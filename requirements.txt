@@ -1,0 +1,19 @@
+# Core (required)
+fastapi
+uvicorn
+numpy
+pandas
+pydantic
+requests
+
+# Testing
+pytest
+httpx
+
+# Real embeddings (recommended — install one)
+# pip install sentence-transformers   # SentenceTransformers provider
+# pip install ollama                   # Ollama provider (if using Ollama API)
+
+# Chat client (examples/ryuki_chat.py)
+# pip install anthropic                # For Claude API
+# pip install openai                   # For OpenAI-compatible APIs (Ollama, LM Studio, etc.)
