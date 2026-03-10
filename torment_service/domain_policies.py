@@ -78,4 +78,22 @@ DEFAULT_DOMAIN_POLICIES: Dict[str, Dict[str, Any]] = {
         "auto_merge_motifs": False,
         "auto_merge_entropy_trigger": 0.80,
     },
+    # Single-agent / companion default domain.
+    # Relaxed thresholds — one agent's memories don't need multi-agent governance.
+    "personal": {
+        "auto_propose_max_per_window": 12,
+        "auto_propose_min_gap_s": 5,
+        "auto_propose_min_promotion": 0.70,
+        "auto_propose_min_strength": 0.75,
+        "auto_propose_min_confidence": 0.55,
+        "auto_propose_require_novelty": False,
+        "shared_min_distinct_agents": 1,
+        "bridge_peek_requires_approval": False,
+        "motif_entropy_target_n": 24,
+        "motif_entropy_high": 0.72,
+        "motif_merge_similarity": 0.93,
+        "motif_merge_max_suggestions": 20,
+        "auto_merge_motifs": True,
+        "auto_merge_entropy_trigger": 0.80,
+    },
 }

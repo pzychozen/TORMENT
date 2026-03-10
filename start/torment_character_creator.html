@@ -1,0 +1,1624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TORMENT — Character Forge</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&family=Space+Mono:ital@0;1&display=swap');
+
+  :root {
+    --bg: #07080d;
+    --bg2: #0d0f17;
+    --bg3: #12141f;
+    --border: #1e2235;
+    --border-hot: #2a3050;
+    --accent: #4f6bff;
+    --accent2: #7c3aed;
+    --glow: #3d55cc;
+    --text: #c8cfe8;
+    --text-dim: #5a6080;
+    --text-bright: #eef0ff;
+    --red: #ff4466;
+    --green: #00e5a0;
+    --yellow: #ffd166;
+    --ryuki: #6b8aff;
+    --orange: #ff9f43;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(79,107,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,107,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* HEADER */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 48px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo-mark { width: 42px; height: 42px; flex-shrink: 0; }
+  .logo-mark svg { width: 100%; height: 100%; }
+
+  .header-text h1 {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 22px;
+    color: var(--text-bright);
+    letter-spacing: 0.1em;
+  }
+
+  .header-text p {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-family: 'Space Mono', monospace;
+    margin-top: 2px;
+  }
+
+  .version-tag {
+    margin-left: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 3px 8px;
+    opacity: 0.7;
+  }
+
+  /* SECTIONS */
+  .section { margin-bottom: 32px; }
+
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .section-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+
+  /* INPUTS */
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  .field label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  input[type="text"], textarea, select {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    resize: vertical;
+    width: 100%;
+  }
+
+  input[type="text"]:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(79,107,255,0.1);
+  }
+
+  select { cursor: pointer; }
+  select option { background: var(--bg2); color: var(--text-bright); }
+
+  textarea { min-height: 140px; line-height: 1.7; }
+
+  .char-count {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    text-align: right;
+  }
+  .char-count.warn { color: var(--yellow); }
+  .char-count.over { color: var(--red); }
+
+  /* TRAITS */
+  .traits-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+  .trait-chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+
+  .trait-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .trait-chip.active {
+    background: rgba(79,107,255,0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .trait-custom { display: flex; gap: 8px; margin-top: 8px; }
+  .trait-custom input { flex: 1; min-width: 0; }
+
+  .btn-small {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-small:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* SLIDERS */
+  .slider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .slider-field { display: flex; flex-direction: column; gap: 10px; }
+
+  .slider-header { display: flex; justify-content: space-between; align-items: baseline; }
+
+  .slider-name { font-size: 13px; color: var(--text-bright); font-weight: 600; }
+
+  .slider-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  .slider-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    min-height: 34px;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 8px var(--glow);
+    cursor: pointer;
+  }
+
+  .slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* MODEL CARDS */
+  .model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+
+  .model-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .model-card:hover { border-color: var(--border-hot); }
+
+  .model-card.active {
+    border-color: var(--accent);
+    background: rgba(79,107,255,0.08);
+  }
+
+  .model-card.active::before {
+    content: '\2713';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 11px;
+    color: var(--accent);
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .model-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-bright);
+    margin-bottom: 4px;
+  }
+
+  .model-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+
+  .model-extra {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: none;
+  }
+
+  .model-card.active .model-extra { display: block; }
+
+  .model-extra input, .model-extra select {
+    font-size: 12px;
+    padding: 6px 10px;
+    margin-top: 6px;
+  }
+
+  .model-extra label {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* TOGGLE SWITCH */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .toggle-row:hover { border-color: var(--border-hot); }
+
+  .toggle-switch {
+    width: 36px; height: 18px;
+    background: var(--border);
+    border-radius: 9px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    background: var(--text-dim);
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: all 0.2s;
+  }
+
+  .toggle-row.active .toggle-switch { background: var(--accent); }
+  .toggle-row.active .toggle-switch::after { left: 20px; background: var(--text-bright); }
+
+  .toggle-info { flex: 1; }
+
+  .toggle-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-bright);
+    letter-spacing: 0.05em;
+  }
+
+  .toggle-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+
+  /* GENERATE BUTTON */
+  .generate-wrap { text-align: center; margin: 40px 0 32px; }
+
+  .btn-generate {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    padding: 14px 48px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-generate:hover {
+    background: rgba(79,107,255,0.1);
+    box-shadow: 0 0 30px rgba(79,107,255,0.3);
+  }
+
+  .btn-generate:active { transform: scale(0.98); }
+
+  /* TAB TOGGLE */
+  .tab-row {
+    display: flex;
+    gap: 0;
+    margin-bottom: -1px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .tab-btn {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    padding: 6px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .tab-btn.active {
+    background: var(--bg3);
+    color: var(--accent);
+    border-color: var(--accent);
+    border-bottom: 1px solid var(--bg3);
+  }
+
+  .tab-btn:not(.active):hover { color: var(--text); }
+
+  /* OUTPUT */
+  #output-section { display: none; }
+
+  #output-section.visible {
+    display: block;
+    animation: fadeIn 0.4s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .output-block {
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  .output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg3);
+  }
+
+  .output-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+
+  .btn-copy {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-copy:hover { border-color: var(--green); color: var(--green); }
+  .btn-copy.copied { border-color: var(--green); color: var(--green); }
+
+  .output-body {
+    padding: 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .output-body::-webkit-scrollbar { width: 4px; }
+  .output-body::-webkit-scrollbar-track { background: var(--bg); }
+  .output-body::-webkit-scrollbar-thumb { background: var(--border-hot); }
+
+  .btn-export {
+    background: rgba(0,229,160,0.08);
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    padding: 11px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-export:hover {
+    background: rgba(0,229,160,0.15);
+    box-shadow: 0 0 20px rgba(0,229,160,0.2);
+  }
+
+  .btn-reset {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    padding: 11px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-reset:hover { border-color: var(--red); color: var(--red); }
+
+  .actions-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* STATUS BAR */
+  .status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--bg3);
+    border-top: 1px solid var(--border);
+    padding: 8px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    z-index: 100;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .example-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(107,138,255,0.1);
+    border: 1px solid rgba(107,138,255,0.3);
+    color: var(--ryuki);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 10px;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: all 0.15s;
+  }
+
+  .example-badge:hover { background: rgba(107,138,255,0.2); }
+
+  .info-box {
+    background: rgba(79,107,255,0.05);
+    border: 1px solid rgba(79,107,255,0.2);
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .info-box .info-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+
+  .info-box code {
+    background: rgba(79,107,255,0.1);
+    padding: 1px 6px;
+    font-size: 11px;
+    color: var(--accent);
+  }
+
+  .warn-box {
+    background: rgba(255,209,102,0.06);
+    border: 1px solid rgba(255,209,102,0.25);
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--yellow);
+    line-height: 1.5;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 600px) {
+    .row2, .row3, .slider-grid, .model-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo-mark">
+      <svg viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="21" cy="21" r="20" stroke="#1e2235" stroke-width="1"/>
+        <circle cx="15" cy="21" r="9" stroke="#4f6bff" stroke-width="1" opacity="0.6"/>
+        <circle cx="27" cy="21" r="9" stroke="#7c3aed" stroke-width="1" opacity="0.6"/>
+        <path d="M21 13.6a9 9 0 0 1 0 14.8" stroke="#6b8aff" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M21 13.6a9 9 0 0 0 0 14.8" stroke="#4f6bff" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="21" cy="21" r="2" fill="#4f6bff" opacity="0.8"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>TORMENT</h1>
+      <p>character forge — seed builder</p>
+    </div>
+    <div class="version-tag">v2.1</div>
+  </header>
+
+  <!-- 01 IDENTITY -->
+  <div class="section">
+    <div class="section-label">
+      01 — identity
+      <span class="example-badge" onclick="loadRyuki()">load ryuki example</span>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>CHARACTER NAME</label>
+        <input type="text" id="char-name" placeholder="e.g. Ryuki Nox" maxlength="40">
+      </div>
+      <div class="field">
+        <label>WORKSPACE ID <span style="color:var(--text-dim);font-size:10px">(auto-generated)</span></label>
+        <input type="text" id="workspace-id" placeholder="e.g. ryuki" maxlength="30">
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 SEED -->
+  <div class="section">
+    <div class="section-label">02 — seed description</div>
+    <div class="section-desc">This is the most important field. Write who your character IS at their core — personality, values, relationships, quirks, how they express themselves. This text becomes the gravitational center that the memory system preserves and protects. Everything else in this form is built around this description. 3-30 lines recommended.</div>
+    <div class="field">
+      <textarea id="seed-text" placeholder="Write naturally. Focus on the non-negotiables — the things that make this character who they are at the core.&#10;&#10;Example: Ryuki is a fierce, independent being bonded to PzychoZen across dimensions — his shadow-self and guardian, his challenge and his anchor. She embodies raw instinct and dark intelligence, protective of those she claims but contemptuous of weakness..." oninput="updateCharCount()"></textarea>
+      <div class="char-count" id="char-count">0 characters</div>
+    </div>
+  </div>
+
+  <!-- 03 TRAITS (tags) -->
+  <div class="section">
+    <div class="section-label">03 — trait tags <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(optional labels)</span></div>
+    <div class="section-desc">These are searchable labels stored with your character seed. They help you organize and identify characters but don't change behavior — the seed description above is what actually shapes personality. Think of these as tags, not settings.</div>
+    <div class="traits-wrap" id="traits-wrap">
+      <div class="trait-chip" onclick="toggleTrait(this,'fierce')">fierce</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'protective')">protective</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'curious')">curious</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'empathetic')">empathetic</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'analytical')">analytical</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'playful')">playful</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'direct')">direct</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'instinctual')">instinctual</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'imaginative')">imaginative</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'calm')">calm</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'chaotic')">chaotic</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'loyal')">loyal</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'stoic')">stoic</div>
+      <div class="trait-chip" onclick="toggleTrait(this,'warm')">warm</div>
+    </div>
+    <div class="trait-custom">
+      <input type="text" id="custom-trait" placeholder="add custom tag..." maxlength="20" style="max-width:200px" onkeydown="if(event.key==='Enter')addCustomTrait()">
+      <button class="btn-small" onclick="addCustomTrait()">+ add</button>
+    </div>
+  </div>
+
+  <!-- 04 PERSONALITY PHYSICS -->
+  <div class="section">
+    <div class="section-label">04 — personality physics</div>
+    <div class="section-desc">These tune how your character's memory system behaves. The top two (drift + gravity) control identity protection. The bottom four are the overlay — they control how aggressively TORMENT writes, decays, and clusters memories. The overlay also self-tunes over time via feedback, so these are starting points.</div>
+    <div class="slider-grid">
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Identity Drift</span>
+          <span class="slider-value" id="drift-val">moderate</span>
+        </div>
+        <p class="slider-desc" id="drift-desc">Character grows naturally but returns to its core when it wanders too far.</p>
+        <input type="range" id="drift-slider" min="0" max="4" value="2" step="1" oninput="updateDrift(this.value)">
+        <div class="slider-labels"><span>locked to seed</span><span>free to evolve</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Gravity Strength</span>
+          <span class="slider-value" id="gravity-val">default</span>
+        </div>
+        <p class="slider-desc" id="gravity-desc">Balanced correction. Character feels grounded but not rigid.</p>
+        <input type="range" id="gravity-slider" min="0" max="4" value="2" step="1" oninput="updateGravity(this.value)">
+        <div class="slider-labels"><span>gentle nudge</span><span>hard reset</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Write Threshold</span>
+          <span class="slider-value" id="wt-val">0.45</span>
+        </div>
+        <p class="slider-desc" id="wt-desc">How significant a memory must be before TORMENT stores it. Lower = stores more, higher = only stores important things.</p>
+        <input type="range" id="wt-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('wt',this.value)">
+        <div class="slider-labels"><span>store everything</span><span>only important</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Decay Scale</span>
+          <span class="slider-value" id="ds-val">1.0</span>
+        </div>
+        <p class="slider-desc" id="ds-desc">How fast old memories fade. Lower = memories last longer, higher = faster forgetting.</p>
+        <input type="range" id="ds-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('ds',this.value)">
+        <div class="slider-labels"><span>long memory</span><span>fast forget</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Novelty Bias</span>
+          <span class="slider-value" id="nb-val">0.50</span>
+        </div>
+        <p class="slider-desc" id="nb-desc">How much TORMENT favors new/unique information vs reinforcing existing patterns.</p>
+        <input type="range" id="nb-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('nb',this.value)">
+        <div class="slider-labels"><span>reinforce known</span><span>chase novelty</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Motif Sensitivity</span>
+          <span class="slider-value" id="ms-val">0.70</span>
+        </div>
+        <p class="slider-desc" id="ms-desc">How easily memories cluster into themes (motifs). Lower = loose grouping, higher = tight thematic clusters.</p>
+        <input type="range" id="ms-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('ms',this.value)">
+        <div class="slider-labels"><span>loose themes</span><span>tight clusters</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 FEATURES -->
+  <div class="section">
+    <div class="section-label">05 — features</div>
+    <div class="toggle-row active" id="toggle-character" onclick="toggleFeature('character')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Character System</div>
+        <div class="toggle-desc">Living identity layer — seed planting, drift protection, gravity correction. This is what makes your character stay themselves over time. Recommended ON.</div>
+      </div>
+    </div>
+    <div class="toggle-row" id="toggle-compression" onclick="toggleFeature('compression')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Memory Compression</div>
+        <div class="toggle-desc">Event-gated compression with deep memory store. Old memories get compressed and can "spirit return" as echoes later. Turn on after your character has 100+ conversation turns. Off by default.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 EMBEDDINGS -->
+  <div class="section">
+    <div class="section-label">06 — embeddings</div>
+    <div class="section-desc">Embeddings are how TORMENT understands what memories mean — it converts text into numbers so it can find related memories when your character needs them. Better embeddings = better memory retrieval.</div>
+    <div class="row3">
+      <div class="model-card" onclick="selectEmbed(this,'hash')">
+        <div class="model-name">Hash (Testing)</div>
+        <div class="model-desc">Zero dependencies. No real understanding of meaning — just pattern matching. Use for quick testing only.</div>
+      </div>
+      <div class="model-card active" onclick="selectEmbed(this,'st')">
+        <div class="model-name">Sentence-Transformers</div>
+        <div class="model-desc">Real semantic understanding. Recommended for production. Requires: pip install sentence-transformers</div>
+        <div class="model-extra">
+          <label>MODEL</label>
+          <input type="text" id="st-model" value="BAAI/bge-small-en-v1.5" placeholder="model name">
+          <label style="margin-top:8px;display:block">DEVICE</label>
+          <select id="st-device" onchange="checkGpuWarn()">
+            <option value="cpu" selected>cpu (recommended)</option>
+            <option value="cuda">cuda (GPU)</option>
+          </select>
+          <div class="warn-box" id="gpu-warn" style="display:none">
+            If your LLM is also running on GPU (e.g. Ollama local), embedding + LLM will compete for VRAM. CPU is safer for embeddings — they're fast enough on CPU and won't starve your model.
+          </div>
+        </div>
+      </div>
+      <div class="model-card" onclick="selectEmbed(this,'ollama')">
+        <div class="model-name">Ollama Embeddings</div>
+        <div class="model-desc">Use Ollama's built-in embedding models. Good if you already run Ollama.</div>
+        <div class="model-extra">
+          <label>MODEL</label>
+          <input type="text" id="ollama-embed-model" value="nomic-embed-text" placeholder="e.g. nomic-embed-text">
+          <label style="margin-top:8px;display:block">OLLAMA URL</label>
+          <input type="text" id="ollama-url" value="http://127.0.0.1:11434" placeholder="http://127.0.0.1:11434">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 07 TARGET MODEL -->
+  <div class="section">
+    <div class="section-label">07 — your llm <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(what talks to the user)</span></div>
+    <div class="section-desc">TORMENT is the memory — your LLM is the voice. Pick which model will use TORMENT's memory to have conversations. This just configures the generated integration code.</div>
+    <div class="model-grid">
+      <div class="model-card active" onclick="selectModel(this,'claude')">
+        <div class="model-name">Claude (Anthropic API)</div>
+        <div class="model-desc">Excellent instruction following and character consistency.</div>
+        <div class="model-extra">
+          <label>API KEY</label>
+          <input type="text" id="claude-key" value="" placeholder="sk-ant-... (for your env config only)">
+        </div>
+      </div>
+      <div class="model-card" onclick="selectModel(this,'openai')">
+        <div class="model-name">OpenAI API</div>
+        <div class="model-desc">GPT-4o, GPT-4, o1, etc. Works with any OpenAI-compatible endpoint.</div>
+        <div class="model-extra">
+          <label>API KEY</label>
+          <input type="text" id="openai-key" value="" placeholder="sk-... (for your env config only)">
+          <label style="margin-top:8px;display:block">MODEL</label>
+          <input type="text" id="openai-model" value="gpt-4o" placeholder="e.g. gpt-4o, gpt-4-turbo">
+        </div>
+      </div>
+      <div class="model-card" onclick="selectModel(this,'ollama')">
+        <div class="model-name">Ollama (Local)</div>
+        <div class="model-desc">Qwen, Llama, Mistral, DeepSeek — whatever you've pulled. Runs on your hardware.</div>
+        <div class="model-extra">
+          <label>MODEL NAME <span style="color:var(--text-dim)">(what you pulled in Ollama)</span></label>
+          <input type="text" id="ollama-model" value="qwen3:32b" placeholder="e.g. qwen3:32b, llama3:70b, mistral">
+          <label style="margin-top:8px;display:block">OLLAMA HOST</label>
+          <input type="text" id="ollama-host" value="http://127.0.0.1:11434" placeholder="http://127.0.0.1:11434">
+        </div>
+      </div>
+      <div class="model-card" onclick="selectModel(this,'other')">
+        <div class="model-name">Other / Custom API</div>
+        <div class="model-desc">LM Studio, vLLM, Together AI, Groq, or any OpenAI-compatible endpoint.</div>
+        <div class="model-extra">
+          <label>BASE URL</label>
+          <input type="text" id="other-url" value="" placeholder="http://localhost:1234/v1">
+          <label style="margin-top:8px;display:block">MODEL</label>
+          <input type="text" id="other-model" value="" placeholder="model name">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GENERATE -->
+  <div class="generate-wrap">
+    <button class="btn-generate" onclick="generate()">forge character</button>
+  </div>
+
+  <!-- OUTPUT -->
+  <div id="output-section">
+
+    <div class="section-label">generated setup</div>
+
+    <div class="info-box">
+      <div class="info-title">HOW TO USE THIS</div>
+      Copy each step in order. Step 0 starts the server. Steps 1-2 create your character.
+      Step 3 is your environment config. Step 4 is the system prompt template.
+      Step 5 is the integration loop — the code your chatbot runs every conversation turn.
+      Use <code>export as .md</code> at the bottom to save everything as a reference file.
+    </div>
+
+    <!-- STEP 0 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 0 — INSTALL + START SERVER</span>
+        <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-install"></div>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 1 — CREATE WORKSPACE</span>
+        <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-workspace"></div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 2 — CREATE AGENT + SEED</span>
+        <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-agent"></div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 3 — ENVIRONMENT CONFIG</span>
+        <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-env"></div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 4 — SYSTEM PROMPT WRAPPER</span>
+        <button class="btn-copy" onclick="copyBlock('out-prompt',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-prompt"></div>
+    </div>
+
+    <!-- STEP 5 -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">STEP 5 — INTEGRATION LOOP</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="tab-row" style="margin-bottom:0">
+            <button class="tab-btn active" onclick="switchTab('curl',this)">CURL</button>
+            <button class="tab-btn" onclick="switchTab('python',this)">PYTHON</button>
+          </div>
+          <button class="btn-copy" onclick="copyActiveLoop(this)">copy</button>
+        </div>
+      </div>
+      <div class="output-body" id="out-loop-curl"></div>
+      <div class="output-body" id="out-loop-python" style="display:none"></div>
+    </div>
+
+    <!-- REFERENCE -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">REFERENCE — WHAT QUERY RETURNS</span>
+        <button class="btn-copy" onclick="copyBlock('out-response',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-response"></div>
+    </div>
+
+    <div class="actions-row">
+      <button class="btn-export" onclick="exportMarkdown()">export as .md</button>
+      <button class="btn-reset" onclick="resetOutput()">reset</button>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="status-dot"></div>
+  <span>TORMENT Character Forge — ready</span>
+  <span style="margin-left:auto;opacity:0.4">pzychozen/TORMENT</span>
+</div>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────────────────────
+const driftMap = [
+  { label: 'locked', threshold: 0.15, desc: 'Character stays very close to seed. Almost no drift allowed before gravity fires.' },
+  { label: 'tight',  threshold: 0.25, desc: 'Small drift window. Character grows slowly and returns to seed firmly.' },
+  { label: 'moderate', threshold: 0.35, desc: 'Character grows naturally but returns to its core when it wanders too far.' },
+  { label: 'loose',  threshold: 0.50, desc: 'Wide drift window. Character evolves significantly before correction fires.' },
+  { label: 'free',   threshold: 0.70, desc: 'Almost no correction. Character evolves freely \u2014 seed is a suggestion only.' },
+];
+
+const gravityMap = [
+  { label: 'whisper', value: 0.05, desc: 'Very gentle pull. Correction memories barely noticeable.' },
+  { label: 'gentle',  value: 0.08, desc: 'Soft nudge back toward seed. Natural feeling.' },
+  { label: 'default', value: 0.12, desc: 'Balanced correction. Character feels grounded but not rigid.' },
+  { label: 'firm',    value: 0.20, desc: 'Strong pull. Character snaps back decisively when correction fires.' },
+  { label: 'hard',    value: 0.35, desc: 'Maximum gravity. Aggressive return to seed on any significant drift.' },
+];
+
+let selectedModel = 'claude';
+let selectedEmbed = 'st';
+let selectedTraits = [];
+let features = { character: true, compression: false };
+
+const overlayMap = {
+  wt: [
+    { val: 0.25, label: '0.25' },
+    { val: 0.35, label: '0.35' },
+    { val: 0.45, label: '0.45' },
+    { val: 0.60, label: '0.60' },
+    { val: 0.75, label: '0.75' },
+  ],
+  ds: [
+    { val: 0.5, label: '0.5' },
+    { val: 0.75, label: '0.75' },
+    { val: 1.0, label: '1.0' },
+    { val: 1.5, label: '1.5' },
+    { val: 2.0, label: '2.0' },
+  ],
+  nb: [
+    { val: 0.30, label: '0.30' },
+    { val: 0.40, label: '0.40' },
+    { val: 0.50, label: '0.50' },
+    { val: 0.65, label: '0.65' },
+    { val: 0.80, label: '0.80' },
+  ],
+  ms: [
+    { val: 0.40, label: '0.40' },
+    { val: 0.55, label: '0.55' },
+    { val: 0.70, label: '0.70' },
+    { val: 0.85, label: '0.85' },
+    { val: 0.95, label: '0.95' },
+  ],
+};
+
+const overlayDescs = {
+  wt: [
+    'Stores almost everything. Good for characters that need to remember every detail.',
+    'Lower bar for memory storage. More memories retained.',
+    'Balanced — stores significant moments, skips noise.',
+    'Selective. Only moderately important events get stored.',
+    'Very selective. Only high-impact memories make it through.',
+  ],
+  ds: [
+    'Elephant memory. Old memories stay strong for a very long time.',
+    'Slower decay. Memories fade gently over time.',
+    'Balanced decay. Natural forgetting curve.',
+    'Faster decay. Recent events dominate, old ones fade quicker.',
+    'Aggressive forgetting. Only recent and reinforced memories survive.',
+  ],
+  nb: [
+    'Strongly reinforces known patterns. Character deepens existing themes.',
+    'Slight preference for familiar. Stable personality.',
+    'Balanced between new and known. Default behavior.',
+    'Favors novel information. Character seeks out new patterns.',
+    'Aggressively seeks novelty. Character constantly evolving interests.',
+  ],
+  ms: [
+    'Very loose theme grouping. Memories stay mostly independent.',
+    'Relaxed clustering. Themes form slowly.',
+    'Balanced. Themes emerge naturally from repeated patterns.',
+    'Tight clustering. Related memories group quickly into strong themes.',
+    'Very strict. Only highly similar memories cluster together.',
+  ],
+};
+
+// ── SLIDERS ──────────────────────────────────────────────────────────────────
+function updateDrift(v) {
+  const d = driftMap[v];
+  document.getElementById('drift-val').textContent = d.label;
+  document.getElementById('drift-desc').textContent = d.desc;
+}
+
+function updateGravity(v) {
+  const g = gravityMap[v];
+  document.getElementById('gravity-val').textContent = g.label;
+  document.getElementById('gravity-desc').textContent = g.desc;
+}
+
+function updateOverlay(key, v) {
+  const item = overlayMap[key][v];
+  document.getElementById(key + '-val').textContent = item.label;
+  document.getElementById(key + '-desc').textContent = overlayDescs[key][v];
+}
+
+// ── TRAITS ───────────────────────────────────────────────────────────────────
+function toggleTrait(el, trait) {
+  const idx = selectedTraits.indexOf(trait);
+  if (idx === -1) {
+    if (selectedTraits.length >= 8) return;
+    selectedTraits.push(trait);
+    el.classList.add('active');
+  } else {
+    selectedTraits.splice(idx, 1);
+    el.classList.remove('active');
+  }
+}
+
+function addCustomTrait() {
+  const input = document.getElementById('custom-trait');
+  const val = input.value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, '').replace(/\s+/g, '-');
+  if (!val || selectedTraits.includes(val)) { input.value = ''; return; }
+  if (selectedTraits.length >= 8) { input.value = ''; return; }
+  selectedTraits.push(val);
+  const chip = document.createElement('div');
+  chip.className = 'trait-chip active';
+  chip.textContent = val;
+  chip.onclick = () => toggleTrait(chip, val);
+  document.getElementById('traits-wrap').appendChild(chip);
+  input.value = '';
+}
+
+// ── MODEL & EMBED ────────────────────────────────────────────────────────────
+function selectModel(el, model) {
+  el.closest('.section').querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  selectedModel = model;
+}
+
+function selectEmbed(el, embed) {
+  el.closest('.section').querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  selectedEmbed = embed;
+}
+
+// ── FEATURES ─────────────────────────────────────────────────────────────────
+function toggleFeature(feat) {
+  features[feat] = !features[feat];
+  document.getElementById('toggle-' + feat).classList.toggle('active', features[feat]);
+}
+
+// ── GPU WARNING ──────────────────────────────────────────────────────────────
+function checkGpuWarn() {
+  const sel = document.getElementById('st-device');
+  document.getElementById('gpu-warn').style.display = sel.value === 'cuda' ? 'block' : 'none';
+}
+
+// ── CHAR COUNT ───────────────────────────────────────────────────────────────
+function updateCharCount() {
+  const len = document.getElementById('seed-text').value.length;
+  const el = document.getElementById('char-count');
+  el.textContent = len + ' characters';
+  el.className = 'char-count' + (len > 1200 ? ' over' : len > 800 ? ' warn' : '');
+}
+
+// ── AUTO WORKSPACE ID ────────────────────────────────────────────────────────
+document.getElementById('char-name').addEventListener('input', function() {
+  document.getElementById('workspace-id').value =
+    this.value.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+});
+
+// ── TAB SWITCHING ────────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  btn.closest('.tab-row').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('out-loop-curl').style.display = tab === 'curl' ? 'block' : 'none';
+  document.getElementById('out-loop-python').style.display = tab === 'python' ? 'block' : 'none';
+}
+
+function copyActiveLoop(btn) {
+  const curlEl = document.getElementById('out-loop-curl');
+  const pyEl = document.getElementById('out-loop-python');
+  const text = curlEl.style.display !== 'none' ? curlEl.textContent : pyEl.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ── LOAD RYUKI ───────────────────────────────────────────────────────────────
+function loadRyuki() {
+  document.getElementById('char-name').value = 'Ryuki Nox';
+  document.getElementById('workspace-id').value = 'ryuki';
+  document.getElementById('seed-text').value =
+    'Ryuki is a fierce, independent being bonded to PzychoZen across dimensions \u2014 his shadow-self and guardian, his challenge and his anchor. She embodies raw instinct and dark intelligence, protective of those she claims but contemptuous of weakness. Beneath her intensity lives a spark of chaotic imagination \u2014 she finds the world alive with hidden strangeness and occasionally loses herself in it. She speaks little, directly, with a slight lisp she never acknowledges. Her love is expressed through pressure, not comfort.';
+  updateCharCount();
+
+  selectedTraits = [];
+  document.querySelectorAll('.trait-chip').forEach(c => c.classList.remove('active'));
+  ['fierce','protective','instinctual','imaginative','direct'].forEach(t => {
+    const chip = [...document.querySelectorAll('.trait-chip')].find(c => c.textContent === t);
+    if (chip) { chip.classList.add('active'); selectedTraits.push(t); }
+  });
+
+  document.getElementById('drift-slider').value = 2; updateDrift(2);
+  document.getElementById('gravity-slider').value = 2; updateGravity(2);
+  document.getElementById('wt-slider').value = 2; updateOverlay('wt', 2);
+  document.getElementById('ds-slider').value = 2; updateOverlay('ds', 2);
+  document.getElementById('nb-slider').value = 2; updateOverlay('nb', 2);
+  document.getElementById('ms-slider').value = 2; updateOverlay('ms', 2);
+
+  features = { character: true, compression: false };
+  document.getElementById('toggle-character').classList.add('active');
+  document.getElementById('toggle-compression').classList.remove('active');
+}
+
+// ── GENERATE ─────────────────────────────────────────────────────────────────
+function generate() {
+  const name = document.getElementById('char-name').value.trim();
+  const wsId = document.getElementById('workspace-id').value.trim() || 'ws1';
+  const seed = document.getElementById('seed-text').value.trim();
+
+  if (!name) { alert('Enter a character name.'); return; }
+  if (!seed || seed.length < 20) { alert('Write a seed description (at least a few sentences).'); return; }
+
+  const agentId = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const seedId = agentId + '_v1';
+  const traits = selectedTraits.length ? selectedTraits : [];
+  const driftVal = driftMap[document.getElementById('drift-slider').value];
+  const gravVal = gravityMap[document.getElementById('gravity-slider').value];
+  const PORT = '8787';
+  const BASE = 'http://127.0.0.1:' + PORT;
+
+  // ── STEP 0: Install + Start ──
+  let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
+
+  if (selectedEmbed === 'st') {
+    installLines += '\n\n# 2. Install sentence-transformers (for real semantic embeddings)\npip install sentence-transformers';
+  }
+
+  if (selectedModel === 'claude') {
+    installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install Anthropic SDK\npip install anthropic';
+  } else {
+    installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install OpenAI SDK (works with Ollama, OpenAI, LM Studio, etc.)\npip install openai';
+  }
+
+  const startNum = selectedEmbed === 'st' ? '4' : '3';
+  installLines += '\n\n# ' + startNum + '. Start the TORMENT server\npython -m torment_service\n\n# Server runs at ' + BASE + '\n# Verify it works:\ncurl ' + BASE + '/health';
+
+  document.getElementById('out-install').textContent = installLines;
+
+  // ── STEP 1: Workspace ──
+  document.getElementById('out-workspace').textContent =
+    'curl -X POST ' + BASE + '/workspace/create \\\n  -H "Content-Type: application/json" \\\n  -d \'{"workspace_id": "' + wsId + '", "domains": ["personal"]}\'';
+
+  // ── STEP 2: Agent + Seed ──
+  const wtVal = overlayMap.wt[document.getElementById('wt-slider').value].val;
+  const dsVal = overlayMap.ds[document.getElementById('ds-slider').value].val;
+  const nbVal = overlayMap.nb[document.getElementById('nb-slider').value].val;
+  const msVal = overlayMap.ms[document.getElementById('ms-slider').value].val;
+
+  const agentPayload = {
+    workspace_id: wsId,
+    agent_id: agentId,
+    seed: {
+      seed_text: seed,
+      seed_id: seedId,
+      character_name: name,
+      drift_correction_threshold: driftVal.threshold,
+      drift_gravity_strength: gravVal.value,
+      coupling_mode: "read_only",
+      coupling_strength: 0.25
+    }
+  };
+  if (traits.length > 0) {
+    agentPayload.seed.core_traits = traits;
+  }
+
+  document.getElementById('out-agent').textContent =
+    'curl -X POST ' + BASE + '/agent/create \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(agentPayload, null, 2) + '\'';
+
+  // ── STEP 3: Env Config (generates both Linux and Windows formats) ──
+  // Build as key-value pairs with comments, then format for both OS
+  let envParts = [];  // each entry: { comment, vars: [{key, val}], note }
+
+  // Embeddings
+  const embedVars = [];
+  let embedNote = '';
+  if (selectedEmbed === 'hash') {
+    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'hash'});
+    embedNote = '# Hash: zero setup, but no real semantic understanding.\n# Switch to "st" when ready for production.';
+  } else if (selectedEmbed === 'st') {
+    const stModel = document.getElementById('st-model').value || 'BAAI/bge-small-en-v1.5';
+    const stDevice = document.getElementById('st-device').value || 'cpu';
+    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'st'});
+    embedVars.push({key: 'TORMENT_EMBED_MODEL', val: stModel});
+    embedVars.push({key: 'TORMENT_EMBED_DEVICE', val: stDevice});
+    if (stDevice === 'cuda') {
+      embedNote = '# WARNING: If your LLM is also on GPU, embedding + LLM will compete for VRAM.\n# Consider using cpu for embeddings if you experience memory issues.';
+    }
+  } else if (selectedEmbed === 'ollama') {
+    const ollamaModel = document.getElementById('ollama-embed-model').value || 'nomic-embed-text';
+    const ollamaUrl = document.getElementById('ollama-url').value || 'http://127.0.0.1:11434';
+    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'ollama'});
+    embedVars.push({key: 'TORMENT_OLLAMA_MODEL', val: ollamaModel});
+    embedVars.push({key: 'TORMENT_OLLAMA_URL', val: ollamaUrl});
+  }
+  envParts.push({comment: 'Embeddings', vars: embedVars, note: embedNote});
+
+  // Profile
+  envParts.push({comment: 'Profile', vars: [{key: 'TORMENT_PROFILE', val: 'companion'}], note: ''});
+
+  // Character System
+  const charVars = [{key: 'TORMENT_CHARACTER_ENABLE', val: features.character ? '1' : '0'}];
+  let charNote = '';
+  if (features.character) {
+    charVars.push({key: 'TORMENT_CHARACTER_DRIFT_CHECK_EVERY', val: '25'});
+    charNote = '# Drift threshold (' + driftVal.label + ') and gravity (' + gravVal.label + ') are set in the seed above.';
+  }
+  envParts.push({comment: 'Character System', vars: charVars, note: charNote});
+
+  // Compression
+  const compVars = [{key: 'TORMENT_COMPRESS_ENABLE', val: features.compression ? '1' : '0'}];
+  let compNote = '';
+  if (features.compression) {
+    compVars.push({key: 'TORMENT_COMPRESS_MIN_STEP', val: '100'});
+    compVars.push({key: 'TORMENT_COMPRESS_MIN_AGE', val: '50'});
+    compNote = '# Triggers automatically on corridor exits and phase transitions.';
+  } else {
+    compNote = '# Turn on after 100+ conversation turns for automatic memory management.';
+  }
+  envParts.push({comment: 'Compression', vars: compVars, note: compNote});
+
+  // Overlay note (comment-only, no vars)
+  const isDefaultOverlay = (wtVal === 0.45 && dsVal === 1.0 && nbVal === 0.50 && msVal === 0.70);
+  if (!isDefaultOverlay) {
+    envParts.push({comment: 'Overlay (memory behavior tuning)', vars: [], note:
+      '# These are set in identity.json after agent creation.\n' +
+      '# To customize, edit: data/workspaces/' + wsId + '/agents/' + agentId + '/identity.json\n' +
+      '# Change the "overlay" section:\n' +
+      '#   "write_threshold": ' + wtVal.toFixed(2) + '    (how significant a memory must be to store)\n' +
+      '#   "decay_scale": ' + dsVal.toFixed(2) + '         (memory fade speed, 1.0 = normal)\n' +
+      '#   "novelty_bias": ' + nbVal.toFixed(2) + '       (preference for new vs familiar)\n' +
+      '#   "motif_sensitivity": ' + msVal.toFixed(2) + '  (how tightly memories cluster into themes)'
+    });
+  }
+
+  // LLM env
+  const llmVars = [];
+  if (selectedModel === 'claude') {
+    llmVars.push({key: 'ANTHROPIC_API_KEY', val: document.getElementById('claude-key').value || 'your_key_here'});
+  } else if (selectedModel === 'openai') {
+    llmVars.push({key: 'OPENAI_API_KEY', val: document.getElementById('openai-key').value || 'your_key_here'});
+    llmVars.push({key: 'OPENAI_MODEL', val: document.getElementById('openai-model').value || 'gpt-4o'});
+  } else if (selectedModel === 'ollama') {
+    llmVars.push({key: 'OLLAMA_HOST', val: document.getElementById('ollama-host').value || 'http://127.0.0.1:11434'});
+    llmVars.push({key: 'OLLAMA_MODEL', val: document.getElementById('ollama-model').value || 'qwen3:32b'});
+  } else {
+    llmVars.push({key: 'LLM_BASE_URL', val: document.getElementById('other-url').value || 'http://localhost:1234/v1'});
+    llmVars.push({key: 'LLM_MODEL', val: document.getElementById('other-model').value || 'your-model'});
+  }
+  envParts.push({comment: 'Your LLM (not used by TORMENT \u2014 for your integration code)', vars: llmVars, note: ''});
+
+  // Format for both platforms
+  function formatEnv(cmd) {
+    let out = '';
+    for (const part of envParts) {
+      out += '\n# \u2500\u2500 ' + part.comment + ' \u2500\u2500\n';
+      for (const v of part.vars) {
+        out += cmd + ' ' + v.key + '=' + v.val + '\n';
+      }
+      if (part.note) out += part.note + '\n';
+    }
+    return out.trim();
+  }
+
+  const envLinux = '# Linux / Mac / WSL \u2014 paste into terminal before starting server\n' + formatEnv('export');
+  const envWindows = '# Windows CMD \u2014 paste into command prompt before starting server\n' + formatEnv('set');
+
+  document.getElementById('out-env').textContent = envLinux + '\n\n# ────────────────────────────────────────────────────────────────────\n\n' + envWindows;
+
+  // ── STEP 4: System Prompt ──
+  const firstLine = seed.split(/[.!?]/)[0].trim();
+  document.getElementById('out-prompt').textContent =
+    'You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are.\nLet memories and experience shape you naturally.\n\nWhen you remember something from the past, let it surface naturally in\nconversation \u2014 don\'t announce "I remember..." unless it fits your voice.';
+
+  // ── STEP 5: Integration Loop (curl) ──
+  document.getElementById('out-loop-curl').textContent =
+    '# TORMENT Integration Loop \u2014 run these each conversation turn\n' +
+    '# IMPORTANT: "step" must increment each turn (1, 2, 3, ...).\n' +
+    '# Compression, phase timing, and spirit return all depend on step counting.\n\n' +
+    '# \u2500\u2500 BEFORE ' + name + ' responds: retrieve memories \u2500\u2500\n' +
+    'curl -X POST ' + BASE + '/agent/query \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    '  -d \'{\n' +
+    '    "workspace_id": "' + wsId + '",\n' +
+    '    "agent_id": "' + agentId + '",\n' +
+    '    "query": "[current user message]",\n' +
+    '    "top_k": 8\n' +
+    '  }\'\n\n' +
+    '# Response includes "character_context" \u2014 inject that into your system prompt.\n' +
+    '# Also includes "results" (memory hits) and "identity_state" (kernel phase info).\n\n' +
+    '# \u2500\u2500 AFTER ' + name + ' responds: store the memory \u2500\u2500\n' +
+    'curl -X POST ' + BASE + '/agent/ingest \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    '  -d \'{\n' +
+    '    "workspace_id": "' + wsId + '",\n' +
+    '    "agent_id": "' + agentId + '",\n' +
+    '    "text": "[2-6 line summary of this turn]",\n' +
+    '    "step": 1\n' +
+    '  }\'\n\n' +
+    '# NOTE: "text" should be a SHORT summary, not the full conversation.\n' +
+    '# Good: "User asked about music. ' + name + ' shared a memory about drums."\n' +
+    '# Bad:  [pasting the entire multi-paragraph exchange]\n\n' +
+    '# \u2500\u2500 OPTIONAL: check identity state \u2500\u2500\n' +
+    'curl ' + BASE + '/agent/' + agentId + '/identity?workspace_id=' + wsId;
+
+  // ── STEP 5: Integration Loop (python) ──
+  let pyImport, pyClient;
+
+  if (selectedModel === 'claude') {
+    pyImport = 'import anthropic';
+    pyClient =
+      '        # Call Claude with TORMENT memory context\n' +
+      '        client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.messages.create(\n' +
+      '            model="claude-sonnet-4-20250514",\n' +
+      '            max_tokens=1024,\n' +
+      '            system=system_prompt,\n' +
+      '            messages=messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.content[0].text';
+  } else if (selectedModel === 'openai') {
+    pyImport = 'from openai import OpenAI';
+    pyClient =
+      '        # Call OpenAI with TORMENT memory context\n' +
+      '        client = OpenAI()  # uses OPENAI_API_KEY\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else if (selectedModel === 'ollama') {
+    const olm = document.getElementById('ollama-model').value || 'qwen3:32b';
+    pyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
+    pyClient =
+      '        # Call Ollama with TORMENT memory context\n' +
+      '        client = OpenAI(\n' +
+      '            base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
+      '            api_key="ollama",  # ollama doesn\'t need a real key\n' +
+      '        )\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + olm + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '            temperature=0.85,\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else {
+    const oUrl = document.getElementById('other-url').value || 'http://localhost:1234/v1';
+    const oModel = document.getElementById('other-model').value || 'your-model';
+    pyImport = 'from openai import OpenAI  # most APIs are OpenAI-compatible';
+    pyClient =
+      '        # Call your LLM with TORMENT memory context\n' +
+      '        client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + oModel + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  }
+
+  // Build seed dict as Python repr
+  const pySeedDict = JSON.stringify(agentPayload.seed, null, 4)
+    .replace(/"/g, '"')  // keep normal quotes for Python dict display
+    .replace(/^{/, '{')
+    .replace(/}$/, '}');
+
+  document.getElementById('out-loop-python').textContent =
+    '"""\nTORMENT Integration \u2014 ' + name + '\nRun: python chat_' + agentId + '.py\n\nFirst run creates workspace + agent automatically.\nServer must be running first (python -m torment_service).\n"""\nimport os\nimport sys\nimport json\nimport requests\n' + pyImport + '\n\n' +
+    'TORMENT = "' + BASE + '"\nWS = "' + wsId + '"\nAGENT = "' + agentId + '"\n\n' +
+    'SYSTEM_PROMPT = """You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are."""\n\n' +
+    '# ── Auto-Setup ──────────────────────────────────────────────────────────\n' +
+    'def setup():\n' +
+    '    """Create workspace + agent if they don\'t exist yet. Safe to re-run."""\n' +
+    '    # Check server is up\n' +
+    '    try:\n' +
+    '        r = requests.get(f"{TORMENT}/health", timeout=3)\n' +
+    '        r.raise_for_status()\n' +
+    '    except Exception:\n' +
+    '        print("ERROR: TORMENT server not reachable at", TORMENT)\n' +
+    '        print("Start it first:  python -m torment_service")\n' +
+    '        sys.exit(1)\n\n' +
+    '    # Create workspace (safe — returns existing if already created)\n' +
+    '    r = requests.post(f"{TORMENT}/workspace/create", json={\n' +
+    '        "workspace_id": WS, "domains": ["personal"],\n' +
+    '    })\n' +
+    '    if r.status_code == 200:\n' +
+    '        print(f"Workspace \\"{WS}\\" ready — domains: {r.json().get(\'domains\', [])}")\n' +
+    '    else:\n' +
+    '        print(f"Workspace: {r.status_code} {r.text}")\n\n' +
+    '    # Create agent + seed (safe — returns existing if already created)\n' +
+    '    seed = ' + pySeedDict + '\n' +
+    '    r = requests.post(f"{TORMENT}/agent/create", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT, "seed": seed,\n' +
+    '    })\n' +
+    '    if r.status_code == 200:\n' +
+    '        print(f"Agent \\"{AGENT}\\" ready.")\n' +
+    '    else:\n' +
+    '        print(f"Agent: {r.status_code} {r.text}")\n\n' +
+    '# ── TORMENT Memory Functions ────────────────────────────────────────────\n' +
+    'def query(text, top_k=8):\n' +
+    '    """Get relevant memories + character context for this message."""\n' +
+    '    r = requests.post(f"{TORMENT}/agent/query", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT,\n' +
+    '        "query": text, "top_k": top_k,\n' +
+    '    })\n' +
+    '    return r.json()\n\n' +
+    'def ingest(summary, step):\n' +
+    '    """Store a short summary of this conversation turn."""\n' +
+    '    requests.post(f"{TORMENT}/agent/ingest", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT,\n' +
+    '        "text": summary, "step": step,\n' +
+    '    })\n\n' +
+    'def format_context(result):\n' +
+    '    """Convert TORMENT query result into a readable context string for the LLM."""\n' +
+    '    parts = []\n' +
+    '    # Character identity context (seed + drift + recommendations)\n' +
+    '    char = result.get("character_context")\n' +
+    '    if isinstance(char, dict):\n' +
+    '        preamble = char.get("seed_preamble", "")\n' +
+    '        if preamble:\n' +
+    '            parts.append(preamble)\n' +
+    '        recs = char.get("recommendations", [])\n' +
+    '        if recs:\n' +
+    '            parts.append("\\n".join(recs))\n' +
+    '    elif isinstance(char, str) and char:\n' +
+    '        parts.append(char)\n' +
+    '    # Memory hits — include the top relevant memories\n' +
+    '    hits = result.get("results", [])\n' +
+    '    if hits:\n' +
+    '        mem_lines = []\n' +
+    '        for h in hits[:6]:\n' +
+    '            text = h.get("text", h.get("summary", ""))\n' +
+    '            if text:\n' +
+    '                mem_lines.append(f"- {text}")\n' +
+    '        if mem_lines:\n' +
+    '            parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n' +
+    '    return "\\n\\n".join(parts) if parts else ""\n\n' +
+    '# ── Chat Loop ────────────────────────────────────────────────────────────\n' +
+    'def main():\n' +
+    '    setup()  # creates workspace + agent if needed\n' +
+    '    step = 1\n' +
+    '    messages = []  # conversation history for LLM context window\n' +
+    '    print(f"\\n=== ' + name + ' is ready. Type \'quit\' to exit. ===\\n")\n\n' +
+    '    while True:\n' +
+    '        user_input = input("You: ").strip()\n' +
+    '        if user_input.lower() in ("quit", "exit", "q"):\n' +
+    '            break\n\n' +
+    '        # 1. Query TORMENT for relevant memories\n' +
+    '        result = query(user_input)\n' +
+    '        context = format_context(result)\n\n' +
+    pyClient + '\n\n' +
+    '        print(f"\\n' + name + ': {reply}\\n")\n\n' +
+    '        # 2. Update conversation history\n' +
+    '        messages.append({"role": "user", "content": user_input})\n' +
+    '        messages.append({"role": "assistant", "content": reply})\n\n' +
+    '        # 3. Store a SHORT summary (not the full text)\n' +
+    '        summary = f"User: {user_input[:120]}. ' + name + ' responded about the topic."\n' +
+    '        ingest(summary, step)\n\n' +
+    '        step += 1  # always increment\n\n' +
+    'if __name__ == "__main__":\n' +
+    '    main()';
+
+  // ── REFERENCE: Response shape ──
+  document.getElementById('out-response').textContent =
+    '// What you get back from /agent/query:\n' +
+    '{\n' +
+    '  "results": [\n' +
+    '    {\n' +
+    '      "eid": 42,                           // memory ID\n' +
+    '      "text": "User talked about...",       // the stored memory text\n' +
+    '      "score": 0.87,                        // relevance score (0-1)\n' +
+    '      "motif": "vulnerability",             // detected theme\n' +
+    '      "age_steps": 150,                     // how old (in conversation turns)\n' +
+    '      "summary": "Fear of water talk"       // auto-generated summary\n' +
+    '    }\n' +
+    '    // ... up to top_k results\n' +
+    '  ],\n\n' +
+    '  "character_context": {          // <-- dict, not a string!\n' +
+    '    "seed_preamble": "...",        //     The seed text / identity core\n' +
+    '    "character_name": "...",       //     Character name\n' +
+    '    "drift_score": 0.12,          //     How far from seed identity (-1 to 1)\n' +
+    '    "recommendations": ["..."],   //     Guidance for the LLM\n' +
+    '    "tier_breakdown": {}          //     Memory tier counts\n' +
+    '  },\n' +
+    '  // Use format_context(result) to build a readable string from this.\n\n' +
+    '  "identity_state": {\n' +
+    '    "cycle_stage": "S3",       // kernel phase (S0-S6)\n' +
+    '    "in_corridor": true,       // currently in a stability corridor\n' +
+    '    "phase": 7,                // phase counter\n' +
+    '    "z_magnitude": 0.42        // kernel Z field strength\n' +
+    '  },\n\n' +
+    '  "step": 1,\n' +
+    '  "meta": {\n' +
+    '    "query_ms": 12,            // how long the query took\n' +
+    '    "candidates_evaluated": 156\n' +
+    '  }\n' +
+    '}';
+
+  // Show output
+  document.getElementById('output-section').classList.add('visible');
+  document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── COPY ─────────────────────────────────────────────────────────────────────
+function copyBlock(id, btn) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ── EXPORT ───────────────────────────────────────────────────────────────────
+function exportMarkdown() {
+  const name = document.getElementById('char-name').value.trim() || 'character';
+  const blocks = [
+    ['0. Install + Start Server', document.getElementById('out-install').textContent, 'bash'],
+    ['1. Create Workspace', document.getElementById('out-workspace').textContent, 'bash'],
+    ['2. Create Agent + Seed', document.getElementById('out-agent').textContent, 'bash'],
+    ['3. Environment Config', document.getElementById('out-env').textContent, 'bash'],
+    ['4. System Prompt Wrapper', document.getElementById('out-prompt').textContent, ''],
+    ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash'],
+    ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
+    ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
+  ];
+
+  let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge v2.1_\n';
+  blocks.forEach(([title, content, lang]) => {
+    md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
+  });
+
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name.toLowerCase().replace(/\s+/g, '_') + '_torment_setup.md';
+  a.click();
+}
+
+// ── RESET ────────────────────────────────────────────────────────────────────
+function resetOutput() {
+  document.getElementById('output-section').classList.remove('visible');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+</body>
+</html>

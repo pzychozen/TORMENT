@@ -11,7 +11,7 @@ from .memory_kernel import TriOctaMemoryKernel
 from .memory_graph import MemoryGraph
 from .identity import IdentityStore, AgentIdentity, DEFAULT_AGENT_SEED, DEFAULT_AGENT_OVERLAY
 from .motifs import MotifRegistry, cosine as cos_sim
-from .router import DomainRouter, DEFAULT_DOMAINS
+from .router import DomainRouter, DEFAULT_DOMAINS, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry
@@ -294,7 +294,8 @@ def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: D
     os.replace(tmp, p)
 
 class Workspace:
-    def __init__(self, data_dir: str, workspace_id: str, kernel: TriOctaMemoryKernel) -> None:
+    def __init__(self, data_dir: str, workspace_id: str, kernel: TriOctaMemoryKernel,
+                 requested_domains: Optional[List[str]] = None) -> None:
         self.data_dir = data_dir
         self.workspace_id = workspace_id
         self.kernel = kernel
@@ -306,7 +307,7 @@ class Workspace:
                 f"Workspace '{workspace_id}' is locked to embed_dim={self.embed_dim}, "
                 f"but current embedder provides dim={kernel.embedder.dim}."
             )
-        self.domains = self._load_or_init_domains()
+        self.domains = self._load_or_init_domains(requested_domains=requested_domains)
 
         # shared stores per domain (created before motif_regs so shard readers are available)
         self.shared_graphs: Dict[str, MemoryGraph] = {}
@@ -382,16 +383,31 @@ class Workspace:
     def _domains_path(self) -> str:
         return os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains.json")
 
-    def _load_or_init_domains(self) -> List[str]:
+    def _load_or_init_domains(self, requested_domains: Optional[List[str]] = None) -> List[str]:
         p = self._domains_path()
         os.makedirs(os.path.dirname(p), exist_ok=True)
         if os.path.exists(p):
+            # Workspace already exists — load existing domains
             with open(p, "r", encoding="utf-8") as f:
                 obj = json.load(f)
-            return list(obj.get("domains", DEFAULT_DOMAINS))
+            existing = list(obj.get("domains", [SINGLE_AGENT_DOMAIN]))
+            # If new domains requested, add any missing ones (never remove)
+            if requested_domains:
+                added = False
+                for d in requested_domains:
+                    if d not in existing:
+                        existing.append(d)
+                        added = True
+                if added:
+                    with open(p, "w", encoding="utf-8") as f:
+                        json.dump({"domains": existing}, f, indent=2)
+            return existing
+        # New workspace — use requested domains or single-agent default.
+        # For multi-agent hive-mind, pass domains explicitly (e.g. DEFAULT_DOMAINS).
+        domains = list(requested_domains) if requested_domains else [SINGLE_AGENT_DOMAIN]
         with open(p, "w", encoding="utf-8") as f:
-            json.dump({"domains": DEFAULT_DOMAINS}, f, indent=2)
-        return list(DEFAULT_DOMAINS)
+            json.dump({"domains": domains}, f, indent=2)
+        return domains
 
     def _load_or_init_domain_policies(self) -> Dict[str, Any]:
         p = self.domain_policies_path
@@ -531,15 +547,42 @@ class TormentFabric:
                 self._sqlite_indexes[key] = None
         return self._sqlite_indexes[key]
 
-    def get_workspace(self, workspace_id: str) -> Workspace:
+    def get_workspace(self, workspace_id: str, domains: Optional[List[str]] = None) -> Workspace:
         ws = self.workspaces.get(workspace_id)
         if ws is None:
             try:
-                ws = Workspace(data_dir=self.data_dir, workspace_id=workspace_id, kernel=self.kernel)
+                ws = Workspace(data_dir=self.data_dir, workspace_id=workspace_id,
+                               kernel=self.kernel, requested_domains=domains)
             except ValueError as e:
                 # Dim mismatch safety.
                 raise HTTPException(status_code=409, detail=str(e))
             self.workspaces[workspace_id] = ws
+        elif domains:
+            # Workspace exists in memory — ensure requested domains are present
+            added = False
+            for d in domains:
+                if d not in ws.domains:
+                    # Add domain infrastructure
+                    dom_dir = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", d, "shared")
+                    ws.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
+                    ws.motif_regs[d] = MotifRegistry(
+                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d,
+                        shard_reader=ws.shared_graphs[d]._shard_reader,
+                        entity_payload_fn=lambda eid, _d=d: ws._entity_payload_for_motif(eid, _d),
+                    )
+                    ws.proposals[d] = ProposalRegistry(
+                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d)
+                    ws.conflicts[d] = ConflictRegistry(
+                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d)
+                    ws.domains.append(d)
+                    added = True
+            if added:
+                # Persist updated domain list
+                p = ws._domains_path()
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump({"domains": ws.domains}, f, indent=2)
+                # Rebuild router with new motif registries
+                ws.router = DomainRouter(ws.motif_regs, embed_dim=int(ws.embed_dim))
         return ws
 
     def list_workspaces_meta(self) -> List[Dict[str, Any]]:

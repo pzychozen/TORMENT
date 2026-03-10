@@ -13,6 +13,10 @@ DEFAULT_DOMAINS = [
     "meta",
 ]
 
+# Single-agent / companion mode: one shared domain is enough.
+# Multi-agent hive-mind workspaces should explicitly request the domains they need.
+SINGLE_AGENT_DOMAIN = "personal"
+
 @dataclass
 class DomainScore:
     domain_id: str

@@ -68,8 +68,11 @@ class TormentClient:
 
     # --- Workspace / agent
 
-    def workspace_create(self, workspace_id: str) -> Dict[str, Any]:
-        return self._post("/workspace/create", {"workspace_id": workspace_id})
+    def workspace_create(self, workspace_id: str, domains: Optional[List[str]] = None) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"workspace_id": workspace_id}
+        if domains:
+            payload["domains"] = domains
+        return self._post("/workspace/create", payload)
 
     def agent_create(
         self,
@@ -215,8 +218,8 @@ def pp(title: str, obj: Any) -> None:
 def main() -> int:
     c = TormentClient(BASE_URL)
 
-    # 1) Workspace
-    ws = c.workspace_create(WORKSPACE_ID)
+    # 1) Workspace — multi-agent demo needs explicit hive-mind domains
+    ws = c.workspace_create(WORKSPACE_ID, domains=["research", "engineering", "operations", "creative", "meta"])
     pp("workspace_create", ws)
 
     # 2) Agents (two agents to satisfy min_distinct_agents=2 for canon promotion)

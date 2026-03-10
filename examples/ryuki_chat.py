@@ -68,12 +68,6 @@ RYUKI_SEED = {
     ),
     "seed_id": "ryuki_nox_v1",
     "core_traits": ["fierce", "protective", "instinctual", "imaginative", "direct"],
-    "priority_weights": {
-        "facts": 0.6,
-        "projects": 0.5,
-        "preferences": 0.7,
-        "motifs": 0.9,
-    },
     "coupling_mode": "read_only",
     "coupling_strength": 0.25,
 }
@@ -122,8 +116,11 @@ class TormentClient:
     def health(self) -> dict:
         return self._get("/health")
 
-    def workspace_create(self, ws_id: str) -> dict:
-        return self._post("/workspace/create", {"workspace_id": ws_id})
+    def workspace_create(self, ws_id: str, domains: list = None) -> dict:
+        payload = {"workspace_id": ws_id}
+        if domains:
+            payload["domains"] = domains
+        return self._post("/workspace/create", payload)
 
     def agent_create(self, ws_id: str, agent_id: str, seed: dict) -> dict:
         return self._post("/agent/create", {
@@ -282,7 +279,7 @@ def ensure_setup(torment: TormentClient) -> None:
 
     # Create workspace (idempotent — returns existing if present)
     try:
-        torment.workspace_create(WORKSPACE_ID)
+        torment.workspace_create(WORKSPACE_ID, domains=["personal"])
         print(f"  Workspace '{WORKSPACE_ID}' ready.")
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 409:

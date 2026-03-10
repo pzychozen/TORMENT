@@ -1,10 +1,20 @@
-# TORMENT Memory Fabric — v2.1
+# TORMENT Memory Fabric — v2.1.1
 
 A dynamical **memory substrate** for AI agents, built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons.
 
 Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
 TORMENT does not control personality. It stores and retrieves context in a stable way — and provides a living character identity layer that lets personality emerge from memory rather than static prompts, with a complete memory lifecycle through event-gated compression and spirit return.
+
+---
+
+## What's New in v2.1.1
+
+**Character Forge** (`start/torment_character_creator.html`) — a zero-code HTML tool that walks new users through creating a TORMENT character. Generates all setup commands, env config (Linux + Windows), a complete Python chat script with auto-setup, and a system prompt template. Supports Claude, OpenAI, Ollama, and custom LLM endpoints.
+
+**Single-Agent Domain Fix** — new workspaces now default to a single `personal` domain instead of creating all 5 hive-mind domains. Companion characters no longer waste 4x storage on unused domain infrastructure. Multi-agent setups can still request specific domains explicitly.
+
+**Personal Domain Policy** — relaxed governance for single-agent use: `shared_min_distinct_agents: 1`, higher proposal rates, auto-merge motifs enabled. No multi-agent approval overhead when running a solo companion.
 
 ---
 
@@ -34,6 +44,7 @@ TORMENT does not control personality. It stores and retrieves context in a stabl
 
 | Document | Description |
 |----------|-------------|
+| `start/torment_character_creator.html` | **Character Forge** — zero-code character setup tool |
 | `docs/QUICKSTART.md` | 5-minute setup guide |
 | `docs/GUIDE.md` | Detailed system guide |
 | `docs/CHARACTER_SYSTEM.md` | Living character identity + spirit return voice layer |
@@ -92,7 +103,7 @@ TORMENT has four layers:
 - `GET /embedder/check` — embedding diagnostic
 
 **Workspace:**
-- `POST /workspace/create` `{ workspace_id }`
+- `POST /workspace/create` `{ workspace_id, domains? }` — defaults to `["personal"]`; pass explicit list for multi-agent
 - `GET /workspace/{workspace_id}/domains`
 - `POST /workspace/clone` `{ source_workspace_id, target_workspace_id, reembed?, reembed_mode? }`
 - `POST /workspace/maintenance` `{ workspace_id, mode }` — scan/repair/compact
@@ -180,7 +191,7 @@ Scenarios: `research`, `ops`, `creative`, `mixed`, `collaborative_mixed_200`.
 
 ## Defaults
 
-- Workspaces have default domains: `research`, `engineering`, `operations`, `creative`, `meta`
+- New workspaces default to a single `personal` domain (companion use). For multi-agent hive-mind, pass `"domains": ["research", "engineering", "operations", "creative", "meta"]` to workspace creation.
 - Agents: private-write, shared-read (shared-write requires proposal/governance)
 - Character layer: enabled by default when `seed_text` is provided
 - Compression: disabled by default (`TORMENT_COMPRESS_ENABLE=0`), enable for full lifecycle

@@ -65,7 +65,7 @@ def workspaces_embed_audit_summary(limit: int = 200) -> Dict[str, Any]:
 # -------------------- models --------------------
 class WorkspaceCreateReq(BaseModel):
     workspace_id: str = Field(default="default")
-    domains: Optional[List[str]] = None  # currently informational; domains.json can be edited later
+    domains: Optional[List[str]] = None  # if provided, only these domains are created (default: all 5)
 
 
 
@@ -407,7 +407,7 @@ def embedder_check() -> Dict[str, Any]:
 
 @app.post("/workspace/create")
 def workspace_create(req: WorkspaceCreateReq) -> Dict[str, Any]:
-    ws = fabric.get_workspace(req.workspace_id)
+    ws = fabric.get_workspace(req.workspace_id, domains=req.domains)
     return {"workspace_id": ws.workspace_id, "domains": ws.domains}
 
 
