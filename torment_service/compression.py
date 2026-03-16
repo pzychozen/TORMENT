@@ -336,6 +336,20 @@ class CompressionScorer:
         if _sustained >= 10:  # PHASE_DURATION_RESIST_THRESHOLD
             j_score = max(0.0, j_score - 0.15)  # PHASE_DURATION_RESIST_BONUS
 
+        # SRG compression resistance (opt-in, reads payload only)
+        _srg_pay = payload.get("srg")
+        if _srg_pay and isinstance(_srg_pay, dict):
+            # Crystal memories are NEVER compressed
+            if _srg_pay.get("is_crystal", False):
+                return None
+            # Class A heartbeat = deep memory = 15% harder to compress
+            if _srg_pay.get("heartbeat_class") == "A":
+                j_score *= 0.85
+            # High R (near fixed-point lock) = resists compression
+            _srg_R = float(_srg_pay.get("R", 0.0) or 0.0)
+            if _srg_R > 0.15:
+                j_score *= (1.0 - 0.1 * min(1.0, _srg_R / 0.176))
+
         # Composite: J-weighted 60%, Z-weighted 40% (per RGD ordering)
         composite = 0.60 * j_score + 0.40 * z_score
 

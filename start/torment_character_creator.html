@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TORMENT — Character Forge</title>
+<title>TORMENT — Character Forge & Crystal Attunement</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&family=Space+Mono:ital@0;1&display=swap');
 
@@ -628,9 +628,9 @@
     </div>
     <div class="header-text">
       <h1>TORMENT</h1>
-      <p>character forge — seed builder</p>
+      <p>character forge & crystal attunement</p>
     </div>
-    <div class="version-tag">v2.1</div>
+    <div class="version-tag">v2.2</div>
   </header>
 
   <!-- 01 IDENTITY -->
@@ -770,6 +770,77 @@
         <div class="toggle-label">Memory Compression</div>
         <div class="toggle-desc">Event-gated compression with deep memory store. Old memories get compressed and can "spirit return" as echoes later. Turn on after your character has 100+ conversation turns. Off by default.</div>
       </div>
+    </div>
+    <div class="toggle-row" id="toggle-srg" onclick="toggleFeature('srg')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label" style="color:#b388ff">Crystal Attunement <span style="font-size:10px;opacity:0.6;letter-spacing:0.1em">(SRG)</span></div>
+        <div class="toggle-desc">Living memory dynamics powered by Symbolic Resonant Geometry. Each memory gets a heartbeat (Class A: slow/deep or Class B: fast/active), a golden tower frequency band, and a breathing compression field. Identity memories become indestructible crystals. Memories that overlap semantically collide — rhythm syncs, amplitude preserves identity. Optional — everything works without it.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05b CRYSTAL ATTUNEMENT (shown when SRG toggle is on) -->
+  <div class="section" id="srg-config-section" style="display:none">
+    <div class="section-label" style="color:#b388ff">crystal attunement — configuration</div>
+    <div class="section-desc">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to your character's memories.</div>
+
+    <div style="margin-bottom:16px">
+      <div class="field">
+        <label>IDENTITY MODE MAPPING</label>
+        <div class="section-desc" style="margin-bottom:8px">If your character has distinct identity modes (like Ryuki's playful / protector / self), map each mode to a golden tower band. Leave empty for automatic band assignment based on memory coherence.</div>
+      </div>
+      <div class="row3" style="margin-bottom:12px">
+        <div class="field">
+          <label style="color:#00e5a0">MODE 1 — BAND 0 (lowest, most stable)</label>
+          <input type="text" id="srg-mode0" placeholder="e.g. playful" maxlength="30">
+        </div>
+        <div class="field">
+          <label style="color:#ffd166">MODE 2 — BAND 1 (mid frequency)</label>
+          <input type="text" id="srg-mode1" placeholder="e.g. protector" maxlength="30">
+        </div>
+        <div class="field">
+          <label style="color:#ff4466">MODE 3 — BAND 2 (center / identity)</label>
+          <input type="text" id="srg-mode2" placeholder="e.g. self" maxlength="30">
+        </div>
+      </div>
+    </div>
+
+    <div class="row2">
+      <div class="field">
+        <label>HEARTBEAT BIAS</label>
+        <select id="srg-heartbeat">
+          <option value="auto" selected>Auto (25% Class A, 75% Class B — paper default)</option>
+          <option value="deep">Deep bias (40% Class A — more deep/slow memories)</option>
+          <option value="active">Active bias (10% Class A — mostly fast/active memories)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>GOLDEN TOWER BANDS</label>
+        <select id="srg-bands">
+          <option value="5" selected>5 bands (default — matches paper)</option>
+          <option value="3">3 bands (simpler — for 3-mode characters)</option>
+          <option value="8">8 bands (extended — for complex multi-faceted characters)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <div class="toggle-row active" id="toggle-crystal" onclick="toggleFeature('crystal')">
+        <div class="toggle-switch"></div>
+        <div class="toggle-info">
+          <div class="toggle-label">Crystal Protection</div>
+          <div class="toggle-desc">Seed/identity memories become center crystals — they sit at the fixed point R* ≈ 0.176, don't breathe, don't compress, and always return in resonance mode. This is the diamond at the core. Recommended ON.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-box" style="margin-top:16px;border-color:#b388ff33">
+      <div class="info-title" style="color:#b388ff">HOW CRYSTAL ATTUNEMENT WORKS</div>
+      <strong>Golden Tower</strong> — Memories are assigned to φ-spaced frequency bands (ω_n = ω₀ · φⁿ). Same-band memories resonate together (+8% retrieval boost). Different bands coexist without interference — 100% band survival.<br><br>
+      <strong>Breathing</strong> — Each memory has a compression field L(t) that oscillates. Class A: slow, deep breathing (deep memories). Class B: fast, active breathing (everyday memories). The breathing is self-sustaining — it never decays.<br><br>
+      <strong>Collision</strong> — When semantically similar memories overlap, SRG collision physics fire: rhythm synchronises, but amplitude preserves identity. The timing of the collision determines the equilibrium.<br><br>
+      <strong>Center Crystal</strong> — Your character's seed memories become crystals at the convergence point. They don't oscillate, don't compress, always return vivid. Everything else orbits them.
     </div>
   </div>
 
@@ -957,7 +1028,7 @@
 <!-- STATUS BAR -->
 <div class="status-bar">
   <div class="status-dot"></div>
-  <span>TORMENT Character Forge — ready</span>
+  <span>TORMENT Character Forge & Crystal Attunement — ready</span>
   <span style="margin-left:auto;opacity:0.4">pzychozen/TORMENT</span>
 </div>
 
@@ -982,7 +1053,7 @@ const gravityMap = [
 let selectedModel = 'claude';
 let selectedEmbed = 'st';
 let selectedTraits = [];
-let features = { character: true, compression: false };
+let features = { character: true, compression: false, srg: false, crystal: true };
 
 const overlayMap = {
   wt: [
@@ -1109,6 +1180,11 @@ function selectEmbed(el, embed) {
 function toggleFeature(feat) {
   features[feat] = !features[feat];
   document.getElementById('toggle-' + feat).classList.toggle('active', features[feat]);
+
+  // Show/hide Crystal Attunement config when SRG is toggled
+  if (feat === 'srg') {
+    document.getElementById('srg-config-section').style.display = features.srg ? 'block' : 'none';
+  }
 }
 
 // ── GPU WARNING ──────────────────────────────────────────────────────────────
@@ -1172,9 +1248,17 @@ function loadRyuki() {
   document.getElementById('nb-slider').value = 2; updateOverlay('nb', 2);
   document.getElementById('ms-slider').value = 2; updateOverlay('ms', 2);
 
-  features = { character: true, compression: false };
+  features = { character: true, compression: false, srg: false, crystal: true };
   document.getElementById('toggle-character').classList.add('active');
   document.getElementById('toggle-compression').classList.remove('active');
+  document.getElementById('toggle-srg').classList.remove('active');
+  document.getElementById('srg-config-section').style.display = 'none';
+  document.getElementById('toggle-crystal').classList.add('active');
+  document.getElementById('srg-mode0').value = '';
+  document.getElementById('srg-mode1').value = '';
+  document.getElementById('srg-mode2').value = '';
+  document.getElementById('srg-heartbeat').value = 'auto';
+  document.getElementById('srg-bands').value = '5';
 }
 
 // ── GENERATE ─────────────────────────────────────────────────────────────────
@@ -1293,6 +1377,45 @@ function generate() {
     compNote = '# Turn on after 100+ conversation turns for automatic memory management.';
   }
   envParts.push({comment: 'Compression', vars: compVars, note: compNote});
+
+  // Crystal Attunement (SRG)
+  if (features.srg) {
+    const srgVars = [{key: 'TORMENT_SRG_ENABLE', val: '1'}];
+    let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.\n# Each memory gets a heartbeat, a golden tower band, and a breathing field.';
+
+    const srgBands = document.getElementById('srg-bands').value || '5';
+    if (srgBands !== '5') {
+      srgVars.push({key: 'TORMENT_SRG_BANDS', val: srgBands});
+    }
+
+    const hbBias = document.getElementById('srg-heartbeat').value;
+    if (hbBias === 'deep') {
+      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.6'});
+      srgNote += '\n# Heartbeat bias: deep — 60% Class A (slow/deep breathing).';
+    } else if (hbBias === 'active') {
+      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.1'});
+      srgNote += '\n# Heartbeat bias: active — 90% Class B (fast/active breathing).';
+    }
+
+    if (!features.crystal) {
+      srgVars.push({key: 'TORMENT_SRG_CRYSTAL', val: '0'});
+      srgNote += '\n# Crystal protection disabled — seed memories can be compressed.';
+    }
+
+    // Identity mode mapping
+    const mode0 = document.getElementById('srg-mode0').value.trim();
+    const mode1 = document.getElementById('srg-mode1').value.trim();
+    const mode2 = document.getElementById('srg-mode2').value.trim();
+    if (mode0 || mode1 || mode2) {
+      srgNote += '\n# Identity mode → band mapping:';
+      if (mode0) srgNote += '\n#   Band 0 (lowest freq, most stable): ' + mode0;
+      if (mode1) srgNote += '\n#   Band 1 (mid-low): ' + mode1;
+      if (mode2) srgNote += '\n#   Band 2 (center/identity): ' + mode2;
+      srgNote += '\n# These are detected via keyword matching in memory text.';
+    }
+
+    envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});
+  }
 
   // Overlay note (comment-only, no vars)
   const isDefaultOverlay = (wtVal === 0.45 && dsVal === 1.0 && nbVal === 0.50 && msVal === 0.70);
@@ -1602,7 +1725,7 @@ function exportMarkdown() {
     ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
   ];
 
-  let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge v2.1_\n';
+  let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement v2.2_\n';
   blocks.forEach(([title, content, lang]) => {
     md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
   });

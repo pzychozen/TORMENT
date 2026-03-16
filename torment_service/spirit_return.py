@@ -353,8 +353,24 @@ def enrich_deep_memory_hit(
     if _sustained >= SUSTAINED_CORRIDOR_THRESHOLD and warmth < SUSTAINED_WARMTH_FLOOR:
         warmth = SUSTAINED_WARMTH_FLOOR
 
+    # SRG spirit return enrichment (reads metadata only, no import when absent)
+    _srg_meta = metadata.get("srg")
+    _srg_force_resonance = False
+    if _srg_meta and isinstance(_srg_meta, dict):
+        # Crystal memories always return in resonance mode (vivid)
+        if _srg_meta.get("is_crystal", False):
+            _srg_force_resonance = True
+        # Class A heartbeat: +0.15 warmth floor (deep/slow memories return warmer)
+        if _srg_meta.get("heartbeat_class") == "A":
+            _srg_warmth_floor = warmth + 0.15
+            if warmth < _srg_warmth_floor:
+                warmth = min(1.0, _srg_warmth_floor)
+
     # Select return mode
-    mode = select_return_mode(deep_memory, compressed_in_core, interaction, warmth)
+    if _srg_force_resonance:
+        mode = "resonance"
+    else:
+        mode = select_return_mode(deep_memory, compressed_in_core, interaction, warmth)
 
     # Compute resonance confidence
     # Base confidence from deep memory, boosted by symbol interaction

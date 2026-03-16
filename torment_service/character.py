@@ -692,6 +692,57 @@ def derive_kernel_modulation(
     }
 
 
+def derive_srg_character_bands(seed: CharacterSeed) -> Dict[str, Any]:
+    """Map a character seed's identity modes to golden tower bands.
+
+    This is a read-only helper — it doesn't modify the seed or any state.
+    Returns a dict of detected modes and their band assignments, or an
+    empty dict if SRG is not enabled.
+
+    Integration point for fabric.py to pass SRG character mode into
+    build_memory_srg() at ingest time.
+    """
+    try:
+        from .srg_engine import (
+            srg_enabled, detect_character_mode, assign_band,
+            golden_tower_frequency, CHARACTER_MODE_KEYWORDS,
+        )
+    except ImportError:
+        return {}
+
+    if not srg_enabled():
+        return {}
+
+    text = str(getattr(seed, "seed_text", "") or "")
+    if not text:
+        return {}
+
+    # Detect dominant mode from seed text
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    mode_scores = {
+        mode: len(words & kws) for mode, kws in CHARACTER_MODE_KEYWORDS.items()
+    }
+
+    # Build band map for all modes with hits
+    band_map = {}
+    for mode, score in mode_scores.items():
+        if score >= 1:
+            band = assign_band(character_mode=mode)
+            band_map[mode] = {
+                "band": band,
+                "frequency": golden_tower_frequency(band),
+                "keyword_hits": score,
+            }
+
+    dominant = max(mode_scores, key=mode_scores.get)
+    dominant_score = mode_scores[dominant]
+
+    return {
+        "dominant_mode": dominant if dominant_score >= 2 else "",
+        "band_map": band_map,
+    }
+
+
 def assemble_character_context(
     *,
     graph,            # MemoryGraph (private graph)

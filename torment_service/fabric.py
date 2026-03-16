@@ -500,6 +500,9 @@ class TormentFabric:
         self._deep_stores: Dict[str, Any] = {}            # per agent
         self._phase_timers: Dict[str, Any] = {}            # per agent
 
+        # SRG living memory (opt-in) — disabled by default
+        self._srg_enable = str(os.environ.get("TORMENT_SRG_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
+
         # private memory stores per agent
         self.private_graphs: Dict[str, MemoryGraph] = {}  # agent_id -> graph
 
@@ -1859,6 +1862,23 @@ class TormentFabric:
         _pt.update(int(step), _pt_in_corr, _pt_stage)
         _pt_durations = _pt.get_durations(int(step))
 
+        # SRG living memory — build dual-field state if enabled (Phase 1+2)
+        _srg_dict = None
+        if self._srg_enable:
+            from .srg_engine import build_memory_srg, detect_character_mode
+            _srg_char_mode = detect_character_mode(text)
+            _srg_state = build_memory_srg(
+                strength=float(signals.strength),
+                coherence=float(debug.get("coherence", 0.5)),
+                phase_duration=int(_pt_durations.get("phase_duration_steps", 0)),
+                content_hash=hash(summary) & 0xFFFFFFFF,
+                character_mode=_srg_char_mode,
+                is_seed=False,
+            )
+            _srg_dict = _srg_state.to_dict()
+            # Track last-ingested band for same-band scoring in query path
+            self._srg_last_ingest_band = _srg_state.R_band
+
         # Character continuity (v1.11): soft role inference (guidance signal).
         # Updates slowly and is used only to tune memory behavior (anchors/recency), never persona writing.
         try:
@@ -2004,6 +2024,9 @@ class TormentFabric:
                     # Phase-cycle duration tracking
                     "phase_duration_steps": _pt_durations.get("phase_duration_steps", 0),
                     "corridor_duration_steps": _pt_durations.get("corridor_duration_steps", 0),
+
+                    # SRG dual-field state (None when flag is off — filtered below)
+                    "srg": _srg_dict,
                 },
             )
             stored = True
@@ -2108,6 +2131,55 @@ class TormentFabric:
                 graph.flush_node(int(eid))
             except Exception:
                 pass
+
+            # --- SRG collision detection (Phase 3) ---
+            if self._srg_enable and _srg_dict and eid is not None:
+                try:
+                    from .srg_engine import SRGMemoryState, collision as srg_collision, evolve_breathing
+                    from .embedding_store import load_embedding as _load_emb_srg
+                    # Find closest existing memory by embedding similarity
+                    _new_emb_norm = emb / (np.linalg.norm(emb) + 1e-12)
+                    _best_sim = 0.0
+                    _best_eid = None
+                    for _oid, _oent in graph.entities.items():
+                        if int(_oid) == int(eid):
+                            continue
+                        _opay = getattr(_oent, "payload", {}) or {}
+                        if not _opay.get("srg"):
+                            continue
+                        _raw = _load_emb_srg(
+                            _oid, _opay, graph._shard_reader, graph.data_dir
+                        )
+                        if _raw is None:
+                            continue
+                        _ov = np.asarray(_raw, dtype=np.float32).reshape(-1)
+                        _on = float(np.linalg.norm(_ov))
+                        if _on < 1e-12:
+                            continue
+                        _sim = float(np.dot(_new_emb_norm, _ov / _on))
+                        if _sim > _best_sim:
+                            _best_sim = _sim
+                            _best_eid = int(_oid)
+
+                    if _best_eid is not None and _best_sim >= 0.75:
+                        _exist_ent = graph.entities.get(_best_eid)
+                        if _exist_ent is not None:
+                            _exist_srg = SRGMemoryState.from_dict(
+                                (_exist_ent.payload or {}).get("srg", {})
+                            )
+                            _new_srg = SRGMemoryState.from_dict(_srg_dict)
+                            _col_report = srg_collision(
+                                _exist_srg, _new_srg, _best_sim, int(step)
+                            )
+                            if _col_report.get("collision"):
+                                # Write back updated states
+                                _exist_ent.payload["srg"] = _exist_srg.to_dict()
+                                _my_ent = graph.entities.get(int(eid))
+                                if _my_ent is not None:
+                                    _my_ent.payload["srg"] = _new_srg.to_dict()
+                                    _my_ent.payload["srg_collision"] = _col_report
+                except Exception:
+                    pass
 
             pol = ws.domain_policies.get(chosen_domain, {})
             try:
@@ -2732,6 +2804,44 @@ class TormentFabric:
 
             base_score = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=0.0)
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
+
+            # SRG scoring bonuses + breathing evolution (Phase 3)
+            if self._srg_enable:
+                _srg_hit = (h.get("payload") or {}).get("srg")
+                if _srg_hit:
+                    # Same-band resonance: 8% boost
+                    if hasattr(self, "_srg_last_ingest_band") and _srg_hit.get("R_band") == self._srg_last_ingest_band:
+                        final *= 1.08
+                    # Crystal identity anchor: 5% boost
+                    if _srg_hit.get("is_crystal", False):
+                        final *= 1.05
+                    # Class A (deep/slow heartbeat): 3% stability bonus
+                    if _srg_hit.get("heartbeat_class") == "A":
+                        final *= 1.03
+
+                    # Breathing evolution: retrieved memories are "active" → evolve
+                    try:
+                        from .srg_engine import SRGMemoryState as _SMS, evolve_breathing as _evolve
+                        _srg_live = _SMS.from_dict(_srg_hit)
+                        _evolve(_srg_live)
+                        # Write back evolved state to the in-memory entity
+                        _hit_eid = h.get("eid")
+                        if _hit_eid is not None:
+                            # Try private graph first, then each domain's shared graph
+                            _hit_ent = None
+                            _pg = self.private_graphs.get(agent_id)
+                            if _pg is not None:
+                                _hit_ent = _pg.entities.get(int(_hit_eid))
+                            if _hit_ent is None:
+                                for _sg in ws.shared_graphs.values():
+                                    _hit_ent = _sg.entities.get(int(_hit_eid))
+                                    if _hit_ent is not None:
+                                        break
+                            if _hit_ent is not None:
+                                _hit_ent.payload["srg"] = _srg_live.to_dict()
+                    except Exception:
+                        pass
+
             hh = dict(h)
             hh["motifs"] = motifs
             hh["final_score"] = final
