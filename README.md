@@ -1,10 +1,54 @@
-# TORMENT Memory Fabric — v2.1.1
+# TORMENT Memory Fabric — v2.3.0
 
 A dynamical **memory substrate** for AI agents, built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons.
 
 Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
-TORMENT does not control personality. It stores and retrieves context in a stable way — and provides a living character identity layer that lets personality emerge from memory rather than static prompts, with a complete memory lifecycle through event-gated compression and spirit return.
+TORMENT does not control personality. It stores and retrieves context in a stable way — and provides a living character identity layer that lets personality emerge from memory rather than static prompts, with a complete memory lifecycle through event-gated compression, spirit return, and collective resonance coupling.
+
+---
+
+## What's New in v2.3.0 — Hivemind Phase D (Collective Governance)
+
+**Memory Governance System** (`governance.py`) — centralized resolver for per-memory consent and sharing flags. Source protection flags (protected, non_shareable, collective_export_blocked) control what leaves private memory. Derived handling flags (collective_reingest_blocked, decay_accelerated) govern synthetic material after arrival. Partial updates with full audit trail, workspace-level JSONL audit log.
+
+**7-Gate Collective Policy Engine** (`collective_policy.py`) — gatekeeper between convergence detection and echo re-ingestion. Gates: confidence threshold (0.60), agent opt-in, domain exact match, deduplication, rate limiting (3/hour), drift budget / identity compatibility, eligible. Conservative by design — slightly annoying to trigger is a feature.
+
+**Echo Re-Ingestion** (`fabric.reingest_convergence()`) — bridges detection and influence. Loads convergence events, runs them through the policy engine, synthesizes compact echo summaries, and ingests them as low-amplitude memories (0.25x strength, 0.40x hard cap). Echoes are terminal: double-blocked governance (can't re-emit or re-echo), provenance-marked, and retrieval-discounted (0.5x weight).
+
+**Collective Proposal Bridge** (`collective_proposals.py`) — automatically drafts share proposals when convergence events are persistent and high-confidence. Tracks domain+motif patterns over time, requires persistence (2+ events in 2 hours) before proposing. Proposals are always pending for operator review — never auto-approved.
+
+**5 Design Invariants** enforced across all modules: (1) Protected memories never weakened automatically, (2) Non-shareable/export-blocked memories never emit, (3) Collective echoes are terminal by default, (4) Echoes are influences not autobiography, (5) Collective provenance cannot outrank seed/canon identity.
+
+**663 Tests** — 194 new tests across governance, policy, reingest, proposals, and cross-phase integration. Full 5-invariant verification suite.
+
+---
+
+## What's New in v2.2.0 — Crystal Attunement (SRG)
+
+**Symbolic Resonant Geometry** (`srg_engine.py`) — living memory geometry derived from the SRG paper's recursive operator mathematics. Each memory carries a dual-field state: Resonance R (what it IS — golden-tower frequency bands) and Compression L (WHO it is — breathing oscillation). The coupling constant `gamma_srg = zeta(3)/(pi*e*phi) ~ 0.08699` emerges from the math and governs all SRG dynamics.
+
+**Golden Frequency Tower** — memories occupy phi-spaced frequency bands (`omega_n = omega_0 * phi^n`) with 100% band survival. Same-band memories get 8% retrieval boost. Memories naturally cluster by resonant similarity.
+
+**Heartbeat Classes** — discrete symmetry breaking produces Class A (slow, deep) and Class B (fast, active) breathing. Class A memories get a 3% stability bonus. The heartbeat classification persists through the memory lifecycle.
+
+**Center Crystals** — when a memory's breathing compression locks to the SRG coupling frequency, it becomes a "crystal" — a maximally stable identity anchor. Crystal memories get 5% retrieval boost and resist compression.
+
+**Collision Physics** — when similar memories merge (cosine similarity >= 0.75), SRG collision dynamics fire: rhythm synchronizes, amplitude preserves identity, merger timing determines equilibrium. Breathing evolution occurs on retrieval — active memories are living fields.
+
+**Feature-flag gated** — `TORMENT_SRG_ENABLE=1` activates the layer. Zero overhead when off.
+
+---
+
+## What's New in v2.2.1 — Hivemind Foundation (Phases A-C)
+
+**Collective Data Contracts** (`collective_models.py`) — ResonancePacket (per-ingest snapshot for the collective field), ConvergenceEvent (multi-agent alignment record), CharacterSelfState (agent identity health view), MemoryGovernanceFlags (per-memory consent controls).
+
+**Character Self-Awareness API** — `GET /agent/{id}/self-state` returns drift score, seed basin geometry, memory tier counts, phase timing, and SRG attunement at a glance.
+
+**Collective Field** (`collective_field.py`) — workspace-level packet store with convergence detection. Cosine similarity >= 0.72 triggers events, composite confidence from semantic (50%) + phase (15%) + symbol (15%) + motif (20%). JSONL persistence, cooldown dedup.
+
+**Packet Emission** — every ingest above coherence 0.15 emits a ResonancePacket into the workspace collective field. Feature-flag gated: `TORMENT_HIVEMIND_ENABLE=1`.
 
 ---
 
@@ -82,7 +126,7 @@ make verify
 
 ## Architecture
 
-TORMENT has four layers:
+TORMENT has five layers:
 
 **Layer 1 — The Kernel** (`torment_service/kernel/`): a TriOcta phase-lock model (three coupled oscillators on Mexican-hat potentials with D24 phase scaffold). Produces stability signals — coherence, corridor alignment, identity state — that govern memory behavior. Accepts per-character modulation of coupling strength and phase angles.
 
@@ -90,7 +134,9 @@ TORMENT has four layers:
 
 **Layer 3 — Compression + Spirit Return** (`compression.py`, `deep_memory.py`, `spirit_return.py`, `phase_timer.py`, `retrieval_assembler.py`): event-gated memory lifecycle. Compression fires at corridor transitions, deep memories return through symbolic resonance with warmth and voice cues.
 
-**Layer 4 — Interfaces** (`app.py`, `sim/`, `tests/`): FastAPI REST service, simulation harness, stress tests, 185-test suite.
+**Layer 4 — Collective Hivemind** (`collective_field.py`, `collective_policy.py`, `collective_proposals.py`, `governance.py`): workspace-level resonance coupling between agents. Convergence detection, 7-gate policy engine, echo re-ingestion with terminal governance, and a proposal bridge for persistent patterns. SRG Crystal Attunement (`srg_engine.py`) adds living memory geometry with golden-tower bands, heartbeats, breathing compression, and collision physics.
+
+**Layer 5 — Interfaces** (`app.py`, `sim/`, `tests/`): FastAPI REST service, simulation harness, stress tests, 663-test suite.
 
 ---
 
@@ -123,6 +169,19 @@ TORMENT has four layers:
 - `GET /workspace/{workspace_id}/domain/{domain_id}/proposals`
 - `POST /workspace/domain/proposals/decide`
 
+**Memory governance (v2.3):**
+- `POST /memory/governance/set` `{ workspace_id, agent_id, eid, flags, actor?, source? }` — partial flag update with audit
+- `GET /memory/governance/get` `{ workspace_id, agent_id, eid }` — read current governance flags
+- `GET /workspace/{workspace_id}/governance/audit` — workspace-level governance audit log
+
+**Collective hivemind (v2.2.1+):**
+- `GET /workspace/{workspace_id}/collective/status` — field summary (packets, events, agents, domains)
+- `GET /workspace/{workspace_id}/collective/packets` — recent resonance packets (filterable by agent/domain)
+- `GET /workspace/{workspace_id}/collective/events` — convergence events
+- `GET /workspace/{workspace_id}/collective/events/{event_id}` — single event detail
+- `POST /workspace/{workspace_id}/collective/reingest` `{ agent_id, event_id, echo_strength_override? }` — manual echo re-ingestion through 7-gate policy
+- `GET /workspace/{workspace_id}/collective/proposals/status` — proposal bridge telemetry
+
 ---
 
 ## Embeddings
@@ -148,13 +207,20 @@ Each workspace locks its embedding dimension. Switching embedders requires cloni
 
 ---
 
-## Enable Compression (v2.1)
+## Enable Feature Flags
 
 ```bash
+# Compression (v2.1) — event-gated memory lifecycle
 export TORMENT_COMPRESS_ENABLE=1
+
+# SRG Crystal Attunement (v2.2) — living memory geometry
+export TORMENT_SRG_ENABLE=1
+
+# Hivemind (v2.2.1+) — collective resonance coupling
+export TORMENT_HIVEMIND_ENABLE=1
 ```
 
-That's it. Compression fires automatically at corridor transition events during ingest. Deep memories resurface during sparse queries with voice cues and warmth. See `docs/TUNING.md` for fine-tuning.
+Each layer is independently flag-gated. Zero overhead when off. They compose naturally: compression provides the memory lifecycle, SRG adds geometric memory physics, and hivemind enables multi-agent resonance coupling on top.
 
 ---
 
@@ -195,6 +261,9 @@ Scenarios: `research`, `ops`, `creative`, `mixed`, `collaborative_mixed_200`.
 - Agents: private-write, shared-read (shared-write requires proposal/governance)
 - Character layer: enabled by default when `seed_text` is provided
 - Compression: disabled by default (`TORMENT_COMPRESS_ENABLE=0`), enable for full lifecycle
+- SRG Crystal Attunement: disabled by default (`TORMENT_SRG_ENABLE=0`), enable for living memory geometry
+- Hivemind: disabled by default (`TORMENT_HIVEMIND_ENABLE=0`), enable for multi-agent resonance coupling
+- Collective echoes: 0.25x strength (0.40x hard cap), 0.5x retrieval weight, terminal by default
 - Kernel modulation: automatic when character is active
 
 ---

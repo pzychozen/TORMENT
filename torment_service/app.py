@@ -778,6 +778,68 @@ def collective_event_detail(workspace_id: str, event_id: str) -> Dict[str, Any]:
     return event
 
 
+class CollectiveReingestRequest(BaseModel):
+    agent_id: str = Field(..., description="Target agent to receive the echo.")
+    event_id: str = Field(..., description="Convergence event ID to reingest.")
+    echo_strength_override: Optional[float] = Field(
+        None,
+        description="Optional echo strength override (capped at 0.40).",
+    )
+
+
+@app.post("/workspace/{workspace_id}/collective/reingest")
+def collective_reingest(workspace_id: str, req: CollectiveReingestRequest) -> Dict[str, Any]:
+    """Re-ingest a convergence event as a low-amplitude echo into a target agent.
+
+    This is a manual/API-triggered action — not automatic. The policy engine
+    runs all 7 gates before allowing the reingest. The resulting echo is
+    terminal (double-blocked) and provenance-marked.
+    """
+    if not fabric._hivemind_enable:
+        raise HTTPException(status_code=404, detail="Hivemind not enabled")
+    result = fabric.reingest_convergence(
+        workspace_id=workspace_id,
+        target_agent_id=req.agent_id,
+        event_id=req.event_id,
+        echo_strength_override=req.echo_strength_override,
+    )
+    if not result.get("eligible", False) and result.get("reason", "").startswith("Event "):
+        raise HTTPException(status_code=404, detail=result["reason"])
+    return result
+
+
+@app.get("/workspace/{workspace_id}/collective/proposals/status")
+def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
+    """Return convergence-to-proposal bridge status for a workspace.
+
+    Shows pattern tracking, persistence counts, and recent proposal activity.
+    Collective proposals appear in the normal proposal review queue —
+    this endpoint provides bridge-specific telemetry.
+    """
+    if not fabric._hivemind_enable:
+        raise HTTPException(status_code=404, detail="Hivemind not enabled")
+    try:
+        bridge = fabric._get_proposal_bridge(workspace_id)
+        tracker = bridge.tracker
+        patterns = {k: len(v) for k, v in tracker._patterns.items()}
+        return {
+            "workspace_id": workspace_id,
+            "tracked_patterns": len(patterns),
+            "proposed_events": len(tracker._proposed_events),
+            "domain_cooldowns": dict(tracker._domain_last_proposed),
+            "pattern_detail": patterns,
+            "config": {
+                "confidence_threshold": bridge.confidence_threshold,
+                "persistence_min": bridge.persistence_min,
+                "persistence_window": bridge.persistence_window,
+                "domain_cooldown": bridge.domain_cooldown,
+                "max_pending_per_domain": bridge.max_pending_per_domain,
+            },
+        }
+    except Exception as e:
+        return {"workspace_id": workspace_id, "error": str(e)}
+
+
 @app.post("/agent/ingest")
 def ingest(req: IngestReq) -> Dict[str, Any]:
     return fabric.ingest(

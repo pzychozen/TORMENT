@@ -506,6 +506,7 @@ class TormentFabric:
         # Hivemind collective resonance (opt-in) — disabled by default
         self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
         self._collective_fields: Dict[str, Any] = {}  # workspace_id -> CollectiveField (lazy init)
+        self._proposal_bridges: Dict[str, Any] = {}  # workspace_id -> CollectiveProposalBridge (lazy init)
 
         # private memory stores per agent
         self.private_graphs: Dict[str, MemoryGraph] = {}  # agent_id -> graph
@@ -1831,6 +1832,15 @@ class TormentFabric:
             )
         return self._collective_fields[workspace_id]
 
+    def _get_proposal_bridge(self, workspace_id: str):
+        """Lazy-init and return the CollectiveProposalBridge for a workspace."""
+        if workspace_id not in self._proposal_bridges:
+            from .collective_proposals import CollectiveProposalBridge
+            self._proposal_bridges[workspace_id] = CollectiveProposalBridge(
+                data_dir=self.data_dir, workspace_id=workspace_id,
+            )
+        return self._proposal_bridges[workspace_id]
+
     def _collective_query_context(self, workspace_id: str, domains: List[str]) -> Dict[str, Any]:
         """Build optional collective_context for query response.
 
@@ -1860,6 +1870,180 @@ class TormentFabric:
             }
         except Exception:
             return {}
+
+    # ------------------------------------------------------------------
+    # Phase D3: Collective echo re-ingestion
+    # ------------------------------------------------------------------
+
+    def reingest_convergence(
+        self,
+        workspace_id: str,
+        target_agent_id: str,
+        event_id: str,
+        *,
+        echo_strength_override: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Re-ingest a convergence event as a low-amplitude echo into a target agent.
+
+        This is the core D3 method — the bridge between detection and influence.
+        It loads the event, runs it through the 7-gate policy engine, then calls
+        ingest() with reduced strength and collective governance flags.
+
+        Echoes are:
+            - Low-amplitude (0.25x default, 0.40x hard cap)
+            - Terminal (collective_reingest_blocked + collective_export_blocked)
+            - Provenance-marked (provenance='collective', source_event_id, source_agents)
+            - Retrieval-discounted (0.5x weight at query time)
+            - Excluded from seed-basin correction
+
+        Args:
+            workspace_id: Target workspace.
+            target_agent_id: Agent that will receive the echo.
+            event_id: Convergence event to reingest.
+            echo_strength_override: Optional strength override (capped at echo_strength_cap).
+
+        Returns:
+            Dict with reingest result (eligible, gate_failed, echo details or rejection reason).
+        """
+        if not self._hivemind_enable:
+            return {"eligible": False, "reason": "Hivemind is disabled (TORMENT_HIVEMIND_ENABLE=0)"}
+
+        # Load the convergence event
+        field = self._get_collective_field(workspace_id)
+        event_dict = field.get_event(event_id)
+        if event_dict is None:
+            return {"eligible": False, "reason": f"Event '{event_id}' not found"}
+
+        # Ensure target agent exists
+        try:
+            self.create_agent(workspace_id, target_agent_id)
+        except Exception as e:
+            return {"eligible": False, "reason": f"Cannot initialize agent: {e}"}
+
+        # Build policy engine
+        from .collective_policy import CollectivePolicy
+
+        policy = CollectivePolicy(
+            data_dir=self.data_dir,
+            workspace_id=workspace_id,
+        )
+
+        # Load agent's character state for drift info
+        current_drift_score = 0.0
+        drift_direction = "stable"
+        agent_seed_motif_id = None
+        try:
+            cstate = self.character_store.load_state(workspace_id, target_agent_id)
+            if cstate:
+                current_drift_score = float(cstate.drift_score)
+                drift_direction = str(cstate.drift_direction or "stable")
+                # Load seed for motif ID
+                seed_id = str(cstate.seed_id or "")
+                if seed_id:
+                    cseed = self.character_store.load_seed(workspace_id, seed_id)
+                    if cseed:
+                        agent_seed_motif_id = cseed.seed_motif_id
+        except Exception:
+            pass
+
+        # Determine target domain
+        target_domain = event_dict.get("domain_id", "")
+
+        # Run 7-gate policy evaluation
+        result = policy.evaluate(
+            event=event_dict,
+            target_agent_id=target_agent_id,
+            target_domain_id=target_domain,
+            current_drift_score=current_drift_score,
+            drift_direction=drift_direction,
+            agent_seed_motif_id=agent_seed_motif_id,
+        )
+
+        if not result.eligible:
+            return {
+                "eligible": False,
+                "gate_failed": result.gate_failed,
+                "reason": result.reason,
+            }
+
+        # Determine echo strength (policy default, overridable with cap)
+        from .collective_policy import DEFAULT_ECHO_STRENGTH_CAP
+        echo_strength = result.echo_strength
+        if echo_strength_override is not None:
+            echo_strength = min(float(echo_strength_override), DEFAULT_ECHO_STRENGTH_CAP)
+
+        # Synthesize summary from event data
+        participating = event_dict.get("participating_agents", [])
+        source_agents = [a for a in participating if a != target_agent_id]
+        dominant_motifs = event_dict.get("dominant_motifs", [])
+        event_summary = event_dict.get("summary", "")
+
+        echo_summary = (
+            f"[collective echo] {event_summary}"
+            if event_summary
+            else f"[collective echo] Convergence across {', '.join(source_agents)} "
+                 f"in domain '{target_domain}'"
+        )
+        if dominant_motifs:
+            echo_summary += f" (motifs: {', '.join(dominant_motifs[:3])})"
+
+        # Ingest the echo as a low-amplitude memory
+        # We call ingest() directly but then immediately patch the stored memory
+        # with collective governance flags and provenance markers.
+        ingest_result = self.ingest(
+            workspace_id=workspace_id,
+            agent_id=target_agent_id,
+            text=echo_summary,
+            step=0,  # echoes don't participate in step-counting
+            domain_id=target_domain,
+            supplied_summary=echo_summary,
+            scope="private",
+        )
+
+        echo_eid = ingest_result.get("eid")
+
+        if echo_eid is not None:
+            # Patch the stored memory with collective provenance + governance
+            try:
+                graph = self.private_graphs.get(target_agent_id)
+                if graph:
+                    ent = graph.entities.get(int(echo_eid))
+                    if ent is not None:
+                        # Mark provenance
+                        ent.payload["provenance"] = "collective"
+                        ent.payload["source_event_id"] = event_id
+                        ent.payload["source_agents"] = source_agents
+
+                        # Reduce strength to echo level
+                        ent.payload["strength"] = float(echo_strength)
+
+                        # Apply terminal governance: double-block
+                        from .governance import update_governance
+                        update_governance(ent.payload, {
+                            "collective_reingest_blocked": True,
+                            "collective_export_blocked": True,
+                        }, actor="collective_policy", source="reingest")
+
+                        # Flush the patched entity to disk
+                        try:
+                            graph.flush_node(int(echo_eid))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # Record the reingest in the tracker (for dedup + rate limiting)
+        policy.record_reingest(target_agent_id, event_id)
+
+        return {
+            "eligible": True,
+            "echo_eid": echo_eid,
+            "echo_strength": echo_strength,
+            "event_id": event_id,
+            "target_agent_id": target_agent_id,
+            "source_agents": source_agents,
+            "reason": result.reason,
+        }
 
     def ingest(
         self,
@@ -2237,6 +2421,10 @@ class TormentFabric:
                         _hm_ent_gov = graph.entities.get(int(eid))
                         if _hm_ent_gov is not None:
                             _hm_emit_ok = _gov_should_emit(_hm_ent_gov.payload)
+                            # Gate 1b: collective-provenance memories never emit packets
+                            # (terminal echo invariant — echoes don't echo)
+                            if str((_hm_ent_gov.payload or {}).get("provenance", "")) == "collective":
+                                _hm_emit_ok = False
                     except Exception:
                         pass
 
@@ -2311,7 +2499,22 @@ class TormentFabric:
                             srg_is_crystal=_hm_srg_crystal,
                         )
                         _hm_field = self._get_collective_field(workspace_id)
-                        _hm_field.append_packet(_hm_packet, embedding=emb)
+                        _hm_conv_event = _hm_field.append_packet(_hm_packet, embedding=emb)
+
+                        # Phase D4: Light proposal bridge
+                        # If convergence was detected, feed it to the proposal bridge.
+                        # Proposals are auto-drafted (pending), never auto-approved.
+                        if _hm_conv_event is not None:
+                            try:
+                                _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
+                                _hm_prop_reg = ws.proposals.get(chosen_domain)
+                                _hm_prop_bridge.maybe_draft_proposal(
+                                    event=_hm_conv_event.to_dict(),
+                                    proposal_registry=_hm_prop_reg,
+                                    embedding=emb,
+                                )
+                            except Exception:
+                                pass  # Proposal bridge is optional
                 except Exception:
                     pass  # Hivemind is optional — never blocks ingest
 
@@ -2975,6 +3178,17 @@ class TormentFabric:
                                 _hit_ent.payload["srg"] = _srg_live.to_dict()
                     except Exception:
                         pass
+
+            # Phase D3: collective-provenance retrieval discount
+            # Echoes are influences, not autobiography — discount so they don't
+            # outrank organic private memories in retrieval.
+            _h_provenance = str((h.get("payload") or h).get("provenance", "") or h.get("provenance", "") or "")
+            if _h_provenance == "collective":
+                try:
+                    _coll_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
+                except Exception:
+                    _coll_discount = 0.50
+                final *= _coll_discount
 
             hh = dict(h)
             hh["motifs"] = motifs
