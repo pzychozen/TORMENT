@@ -92,6 +92,7 @@ TORMENT does not control personality. It stores and retrieves context in a stabl
 | `docs/QUICKSTART.md` | 5-minute setup guide |
 | `docs/GUIDE.md` | Detailed system guide |
 | `docs/CHARACTER_SYSTEM.md` | Living character identity + spirit return voice layer |
+| `docs/HIVEMIND_GUIDE.md` | Multi-agent hivemind setup, convergence, echo re-ingestion |
 | `docs/COMPANION_CONTRACT.md` | Philosophy — what TORMENT does and does not do |
 | `docs/TUNING.md` | Configuration tuning (includes compression + spirit return) |
 | `docs/TROUBLESHOOTING.md` | Operational fixes (includes compression + spirit return) |

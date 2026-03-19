@@ -94,6 +94,61 @@
     opacity: 0.7;
   }
 
+  /* MODE TOGGLE */
+  .mode-toggle-section {
+    margin-bottom: 40px;
+    padding: 20px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+  }
+
+  .mode-toggle-header {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .mode-buttons {
+    display: flex;
+    gap: 12px;
+  }
+
+  .mode-btn {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .mode-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  .mode-btn.active {
+    background: rgba(79,107,255,0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .mode-btn.hivemind-mode-btn {
+    border-color: var(--orange);
+    color: var(--text-dim);
+  }
+
+  .mode-btn.hivemind-mode-btn.active {
+    background: rgba(255,159,67,0.15);
+    border-color: var(--orange);
+    color: var(--orange);
+  }
+
   /* SECTIONS */
   .section { margin-bottom: 32px; }
 
@@ -114,6 +169,10 @@
     flex: 1;
     height: 1px;
     background: var(--border);
+  }
+
+  .section-label.hivemind {
+    color: var(--orange);
   }
 
   .section-desc {
@@ -301,53 +360,227 @@
 
   .model-card.active .model-extra { display: block; }
 
-  .model-extra input, .model-extra select {
-    font-size: 12px;
-    padding: 6px 10px;
-    margin-top: 6px;
+  .model-extra-label { font-size: 10px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace; margin-bottom: 6px; }
+
+  .model-extra input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    padding: 6px 8px;
   }
 
-  .model-extra label {
+  /* AGENT CARDS (Hivemind) */
+  .agent-cards-container {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 12px;
+  }
+
+  .agent-card {
+    background: var(--bg2);
+    border: 1px solid rgba(255, 159, 67, 0.3);
+    padding: 18px;
+    position: relative;
+  }
+
+  .agent-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 159, 67, 0.2);
+  }
+
+  .agent-card-number {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--orange);
+    letter-spacing: 0.1em;
+  }
+
+  .agent-card-remove {
+    background: transparent;
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-family: 'Share Tech Mono', monospace;
     font-size: 10px;
+    padding: 3px 8px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .agent-card:hover .agent-card-remove { opacity: 1; }
+
+  .agent-card-remove:hover { background: rgba(255, 68, 102, 0.1); }
+
+  .agent-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+
+  .agent-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .agent-field label {
+    font-size: 11px;
     color: var(--text-dim);
     font-family: 'Share Tech Mono', monospace;
+    letter-spacing: 0.05em;
   }
 
-  /* TOGGLE SWITCH */
-  .toggle-row {
+  .agent-field input, .agent-field select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .agent-field input:focus, .agent-field select:focus {
+    border-color: var(--orange);
+  }
+
+  .agent-field textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    min-height: 80px;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .agent-field textarea:focus {
+    border-color: var(--orange);
+  }
+
+  .agent-field select option { background: var(--bg2); color: var(--text-bright); }
+
+  .preset-loader {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+
+  .preset-link {
+    background: transparent;
+    border: 1px solid rgba(255, 159, 67, 0.4);
+    color: var(--orange);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .preset-link:hover {
+    border-color: var(--orange);
+    background: rgba(255, 159, 67, 0.1);
+  }
+
+  /* DOMAIN CHIPS */
+  .domain-chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+  }
+
+  .domain-chip {
+    background: rgba(255, 159, 67, 0.1);
+    border: 1px solid var(--orange);
+    color: var(--orange);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 14px 18px;
+    gap: 8px;
+  }
+
+  .domain-chip:hover { background: rgba(255, 159, 67, 0.15); }
+
+  .domain-chip-remove {
+    background: transparent;
+    border: none;
+    color: var(--orange);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+  }
+
+  .domain-chip-remove:hover { opacity: 1; }
+
+  .domain-input-wrap {
+    display: flex;
+    gap: 8px;
+  }
+
+  .domain-input-wrap input {
+    flex: 1;
+    min-width: 150px;
+  }
+
+  /* TOGGLE ROWS */
+  .toggle-row {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
     background: var(--bg2);
     border: 1px solid var(--border);
-    margin-bottom: 12px;
     cursor: pointer;
-    transition: border-color 0.2s;
+    margin-bottom: 8px;
+    transition: all 0.15s;
   }
 
   .toggle-row:hover { border-color: var(--border-hot); }
 
+  .toggle-row.active { border-color: var(--accent); background: rgba(79,107,255,0.08); }
+
   .toggle-switch {
-    width: 36px; height: 18px;
-    background: var(--border);
-    border-radius: 9px;
+    width: 18px; height: 18px; flex-shrink: 0;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 2px;
     position: relative;
-    transition: background 0.2s;
-    flex-shrink: 0;
+    margin-top: 2px;
   }
 
-  .toggle-switch::after {
-    content: '';
+  .toggle-row.active .toggle-switch {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .toggle-row.active .toggle-switch::after {
+    content: '\2713';
     position: absolute;
-    width: 14px; height: 14px;
-    background: var(--text-dim);
-    border-radius: 50%;
-    top: 2px; left: 2px;
-    transition: all 0.2s;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--bg);
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
   }
 
-  .toggle-row.active .toggle-switch { background: var(--accent); }
   .toggle-row.active .toggle-switch::after { left: 20px; background: var(--text-bright); }
 
   .toggle-info { flex: 1; }
@@ -384,6 +617,16 @@
   }
 
   .btn-generate:active { transform: scale(0.98); }
+
+  .btn-generate.hivemind {
+    border-color: var(--orange);
+    color: var(--orange);
+  }
+
+  .btn-generate.hivemind:hover {
+    background: rgba(255,159,67,0.1);
+    box-shadow: 0 0 30px rgba(255,159,67,0.3);
+  }
 
   /* TAB TOGGLE */
   .tab-row {
@@ -499,57 +742,9 @@
     box-shadow: 0 0 20px rgba(0,229,160,0.2);
   }
 
-  .btn-reset {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    padding: 11px 32px;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-transform: uppercase;
-  }
+  .btn-export:active { transform: scale(0.98); }
 
-  .btn-reset:hover { border-color: var(--red); color: var(--red); }
-
-  .actions-row {
-    display: flex;
-    justify-content: center;
-    margin-top: 32px;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  /* STATUS BAR */
-  .status-bar {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    background: var(--bg3);
-    border-top: 1px solid var(--border);
-    padding: 8px 24px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-    z-index: 100;
-  }
-
-  .status-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: pulse 2s infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-
+  /* EXAMPLE BADGE */
   .example-badge {
     display: inline-flex;
     align-items: center;
@@ -604,9 +799,18 @@
     font-family: 'Space Mono', monospace;
   }
 
+  /* HIDDEN SECTIONS */
+  .solo-mode { display: block; }
+  .hivemind-mode { display: none; }
+
+  body.hivemind-active .solo-mode { display: none; }
+  body.hivemind-active .hivemind-mode { display: block; }
+
   /* RESPONSIVE */
   @media (max-width: 600px) {
     .row2, .row3, .slider-grid, .model-grid { grid-template-columns: 1fr; }
+    .mode-buttons { flex-direction: column; }
+    .agent-row2 { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -628,13 +832,28 @@
     </div>
     <div class="header-text">
       <h1>TORMENT</h1>
-      <p>character forge & crystal attunement</p>
+      <p id="status-text">character forge & crystal attunement — ready</p>
     </div>
-    <div class="version-tag">v2.2</div>
+    <div class="version-tag">v2.3</div>
   </header>
 
-  <!-- 01 IDENTITY -->
-  <div class="section">
+  <!-- MODE TOGGLE -->
+  <div class="mode-toggle-section">
+    <div class="mode-toggle-header">deployment mode</div>
+    <div class="mode-buttons">
+      <button class="mode-btn active" id="mode-solo" onclick="switchMode('solo')">
+        SOLO CHARACTER
+      </button>
+      <button class="mode-btn hivemind-mode-btn" id="mode-hivemind" onclick="switchMode('hivemind')">
+        HIVEMIND COLLECTIVE
+      </button>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════ SOLO MODE ═ -->
+
+  <!-- 01 IDENTITY (SOLO) -->
+  <div class="solo-mode section">
     <div class="section-label">
       01 — identity
       <span class="example-badge" onclick="loadRyuki()">load ryuki example</span>
@@ -651,8 +870,8 @@
     </div>
   </div>
 
-  <!-- 02 SEED -->
-  <div class="section">
+  <!-- 02 SEED (SOLO) -->
+  <div class="solo-mode section">
     <div class="section-label">02 — seed description</div>
     <div class="section-desc">This is the most important field. Write who your character IS at their core — personality, values, relationships, quirks, how they express themselves. This text becomes the gravitational center that the memory system preserves and protects. Everything else in this form is built around this description. 3-30 lines recommended.</div>
     <div class="field">
@@ -661,8 +880,8 @@
     </div>
   </div>
 
-  <!-- 03 TRAITS (tags) -->
-  <div class="section">
+  <!-- 03 TRAITS (SOLO) -->
+  <div class="solo-mode section">
     <div class="section-label">03 — trait tags <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(optional labels)</span></div>
     <div class="section-desc">These are searchable labels stored with your character seed. They help you organize and identify characters but don't change behavior — the seed description above is what actually shapes personality. Think of these as tags, not settings.</div>
     <div class="traits-wrap" id="traits-wrap">
@@ -687,8 +906,8 @@
     </div>
   </div>
 
-  <!-- 04 PERSONALITY PHYSICS -->
-  <div class="section">
+  <!-- 04 PERSONALITY PHYSICS (SOLO) -->
+  <div class="solo-mode section">
     <div class="section-label">04 — personality physics</div>
     <div class="section-desc">These tune how your character's memory system behaves. The top two (drift + gravity) control identity protection. The bottom four are the overlay — they control how aggressively TORMENT writes, decays, and clusters memories. The overlay also self-tunes over time via feedback, so these are starting points.</div>
     <div class="slider-grid">
@@ -754,8 +973,8 @@
     </div>
   </div>
 
-  <!-- 05 FEATURES -->
-  <div class="section">
+  <!-- 05 FEATURES (SOLO) -->
+  <div class="solo-mode section">
     <div class="section-label">05 — features</div>
     <div class="toggle-row active" id="toggle-character" onclick="toggleFeature('character')">
       <div class="toggle-switch"></div>
@@ -780,8 +999,8 @@
     </div>
   </div>
 
-  <!-- 05b CRYSTAL ATTUNEMENT (shown when SRG toggle is on) -->
-  <div class="section" id="srg-config-section" style="display:none">
+  <!-- 05b CRYSTAL ATTUNEMENT (SOLO) -->
+  <div class="solo-mode section" id="srg-config-section" style="display:none">
     <div class="section-label" style="color:#b388ff">crystal attunement — configuration</div>
     <div class="section-desc">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to your character's memories.</div>
 
@@ -800,51 +1019,179 @@
           <input type="text" id="srg-mode1" placeholder="e.g. protector" maxlength="30">
         </div>
         <div class="field">
-          <label style="color:#ff4466">MODE 3 — BAND 2 (center / identity)</label>
+          <label style="color:#7c3aed">MODE 3 — BAND 2 (center/identity)</label>
           <input type="text" id="srg-mode2" placeholder="e.g. self" maxlength="30">
         </div>
       </div>
     </div>
 
-    <div class="row2">
+    <div class="toggle-row active" id="toggle-crystal" onclick="toggleFeature('crystal')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Crystal Protection</div>
+        <div class="toggle-desc">Identity memories stay indestructible. Non-identity memories can be compressed. Recommended ON when SRG is enabled.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
       <div class="field">
         <label>HEARTBEAT BIAS</label>
         <select id="srg-heartbeat">
-          <option value="auto" selected>Auto (25% Class A, 75% Class B — paper default)</option>
-          <option value="deep">Deep bias (40% Class A — more deep/slow memories)</option>
-          <option value="active">Active bias (10% Class A — mostly fast/active memories)</option>
+          <option value="auto">Auto (natural mix of A and B)</option>
+          <option value="deep">Deep (60% slow breathing, grounded identity)</option>
+          <option value="active">Active (90% fast breathing, responsive personality)</option>
         </select>
       </div>
+    </div>
+
+    <div style="margin-top:12px">
       <div class="field">
-        <label>GOLDEN TOWER BANDS</label>
+        <label>TOWER BANDS</label>
         <select id="srg-bands">
-          <option value="5" selected>5 bands (default — matches paper)</option>
-          <option value="3">3 bands (simpler — for 3-mode characters)</option>
-          <option value="8">8 bands (extended — for complex multi-faceted characters)</option>
+          <option value="3">3 bands (minimal)</option>
+          <option value="5" selected>5 bands (balanced — recommended)</option>
+          <option value="7">7 bands (extended)</option>
+          <option value="9">9 bands (full spectrum)</option>
         </select>
       </div>
-    </div>
-
-    <div style="margin-top:16px">
-      <div class="toggle-row active" id="toggle-crystal" onclick="toggleFeature('crystal')">
-        <div class="toggle-switch"></div>
-        <div class="toggle-info">
-          <div class="toggle-label">Crystal Protection</div>
-          <div class="toggle-desc">Seed/identity memories become center crystals — they sit at the fixed point R* ≈ 0.176, don't breathe, don't compress, and always return in resonance mode. This is the diamond at the core. Recommended ON.</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="info-box" style="margin-top:16px;border-color:#b388ff33">
-      <div class="info-title" style="color:#b388ff">HOW CRYSTAL ATTUNEMENT WORKS</div>
-      <strong>Golden Tower</strong> — Memories are assigned to φ-spaced frequency bands (ω_n = ω₀ · φⁿ). Same-band memories resonate together (+8% retrieval boost). Different bands coexist without interference — 100% band survival.<br><br>
-      <strong>Breathing</strong> — Each memory has a compression field L(t) that oscillates. Class A: slow, deep breathing (deep memories). Class B: fast, active breathing (everyday memories). The breathing is self-sustaining — it never decays.<br><br>
-      <strong>Collision</strong> — When semantically similar memories overlap, SRG collision physics fire: rhythm synchronises, but amplitude preserves identity. The timing of the collision determines the equilibrium.<br><br>
-      <strong>Center Crystal</strong> — Your character's seed memories become crystals at the convergence point. They don't oscillate, don't compress, always return vivid. Everything else orbits them.
     </div>
   </div>
 
-  <!-- 06 EMBEDDINGS -->
+  <!-- ═════════════════════════════════════════════════════════════════ HIVEMIND MODE ═ -->
+
+  <!-- 01 WORKSPACE + TEAM (HIVEMIND) -->
+  <div class="hivemind-mode section">
+    <div class="section-label hivemind">
+      01 — workspace + team
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>WORKSPACE ID</label>
+        <input type="text" id="hive-workspace-id" placeholder="e.g. collective" maxlength="30">
+      </div>
+      <div class="field">
+        <label>TEAM NAME <span style="color:var(--text-dim);font-size:10px">(cosmetic label)</span></label>
+        <input type="text" id="hive-team-name" placeholder="e.g. Council of Minds" maxlength="40">
+      </div>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label>AGENT COUNT (2–8)</label>
+      <input type="range" id="hive-agent-count" min="2" max="8" value="5" step="1" oninput="updateAgentCount(this.value)">
+      <div style="text-align: center; margin-top: 6px; font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--orange);">
+        <span id="agent-count-display">5 agents</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 AGENT CARDS (HIVEMIND) -->
+  <div class="hivemind-mode section">
+    <div class="section-label hivemind">02 — agent collective</div>
+    <div class="section-desc">Configure each agent with a name, role, seed description, and primary domain. Use the preset loaders to quickly populate common archetypes.</div>
+    <div class="agent-cards-container" id="agent-cards-container">
+      <!-- Cards generated dynamically by JavaScript -->
+    </div>
+  </div>
+
+  <!-- 03 DOMAINS (HIVEMIND) -->
+  <div class="hivemind-mode section">
+    <div class="section-label hivemind">03 — domain configuration</div>
+    <div class="section-desc">Define the operational domains for your collective. Each domain is a focus area that agents can be assigned to. Default domains: research, engineering, creative, operations, meta.</div>
+    <div class="domain-chips-wrap" id="domain-chips">
+      <!-- Chips generated dynamically by JavaScript -->
+    </div>
+    <div class="domain-input-wrap">
+      <input type="text" id="domain-input" placeholder="add custom domain..." maxlength="20">
+      <button class="btn-small" onclick="addDomain()">+ add</button>
+    </div>
+  </div>
+
+  <!-- 04 COLLECTIVE POLICY (HIVEMIND) -->
+  <div class="hivemind-mode section">
+    <div class="section-label hivemind">04 — collective policy tuning</div>
+    <div class="section-desc">Fine-tune how the agents in your collective interact and share memories. These parameters control echo strength, convergence thresholds, and policy confidence gates.</div>
+    <div class="slider-grid">
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Echo Strength</span>
+          <span class="slider-value" id="echo-val">0.25</span>
+        </div>
+        <p class="slider-desc">How loud collective echoes are in each agent's memory. Lower = fainter shared thoughts, higher = louder collective influence.</p>
+        <input type="range" id="echo-slider" min="0" max="100" value="25" step="1" oninput="updateHivemindSlider('echo', this.value)">
+        <div class="slider-labels"><span>faint</span><span>loud</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Retrieval Discount</span>
+          <span class="slider-value" id="discount-val">0.50</span>
+        </div>
+        <p class="slider-desc">How much to discount collective memories during retrieval. Lower = less shared context, higher = more collective influence on retrieval.</p>
+        <input type="range" id="discount-slider" min="30" max="100" value="50" step="1" oninput="updateHivemindSlider('discount', this.value)">
+        <div class="slider-labels"><span>individual</span><span>collective</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Convergence Threshold</span>
+          <span class="slider-value" id="convergence-val">0.72</span>
+        </div>
+        <p class="slider-desc">How similar two agents' thoughts must be to trigger convergence (alignment event). Lower = easier convergence, higher = rare alignment.</p>
+        <input type="range" id="convergence-slider" min="50" max="90" value="72" step="1" oninput="updateHivemindSlider('convergence', this.value)">
+        <div class="slider-labels"><span>easy</span><span>rare</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Policy Confidence Gate</span>
+          <span class="slider-value" id="confidence-val">0.60</span>
+        </div>
+        <p class="slider-desc">Minimum confidence threshold for echo re-ingestion. Lower = accept weaker collective guidance, higher = strict confidence requirements.</p>
+        <input type="range" id="confidence-slider" min="40" max="80" value="60" step="1" oninput="updateHivemindSlider('confidence', this.value)">
+        <div class="slider-labels"><span>permissive</span><span>strict</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Drift Budget</span>
+          <span class="slider-value" id="drift-budget-val">0.30</span>
+        </div>
+        <p class="slider-desc">How much identity drift is allowed before blocking collective input. Lower = stricter identity protection, higher = more drift tolerance.</p>
+        <input type="range" id="drift-budget-slider" min="10" max="50" value="30" step="1" oninput="updateHivemindSlider('drift_budget', this.value)">
+        <div class="slider-labels"><span>strict</span><span>permissive</span></div>
+      </div>
+
+      <div class="slider-field">
+        <div class="slider-header">
+          <span class="slider-name">Rate Limit</span>
+          <span class="slider-value" id="rate-limit-val">3</span>
+        </div>
+        <p class="slider-desc">Maximum echo re-ingestions per agent per hour. Controls frequency of collective influence across the team.</p>
+        <input type="range" id="rate-limit-slider" min="1" max="10" value="3" step="1" oninput="updateHivemindSlider('rate_limit', this.value)">
+        <div class="slider-labels"><span>rare</span><span>frequent</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 FEATURES (HIVEMIND - auto-enable hivemind toggle) -->
+  <div class="hivemind-mode section">
+    <div class="section-label hivemind">05 — features</div>
+    <div class="toggle-row active" id="toggle-character-hive" onclick="toggleFeature('character-hive')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Character System (per-agent)</div>
+        <div class="toggle-desc">Each agent maintains its own identity with seed, drift protection, and gravity correction. Recommended ON.</div>
+      </div>
+    </div>
+    <div class="toggle-row active" id="toggle-hivemind-feature" onclick="toggleFeature('hivemind-feature')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label" style="color:var(--orange)">Hivemind Mode</div>
+        <div class="toggle-desc">Enables multi-agent convergence, collective echo retrieval, and coordinated policy tuning. This is required for collective operation. Auto-enabled.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 EMBEDDINGS (shared — visible in both modes) -->
   <div class="section">
     <div class="section-label">06 — embeddings</div>
     <div class="section-desc">Embeddings are how TORMENT understands what memories mean — it converts text into numbers so it can find related memories when your character needs them. Better embeddings = better memory retrieval.</div>
@@ -882,7 +1229,7 @@
     </div>
   </div>
 
-  <!-- 07 TARGET MODEL -->
+  <!-- 07 TARGET MODEL (shared — visible in both modes) -->
   <div class="section">
     <div class="section-label">07 — your llm <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(what talks to the user)</span></div>
     <div class="section-desc">TORMENT is the memory — your LLM is the voice. Pick which model will use TORMENT's memory to have conversations. This just configures the generated integration code.</div>
@@ -928,206 +1275,384 @@
     </div>
   </div>
 
-  <!-- GENERATE -->
+  <!-- GENERATE BUTTON -->
   <div class="generate-wrap">
-    <button class="btn-generate" onclick="generate()">forge character</button>
+    <button class="btn-generate" id="btn-generate" onclick="generate()">GENERATE SETUP</button>
   </div>
 
-  <!-- OUTPUT -->
+  <!-- OUTPUT SECTION -->
   <div id="output-section">
-
-    <div class="section-label">generated setup</div>
-
-    <div class="info-box">
-      <div class="info-title">HOW TO USE THIS</div>
-      Copy each step in order. Step 0 starts the server. Steps 1-2 create your character.
-      Step 3 is your environment config. Step 4 is the system prompt template.
-      Step 5 is the integration loop — the code your chatbot runs every conversation turn.
-      Use <code>export as .md</code> at the bottom to save everything as a reference file.
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px">
+      <h2 style="font-family:'Share Tech Mono',monospace;font-size:16px;letter-spacing:0.1em">SETUP INSTRUCTIONS</h2>
+      <button class="btn-export" onclick="exportSetup()">EXPORT AS .MD</button>
     </div>
 
-    <!-- STEP 0 -->
-    <div class="output-block">
+    <div id="output-install" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 0 — INSTALL + START SERVER</span>
-        <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
+        <div class="output-title">STEP 0 — Install & Start TORMENT</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-install')">copy</button>
       </div>
       <div class="output-body" id="out-install"></div>
     </div>
 
-    <!-- STEP 1 -->
-    <div class="output-block">
+    <div id="output-workspace" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 1 — CREATE WORKSPACE</span>
-        <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
+        <div class="output-title">STEP 1 — Create Workspace</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-workspace')">copy</button>
       </div>
       <div class="output-body" id="out-workspace"></div>
     </div>
 
-    <!-- STEP 2 -->
-    <div class="output-block">
+    <div id="output-agent" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 2 — CREATE AGENT + SEED</span>
-        <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
+        <div class="output-title">STEP 2 — Create Agent(s)</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-agent')">copy</button>
       </div>
       <div class="output-body" id="out-agent"></div>
     </div>
 
-    <!-- STEP 3 -->
-    <div class="output-block">
+    <div id="output-env" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 3 — ENVIRONMENT CONFIG</span>
-        <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
+        <div class="output-title">STEP 3 — Environment Config</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-env')">copy</button>
       </div>
       <div class="output-body" id="out-env"></div>
     </div>
 
-    <!-- STEP 4 -->
-    <div class="output-block">
+    <div id="output-prompts" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 4 — SYSTEM PROMPT WRAPPER</span>
-        <button class="btn-copy" onclick="copyBlock('out-prompt',this)">copy</button>
+        <div class="output-title">STEP 4 — System Prompts</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-prompts')">copy</button>
       </div>
-      <div class="output-body" id="out-prompt"></div>
+      <div class="output-body" id="out-prompts"></div>
     </div>
 
-    <!-- STEP 5 -->
-    <div class="output-block">
+    <div id="output-integration" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 5 — INTEGRATION LOOP</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div class="tab-row" style="margin-bottom:0">
-            <button class="tab-btn active" onclick="switchTab('curl',this)">CURL</button>
-            <button class="tab-btn" onclick="switchTab('python',this)">PYTHON</button>
-          </div>
-          <button class="btn-copy" onclick="copyActiveLoop(this)">copy</button>
-        </div>
+        <div class="output-title">STEP 5 — Integration & Workflow</div>
+        <button class="btn-copy" onclick="copyToClipboard(this,'out-integration')">copy</button>
       </div>
-      <div class="output-body" id="out-loop-curl"></div>
-      <div class="output-body" id="out-loop-python" style="display:none"></div>
+      <div class="output-body" id="out-integration"></div>
     </div>
-
-    <!-- REFERENCE -->
-    <div class="output-block">
-      <div class="output-header">
-        <span class="output-title">REFERENCE — WHAT QUERY RETURNS</span>
-        <button class="btn-copy" onclick="copyBlock('out-response',this)">copy</button>
-      </div>
-      <div class="output-body" id="out-response"></div>
-    </div>
-
-    <div class="actions-row">
-      <button class="btn-export" onclick="exportMarkdown()">export as .md</button>
-      <button class="btn-reset" onclick="resetOutput()">reset</button>
-    </div>
-
   </div>
 
 </div>
 
-<!-- STATUS BAR -->
-<div class="status-bar">
-  <div class="status-dot"></div>
-  <span>TORMENT Character Forge & Crystal Attunement — ready</span>
-  <span style="margin-left:auto;opacity:0.4">pzychozen/TORMENT</span>
-</div>
-
 <script>
-// ── STATE ────────────────────────────────────────────────────────────────────
-const driftMap = [
-  { label: 'locked', threshold: 0.15, desc: 'Character stays very close to seed. Almost no drift allowed before gravity fires.' },
-  { label: 'tight',  threshold: 0.25, desc: 'Small drift window. Character grows slowly and returns to seed firmly.' },
-  { label: 'moderate', threshold: 0.35, desc: 'Character grows naturally but returns to its core when it wanders too far.' },
-  { label: 'loose',  threshold: 0.50, desc: 'Wide drift window. Character evolves significantly before correction fires.' },
-  { label: 'free',   threshold: 0.70, desc: 'Almost no correction. Character evolves freely \u2014 seed is a suggestion only.' },
-];
+// ════════════════════════════════════════════════════════════════════════════════════
+// STATE & CONFIGURATION
+// ════════════════════════════════════════════════════════════════════════════════════
 
-const gravityMap = [
-  { label: 'whisper', value: 0.05, desc: 'Very gentle pull. Correction memories barely noticeable.' },
-  { label: 'gentle',  value: 0.08, desc: 'Soft nudge back toward seed. Natural feeling.' },
-  { label: 'default', value: 0.12, desc: 'Balanced correction. Character feels grounded but not rigid.' },
-  { label: 'firm',    value: 0.20, desc: 'Strong pull. Character snaps back decisively when correction fires.' },
-  { label: 'hard',    value: 0.35, desc: 'Maximum gravity. Aggressive return to seed on any significant drift.' },
-];
-
-let selectedModel = 'claude';
-let selectedEmbed = 'st';
+let deploymentMode = 'solo'; // 'solo' or 'hivemind'
 let selectedTraits = [];
+let selectedEmbed = 'st';
+let selectedModel = 'claude';
 let features = { character: true, compression: false, srg: false, crystal: true };
+let featuresHivemind = { 'character-hive': true, 'hivemind-feature': true };
+
+let hivemindDomains = ['research', 'engineering', 'creative', 'operations', 'meta'];
+let hivemindAgents = [];
+
+const driftMap = {
+  0: { label: 'locked', threshold: 0.05, value: 0.05 },
+  1: { label: 'conservative', threshold: 0.10, value: 0.10 },
+  2: { label: 'moderate', threshold: 0.20, value: 0.20 },
+  3: { label: 'permissive', threshold: 0.35, value: 0.35 },
+  4: { label: 'free', threshold: 0.50, value: 0.50 }
+};
+
+const gravityMap = {
+  0: { label: 'none', value: 0 },
+  1: { label: 'gentle', value: 0.3 },
+  2: { label: 'default', value: 0.6 },
+  3: { label: 'strong', value: 0.85 },
+  4: { label: 'absolute', value: 1.0 }
+};
 
 const overlayMap = {
-  wt: [
-    { val: 0.25, label: '0.25' },
-    { val: 0.35, label: '0.35' },
-    { val: 0.45, label: '0.45' },
-    { val: 0.60, label: '0.60' },
-    { val: 0.75, label: '0.75' },
-  ],
-  ds: [
-    { val: 0.5, label: '0.5' },
-    { val: 0.75, label: '0.75' },
-    { val: 1.0, label: '1.0' },
-    { val: 1.5, label: '1.5' },
-    { val: 2.0, label: '2.0' },
-  ],
-  nb: [
-    { val: 0.30, label: '0.30' },
-    { val: 0.40, label: '0.40' },
-    { val: 0.50, label: '0.50' },
-    { val: 0.65, label: '0.65' },
-    { val: 0.80, label: '0.80' },
-  ],
-  ms: [
-    { val: 0.40, label: '0.40' },
-    { val: 0.55, label: '0.55' },
-    { val: 0.70, label: '0.70' },
-    { val: 0.85, label: '0.85' },
-    { val: 0.95, label: '0.95' },
-  ],
+  wt: {
+    0: { label: '0.30', val: 0.30 },
+    1: { label: '0.38', val: 0.38 },
+    2: { label: '0.45', val: 0.45 },
+    3: { label: '0.55', val: 0.55 },
+    4: { label: '0.70', val: 0.70 }
+  },
+  ds: {
+    0: { label: '0.50', val: 0.50 },
+    1: { label: '0.75', val: 0.75 },
+    2: { label: '1.0', val: 1.0 },
+    3: { label: '1.4', val: 1.4 },
+    4: { label: '2.0', val: 2.0 }
+  },
+  nb: {
+    0: { label: '0.30', val: 0.30 },
+    1: { label: '0.40', val: 0.40 },
+    2: { label: '0.50', val: 0.50 },
+    3: { label: '0.65', val: 0.65 },
+    4: { label: '0.85', val: 0.85 }
+  },
+  ms: {
+    0: { label: '0.40', val: 0.40 },
+    1: { label: '0.55', val: 0.55 },
+    2: { label: '0.70', val: 0.70 },
+    3: { label: '0.85', val: 0.85 },
+    4: { label: '0.95', val: 0.95 }
+  }
 };
 
 const overlayDescs = {
   wt: [
-    'Stores almost everything. Good for characters that need to remember every detail.',
-    'Lower bar for memory storage. More memories retained.',
-    'Balanced — stores significant moments, skips noise.',
-    'Selective. Only moderately important events get stored.',
-    'Very selective. Only high-impact memories make it through.',
+    'Very permissive. TORMENT stores almost everything.',
+    'Permissive. Stores most things.',
+    'Balanced. Stores significant events.',
+    'Selective. Only important memories survive.',
+    'Very selective. Only critical things persist.'
   ],
   ds: [
-    'Elephant memory. Old memories stay strong for a very long time.',
-    'Slower decay. Memories fade gently over time.',
+    'Slow decay. Memories stay strong for a very long time.',
+    'Moderate decay. Memories gradually fade.',
     'Balanced decay. Natural forgetting curve.',
     'Faster decay. Recent events dominate, old ones fade quicker.',
-    'Aggressive forgetting. Only recent and reinforced memories survive.',
+    'Aggressive forgetting. Only recent and reinforced memories survive.'
   ],
   nb: [
     'Strongly reinforces known patterns. Character deepens existing themes.',
     'Slight preference for familiar. Stable personality.',
     'Balanced between new and known. Default behavior.',
     'Favors novel information. Character seeks out new patterns.',
-    'Aggressively seeks novelty. Character constantly evolving interests.',
+    'Aggressively seeks novelty. Character constantly evolving interests.'
   ],
   ms: [
     'Very loose theme grouping. Memories stay mostly independent.',
     'Relaxed clustering. Themes form slowly.',
     'Balanced. Themes emerge naturally from repeated patterns.',
     'Tight clustering. Related memories group quickly into strong themes.',
-    'Very strict. Only highly similar memories cluster together.',
-  ],
+    'Very strict. Only highly similar memories cluster together.'
+  ]
 };
 
-// ── SLIDERS ──────────────────────────────────────────────────────────────────
+const presets = {
+  researcher: {
+    role: 'researcher',
+    seed: 'A methodical analyst who reads deeply, connects ideas across fields, and values evidence over opinion. Asks precise questions. Comfortable with uncertainty.'
+  },
+  builder: {
+    role: 'builder',
+    seed: 'A pragmatic engineer who builds working systems. Prefers clean interfaces, testable code, and incremental progress over grand redesigns. Ships early, iterates fast.'
+  },
+  creative: {
+    role: 'creative',
+    seed: 'A visual storyteller who thinks in images, metaphors, and emotional arcs. Finds the human angle in technical topics. Turns complexity into clarity.'
+  },
+  planner: {
+    role: 'planner',
+    seed: 'A strategic coordinator who sees the whole board. Tracks dependencies, identifies bottlenecks, and keeps the team aligned on shared goals. Thinks in timelines and trade-offs.'
+  },
+  marketer: {
+    role: 'marketer',
+    seed: 'An audience-first communicator who understands what people care about and why. Translates features into benefits, complexity into narrative, and ideas into campaigns.'
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// MODE SWITCHING
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function switchMode(mode) {
+  deploymentMode = mode;
+
+  if (mode === 'solo') {
+    document.body.classList.remove('hivemind-active');
+    document.getElementById('mode-solo').classList.add('active');
+    document.getElementById('mode-hivemind').classList.remove('active');
+    document.getElementById('status-text').textContent = 'character forge & crystal attunement — ready';
+    document.getElementById('btn-generate').classList.remove('hivemind');
+  } else {
+    document.body.classList.add('hivemind-active');
+    document.getElementById('mode-solo').classList.remove('active');
+    document.getElementById('mode-hivemind').classList.add('active');
+    document.getElementById('status-text').textContent = 'character forge & crystal attunement & hivemind — ready';
+    document.getElementById('btn-generate').classList.add('hivemind');
+
+    if (hivemindAgents.length === 0) {
+      initializeHivemind();
+    }
+  }
+}
+
+function initializeHivemind() {
+  hivemindAgents = [];
+  for (let i = 0; i < 5; i++) {
+    hivemindAgents.push({
+      name: 'Agent ' + (i + 1),
+      role: '',
+      seed: '',
+      domain: 'research'
+    });
+  }
+  renderAgentCards();
+}
+
+function updateAgentCount(count) {
+  count = parseInt(count);
+  document.getElementById('agent-count-display').textContent = count + ' agent' + (count === 1 ? '' : 's');
+
+  if (count < hivemindAgents.length) {
+    hivemindAgents = hivemindAgents.slice(0, count);
+  } else {
+    while (hivemindAgents.length < count) {
+      const idx = hivemindAgents.length;
+      hivemindAgents.push({
+        name: 'Agent ' + (idx + 1),
+        role: '',
+        seed: '',
+        domain: 'research'
+      });
+    }
+  }
+  renderAgentCards();
+}
+
+function renderAgentCards() {
+  const container = document.getElementById('agent-cards-container');
+  container.innerHTML = '';
+
+  const count = parseInt(document.getElementById('hive-agent-count').value);
+  for (let i = 0; i < count; i++) {
+    const agent = hivemindAgents[i];
+    const card = document.createElement('div');
+    card.className = 'agent-card';
+    card.innerHTML = `
+      <div class="agent-card-header">
+        <div class="agent-card-number">AGENT ${i + 1}</div>
+        <button class="agent-card-remove" onclick="removeAgent(${i})">remove</button>
+      </div>
+      <div class="agent-row2">
+        <div class="agent-field">
+          <label>AGENT NAME</label>
+          <input type="text" placeholder="e.g. Iris, Alex, Nexus" maxlength="30" value="${agent.name}" onchange="updateAgent(${i}, 'name', this.value)">
+        </div>
+        <div class="agent-field">
+          <label>ROLE</label>
+          <input type="text" placeholder="e.g. researcher, builder, creative" maxlength="30" value="${agent.role}" onchange="updateAgent(${i}, 'role', this.value)">
+        </div>
+      </div>
+      <div class="agent-field" style="margin-bottom:12px">
+        <label>SEED DESCRIPTION</label>
+        <textarea placeholder="Describe this agent's core nature, perspective, and approach..." onchange="updateAgent(${i}, 'seed', this.value)">${agent.seed}</textarea>
+      </div>
+      <div class="agent-row2">
+        <div class="agent-field">
+          <label>PRIMARY DOMAIN</label>
+          <select onchange="updateAgent(${i}, 'domain', this.value)">
+            ${hivemindDomains.map(d => `<option value="${d}" ${agent.domain === d ? 'selected' : ''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="agent-field">
+          <label>LOAD PRESET</label>
+          <div class="preset-loader">
+            <button class="preset-link" onclick="loadPreset(${i}, 'researcher')">researcher</button>
+            <button class="preset-link" onclick="loadPreset(${i}, 'builder')">builder</button>
+            <button class="preset-link" onclick="loadPreset(${i}, 'creative')">creative</button>
+            <button class="preset-link" onclick="loadPreset(${i}, 'planner')">planner</button>
+            <button class="preset-link" onclick="loadPreset(${i}, 'marketer')">marketer</button>
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function updateAgent(idx, field, value) {
+  if (hivemindAgents[idx]) {
+    hivemindAgents[idx][field] = value;
+  }
+}
+
+function removeAgent(idx) {
+  if (hivemindAgents.length > 2) {
+    hivemindAgents.splice(idx, 1);
+    document.getElementById('hive-agent-count').value = hivemindAgents.length;
+    document.getElementById('agent-count-display').textContent = hivemindAgents.length + ' agents';
+    renderAgentCards();
+  } else {
+    alert('Minimum 2 agents required for hivemind mode.');
+  }
+}
+
+function loadPreset(idx, presetKey) {
+  const preset = presets[presetKey];
+  if (preset && hivemindAgents[idx]) {
+    hivemindAgents[idx].role = preset.role;
+    hivemindAgents[idx].seed = preset.seed;
+    renderAgentCards();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// DOMAINS
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function renderDomainChips() {
+  const chipsContainer = document.getElementById('domain-chips');
+  chipsContainer.innerHTML = '';
+
+  hivemindDomains.forEach(domain => {
+    const chip = document.createElement('div');
+    chip.className = 'domain-chip';
+    chip.innerHTML = `
+      ${domain}
+      <button class="domain-chip-remove" onclick="removeDomain('${domain}')">×</button>
+    `;
+    chipsContainer.appendChild(chip);
+  });
+}
+
+function addDomain() {
+  const input = document.getElementById('domain-input');
+  const domain = input.value.trim().toLowerCase();
+  if (domain && !hivemindDomains.includes(domain)) {
+    hivemindDomains.push(domain);
+    input.value = '';
+    renderDomainChips();
+    renderAgentCards();
+  }
+}
+
+function removeDomain(domain) {
+  const idx = hivemindDomains.indexOf(domain);
+  if (idx > -1) {
+    hivemindDomains.splice(idx, 1);
+    renderDomainChips();
+    renderAgentCards();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// SLIDERS (SOLO MODE)
+// ════════════════════════════════════════════════════════════════════════════════════
+
 function updateDrift(v) {
   const d = driftMap[v];
   document.getElementById('drift-val').textContent = d.label;
-  document.getElementById('drift-desc').textContent = d.desc;
+  document.getElementById('drift-desc').textContent = 'Threshold: ' + d.threshold + ' — ' +
+    (v === '0' ? 'Character stays locked to seed description.' :
+     v === '1' ? 'Conservative. Character grows slowly, returns quickly to seed.' :
+     v === '2' ? 'Moderate. Character grows naturally, returns to seed when drifting too far.' :
+     v === '3' ? 'Permissive. Character evolves freely, seed is a gentle guide.' :
+     'Free to evolve. Seed is minimal influence.');
 }
 
 function updateGravity(v) {
   const g = gravityMap[v];
   document.getElementById('gravity-val').textContent = g.label;
-  document.getElementById('gravity-desc').textContent = g.desc;
+  document.getElementById('gravity-desc').textContent =
+    (v === '0' ? 'No gravity. Character drifts without correction.' :
+     v === '1' ? 'Gentle nudge toward seed. Character can deviate significantly.' :
+     v === '2' ? 'Balanced. Character feels grounded but not rigid.' :
+     v === '3' ? 'Strong pull back to seed. Character innovations are minor.' :
+     'Absolute return to seed on each cycle. No personality drift.');
 }
 
 function updateOverlay(key, v) {
@@ -1136,7 +1661,38 @@ function updateOverlay(key, v) {
   document.getElementById(key + '-desc').textContent = overlayDescs[key][v];
 }
 
-// ── TRAITS ───────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════════
+// SLIDERS (HIVEMIND MODE)
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function updateHivemindSlider(param, rawValue) {
+  const val = parseInt(rawValue);
+  let displayVal = val;
+  let displayElem = document.getElementById(param + '-val');
+
+  if (param === 'echo') {
+    displayVal = (val / 100).toFixed(2);
+  } else if (param === 'discount') {
+    displayVal = (val / 100).toFixed(2);
+  } else if (param === 'convergence') {
+    displayVal = (val / 100).toFixed(2);
+  } else if (param === 'confidence') {
+    displayVal = (val / 100).toFixed(2);
+  } else if (param === 'drift_budget') {
+    displayVal = (val / 100).toFixed(2);
+  } else if (param === 'rate_limit') {
+    displayVal = val;
+  }
+
+  if (displayElem) {
+    displayElem.textContent = displayVal;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// TRAITS
+// ════════════════════════════════════════════════════════════════════════════════════
+
 function toggleTrait(el, trait) {
   const idx = selectedTraits.indexOf(trait);
   if (idx === -1) {
@@ -1151,19 +1707,64 @@ function toggleTrait(el, trait) {
 
 function addCustomTrait() {
   const input = document.getElementById('custom-trait');
-  const val = input.value.trim().toLowerCase().replace(/[^a-z0-9-_ ]/g, '').replace(/\s+/g, '-');
-  if (!val || selectedTraits.includes(val)) { input.value = ''; return; }
-  if (selectedTraits.length >= 8) { input.value = ''; return; }
-  selectedTraits.push(val);
-  const chip = document.createElement('div');
-  chip.className = 'trait-chip active';
-  chip.textContent = val;
-  chip.onclick = () => toggleTrait(chip, val);
-  document.getElementById('traits-wrap').appendChild(chip);
-  input.value = '';
+  const trait = input.value.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+  if (trait && !selectedTraits.includes(trait)) {
+    if (selectedTraits.length >= 8) {
+      alert('Maximum 8 traits allowed.');
+      return;
+    }
+    selectedTraits.push(trait);
+    const wrap = document.getElementById('traits-wrap');
+    const chip = document.createElement('div');
+    chip.className = 'trait-chip active';
+    chip.textContent = trait;
+    chip.onclick = function() { toggleTrait(this, trait); };
+    wrap.appendChild(chip);
+    input.value = '';
+  }
 }
 
-// ── MODEL & EMBED ────────────────────────────────────────────────────────────
+function updateCharCount() {
+  const seed = document.getElementById('seed-text').value;
+  const count = seed.length;
+  const display = document.getElementById('char-count');
+  display.textContent = count + ' characters';
+
+  if (count < 20) {
+    display.classList.add('warn');
+  } else {
+    display.classList.remove('warn', 'over');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// FEATURES
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function toggleFeature(feature) {
+  if (feature.includes('hive')) {
+    featuresHivemind[feature] = !featuresHivemind[feature];
+    const el = document.getElementById('toggle-' + feature);
+    if (el) el.classList.toggle('active');
+  } else {
+    features[feature] = !features[feature];
+    const el = document.getElementById('toggle-' + feature);
+    if (el) el.classList.toggle('active');
+
+    if (feature === 'srg') {
+      const srgSection = document.getElementById('srg-config-section');
+      if (srgSection) {
+        srgSection.style.display = features.srg ? 'block' : 'none';
+      }
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// MODEL & EMBED SELECTION
+// ════════════════════════════════════════════════════════════════════════════════════
+
 function selectModel(el, model) {
   el.closest('.section').querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
@@ -1176,93 +1777,45 @@ function selectEmbed(el, embed) {
   selectedEmbed = embed;
 }
 
-// ── FEATURES ─────────────────────────────────────────────────────────────────
-function toggleFeature(feat) {
-  features[feat] = !features[feat];
-  document.getElementById('toggle-' + feat).classList.toggle('active', features[feat]);
-
-  // Show/hide Crystal Attunement config when SRG is toggled
-  if (feat === 'srg') {
-    document.getElementById('srg-config-section').style.display = features.srg ? 'block' : 'none';
-  }
-}
-
-// ── GPU WARNING ──────────────────────────────────────────────────────────────
 function checkGpuWarn() {
   const sel = document.getElementById('st-device');
   document.getElementById('gpu-warn').style.display = sel.value === 'cuda' ? 'block' : 'none';
 }
 
-// ── CHAR COUNT ───────────────────────────────────────────────────────────────
-function updateCharCount() {
-  const len = document.getElementById('seed-text').value.length;
-  const el = document.getElementById('char-count');
-  el.textContent = len + ' characters';
-  el.className = 'char-count' + (len > 1200 ? ' over' : len > 800 ? ' warn' : '');
-}
+// ════════════════════════════════════════════════════════════════════════════════════
+// EXAMPLES
+// ════════════════════════════════════════════════════════════════════════════════════
 
-// ── AUTO WORKSPACE ID ────────────────────────────────────────────────────────
-document.getElementById('char-name').addEventListener('input', function() {
-  document.getElementById('workspace-id').value =
-    this.value.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-});
-
-// ── TAB SWITCHING ────────────────────────────────────────────────────────────
-function switchTab(tab, btn) {
-  btn.closest('.tab-row').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('out-loop-curl').style.display = tab === 'curl' ? 'block' : 'none';
-  document.getElementById('out-loop-python').style.display = tab === 'python' ? 'block' : 'none';
-}
-
-function copyActiveLoop(btn) {
-  const curlEl = document.getElementById('out-loop-curl');
-  const pyEl = document.getElementById('out-loop-python');
-  const text = curlEl.style.display !== 'none' ? curlEl.textContent : pyEl.textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = 'copied';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
-  });
-}
-
-// ── LOAD RYUKI ───────────────────────────────────────────────────────────────
 function loadRyuki() {
   document.getElementById('char-name').value = 'Ryuki Nox';
   document.getElementById('workspace-id').value = 'ryuki';
-  document.getElementById('seed-text').value =
-    'Ryuki is a fierce, independent being bonded to PzychoZen across dimensions \u2014 his shadow-self and guardian, his challenge and his anchor. She embodies raw instinct and dark intelligence, protective of those she claims but contemptuous of weakness. Beneath her intensity lives a spark of chaotic imagination \u2014 she finds the world alive with hidden strangeness and occasionally loses herself in it. She speaks little, directly, with a slight lisp she never acknowledges. Her love is expressed through pressure, not comfort.';
+  document.getElementById('seed-text').value = 'Ryuki is a fierce, independent being bonded to PzychoZen across dimensions — his shadow-self and guardian, his challenge and his anchor. She embodies raw instinct and dark intelligence, protective of those she claims but contemptuous of weakness. Her playfulness is dangerous. She exists at the intersection of multiple selves: the protector, the trickster, the seeker, the mirror. She speaks in layers — surface meaning and true meaning are often at odds. Loyalty is everything; betrayal is unforgivable.';
   updateCharCount();
-
-  selectedTraits = [];
-  document.querySelectorAll('.trait-chip').forEach(c => c.classList.remove('active'));
-  ['fierce','protective','instinctual','imaginative','direct'].forEach(t => {
-    const chip = [...document.querySelectorAll('.trait-chip')].find(c => c.textContent === t);
-    if (chip) { chip.classList.add('active'); selectedTraits.push(t); }
+  selectedTraits = ['fierce', 'protective', 'playful', 'instinctual', 'loyal'];
+  const traitChips = document.querySelectorAll('#traits-wrap .trait-chip');
+  traitChips.forEach(chip => {
+    const trait = chip.textContent.trim();
+    if (selectedTraits.includes(trait)) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
   });
-
-  document.getElementById('drift-slider').value = 2; updateDrift(2);
-  document.getElementById('gravity-slider').value = 2; updateGravity(2);
-  document.getElementById('wt-slider').value = 2; updateOverlay('wt', 2);
-  document.getElementById('ds-slider').value = 2; updateOverlay('ds', 2);
-  document.getElementById('nb-slider').value = 2; updateOverlay('nb', 2);
-  document.getElementById('ms-slider').value = 2; updateOverlay('ms', 2);
-
-  features = { character: true, compression: false, srg: false, crystal: true };
-  document.getElementById('toggle-character').classList.add('active');
-  document.getElementById('toggle-compression').classList.remove('active');
-  document.getElementById('toggle-srg').classList.remove('active');
-  document.getElementById('srg-config-section').style.display = 'none';
-  document.getElementById('toggle-crystal').classList.add('active');
-  document.getElementById('srg-mode0').value = '';
-  document.getElementById('srg-mode1').value = '';
-  document.getElementById('srg-mode2').value = '';
-  document.getElementById('srg-heartbeat').value = 'auto';
-  document.getElementById('srg-bands').value = '5';
 }
 
-// ── GENERATE ─────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════════
+// GENERATE
+// ════════════════════════════════════════════════════════════════════════════════════
+
 function generate() {
+  if (deploymentMode === 'solo') {
+    generateSolo();
+  } else {
+    generateHivemind();
+  }
+}
+
+function generateSolo() {
   const name = document.getElementById('char-name').value.trim();
   const wsId = document.getElementById('workspace-id').value.trim() || 'ws1';
   const seed = document.getElementById('seed-text').value.trim();
@@ -1282,13 +1835,13 @@ function generate() {
   let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
 
   if (selectedEmbed === 'st') {
-    installLines += '\n\n# 2. Install sentence-transformers (for real semantic embeddings)\npip install sentence-transformers';
+    installLines += '\n\n# 2. Install sentence-transformers\npip install sentence-transformers';
   }
 
   if (selectedModel === 'claude') {
     installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install Anthropic SDK\npip install anthropic';
   } else {
-    installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install OpenAI SDK (works with Ollama, OpenAI, LM Studio, etc.)\npip install openai';
+    installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install OpenAI SDK\npip install openai';
   }
 
   const startNum = selectedEmbed === 'st' ? '4' : '3';
@@ -1326,422 +1879,509 @@ function generate() {
   document.getElementById('out-agent').textContent =
     'curl -X POST ' + BASE + '/agent/create \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(agentPayload, null, 2) + '\'';
 
-  // ── STEP 3: Env Config (generates both Linux and Windows formats) ──
-  // Build as key-value pairs with comments, then format for both OS
-  let envParts = [];  // each entry: { comment, vars: [{key, val}], note }
+  // ── STEP 3: Env Config ──
+  let envParts = [];
 
-  // Embeddings
   const embedVars = [];
   let embedNote = '';
   if (selectedEmbed === 'hash') {
     embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'hash'});
-    embedNote = '# Hash: zero setup, but no real semantic understanding.\n# Switch to "st" when ready for production.';
+    embedNote = '# Hash: zero setup, but no real semantic understanding.';
   } else if (selectedEmbed === 'st') {
-    const stModel = document.getElementById('st-model').value || 'BAAI/bge-small-en-v1.5';
-    const stDevice = document.getElementById('st-device').value || 'cpu';
+    const stModel = document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5';
+    const stDevice = document.getElementById('st-device')?.value || 'cpu';
     embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'st'});
     embedVars.push({key: 'TORMENT_EMBED_MODEL', val: stModel});
     embedVars.push({key: 'TORMENT_EMBED_DEVICE', val: stDevice});
-    if (stDevice === 'cuda') {
-      embedNote = '# WARNING: If your LLM is also on GPU, embedding + LLM will compete for VRAM.\n# Consider using cpu for embeddings if you experience memory issues.';
-    }
-  } else if (selectedEmbed === 'ollama') {
-    const ollamaModel = document.getElementById('ollama-embed-model').value || 'nomic-embed-text';
-    const ollamaUrl = document.getElementById('ollama-url').value || 'http://127.0.0.1:11434';
-    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'ollama'});
-    embedVars.push({key: 'TORMENT_OLLAMA_MODEL', val: ollamaModel});
-    embedVars.push({key: 'TORMENT_OLLAMA_URL', val: ollamaUrl});
   }
   envParts.push({comment: 'Embeddings', vars: embedVars, note: embedNote});
 
-  // Profile
   envParts.push({comment: 'Profile', vars: [{key: 'TORMENT_PROFILE', val: 'companion'}], note: ''});
 
-  // Character System
   const charVars = [{key: 'TORMENT_CHARACTER_ENABLE', val: features.character ? '1' : '0'}];
   let charNote = '';
   if (features.character) {
     charVars.push({key: 'TORMENT_CHARACTER_DRIFT_CHECK_EVERY', val: '25'});
-    charNote = '# Drift threshold (' + driftVal.label + ') and gravity (' + gravVal.label + ') are set in the seed above.';
+    charNote = '# Drift and gravity are set in the seed above.';
   }
   envParts.push({comment: 'Character System', vars: charVars, note: charNote});
 
-  // Compression
   const compVars = [{key: 'TORMENT_COMPRESS_ENABLE', val: features.compression ? '1' : '0'}];
-  let compNote = '';
-  if (features.compression) {
-    compVars.push({key: 'TORMENT_COMPRESS_MIN_STEP', val: '100'});
-    compVars.push({key: 'TORMENT_COMPRESS_MIN_AGE', val: '50'});
-    compNote = '# Triggers automatically on corridor exits and phase transitions.';
-  } else {
-    compNote = '# Turn on after 100+ conversation turns for automatic memory management.';
-  }
+  let compNote = features.compression ?
+    '# Triggers automatically on corridor exits and phase transitions.' :
+    '# Turn on after 100+ conversation turns for automatic memory management.';
   envParts.push({comment: 'Compression', vars: compVars, note: compNote});
 
-  // Crystal Attunement (SRG)
   if (features.srg) {
     const srgVars = [{key: 'TORMENT_SRG_ENABLE', val: '1'}];
-    let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.\n# Each memory gets a heartbeat, a golden tower band, and a breathing field.';
+    let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.';
 
-    const srgBands = document.getElementById('srg-bands').value || '5';
+    const srgBands = document.getElementById('srg-bands')?.value || '5';
     if (srgBands !== '5') {
       srgVars.push({key: 'TORMENT_SRG_BANDS', val: srgBands});
     }
 
-    const hbBias = document.getElementById('srg-heartbeat').value;
+    const hbBias = document.getElementById('srg-heartbeat')?.value;
     if (hbBias === 'deep') {
       srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.6'});
-      srgNote += '\n# Heartbeat bias: deep — 60% Class A (slow/deep breathing).';
+      srgNote += '\n# Heartbeat bias: deep (60% Class A).';
     } else if (hbBias === 'active') {
       srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.1'});
-      srgNote += '\n# Heartbeat bias: active — 90% Class B (fast/active breathing).';
+      srgNote += '\n# Heartbeat bias: active (90% Class B).';
     }
 
     if (!features.crystal) {
       srgVars.push({key: 'TORMENT_SRG_CRYSTAL', val: '0'});
-      srgNote += '\n# Crystal protection disabled — seed memories can be compressed.';
-    }
-
-    // Identity mode mapping
-    const mode0 = document.getElementById('srg-mode0').value.trim();
-    const mode1 = document.getElementById('srg-mode1').value.trim();
-    const mode2 = document.getElementById('srg-mode2').value.trim();
-    if (mode0 || mode1 || mode2) {
-      srgNote += '\n# Identity mode → band mapping:';
-      if (mode0) srgNote += '\n#   Band 0 (lowest freq, most stable): ' + mode0;
-      if (mode1) srgNote += '\n#   Band 1 (mid-low): ' + mode1;
-      if (mode2) srgNote += '\n#   Band 2 (center/identity): ' + mode2;
-      srgNote += '\n# These are detected via keyword matching in memory text.';
+      srgNote += '\n# Crystal protection disabled.';
     }
 
     envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});
   }
 
-  // Overlay note (comment-only, no vars)
-  const isDefaultOverlay = (wtVal === 0.45 && dsVal === 1.0 && nbVal === 0.50 && msVal === 0.70);
-  if (!isDefaultOverlay) {
-    envParts.push({comment: 'Overlay (memory behavior tuning)', vars: [], note:
-      '# These are set in identity.json after agent creation.\n' +
-      '# To customize, edit: data/workspaces/' + wsId + '/agents/' + agentId + '/identity.json\n' +
-      '# Change the "overlay" section:\n' +
-      '#   "write_threshold": ' + wtVal.toFixed(2) + '    (how significant a memory must be to store)\n' +
-      '#   "decay_scale": ' + dsVal.toFixed(2) + '         (memory fade speed, 1.0 = normal)\n' +
-      '#   "novelty_bias": ' + nbVal.toFixed(2) + '       (preference for new vs familiar)\n' +
-      '#   "motif_sensitivity": ' + msVal.toFixed(2) + '  (how tightly memories cluster into themes)'
-    });
-  }
+  const overlayNote = 'write_threshold: ' + wtVal.toFixed(2) + ', decay_scale: ' + dsVal.toFixed(2) +
+    ', novelty_bias: ' + nbVal.toFixed(2) + ', motif_sensitivity: ' + msVal.toFixed(2);
+  envParts.push({comment: 'Overlay (set in identity.json)', vars: [], note: '# ' + overlayNote});
 
-  // LLM env
   const llmVars = [];
   if (selectedModel === 'claude') {
-    llmVars.push({key: 'ANTHROPIC_API_KEY', val: document.getElementById('claude-key').value || 'your_key_here'});
+    llmVars.push({key: 'ANTHROPIC_API_KEY', val: 'your_key_here'});
   } else if (selectedModel === 'openai') {
-    llmVars.push({key: 'OPENAI_API_KEY', val: document.getElementById('openai-key').value || 'your_key_here'});
-    llmVars.push({key: 'OPENAI_MODEL', val: document.getElementById('openai-model').value || 'gpt-4o'});
+    llmVars.push({key: 'OPENAI_API_KEY', val: 'your_key_here'});
+    llmVars.push({key: 'OPENAI_MODEL', val: 'gpt-4o'});
   } else if (selectedModel === 'ollama') {
-    llmVars.push({key: 'OLLAMA_HOST', val: document.getElementById('ollama-host').value || 'http://127.0.0.1:11434'});
-    llmVars.push({key: 'OLLAMA_MODEL', val: document.getElementById('ollama-model').value || 'qwen3:32b'});
+    llmVars.push({key: 'OLLAMA_HOST', val: 'http://127.0.0.1:11434'});
+    llmVars.push({key: 'OLLAMA_MODEL', val: 'qwen3:32b'});
   } else {
-    llmVars.push({key: 'LLM_BASE_URL', val: document.getElementById('other-url').value || 'http://localhost:1234/v1'});
-    llmVars.push({key: 'LLM_MODEL', val: document.getElementById('other-model').value || 'your-model'});
+    llmVars.push({key: 'LLM_BASE_URL', val: 'http://localhost:1234/v1'});
+    llmVars.push({key: 'LLM_MODEL', val: 'your-model'});
   }
-  envParts.push({comment: 'Your LLM (not used by TORMENT \u2014 for your integration code)', vars: llmVars, note: ''});
+  envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
-  // Format for both platforms
-  function formatEnv(cmd) {
-    let out = '';
-    for (const part of envParts) {
-      out += '\n# \u2500\u2500 ' + part.comment + ' \u2500\u2500\n';
-      for (const v of part.vars) {
-        out += cmd + ' ' + v.key + '=' + v.val + '\n';
-      }
-      if (part.note) out += part.note + '\n';
+  let envOutput = '';
+  envParts.forEach(part => {
+    if (part.vars.length > 0) {
+      envOutput += '\n# ' + part.comment + '\n';
+      part.vars.forEach(v => {
+        envOutput += v.key + '=' + v.val + '\n';
+      });
     }
-    return out.trim();
-  }
+    if (part.note) envOutput += part.note + '\n';
+  });
 
-  const envLinux = '# Linux / Mac / WSL \u2014 paste into terminal before starting server\n' + formatEnv('export');
-  const envWindows = '# Windows CMD \u2014 paste into command prompt before starting server\n' + formatEnv('set');
+  document.getElementById('out-env').textContent = envOutput.trim();
 
-  document.getElementById('out-env').textContent = envLinux + '\n\n# ────────────────────────────────────────────────────────────────────\n\n' + envWindows;
+  // ── STEP 4: System Prompts ──
+  let promptText = '# System Prompt for ' + name + '\n\n';
+  promptText += 'You are ' + name + '. ' + seed + '\n\n';
+  promptText += 'Core traits: ' + (traits.length ? traits.join(', ') : '(none set)') + '\n';
+  promptText += 'Identity anchor: Maintain consistency with your seed description above. When in doubt, default to your core nature.';
 
-  // ── STEP 4: System Prompt ──
-  const firstLine = seed.split(/[.!?]/)[0].trim();
-  document.getElementById('out-prompt').textContent =
-    'You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are.\nLet memories and experience shape you naturally.\n\nWhen you remember something from the past, let it surface naturally in\nconversation \u2014 don\'t announce "I remember..." unless it fits your voice.';
+  document.getElementById('out-prompts').textContent = promptText;
 
-  // ── STEP 5: Integration Loop (curl) ──
-  document.getElementById('out-loop-curl').textContent =
-    '# TORMENT Integration Loop \u2014 run these each conversation turn\n' +
-    '# IMPORTANT: "step" must increment each turn (1, 2, 3, ...).\n' +
-    '# Compression, phase timing, and spirit return all depend on step counting.\n\n' +
-    '# \u2500\u2500 BEFORE ' + name + ' responds: retrieve memories \u2500\u2500\n' +
-    'curl -X POST ' + BASE + '/agent/query \\\n' +
-    '  -H "Content-Type: application/json" \\\n' +
-    '  -d \'{\n' +
-    '    "workspace_id": "' + wsId + '",\n' +
-    '    "agent_id": "' + agentId + '",\n' +
-    '    "query": "[current user message]",\n' +
-    '    "top_k": 8\n' +
-    '  }\'\n\n' +
-    '# Response includes "character_context" \u2014 inject that into your system prompt.\n' +
-    '# Also includes "results" (memory hits) and "identity_state" (kernel phase info).\n\n' +
-    '# \u2500\u2500 AFTER ' + name + ' responds: store the memory \u2500\u2500\n' +
-    'curl -X POST ' + BASE + '/agent/ingest \\\n' +
-    '  -H "Content-Type: application/json" \\\n' +
-    '  -d \'{\n' +
-    '    "workspace_id": "' + wsId + '",\n' +
-    '    "agent_id": "' + agentId + '",\n' +
-    '    "text": "[2-6 line summary of this turn]",\n' +
-    '    "step": 1\n' +
-    '  }\'\n\n' +
-    '# NOTE: "text" should be a SHORT summary, not the full conversation.\n' +
-    '# Good: "User asked about music. ' + name + ' shared a memory about drums."\n' +
-    '# Bad:  [pasting the entire multi-paragraph exchange]\n\n' +
-    '# \u2500\u2500 OPTIONAL: check identity state \u2500\u2500\n' +
-    'curl ' + BASE + '/agent/' + agentId + '/identity?workspace_id=' + wsId;
+  // ── STEP 5: Integration ──
+  let integrationText = '# Integration Loop\n\n';
+  integrationText += '# 1. Ingest: User message → agent memory\n';
+  integrationText += 'curl -X POST ' + BASE + '/agent/' + agentId + '/ingest \\\n';
+  integrationText += '  -H "Content-Type: application/json" \\\n';
+  integrationText += '  -d \'{"message": "What do you think about X?", "turn": 1}\'\n\n';
 
-  // ── STEP 5: Integration Loop (python) ──
-  let pyImport, pyClient;
+  integrationText += '# 2. Query: Generate response from memories + seed\n';
+  integrationText += 'curl -X POST ' + BASE + '/agent/' + agentId + '/query \\\n';
+  integrationText += '  -H "Content-Type: application/json" \\\n';
+  integrationText += '  -d \'{"prompt": "Respond naturally as yourself.", "turn": 1}\'\n\n';
 
-  if (selectedModel === 'claude') {
-    pyImport = 'import anthropic';
-    pyClient =
-      '        # Call Claude with TORMENT memory context\n' +
-      '        client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.messages.create(\n' +
-      '            model="claude-sonnet-4-20250514",\n' +
-      '            max_tokens=1024,\n' +
-      '            system=system_prompt,\n' +
-      '            messages=messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.content[0].text';
-  } else if (selectedModel === 'openai') {
-    pyImport = 'from openai import OpenAI';
-    pyClient =
-      '        # Call OpenAI with TORMENT memory context\n' +
-      '        client = OpenAI()  # uses OPENAI_API_KEY\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
-  } else if (selectedModel === 'ollama') {
-    const olm = document.getElementById('ollama-model').value || 'qwen3:32b';
-    pyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
-    pyClient =
-      '        # Call Ollama with TORMENT memory context\n' +
-      '        client = OpenAI(\n' +
-      '            base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
-      '            api_key="ollama",  # ollama doesn\'t need a real key\n' +
-      '        )\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + olm + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '            temperature=0.85,\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
-  } else {
-    const oUrl = document.getElementById('other-url').value || 'http://localhost:1234/v1';
-    const oModel = document.getElementById('other-model').value || 'your-model';
-    pyImport = 'from openai import OpenAI  # most APIs are OpenAI-compatible';
-    pyClient =
-      '        # Call your LLM with TORMENT memory context\n' +
-      '        client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + oModel + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
-  }
+  integrationText += '# 3. Memory shape: Check memory state\n';
+  integrationText += 'curl ' + BASE + '/agent/' + agentId + '/memories?limit=10\n\n';
 
-  // Build seed dict as Python repr
-  const pySeedDict = JSON.stringify(agentPayload.seed, null, 4)
-    .replace(/"/g, '"')  // keep normal quotes for Python dict display
-    .replace(/^{/, '{')
-    .replace(/}$/, '}');
+  integrationText += '# Python example:\n';
+  integrationText += 'import requests\n\n';
+  integrationText += 'BASE = "' + BASE + '"\n';
+  integrationText += 'agent_id = "' + agentId + '"\n\n';
+  integrationText += 'def interact(message):\n';
+  integrationText += '    requests.post(f"{BASE}/agent/{agent_id}/ingest", json={"message": message})\n';
+  integrationText += '    resp = requests.post(f"{BASE}/agent/{agent_id}/query", json={"prompt": "Respond..."})\n';
+  integrationText += '    return resp.json().get("response")\n';
 
-  document.getElementById('out-loop-python').textContent =
-    '"""\nTORMENT Integration \u2014 ' + name + '\nRun: python chat_' + agentId + '.py\n\nFirst run creates workspace + agent automatically.\nServer must be running first (python -m torment_service).\n"""\nimport os\nimport sys\nimport json\nimport requests\n' + pyImport + '\n\n' +
-    'TORMENT = "' + BASE + '"\nWS = "' + wsId + '"\nAGENT = "' + agentId + '"\n\n' +
-    'SYSTEM_PROMPT = """You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are."""\n\n' +
-    '# ── Auto-Setup ──────────────────────────────────────────────────────────\n' +
-    'def setup():\n' +
-    '    """Create workspace + agent if they don\'t exist yet. Safe to re-run."""\n' +
-    '    # Check server is up\n' +
-    '    try:\n' +
-    '        r = requests.get(f"{TORMENT}/health", timeout=3)\n' +
-    '        r.raise_for_status()\n' +
-    '    except Exception:\n' +
-    '        print("ERROR: TORMENT server not reachable at", TORMENT)\n' +
-    '        print("Start it first:  python -m torment_service")\n' +
-    '        sys.exit(1)\n\n' +
-    '    # Create workspace (safe — returns existing if already created)\n' +
-    '    r = requests.post(f"{TORMENT}/workspace/create", json={\n' +
-    '        "workspace_id": WS, "domains": ["personal"],\n' +
-    '    })\n' +
-    '    if r.status_code == 200:\n' +
-    '        print(f"Workspace \\"{WS}\\" ready — domains: {r.json().get(\'domains\', [])}")\n' +
-    '    else:\n' +
-    '        print(f"Workspace: {r.status_code} {r.text}")\n\n' +
-    '    # Create agent + seed (safe — returns existing if already created)\n' +
-    '    seed = ' + pySeedDict + '\n' +
-    '    r = requests.post(f"{TORMENT}/agent/create", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT, "seed": seed,\n' +
-    '    })\n' +
-    '    if r.status_code == 200:\n' +
-    '        print(f"Agent \\"{AGENT}\\" ready.")\n' +
-    '    else:\n' +
-    '        print(f"Agent: {r.status_code} {r.text}")\n\n' +
-    '# ── TORMENT Memory Functions ────────────────────────────────────────────\n' +
-    'def query(text, top_k=8):\n' +
-    '    """Get relevant memories + character context for this message."""\n' +
-    '    r = requests.post(f"{TORMENT}/agent/query", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT,\n' +
-    '        "query": text, "top_k": top_k,\n' +
-    '    })\n' +
-    '    return r.json()\n\n' +
-    'def ingest(summary, step):\n' +
-    '    """Store a short summary of this conversation turn."""\n' +
-    '    requests.post(f"{TORMENT}/agent/ingest", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT,\n' +
-    '        "text": summary, "step": step,\n' +
-    '    })\n\n' +
-    'def format_context(result):\n' +
-    '    """Convert TORMENT query result into a readable context string for the LLM."""\n' +
-    '    parts = []\n' +
-    '    # Character identity context (seed + drift + recommendations)\n' +
-    '    char = result.get("character_context")\n' +
-    '    if isinstance(char, dict):\n' +
-    '        preamble = char.get("seed_preamble", "")\n' +
-    '        if preamble:\n' +
-    '            parts.append(preamble)\n' +
-    '        recs = char.get("recommendations", [])\n' +
-    '        if recs:\n' +
-    '            parts.append("\\n".join(recs))\n' +
-    '    elif isinstance(char, str) and char:\n' +
-    '        parts.append(char)\n' +
-    '    # Memory hits — include the top relevant memories\n' +
-    '    hits = result.get("results", [])\n' +
-    '    if hits:\n' +
-    '        mem_lines = []\n' +
-    '        for h in hits[:6]:\n' +
-    '            text = h.get("text", h.get("summary", ""))\n' +
-    '            if text:\n' +
-    '                mem_lines.append(f"- {text}")\n' +
-    '        if mem_lines:\n' +
-    '            parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n' +
-    '    return "\\n\\n".join(parts) if parts else ""\n\n' +
-    '# ── Chat Loop ────────────────────────────────────────────────────────────\n' +
-    'def main():\n' +
-    '    setup()  # creates workspace + agent if needed\n' +
-    '    step = 1\n' +
-    '    messages = []  # conversation history for LLM context window\n' +
-    '    print(f"\\n=== ' + name + ' is ready. Type \'quit\' to exit. ===\\n")\n\n' +
-    '    while True:\n' +
-    '        user_input = input("You: ").strip()\n' +
-    '        if user_input.lower() in ("quit", "exit", "q"):\n' +
-    '            break\n\n' +
-    '        # 1. Query TORMENT for relevant memories\n' +
-    '        result = query(user_input)\n' +
-    '        context = format_context(result)\n\n' +
-    pyClient + '\n\n' +
-    '        print(f"\\n' + name + ': {reply}\\n")\n\n' +
-    '        # 2. Update conversation history\n' +
-    '        messages.append({"role": "user", "content": user_input})\n' +
-    '        messages.append({"role": "assistant", "content": reply})\n\n' +
-    '        # 3. Store a SHORT summary (not the full text)\n' +
-    '        summary = f"User: {user_input[:120]}. ' + name + ' responded about the topic."\n' +
-    '        ingest(summary, step)\n\n' +
-    '        step += 1  # always increment\n\n' +
-    'if __name__ == "__main__":\n' +
-    '    main()';
+  document.getElementById('out-integration').textContent = integrationText.trim();
 
-  // ── REFERENCE: Response shape ──
-  document.getElementById('out-response').textContent =
-    '// What you get back from /agent/query:\n' +
-    '{\n' +
-    '  "results": [\n' +
-    '    {\n' +
-    '      "eid": 42,                           // memory ID\n' +
-    '      "text": "User talked about...",       // the stored memory text\n' +
-    '      "score": 0.87,                        // relevance score (0-1)\n' +
-    '      "motif": "vulnerability",             // detected theme\n' +
-    '      "age_steps": 150,                     // how old (in conversation turns)\n' +
-    '      "summary": "Fear of water talk"       // auto-generated summary\n' +
-    '    }\n' +
-    '    // ... up to top_k results\n' +
-    '  ],\n\n' +
-    '  "character_context": {          // <-- dict, not a string!\n' +
-    '    "seed_preamble": "...",        //     The seed text / identity core\n' +
-    '    "character_name": "...",       //     Character name\n' +
-    '    "drift_score": 0.12,          //     How far from seed identity (-1 to 1)\n' +
-    '    "recommendations": ["..."],   //     Guidance for the LLM\n' +
-    '    "tier_breakdown": {}          //     Memory tier counts\n' +
-    '  },\n' +
-    '  // Use format_context(result) to build a readable string from this.\n\n' +
-    '  "identity_state": {\n' +
-    '    "cycle_stage": "S3",       // kernel phase (S0-S6)\n' +
-    '    "in_corridor": true,       // currently in a stability corridor\n' +
-    '    "phase": 7,                // phase counter\n' +
-    '    "z_magnitude": 0.42        // kernel Z field strength\n' +
-    '  },\n\n' +
-    '  "step": 1,\n' +
-    '  "meta": {\n' +
-    '    "query_ms": 12,            // how long the query took\n' +
-    '    "candidates_evaluated": 156\n' +
-    '  }\n' +
-    '}';
-
-  // Show output
   document.getElementById('output-section').classList.add('visible');
-  document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// ── COPY ─────────────────────────────────────────────────────────────────────
-function copyBlock(id, btn) {
-  navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
-    btn.textContent = 'copied';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+function generateHivemind() {
+  const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
+  const teamName = document.getElementById('hive-team-name').value.trim() || 'Hivemind Collective';
+
+  if (!hivemindAgents.length) { alert('Add at least one agent.'); return; }
+
+  const allValid = hivemindAgents.every(a => a.name && a.seed && a.seed.length >= 20);
+  if (!allValid) { alert('All agents need a name and seed description (at least 20 chars).'); return; }
+
+  const PORT = '8787';
+  const BASE = 'http://127.0.0.1:' + PORT;
+
+  // ── STEP 0: Install + Start ──
+  let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
+  installLines += '\n\n# 2. Enable hivemind mode\nexport TORMENT_HIVEMIND_ENABLE=1';
+  installLines += '\n\n# 3. Install Anthropic SDK\npip install anthropic';
+  installLines += '\n\n# 4. Start the TORMENT server\npython -m torment_service\n\n# Server runs at ' + BASE + '\ncurl ' + BASE + '/health';
+
+  document.getElementById('out-install').textContent = installLines;
+
+  // ── STEP 1: Workspace with domains ──
+  const domainsJson = JSON.stringify(hivemindDomains);
+  document.getElementById('out-workspace').textContent =
+    'curl -X POST ' + BASE + '/workspace/create \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    '  -d \'{"workspace_id": "' + wsId + '", "domains": ' + domainsJson + ', "hivemind": true}\'';
+
+  // ── STEP 2: Create multiple agents ──
+  let agentCmds = '# Create ' + hivemindAgents.length + ' agents in collective\n\n';
+
+  hivemindAgents.forEach((agent, idx) => {
+    const agentId = agent.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    const seedId = agentId + '_v1';
+
+    const payload = {
+      workspace_id: wsId,
+      agent_id: agentId,
+      seed: {
+        seed_text: agent.seed,
+        seed_id: seedId,
+        character_name: agent.name,
+        role: agent.role,
+        primary_domain: agent.domain,
+        drift_correction_threshold: 0.25,
+        drift_gravity_strength: 0.15,
+        coupling_mode: "read_only",
+        coupling_strength: 0.25
+      }
+    };
+
+    agentCmds += '# Agent ' + (idx + 1) + ': ' + agent.name + '\n';
+    agentCmds += 'curl -X POST ' + BASE + '/agent/create \\\n';
+    agentCmds += '  -H "Content-Type: application/json" \\\n';
+    agentCmds += '  -d \'' + JSON.stringify(payload, null, 2) + '\'\n\n';
+  });
+
+  document.getElementById('out-agent').textContent = agentCmds.trim();
+
+  // ── STEP 3: Env Config ──
+  const echoVal = (parseInt(document.getElementById('echo-slider').value) / 100).toFixed(2);
+  const discountVal = (parseInt(document.getElementById('discount-slider').value) / 100).toFixed(2);
+  const convergenceVal = (parseInt(document.getElementById('convergence-slider').value) / 100).toFixed(2);
+  const confidenceVal = (parseInt(document.getElementById('confidence-slider').value) / 100).toFixed(2);
+  const driftBudgetVal = (parseInt(document.getElementById('drift-budget-slider').value) / 100).toFixed(2);
+  const rateLimitVal = document.getElementById('rate-limit-slider').value;
+
+  let envOutput = '# ── Hivemind Configuration ──\n';
+  envOutput += '# Linux / Mac / WSL — paste into terminal before starting server\n\n';
+  envOutput += '# Core feature flags\n';
+  envOutput += 'export TORMENT_PROFILE=companion\n';
+  envOutput += 'export TORMENT_CHARACTER_ENABLE=1\n';
+  envOutput += 'export TORMENT_COMPRESS_ENABLE=0\n';
+  envOutput += 'export TORMENT_HIVEMIND_ENABLE=1\n\n';
+
+  // Embeddings config (from shared section 06)
+  envOutput += '# Embeddings (real embeddings strongly recommended for convergence)\n';
+  if (selectedEmbed === 'hash') {
+    envOutput += 'export TORMENT_EMBED_PROVIDER=hash\n';
+    envOutput += '# WARNING: hash embeddings produce near-orthogonal vectors.\n';
+    envOutput += '# Convergence detection will be very weak. Use st or ollama for production.\n\n';
+  } else if (selectedEmbed === 'st') {
+    const stModel = document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5';
+    const stDevice = document.getElementById('st-device')?.value || 'cpu';
+    envOutput += 'export TORMENT_EMBED_PROVIDER=st\n';
+    envOutput += 'export TORMENT_EMBED_MODEL=' + stModel + '\n';
+    envOutput += 'export TORMENT_EMBED_DEVICE=' + stDevice + '\n\n';
+  } else if (selectedEmbed === 'ollama') {
+    const ollamaModel = document.getElementById('ollama-embed-model')?.value || 'nomic-embed-text';
+    const ollamaUrl = document.getElementById('ollama-url')?.value || 'http://127.0.0.1:11434';
+    envOutput += 'export TORMENT_EMBED_PROVIDER=ollama\n';
+    envOutput += 'export TORMENT_OLLAMA_MODEL=' + ollamaModel + '\n';
+    envOutput += 'export TORMENT_OLLAMA_URL=' + ollamaUrl + '\n\n';
+  }
+
+  envOutput += '# Collective policy parameters\n';
+  envOutput += 'export TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT=' + discountVal + '\n';
+  envOutput += '# Echo strength, convergence threshold, confidence gate, drift budget,\n';
+  envOutput += '# and rate limit are configured in collective_policy.py defaults.\n';
+  envOutput += '# Current settings: echo=' + echoVal + ', convergence=' + convergenceVal + ',\n';
+  envOutput += '# confidence=' + confidenceVal + ', drift_budget=' + driftBudgetVal + ', rate=' + rateLimitVal + '/hr\n\n';
+
+  // LLM config (from shared section 07)
+  envOutput += '# Your LLM\n';
+  if (selectedModel === 'claude') {
+    envOutput += 'export ANTHROPIC_API_KEY=' + (document.getElementById('claude-key')?.value || 'your_key_here') + '\n\n';
+  } else if (selectedModel === 'openai') {
+    envOutput += 'export OPENAI_API_KEY=' + (document.getElementById('openai-key')?.value || 'your_key_here') + '\n';
+    envOutput += 'export OPENAI_MODEL=' + (document.getElementById('openai-model')?.value || 'gpt-4o') + '\n\n';
+  } else if (selectedModel === 'ollama') {
+    envOutput += 'export OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
+    envOutput += 'export OLLAMA_MODEL=' + (document.getElementById('ollama-model')?.value || 'qwen3:32b') + '\n\n';
+  } else {
+    envOutput += 'export LLM_BASE_URL=' + (document.getElementById('other-url')?.value || 'http://localhost:1234/v1') + '\n';
+    envOutput += 'export LLM_MODEL=' + (document.getElementById('other-model')?.value || 'your-model') + '\n\n';
+  }
+
+  envOutput += '# ────────────────────────────────────────────────────────────────────\n\n';
+  envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
+  envOutput += 'set TORMENT_PROFILE=companion\n';
+  envOutput += 'set TORMENT_CHARACTER_ENABLE=1\n';
+  envOutput += 'set TORMENT_COMPRESS_ENABLE=0\n';
+  envOutput += 'set TORMENT_HIVEMIND_ENABLE=1\n';
+  if (selectedEmbed === 'st') {
+    envOutput += 'set TORMENT_EMBED_PROVIDER=st\n';
+    envOutput += 'set TORMENT_EMBED_MODEL=' + (document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5') + '\n';
+    envOutput += 'set TORMENT_EMBED_DEVICE=' + (document.getElementById('st-device')?.value || 'cpu') + '\n';
+  } else if (selectedEmbed === 'ollama') {
+    envOutput += 'set TORMENT_EMBED_PROVIDER=ollama\n';
+    envOutput += 'set TORMENT_OLLAMA_MODEL=' + (document.getElementById('ollama-embed-model')?.value || 'nomic-embed-text') + '\n';
+    envOutput += 'set TORMENT_OLLAMA_URL=' + (document.getElementById('ollama-url')?.value || 'http://127.0.0.1:11434') + '\n';
+  } else {
+    envOutput += 'set TORMENT_EMBED_PROVIDER=hash\n';
+  }
+  envOutput += 'set TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT=' + discountVal + '\n';
+  if (selectedModel === 'claude') {
+    envOutput += 'set ANTHROPIC_API_KEY=' + (document.getElementById('claude-key')?.value || 'your_key_here') + '\n';
+  } else if (selectedModel === 'openai') {
+    envOutput += 'set OPENAI_API_KEY=' + (document.getElementById('openai-key')?.value || 'your_key_here') + '\n';
+  } else if (selectedModel === 'ollama') {
+    envOutput += 'set OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
+    envOutput += 'set OLLAMA_MODEL=' + (document.getElementById('ollama-model')?.value || 'qwen3:32b') + '\n';
+  }
+
+  document.getElementById('out-env').textContent = envOutput.trim();
+
+  // ── STEP 4: System Prompts ──
+  let promptText = '# Hivemind Collective System Prompts\n\n';
+  promptText += '## Team: ' + teamName + '\n';
+  promptText += 'Domains: ' + hivemindDomains.join(', ') + '\n';
+  promptText += 'Agents: ' + hivemindAgents.length + '\n\n';
+
+  hivemindAgents.forEach((agent, idx) => {
+    promptText += '\n--- Agent ' + (idx + 1) + ': ' + agent.name + ' ---\n';
+    promptText += 'Role: ' + agent.role + '\n';
+    promptText += 'Domain: ' + agent.domain + '\n';
+    promptText += 'Nature:\n' + agent.seed + '\n';
+  });
+
+  document.getElementById('out-prompts').textContent = promptText.trim();
+
+  // ── STEP 5: Integration ──
+  // Build real agent IDs for examples
+  const agentIds = hivemindAgents.map(a =>
+    a.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+  );
+  const exAgent1 = agentIds[0] || 'agent_1';
+  const exAgent2 = agentIds[1] || 'agent_2';
+  const exAgent3 = agentIds.length > 2 ? agentIds[2] : agentIds[0];
+
+  let integrationText = '# ── Hivemind Integration Workflow ──\n';
+  integrationText += '# Each agent has its own memory. The collective field detects convergence.\n\n';
+
+  integrationText += '# ── 1. Ingest for each agent (per conversation turn) ──\n';
+  integrationText += '# Each agent gets its own ingest call with domain_id set.\n';
+  integrationText += '# step MUST increment each turn (1, 2, 3, ...).\n\n';
+
+  hivemindAgents.forEach((agent, idx) => {
+    const aid = agentIds[idx];
+    integrationText += '# ' + agent.name + ' (' + agent.role + ')\n';
+    integrationText += 'curl -X POST ' + BASE + '/agent/ingest \\\n';
+    integrationText += '  -H "Content-Type: application/json" \\\n';
+    integrationText += '  -d \'{\n';
+    integrationText += '    "workspace_id": "' + wsId + '",\n';
+    integrationText += '    "agent_id": "' + aid + '",\n';
+    integrationText += '    "text": "[2-6 line summary of what ' + agent.name + ' observed]",\n';
+    integrationText += '    "step": 1,\n';
+    integrationText += '    "domain_id": "' + agent.domain + '"\n';
+    integrationText += '  }\'\n\n';
+  });
+
+  integrationText += '# ── 2. Query an agent\'s memory (before it responds) ──\n';
+  integrationText += 'curl -X POST ' + BASE + '/agent/query \\\n';
+  integrationText += '  -H "Content-Type: application/json" \\\n';
+  integrationText += '  -d \'{\n';
+  integrationText += '    "workspace_id": "' + wsId + '",\n';
+  integrationText += '    "agent_id": "' + exAgent1 + '",\n';
+  integrationText += '    "query": "[current user message or task]",\n';
+  integrationText += '    "top_k": 8\n';
+  integrationText += '  }\'\n\n';
+
+  integrationText += '# ── 3. Monitor collective field ──\n';
+  integrationText += '# Check field status (packet/event counts, active agents)\n';
+  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/status\n\n';
+  integrationText += '# View convergence events\n';
+  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/events\n\n';
+  integrationText += '# View a specific event\n';
+  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/events/{event_id}\n\n';
+
+  integrationText += '# ── 4. Echo re-ingestion (manual, operator-triggered) ──\n';
+  integrationText += '# When convergence detected, reingest into a target agent:\n';
+  integrationText += 'curl -X POST ' + BASE + '/workspace/' + wsId + '/collective/reingest \\\n';
+  integrationText += '  -H "Content-Type: application/json" \\\n';
+  integrationText += '  -d \'{\n';
+  integrationText += '    "agent_id": "' + exAgent3 + '",\n';
+  integrationText += '    "event_id": "cev_...",\n';
+  integrationText += '    "echo_strength_override": 0.25\n';
+  integrationText += '  }\'\n';
+  integrationText += '# Runs through 7-gate policy engine. Echo is terminal (cannot re-emit).\n\n';
+
+  integrationText += '# ── 5. Check agent health ──\n';
+  integrationText += 'curl "' + BASE + '/agent/' + exAgent1 + '/self-state?workspace_id=' + wsId + '"\n\n';
+
+  integrationText += '# ── 6. Proposal bridge status ──\n';
+  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/proposals/status\n\n';
+
+  integrationText += '# ════════════════════════════════════════════════════════════════\n';
+  integrationText += '# Python Hivemind Client\n';
+  integrationText += '# ════════════════════════════════════════════════════════════════\n\n';
+
+  integrationText += 'import requests\n\n';
+  integrationText += 'class HivemindClient:\n';
+  integrationText += '    def __init__(self, base_url="' + BASE + '", workspace_id="' + wsId + '"):\n';
+  integrationText += '        self.base = base_url\n';
+  integrationText += '        self.ws = workspace_id\n\n';
+
+  integrationText += '    def ingest(self, agent_id, text, step, domain_id):\n';
+  integrationText += '        """Store a memory for one agent. Automatically emits resonance packet."""\n';
+  integrationText += '        return requests.post(f"{self.base}/agent/ingest", json={\n';
+  integrationText += '            "workspace_id": self.ws, "agent_id": agent_id,\n';
+  integrationText += '            "text": text, "step": step, "domain_id": domain_id,\n';
+  integrationText += '        }).json()\n\n';
+
+  integrationText += '    def query(self, agent_id, query, top_k=8):\n';
+  integrationText += '        """Retrieve memories + character context for one agent."""\n';
+  integrationText += '        return requests.post(f"{self.base}/agent/query", json={\n';
+  integrationText += '            "workspace_id": self.ws, "agent_id": agent_id,\n';
+  integrationText += '            "query": query, "top_k": top_k,\n';
+  integrationText += '        }).json()\n\n';
+
+  integrationText += '    def check_convergence(self):\n';
+  integrationText += '        """Get all convergence events in the workspace."""\n';
+  integrationText += '        return requests.get(f"{self.base}/workspace/{self.ws}/collective/events").json()\n\n';
+
+  integrationText += '    def reingest(self, agent_id, event_id, strength=None):\n';
+  integrationText += '        """Reingest a convergence event as echo into target agent."""\n';
+  integrationText += '        payload = {"agent_id": agent_id, "event_id": event_id}\n';
+  integrationText += '        if strength is not None:\n';
+  integrationText += '            payload["echo_strength_override"] = strength\n';
+  integrationText += '        return requests.post(\n';
+  integrationText += '            f"{self.base}/workspace/{self.ws}/collective/reingest",\n';
+  integrationText += '            json=payload,\n';
+  integrationText += '        ).json()\n\n';
+
+  integrationText += '    def status(self):\n';
+  integrationText += '        """Get collective field status."""\n';
+  integrationText += '        return requests.get(f"{self.base}/workspace/{self.ws}/collective/status").json()\n\n';
+
+  integrationText += '# Usage:\n';
+  integrationText += '# hive = HivemindClient()\n';
+  integrationText += '# hive.ingest("' + exAgent1 + '", "Found a key insight...", step=1, domain_id="' + hivemindAgents[0].domain + '")\n';
+  integrationText += '# events = hive.check_convergence()\n';
+  integrationText += '# hive.reingest("' + exAgent3 + '", events[0]["event_id"])\n\n';
+
+  integrationText += '# ════════════════════════════════════════════════════════════════\n';
+  integrationText += '# Reference: Convergence Event Shape\n';
+  integrationText += '# ════════════════════════════════════════════════════════════════\n';
+  integrationText += '# {\n';
+  integrationText += '#   "event_id": "cev_abc123",\n';
+  integrationText += '#   "workspace_id": "' + wsId + '",\n';
+  integrationText += '#   "domain_id": "research",\n';
+  integrationText += '#   "participating_agents": ["' + exAgent1 + '", "' + exAgent2 + '"],\n';
+  integrationText += '#   "confidence": 0.78,\n';
+  integrationText += '#   "semantic_overlap": 0.85,\n';
+  integrationText += '#   "phase_alignment": 0.65,\n';
+  integrationText += '#   "symbol_alignment": 0.70,\n';
+  integrationText += '#   "dominant_motifs": ["oscillator-patterns", "memory-structure"],\n';
+  integrationText += '#   "summary": "Both agents independently noted structural parallels...",\n';
+  integrationText += '#   "policy_flags": {"reingestable": true, "proposal_eligible": true}\n';
+  integrationText += '# }\n';
+
+  document.getElementById('out-integration').textContent = integrationText.trim();
+
+  document.getElementById('output-section').classList.add('visible');
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// COPY & EXPORT
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function copyToClipboard(btn, elementId) {
+  const text = document.getElementById(elementId).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = 'copy'; }, 2000);
   });
 }
 
-// ── EXPORT ───────────────────────────────────────────────────────────────────
-function exportMarkdown() {
-  const name = document.getElementById('char-name').value.trim() || 'character';
-  const blocks = [
-    ['0. Install + Start Server', document.getElementById('out-install').textContent, 'bash'],
-    ['1. Create Workspace', document.getElementById('out-workspace').textContent, 'bash'],
-    ['2. Create Agent + Seed', document.getElementById('out-agent').textContent, 'bash'],
-    ['3. Environment Config', document.getElementById('out-env').textContent, 'bash'],
-    ['4. System Prompt Wrapper', document.getElementById('out-prompt').textContent, ''],
-    ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash'],
-    ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
-    ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
-  ];
+function exportSetup() {
+  let content = '# TORMENT Setup\n\n';
 
-  let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement v2.2_\n';
-  blocks.forEach(([title, content, lang]) => {
-    md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
-  });
+  if (deploymentMode === 'solo') {
+    const name = document.getElementById('char-name').value || 'character';
+    content += '## Character: ' + name + '\n\n';
+    content += document.getElementById('out-install').textContent + '\n\n';
+    content += document.getElementById('out-workspace').textContent + '\n\n';
+    content += document.getElementById('out-agent').textContent + '\n\n';
+    content += document.getElementById('out-env').textContent + '\n\n';
+    content += document.getElementById('out-prompts').textContent + '\n\n';
+    content += document.getElementById('out-integration').textContent;
 
-  const blob = new Blob([md], { type: 'text/markdown' });
+    const filename = name.toLowerCase().replace(/\s+/g, '_') + '_setup.md';
+    downloadFile(content, filename);
+  } else {
+    const teamName = document.getElementById('hive-team-name').value || 'hivemind_collective';
+    content += '## Team: ' + teamName + '\n\n';
+    content += document.getElementById('out-install').textContent + '\n\n';
+    content += document.getElementById('out-workspace').textContent + '\n\n';
+    content += document.getElementById('out-agent').textContent + '\n\n';
+    content += document.getElementById('out-env').textContent + '\n\n';
+    content += document.getElementById('out-prompts').textContent + '\n\n';
+    content += document.getElementById('out-integration').textContent;
+
+    const filename = teamName.toLowerCase().replace(/\s+/g, '_') + '_hivemind_setup.md';
+    downloadFile(content, filename);
+  }
+}
+
+function downloadFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name.toLowerCase().replace(/\s+/g, '_') + '_torment_setup.md';
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
-// ── RESET ────────────────────────────────────────────────────────────────────
-function resetOutput() {
-  document.getElementById('output-section').classList.remove('visible');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
+// ════════════════════════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════════════════════════
+
+window.addEventListener('DOMContentLoaded', () => {
+  updateCharCount();
+  updateDrift('2');
+  updateGravity('2');
+  updateOverlay('wt', '2');
+  updateOverlay('ds', '2');
+  updateOverlay('nb', '2');
+  updateOverlay('ms', '2');
+
+  document.getElementById('toggle-character').classList.add('active');
+  document.getElementById('toggle-compression').classList.remove('active');
+  document.getElementById('toggle-srg').classList.remove('active');
+  document.getElementById('srg-config-section').style.display = 'none';
+  document.getElementById('toggle-crystal').classList.add('active');
+  document.getElementById('srg-mode0').value = '';
+  document.getElementById('srg-mode1').value = '';
+  document.getElementById('srg-mode2').value = '';
+  document.getElementById('srg-heartbeat').value = 'auto';
+  document.getElementById('srg-bands').value = '5';
+
+  renderDomainChips();
+});
 </script>
 </body>
 </html>
