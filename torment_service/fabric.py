@@ -1831,6 +1831,36 @@ class TormentFabric:
             )
         return self._collective_fields[workspace_id]
 
+    def _collective_query_context(self, workspace_id: str, domains: List[str]) -> Dict[str, Any]:
+        """Build optional collective_context for query response.
+
+        Returns recent convergence events relevant to the queried domains.
+        Does NOT influence scoring — informational only.
+        """
+        try:
+            field = self._get_collective_field(workspace_id)
+            relevant_events = []
+            for d in domains:
+                relevant_events.extend(field.events_by_domain(d, limit=5))
+            # Deduplicate by event_id
+            seen = set()
+            unique = []
+            for ev in relevant_events:
+                eid = ev.get("event_id", "")
+                if eid not in seen:
+                    seen.add(eid)
+                    unique.append(ev)
+            if not unique:
+                return {}
+            return {
+                "collective_context": {
+                    "recent_events": unique[:10],
+                    "event_count": len(unique),
+                }
+            }
+        except Exception:
+            return {}
+
     def ingest(
         self,
         workspace_id: str,
@@ -2268,7 +2298,7 @@ class TormentFabric:
                             srg_is_crystal=_hm_srg_crystal,
                         )
                         _hm_field = self._get_collective_field(workspace_id)
-                        _hm_field.append_packet(_hm_packet)
+                        _hm_field.append_packet(_hm_packet, embedding=emb)
                 except Exception:
                     pass  # Hivemind is optional — never blocks ingest
 
@@ -3074,6 +3104,7 @@ class TormentFabric:
             "embed_context": self._embed_context(ws),
             **({"continuity_debug": continuity_dbg} if continuity_dbg is not None else {}),
             **({"character_context": _char_ctx} if _char_ctx is not None else {}),
+            **(self._collective_query_context(workspace_id, domains) if self._hivemind_enable else {}),
         }
 
     def feedback(

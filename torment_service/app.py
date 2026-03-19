@@ -602,6 +602,68 @@ def get_character_seed(agent_id: str, workspace_id: str = "default") -> Dict[str
     }
 
 
+# ── Collective (Hivemind) ─────────────────────────────────────────────────
+
+@app.get("/workspace/{workspace_id}/collective/status")
+def collective_status(workspace_id: str) -> Dict[str, Any]:
+    """Return collective field summary: packet/event counts, active agents/domains."""
+    if not fabric._hivemind_enable:
+        return {"enabled": False, "workspace_id": workspace_id}
+    field = fabric._get_collective_field(workspace_id)
+    result = field.status()
+    result["enabled"] = True
+    return result
+
+
+@app.get("/workspace/{workspace_id}/collective/packets")
+def collective_packets(
+    workspace_id: str,
+    domain: Optional[str] = None,
+    agent: Optional[str] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Return recent resonance packets, optionally filtered by domain or agent."""
+    if not fabric._hivemind_enable:
+        return {"enabled": False, "packets": []}
+    field = fabric._get_collective_field(workspace_id)
+    if domain:
+        pkts = field.packets_by_domain(domain, limit=limit)
+    elif agent:
+        pkts = field.packets_by_agent(agent, limit=limit)
+    else:
+        pkts = field.recent_packets(limit=limit)
+    return {"enabled": True, "count": len(pkts), "packets": pkts}
+
+
+@app.get("/workspace/{workspace_id}/collective/events")
+def collective_events(
+    workspace_id: str,
+    domain: Optional[str] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Return recent convergence events."""
+    if not fabric._hivemind_enable:
+        return {"enabled": False, "events": []}
+    field = fabric._get_collective_field(workspace_id)
+    if domain:
+        events = field.events_by_domain(domain, limit=limit)
+    else:
+        events = field.recent_events(limit=limit)
+    return {"enabled": True, "count": len(events), "events": events}
+
+
+@app.get("/workspace/{workspace_id}/collective/events/{event_id}")
+def collective_event_detail(workspace_id: str, event_id: str) -> Dict[str, Any]:
+    """Return a single convergence event by ID."""
+    if not fabric._hivemind_enable:
+        raise HTTPException(status_code=404, detail="Hivemind not enabled")
+    field = fabric._get_collective_field(workspace_id)
+    event = field.get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+
 @app.post("/agent/ingest")
 def ingest(req: IngestReq) -> Dict[str, Any]:
     return fabric.ingest(

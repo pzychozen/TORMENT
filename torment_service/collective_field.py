@@ -1,18 +1,22 @@
 # collective_field.py — Workspace-level collective resonance field
 #
 # Persists and queries ResonancePackets and ConvergenceEvents per workspace.
-# This is the storage + retrieval layer for the hivemind — convergence
-# detection will be added in Phase C.
+# This is the storage + retrieval layer for the hivemind. Convergence
+# detection runs on ingest, comparing the new packet against recent packets
+# from OTHER agents in the same domain.
 #
 # This module does NOT replace proposals or bridges. It sits above them.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 from .collective_models import ResonancePacket, ConvergenceEvent
 
@@ -26,6 +30,12 @@ class CollectiveField:
     Thread-safe for concurrent ingests within the same process.
     """
 
+    # Convergence detection defaults
+    CONVERGENCE_SIM_THRESHOLD = 0.72     # cosine similarity to trigger
+    CONVERGENCE_TIME_WINDOW = 100        # max age difference in steps
+    CONVERGENCE_MIN_AGENTS = 2           # minimum distinct agents
+    CONVERGENCE_COOLDOWN = 30            # seconds between events for same agent pair + domain
+
     def __init__(self, workspace_id: str, data_dir: str) -> None:
         self.workspace_id = workspace_id
         self._base = os.path.join(data_dir, "workspaces", workspace_id, "collective")
@@ -38,7 +48,12 @@ class CollectiveField:
 
         # Small in-memory cache for recent packets (convergence detection window)
         self._recent_packets: List[ResonancePacket] = []
+        self._recent_embeddings: Dict[str, np.ndarray] = {}  # packet_id -> embedding (in-memory only)
         self._recent_max = 200  # keep last N in memory
+
+        # Deduplication: track recent convergence events to avoid spam
+        # key: frozenset({agent1, agent2}) + domain -> last event timestamp
+        self._event_cooldowns: Dict[str, int] = {}
 
         # Load existing packets into cache on startup
         self._warm_cache()
@@ -82,13 +97,37 @@ class CollectiveField:
     # Packet operations
     # ------------------------------------------------------------------
 
-    def append_packet(self, packet: ResonancePacket) -> None:
-        """Persist a packet and add to in-memory cache."""
+    def append_packet(
+        self,
+        packet: ResonancePacket,
+        embedding: Optional[np.ndarray] = None,
+    ) -> Optional[ConvergenceEvent]:
+        """Persist a packet, add to cache, and run convergence detection.
+
+        Args:
+            packet: The resonance packet to store.
+            embedding: Optional full embedding vector for similarity computation.
+                       Kept in-memory only — not written to JSONL.
+
+        Returns:
+            A ConvergenceEvent if convergence was detected, else None.
+        """
         self._append_jsonl(self._packets_path, packet.to_dict())
         with self._lock:
             self._recent_packets.append(packet)
+            if embedding is not None:
+                self._recent_embeddings[packet.packet_id] = np.asarray(embedding, dtype=np.float32)
             if len(self._recent_packets) > self._recent_max:
+                # Evict oldest
+                evicted = self._recent_packets[:-self._recent_max]
                 self._recent_packets = self._recent_packets[-self._recent_max:]
+                for ep in evicted:
+                    self._recent_embeddings.pop(ep.packet_id, None)
+
+        # Convergence detection (only if we have an embedding)
+        if embedding is not None:
+            return self.detect_convergence(packet, embedding)
+        return None
 
     def recent_packets(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Return the most recent packets from cache."""
@@ -165,6 +204,176 @@ class CollectiveField:
             "active_agents": sorted(agents),
             "active_domains": sorted(domains),
         }
+
+    # ------------------------------------------------------------------
+    # Convergence detection
+    # ------------------------------------------------------------------
+
+    def detect_convergence(
+        self,
+        new_packet: ResonancePacket,
+        new_embedding: np.ndarray,
+    ) -> Optional[ConvergenceEvent]:
+        """Check if a new packet converges with recent packets from other agents.
+
+        Convergence requires:
+            1. Same workspace + same domain
+            2. Different agent
+            3. Semantic similarity >= threshold
+            4. Not in cooldown (same agent-pair + domain)
+
+        Bonuses for phase/symbol/motif alignment increase confidence.
+
+        Returns a ConvergenceEvent if detected, else None.
+        """
+        new_emb_norm = np.linalg.norm(new_embedding)
+        if new_emb_norm < 1e-12:
+            return None
+        new_unit = new_embedding / new_emb_norm
+
+        now_ts = int(time.time())
+        best_match: Optional[Tuple[ResonancePacket, float]] = None
+        best_sim = 0.0
+
+        with self._lock:
+            candidates = list(self._recent_packets)
+            emb_cache = dict(self._recent_embeddings)
+
+        for pkt in candidates:
+            # Must be same domain, different agent
+            if pkt.domain_id != new_packet.domain_id:
+                continue
+            if pkt.agent_id == new_packet.agent_id:
+                continue
+
+            # Check embedding similarity
+            other_emb = emb_cache.get(pkt.packet_id)
+            if other_emb is None:
+                continue
+            other_norm = np.linalg.norm(other_emb)
+            if other_norm < 1e-12:
+                continue
+            sim = float(np.dot(new_unit, other_emb / other_norm))
+
+            if sim >= self.CONVERGENCE_SIM_THRESHOLD and sim > best_sim:
+                best_sim = sim
+                best_match = (pkt, sim)
+
+        if best_match is None:
+            return None
+
+        other_pkt, semantic_sim = best_match
+
+        # Cooldown check: don't fire for same agent pair + domain within window
+        pair_key = self._pair_key(new_packet.agent_id, other_pkt.agent_id, new_packet.domain_id)
+        last_event_ts = self._event_cooldowns.get(pair_key, 0)
+        if (now_ts - last_event_ts) < self.CONVERGENCE_COOLDOWN:
+            return None
+
+        # Compute alignment bonuses
+        phase_align = self._phase_alignment(new_packet, other_pkt)
+        symbol_align = self._symbol_alignment(new_packet, other_pkt)
+        motif_align = self._motif_alignment(new_packet, other_pkt)
+
+        # Composite confidence: weighted combination
+        confidence = (
+            0.50 * semantic_sim +
+            0.15 * phase_align +
+            0.15 * symbol_align +
+            0.20 * motif_align
+        )
+
+        # Must clear minimum composite threshold
+        if confidence < 0.45:
+            return None
+
+        # Build the event
+        event = ConvergenceEvent(
+            workspace_id=self.workspace_id,
+            domain_id=new_packet.domain_id,
+            ts_start=min(new_packet.ts, other_pkt.ts),
+            ts_end=max(new_packet.ts, other_pkt.ts),
+            participating_agents=sorted([new_packet.agent_id, other_pkt.agent_id]),
+            source_packets=[other_pkt.packet_id, new_packet.packet_id],
+            source_eids=[
+                e for e in [other_pkt.source_eid, new_packet.source_eid] if e is not None
+            ],
+            confidence=round(confidence, 4),
+            persistence=0.0,  # will be meaningful once temporal tracking exists
+            semantic_overlap=round(semantic_sim, 4),
+            phase_alignment=round(phase_align, 4),
+            symbol_alignment=round(symbol_align, 4),
+            dominant_motifs=self._shared_motifs(new_packet, other_pkt),
+            dominant_symbol=new_packet.state_symbol if new_packet.state_symbol == other_pkt.state_symbol else None,
+            dominant_cycle_stage=new_packet.cycle_stage if new_packet.cycle_stage == other_pkt.cycle_stage else None,
+            dominant_identity_state=new_packet.identity_state if new_packet.identity_state == other_pkt.identity_state else None,
+            summary=f"Convergence between {new_packet.agent_id} and {other_pkt.agent_id} in {new_packet.domain_id} (sim={semantic_sim:.2f})",
+        )
+
+        # Persist + update cooldown
+        self.append_event(event)
+        self._event_cooldowns[pair_key] = now_ts
+
+        return event
+
+    @staticmethod
+    def _pair_key(agent_a: str, agent_b: str, domain_id: str) -> str:
+        """Deterministic key for an agent pair + domain."""
+        pair = tuple(sorted([agent_a, agent_b]))
+        return f"{pair[0]}|{pair[1]}|{domain_id}"
+
+    @staticmethod
+    def _phase_alignment(a: ResonancePacket, b: ResonancePacket) -> float:
+        """Score 0-1 for how aligned two packets' kernel phase states are."""
+        score = 0.0
+        # Cycle stage match (S0-S6)
+        if a.cycle_stage and b.cycle_stage:
+            if a.cycle_stage == b.cycle_stage:
+                score += 0.6
+            else:
+                # Parse stage numbers for proximity
+                try:
+                    sa = int(a.cycle_stage.replace("S", "").replace("s", ""))
+                    sb = int(b.cycle_stage.replace("S", "").replace("s", ""))
+                    dist = abs(sa - sb)
+                    if dist <= 1:
+                        score += 0.3
+                except (ValueError, AttributeError):
+                    pass
+        # Identity state match
+        if a.identity_state and b.identity_state:
+            if a.identity_state == b.identity_state:
+                score += 0.4
+        return min(1.0, score)
+
+    @staticmethod
+    def _symbol_alignment(a: ResonancePacket, b: ResonancePacket) -> float:
+        """Score 0-1 for symbol and loop_type overlap."""
+        score = 0.0
+        if a.state_symbol and b.state_symbol and a.state_symbol == b.state_symbol:
+            score += 0.6
+        if a.loop_type and b.loop_type and a.loop_type == b.loop_type:
+            score += 0.4
+        return min(1.0, score)
+
+    @staticmethod
+    def _motif_alignment(a: ResonancePacket, b: ResonancePacket) -> float:
+        """Score 0-1 for motif overlap (Jaccard-like)."""
+        if not a.motifs or not b.motifs:
+            return 0.0
+        set_a = set(a.motifs)
+        set_b = set(b.motifs)
+        union = set_a | set_b
+        if not union:
+            return 0.0
+        return len(set_a & set_b) / len(union)
+
+    @staticmethod
+    def _shared_motifs(a: ResonancePacket, b: ResonancePacket) -> List[str]:
+        """Return motifs shared between two packets."""
+        if not a.motifs or not b.motifs:
+            return []
+        return sorted(set(a.motifs) & set(b.motifs))
 
     def _count_lines(self, path: str) -> int:
         """Count lines in a file without loading all data."""
