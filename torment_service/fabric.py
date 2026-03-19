@@ -503,6 +503,9 @@ class TormentFabric:
         # SRG living memory (opt-in) — disabled by default
         self._srg_enable = str(os.environ.get("TORMENT_SRG_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
 
+        # Hivemind collective resonance (opt-in) — disabled by default
+        self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
+
         # private memory stores per agent
         self.private_graphs: Dict[str, MemoryGraph] = {}  # agent_id -> graph
 

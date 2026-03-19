@@ -743,6 +743,72 @@ def derive_srg_character_bands(seed: CharacterSeed) -> Dict[str, Any]:
     }
 
 
+def build_self_state(
+    workspace_id: str,
+    agent_id: str,
+    character_store: "CharacterStore",
+    *,
+    seed_id: Optional[str] = None,
+    phase_timers: Optional[Dict[str, Any]] = None,
+    srg_enable: bool = False,
+) -> Dict[str, Any]:
+    """Assemble a CharacterSelfState dict from persisted data.
+
+    The caller (app.py) is expected to extract seed_id from the agent's
+    identity. If seed_id is None, returns minimal state.
+
+    This is a read-only helper — no side effects on any store.
+    """
+    from .collective_models import CharacterSelfState
+
+    if not seed_id:
+        # No character seed — return minimal state
+        return CharacterSelfState(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            updated_ts=_now_ts(),
+        ).to_dict()
+
+    seed = character_store.load_seed(workspace_id, seed_id)
+    state = character_store.load_state(workspace_id, agent_id)
+
+    ss = CharacterSelfState(
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        seed_id=seed_id,
+        character_name=seed.character_name if seed else None,
+        seed_motif_id=seed.seed_motif_id if seed else None,
+        updated_ts=_now_ts(),
+    )
+
+    # Drift + basin from CharacterState
+    if state:
+        ss.drift_score = state.drift_score
+        ss.drift_direction = state.drift_direction
+        ss.distance_to_seed = state.distance_to_seed
+        ss.seed_basin_role = state.seed_basin_role
+        ss.seed_basin_phi = state.seed_basin_phi
+        ss.seed_basin_kappa = state.seed_basin_kappa
+        ss.seed_basin_tension = state.seed_basin_tension
+        ss.core_count = state.core_count
+        ss.relational_count = state.relational_count
+        ss.situational_count = state.situational_count
+
+    # Phase timing from fabric's phase_timers
+    if phase_timers:
+        pt = phase_timers.get(agent_id)
+        if pt:
+            ss.phase_duration_steps = pt.get("phase_duration_steps")
+            ss.corridor_duration_steps = pt.get("corridor_duration_steps")
+            ss.last_cycle_stage = pt.get("cycle_stage") or pt.get("last_cycle_stage")
+            ss.last_identity_state = pt.get("identity_state") or pt.get("last_identity_state")
+
+    # SRG
+    ss.srg_enabled = srg_enable
+
+    return ss.to_dict()
+
+
 def assemble_character_context(
     *,
     graph,            # MemoryGraph (private graph)

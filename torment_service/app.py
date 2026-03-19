@@ -563,6 +563,45 @@ def get_roles(agent_id: str, workspace_id: str = "default") -> Dict[str, Any]:
         "updated_ts": rp.updated_ts,
     }
 
+@app.get("/agent/{agent_id}/character/state")
+def get_character_state(agent_id: str, workspace_id: str = "default") -> Dict[str, Any]:
+    """Return the living character self-state: drift, basin, tiers, phase timing."""
+    from .character import build_self_state
+    ident = fabric.ident_store.load(workspace_id, agent_id)
+    if ident is None:
+        raise HTTPException(status_code=404, detail="Unknown agent_id")
+    seed_id = None
+    if ident.seed and isinstance(ident.seed, dict):
+        seed_id = ident.seed.get("seed_id")
+    return build_self_state(
+        workspace_id, agent_id, fabric.character_store,
+        seed_id=seed_id,
+        phase_timers=fabric._phase_timers,
+        srg_enable=fabric._srg_enable,
+    )
+
+
+@app.get("/agent/{agent_id}/character/seed")
+def get_character_seed(agent_id: str, workspace_id: str = "default") -> Dict[str, Any]:
+    """Return the character seed metadata (read-only)."""
+    ident = fabric.ident_store.load(workspace_id, agent_id)
+    if ident is None:
+        raise HTTPException(status_code=404, detail="Unknown agent_id")
+    seed_id = None
+    if ident.seed and isinstance(ident.seed, dict):
+        seed_id = ident.seed.get("seed_id")
+    if not seed_id:
+        return {"workspace_id": workspace_id, "agent_id": agent_id, "seed": None}
+    seed = fabric.character_store.load_seed(workspace_id, seed_id)
+    if seed is None:
+        return {"workspace_id": workspace_id, "agent_id": agent_id, "seed": None}
+    return {
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "seed": seed.to_dict(),
+    }
+
+
 @app.post("/agent/ingest")
 def ingest(req: IngestReq) -> Dict[str, Any]:
     return fabric.ingest(
