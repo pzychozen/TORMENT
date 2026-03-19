@@ -505,6 +505,7 @@ class TormentFabric:
 
         # Hivemind collective resonance (opt-in) — disabled by default
         self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
+        self._collective_fields: Dict[str, Any] = {}  # workspace_id -> CollectiveField (lazy init)
 
         # private memory stores per agent
         self.private_graphs: Dict[str, MemoryGraph] = {}  # agent_id -> graph
@@ -1821,6 +1822,15 @@ class TormentFabric:
 
         return ident
 
+    def _get_collective_field(self, workspace_id: str):
+        """Lazy-init and return the CollectiveField for a workspace."""
+        if workspace_id not in self._collective_fields:
+            from .collective_field import CollectiveField
+            self._collective_fields[workspace_id] = CollectiveField(
+                workspace_id=workspace_id, data_dir=self.data_dir,
+            )
+        return self._collective_fields[workspace_id]
+
     def ingest(
         self,
         workspace_id: str,
@@ -2183,6 +2193,84 @@ class TormentFabric:
                                     _my_ent.payload["srg_collision"] = _col_report
                 except Exception:
                     pass
+
+            # --- Hivemind: emit ResonancePacket into collective field ---
+            if self._hivemind_enable and stored and eid is not None:
+                try:
+                    from .collective_models import ResonancePacket
+                    _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
+                    # Gate: only emit if coherence passes minimum threshold
+                    if _hm_coherence >= 0.15:
+                        _hm_emb_hash = ""
+                        try:
+                            import hashlib
+                            _hm_emb_hash = hashlib.md5(emb.tobytes()).hexdigest()[:12]
+                        except Exception:
+                            pass
+
+                        # Safely extract resonance data (may not exist if sym enrichment failed)
+                        _hm_res_score = None
+                        _hm_loop_type = None
+                        try:
+                            _hm_ent = graph.entities.get(int(eid))
+                            if _hm_ent and _hm_ent.payload:
+                                _hm_res_score = _hm_ent.payload.get("resonance_score")
+                                _hm_loop_type = _hm_ent.payload.get("loop_type")
+                        except Exception:
+                            pass
+
+                        # Drift info (may not exist yet)
+                        _hm_drift = None
+                        _hm_drift_dir = None
+                        _hm_seed_id = None
+                        try:
+                            _hm_cstate = self.character_store.load_state(workspace_id, agent_id)
+                            if _hm_cstate:
+                                _hm_drift = _hm_cstate.drift_score
+                                _hm_drift_dir = _hm_cstate.drift_direction
+                                _hm_seed_id = _hm_cstate.seed_id
+                        except Exception:
+                            pass
+
+                        # SRG fields
+                        _hm_srg_band = None
+                        _hm_srg_hb = None
+                        _hm_srg_crystal = False
+                        if _srg_dict and isinstance(_srg_dict, dict):
+                            _hm_srg_band = _srg_dict.get("R_band")
+                            _hm_srg_hb = _srg_dict.get("heartbeat_class")
+                            _hm_srg_crystal = bool(_srg_dict.get("is_crystal", False))
+
+                        _hm_packet = ResonancePacket(
+                            workspace_id=workspace_id,
+                            agent_id=agent_id,
+                            domain_id=chosen_domain,
+                            source_eid=int(eid),
+                            summary=str(summary),
+                            embedding_hash=_hm_emb_hash,
+                            cycle_stage=str(tri_mod.get("cycle_stage", "")),
+                            identity_state=str(tri_mod.get("identity_state", "")),
+                            coherence=_hm_coherence,
+                            stability_delta=float(signals.stability_delta),
+                            corridor_angle_deg=_pt_durations.get("corridor_angle_deg") if _pt_durations else None,
+                            corridor_duration_steps=int(_pt_durations.get("corridor_duration_steps", 0)) if _pt_durations else None,
+                            phase_duration_steps=int(_pt_durations.get("phase_duration_steps", 0)) if _pt_durations else None,
+                            motifs=list(motif_ids),
+                            created_motif=created_motif,
+                            state_symbol=sym.get("state_symbol"),
+                            resonance_score=float(_hm_res_score) if _hm_res_score is not None else None,
+                            loop_type=str(_hm_loop_type) if _hm_loop_type else None,
+                            drift_score=float(_hm_drift) if _hm_drift is not None else None,
+                            drift_direction=str(_hm_drift_dir) if _hm_drift_dir else None,
+                            seed_id=str(_hm_seed_id) if _hm_seed_id else None,
+                            srg_band=_hm_srg_band,
+                            srg_heartbeat_class=_hm_srg_hb,
+                            srg_is_crystal=_hm_srg_crystal,
+                        )
+                        _hm_field = self._get_collective_field(workspace_id)
+                        _hm_field.append_packet(_hm_packet)
+                except Exception:
+                    pass  # Hivemind is optional — never blocks ingest
 
             pol = ws.domain_policies.get(chosen_domain, {})
             try:
