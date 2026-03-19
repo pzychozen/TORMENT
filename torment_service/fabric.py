@@ -2228,9 +2228,22 @@ class TormentFabric:
             if self._hivemind_enable and stored and eid is not None:
                 try:
                     from .collective_models import ResonancePacket
+                    from .governance import should_emit_packet as _gov_should_emit
+
+                    # Gate 1: governance — non_shareable / export_blocked memories never emit
+                    # Check at emission time (earliest boundary), not at convergence time.
+                    _hm_emit_ok = True
+                    try:
+                        _hm_ent_gov = graph.entities.get(int(eid))
+                        if _hm_ent_gov is not None:
+                            _hm_emit_ok = _gov_should_emit(_hm_ent_gov.payload)
+                    except Exception:
+                        pass
+
+                    # Gate 2: coherence minimum threshold
                     _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
-                    # Gate: only emit if coherence passes minimum threshold
-                    if _hm_coherence >= 0.15:
+
+                    if _hm_emit_ok and _hm_coherence >= 0.15:
                         _hm_emb_hash = ""
                         try:
                             import hashlib

@@ -224,7 +224,16 @@ class CompressionScorer:
         self.max_candidates = int(max_candidates)
 
     def _is_protected(self, payload: dict) -> bool:
-        """Return True if this node must never be compressed."""
+        """Return True if this node must never be compressed.
+
+        Checks (in order):
+            1. Canon flag (existing)
+            2. Protected kinds — seed, anchor, identity_anchor (existing)
+            3. Protected tiers — core_identity (existing)
+            4. Governance 'protected' flag (Phase D addition)
+
+        Invariant: protected memories are never weakened automatically.
+        """
         if payload.get("canon") is True:
             return True
         kind = str(payload.get("kind", payload.get("type", "")) or "")
@@ -233,6 +242,13 @@ class CompressionScorer:
         tier = str(payload.get("tier", "") or "")
         if tier in self.PROTECTED_TIERS:
             return True
+        # Phase D: governance flag check
+        try:
+            from .governance import is_compression_protected
+            if is_compression_protected(payload):
+                return True
+        except ImportError:
+            pass
         return False
 
     def score(

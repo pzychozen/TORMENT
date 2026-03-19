@@ -602,6 +602,120 @@ def get_character_seed(agent_id: str, workspace_id: str = "default") -> Dict[str
     }
 
 
+# ── Memory Governance ─────────────────────────────────────────────────────
+
+
+class GovernanceSetRequest(BaseModel):
+    workspace_id: str
+    agent_id: str
+    eid: int
+    flags: Dict[str, bool] = Field(
+        ...,
+        description="Partial governance flag updates. Only specified flags are changed.",
+    )
+    actor: str = Field("operator", description="Who initiated the change.")
+    source: str = Field("api", description="Where the change came from.")
+
+
+@app.post("/memory/governance/set")
+def set_governance_flags(req: GovernanceSetRequest) -> Dict[str, Any]:
+    """Update governance flags on an existing memory (partial update).
+
+    Only specified flags are changed; unspecified flags keep their current
+    value. Appends an audit record to both the memory payload and the
+    workspace-level audit log.
+    """
+    from .governance import update_governance, resolve_governance, GovernanceAuditLog
+
+    ws = fabric.workspaces.get(req.workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    graph = fabric.private_graphs.get(req.agent_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail="Agent graph not found")
+
+    ent = graph.entities.get(req.eid)
+    if ent is None:
+        raise HTTPException(status_code=404, detail=f"Memory eid={req.eid} not found")
+
+    payload = ent.payload or {}
+
+    try:
+        audit_record = update_governance(
+            payload,
+            req.flags,
+            actor=req.actor,
+            source=req.source,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Persist updated payload to memory graph
+    graph.update_payload(req.eid, payload)
+
+    # Also log to workspace-level audit
+    try:
+        audit_log = GovernanceAuditLog(data_dir=DATA_DIR, workspace_id=req.workspace_id)
+        audit_log.log(
+            eid=req.eid,
+            agent_id=req.agent_id,
+            changes=audit_record.get("changed", {}),
+            actor=req.actor,
+            source=req.source,
+        )
+    except Exception:
+        pass  # audit log is best-effort
+
+    # Return the new governance state
+    new_gov = resolve_governance(payload)
+    return {
+        "eid": req.eid,
+        "agent_id": req.agent_id,
+        "governance": new_gov.to_dict(),
+        "audit": audit_record,
+    }
+
+
+@app.get("/memory/governance/get")
+def get_governance_flags(
+    workspace_id: str,
+    agent_id: str,
+    eid: int,
+) -> Dict[str, Any]:
+    """Read governance flags for a specific memory."""
+    from .governance import resolve_governance
+
+    graph = fabric.private_graphs.get(agent_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail="Agent graph not found")
+
+    ent = graph.entities.get(eid)
+    if ent is None:
+        raise HTTPException(status_code=404, detail=f"Memory eid={eid} not found")
+
+    gov = resolve_governance(ent.payload)
+    return {
+        "eid": eid,
+        "agent_id": agent_id,
+        "governance": gov.to_dict(),
+    }
+
+
+@app.get("/workspace/{workspace_id}/governance/audit")
+def governance_audit(workspace_id: str, limit: int = 50) -> Dict[str, Any]:
+    """Return recent governance change audit records for a workspace."""
+    from .governance import GovernanceAuditLog
+
+    audit_log = GovernanceAuditLog(data_dir=DATA_DIR, workspace_id=workspace_id)
+    records = audit_log.recent(limit=limit)
+    return {
+        "workspace_id": workspace_id,
+        "count": len(records),
+        "records": records,
+    }
+
+
 # ── Collective (Hivemind) ─────────────────────────────────────────────────
 
 @app.get("/workspace/{workspace_id}/collective/status")
