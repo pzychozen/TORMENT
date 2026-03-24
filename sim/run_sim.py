@@ -76,8 +76,8 @@ def main():
     from torment_service.app import app  # noqa: E402
     client = TestClient(app)
 
-    # create workspace
-    r = client.post("/workspace/create", json={"workspace_id": args.workspace})
+    # create workspace with all sim domains pre-registered
+    r = client.post("/workspace/create", json={"workspace_id": args.workspace, "domains": DEFAULT_DOMAINS})
     r.raise_for_status()
 
     # build agents deterministically

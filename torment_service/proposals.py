@@ -21,6 +21,7 @@ class ShareProposal:
     strength: float
     created_ts: int
     status: str  # pending|approved|rejected
+    half_life_days: Optional[float] = None
     processed_ts: Optional[int] = None
     note: Optional[str] = None
 
@@ -48,6 +49,7 @@ class ProposalRegistry:
         mtype: str,
         confidence: float,
         strength: float,
+        half_life_days: Optional[float] = None,
     ) -> ShareProposal:
         p = ShareProposal(
             proposal_id=str(uuid.uuid4()),
@@ -59,6 +61,7 @@ class ProposalRegistry:
             mtype=mtype,
             confidence=float(confidence),
             strength=float(strength),
+            half_life_days=half_life_days,
             created_ts=_now_ts(),
             status="pending",
         )

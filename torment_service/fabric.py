@@ -3488,7 +3488,11 @@ class TormentFabric:
         """
         ws = self.get_workspace(workspace_id)
         if domain_id not in ws.domains:
-            raise ValueError("Unknown domain_id")
+            raise ValueError(
+                f"Unknown domain_id '{domain_id}' in workspace '{workspace_id}'. "
+                f"Registered domains: {ws.domains}. "
+                f"Domains are structural — register them at workspace creation or via add_domain()."
+            )
 
         reg = ws.proposals[domain_id]
         if min_distinct_agents <= 0:
