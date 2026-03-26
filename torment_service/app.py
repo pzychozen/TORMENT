@@ -161,6 +161,7 @@ class ProcessProposalsReq(BaseModel):
     max_to_process: int = Field(default=200)
     sim_threshold: float = Field(default=0.90)
     min_distinct_agents: int = Field(default=0)
+    step: Optional[int] = Field(default=None, description="Explicit sim step for deterministic replay; defaults to int(time.time())")
 
 
 
@@ -686,7 +687,8 @@ def get_governance_flags(
     """Read governance flags for a specific memory."""
     from .governance import resolve_governance
 
-    graph = fabric.private_graphs.get(agent_id)
+    ak = fabric._agent_key(workspace_id, agent_id)
+    graph = fabric.private_graphs.get(ak)
     if graph is None:
         raise HTTPException(status_code=404, detail="Agent graph not found")
 
@@ -992,6 +994,7 @@ def process_proposals(req: ProcessProposalsReq) -> Dict[str, Any]:
         max_to_process=req.max_to_process,
         sim_threshold=req.sim_threshold,
         min_distinct_agents=req.min_distinct_agents,
+        step=req.step,
     )
 
 
@@ -1602,7 +1605,7 @@ def promote_suggestions(
             if seed_id:
                 cseed = fabric.character_store.load_seed(workspace_id, seed_id)
                 if cseed and cseed.seed_eids:
-                    graph = fabric.private_graphs.get(agent_id)
+                    graph = fabric.private_graphs.get(fabric._agent_key(workspace_id, agent_id))
                     if graph:
                         import numpy as np
                         embs = []
@@ -1708,22 +1711,24 @@ async def compression_status(workspace_id: str, agent_id: str):
         "min_step": fabric._compress_min_step,
     }
 
+    ak = fabric._agent_key(workspace_id, agent_id)
+
     # Event detector state
-    detector = fabric._event_detectors.get(agent_id)
+    detector = fabric._event_detectors.get(ak)
     if detector:
         result["detector"] = detector.state_dict()
     else:
         result["detector"] = None
 
     # Compression history
-    executor = fabric._compression_executors.get(agent_id)
+    executor = fabric._compression_executors.get(ak)
     if executor:
         result["history"] = executor.get_history()
     else:
         result["history"] = []
 
     # Deep memory stats
-    deep_store = fabric._deep_stores.get(agent_id)
+    deep_store = fabric._deep_stores.get(ak)
     if deep_store:
         result["deep_memory"] = deep_store.stats()
     else:
@@ -1755,7 +1760,7 @@ async def spirit_return_status(workspace_id: str, agent_id: str):
         result["warmup_error"] = str(exc)
 
     # Deep memory stats (for context)
-    deep_store = fabric._deep_stores.get(agent_id)
+    deep_store = fabric._deep_stores.get(fabric._agent_key(workspace_id, agent_id))
     if deep_store is not None:
         try:
             result["deep_memory"] = deep_store.stats()
@@ -1784,3 +1789,288 @@ async def deep_memory_query(workspace_id: str, req: DeepMemoryQueryRequest):
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ==========================================================================
+# Agent Spine — Cognition Pipeline (v0.1)
+# ==========================================================================
+
+class CognitionRunReq(BaseModel):
+    """Request body for POST /cognition/run."""
+    workspace_id: str = Field(default="default")
+    agent_id: str
+    user_input: str
+    mode: str = Field(default="auto")       # auto | engineering | strategic | identity
+    priority: str = Field(default="normal")  # low | normal | high
+
+
+@app.post("/cognition/run")
+def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
+    """Execute the Agent Spine cognition pipeline.
+
+    Single-pass pipeline: TaskPacket → Router → Apertures → Roles →
+    Reintegration → Response.  See AGENT_SPINE_PLAN.md for design.
+    """
+    from cognition.task_models import TaskPacket
+    from cognition.pipeline import run_cognition_pipeline
+    from cognition.drift import make_live_drift_check
+
+    # Validate workspace and agent exist
+    try:
+        ws = fabric.get_workspace(req.workspace_id)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Workspace '{req.workspace_id}' not found"
+        )
+    try:
+        ident = fabric.create_agent(req.workspace_id, req.agent_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{req.agent_id}' in workspace '{req.workspace_id}': {exc}"
+        )
+
+    # Build TaskPacket
+    try:
+        task = TaskPacket(
+            workspace_id=req.workspace_id,
+            agent_id=req.agent_id,
+            user_input=req.user_input,
+            mode=req.mode,
+            priority=req.priority,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # Build query function wrapping fabric.query()
+    def query_fn(workspace_id, agent_id, query_text, top_k, domain_id):
+        return fabric.query(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            query_text=query_text,
+            top_k=top_k,
+            domain_id=domain_id,
+        )
+
+    # Build character context function
+    def character_fn(workspace_id, agent_id):
+        agent_ident = fabric.create_agent(workspace_id, agent_id)
+        return {
+            "seed": agent_ident.seed,
+            "overlay": agent_ident.overlay,
+            "agent_id": agent_ident.agent_id,
+        }
+
+    # Build drift check function
+    drift_check_fn = make_live_drift_check(fabric)
+
+    # Get domain ranking
+    primary_domains = list(ws.domains.keys()) if hasattr(ws, 'domains') else []
+
+    # Run pipeline
+    result = run_cognition_pipeline(
+        task=task,
+        query_fn=query_fn,
+        character_fn=character_fn,
+        drift_check_fn=drift_check_fn,
+        primary_domains=primary_domains[:3],  # top 3 domains
+    )
+
+    if not result.get("ok", False):
+        raise HTTPException(
+            status_code=500,
+            detail=result.get("error", "Cognition pipeline failed"),
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Unified Observability Endpoint (optional)
+# ---------------------------------------------------------------------------
+
+@app.get("/debug/metrics")
+async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] = None):
+    """Unified observability endpoint — aggregates memory, coherence, compression,
+    motif, and hive mind stats into a single response.
+
+    Optional: designed to be the one-stop diagnostic view for any TORMENT deployment.
+    Cheap to call — reads only in-memory state, no disk scans.
+
+    Query params:
+        workspace_id: workspace to inspect (default: "default")
+        agent_id: if provided, include per-agent detail; otherwise summarize all agents
+    """
+    result: Dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+    }
+
+    # --- Feature flags ---
+    result["features"] = {
+        "compress_enable": fabric._compress_enable,
+        "hivemind_enable": fabric._hivemind_enable,
+        "srg_enable": fabric._srg_enable,
+        "character_enable": fabric._character_enable,
+        "checkpoint_enable": fabric._checkpoint_enable,
+    }
+
+    # --- Workspace existence check ---
+    ws = fabric.workspaces.get(workspace_id)
+    if ws is None:
+        result["error"] = f"workspace '{workspace_id}' not found"
+        return result
+
+    # --- Agent list ---
+    agent_ids_list: List[str] = []
+    if agent_id:
+        agent_ids_list = [agent_id]
+    else:
+        # Discover agents from private_graphs keys
+        prefix = f"{workspace_id}::"
+        for ak in fabric.private_graphs:
+            if ak.startswith(prefix):
+                agent_ids_list.append(ak[len(prefix):])
+
+    # --- Per-agent metrics ---
+    agents_metrics: Dict[str, Any] = {}
+    for aid in agent_ids_list:
+        ak = fabric._agent_key(workspace_id, aid)
+        am: Dict[str, Any] = {}
+
+        # Memory count
+        graph = fabric.private_graphs.get(ak)
+        if graph is not None:
+            am["memory_count"] = len(graph.entities) if hasattr(graph, "entities") else 0
+        else:
+            am["memory_count"] = 0
+
+        # Compression state
+        detector = getattr(fabric, "_event_detectors", {}).get(ak)
+        if detector is not None:
+            am["compression"] = {
+                "last_compression_step": detector.last_compression_step,
+                "compression_events_total": detector.compression_events_total,
+                "warning_active": detector.warning_active,
+                "prev_in_corridor": detector.prev_in_corridor,
+            }
+        else:
+            am["compression"] = None
+
+        # Compression history (last 5 events for brevity)
+        executor = getattr(fabric, "_compression_executors", {}).get(ak)
+        if executor is not None:
+            history = executor.get_history()
+            am["compression_recent"] = history[-5:] if history else []
+        else:
+            am["compression_recent"] = []
+
+        # Deep memory stats
+        deep_store = getattr(fabric, "_deep_stores", {}).get(ak)
+        if deep_store is not None:
+            try:
+                am["deep_memory"] = deep_store.stats()
+            except Exception:
+                am["deep_memory"] = None
+        else:
+            am["deep_memory"] = None
+
+        # Character drift (if available)
+        if fabric._character_enable:
+            try:
+                cstate = fabric.character_store.load_state(workspace_id, aid)
+                if cstate is not None:
+                    am["character"] = {
+                        "drift_score": cstate.drift_score,
+                        "drift_direction": cstate.drift_direction,
+                        "distance_to_seed": getattr(cstate, "distance_to_seed", None),
+                        "core_count": getattr(cstate, "core_count", None),
+                        "relational_count": getattr(cstate, "relational_count", None),
+                        "situational_count": getattr(cstate, "situational_count", None),
+                    }
+                else:
+                    am["character"] = None
+            except Exception:
+                am["character"] = None
+
+        agents_metrics[aid] = am
+
+    result["agents"] = agents_metrics
+
+    # --- Domain-level metrics ---
+    domains_metrics: Dict[str, Any] = {}
+    for domain_id in ws.domains:
+        dm: Dict[str, Any] = {}
+
+        # Motif stats
+        reg = ws.motif_regs.get(domain_id)
+        if reg is not None:
+            motifs = reg.motifs
+            dm["motif_count"] = len(motifs)
+            if motifs:
+                strengths = [float(getattr(m, "strength", 0) or 0) for m in motifs.values()]
+                dm["motif_avg_strength"] = round(sum(strengths) / len(strengths), 4) if strengths else 0
+                dm["motif_max_strength"] = round(max(strengths), 4) if strengths else 0
+            else:
+                dm["motif_avg_strength"] = 0
+                dm["motif_max_strength"] = 0
+
+            # Entropy via coherence field
+            try:
+                from .coherence_field import compute_coherence_field as _cf_compute
+                motif_rows = []
+                for mid, mm in motifs.items():
+                    motif_rows.append({
+                        "motif_id": mid,
+                        "label": getattr(mm, "label", mid),
+                        "centroid": list(getattr(mm, "centroid", []) or []),
+                        "strength": float(getattr(mm, "strength", 0) or 0),
+                        "members": list(getattr(mm, "members", []) or []),
+                    })
+                if motif_rows:
+                    field = _cf_compute(motif_rows)
+                    roles = [r.get("role", "") for r in field]
+                    dm["coherence_field"] = {
+                        "basin_count": roles.count("basin"),
+                        "ridge_count": roles.count("ridge"),
+                        "plateau_count": roles.count("plateau"),
+                    }
+            except Exception:
+                pass
+        else:
+            dm["motif_count"] = 0
+
+        # Shared memory count
+        shared_graph = ws.shared_graphs.get(domain_id)
+        if shared_graph is not None:
+            dm["shared_memory_count"] = len(shared_graph.entities) if hasattr(shared_graph, "entities") else 0
+        else:
+            dm["shared_memory_count"] = 0
+
+        # Proposal stats
+        prop_reg = ws.proposals.get(domain_id)
+        if prop_reg is not None:
+            try:
+                dm["proposals_total"] = len(getattr(prop_reg, "proposals", []))
+            except Exception:
+                pass
+
+        domains_metrics[domain_id] = dm
+
+    result["domains"] = domains_metrics
+
+    # --- Collective field summary ---
+    try:
+        cfield = getattr(fabric, "_collective_fields", {}).get(workspace_id)
+        if cfield is not None:
+            result["collective"] = {
+                "packet_count": len(getattr(cfield, "packets", [])),
+                "convergence_events": len(getattr(cfield, "convergence_log", [])),
+            }
+        else:
+            result["collective"] = None
+    except Exception:
+        result["collective"] = None
+
+    return result

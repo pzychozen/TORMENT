@@ -61,22 +61,57 @@ class TriOctaMemoryKernel:
         # Tunables (safe defaults)
         self.CORR_THR = 0.80          # |dot_align| threshold for corridor membership
         self.COH_FLOOR = 0.05         # keep a low-end signal
-        self.DISP_SCALE = 7.0e-4      # dispersion -> coherence sensitivity
+        self.DISP_SCALE = 1.50        # fallback scale (used during adaptive warmup)
         self.PROX_ALPHA = 0.10        # EMA for proximity
         self.SURV_DECAY = 0.985       # per-step decay of survival memory
         self.SURV_GAIN = 0.06         # add when in corridor (scaled by proximity)
-        self.COH_SMOOTH = 0.90        # 0 disables; e.g., 0.90 enables smoothing EMA
+        self.COH_SMOOTH = 0.70        # 0 disables; reduced from 0.90 for faster response
+
+        # Adaptive DISP_SCALE — embedder-independent coherence sensitivity.
+        # Instead of a fixed scale that must be recalibrated per embedder,
+        # the effective scale tracks the observed dispersion distribution:
+        #   effective = k * (mean(disp_window) + std(disp_window))
+        # with a linear warmup blend from DISP_SCALE (fallback) to adaptive.
+        # k=2.0 is dimensionless: it means "dispersion at ~mean+std maps to
+        # coherence ≈ 0.61 (the 1/e point)".  Tested stable with both
+        # HashEmbedding and STEmbedding (BAAI/bge-small-en-v1.5).
+        self.ADAPTIVE_DISP = True         # False reverts to fixed DISP_SCALE
+        self.ADAPTIVE_K = 2.0             # sensitivity multiplier
+        self.ADAPTIVE_WINDOW = 50         # rolling window size
+        self.ADAPTIVE_WARMUP = 10         # steps before fully adaptive
+        self._disp_buffer: List[float] = []
+        self._last_effective_scale = float(self.DISP_SCALE)
 
     # ----------------------------
     # Embedding -> Omega
     # ----------------------------
     def _omega_from_embedding(self, emb: np.ndarray) -> np.ndarray:
         e = np.asarray(emb, dtype=float).reshape(-1)
-        if e.size < 6:
-            e = np.pad(e, (0, 6 - e.size))
-        w = np.abs(e[:3]) + 1e-6
+        dim = e.size
+        if dim < 6:
+            e = np.pad(e, (0, 6 - dim))
+            dim = e.size
+
+        # --- fold embedding into 6 aggregate values ----------------
+        # Fixed-index sampling fails for HashEmbedding (sparse, non-zero
+        # positions are unpredictable) and concentrates signal for dense
+        # embedders.  Instead we fold the full vector into 6 buckets by
+        # splitting into 6 equal chunks and summing each.  This captures
+        # information from the ENTIRE embedding regardless of sparsity
+        # pattern, producing genuinely different weights and phases for
+        # each oscillator.
+        chunk = dim // 6
+        folded = np.array([
+            np.sum(e[i * chunk : (i + 1) * chunk])
+            for i in range(6)
+        ])
+        # If dim isn't divisible by 6, absorb remainder into last bucket
+        if dim % 6:
+            folded[5] += np.sum(e[6 * chunk :])
+
+        w = np.abs(folded[:3]) + 1e-6
         w = w / np.sum(w)
-        phases = (e[3:6] * np.pi)
+        phases = folded[3:6] * np.pi
         Omega = np.sqrt(w) * (np.cos(phases) + 1j * np.sin(phases))
         return Omega.astype(np.complex128)
 
@@ -107,13 +142,47 @@ class TriOctaMemoryKernel:
     # ----------------------------
     # Dispersion coherence (single source of truth)
     # ----------------------------
+    def _effective_disp_scale(self, disp: float) -> float:
+        """Compute adaptive DISP_SCALE from the rolling dispersion window.
+
+        During warmup (< ADAPTIVE_WARMUP steps), blends linearly from the
+        fixed fallback (DISP_SCALE) to the adaptive estimate.  After warmup,
+        fully adaptive.  Falls back to fixed DISP_SCALE if ADAPTIVE_DISP is
+        False or the buffer has < 2 samples.
+        """
+        if not self.ADAPTIVE_DISP:
+            return float(self.DISP_SCALE)
+
+        buf = self._disp_buffer
+        buf.append(disp)
+        if len(buf) > self.ADAPTIVE_WINDOW:
+            buf.pop(0)
+
+        n = len(buf)
+        if n < 2:
+            self._last_effective_scale = float(self.DISP_SCALE)
+            return float(self.DISP_SCALE)
+
+        mu = float(np.mean(buf))
+        sigma = float(np.std(buf))
+        adaptive = float(self.ADAPTIVE_K) * (mu + sigma)
+
+        # Smooth warmup blend: fallback → adaptive
+        alpha = min(1.0, n / float(self.ADAPTIVE_WARMUP))
+        effective = (1.0 - alpha) * float(self.DISP_SCALE) + alpha * adaptive
+
+        # Clamp to sane range
+        effective = float(np.clip(effective, 1e-6, 10.0))
+        self._last_effective_scale = effective
+        return effective
+
     def _dispersion_coherence(self, Omega: np.ndarray) -> Tuple[float, float]:
         ph = np.angle(Omega)
         d01 = _wrap_pi(float(ph[0] - ph[1]))
         d12 = _wrap_pi(float(ph[1] - ph[2]))
         d20 = _wrap_pi(float(ph[2] - ph[0]))
         disp = float(np.sqrt(np.mean(np.square([d01, d12, d20]))))
-        scale = float(self.DISP_SCALE)
+        scale = self._effective_disp_scale(disp)
         coh_phase = float(np.exp(-((disp / max(scale, 1e-12)) ** 2)))
         return disp, coh_phase
 
@@ -326,6 +395,7 @@ class TriOctaMemoryKernel:
             "id_label": id_label,
             "S_mag": float(S_mag),
             "phi_coll": float(Phi_coll),
+            "effective_disp_scale": float(self._last_effective_scale),
         }
 
         return state, signals, debug

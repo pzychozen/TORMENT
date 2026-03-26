@@ -206,9 +206,13 @@ def main():
             fr.raise_for_status()
 
         if bool(row.get("process_proposals", False)):
-            # process proposals for all domains
+            # process proposals for all domains; pass sim step for deterministic replay
             for domain_id in DEFAULT_DOMAINS:
-                pr = client.post("/workspace/process_proposals", json={"workspace_id": args.workspace, "domain_id": domain_id})
+                pr = client.post("/workspace/process_proposals", json={
+                    "workspace_id": args.workspace,
+                    "domain_id": domain_id,
+                    "step": int(row.get("step", 0)),
+                })
                 pr.raise_for_status()
 
     outdir = args.out

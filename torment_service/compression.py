@@ -63,6 +63,21 @@ COMPRESS_TEAR_EMERGENCY = _env_float("TORMENT_COMPRESS_TEAR_EMERGENCY", 0.7)
 COMPRESS_SHORT_PATH_MULT = _env_float("TORMENT_COMPRESS_SHORT_STRENGTH_MULT", 0.5)
 COMPRESS_LONG_PATH_STRENGTH = _env_float("TORMENT_COMPRESS_LONG_STRENGTH", 0.1)
 
+# Tier-specific short-path multipliers (Proposal D — Phase 2.2)
+COMPRESS_RELATIONAL_MULT = _env_float("TORMENT_COMPRESS_RELATIONAL_MULT", 0.7)
+COMPRESS_ECHO_MULT = _env_float("TORMENT_COMPRESS_ECHO_MULT", 0.4)
+COMPRESS_ECHO_DEEP_AGE = _env_int("TORMENT_COMPRESS_ECHO_DEEP_AGE", 150)
+
+# Fallback trigger thresholds (Proposal A — Phase 2.2)
+COMPRESS_COUNT_THRESHOLD = _env_int("TORMENT_COMPRESS_COUNT_THRESHOLD", 400)
+COMPRESS_STEP_INTERVAL = _env_int("TORMENT_COMPRESS_STEP_INTERVAL", 200)
+COMPRESS_FALLBACK_COOLDOWN = _env_int("TORMENT_COMPRESS_FALLBACK_COOLDOWN", 50)
+COMPRESS_PERIODIC_FLOOR = _env_float("TORMENT_COMPRESS_PERIODIC_FLOOR", 0.5)
+
+# Hard memory cap — last-resort safety net (not primary mechanism)
+COMPRESS_HARD_CAP = _env_int("TORMENT_MAX_PRIVATE_MEMORIES", 10000)
+COMPRESS_HARD_CAP_TARGET = _env_float("TORMENT_HARD_CAP_TARGET_RATIO", 0.80)  # compress down to 80%
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -85,7 +100,7 @@ class CompressionCandidate:
 @dataclass
 class CompressionEvent:
     step: int
-    trigger: str                # "corridor_exit" | "cycle_stage_change" | "emergency_tear" | "manual"
+    trigger: str                # "corridor_exit" | "cycle_stage_change" | "emergency_tear" | "count_overflow" | "periodic" | "manual"
     candidates_evaluated: int = 0
     compressed: int = 0
     exported_deep: int = 0
@@ -107,12 +122,15 @@ class CompressionEvent:
 class EventDetector:
     """Detects discrete event boundaries from kernel tri_mod signals.
 
-    Triggers on:
-      - in_corridor True→False  (corridor exit — primary)
-      - cycle_stage change       (kernel phase transition)
-      - tearing_risk > threshold while in_corridor (emergency)
+    Triggers (in priority order):
+      1. emergency_tear    — tearing_risk > threshold while in_corridor
+      2. corridor_exit     — in_corridor True→False
+      3. cycle_stage_change — kernel phase transition
+      4. count_overflow    — memory count exceeds threshold (fallback)
+      5. periodic          — N steps since last compression (fallback)
 
-    Maintains previous state for edge detection.
+    Geometric triggers (1-3) always take priority over fallback triggers (4-5).
+    Fallback triggers respect a cooldown period after ANY compression event.
     """
 
     def __init__(self) -> None:
@@ -122,16 +140,31 @@ class EventDetector:
         self.warning_active: bool = False
         self._prev_tear: float = 0.0
         self._prev_align: float = 1.0
+        # Fallback trigger state (Proposal A)
+        self.last_compression_step: int = 0
+        self.compression_events_total: int = 0
 
-    def check(self, tri_mod: dict, step: int) -> Optional[str]:
+    def record_compression(self, step: int) -> None:
+        """Called after a compression event to update cooldown tracking."""
+        self.last_compression_step = step
+        self.compression_events_total += 1
+
+    def check(
+        self,
+        tri_mod: dict,
+        step: int,
+        memory_count: int = 0,
+    ) -> Optional[str]:
         """Return trigger type string if event boundary detected, else None.
 
         Args:
             tri_mod: modulation dict from TriOctaMemoryKernel.process()
             step: current conversation step
+            memory_count: current private memory count for this agent (for fallback triggers)
 
         Returns:
-            "corridor_exit" | "cycle_stage_change" | "emergency_tear" | None
+            "corridor_exit" | "cycle_stage_change" | "emergency_tear"
+            | "count_overflow" | "periodic" | None
         """
         in_corridor = bool(tri_mod.get("in_corridor", False))
         cycle_stage = tri_mod.get("cycle_stage")
@@ -153,6 +186,15 @@ class EventDetector:
               and cycle_stage != self.prev_cycle_stage):
             trigger = "cycle_stage_change"
 
+        # Priority 4-5: fallback triggers (only if geometric triggers didn't fire)
+        elif self._fallback_cooldown_ok(step):
+            # Priority 4: count overflow — hard safety rail
+            if memory_count > COMPRESS_COUNT_THRESHOLD:
+                trigger = "count_overflow"
+            # Priority 5: periodic maintenance
+            elif (step - self.last_compression_step) > COMPRESS_STEP_INTERVAL:
+                trigger = "periodic"
+
         # Update state for next call
         self.prev_in_corridor = in_corridor
         if cycle_stage is not None:
@@ -165,6 +207,10 @@ class EventDetector:
         self._update_warning(tri_mod)
 
         return trigger
+
+    def _fallback_cooldown_ok(self, step: int) -> bool:
+        """Return True if enough steps have passed since last compression for fallback."""
+        return (step - self.last_compression_step) >= COMPRESS_FALLBACK_COOLDOWN
 
     def _update_warning(self, tri_mod: dict) -> None:
         """Track warning horizon: tearing rising + alignment falling."""
@@ -190,12 +236,52 @@ class EventDetector:
             "prev_cycle_stage": self.prev_cycle_stage,
             "prev_identity_state": self.prev_identity_state,
             "warning_active": self.warning_active,
+            "last_compression_step": self.last_compression_step,
+            "compression_events_total": self.compression_events_total,
         }
 
 
 # ---------------------------------------------------------------------------
 # CompressionScorer — J→Z ordered scoring of memory nodes
 # ---------------------------------------------------------------------------
+
+def derive_retention_tier(payload: dict) -> str:
+    """Derive retention tier from payload fields at scoring time (Proposal D).
+
+    No migration needed — tier is computed from existing payload fields.
+
+    Returns one of: "protected", "identity", "relational", "situational", "echo"
+    """
+    # Protected: canon, seed/identity kinds, SRG crystal
+    if payload.get("canon") is True:
+        return "protected"
+    kind = str(payload.get("kind", payload.get("type", "")) or "")
+    if kind in ("seed", "identity", "core_identity"):
+        return "protected"
+    tier_field = str(payload.get("tier", "") or "")
+    if tier_field == "core_identity":
+        return "protected"
+    srg = payload.get("srg")
+    if isinstance(srg, dict) and srg.get("is_crystal", False):
+        return "protected"
+
+    # Identity: half_life >= 365 days
+    hl = float(payload.get("half_life", payload.get("half_life_days", 0)) or 0)
+    if hl >= 365:
+        return "identity"
+
+    # Echo: collective provenance
+    prov = str(payload.get("provenance", "") or "")
+    if prov == "collective":
+        return "echo"
+
+    # Relational: half_life >= 7 days
+    if hl >= 7:
+        return "relational"
+
+    # Default: situational
+    return "situational"
+
 
 class CompressionScorer:
     """Score memory nodes for compression eligibility.
@@ -273,9 +359,15 @@ class CompressionScorer:
             node.get("born_step", payload.get("created_at", payload.get("born_step", 0))) or 0
         )
 
-        # Protection check
-        if self._is_protected(payload):
+        # Derive retention tier (Proposal D)
+        retention_tier = derive_retention_tier(payload)
+
+        # Protection check — both legacy and tier-based
+        if retention_tier == "protected" or self._is_protected(payload):
             return None
+
+        # Identity tier: only long-path deep export, never short-path weakened
+        # (handled in router, but we still score them)
 
         # Age check
         age = current_step - born_step
@@ -369,9 +461,17 @@ class CompressionScorer:
         # Composite: J-weighted 60%, Z-weighted 40% (per RGD ordering)
         composite = 0.60 * j_score + 0.40 * z_score
 
+        # Tier-based score adjustment (Proposal D)
+        # Echo memories are slightly more compressible; relational slightly less
+        if retention_tier == "echo":
+            composite = min(1.0, composite * 1.15)   # +15% compressibility
+        elif retention_tier == "relational":
+            composite = max(0.0, composite * 0.85)   # -15% compressibility (more resistant)
+        elif retention_tier == "identity":
+            composite = max(0.0, composite * 0.70)   # -30% compressibility (strong resistance)
+
         summary = str(payload.get("summary", payload.get("text", "")) or "")
         memory_class = str(payload.get("memory_class", "core") or "core")
-        tier = str(payload.get("tier", "") or "")
 
         return CompressionCandidate(
             eid=eid,
@@ -382,7 +482,7 @@ class CompressionScorer:
             z_score=round(z_score, 4),
             motif_id=str(motif_id) if motif_id else None,
             memory_class=memory_class,
-            tier=tier,
+            tier=retention_tier,
         )
 
     def select_candidates(
@@ -431,6 +531,15 @@ class CompressionRouter:
         Returns "short_path" or "long_path".
         """
         age = current_step - candidate.born_step
+
+        # Tier-specific routing (Proposal D)
+        # Identity tier: ONLY long-path deep export, never short-path weakened
+        if candidate.tier == "identity":
+            return "long_path"
+
+        # Echo tier: deep export after fewer steps (COMPRESS_ECHO_DEEP_AGE)
+        if candidate.tier == "echo" and age >= COMPRESS_ECHO_DEEP_AGE:
+            return "long_path"
 
         # Archive memories always go deep
         if candidate.memory_class == "archive":
@@ -504,14 +613,28 @@ class CompressionExecutor:
         return event
 
     def _execute_short_path(self, candidate: CompressionCandidate, step: int) -> None:
-        """Reduce strength, mark compressed in core memory."""
+        """Reduce strength, mark compressed in core memory.
+
+        Tier-specific multipliers (Proposal D):
+          - relational: 0.7x (gentler)
+          - echo: 0.4x (slightly aggressive, per ChatGPT review)
+          - situational/default: 0.5x
+        """
         ent = self.memory_graph.entities.get(candidate.eid)
         if ent is None:
             raise KeyError(f"Entity {candidate.eid} not found in memory graph")
 
+        # Select tier-specific multiplier
+        if candidate.tier == "relational":
+            mult = COMPRESS_RELATIONAL_MULT
+        elif candidate.tier == "echo":
+            mult = COMPRESS_ECHO_MULT
+        else:
+            mult = COMPRESS_SHORT_PATH_MULT
+
         payload = ent.payload or {}
         old_strength = float(payload.get("strength", 0.5) or 0.5)
-        new_strength = max(0.05, old_strength * COMPRESS_SHORT_PATH_MULT)
+        new_strength = max(0.05, old_strength * mult)
 
         patch = {
             "strength": round(new_strength, 4),
@@ -519,6 +642,7 @@ class CompressionExecutor:
             "compressed_step": step,
             "compression_route": "short_path",
             "compression_score": candidate.score,
+            "compression_tier": candidate.tier,
         }
         self.memory_graph.update_payload(candidate.eid, patch)
 
@@ -569,6 +693,7 @@ def try_compress(
     agent_id: str,
     tri_mod: dict,
     step: int,
+    workspace_id: str = "default",
 ) -> Optional[CompressionEvent]:
     """Called from fabric.ingest() after checkpoint phase.
 
@@ -581,34 +706,43 @@ def try_compress(
         agent_id: agent whose memories to compress
         tri_mod: modulation dict from kernel
         step: current conversation step
+        workspace_id: workspace scope for composite key isolation
     """
+    # Composite key for workspace-scoped dict access
+    from .fabric import TormentFabric
+    ak = TormentFabric._agent_key(workspace_id, agent_id)
+
     # Lazy-init per-agent detector
     if not hasattr(fabric_instance, "_event_detectors"):
         fabric_instance._event_detectors = {}
-    if agent_id not in fabric_instance._event_detectors:
-        fabric_instance._event_detectors[agent_id] = EventDetector()
+    if ak not in fabric_instance._event_detectors:
+        fabric_instance._event_detectors[ak] = EventDetector()
 
-    detector = fabric_instance._event_detectors[agent_id]
-    trigger = detector.check(tri_mod, step)
+    detector = fabric_instance._event_detectors[ak]
+
+    # Get memory graph for this agent (keyed by composite key)
+    graph = fabric_instance.private_graphs.get(ak)
+    if graph is None:
+        logger.warning("no private graph for agent=%s ws=%s, skipping compression", agent_id, workspace_id)
+        return None
+
+    # Pass memory count to detector for fallback triggers (Proposal A)
+    memory_count = len(graph.entities) if hasattr(graph, "entities") else 0
+    trigger = detector.check(tri_mod, step, memory_count=memory_count)
 
     if trigger is None:
         return None
 
-    logger.info("compression trigger=%s at step=%d for agent=%s", trigger, step, agent_id)
-
-    # Get memory graph for this agent
-    graph = fabric_instance.private_graphs.get(agent_id)
-    if graph is None:
-        logger.warning("no private graph for agent=%s, skipping compression", agent_id)
-        return None
+    logger.info("compression trigger=%s at step=%d for agent=%s ws=%s (mem_count=%d)",
+                trigger, step, agent_id, workspace_id, memory_count)
 
     # Get or create deep store
-    deep_store = _get_or_create_deep_store(fabric_instance, agent_id)
+    deep_store = _get_or_create_deep_store(fabric_instance, agent_id, workspace_id)
 
     # Load motifs for coherence field
     coherence_field = None
     try:
-        motifs_path = _find_motifs_path(fabric_instance, agent_id)
+        motifs_path = _find_motifs_path(fabric_instance, agent_id, workspace_id)
         if motifs_path and os.path.exists(motifs_path):
             with open(motifs_path, "r", encoding="utf-8") as f:
                 motifs_data = json.load(f)
@@ -628,12 +762,24 @@ def try_compress(
             "payload": payload,
         })
 
-    # Score
+    # Score — max_candidates varies by trigger type
     scorer = CompressionScorer()
     candidates = scorer.select_candidates(nodes, step, coherence_field)
 
+    # Trigger-specific candidate filtering (Proposal A)
+    if trigger == "periodic":
+        # Periodic: only compress candidates scoring above the floor
+        candidates = [c for c in candidates if c.score >= COMPRESS_PERIODIC_FLOOR]
+    elif trigger == "count_overflow":
+        # Count overflow: compress enough to drop below 80% of threshold
+        target_count = int(COMPRESS_COUNT_THRESHOLD * 0.80)
+        excess = memory_count - target_count
+        if excess > 0:
+            # Take at most `excess` candidates (already sorted by score desc)
+            candidates = candidates[:excess]
+
     if not candidates:
-        logger.debug("no compression candidates at step=%d", step)
+        logger.debug("no compression candidates at step=%d (trigger=%s)", step, trigger)
         return CompressionEvent(step=step, trigger=trigger)
 
     # Route
@@ -644,14 +790,75 @@ def try_compress(
     executor = CompressionExecutor(graph, deep_store)
     event = executor.execute(candidates, step, trigger)
 
-    # Persist executor in fabric for history access
+    # Record compression in detector for cooldown tracking (Proposal A)
+    detector.record_compression(step)
+
+    # Persist executor in fabric for history access (composite key)
     if not hasattr(fabric_instance, "_compression_executors"):
         fabric_instance._compression_executors = {}
-    fabric_instance._compression_executors[agent_id] = executor
+    fabric_instance._compression_executors[ak] = executor
 
     # Log to compression_log.jsonl
-    _log_compression_event(fabric_instance, agent_id, event)
+    _log_compression_event(fabric_instance, agent_id, event, workspace_id)
 
+    return event
+
+
+def check_hard_cap(
+    fabric_instance,
+    agent_id: str,
+    step: int,
+    workspace_id: str = "default",
+) -> Optional[CompressionEvent]:
+    """Last-resort safety net: if memory count exceeds HARD_CAP, force-compress.
+
+    This runs AFTER try_compress and is independent of EventDetector triggers.
+    It's the absolute ceiling — should rarely fire if fallback triggers are healthy.
+    """
+    from .fabric import TormentFabric
+    ak = TormentFabric._agent_key(workspace_id, agent_id)
+
+    graph = fabric_instance.private_graphs.get(ak)
+    if graph is None:
+        return None
+
+    memory_count = len(graph.entities) if hasattr(graph, "entities") else 0
+    if memory_count <= COMPRESS_HARD_CAP:
+        return None
+
+    target = int(COMPRESS_HARD_CAP * COMPRESS_HARD_CAP_TARGET)
+    excess = memory_count - target
+    logger.warning(
+        "HARD CAP triggered: agent=%s ws=%s count=%d > cap=%d, compressing %d",
+        agent_id, workspace_id, memory_count, COMPRESS_HARD_CAP, excess,
+    )
+
+    deep_store = _get_or_create_deep_store(fabric_instance, agent_id, workspace_id)
+
+    # Score all nodes
+    nodes = []
+    for eid, ent in graph.entities.items():
+        payload = dict(ent.payload or {})
+        nodes.append({
+            "eid": int(eid),
+            "born_step": int(getattr(ent, "born_step", 0) or 0),
+            "payload": payload,
+        })
+
+    scorer = CompressionScorer(min_age_steps=0)  # override min_age for emergency
+    candidates = scorer.select_candidates(nodes, step)
+    candidates = candidates[:excess]
+
+    if not candidates:
+        return None
+
+    router = CompressionRouter()
+    router.route_all(candidates, step)
+
+    executor = CompressionExecutor(graph, deep_store)
+    event = executor.execute(candidates, step, "hard_cap")
+
+    _log_compression_event(fabric_instance, agent_id, event, workspace_id)
     return event
 
 
@@ -659,22 +866,27 @@ def try_compress(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _get_or_create_deep_store(fabric_instance, agent_id: str):
-    """Lazy-init deep memory store for an agent."""
+def _get_or_create_deep_store(fabric_instance, agent_id: str, workspace_id: str = "default"):
+    """Lazy-init deep memory store for an agent (workspace-scoped)."""
+    from .fabric import TormentFabric
+    ak = TormentFabric._agent_key(workspace_id, agent_id)
     if not hasattr(fabric_instance, "_deep_stores"):
         fabric_instance._deep_stores = {}
-    if agent_id not in fabric_instance._deep_stores:
+    if ak not in fabric_instance._deep_stores:
         from .deep_memory import DeepMemoryStore
-        base = Path(fabric_instance.data_dir) / "agents" / agent_id / "deep_memory"
-        fabric_instance._deep_stores[agent_id] = DeepMemoryStore(base)
-    return fabric_instance._deep_stores[agent_id]
+        base = Path(fabric_instance.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "deep_memory"
+        fabric_instance._deep_stores[ak] = DeepMemoryStore(base)
+    return fabric_instance._deep_stores[ak]
 
 
-def _find_motifs_path(fabric_instance, agent_id: str) -> Optional[str]:
-    """Locate motifs.json for an agent."""
+def _find_motifs_path(fabric_instance, agent_id: str, workspace_id: str = "default") -> Optional[str]:
+    """Locate motifs.json for an agent (workspace-scoped)."""
     data_dir = getattr(fabric_instance, "data_dir", "data")
-    # Check agent private dir
+    # Check workspace-scoped paths first, then legacy flat paths as fallback
     candidates = [
+        os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "private", "motifs.json"),
+        os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "motifs.json"),
+        # Legacy flat paths (for backward compatibility with pre-workspace layouts)
         os.path.join(data_dir, "agents", agent_id, "private", "motifs.json"),
         os.path.join(data_dir, "agents", agent_id, "motifs.json"),
     ]
@@ -684,11 +896,11 @@ def _find_motifs_path(fabric_instance, agent_id: str) -> Optional[str]:
     return None
 
 
-def _log_compression_event(fabric_instance, agent_id: str, event: CompressionEvent) -> None:
-    """Append compression event to agent's compression_log.jsonl."""
+def _log_compression_event(fabric_instance, agent_id: str, event: CompressionEvent, workspace_id: str = "default") -> None:
+    """Append compression event to agent's compression_log.jsonl (workspace-scoped)."""
     try:
         data_dir = getattr(fabric_instance, "data_dir", "data")
-        log_dir = os.path.join(data_dir, "agents", agent_id, "private")
+        log_dir = os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "compression_log.jsonl")
         with open(log_path, "a", encoding="utf-8") as f:

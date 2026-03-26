@@ -456,6 +456,18 @@ class Workspace:
         self.router = DomainRouter(self.motif_regs, embed_dim=int(self.embed_dim))
 
 class TormentFabric:
+
+    @staticmethod
+    def _agent_key(workspace_id: str, agent_id: str) -> str:
+        """Composite key for all per-agent in-memory dicts.
+
+        Ensures agent "atlas" in workspace "Entity" and agent "atlas" in
+        workspace "Entity3" never collide.  Every dict keyed by agent scope
+        (private_graphs, agent_states, _phase_timers, _deep_stores, etc.)
+        MUST use this helper — never bare ``agent_id``.
+        """
+        return f"{workspace_id}/{agent_id}"
+
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)
@@ -481,7 +493,7 @@ class TormentFabric:
         self._character_drift_every = int(os.environ.get("TORMENT_CHARACTER_DRIFT_CHECK_EVERY", "25"))
 
         self.workspaces: Dict[str, Workspace] = {}
-        self.agent_states: Dict[str, Any] = {}  # agent_id -> TriOcta ModelState (in-memory)
+        self.agent_states: Dict[str, Any] = {}  # _agent_key(ws, agent) -> TriOcta ModelState
 
         # SQLite sidecar index (Phase 4) — optional, non-blocking
         self._sqlite_enable = str(os.environ.get("TORMENT_SQLITE_INDEX_ENABLE", "1")).strip().lower() in ("1", "true", "yes", "on")
@@ -495,10 +507,10 @@ class TormentFabric:
         # Event-gated compression (Phase 6) — disabled by default
         self._compress_enable = str(os.environ.get("TORMENT_COMPRESS_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
         self._compress_min_step = int(os.environ.get("TORMENT_COMPRESS_MIN_STEP", "100"))
-        self._event_detectors: Dict[str, Any] = {}       # per agent
-        self._compression_executors: Dict[str, Any] = {}  # per agent
-        self._deep_stores: Dict[str, Any] = {}            # per agent
-        self._phase_timers: Dict[str, Any] = {}            # per agent
+        self._event_detectors: Dict[str, Any] = {}       # _agent_key -> detector
+        self._compression_executors: Dict[str, Any] = {}  # _agent_key -> executor
+        self._deep_stores: Dict[str, Any] = {}            # _agent_key -> store
+        self._phase_timers: Dict[str, Any] = {}            # _agent_key -> PhaseTimer
 
         # SRG living memory (opt-in) — disabled by default
         self._srg_enable = str(os.environ.get("TORMENT_SRG_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -509,7 +521,7 @@ class TormentFabric:
         self._proposal_bridges: Dict[str, Any] = {}  # workspace_id -> CollectiveProposalBridge (lazy init)
 
         # private memory stores per agent
-        self.private_graphs: Dict[str, MemoryGraph] = {}  # agent_id -> graph
+        self.private_graphs: Dict[str, MemoryGraph] = {}  # _agent_key(ws, agent) -> graph
 
         # workspace clone controls (v1.10.4)
         self._clone_mutex = threading.Lock()
@@ -1151,9 +1163,10 @@ class TormentFabric:
 
         if not motif_ids:
             return None
-        if agent_id not in self.private_graphs:
+        ak = self._agent_key(ws.workspace_id, agent_id)
+        if ak not in self.private_graphs:
             return None
-        g = self.private_graphs[agent_id]
+        g = self.private_graphs[ak]
         reg = ws.motif_regs.get(domain_id)
         if reg is None:
             return None
@@ -1319,9 +1332,10 @@ class TormentFabric:
         if conf < min_conf:
             return None
 
-        if agent_id not in self.private_graphs:
+        ak = self._agent_key(ws.workspace_id, agent_id)
+        if ak not in self.private_graphs:
             return None
-        g = self.private_graphs[agent_id]
+        g = self.private_graphs[ak]
 
         st = _load_affect_state(self.data_dir, ws.workspace_id, agent_id)
         last_tag = st.get("last_tag")
@@ -1408,9 +1422,10 @@ class TormentFabric:
         - Optionally soft-retire weak/old anchors.
         This is strictly a memory hygiene pass; it does not enforce persona.
         """
-        if agent_id not in self.private_graphs:
+        ak = self._agent_key(ws.workspace_id, agent_id)
+        if ak not in self.private_graphs:
             return
-        g = self.private_graphs[agent_id]
+        g = self.private_graphs[ak]
         try:
             keep_k = int(os.getenv("TORMENT_ANCHOR_KEEP_PER_MOTIF", "1"))
         except Exception:
@@ -1754,6 +1769,7 @@ class TormentFabric:
     
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
         ws = self.get_workspace(workspace_id)
+        ak = self._agent_key(workspace_id, agent_id)
         ident = self.ident_store.load(workspace_id, agent_id)
         if ident is None:
             ident = self.ident_store.create(workspace_id, agent_id, seed=seed or DEFAULT_AGENT_SEED)
@@ -1763,7 +1779,7 @@ class TormentFabric:
         except Exception:
             pass
         # init kernel state if needed — route character seed through oscillator physics
-        if agent_id not in self.agent_states:
+        if ak not in self.agent_states:
             char_mod = None
             if self._character_enable:
                 seed_text_val = str(ident.seed.get("seed_text", "") or "").strip()
@@ -1778,15 +1794,15 @@ class TormentFabric:
                     except Exception:
                         char_mod = None
             if char_mod:
-                self.agent_states[agent_id] = self.kernel.init_state(
+                self.agent_states[ak] = self.kernel.init_state(
                     seed_text=seed_text_val, character_modulation=char_mod)
             else:
-                self.agent_states[agent_id] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
+                self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
         # init private store
-        if agent_id not in self.private_graphs:
+        if ak not in self.private_graphs:
             pdir = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
             sq_idx = self._get_sqlite_index(workspace_id, agent_id)
-            self.private_graphs[agent_id] = MemoryGraph(
+            self.private_graphs[ak] = MemoryGraph(
                 data_dir=pdir, embedder=self.kernel.embedder, sqlite_index=sq_idx,
             )
 
@@ -1809,7 +1825,7 @@ class TormentFabric:
                         mreg = ws.motif_regs.get(dom)
                         if mreg is not None:
                             char_seed = plant_seed(
-                                graph=self.private_graphs[agent_id],
+                                graph=self.private_graphs[ak],
                                 motif_registry=mreg,
                                 coherence_field=None,
                                 embedder=self.kernel.embedder,
@@ -2005,7 +2021,7 @@ class TormentFabric:
         if echo_eid is not None:
             # Patch the stored memory with collective provenance + governance
             try:
-                graph = self.private_graphs.get(target_agent_id)
+                graph = self.private_graphs.get(self._agent_key(workspace_id, target_agent_id))
                 if graph:
                     ent = graph.entities.get(int(echo_eid))
                     if ent is not None:
@@ -2063,13 +2079,14 @@ class TormentFabric:
         # This prevents archive content from entering the identity pipeline.
         # =====================
         ws = self.get_workspace(workspace_id)
+        ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
         ws = self.get_workspace(workspace_id)
 
-        state = self.agent_states[agent_id]
+        state = self.agent_states[ak]
         # process kernel (text only used for gating signals)
         state, signals, debug = self.kernel.process(state, text)
-        self.agent_states[agent_id] = state
+        self.agent_states[ak] = state
 
         summary = supplied_summary or debug.get("summary") or (text.strip()[:240] + ("…" if len(text.strip()) > 240 else ""))
 
@@ -2078,10 +2095,10 @@ class TormentFabric:
 
         # Phase-cycle time tracking (per-agent)
         from .phase_timer import PhaseTimer as _PhaseTimer
-        _pt = self._phase_timers.get(agent_id)
+        _pt = self._phase_timers.get(ak)
         if _pt is None:
             _pt = _PhaseTimer()
-            self._phase_timers[agent_id] = _pt
+            self._phase_timers[ak] = _pt
         _pt_in_corr = bool(tri_mod.get("in_corridor", 0))
         _pt_stage = tri_mod.get("cycle_stage")
         if _pt_stage is not None:
@@ -2187,12 +2204,15 @@ class TormentFabric:
 
                     allow_write = random_chance(p)
         half_life_days: Optional[float] = None
-        
+        motif_ids: list = []
+        created_motif: Optional[str] = None
+        _reinforced_eid: Optional[int] = None
+
         # choose graph early so world can evolve even when we don't store
         if scope == "shared":
             graph = ws.shared_graphs[chosen_domain]
         else:
-            graph = self.private_graphs[agent_id]
+            graph = self.private_graphs[ak]
 
         if allow_write:
             # --- metastability -> half-life (A-only: memory mechanics) ---
@@ -2208,14 +2228,49 @@ class TormentFabric:
 
             half_life_days = max(1.0, float(signals.half_life) * decay_scale * hl_mult)
 
-            # --- Single-write path: spawn → enrich → flush ---
-            # spawn_memory creates entity + embedding in RAM but does NOT
-            # write to nodes.jsonl yet.  We enrich the payload with motif,
-            # symbol, and resonance data, then flush_node writes one
-            # complete record.  This replaces the old add_memory +
-            # update_payload pattern that wrote 2 (or 3) records per memory.
+            # --- Duplicate suppression: reinforce existing instead of creating new ---
+            # Same-agent only, strict threshold, recent-window search.
+            _reinforce_sim_threshold = float(os.getenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0.92"))
+            _reinforced_eid: Optional[int] = None
+            if scope == "private" and _reinforce_sim_threshold > 0:
+                try:
+                    _recent_hits = graph.search_by_embedding(
+                        np.asarray(emb, dtype=np.float32),
+                        top_k=3,
+                        user_id=agent_id,
+                    )
+                    for _rh in _recent_hits:
+                        if float(_rh.get("raw_score", _rh.get("score", 0))) >= _reinforce_sim_threshold:
+                            _existing_eid = int(_rh["eid"])
+                            _existing_ent = graph.entities.get(_existing_eid)
+                            if _existing_ent is not None:
+                                _old_str = float((_existing_ent.payload or {}).get("strength", 0.5))
+                                # Asymptotic reinforcement: diminishing returns, cap at 0.98
+                                _new_str = min(0.98, _old_str + (1.0 - _old_str) * 0.3)
+                                graph.update_payload(_existing_eid, {
+                                    "strength": round(_new_str, 4),
+                                    "last_reinforced": int(step),
+                                    "last_reinforced_ts": _now_ts(),
+                                    "reinforce_count": int((_existing_ent.payload or {}).get("reinforce_count", 0)) + 1,
+                                })
+                                _reinforced_eid = _existing_eid
+                                break
+                except Exception:
+                    pass  # on any error, fall through to normal creation
 
-            eid = graph.spawn_memory(
+            if _reinforced_eid is not None:
+                stored = True
+                eid = _reinforced_eid
+                # Skip spawn — we reinforced an existing memory
+            else:
+                # --- Single-write path: spawn → enrich → flush ---
+                # spawn_memory creates entity + embedding in RAM but does NOT
+                # write to nodes.jsonl yet.  We enrich the payload with motif,
+                # symbol, and resonance data, then flush_node writes one
+                # complete record.  This replaces the old add_memory +
+                # update_payload pattern that wrote 2 (or 3) records per memory.
+
+                eid = graph.spawn_memory(
                 summary=summary,
                 embedding=emb,
                 mtype=signals.memory_type,
@@ -2255,295 +2310,333 @@ class TormentFabric:
                     # SRG dual-field state (None when flag is off — filtered below)
                     "srg": _srg_dict,
                 },
-            )
-            stored = True
-
-            _mark_embed_audit_dirty(self.data_dir, workspace_id)
-
-            reg = ws.motif_regs[chosen_domain]
-            motif_ids, created_motif = reg.attach_or_create(
-                emb,
-                memory_eid=int(eid),
-                agent_id=agent_id,
-                summary=summary,
-                attach_threshold=float(0.62 + 0.2 * ident.overlay.get("motif_sensitivity", 0.7)),
-            )
-
-            sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
-            prev_symbol = str(sym_state.get("last_symbol", "") or "")
-            prev_trace = list(sym_state.get("symbol_trace", []) or [])
-            primary_prev_motif_id = str(sym_state.get("last_motif_id", "") or "")
-            prev_tension = float(sym_state.get("last_tension", 0.0) or 0.0)
-
-            # hidden symbolic watermark — geometric projection from coherence field
-            sym = {
-                "state_symbol": None,
-                "symbol_confidence": None,
-                "symbol_reason": None,
-            }
-            current_tension = 0.0
-
-            try:
-                # Build motif rows for the whole chosen domain
-                motif_rows = []
-                for mid, mm in reg.motifs.items():
-                    motif_rows.append({
-                        "motif_id": mid,
-                        "label": getattr(mm, "label", mid),
-                        "centroid": list(getattr(mm, "centroid", []) or []),
-                        "strength": float(getattr(mm, "strength", 0.0) or 0.0),
-                        "stability_score": float(getattr(mm, "stability_score", 0.0) or 0.0),
-                        "members": list(getattr(mm, "members", []) or []),
-                        "radius": float(reg._motif_radius(mm)) if hasattr(reg, "_motif_radius") else 0.0,
-                    })
-
-                field_rows = compute_coherence_field(motif_rows)
-                field_by_id = {row["motif_id"]: row for row in field_rows}
-
-                primary_motif_id = created_motif or (motif_ids[0] if motif_ids else None)
-                field_state = field_by_id.get(primary_motif_id or "", {})
-
-                current_tension = float(field_state.get("tension", 0.0) or 0.0)
-                tension_delta = current_tension - prev_tension
-
-                sym = assign_symbol_state(
-                    motif_role=str(field_state.get("role", "") or ""),
-                    phi=float(field_state.get("phi", 0.0) or 0.0),
-                    tension=current_tension,
-                    kappa=float(field_state.get("kappa", 0.0) or 0.0),
-                    coherence_delta=float(signals.stability_delta),
-                    tension_delta=tension_delta,
-                    previous_symbol=prev_symbol,
-                    repeated_same_motif=bool(primary_motif_id and str(primary_motif_id) == primary_prev_motif_id),
-                    is_new_motif=bool(created_motif is not None),
-                    symbol_trace=prev_trace,
                 )
-            except Exception:
-                pass
+                stored = True
 
-            # Enrich the entity payload with symbol + resonance data IN-MEMORY
-            # (no nodes.jsonl write yet — flush_node below handles that)
-            try:
-                if eid is not None:
-                    new_symbol = sym.get("state_symbol")
-                    new_trace = append_symbol(prev_trace, new_symbol) if new_symbol else prev_trace
-                    res = summarize_resonance(new_trace, prev_trace=prev_trace)
+                _mark_embed_audit_dirty(self.data_dir, workspace_id)
 
-                    sym_state["last_symbol"] = str(new_symbol or "")
-                    sym_state["last_motif_id"] = str(primary_motif_id or "")
-                    sym_state["last_tension"] = float(current_tension)
-                    sym_state["symbol_trace"] = list(new_trace[-12:])
-                    _save_symbol_state(self.data_dir, workspace_id, agent_id, sym_state)
+                reg = ws.motif_regs[chosen_domain]
+                motif_ids, created_motif = reg.attach_or_create(
+                    emb,
+                    memory_eid=int(eid),
+                    agent_id=agent_id,
+                    summary=summary,
+                    attach_threshold=float(0.62 + 0.2 * ident.overlay.get("motif_sensitivity", 0.7)),
+                )
 
-                    # Enrich payload in-memory (entity is already in graph.entities)
-                    ent = graph.entities.get(int(eid))
-                    if ent is not None:
-                        ent.payload.update({
-                            "state_symbol": sym.get("state_symbol"),
-                            "symbol_confidence": sym.get("symbol_confidence"),
-                            "symbol_reason": sym.get("symbol_reason"),
-                            "symbol_trace": list(res.get("symbol_trace", []) or []),
-                            "resonance_score": float(res.get("resonance_score", 0.0) or 0.0),
-                            "transition_entropy": float(res.get("transition_entropy", 0.0) or 0.0),
-                            "loop_type": str(res.get("loop_type", "mixed") or "mixed"),
-                            "phase_shift": bool(res.get("phase_shift", False)),
-                            "dominant_transition": res.get("dominant_transition"),
-                            "cycles": res.get("cycles", []),
-                        })
-            except Exception:
-                pass
+                sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
+                prev_symbol = str(sym_state.get("last_symbol", "") or "")
+                prev_trace = list(sym_state.get("symbol_trace", []) or [])
+                primary_prev_motif_id = str(sym_state.get("last_motif_id", "") or "")
+                prev_tension = float(sym_state.get("last_tension", 0.0) or 0.0)
 
-            # --- Single flush: write the complete, enriched record once ---
-            try:
-                graph.flush_node(int(eid))
-            except Exception:
-                pass
+                # hidden symbolic watermark — geometric projection from coherence field
+                sym = {
+                    "state_symbol": None,
+                    "symbol_confidence": None,
+                    "symbol_reason": None,
+                }
+                current_tension = 0.0
 
-            # --- SRG collision detection (Phase 3) ---
-            if self._srg_enable and _srg_dict and eid is not None:
                 try:
-                    from .srg_engine import SRGMemoryState, collision as srg_collision, evolve_breathing
-                    from .embedding_store import load_embedding as _load_emb_srg
-                    # Find closest existing memory by embedding similarity
-                    _new_emb_norm = emb / (np.linalg.norm(emb) + 1e-12)
-                    _best_sim = 0.0
-                    _best_eid = None
-                    for _oid, _oent in graph.entities.items():
-                        if int(_oid) == int(eid):
-                            continue
-                        _opay = getattr(_oent, "payload", {}) or {}
-                        if not _opay.get("srg"):
-                            continue
-                        _raw = _load_emb_srg(
-                            _oid, _opay, graph._shard_reader, graph.data_dir
-                        )
-                        if _raw is None:
-                            continue
-                        _ov = np.asarray(_raw, dtype=np.float32).reshape(-1)
-                        _on = float(np.linalg.norm(_ov))
-                        if _on < 1e-12:
-                            continue
-                        _sim = float(np.dot(_new_emb_norm, _ov / _on))
-                        if _sim > _best_sim:
-                            _best_sim = _sim
-                            _best_eid = int(_oid)
+                    # Build motif rows for the whole chosen domain
+                    motif_rows = []
+                    for mid, mm in reg.motifs.items():
+                        motif_rows.append({
+                            "motif_id": mid,
+                            "label": getattr(mm, "label", mid),
+                            "centroid": list(getattr(mm, "centroid", []) or []),
+                            "strength": float(getattr(mm, "strength", 0.0) or 0.0),
+                            "stability_score": float(getattr(mm, "stability_score", 0.0) or 0.0),
+                            "members": list(getattr(mm, "members", []) or []),
+                            "radius": float(reg._motif_radius(mm)) if hasattr(reg, "_motif_radius") else 0.0,
+                        })
 
-                    if _best_eid is not None and _best_sim >= 0.75:
-                        _exist_ent = graph.entities.get(_best_eid)
-                        if _exist_ent is not None:
-                            _exist_srg = SRGMemoryState.from_dict(
-                                (_exist_ent.payload or {}).get("srg", {})
-                            )
-                            _new_srg = SRGMemoryState.from_dict(_srg_dict)
-                            _col_report = srg_collision(
-                                _exist_srg, _new_srg, _best_sim, int(step)
-                            )
-                            if _col_report.get("collision"):
-                                # Write back updated states
-                                _exist_ent.payload["srg"] = _exist_srg.to_dict()
-                                _my_ent = graph.entities.get(int(eid))
-                                if _my_ent is not None:
-                                    _my_ent.payload["srg"] = _new_srg.to_dict()
-                                    _my_ent.payload["srg_collision"] = _col_report
+                    field_rows = compute_coherence_field(motif_rows)
+                    field_by_id = {row["motif_id"]: row for row in field_rows}
+
+                    primary_motif_id = created_motif or (motif_ids[0] if motif_ids else None)
+                    field_state = field_by_id.get(primary_motif_id or "", {})
+
+                    current_tension = float(field_state.get("tension", 0.0) or 0.0)
+                    tension_delta = current_tension - prev_tension
+
+                    sym = assign_symbol_state(
+                        motif_role=str(field_state.get("role", "") or ""),
+                        phi=float(field_state.get("phi", 0.0) or 0.0),
+                        tension=current_tension,
+                        kappa=float(field_state.get("kappa", 0.0) or 0.0),
+                        coherence_delta=float(signals.stability_delta),
+                        tension_delta=tension_delta,
+                        previous_symbol=prev_symbol,
+                        repeated_same_motif=bool(primary_motif_id and str(primary_motif_id) == primary_prev_motif_id),
+                        is_new_motif=bool(created_motif is not None),
+                        symbol_trace=prev_trace,
+                    )
                 except Exception:
                     pass
 
-            # --- Hivemind: emit ResonancePacket into collective field ---
-            if self._hivemind_enable and stored and eid is not None:
+                # Enrich the entity payload with symbol + resonance data IN-MEMORY
+                # (no nodes.jsonl write yet — flush_node below handles that)
                 try:
-                    from .collective_models import ResonancePacket
-                    from .governance import should_emit_packet as _gov_should_emit
+                    if eid is not None:
+                        new_symbol = sym.get("state_symbol")
+                        new_trace = append_symbol(prev_trace, new_symbol) if new_symbol else prev_trace
+                        res = summarize_resonance(new_trace, prev_trace=prev_trace)
 
-                    # Gate 1: governance — non_shareable / export_blocked memories never emit
-                    # Check at emission time (earliest boundary), not at convergence time.
-                    _hm_emit_ok = True
+                        sym_state["last_symbol"] = str(new_symbol or "")
+                        sym_state["last_motif_id"] = str(primary_motif_id or "")
+                        sym_state["last_tension"] = float(current_tension)
+                        sym_state["symbol_trace"] = list(new_trace[-12:])
+                        _save_symbol_state(self.data_dir, workspace_id, agent_id, sym_state)
+
+                        # Enrich payload in-memory (entity is already in graph.entities)
+                        ent = graph.entities.get(int(eid))
+                        if ent is not None:
+                            ent.payload.update({
+                                "state_symbol": sym.get("state_symbol"),
+                                "symbol_confidence": sym.get("symbol_confidence"),
+                                "symbol_reason": sym.get("symbol_reason"),
+                                "symbol_trace": list(res.get("symbol_trace", []) or []),
+                                "resonance_score": float(res.get("resonance_score", 0.0) or 0.0),
+                                "transition_entropy": float(res.get("transition_entropy", 0.0) or 0.0),
+                                "loop_type": str(res.get("loop_type", "mixed") or "mixed"),
+                                "phase_shift": bool(res.get("phase_shift", False)),
+                                "dominant_transition": res.get("dominant_transition"),
+                                "cycles": res.get("cycles", []),
+                            })
+                except Exception:
+                    pass
+
+                # --- Single flush: write the complete, enriched record once ---
+                try:
+                    graph.flush_node(int(eid))
+                except Exception:
+                    pass
+
+                # --- SRG collision detection (Phase 3) ---
+                if self._srg_enable and _srg_dict and eid is not None:
                     try:
-                        _hm_ent_gov = graph.entities.get(int(eid))
-                        if _hm_ent_gov is not None:
-                            _hm_emit_ok = _gov_should_emit(_hm_ent_gov.payload)
-                            # Gate 1b: collective-provenance memories never emit packets
-                            # (terminal echo invariant — echoes don't echo)
-                            if str((_hm_ent_gov.payload or {}).get("provenance", "")) == "collective":
-                                _hm_emit_ok = False
+                        from .srg_engine import SRGMemoryState, collision as srg_collision, evolve_breathing
+                        from .embedding_store import load_embedding as _load_emb_srg
+                        # Find closest existing memory by embedding similarity
+                        _new_emb_norm = emb / (np.linalg.norm(emb) + 1e-12)
+                        _best_sim = 0.0
+                        _best_eid = None
+                        for _oid, _oent in graph.entities.items():
+                            if int(_oid) == int(eid):
+                                continue
+                            _opay = getattr(_oent, "payload", {}) or {}
+                            if not _opay.get("srg"):
+                                continue
+                            _raw = _load_emb_srg(
+                                _oid, _opay, graph._shard_reader, graph.data_dir
+                            )
+                            if _raw is None:
+                                continue
+                            _ov = np.asarray(_raw, dtype=np.float32).reshape(-1)
+                            _on = float(np.linalg.norm(_ov))
+                            if _on < 1e-12:
+                                continue
+                            _sim = float(np.dot(_new_emb_norm, _ov / _on))
+                            if _sim > _best_sim:
+                                _best_sim = _sim
+                                _best_eid = int(_oid)
+
+                        if _best_eid is not None and _best_sim >= 0.75:
+                            _exist_ent = graph.entities.get(_best_eid)
+                            if _exist_ent is not None:
+                                _exist_srg = SRGMemoryState.from_dict(
+                                    (_exist_ent.payload or {}).get("srg", {})
+                                )
+                                _new_srg = SRGMemoryState.from_dict(_srg_dict)
+                                _col_report = srg_collision(
+                                    _exist_srg, _new_srg, _best_sim, int(step)
+                                )
+                                if _col_report.get("collision"):
+                                    # Write back updated states
+                                    _exist_ent.payload["srg"] = _exist_srg.to_dict()
+                                    _my_ent = graph.entities.get(int(eid))
+                                    if _my_ent is not None:
+                                        _my_ent.payload["srg"] = _new_srg.to_dict()
+                                        _my_ent.payload["srg_collision"] = _col_report
                     except Exception:
                         pass
 
-                    # Gate 2: coherence minimum threshold
-                    _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
+                # --- Hivemind: emit ResonancePacket into collective field ---
+                # === TEMPORARY PACKET DEBUG (print to stdout — remove after diagnosis) ===
+                import sys as _hm_sys
+                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}", flush=True)
+                _hm_sys.stdout.flush()
+                if self._hivemind_enable and stored and eid is not None:
+                    try:
+                        from .collective_models import ResonancePacket
+                        from .governance import should_emit_packet as _gov_should_emit
 
-                    if _hm_emit_ok and _hm_coherence >= 0.15:
-                        _hm_emb_hash = ""
+                        # Gate 1: governance — non_shareable / export_blocked memories never emit
+                        # Check at emission time (earliest boundary), not at convergence time.
+                        _hm_emit_ok = True
+                        _hm_skip_reason = None
                         try:
-                            import hashlib
-                            _hm_emb_hash = hashlib.md5(emb.tobytes()).hexdigest()[:12]
-                        except Exception:
-                            pass
+                            _hm_ent_gov = graph.entities.get(int(eid))
+                            if _hm_ent_gov is not None:
+                                _hm_emit_ok = _gov_should_emit(_hm_ent_gov.payload)
+                                if not _hm_emit_ok:
+                                    _hm_skip_reason = "governance: non_shareable or export_blocked"
+                                # Gate 1b: collective-provenance memories never emit packets
+                                # (terminal echo invariant — echoes don't echo)
+                                if str((_hm_ent_gov.payload or {}).get("provenance", "")) == "collective":
+                                    _hm_emit_ok = False
+                                    _hm_skip_reason = "governance: collective provenance (echo invariant)"
+                        except Exception as _gov_exc:
+                            print(f"[PACKET-GATE] governance check exception: {_gov_exc}", flush=True)
 
-                        # Safely extract resonance data (may not exist if sym enrichment failed)
-                        _hm_res_score = None
-                        _hm_loop_type = None
-                        try:
-                            _hm_ent = graph.entities.get(int(eid))
-                            if _hm_ent and _hm_ent.payload:
-                                _hm_res_score = _hm_ent.payload.get("resonance_score")
-                                _hm_loop_type = _hm_ent.payload.get("loop_type")
-                        except Exception:
-                            pass
+                        # Gate 2: coherence minimum threshold
+                        # Restored to 0.15 after DISP_SCALE recalibration (7e-4 → 0.10)
+                        # and distributed Omega extraction fix.
+                        _HM_COH_THRESHOLD = 0.15
+                        _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
 
-                        # Drift info (may not exist yet)
-                        _hm_drift = None
-                        _hm_drift_dir = None
-                        _hm_seed_id = None
-                        try:
-                            _hm_cstate = self.character_store.load_state(workspace_id, agent_id)
-                            if _hm_cstate:
-                                _hm_drift = _hm_cstate.drift_score
-                                _hm_drift_dir = _hm_cstate.drift_direction
-                                _hm_seed_id = _hm_cstate.seed_id
-                        except Exception:
-                            pass
+                        print(f"[PACKET-GATE] gate1_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f} (threshold={_HM_COH_THRESHOLD}), skip_reason={_hm_skip_reason}", flush=True)
 
-                        # SRG fields
-                        _hm_srg_band = None
-                        _hm_srg_hb = None
-                        _hm_srg_crystal = False
-                        if _srg_dict and isinstance(_srg_dict, dict):
-                            _hm_srg_band = _srg_dict.get("R_band")
-                            _hm_srg_hb = _srg_dict.get("heartbeat_class")
-                            _hm_srg_crystal = bool(_srg_dict.get("is_crystal", False))
-
-                        _hm_packet = ResonancePacket(
-                            workspace_id=workspace_id,
-                            agent_id=agent_id,
-                            domain_id=chosen_domain,
-                            source_eid=int(eid),
-                            summary=str(summary),
-                            embedding_hash=_hm_emb_hash,
-                            cycle_stage=str(tri_mod.get("cycle_stage", "")),
-                            identity_state=str(tri_mod.get("identity_state", "")),
-                            coherence=_hm_coherence,
-                            stability_delta=float(signals.stability_delta),
-                            corridor_angle_deg=_pt_durations.get("corridor_angle_deg") if _pt_durations else None,
-                            corridor_duration_steps=int(_pt_durations.get("corridor_duration_steps", 0)) if _pt_durations else None,
-                            phase_duration_steps=int(_pt_durations.get("phase_duration_steps", 0)) if _pt_durations else None,
-                            motifs=list(motif_ids),
-                            created_motif=created_motif,
-                            state_symbol=sym.get("state_symbol"),
-                            resonance_score=float(_hm_res_score) if _hm_res_score is not None else None,
-                            loop_type=str(_hm_loop_type) if _hm_loop_type else None,
-                            drift_score=float(_hm_drift) if _hm_drift is not None else None,
-                            drift_direction=str(_hm_drift_dir) if _hm_drift_dir else None,
-                            seed_id=str(_hm_seed_id) if _hm_seed_id else None,
-                            srg_band=_hm_srg_band,
-                            srg_heartbeat_class=_hm_srg_hb,
-                            srg_is_crystal=_hm_srg_crystal,
-                        )
-                        _hm_field = self._get_collective_field(workspace_id)
-                        _hm_conv_event = _hm_field.append_packet(_hm_packet, embedding=emb)
-
-                        # Phase D4: Light proposal bridge
-                        # If convergence was detected, feed it to the proposal bridge.
-                        # Proposals are auto-drafted (pending), never auto-approved.
-                        if _hm_conv_event is not None:
+                        if _hm_emit_ok and _hm_coherence >= _HM_COH_THRESHOLD:
+                            _hm_emb_hash = ""
                             try:
-                                _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
-                                _hm_prop_reg = ws.proposals.get(chosen_domain)
-                                _hm_prop_bridge.maybe_draft_proposal(
-                                    event=_hm_conv_event.to_dict(),
-                                    proposal_registry=_hm_prop_reg,
-                                    embedding=emb,
-                                )
+                                import hashlib
+                                _hm_emb_hash = hashlib.md5(emb.tobytes()).hexdigest()[:12]
                             except Exception:
-                                pass  # Proposal bridge is optional
+                                pass
+
+                            # Safely extract resonance data (may not exist if sym enrichment failed)
+                            _hm_res_score = None
+                            _hm_loop_type = None
+                            try:
+                                _hm_ent = graph.entities.get(int(eid))
+                                if _hm_ent and _hm_ent.payload:
+                                    _hm_res_score = _hm_ent.payload.get("resonance_score")
+                                    _hm_loop_type = _hm_ent.payload.get("loop_type")
+                            except Exception:
+                                pass
+
+                            # Drift info (may not exist yet)
+                            _hm_drift = None
+                            _hm_drift_dir = None
+                            _hm_seed_id = None
+                            try:
+                                _hm_cstate = self.character_store.load_state(workspace_id, agent_id)
+                                if _hm_cstate:
+                                    _hm_drift = _hm_cstate.drift_score
+                                    _hm_drift_dir = _hm_cstate.drift_direction
+                                    _hm_seed_id = _hm_cstate.seed_id
+                            except Exception:
+                                pass
+
+                            # SRG fields
+                            _hm_srg_band = None
+                            _hm_srg_hb = None
+                            _hm_srg_crystal = False
+                            if _srg_dict and isinstance(_srg_dict, dict):
+                                _hm_srg_band = _srg_dict.get("R_band")
+                                _hm_srg_hb = _srg_dict.get("heartbeat_class")
+                                _hm_srg_crystal = bool(_srg_dict.get("is_crystal", False))
+
+                            _hm_packet = ResonancePacket(
+                                workspace_id=workspace_id,
+                                agent_id=agent_id,
+                                domain_id=chosen_domain,
+                                source_eid=int(eid),
+                                summary=str(summary),
+                                embedding_hash=_hm_emb_hash,
+                                cycle_stage=str(tri_mod.get("cycle_stage", "")),
+                                identity_state=str(tri_mod.get("identity_state", "")),
+                                coherence=_hm_coherence,
+                                stability_delta=float(signals.stability_delta),
+                                corridor_angle_deg=_pt_durations.get("corridor_angle_deg") if _pt_durations else None,
+                                corridor_duration_steps=int(_pt_durations.get("corridor_duration_steps", 0)) if _pt_durations else None,
+                                phase_duration_steps=int(_pt_durations.get("phase_duration_steps", 0)) if _pt_durations else None,
+                                motifs=list(motif_ids),
+                                created_motif=created_motif,
+                                state_symbol=sym.get("state_symbol"),
+                                resonance_score=float(_hm_res_score) if _hm_res_score is not None else None,
+                                loop_type=str(_hm_loop_type) if _hm_loop_type else None,
+                                drift_score=float(_hm_drift) if _hm_drift is not None else None,
+                                drift_direction=str(_hm_drift_dir) if _hm_drift_dir else None,
+                                seed_id=str(_hm_seed_id) if _hm_seed_id else None,
+                                srg_band=_hm_srg_band,
+                                srg_heartbeat_class=_hm_srg_hb,
+                                srg_is_crystal=_hm_srg_crystal,
+                            )
+                            _hm_field = self._get_collective_field(workspace_id)
+                            _hm_conv_event = _hm_field.append_packet(_hm_packet, embedding=emb)
+
+                            print(
+                                f"[PACKET-EMIT] packet BUILT and appended: agent={agent_id}, domain={chosen_domain}, "
+                                f"coherence={_hm_coherence:.3f}, eid={eid}, convergence_event={_hm_conv_event is not None}",
+                                flush=True,
+                            )
+
+                            # Phase D4: Light proposal bridge
+                            # If convergence was detected, feed it to the proposal bridge.
+                            # Proposals are auto-drafted (pending), never auto-approved.
+                            if _hm_conv_event is not None:
+                                print(f"[PACKET-CONVERGE] convergence event detected! {_hm_conv_event}", flush=True)
+                                try:
+                                    _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
+                                    _hm_prop_reg = ws.proposals.get(chosen_domain)
+                                    _hm_prop_bridge.maybe_draft_proposal(
+                                        event=_hm_conv_event.to_dict(),
+                                        proposal_registry=_hm_prop_reg,
+                                        embedding=emb,
+                                    )
+                                except Exception:
+                                    pass  # Proposal bridge is optional
+                        else:
+                            print(
+                                f"[PACKET-SKIP] packet NOT built: emit_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f}, "
+                                f"reason={_hm_skip_reason if not _hm_emit_ok else 'coherence_below_0.15'}",
+                                flush=True,
+                            )
+                    except Exception as _hm_exc:
+                        import traceback
+                        print(f"[PACKET-ERROR] exception in packet emission: {_hm_exc}", flush=True)
+                        traceback.print_exc()
+                else:
+                    # Outer gate failed — print which condition was False
+                    _hm_reasons = []
+                    if not self._hivemind_enable:
+                        _hm_reasons.append("hivemind_enable=False (set TORMENT_HIVEMIND_ENABLE=1)")
+                    if not stored:
+                        _hm_reasons.append("stored=False")
+                    if eid is None:
+                        _hm_reasons.append("eid=None")
+                    print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", flush=True)
+
+                pol = ws.domain_policies.get(chosen_domain, {})
+                try:
+                    reg.update_entropy_and_suggest(
+                        target_n=int(pol.get("motif_entropy_target_n", 24)),
+                        entropy_high=float(pol.get("motif_entropy_high", 0.72)),
+                        sim_threshold=float(pol.get("motif_merge_similarity", 0.93)),
+                        max_suggestions=int(pol.get("motif_merge_max_suggestions", 20)),
+                        auto_merge=bool(pol.get("auto_merge_motifs", False)),
+                        auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
+                    )
                 except Exception:
-                    pass  # Hivemind is optional — never blocks ingest
+                    pass
 
-            pol = ws.domain_policies.get(chosen_domain, {})
-            try:
-                reg.update_entropy_and_suggest(
-                    target_n=int(pol.get("motif_entropy_target_n", 24)),
-                    entropy_high=float(pol.get("motif_entropy_high", 0.72)),
-                    sim_threshold=float(pol.get("motif_merge_similarity", 0.93)),
-                    max_suggestions=int(pol.get("motif_merge_max_suggestions", 20)),
-                    auto_merge=bool(pol.get("auto_merge_motifs", False)),
-                    auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
-                )
-            except Exception:
-                pass
-
-            # optional B-layers (safe to keep wrapped)
-            try:
-                _ = self._maybe_emit_identity_anchor(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), motif_ids=list(motif_ids))
-            except Exception:
-                pass
-            try:
-                self._refine_identity_anchors(ws, agent_id=agent_id, domain_id=chosen_domain, motif_ids=list(motif_ids))
-            except Exception:
-                pass
-            try:
-                self._maybe_emit_mood_drift(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), affect_tag=affect_tag, affect_conf=affect_conf)
-            except Exception:
-                pass
+                # optional B-layers (safe to keep wrapped)
+                try:
+                    _ = self._maybe_emit_identity_anchor(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), motif_ids=list(motif_ids))
+                except Exception:
+                    pass
+                try:
+                    self._refine_identity_anchors(ws, agent_id=agent_id, domain_id=chosen_domain, motif_ids=list(motif_ids))
+                except Exception:
+                    pass
+                try:
+                    self._maybe_emit_mood_drift(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), affect_tag=affect_tag, affect_conf=affect_conf)
+                except Exception:
+                    pass
 
         # world evolves continuously (non-finite seeds), even if no memory stored this tick
         try:
@@ -2648,12 +2741,20 @@ class TormentFabric:
         # --- Event-gated compression (Phase 6) — non-blocking ---
         if self._compress_enable and int(step) >= self._compress_min_step:
             try:
-                from .compression import try_compress
-                _comp_event = try_compress(self, agent_id, tri_mod, int(step))
+                from .compression import try_compress, check_hard_cap
+                _comp_event = try_compress(self, agent_id, tri_mod, int(step), workspace_id=workspace_id)
                 if _comp_event and (_comp_event.compressed + _comp_event.exported_deep) > 0:
                     logging.getLogger("torment.compression").info(
-                        "compression at step %s: %d compressed, %d exported deep",
+                        "compression at step %s: %d compressed, %d exported deep (trigger=%s)",
                         step, _comp_event.compressed, _comp_event.exported_deep,
+                        _comp_event.trigger,
+                    )
+                # Hard cap safety net — fires independently of event triggers
+                _hc_event = check_hard_cap(self, agent_id, int(step), workspace_id=workspace_id)
+                if _hc_event and (_hc_event.compressed + _hc_event.exported_deep) > 0:
+                    logging.getLogger("torment.compression").warning(
+                        "HARD CAP compression at step %s: %d compressed, %d exported deep",
+                        step, _hc_event.compressed, _hc_event.exported_deep,
                     )
             except Exception:
                 pass  # Compression failure is always non-fatal
@@ -2700,6 +2801,7 @@ class TormentFabric:
 
         return {
             "stored": stored,
+            "reinforced": bool(_reinforced_eid is not None),
             "proposal_id": proposal_id,
             "eid": eid,
             "domain_ranked": [{"id": d.domain_id, "score": d.score} for d in dom_scores],
@@ -2732,6 +2834,7 @@ class TormentFabric:
         continuity_debug: bool = False,
     ) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)
+        ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
 
         qemb = self.kernel.embedder.embed(query_text)
@@ -2747,7 +2850,7 @@ class TormentFabric:
             domains = domains[:2]
 
         # candidate hits from private store + each domain shared
-        private_hits = self.private_graphs[agent_id].search(query_text, top_k=top_k, user_id=agent_id)
+        private_hits = self.private_graphs[ak].search(query_text, top_k=top_k, user_id=agent_id)
         shared_hits: List[Dict[str, Any]] = []
         for d in domains:
             shared_hits.extend(ws.shared_graphs[d].search(query_text, top_k=top_k, user_id=None))
@@ -2790,7 +2893,7 @@ class TormentFabric:
             try:
                 from .spirit_return import enrich_deep_memory_hit, WarmupTracker, inject_spirit_return_into_hit
 
-                _deep_store = self._deep_stores.get(agent_id)
+                _deep_store = self._deep_stores.get(ak)
                 if _deep_store:
                     _deep_qv = np.asarray(qemb, dtype=np.float32).reshape(-1)
                     _deep_hits = _deep_store.query(
@@ -2808,7 +2911,7 @@ class TormentFabric:
 
                     # Check which deep EIDs also exist in core (short-path compressed)
                     _core_compressed: set = set()
-                    _pg = self.private_graphs.get(agent_id)
+                    _pg = self.private_graphs.get(ak)
                     if _pg:
                         for _eid_key, _ent in _pg.entities.items():
                             if (_ent.payload or {}).get("compressed"):
@@ -3166,7 +3269,7 @@ class TormentFabric:
                         if _hit_eid is not None:
                             # Try private graph first, then each domain's shared graph
                             _hit_ent = None
-                            _pg = self.private_graphs.get(agent_id)
+                            _pg = self.private_graphs.get(ak)
                             if _pg is not None:
                                 _hit_ent = _pg.entities.get(int(_hit_eid))
                             if _hit_ent is None:
@@ -3308,7 +3411,7 @@ class TormentFabric:
                                 "relational_count": _cstate.relational_count,
                             }
                         _char_ctx = assemble_character_context(
-                            graph=self.private_graphs.get(agent_id),
+                            graph=self.private_graphs.get(ak),
                             seed=_cseed,
                             agent_id=agent_id,
                             hits=rescored,
@@ -3476,6 +3579,7 @@ class TormentFabric:
         max_to_process: int = 200,
         sim_threshold: float = 0.90,
         min_distinct_agents: int = 0,
+        step: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Process pending share proposals for a domain.
@@ -3554,7 +3658,7 @@ class TormentFabric:
                     links=[],
                     canon=True,
                     user_id="collective",
-                    step=int(time.time()),
+                    step=step if step is not None else int(time.time()),
                     extra_payload={
                         "workspace_id": workspace_id,
                         "domain_id": domain_id,
@@ -3862,6 +3966,7 @@ class TormentFabric:
     def trace(self, workspace_id: str, agent_id: str, query_text: str, eids: List[int], domain_id: Optional[str] = None) -> Dict[str, Any]:
         """Explain why specific memories scored the way they did for a query."""
         ws = self.get_workspace(workspace_id)
+        ak = self._agent_key(workspace_id, agent_id)
         self.create_agent(workspace_id, agent_id)
         qemb = self.kernel.embedder.embed(query_text)
         dom_scores = ws.router.rank_domains(qemb, top_k=2)
@@ -3928,7 +4033,7 @@ class TormentFabric:
         # gather hits by looking up in graphs
         out = []
         # private
-        priv = self.private_graphs.get(agent_id)
+        priv = self.private_graphs.get(ak)
         if priv:
             for eid in eids:
                 ent = priv.entities.get(int(eid))
@@ -3971,7 +4076,8 @@ class TormentFabric:
         if scope == 'private':
             if not agent_id:
                 raise ValueError('agent_id required for private scope')
-            g = self.private_graphs.get(agent_id)
+            ak = self._agent_key(workspace_id, agent_id)
+            g = self.private_graphs.get(ak)
             if g is None:
                 return {"workspace_id": workspace_id, "eid": int(eid), "events": []}
             path = g.events_path

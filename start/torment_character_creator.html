@@ -744,6 +744,57 @@
 
   .btn-export:active { transform: scale(0.98); }
 
+  .btn-reset {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    padding: 11px 32px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn-reset:hover { border-color: var(--red); color: var(--red); }
+
+  .actions-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* STATUS BAR */
+  .status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--bg3);
+    border-top: 1px solid var(--border);
+    padding: 8px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    z-index: 100;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
   /* EXAMPLE BADGE */
   .example-badge {
     display: inline-flex;
@@ -1282,60 +1333,101 @@
 
   <!-- OUTPUT SECTION -->
   <div id="output-section">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px">
-      <h2 style="font-family:'Share Tech Mono',monospace;font-size:16px;letter-spacing:0.1em">SETUP INSTRUCTIONS</h2>
-      <button class="btn-export" onclick="exportSetup()">EXPORT AS .MD</button>
+
+    <div class="section-label">generated setup</div>
+
+    <div class="info-box">
+      <div class="info-title">HOW TO USE THIS</div>
+      Copy each step in order. Step 0 starts the server. Steps 1-2 create your character.
+      Step 3 is your environment config. Step 4 is the system prompt template.
+      Step 5 is the integration loop — the code your chatbot runs every conversation turn.
+      Use <code>export as .md</code> at the bottom to save everything as a reference file.
     </div>
 
+    <!-- STEP 0 -->
     <div id="output-install" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 0 — Install & Start TORMENT</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-install')">copy</button>
+        <span class="output-title">STEP 0 — INSTALL + START SERVER</span>
+        <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
       </div>
       <div class="output-body" id="out-install"></div>
     </div>
 
+    <!-- STEP 1 -->
     <div id="output-workspace" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 1 — Create Workspace</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-workspace')">copy</button>
+        <span class="output-title">STEP 1 — CREATE WORKSPACE</span>
+        <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
       </div>
       <div class="output-body" id="out-workspace"></div>
     </div>
 
+    <!-- STEP 2 -->
     <div id="output-agent" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 2 — Create Agent(s)</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-agent')">copy</button>
+        <span class="output-title">STEP 2 — CREATE AGENT + SEED</span>
+        <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
       </div>
       <div class="output-body" id="out-agent"></div>
     </div>
 
+    <!-- STEP 3 -->
     <div id="output-env" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 3 — Environment Config</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-env')">copy</button>
+        <span class="output-title">STEP 3 — ENVIRONMENT CONFIG</span>
+        <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
       </div>
       <div class="output-body" id="out-env"></div>
     </div>
 
+    <!-- STEP 4 -->
     <div id="output-prompts" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 4 — System Prompts</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-prompts')">copy</button>
+        <span class="output-title">STEP 4 — SYSTEM PROMPT WRAPPER</span>
+        <button class="btn-copy" onclick="copyBlock('out-prompts',this)">copy</button>
       </div>
       <div class="output-body" id="out-prompts"></div>
     </div>
 
+    <!-- STEP 5 -->
     <div id="output-integration" class="output-block">
       <div class="output-header">
-        <div class="output-title">STEP 5 — Integration & Workflow</div>
-        <button class="btn-copy" onclick="copyToClipboard(this,'out-integration')">copy</button>
+        <span class="output-title">STEP 5 — INTEGRATION LOOP</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="tab-row" style="margin-bottom:0">
+            <button class="tab-btn active" onclick="switchTab('curl',this)">CURL</button>
+            <button class="tab-btn" onclick="switchTab('python',this)">PYTHON</button>
+          </div>
+          <button class="btn-copy" onclick="copyActiveLoop(this)">copy</button>
+        </div>
       </div>
-      <div class="output-body" id="out-integration"></div>
+      <div class="output-body" id="out-loop-curl"></div>
+      <div class="output-body" id="out-loop-python" style="display:none"></div>
     </div>
+
+    <!-- REFERENCE -->
+    <div class="output-block">
+      <div class="output-header">
+        <span class="output-title">REFERENCE — WHAT QUERY RETURNS</span>
+        <button class="btn-copy" onclick="copyBlock('out-response',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-response"></div>
+    </div>
+
+    <div class="actions-row">
+      <button class="btn-export" onclick="exportSetup()">export as .md</button>
+      <button class="btn-reset" onclick="resetOutput()">reset</button>
+    </div>
+
   </div>
 
+</div>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="status-dot"></div>
+  <span id="status-bar-text">TORMENT Character Forge & Crystal Attunement — ready</span>
+  <span style="margin-left:auto;opacity:0.4">pzychozen/TORMENT</span>
 </div>
 
 <script>
@@ -1957,54 +2049,270 @@ function generateSolo() {
   }
   envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
-  let envOutput = '';
+  // Build Linux/Mac section
+  let envOutput = '# ── Environment Configuration ──\n';
+  envOutput += '# Linux / Mac / WSL — paste into terminal before starting server\n\n';
   envParts.forEach(part => {
     if (part.vars.length > 0) {
-      envOutput += '\n# ' + part.comment + '\n';
+      envOutput += '# ' + part.comment + '\n';
       part.vars.forEach(v => {
-        envOutput += v.key + '=' + v.val + '\n';
+        envOutput += 'export ' + v.key + '=' + v.val + '\n';
       });
+      envOutput += '\n';
     }
-    if (part.note) envOutput += part.note + '\n';
+    if (part.note) envOutput += part.note + '\n\n';
   });
+
+  envOutput += '# ────────────────────────────────────────────────────────────────────\n\n';
+  envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
+  envParts.forEach(part => {
+    if (part.vars.length > 0) {
+      envOutput += ':: ' + part.comment + '\n';
+      part.vars.forEach(v => {
+        envOutput += 'set ' + v.key + '=' + v.val + '\n';
+      });
+      envOutput += '\n';
+    }
+  });
+
+  envOutput += '\n# ────────────────────────────────────────────────────────────────────\n\n';
+
+  // API key guidance based on selected model
+  if (selectedModel === 'claude') {
+    envOutput += '# HOW TO GET YOUR ANTHROPIC API KEY:\n';
+    envOutput += '# 1. Go to https://console.anthropic.com/\n';
+    envOutput += '# 2. Sign in or create an account\n';
+    envOutput += '# 3. Go to Settings > API Keys > Create Key\n';
+    envOutput += '# 4. Copy the key (starts with "sk-ant-...")\n';
+    envOutput += '# 5. Replace "your_key_here" above with your actual key\n';
+    envOutput += '#\n';
+    envOutput += '# IMPORTANT: Never share your API key or commit it to git.\n';
+    envOutput += '# Keep it in environment variables, not in source code.\n';
+  } else if (selectedModel === 'openai') {
+    envOutput += '# HOW TO GET YOUR OPENAI API KEY:\n';
+    envOutput += '# 1. Go to https://platform.openai.com/api-keys\n';
+    envOutput += '# 2. Sign in or create an account\n';
+    envOutput += '# 3. Click "Create new secret key"\n';
+    envOutput += '# 4. Copy the key (starts with "sk-...")\n';
+    envOutput += '# 5. Replace "your_key_here" above with your actual key\n';
+  } else if (selectedModel === 'ollama') {
+    envOutput += '# OLLAMA SETUP:\n';
+    envOutput += '# 1. Install Ollama: https://ollama.ai/download\n';
+    envOutput += '# 2. Pull your model: ollama pull qwen3:32b\n';
+    envOutput += '# 3. Ollama runs locally — no API key needed.\n';
+  }
 
   document.getElementById('out-env').textContent = envOutput.trim();
 
-  // ── STEP 4: System Prompts ──
-  let promptText = '# System Prompt for ' + name + '\n\n';
-  promptText += 'You are ' + name + '. ' + seed + '\n\n';
-  promptText += 'Core traits: ' + (traits.length ? traits.join(', ') : '(none set)') + '\n';
-  promptText += 'Identity anchor: Maintain consistency with your seed description above. When in doubt, default to your core nature.';
+  // ── STEP 4: System Prompt ──
+  const firstLine = seed.split(/[.!?]/)[0].trim();
+  document.getElementById('out-prompts').textContent =
+    'You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are.\nLet memories and experience shape you naturally.\n\nWhen you remember something from the past, let it surface naturally in\nconversation \u2014 don\'t announce "I remember..." unless it fits your voice.';
 
-  document.getElementById('out-prompts').textContent = promptText;
+  // ── STEP 5: Integration Loop (curl) ──
+  document.getElementById('out-loop-curl').textContent =
+    '# TORMENT Integration Loop \u2014 run these each conversation turn\n' +
+    '# IMPORTANT: "step" must increment each turn (1, 2, 3, ...).\n' +
+    '# Compression, phase timing, and spirit return all depend on step counting.\n\n' +
+    '# \u2500\u2500 BEFORE ' + name + ' responds: retrieve memories \u2500\u2500\n' +
+    'curl -X POST ' + BASE + '/agent/query \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    '  -d \'{\n' +
+    '    "workspace_id": "' + wsId + '",\n' +
+    '    "agent_id": "' + agentId + '",\n' +
+    '    "query": "[current user message]",\n' +
+    '    "top_k": 8\n' +
+    '  }\'\n\n' +
+    '# Response includes "character_context" \u2014 inject that into your system prompt.\n' +
+    '# Also includes "results" (memory hits) and "identity_state" (kernel phase info).\n\n' +
+    '# \u2500\u2500 AFTER ' + name + ' responds: store the memory \u2500\u2500\n' +
+    'curl -X POST ' + BASE + '/agent/ingest \\\n' +
+    '  -H "Content-Type: application/json" \\\n' +
+    '  -d \'{\n' +
+    '    "workspace_id": "' + wsId + '",\n' +
+    '    "agent_id": "' + agentId + '",\n' +
+    '    "text": "[2-6 line summary of this turn]",\n' +
+    '    "step": 1\n' +
+    '  }\'\n\n' +
+    '# NOTE: "text" should be a SHORT summary, not the full conversation.\n' +
+    '# Good: "User asked about music. ' + name + ' shared a memory about drums."\n' +
+    '# Bad:  [pasting the entire multi-paragraph exchange]\n\n' +
+    '# \u2500\u2500 OPTIONAL: check identity state \u2500\u2500\n' +
+    'curl ' + BASE + '/agent/' + agentId + '/identity?workspace_id=' + wsId;
 
-  // ── STEP 5: Integration ──
-  let integrationText = '# Integration Loop\n\n';
-  integrationText += '# 1. Ingest: User message → agent memory\n';
-  integrationText += 'curl -X POST ' + BASE + '/agent/' + agentId + '/ingest \\\n';
-  integrationText += '  -H "Content-Type: application/json" \\\n';
-  integrationText += '  -d \'{"message": "What do you think about X?", "turn": 1}\'\n\n';
+  // ── STEP 5: Integration Loop (python) ──
+  let pyImport, pyClient;
 
-  integrationText += '# 2. Query: Generate response from memories + seed\n';
-  integrationText += 'curl -X POST ' + BASE + '/agent/' + agentId + '/query \\\n';
-  integrationText += '  -H "Content-Type: application/json" \\\n';
-  integrationText += '  -d \'{"prompt": "Respond naturally as yourself.", "turn": 1}\'\n\n';
+  if (selectedModel === 'claude') {
+    pyImport = 'import anthropic';
+    pyClient =
+      '        # Call Claude with TORMENT memory context\n' +
+      '        client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.messages.create(\n' +
+      '            model="claude-sonnet-4-20250514",\n' +
+      '            max_tokens=1024,\n' +
+      '            system=system_prompt,\n' +
+      '            messages=messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.content[0].text';
+  } else if (selectedModel === 'openai') {
+    pyImport = 'from openai import OpenAI';
+    pyClient =
+      '        # Call OpenAI with TORMENT memory context\n' +
+      '        client = OpenAI()  # uses OPENAI_API_KEY\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else if (selectedModel === 'ollama') {
+    const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
+    pyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
+    pyClient =
+      '        # Call Ollama with TORMENT memory context\n' +
+      '        client = OpenAI(\n' +
+      '            base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
+      '            api_key="ollama",  # ollama doesn\'t need a real key\n' +
+      '        )\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + olm + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '            temperature=0.85,\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else {
+    const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
+    const oModel = document.getElementById('other-model')?.value || 'your-model';
+    pyImport = 'from openai import OpenAI  # most APIs are OpenAI-compatible';
+    pyClient =
+      '        # Call your LLM with TORMENT memory context\n' +
+      '        client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
+      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + oModel + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  }
 
-  integrationText += '# 3. Memory shape: Check memory state\n';
-  integrationText += 'curl ' + BASE + '/agent/' + agentId + '/memories?limit=10\n\n';
+  // Build seed dict as Python repr
+  const pySeedDict = JSON.stringify(agentPayload.seed, null, 4);
 
-  integrationText += '# Python example:\n';
-  integrationText += 'import requests\n\n';
-  integrationText += 'BASE = "' + BASE + '"\n';
-  integrationText += 'agent_id = "' + agentId + '"\n\n';
-  integrationText += 'def interact(message):\n';
-  integrationText += '    requests.post(f"{BASE}/agent/{agent_id}/ingest", json={"message": message})\n';
-  integrationText += '    resp = requests.post(f"{BASE}/agent/{agent_id}/query", json={"prompt": "Respond..."})\n';
-  integrationText += '    return resp.json().get("response")\n';
+  document.getElementById('out-loop-python').textContent =
+    '"""\nTORMENT Integration \u2014 ' + name + '\nRun: python chat_' + agentId + '.py\n\nFirst run creates workspace + agent automatically.\nServer must be running first (python -m torment_service).\n"""\nimport os\nimport sys\nimport json\nimport requests\n' + pyImport + '\n\n' +
+    'TORMENT = "' + BASE + '"\nWS = "' + wsId + '"\nAGENT = "' + agentId + '"\n\n' +
+    'SYSTEM_PROMPT = """You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are."""\n\n' +
+    '# \u2500\u2500 Auto-Setup \u2500\u2500\n' +
+    'def setup():\n' +
+    '    """Create workspace + agent if they don\'t exist yet. Safe to re-run."""\n' +
+    '    try:\n' +
+    '        r = requests.get(f"{TORMENT}/health", timeout=3)\n' +
+    '        r.raise_for_status()\n' +
+    '    except Exception:\n' +
+    '        print("ERROR: TORMENT server not reachable at", TORMENT)\n' +
+    '        print("Start it first:  python -m torment_service")\n' +
+    '        sys.exit(1)\n\n' +
+    '    r = requests.post(f"{TORMENT}/workspace/create", json={\n' +
+    '        "workspace_id": WS, "domains": ["personal"],\n' +
+    '    })\n' +
+    '    if r.status_code == 200:\n' +
+    '        print(f"Workspace \\"{WS}\\" ready.")\n\n' +
+    '    seed = ' + pySeedDict + '\n' +
+    '    r = requests.post(f"{TORMENT}/agent/create", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT, "seed": seed,\n' +
+    '    })\n' +
+    '    if r.status_code == 200:\n' +
+    '        print(f"Agent \\"{AGENT}\\" ready.")\n\n' +
+    '# \u2500\u2500 TORMENT Memory Functions \u2500\u2500\n' +
+    'def query(text, top_k=8):\n' +
+    '    r = requests.post(f"{TORMENT}/agent/query", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT,\n' +
+    '        "query": text, "top_k": top_k,\n' +
+    '    })\n' +
+    '    return r.json()\n\n' +
+    'def ingest(summary, step):\n' +
+    '    requests.post(f"{TORMENT}/agent/ingest", json={\n' +
+    '        "workspace_id": WS, "agent_id": AGENT,\n' +
+    '        "text": summary, "step": step,\n' +
+    '    })\n\n' +
+    'def format_context(result):\n' +
+    '    parts = []\n' +
+    '    char = result.get("character_context")\n' +
+    '    if isinstance(char, dict):\n' +
+    '        preamble = char.get("seed_preamble", "")\n' +
+    '        if preamble: parts.append(preamble)\n' +
+    '        recs = char.get("recommendations", [])\n' +
+    '        if recs: parts.append("\\n".join(recs))\n' +
+    '    elif isinstance(char, str) and char:\n' +
+    '        parts.append(char)\n' +
+    '    hits = result.get("results", [])\n' +
+    '    if hits:\n' +
+    '        mem_lines = [f"- {h.get(\'text\', h.get(\'summary\', \'\'))}" for h in hits[:6] if h.get(\'text\') or h.get(\'summary\')]\n' +
+    '        if mem_lines: parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n' +
+    '    return "\\n\\n".join(parts) if parts else ""\n\n' +
+    '# \u2500\u2500 Chat Loop \u2500\u2500\n' +
+    'def main():\n' +
+    '    setup()\n' +
+    '    step = 1\n' +
+    '    messages = []\n' +
+    '    print(f"\\n=== ' + name + ' is ready. Type \'quit\' to exit. ===\\n")\n\n' +
+    '    while True:\n' +
+    '        user_input = input("You: ").strip()\n' +
+    '        if user_input.lower() in ("quit", "exit", "q"): break\n\n' +
+    '        result = query(user_input)\n' +
+    '        context = format_context(result)\n\n' +
+    pyClient + '\n\n' +
+    '        print(f"\\n' + name + ': {reply}\\n")\n\n' +
+    '        messages.append({"role": "user", "content": user_input})\n' +
+    '        messages.append({"role": "assistant", "content": reply})\n\n' +
+    '        summary = f"User: {user_input[:120]}. ' + name + ' responded about the topic."\n' +
+    '        ingest(summary, step)\n' +
+    '        step += 1\n\n' +
+    'if __name__ == "__main__":\n' +
+    '    main()';
 
-  document.getElementById('out-integration').textContent = integrationText.trim();
+  // ── REFERENCE: Response shape ──
+  document.getElementById('out-response').textContent =
+    '// What you get back from /agent/query:\n' +
+    '{\n' +
+    '  "results": [\n' +
+    '    {\n' +
+    '      "eid": 42,                           // memory ID\n' +
+    '      "text": "User talked about...",       // the stored memory text\n' +
+    '      "score": 0.87,                        // relevance score (0-1)\n' +
+    '      "motif": "vulnerability",             // detected theme\n' +
+    '      "age_steps": 150,                     // how old (in conversation turns)\n' +
+    '      "summary": "Fear of water talk"       // auto-generated summary\n' +
+    '    }\n' +
+    '    // ... up to top_k results\n' +
+    '  ],\n\n' +
+    '  "character_context": {          // <-- dict, not a string!\n' +
+    '    "seed_preamble": "...",        //     The seed text / identity core\n' +
+    '    "character_name": "...",       //     Character name\n' +
+    '    "drift_score": 0.12,          //     How far from seed identity (-1 to 1)\n' +
+    '    "recommendations": ["..."],   //     Guidance for the LLM\n' +
+    '    "tier_breakdown": {}          //     Memory tier counts\n' +
+    '  },\n' +
+    '  // Use format_context(result) to build a readable string from this.\n\n' +
+    '  "identity_state": {\n' +
+    '    "cycle_stage": "S3",       // kernel phase (S0-S6)\n' +
+    '    "in_corridor": true,       // currently in a stability corridor\n' +
+    '    "phase": 7,                // phase counter\n' +
+    '    "z_magnitude": 0.42        // kernel Z field strength\n' +
+    '  },\n\n' +
+    '  "step": 1,\n' +
+    '  "meta": {\n' +
+    '    "query_ms": 12,            // how long the query took\n' +
+    '    "candidates_evaluated": 156\n' +
+    '  }\n' +
+    '}';
 
+  // Show output
   document.getElementById('output-section').classList.add('visible');
+  document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function generateHivemind() {
@@ -2297,47 +2605,330 @@ function generateHivemind() {
   integrationText += '#   "policy_flags": {"reingestable": true, "proposal_eligible": true}\n';
   integrationText += '# }\n';
 
-  document.getElementById('out-integration').textContent = integrationText.trim();
+  document.getElementById('out-loop-curl').textContent = integrationText.trim();
+
+  // ── STEP 5 Python tab: Full runnable hivemind script ──
+  // Build LLM client code based on selectedModel (same approach as SOLO mode)
+  let hivePyImport, hivePyClientSetup, hivePyCall;
+
+  if (selectedModel === 'claude') {
+    hivePyImport = 'import anthropic';
+    hivePyClientSetup =
+      '    client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY env var';
+    hivePyCall =
+      '        resp = client.messages.create(\n' +
+      '            model="claude-sonnet-4-20250514",\n' +
+      '            max_tokens=1024,\n' +
+      '            system=system_prompt,\n' +
+      '            messages=[{"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.content[0].text';
+  } else if (selectedModel === 'openai') {
+    hivePyImport = 'from openai import OpenAI';
+    hivePyClientSetup =
+      '    client = OpenAI()  # uses OPENAI_API_KEY env var';
+    hivePyCall =
+      '        resp = client.chat.completions.create(\n' +
+      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
+      '            messages=[{"role": "system", "content": system_prompt},\n' +
+      '                      {"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else if (selectedModel === 'ollama') {
+    const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
+    hivePyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
+    hivePyClientSetup =
+      '    client = OpenAI(\n' +
+      '        base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
+      '        api_key="ollama",\n' +
+      '    )';
+    hivePyCall =
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + olm + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt},\n' +
+      '                      {"role": "user", "content": user_input}],\n' +
+      '            temperature=0.85,\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  } else {
+    const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
+    const oModel = document.getElementById('other-model')?.value || 'your-model';
+    hivePyImport = 'from openai import OpenAI';
+    hivePyClientSetup =
+      '    client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))';
+    hivePyCall =
+      '        resp = client.chat.completions.create(\n' +
+      '            model="' + oModel + '",\n' +
+      '            messages=[{"role": "system", "content": system_prompt},\n' +
+      '                      {"role": "user", "content": user_input}],\n' +
+      '        )\n' +
+      '        reply = resp.choices[0].message.content';
+  }
+
+  // Build agents config as Python list
+  let pyAgentsList = '[\n';
+  hivemindAgents.forEach((agent, idx) => {
+    const aid = agentIds[idx];
+    pyAgentsList += '    {"agent_id": "' + aid + '", "name": "' + agent.name + '", "role": "' + agent.role + '", "domain": "' + agent.domain + '",\n';
+    pyAgentsList += '     "seed": ' + JSON.stringify(agent.seed) + '},\n';
+  });
+  pyAgentsList += ']';
+
+  // Build domains list
+  const pyDomainsList = JSON.stringify(hivemindDomains);
+
+  let pyScript = '';
+  pyScript += '"""\n';
+  pyScript += 'TORMENT Hivemind — ' + teamName + '\n';
+  pyScript += 'Run: python hivemind_' + wsId + '.py\n\n';
+  pyScript += 'First run creates workspace + agents automatically.\n';
+  pyScript += 'Server must be running first (python -m torment_service).\n\n';
+  pyScript += 'Set environment variables before running (see Step 3).\n';
+  pyScript += '"""\n';
+  pyScript += 'import os\nimport sys\nimport json\nimport time\nimport requests\n' + hivePyImport + '\n\n';
+  pyScript += '# ── Configuration ──\n';
+  pyScript += 'TORMENT = "' + BASE + '"\n';
+  pyScript += 'WS = "' + wsId + '"\n';
+  pyScript += 'DOMAINS = ' + pyDomainsList + '\n\n';
+  pyScript += 'AGENTS = ' + pyAgentsList + '\n\n';
+
+  // LLM client init
+  pyScript += '# ── LLM Client ──\n';
+  pyScript += hivePyClientSetup + '\n\n';
+
+  // Auto-setup function
+  pyScript += '# ── Auto-Setup ──\n';
+  pyScript += 'def setup():\n';
+  pyScript += '    """Create workspace + all agents if they don\'t exist. Safe to re-run."""\n';
+  pyScript += '    try:\n';
+  pyScript += '        r = requests.get(f"{TORMENT}/health", timeout=3)\n';
+  pyScript += '        r.raise_for_status()\n';
+  pyScript += '    except Exception:\n';
+  pyScript += '        print("ERROR: TORMENT server not reachable at", TORMENT)\n';
+  pyScript += '        print("Start it first:  python -m torment_service")\n';
+  pyScript += '        sys.exit(1)\n\n';
+  pyScript += '    # Create workspace with domains and hivemind enabled\n';
+  pyScript += '    r = requests.post(f"{TORMENT}/workspace/create", json={\n';
+  pyScript += '        "workspace_id": WS, "domains": DOMAINS, "hivemind": True,\n';
+  pyScript += '    })\n';
+  pyScript += '    print(f"Workspace \\"{WS}\\" — {r.status_code}")\n\n';
+  pyScript += '    # Create each agent with seed\n';
+  pyScript += '    for agent in AGENTS:\n';
+  pyScript += '        r = requests.post(f"{TORMENT}/agent/create", json={\n';
+  pyScript += '            "workspace_id": WS,\n';
+  pyScript += '            "agent_id": agent["agent_id"],\n';
+  pyScript += '            "seed": {\n';
+  pyScript += '                "seed_text": agent["seed"],\n';
+  pyScript += '                "seed_id": agent["agent_id"] + "_v1",\n';
+  pyScript += '                "character_name": agent["name"],\n';
+  pyScript += '                "role": agent["role"],\n';
+  pyScript += '                "primary_domain": agent["domain"],\n';
+  pyScript += '                "drift_correction_threshold": 0.25,\n';
+  pyScript += '                "drift_gravity_strength": 0.15,\n';
+  pyScript += '                "coupling_mode": "read_only",\n';
+  pyScript += '                "coupling_strength": 0.25,\n';
+  pyScript += '            },\n';
+  pyScript += '        })\n';
+  pyScript += '        print(f"  Agent \\"{agent[\'name\']}\\" ({agent[\'role\']}) — {r.status_code}")\n';
+  pyScript += '    print()\n\n';
+
+  // TORMENT memory functions
+  pyScript += '# ── TORMENT Memory Functions ──\n';
+  pyScript += 'def ingest(agent_id, text, step, domain_id):\n';
+  pyScript += '    """Store a memory for one agent. Automatically emits resonance packet."""\n';
+  pyScript += '    r = requests.post(f"{TORMENT}/agent/ingest", json={\n';
+  pyScript += '        "workspace_id": WS, "agent_id": agent_id,\n';
+  pyScript += '        "text": text, "step": step, "domain_id": domain_id,\n';
+  pyScript += '    })\n';
+  pyScript += '    return r.json()\n\n';
+
+  pyScript += 'def query(agent_id, text, top_k=8):\n';
+  pyScript += '    """Retrieve memories + character context for one agent."""\n';
+  pyScript += '    r = requests.post(f"{TORMENT}/agent/query", json={\n';
+  pyScript += '        "workspace_id": WS, "agent_id": agent_id,\n';
+  pyScript += '        "query": text, "top_k": top_k,\n';
+  pyScript += '    })\n';
+  pyScript += '    return r.json()\n\n';
+
+  pyScript += 'def check_convergence():\n';
+  pyScript += '    """Get all convergence events in the workspace."""\n';
+  pyScript += '    return requests.get(f"{TORMENT}/workspace/{WS}/collective/events").json()\n\n';
+
+  pyScript += 'def reingest(agent_id, event_id, strength=0.25):\n';
+  pyScript += '    """Reingest a convergence event as echo into target agent."""\n';
+  pyScript += '    return requests.post(\n';
+  pyScript += '        f"{TORMENT}/workspace/{WS}/collective/reingest",\n';
+  pyScript += '        json={"agent_id": agent_id, "event_id": event_id,\n';
+  pyScript += '              "echo_strength_override": strength},\n';
+  pyScript += '    ).json()\n\n';
+
+  pyScript += 'def collective_status():\n';
+  pyScript += '    """Get collective field status (packets, events, active agents)."""\n';
+  pyScript += '    return requests.get(f"{TORMENT}/workspace/{WS}/collective/status").json()\n\n';
+
+  pyScript += 'def format_context(result):\n';
+  pyScript += '    """Build a readable string from query results for the LLM."""\n';
+  pyScript += '    parts = []\n';
+  pyScript += '    char = result.get("character_context")\n';
+  pyScript += '    if isinstance(char, dict):\n';
+  pyScript += '        preamble = char.get("seed_preamble", "")\n';
+  pyScript += '        if preamble: parts.append(preamble)\n';
+  pyScript += '        recs = char.get("recommendations", [])\n';
+  pyScript += '        if recs: parts.append("\\n".join(recs))\n';
+  pyScript += '    elif isinstance(char, str) and char:\n';
+  pyScript += '        parts.append(char)\n';
+  pyScript += '    hits = result.get("results", [])\n';
+  pyScript += '    if hits:\n';
+  pyScript += '        mem_lines = [f"- {h.get(\'text\', h.get(\'summary\', \'\'))}" for h in hits[:6]]\n';
+  pyScript += '        if mem_lines: parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n';
+  pyScript += '    return "\\n\\n".join(parts) if parts else ""\n\n';
+
+  // Agent response function
+  pyScript += 'def agent_respond(agent, user_input, step):\n';
+  pyScript += '    """One agent observes input, queries memory, responds via LLM, ingests summary."""\n';
+  pyScript += '    result = query(agent["agent_id"], user_input)\n';
+  pyScript += '    context = format_context(result)\n\n';
+  pyScript += '    system_prompt = (\n';
+  pyScript += '        f"You are {agent[\'name\']} ({agent[\'role\']}).\\n\\n"\n';
+  pyScript += '        f"{context}\\n\\n"\n';
+  pyScript += '        f"{agent[\'seed\']}\\n"\n';
+  pyScript += '        f"Respond as {agent[\'name\']}. Stay in character."\n';
+  pyScript += '    )\n\n';
+  pyScript += hivePyCall + '\n\n';
+  pyScript += '    # Store this turn as memory\n';
+  pyScript += '    summary = f"User: {user_input[:120]}. {agent[\'name\']} responded about the topic."\n';
+  pyScript += '    result = ingest(agent["agent_id"], summary, step, agent["domain"])\n\n';
+  pyScript += '    # Show debug info\n';
+  pyScript += '    debug = result.get("debug", {})\n';
+  pyScript += '    signals = result.get("signals", {})\n';
+  pyScript += '    coh = debug.get("coherence", 0)\n';
+  pyScript += '    strength = signals.get("strength", 0)\n';
+  pyScript += '    stored = result.get("stored", False)\n';
+  pyScript += '    print(f"  [{agent[\'name\']}] coh={coh:.3f} str={strength:.3f} stored={stored}")\n\n';
+  pyScript += '    return reply\n\n';
+
+  // Main loop
+  pyScript += '# ── Main Loop ──\n';
+  pyScript += 'def main():\n';
+  pyScript += '    setup()\n';
+  pyScript += '    step = 1\n';
+  pyScript += '    seen_events = set()\n\n';
+  pyScript += '    print("=== ' + teamName + ' — Hivemind Ready ===")\n';
+  pyScript += '    print("Agents:", ", ".join(a["name"] for a in AGENTS))\n';
+  pyScript += '    print("Type a message. All agents will respond. Type \'quit\' to exit.")\n';
+  pyScript += '    print()\n\n';
+
+  pyScript += '    while True:\n';
+  pyScript += '        user_input = input("You: ").strip()\n';
+  pyScript += '        if user_input.lower() in ("quit", "exit", "q"): break\n\n';
+  pyScript += '        # Each agent responds to the same input\n';
+  pyScript += '        for agent in AGENTS:\n';
+  pyScript += '            print(f"\\n{agent[\'name\']} ({agent[\'role\']}):")\n';
+  pyScript += '            reply = agent_respond(agent, user_input, step)\n';
+  pyScript += '            print(f"  {reply[:300]}\\n")\n\n';
+
+  pyScript += '        # Check for convergence after all agents respond\n';
+  pyScript += '        events = check_convergence()\n';
+  pyScript += '        if isinstance(events, list):\n';
+  pyScript += '            for ev in events:\n';
+  pyScript += '                eid = ev.get("event_id", "")\n';
+  pyScript += '                if eid and eid not in seen_events:\n';
+  pyScript += '                    seen_events.add(eid)\n';
+  pyScript += '                    agents_involved = ev.get("participating_agents", [])\n';
+  pyScript += '                    conf = ev.get("confidence", 0)\n';
+  pyScript += '                    print(f"  *** CONVERGENCE DETECTED ***")\n';
+  pyScript += '                    print(f"  Event: {eid}")\n';
+  pyScript += '                    print(f"  Agents: {agents_involved}, confidence={conf:.2f}")\n';
+  pyScript += '                    print(f"  Summary: {ev.get(\'summary\', \'(none)\')[:200]}")\n\n';
+  pyScript += '                    # Reingest into all agents\n';
+  pyScript += '                    for agent in AGENTS:\n';
+  pyScript += '                        r = reingest(agent["agent_id"], eid)\n';
+  pyScript += '                        print(f"  Reingested into {agent[\'name\']}: {r.get(\'status\', \'?\')}")\n';
+  pyScript += '                    print()\n\n';
+
+  pyScript += '        # Show collective status\n';
+  pyScript += '        status = collective_status()\n';
+  pyScript += '        if isinstance(status, dict):\n';
+  pyScript += '            packets = status.get("packet_count", 0)\n';
+  pyScript += '            events_total = status.get("event_count", 0)\n';
+  pyScript += '            print(f"  [Collective] packets={packets}, events={events_total}")\n\n';
+
+  pyScript += '        step += 1\n';
+  pyScript += '        print(f"  --- step {step} ---\\n")\n\n';
+
+  pyScript += 'if __name__ == "__main__":\n';
+  pyScript += '    main()\n';
+
+  document.getElementById('out-loop-python').textContent = pyScript;
+  document.getElementById('out-response').textContent = '// Hivemind mode — see integration tab for convergence event reference.';
 
   document.getElementById('output-section').classList.add('visible');
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// TAB SWITCHING
+// ════════════════════════════════════════════════════════════════════════════════════
+
+function switchTab(tab, btn) {
+  btn.closest('.tab-row').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('out-loop-curl').style.display = tab === 'curl' ? 'block' : 'none';
+  document.getElementById('out-loop-python').style.display = tab === 'python' ? 'block' : 'none';
+}
+
+function copyActiveLoop(btn) {
+  const curlEl = document.getElementById('out-loop-curl');
+  const pyEl = document.getElementById('out-loop-python');
+  const text = curlEl.style.display !== 'none' ? curlEl.textContent : pyEl.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════
 // COPY & EXPORT
 // ════════════════════════════════════════════════════════════════════════════════════
 
-function copyToClipboard(btn, elementId) {
-  const text = document.getElementById(elementId).textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = 'copied!';
-    setTimeout(() => { btn.textContent = 'copy'; }, 2000);
+function copyBlock(id, btn) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => {
+    btn.textContent = 'copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
   });
 }
 
 function exportSetup() {
-  let content = '# TORMENT Setup\n\n';
-
   if (deploymentMode === 'solo') {
-    const name = document.getElementById('char-name').value || 'character';
-    content += '## Character: ' + name + '\n\n';
-    content += document.getElementById('out-install').textContent + '\n\n';
-    content += document.getElementById('out-workspace').textContent + '\n\n';
-    content += document.getElementById('out-agent').textContent + '\n\n';
-    content += document.getElementById('out-env').textContent + '\n\n';
-    content += document.getElementById('out-prompts').textContent + '\n\n';
-    content += document.getElementById('out-integration').textContent;
+    const name = document.getElementById('char-name').value.trim() || 'character';
+    const blocks = [
+      ['0. Install + Start Server', document.getElementById('out-install').textContent, 'bash'],
+      ['1. Create Workspace', document.getElementById('out-workspace').textContent, 'bash'],
+      ['2. Create Agent + Seed', document.getElementById('out-agent').textContent, 'bash'],
+      ['3. Environment Config', document.getElementById('out-env').textContent, 'bash'],
+      ['4. System Prompt Wrapper', document.getElementById('out-prompts').textContent, ''],
+      ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash'],
+      ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
+      ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
+    ];
 
-    const filename = name.toLowerCase().replace(/\s+/g, '_') + '_setup.md';
-    downloadFile(content, filename);
+    let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement_\n';
+    blocks.forEach(([title, content, lang]) => {
+      md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
+    });
+
+    const filename = name.toLowerCase().replace(/\s+/g, '_') + '_torment_setup.md';
+    downloadFile(md, filename);
   } else {
     const teamName = document.getElementById('hive-team-name').value || 'hivemind_collective';
-    content += '## Team: ' + teamName + '\n\n';
-    content += document.getElementById('out-install').textContent + '\n\n';
-    content += document.getElementById('out-workspace').textContent + '\n\n';
-    content += document.getElementById('out-agent').textContent + '\n\n';
-    content += document.getElementById('out-env').textContent + '\n\n';
-    content += document.getElementById('out-prompts').textContent + '\n\n';
-    content += document.getElementById('out-integration').textContent;
+    let content = '# ' + teamName + ' \u2014 TORMENT Hivemind Setup\n_Generated by TORMENT Character Forge_\n\n';
+    content += '## Install\n```bash\n' + document.getElementById('out-install').textContent + '\n```\n\n';
+    content += '## Workspace\n```bash\n' + document.getElementById('out-workspace').textContent + '\n```\n\n';
+    content += '## Agents\n```bash\n' + document.getElementById('out-agent').textContent + '\n```\n\n';
+    content += '## Environment\n```bash\n' + document.getElementById('out-env').textContent + '\n```\n\n';
+    content += '## Prompts\n' + document.getElementById('out-prompts').textContent + '\n\n';
+    content += '## Integration\n```bash\n' + (document.getElementById('out-loop-curl')?.textContent || document.getElementById('out-integration')?.textContent || '') + '\n```\n';
 
     const filename = teamName.toLowerCase().replace(/\s+/g, '_') + '_hivemind_setup.md';
     downloadFile(content, filename);
@@ -2346,14 +2937,15 @@ function exportSetup() {
 
 function downloadFile(content, filename) {
   const blob = new Blob([content], { type: 'text/markdown' });
-  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
+  a.href = URL.createObjectURL(blob);
   a.download = filename;
-  document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+}
+
+function resetOutput() {
+  document.getElementById('output-section').classList.remove('visible');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════
@@ -2361,6 +2953,12 @@ function downloadFile(content, filename) {
 // ════════════════════════════════════════════════════════════════════════════════════
 
 window.addEventListener('DOMContentLoaded', () => {
+  // Auto-fill workspace ID from character name
+  document.getElementById('char-name').addEventListener('input', function() {
+    document.getElementById('workspace-id').value =
+      this.value.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  });
+
   updateCharCount();
   updateDrift('2');
   updateGravity('2');

@@ -558,7 +558,7 @@ class TestTryCompressIntegration(unittest.TestCase):
         self.graph = MockMemoryGraph(entities)
         self.graph.data_dir = os.path.join(self.tmpdir, "graph")
         os.makedirs(self.graph.data_dir, exist_ok=True)
-        self.fabric.private_graphs = {"test_agent": self.graph}
+        self.fabric.private_graphs = {"default/test_agent": self.graph}
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -567,12 +567,12 @@ class TestTryCompressIntegration(unittest.TestCase):
         """Corridor exit should trigger compression and produce event."""
         # First call: set corridor state
         tri_mod_in = _make_tri_mod(in_corridor=True, cycle_stage=1)
-        result = try_compress(self.fabric, "test_agent", tri_mod_in, step=200)
+        result = try_compress(self.fabric, "test_agent", tri_mod_in, step=200, workspace_id="default")
         self.assertIsNone(result)  # No trigger yet
 
         # Second call: corridor exit
         tri_mod_out = _make_tri_mod(in_corridor=False, cycle_stage=1)
-        result = try_compress(self.fabric, "test_agent", tri_mod_out, step=201)
+        result = try_compress(self.fabric, "test_agent", tri_mod_out, step=201, workspace_id="default")
 
         self.assertIsNotNone(result)
         self.assertIsInstance(result, CompressionEvent)
@@ -582,18 +582,18 @@ class TestTryCompressIntegration(unittest.TestCase):
     def test_no_trigger_no_compression(self):
         """Stable state should not trigger compression."""
         tri_mod = _make_tri_mod(in_corridor=True, cycle_stage=1)
-        result1 = try_compress(self.fabric, "test_agent", tri_mod, step=100)
-        result2 = try_compress(self.fabric, "test_agent", tri_mod, step=101)
+        result1 = try_compress(self.fabric, "test_agent", tri_mod, step=100, workspace_id="default")
+        result2 = try_compress(self.fabric, "test_agent", tri_mod, step=101, workspace_id="default")
         self.assertIsNone(result1)
         self.assertIsNone(result2)
 
     def test_compression_disabled_no_graph(self):
         """Missing graph should return None gracefully."""
         tri_mod_in = _make_tri_mod(in_corridor=True)
-        try_compress(self.fabric, "missing_agent", tri_mod_in, step=100)
+        try_compress(self.fabric, "missing_agent", tri_mod_in, step=100, workspace_id="default")
 
         tri_mod_out = _make_tri_mod(in_corridor=False)
-        result = try_compress(self.fabric, "missing_agent", tri_mod_out, step=101)
+        result = try_compress(self.fabric, "missing_agent", tri_mod_out, step=101, workspace_id="default")
         self.assertIsNone(result)
 
 
@@ -608,13 +608,13 @@ class TestEmptyGraphNoCrash(unittest.TestCase):
             fabric._event_detectors = {}
             fabric._compression_executors = {}
             fabric._deep_stores = {}
-            fabric.private_graphs = {"agent": MockMemoryGraph({})}
+            fabric.private_graphs = {"default/agent": MockMemoryGraph({})}
 
             tri_mod_in = _make_tri_mod(in_corridor=True)
-            try_compress(fabric, "agent", tri_mod_in, step=100)
+            try_compress(fabric, "agent", tri_mod_in, step=100, workspace_id="default")
 
             tri_mod_out = _make_tri_mod(in_corridor=False)
-            result = try_compress(fabric, "agent", tri_mod_out, step=101)
+            result = try_compress(fabric, "agent", tri_mod_out, step=101, workspace_id="default")
             # Should return event with 0 candidates
             self.assertIsNotNone(result)
             self.assertEqual(result.candidates_evaluated, 0)
@@ -647,12 +647,12 @@ class TestAllProtectedNothingCompressed(unittest.TestCase):
             graph = MockMemoryGraph(entities)
             graph.data_dir = os.path.join(tmpdir, "g")
             os.makedirs(graph.data_dir, exist_ok=True)
-            fabric.private_graphs = {"agent": graph}
+            fabric.private_graphs = {"default/agent": graph}
 
             tri_mod_in = _make_tri_mod(in_corridor=True)
-            try_compress(fabric, "agent", tri_mod_in, step=200)
+            try_compress(fabric, "agent", tri_mod_in, step=200, workspace_id="default")
             tri_mod_out = _make_tri_mod(in_corridor=False)
-            result = try_compress(fabric, "agent", tri_mod_out, step=201)
+            result = try_compress(fabric, "agent", tri_mod_out, step=201, workspace_id="default")
 
             self.assertIsNotNone(result)
             self.assertEqual(result.compressed, 0)
@@ -673,6 +673,7 @@ class TestConcurrentAgentsIsolated(unittest.TestCase):
             fabric._compression_executors = {}
             fabric._deep_stores = {}
 
+            ws = "default"
             for agent in ("alice", "bob"):
                 entities = {
                     i: MockEntity(i, born_step=0, payload={
@@ -685,30 +686,30 @@ class TestConcurrentAgentsIsolated(unittest.TestCase):
                 graph = MockMemoryGraph(entities)
                 graph.data_dir = os.path.join(tmpdir, agent)
                 os.makedirs(graph.data_dir, exist_ok=True)
-                fabric.private_graphs[agent] = graph
+                fabric.private_graphs[f"{ws}/{agent}"] = graph
 
             # Alice corridor exit
-            try_compress(fabric, "alice", _make_tri_mod(in_corridor=True), step=100)
-            result_a = try_compress(fabric, "alice", _make_tri_mod(in_corridor=False), step=101)
+            try_compress(fabric, "alice", _make_tri_mod(in_corridor=True), step=100, workspace_id=ws)
+            result_a = try_compress(fabric, "alice", _make_tri_mod(in_corridor=False), step=101, workspace_id=ws)
 
-            # Bob should have separate detector
-            self.assertIn("alice", fabric._event_detectors)
-            bob_det = fabric._event_detectors.get("bob")
+            # Bob should have separate detector (composite keys)
+            self.assertIn(f"{ws}/alice", fabric._event_detectors)
+            bob_det = fabric._event_detectors.get(f"{ws}/bob")
             # Bob hasn't had any calls yet, so should not have a detector
             self.assertIsNone(bob_det)
 
             # Bob corridor exit
-            try_compress(fabric, "bob", _make_tri_mod(in_corridor=True), step=100)
-            result_b = try_compress(fabric, "bob", _make_tri_mod(in_corridor=False), step=101)
+            try_compress(fabric, "bob", _make_tri_mod(in_corridor=True), step=100, workspace_id=ws)
+            result_b = try_compress(fabric, "bob", _make_tri_mod(in_corridor=False), step=101, workspace_id=ws)
 
             self.assertIsNotNone(result_a)
             self.assertIsNotNone(result_b)
-            # Both should have independent detectors
-            self.assertIn("alice", fabric._event_detectors)
-            self.assertIn("bob", fabric._event_detectors)
+            # Both should have independent detectors (composite keys)
+            self.assertIn(f"{ws}/alice", fabric._event_detectors)
+            self.assertIn(f"{ws}/bob", fabric._event_detectors)
             self.assertIsNot(
-                fabric._event_detectors["alice"],
-                fabric._event_detectors["bob"],
+                fabric._event_detectors[f"{ws}/alice"],
+                fabric._event_detectors[f"{ws}/bob"],
             )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

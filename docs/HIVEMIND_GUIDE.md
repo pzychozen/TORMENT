@@ -4,6 +4,39 @@ How to run multiple AI agents as a collective — with shared resonance, converg
 
 ---
 
+## Quickstart (copy-paste)
+
+```bash
+# 1. Install
+pip install -r requirements.txt
+pip install sentence-transformers
+
+# 2. Configure (Linux/Mac)
+export TORMENT_EMBED_PROVIDER=st
+export TORMENT_EMBED_MODEL=BAAI/bge-small-en-v1.5
+export TORMENT_EMBED_DEVICE=cpu
+export TORMENT_HIVEMIND_ENABLE=1
+
+# 3. Start
+python -m torment_service
+
+# 4. Verify
+curl http://127.0.0.1:8787/health
+```
+
+Windows CMD:
+```cmd
+set TORMENT_EMBED_PROVIDER=st
+set TORMENT_EMBED_MODEL=BAAI/bge-small-en-v1.5
+set TORMENT_EMBED_DEVICE=cpu
+set TORMENT_HIVEMIND_ENABLE=1
+python -m torment_service
+```
+
+Or use the Character Forge (`start/torment_character_creator.html`) to generate a complete setup with agents, seeds, and a runnable Python client.
+
+---
+
 ## Prerequisites
 
 TORMENT service running at `http://127.0.0.1:8787`. Real embeddings recommended (hash embeddings work but convergence detection is weaker because hash vectors are near-orthogonal).
@@ -38,7 +71,7 @@ You can run hivemind without compression or SRG. They compose naturally but don'
 Start the service:
 
 ```bash
-bash run.sh
+python -m torment_service
 ```
 
 ---
@@ -176,6 +209,16 @@ curl -X POST http://127.0.0.1:8787/agent/ingest \
 ```
 
 When hivemind is enabled, every ingest above coherence 0.15 automatically emits a `ResonancePacket` into the workspace collective field. You don't call anything extra — it happens inside `ingest()`.
+
+### Coherence and Adaptive Scaling
+
+Coherence is computed from the TriOcta kernel's phase dispersion. As of v2.3.1, the kernel uses **adaptive DISP_SCALE** — the sensitivity parameter self-calibrates to the embedding distribution, so it works identically with HashEmbedding, SentenceTransformers, or any future embedder without manual tuning.
+
+The coherence pipeline: `disp → adaptive_scale → coh_phase → coh_raw → coh_ema`
+
+The adaptive scale tracks a rolling window of dispersion values and computes `effective_scale = k * (mean + std)` with `k=2.0`. During the first 10 ingests (warmup), it blends from a fixed fallback (1.50) to the adaptive estimate.
+
+You can inspect the current effective scale in any ingest response under `result["debug"]["effective_disp_scale"]`. The coherence value itself is at `result["debug"]["coherence"]`.
 
 ---
 
@@ -554,6 +597,13 @@ The system is conservative, asymmetric, and slightly annoying to trigger. That i
 
 | Threshold | Value | Where |
 |-----------|-------|-------|
+| Adaptive DISP_SCALE (k) | 2.0 | `memory_kernel.py` |
+| Adaptive warmup steps | 10 | `memory_kernel.py` |
+| Adaptive window size | 50 | `memory_kernel.py` |
+| DISP_SCALE fallback | 1.50 | `memory_kernel.py` |
+| COH_SMOOTH (EMA factor) | 0.70 | `memory_kernel.py` |
+| COH_FLOOR | 0.05 | `memory_kernel.py` |
+| Write gate (strength) | >= 0.55 | `fabric.py` ingest |
 | Packet emission coherence | >= 0.15 | `fabric.py` ingest |
 | Convergence similarity | >= 0.72 | `collective_field.py` |
 | Convergence min confidence | >= 0.45 | `collective_field.py` |

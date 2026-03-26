@@ -1,10 +1,34 @@
-# TORMENT Memory Fabric — v2.3.0
+# TORMENT Memory Fabric — v2.4.0
 
 A dynamical **memory substrate** for AI agents, built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons.
 
 Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
 TORMENT does not control personality. It stores and retrieves context in a stable way — and provides a living character identity layer that lets personality emerge from memory rather than static prompts, with a complete memory lifecycle through event-gated compression, spirit return, and collective resonance coupling.
+
+---
+
+## What's New in v2.4.0 — Memory Lifecycle & Agent Spine
+
+This release closes the gap between "the hive mind works" and "the memory system is production-healthy." Extensive stress testing revealed that memories grew without bound under steady-state operation — compression never fired because the geometric triggers (corridor exits, cycle stage changes) require phase dynamics that don't occur during calm input streams. v2.4.0 fixes this with a complete memory lifecycle overhaul, formalizes the Agent Spine cognition pipeline, and adds unified observability.
+
+**Adaptive Coherence** — replaced fixed DISP_SCALE with a self-tuning system. `effective_scale = k * (mean + std)` over a rolling window, with k=2.0 as the dimensionless sensitivity multiplier. Works identically across HashEmbedding and STEmbedding with no per-embedder tuning. The old fixed values (7e-4, 0.10) are gone.
+
+**Duplicate Suppression** (`fabric.py`) — pre-ingest similarity check (cosine ≥ 0.92, same-agent only) prevents redundant memories from accumulating. Duplicates are reinforced instead of duplicated: `min(0.98, old_strength + (1 - old_strength) * 0.3)`. Diagnostic showed 19% dedup rate across 300 ingests.
+
+**Half-Life Decay** — exponential decay `2^(-age/half_life)` applied at query time. Memories naturally fade unless reinforced. Full clock reset on reinforcement via `last_reinforced_ts`. Ranking floor of 0.03 prevents ghost memories from polluting results.
+
+**Fallback Compression Triggers** (`compression.py`) — two new triggers supplement the geometric ones: count-overflow fires when an agent exceeds 400 memories, periodic fires every 200 steps. Both respect a 50-step cooldown. Verified: 30 compression events across 120 single-agent steps in isolation testing.
+
+**Retention Tiers** — five-tier classification (Protected → Identity → Relational → Situational → Echo) with tier-specific scoring multipliers, routing decisions, and execution behavior. Protected memories are never compressed. Identity tier always exports to deep store. Echo tier gets aggressive 0.4x fade. Classification is derived at runtime from existing payload fields — no migration required.
+
+**Hard Memory Cap** — last-resort safety net at 10,000 memories per agent, force-compressing down to 8,000. Overrides minimum age requirements in emergency mode.
+
+**Agent Spine Documentation** — the cognition pipeline (`cognition/`, `roles/`, `schemas/`) was found to be fully implemented: 4 deterministic roles (Interpreter, Engineer, Skeptic, Archivist), 3 aperture types, 7 hard invariants (A–G), 2,844 lines of test coverage, and a working `POST /cognition/run` endpoint. Comprehensive architecture overview written in `docs/AGENT_SPINE_OVERVIEW.md`, including the Spine ↔ Hive Mind interaction contract.
+
+**Unified Observability** (`GET /debug/metrics`) — single endpoint aggregating feature flags, per-agent memory/compression/character state, per-domain motif/coherence/proposal stats, and collective packet/convergence counts. Reads only RAM — cheap to poll. All existing per-component debug endpoints preserved.
+
+**1,027 Tests** — up from 663. Full coverage of decay, dedup, fallback triggers, retention tiers, hard cap, Agent Spine acceptance scenarios, and observability.
 
 ---
 
@@ -97,6 +121,9 @@ TORMENT does not control personality. It stores and retrieves context in a stabl
 | `docs/TUNING.md` | Configuration tuning (includes compression + spirit return) |
 | `docs/TROUBLESHOOTING.md` | Operational fixes (includes compression + spirit return) |
 | `docs/MEMORY_KERNEL_ARCHITECTURE.md` | Internal kernel design + compression gating + warmup mechanics |
+| `docs/AGENT_SPINE_OVERVIEW.md` | Agent Spine cognition pipeline — architecture, invariants, data contracts |
+| `docs/MEMORY_HEALTH_REPORT.md` | Memory growth analysis and lifecycle tuning findings |
+| `docs/ROADMAP_post_hivemind_milestone.md` | Post-hivemind development roadmap and priorities |
 | `docs/PROJECT_OVERVIEW.md` | Comprehensive architecture reference |
 
 ---
@@ -137,7 +164,7 @@ TORMENT has five layers:
 
 **Layer 4 — Collective Hivemind** (`collective_field.py`, `collective_policy.py`, `collective_proposals.py`, `governance.py`): workspace-level resonance coupling between agents. Convergence detection, 7-gate policy engine, echo re-ingestion with terminal governance, and a proposal bridge for persistent patterns. SRG Crystal Attunement (`srg_engine.py`) adds living memory geometry with golden-tower bands, heartbeats, breathing compression, and collision physics.
 
-**Layer 5 — Interfaces** (`app.py`, `sim/`, `tests/`): FastAPI REST service, simulation harness, stress tests, 663-test suite.
+**Layer 5 — Interfaces** (`app.py`, `sim/`, `tests/`): FastAPI REST service, simulation harness, stress tests, 1,027-test suite.
 
 ---
 
@@ -174,6 +201,9 @@ TORMENT has five layers:
 - `POST /memory/governance/set` `{ workspace_id, agent_id, eid, flags, actor?, source? }` — partial flag update with audit
 - `GET /memory/governance/get` `{ workspace_id, agent_id, eid }` — read current governance flags
 - `GET /workspace/{workspace_id}/governance/audit` — workspace-level governance audit log
+
+**Observability (v2.4):**
+- `GET /debug/metrics?workspace_id=...&agent_id=...` — unified metrics (flags, agents, domains, collective)
 
 **Collective hivemind (v2.2.1+):**
 - `GET /workspace/{workspace_id}/collective/status` — field summary (packets, events, agents, domains)

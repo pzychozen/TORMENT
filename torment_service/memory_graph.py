@@ -22,6 +22,40 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+# ---------------------------------------------------------------------------
+# Half-life decay — applied at query time to effective retrieval strength
+# ---------------------------------------------------------------------------
+_DECAY_RANKING_FLOOR = 0.03   # minimum effective strength for ranking (avoids total disappearance)
+
+def _half_life_decay_factor(payload: Dict[str, Any], now_ts: Optional[int] = None) -> float:
+    """Compute exponential decay factor based on half_life_days.
+
+    Uses ``last_reinforced`` (full clock reset on reinforcement) if available,
+    otherwise falls back to ``created_ts``.
+
+    Returns a multiplier in (0, 1].  Caller applies:
+        effective_strength = stored_strength * factor
+    """
+    hl = float(payload.get("half_life", 0) or 0)
+    if hl <= 0:
+        return 1.0  # no decay configured
+
+    anchor_ts = int(payload.get("last_reinforced_ts", 0) or 0)
+    if anchor_ts <= 0:
+        anchor_ts = int(payload.get("created_ts", 0) or 0)
+    if anchor_ts <= 0:
+        return 1.0  # no timestamp → can't decay
+
+    if now_ts is None:
+        now_ts = _now_ts()
+    age_days = max(0.0, (now_ts - anchor_ts) / 86400.0)
+    if age_days <= 0:
+        return 1.0
+
+    factor = float(2.0 ** (-age_days / hl))
+    return max(_DECAY_RANKING_FLOOR, factor)
+
+
 class MemoryGraph:
     """
     A light persistent graph over SeedWorld entities.
@@ -190,6 +224,7 @@ class MemoryGraph:
 
         out: List[Dict[str, Any]] = []
         type_set = set(type_filter or [])
+        _now = _now_ts()
         for eid, sc in hits_eids:
             if min_score is not None and float(sc) < float(min_score):
                 continue
@@ -200,9 +235,14 @@ class MemoryGraph:
             mtype = str(payload.get("type") or payload.get("mtype") or "")
             if type_set and mtype and mtype not in type_set:
                 continue
+            # Half-life decay: adjust effective score for ranking
+            decay = _half_life_decay_factor(payload, _now)
+            effective_score = float(sc) * decay
             out.append({
                 "eid": int(eid),
-                "score": float(sc),
+                "score": effective_score,
+                "raw_score": float(sc),
+                "decay_factor": decay,
                 "summary": str(payload.get("summary") or payload.get("text") or ""),
                 "type": mtype or "memory",
                 "strength": float(payload.get("strength") or 0.0),
@@ -211,9 +251,106 @@ class MemoryGraph:
                 "ts": int(payload.get("ts") or payload.get("created_ts") or 0),
                 **payload,
             })
+        # Re-sort by decayed score (decay may reorder results)
+        out.sort(key=lambda h: h["score"], reverse=True)
         return out
 
+    def search_by_embedding(
+        self,
+        embedding: np.ndarray,
+        *,
+        top_k: int = 8,
+        user_id: Optional[str] = None,
+        min_score: Optional[float] = None,
+        type_filter: Optional[List[str]] = None,
+        canon_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Vector search using a pre-computed embedding vector.
 
+        Same as search() but skips the embedding step — useful when the caller
+        already has the vector (e.g. process_proposals in fabric.py).
+
+        Args:
+            embedding: Pre-computed embedding vector (any shape, will be normalized).
+            top_k: Maximum results to return.
+            user_id: If set, filter to memories owned by this user_id (or None for all).
+            min_score: Minimum cosine similarity threshold.
+            type_filter: If set, only return memories of these types.
+            canon_only: If True, only return memories where payload["canon"] is True.
+        """
+        qv = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        if qv.size == 0:
+            return []
+        qv = self._normalize(qv)
+
+        hits_eids: List[Tuple[int, float]] = []
+        if self._cache_embeddings:
+            self._ensure_index()
+            if self._emb_mat is None or not self._eid_list:
+                return []
+            scores = (self._emb_mat @ qv).astype(np.float32)
+            k = int(max(1, top_k))
+            n = int(scores.shape[0])
+            if n <= k:
+                order = np.argsort(-scores)
+            else:
+                idx = np.argpartition(-scores, k - 1)[:k]
+                order = idx[np.argsort(-scores[idx])]
+            hits_eids = [(int(self._eid_list[int(i)]), float(scores[int(i)])) for i in order[:k]]
+        else:
+            for eid, ent in self.entities.items():
+                payload = getattr(ent, "payload", {}) or {}
+                raw = _load_embedding_universal(
+                    eid, payload, self._shard_reader, self.data_dir
+                )
+                if raw is None:
+                    continue
+                try:
+                    v = self._normalize(raw)
+                except Exception:
+                    continue
+                hits_eids.append((int(eid), float(np.dot(v, qv))))
+            hits_eids.sort(key=lambda t: t[1], reverse=True)
+            hits_eids = hits_eids[: int(max(1, top_k))]
+
+        out: List[Dict[str, Any]] = []
+        type_set = set(type_filter or [])
+        _now = _now_ts()
+        for eid, sc in hits_eids:
+            if min_score is not None and float(sc) < float(min_score):
+                continue
+            ent = self.entities.get(int(eid))
+            if ent is None:
+                continue
+            payload = dict(ent.payload or {})
+            # canon filter
+            if canon_only and not payload.get("canon", False):
+                continue
+            # user filter
+            if user_id is not None and str(payload.get("user_id", "")) != str(user_id):
+                continue
+            mtype = str(payload.get("type") or payload.get("mtype") or "")
+            if type_set and mtype and mtype not in type_set:
+                continue
+            # Half-life decay: adjust effective score for ranking
+            decay = _half_life_decay_factor(payload, _now)
+            effective_score = float(sc) * decay
+            out.append({
+                "eid": int(eid),
+                "score": effective_score,
+                "raw_score": float(sc),
+                "decay_factor": decay,
+                "summary": str(payload.get("summary") or payload.get("text") or ""),
+                "type": mtype or "memory",
+                "strength": float(payload.get("strength") or 0.0),
+                "confidence": float(payload.get("confidence") or 0.0),
+                "step": int(payload.get("step") or payload.get("born_step") or 0),
+                "ts": int(payload.get("ts") or payload.get("created_ts") or 0),
+                **payload,
+            })
+        # Re-sort by decayed score
+        out.sort(key=lambda h: h["score"], reverse=True)
+        return out
 
     def _log_event(self, evt: Dict[str, Any]) -> None:
         evt = dict(evt)
