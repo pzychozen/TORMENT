@@ -1,10 +1,19 @@
 # TORMENT Memory Fabric — v2.4.0
 
-A dynamical **memory substrate** for AI agents, built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons.
+**TORMENT** is a governed memory and identity engine for building persistent AI characters and agents.
 
-Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
+Unlike typical agent stacks that rely on prompts, tool wrappers, and loose memory, TORMENT gives characters a structured internal life:
+- **memory that persists** — geometric kernel with half-life decay, reinforcement, and event-gated compression
+- **identity that resists drift** — character basins, seed gravity, and drift monitoring
+- **governed decisions through the Agent Spine** — dual-lane trust enforcement, auto-escalation, and structured audit trails
+- **multi-agent and hivemind support** — collective resonance, convergence detection, 7-gate policy engine
+- **MCP integration for extension and tooling** — governed MCP server with exposure tiers and incident logging
 
-TORMENT does not control personality. It stores and retrieves context in a stable way — and provides a living character identity layer that lets personality emerge from memory rather than static prompts, with a complete memory lifecycle through event-gated compression, spirit return, and collective resonance coupling.
+Built for **modders, developers, and experimental character systems**, TORMENT is designed to be forked, extended, and shaped into companions, NPCs, worlds, and multi-agent projects.
+
+If you want AI characters that feel more consistent, more alive, and more structurally grounded than standard prompt-based systems, this is the engine.
+
+Built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons. Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
 ---
 
@@ -28,7 +37,7 @@ This release closes the gap between "the hive mind works" and "the memory system
 
 **Unified Observability** (`GET /debug/metrics`) — single endpoint aggregating feature flags, per-agent memory/compression/character state, per-domain motif/coherence/proposal stats, and collective packet/convergence counts. Reads only RAM — cheap to poll. All existing per-component debug endpoints preserved.
 
-**1,027 Tests** — up from 663. Full coverage of decay, dedup, fallback triggers, retention tiers, hard cap, Agent Spine acceptance scenarios, and observability.
+**1,200+ Tests** — up from 663. Full coverage of decay, dedup, fallback triggers, retention tiers, hard cap, Agent Spine acceptance scenarios, observability, incident log, MCP server, Spine governance, and real-host hardening (weird inputs, missing context, tier blocking).
 
 ---
 
@@ -122,8 +131,10 @@ This release closes the gap between "the hive mind works" and "the memory system
 | `docs/TROUBLESHOOTING.md` | Operational fixes (includes compression + spirit return) |
 | `docs/MEMORY_KERNEL_ARCHITECTURE.md` | Internal kernel design + compression gating + warmup mechanics |
 | `docs/AGENT_SPINE_OVERVIEW.md` | Agent Spine cognition pipeline — architecture, invariants, data contracts |
+| `docs/SPINE_CONTRACT.md` | Spine invariants, trust tiers, decision codes, exposure tiers |
+| `docs/MCP_README.md` | MCP server setup, configuration, and Claude Desktop integration |
+| `docs/MCP_EXPANSION_GUIDE.md` | Adding new MCP tools — worked example, decision matrix, checklist |
 | `docs/MEMORY_HEALTH_REPORT.md` | Memory growth analysis and lifecycle tuning findings |
-| `docs/ROADMAP_post_hivemind_milestone.md` | Post-hivemind development roadmap and priorities |
 | `docs/PROJECT_OVERVIEW.md` | Comprehensive architecture reference |
 
 ---
@@ -154,17 +165,19 @@ make verify
 
 ## Architecture
 
-TORMENT has five layers:
+TORMENT has six layers:
 
 **Layer 1 — The Kernel** (`torment_service/kernel/`): a TriOcta phase-lock model (three coupled oscillators on Mexican-hat potentials with D24 phase scaffold). Produces stability signals — coherence, corridor alignment, identity state — that govern memory behavior. Accepts per-character modulation of coupling strength and phase angles.
 
-**Layer 2 — The Fabric** (`torment_service/fabric.py` + modules): governance and orchestration. Routes observations through the kernel, manages memory graphs, motif registries, coherence fields, proposals, bridges, phase-cycle timing, and the character identity layer.
+**Layer 2 — The Fabric** (`torment_service/fabric.py` + modules): orchestration and state management. Routes observations through the kernel, manages memory graphs, motif registries, coherence fields, proposals, bridges, phase-cycle timing, and the character identity layer.
 
 **Layer 3 — Compression + Spirit Return** (`compression.py`, `deep_memory.py`, `spirit_return.py`, `phase_timer.py`, `retrieval_assembler.py`): event-gated memory lifecycle. Compression fires at corridor transitions, deep memories return through symbolic resonance with warmth and voice cues.
 
 **Layer 4 — Collective Hivemind** (`collective_field.py`, `collective_policy.py`, `collective_proposals.py`, `governance.py`): workspace-level resonance coupling between agents. Convergence detection, 7-gate policy engine, echo re-ingestion with terminal governance, and a proposal bridge for persistent patterns. SRG Crystal Attunement (`srg_engine.py`) adds living memory geometry with golden-tower bands, heartbeats, breathing compression, and collision physics.
 
-**Layer 5 — Interfaces** (`app.py`, `sim/`, `tests/`): FastAPI REST service, simulation harness, stress tests, 1,027-test suite.
+**Layer 5 — The Agent Spine** (`spine.py`, `request_context.py`, `incident_log.py`): governed authority layer between external callers and the Fabric. Dual-lane routing (fast path for structured ops, full path for 4-role cognition pipeline). Trust-tier enforcement, auto-escalation from fast→full on identity-sensitive content, structured decision/result codes, and a ring-buffer incident log for observability. MCP and HTTP never touch Fabric directly — everything flows through the Spine.
+
+**Layer 6 — Interfaces** (`app.py`, `mcp_server.py`, `sim/`, `tests/`): FastAPI REST service, MCP stdio server with exposure-tier policy, simulation harness, stress tests, 1,200+ test suite.
 
 ---
 
@@ -201,6 +214,16 @@ TORMENT has five layers:
 - `POST /memory/governance/set` `{ workspace_id, agent_id, eid, flags, actor?, source? }` — partial flag update with audit
 - `GET /memory/governance/get` `{ workspace_id, agent_id, eid }` — read current governance flags
 - `GET /workspace/{workspace_id}/governance/audit` — workspace-level governance audit log
+
+**Agent Spine (v2.4):**
+- `POST /spine/submit_task` `{ workspace_id, agent_id, operation, payload, mode? }` — governed entry point for all operations
+- `GET /spine/status?workspace_id=...` — lightweight pulse check: active agents, recent decisions, blocks, escalations
+- `GET /spine/operations` — list all registered operations with trust/tier metadata
+
+**MCP Server (v2.4):**
+- Run via `python -m torment_service.mcp_server` (stdio transport for Claude Desktop)
+- Tools: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`
+- Resources: `torment://admin/status`, `torment://workspace/{ws}/agent/{ag}/state`, `torment://workspace/{ws}/agent/{ag}/memory-summary`, `torment://workspace/{ws}/collective/status`
 
 **Observability (v2.4):**
 - `GET /debug/metrics?workspace_id=...&agent_id=...` — unified metrics (flags, agents, domains, collective)
@@ -251,7 +274,16 @@ export TORMENT_SRG_ENABLE=1
 export TORMENT_HIVEMIND_ENABLE=1
 ```
 
-Each layer is independently flag-gated. Zero overhead when off. They compose naturally: compression provides the memory lifecycle, SRG adds geometric memory physics, and hivemind enables multi-agent resonance coupling on top.
+```bash
+# MCP Server — expose governed operations to Claude Desktop
+export TORMENT_MCP_WORKSPACE_ID=default
+export TORMENT_MCP_AGENT_ID=atlas
+export TORMENT_MCP_TRUST_TIER=0.6
+# Optional: persist incident log to JSONL
+export TORMENT_MCP_INCIDENT_LOG=./data/spine_incidents.jsonl
+```
+
+Each layer is independently flag-gated. Zero overhead when off. They compose naturally: compression provides the memory lifecycle, SRG adds geometric memory physics, hivemind enables multi-agent resonance coupling, and the MCP server exposes governed operations to external tools.
 
 ---
 

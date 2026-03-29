@@ -2,13 +2,20 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional, List
 import os, json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .fabric import TormentFabric
 from .router import DEFAULT_DOMAINS
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
+from .request_context import RequestContext, InsufficientTrustError, system_context
+from .auth import (
+    resolve_request_context,
+    handle_trust_error,
+    AUTH_ENABLED,
+    get_key_store,
+)
 
 DATA_DIR = os.environ.get("TORMENT_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
 
@@ -309,6 +316,11 @@ def health() -> Dict[str, Any]:
             "model": str(getattr(fabric, "requested_embed_model", "")),
             "strict": str(os.environ.get("TORMENT_EMBED_STRICT") or "").strip() in ("1", "true", "yes", "on"),
         },
+        "auth": {
+            "enabled": AUTH_ENABLED,
+            "configured_keys": get_key_store().stats()["configured_keys"] if AUTH_ENABLED else 0,
+        },
+        "locks": fabric.locks.stats(),
     }
 
 
@@ -619,63 +631,28 @@ class GovernanceSetRequest(BaseModel):
 
 
 @app.post("/memory/governance/set")
-def set_governance_flags(req: GovernanceSetRequest) -> Dict[str, Any]:
-    """Update governance flags on an existing memory (partial update).
+def set_governance_flags(req: GovernanceSetRequest, request: Request) -> Dict[str, Any]:
+    """Legacy governance set endpoint — now shimmed through Spine governance."""
+    from .spine import SpineRequest, submit_task
 
-    Only specified flags are changed; unspecified flags keep their current
-    value. Appends an audit record to both the memory payload and the
-    workspace-level audit log.
-    """
-    from .governance import update_governance, resolve_governance, GovernanceAuditLog
-
-    ws = fabric.workspaces.get(req.workspace_id)
-    if ws is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    graph = fabric.private_graphs.get(req.agent_id)
-    if graph is None:
-        raise HTTPException(status_code=404, detail="Agent graph not found")
-
-    ent = graph.entities.get(req.eid)
-    if ent is None:
-        raise HTTPException(status_code=404, detail=f"Memory eid={req.eid} not found")
-
-    payload = ent.payload or {}
-
-    try:
-        audit_record = update_governance(
-            payload,
-            req.flags,
-            actor=req.actor,
-            source=req.source,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # Persist updated payload to memory graph
-    graph.update_payload(req.eid, payload)
-
-    # Also log to workspace-level audit
-    try:
-        audit_log = GovernanceAuditLog(data_dir=DATA_DIR, workspace_id=req.workspace_id)
-        audit_log.log(
-            eid=req.eid,
-            agent_id=req.agent_id,
-            changes=audit_record.get("changed", {}),
-            actor=req.actor,
-            source=req.source,
-        )
-    except Exception:
-        pass  # audit log is best-effort
-
-    # Return the new governance state
-    new_gov = resolve_governance(payload)
-    return {
-        "eid": req.eid,
-        "agent_id": req.agent_id,
-        "governance": new_gov.to_dict(),
-        "audit": audit_record,
-    }
+    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    spine_req = SpineRequest(
+        workspace_id=req.workspace_id, agent_id=req.agent_id,
+        operation="memory_governance_set",
+        payload={
+            "eid": req.eid, "flags": req.flags,
+            "actor": req.actor, "source": req.source,
+        },
+    )
+    resp = submit_task(spine_req, fabric, ctx)
+    if not resp.allowed:
+        raise HTTPException(status_code=403, detail=resp.reason)
+    if not resp.ok:
+        detail = resp.reason or resp.result.get("reason", "Governance update failed")
+        raise HTTPException(status_code=500, detail=detail)
+    # Backward-compatible: return the Fabric result directly
+    # The fast handler returns {"ok": True, "eid": ..., "audit": ...}
+    return resp.result
 
 
 @app.get("/memory/governance/get")
@@ -790,21 +767,34 @@ class CollectiveReingestRequest(BaseModel):
 
 
 @app.post("/workspace/{workspace_id}/collective/reingest")
-def collective_reingest(workspace_id: str, req: CollectiveReingestRequest) -> Dict[str, Any]:
-    """Re-ingest a convergence event as a low-amplitude echo into a target agent.
-
-    This is a manual/API-triggered action — not automatic. The policy engine
-    runs all 7 gates before allowing the reingest. The resulting echo is
-    terminal (double-blocked) and provenance-marked.
-    """
+def collective_reingest(workspace_id: str, req: CollectiveReingestRequest, request: Request) -> Dict[str, Any]:
+    """Legacy collective reingest endpoint — now shimmed through Spine governance."""
+    from .spine import SpineRequest, submit_task
+    ctx = resolve_request_context(request, workspace_id=workspace_id, agent_id=req.agent_id)
     if not fabric._hivemind_enable:
         raise HTTPException(status_code=404, detail="Hivemind not enabled")
-    result = fabric.reingest_convergence(
-        workspace_id=workspace_id,
-        target_agent_id=req.agent_id,
-        event_id=req.event_id,
-        echo_strength_override=req.echo_strength_override,
+    try:
+        fabric.create_agent(workspace_id, req.agent_id)
+    except Exception:
+        pass
+    spine_req = SpineRequest(
+        workspace_id=workspace_id, agent_id=req.agent_id,
+        operation="collective_reingest",
+        payload={
+            "event_id": req.event_id,
+            "echo_strength_override": req.echo_strength_override,
+        },
     )
+    resp = submit_task(spine_req, fabric, ctx)
+    if not resp.allowed:
+        raise HTTPException(status_code=403, detail=resp.reason)
+    if not resp.ok:
+        # Preserve existing 404 behavior for missing events
+        reason = resp.reason or resp.result.get("reason", "")
+        if "not found" in reason.lower():
+            raise HTTPException(status_code=404, detail=reason)
+        raise HTTPException(status_code=500, detail=resp.reason)
+    result = resp.result
     if not result.get("eligible", False) and result.get("reason", "").startswith("Event "):
         raise HTTPException(status_code=404, detail=result["reason"])
     return result
@@ -843,17 +833,29 @@ def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
 
 
 @app.post("/agent/ingest")
-def ingest(req: IngestReq) -> Dict[str, Any]:
-    return fabric.ingest(
-        workspace_id=req.workspace_id,
-        agent_id=req.agent_id,
-        text=req.text,
-        step=req.step,
-        domain_id=req.domain_id,
-        supplied_summary=req.supplied_summary,
-        supplied_embedding=req.supplied_embedding,
-        scope=req.scope,
+def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
+    """Legacy ingest endpoint — now shimmed through Spine governance."""
+    from .spine import SpineRequest, submit_task
+    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    try:
+        fabric.create_agent(req.workspace_id, req.agent_id)
+    except Exception:
+        pass
+    spine_req = SpineRequest(
+        workspace_id=req.workspace_id, agent_id=req.agent_id,
+        operation="ingest",
+        payload={
+            "text": req.text, "step": req.step, "domain_id": req.domain_id,
+            "supplied_summary": req.supplied_summary,
+            "supplied_embedding": req.supplied_embedding, "scope": req.scope,
+        },
     )
+    resp = submit_task(spine_req, fabric, ctx)
+    if not resp.allowed:
+        raise HTTPException(status_code=403, detail=resp.reason)
+    if not resp.ok:
+        raise HTTPException(status_code=500, detail=resp.reason)
+    return resp.result
 
 @app.post("/agent/query")
 def query(req: QueryReq) -> Dict[str, Any]:
@@ -931,18 +933,28 @@ def memory_trace_view(req: TraceViewReq) -> Dict[str, Any]:
     )
 
 @app.post("/agent/feedback")
-def feedback(req: FeedbackReq) -> Dict[str, Any]:
-    return fabric.feedback(
+def feedback(req: FeedbackReq, request: Request) -> Dict[str, Any]:
+    """Legacy feedback endpoint — shimmed through Spine for governed execution."""
+    from .spine import SpineRequest, submit_task
+    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    spine_req = SpineRequest(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
-        retrieved_ids=req.retrieved_ids,
-        used_successfully=req.used_successfully,
-        user_confirmed=req.user_confirmed,
-        contradiction_detected=req.contradiction_detected,
-        novel_motif_created=req.novel_motif_created,
-        shared_memory_used=req.shared_memory_used,
-        bridges_used=req.bridges_used,
+        operation="feedback",
+        payload={
+            "retrieved_ids": req.retrieved_ids,
+            "used_successfully": req.used_successfully,
+            "user_confirmed": req.user_confirmed,
+            "contradiction_detected": req.contradiction_detected,
+            "novel_motif_created": req.novel_motif_created,
+            "shared_memory_used": req.shared_memory_used,
+            "bridges_used": req.bridges_used,
+        },
     )
+    resp = submit_task(spine_req, fabric, ctx)
+    if not resp.ok:
+        raise HTTPException(status_code=403 if not resp.allowed else 500, detail=resp.reason)
+    return resp.result
 
 @app.get("/workspace/{workspace_id}/domain/{domain_id}/motifs/active")
 def active_motifs(workspace_id: str, domain_id: str) -> Dict[str, Any]:
@@ -1882,6 +1894,158 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
             status_code=500,
             detail=result.get("error", "Cognition pipeline failed"),
         )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Governed Spine — primary write interface (Phase 1 MCP prep)
+# ---------------------------------------------------------------------------
+
+class SpineSubmitReq(BaseModel):
+    """Request model for POST /spine/submit_task."""
+    workspace_id: str = Field(default="default")
+    agent_id: str
+    operation: str                                  # registered operation name
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    mode: str = Field(default="auto")               # fast | full | auto
+
+
+@app.post("/spine/submit_task")
+def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
+    """Primary governed entry point for all meaningful external operations.
+
+    This is the public API surface for MCP tools and external clients.
+    All write operations should go through here instead of targeting
+    raw Fabric endpoints directly.
+
+    The Spine determines the path (fast governance vs full cognition),
+    checks trust, acquires locks, enforces invariants, dispatches to
+    Fabric, and returns a governed response envelope.
+    """
+    from .spine import SpineRequest, submit_task, OPERATION_REGISTRY
+
+    # Resolve auth context
+    ctx = resolve_request_context(
+        request,
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
+
+    # Build Spine request
+    spine_req = SpineRequest(
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+        operation=req.operation,
+        payload=req.payload,
+        mode=req.mode,
+    )
+
+    # Ensure agent exists (create if needed for write ops)
+    spec = OPERATION_REGISTRY.get(req.operation)
+    if spec and spec.min_trust > 0:
+        try:
+            fabric.create_agent(req.workspace_id, req.agent_id)
+        except Exception:
+            pass  # query_state and similar don't need agent creation
+
+    # Submit to Spine
+    response = submit_task(spine_req, fabric, ctx)
+
+    return response.to_dict()
+
+
+@app.get("/spine/operations")
+def spine_list_operations() -> Dict[str, Any]:
+    """List all registered Spine operations with their routing policy."""
+    from .spine import OPERATION_REGISTRY
+    ops = []
+    for name, spec in sorted(OPERATION_REGISTRY.items()):
+        ops.append({
+            "name": spec.name,
+            "default_path": spec.default_path,
+            "min_trust": spec.min_trust,
+            "op_class": spec.op_class,
+            "exposure_tier": spec.exposure_tier,
+            "can_escalate": spec.can_escalate,
+            "description": spec.description,
+        })
+    return {"operations": ops, "count": len(ops)}
+
+
+# ---------------------------------------------------------------------------
+# Spine status — lightweight pulse check for observability
+# ---------------------------------------------------------------------------
+
+@app.get("/spine/status")
+def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Lightweight Spine status surface.
+
+    Returns:
+      - Active agents and their trust contexts
+      - Recent Spine decisions (aggregated counts)
+      - Recent blocks and escalations
+      - Drift summary for workspace agents
+      - Incident log summary
+
+    Not a full dashboard — just enough to answer "what just happened?"
+    """
+    from .incident_log import get_incident_log
+
+    log = get_incident_log()
+    result: Dict[str, Any] = {"ok": True, "timestamp": __import__("time").time()}
+
+    # --- Incident summary ---
+    result["incidents"] = log.summary()
+
+    # --- Recent failures (last 10) ---
+    recent_failures = log.query(failures_only=True, limit=10,
+                                workspace_id=workspace_id)
+    result["recent_failures"] = [f.to_dict() for f in recent_failures]
+
+    # --- Recent escalations ---
+    recent_all = log.query(limit=50, workspace_id=workspace_id)
+    escalations = [i.to_dict() for i in recent_all if i.escalated][:10]
+    result["recent_escalations"] = escalations
+
+    # --- Active agents from Fabric state ---
+    agents: List[Dict[str, Any]] = []
+    for key in fabric.agent_states:
+        sep = "/" if "/" in key else ":"
+        ws, ag = key.split(sep, 1) if sep in key else ("unknown", key)
+        if workspace_id and ws != workspace_id:
+            continue
+        # Get drift for this agent
+        drift_score = 0.0
+        drift_dir = "stable"
+        try:
+            cstate = fabric.character_store.load_state(ws, ag)
+            if cstate:
+                drift_score = float(cstate.drift_score)
+                drift_dir = str(cstate.drift_direction or "stable")
+        except Exception:
+            pass
+
+        # Memory count
+        mem_count = 0
+        try:
+            graph = fabric.private_graphs.get(key)
+            if graph:
+                mem_count = len(graph.entities)
+        except Exception:
+            pass
+
+        agents.append({
+            "workspace_id": ws,
+            "agent_id": ag,
+            "memory_count": mem_count,
+            "drift_score": round(drift_score, 4),
+            "drift_direction": drift_dir,
+            "drift_status": "green" if abs(drift_score) < 0.10 else
+                           "yellow" if abs(drift_score) < 0.20 else "red",
+        })
+    result["agents"] = agents
+    result["agent_count"] = len(agents)
 
     return result
 

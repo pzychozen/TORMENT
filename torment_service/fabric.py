@@ -28,6 +28,7 @@ from .character import (
     plant_seed, measure_drift, gravity_correction,
     assemble_character_context, derive_kernel_modulation,
 )
+from .agent_locks import AgentLockManager
 from .checkpoint import (
     save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
     get_checkpoint_dir, serialize_model_state, serialize_corridor_monitor,
@@ -522,6 +523,9 @@ class TormentFabric:
 
         # private memory stores per agent
         self.private_graphs: Dict[str, MemoryGraph] = {}  # _agent_key(ws, agent) -> graph
+
+        # Per-agent and per-workspace serialization (Phase 0 — MCP prep)
+        self.locks = AgentLockManager()
 
         # workspace clone controls (v1.10.4)
         self._clone_mutex = threading.Lock()
@@ -1770,91 +1774,106 @@ class TormentFabric:
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
-        ident = self.ident_store.load(workspace_id, agent_id)
-        if ident is None:
-            ident = self.ident_store.create(workspace_id, agent_id, seed=seed or DEFAULT_AGENT_SEED)
-        # init role profile (character continuity guidance)
-        try:
-            _ = self.role_store.load(workspace_id, agent_id)
-        except Exception:
-            pass
-        # init kernel state if needed — route character seed through oscillator physics
-        if ak not in self.agent_states:
-            char_mod = None
-            if self._character_enable:
-                seed_text_val = str(ident.seed.get("seed_text", "") or "").strip()
-                if seed_text_val:
-                    try:
-                        _cseed = CharacterSeed(
-                            seed_id=str(ident.seed.get("seed_id", "") or ""),
-                            character_name=str(ident.seed.get("seed_id", "") or ""),
-                            seed_text=seed_text_val,
-                        )
-                        char_mod = derive_kernel_modulation(_cseed, self.kernel.embedder)
-                    except Exception:
-                        char_mod = None
-            if char_mod:
-                self.agent_states[ak] = self.kernel.init_state(
-                    seed_text=seed_text_val, character_modulation=char_mod)
-            else:
-                self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
-        # init private store
-        if ak not in self.private_graphs:
-            pdir = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
-            sq_idx = self._get_sqlite_index(workspace_id, agent_id)
-            self.private_graphs[ak] = MemoryGraph(
-                data_dir=pdir, embedder=self.kernel.embedder, sqlite_index=sq_idx,
-            )
-
-        # --- Character seed planting (optional, non-blocking) ---
-        if self._character_enable:
-            seed_text = str(ident.seed.get("seed_text", "") or "").strip()
-            seed_id = str(ident.seed.get("seed_id", "") or "").strip()
-            if seed_text and seed_id:
-                try:
-                    char_seed = self.character_store.load_seed(workspace_id, seed_id)
-                    if char_seed is None:
-                        char_seed = CharacterSeed(
-                            seed_id=seed_id,
-                            character_name=seed_id,
-                            seed_text=seed_text,
-                        )
-                    if not char_seed.seed_motif_id:
-                        # Determine domain (first available or "default")
-                        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
-                        mreg = ws.motif_regs.get(dom)
-                        if mreg is not None:
-                            char_seed = plant_seed(
-                                graph=self.private_graphs[ak],
-                                motif_registry=mreg,
-                                coherence_field=None,
-                                embedder=self.kernel.embedder,
-                                seed=char_seed,
-                                agent_id=agent_id,
-                                step=0,
+        # Serialize entire agent creation to prevent duplicate init under concurrency
+        with self.locks.agent_lock(workspace_id, agent_id):
+            ident = self.ident_store.load(workspace_id, agent_id)
+            if ident is None:
+                ident = self.ident_store.create(workspace_id, agent_id, seed=seed or DEFAULT_AGENT_SEED)
+            # init role profile (character continuity guidance)
+            try:
+                _ = self.role_store.load(workspace_id, agent_id)
+            except Exception:
+                pass
+            # init kernel state if needed — route character seed through oscillator physics
+            if ak not in self.agent_states:
+                char_mod = None
+                if self._character_enable:
+                    seed_text_val = str(ident.seed.get("seed_text", "") or "").strip()
+                    if seed_text_val:
+                        try:
+                            _cseed = CharacterSeed(
+                                seed_id=str(ident.seed.get("seed_id", "") or ""),
+                                character_name=str(ident.seed.get("seed_id", "") or ""),
+                                seed_text=seed_text_val,
                             )
-                            self.character_store.save_seed(workspace_id, char_seed)
-                except Exception:
-                    pass  # Character is optional — never blocks agent creation
+                            char_mod = derive_kernel_modulation(_cseed, self.kernel.embedder)
+                        except Exception:
+                            char_mod = None
+                if char_mod:
+                    self.agent_states[ak] = self.kernel.init_state(
+                        seed_text=seed_text_val, character_modulation=char_mod)
+                else:
+                    self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
+            # init private store
+            if ak not in self.private_graphs:
+                pdir = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
+                sq_idx = self._get_sqlite_index(workspace_id, agent_id)
+                self.private_graphs[ak] = MemoryGraph(
+                    data_dir=pdir, embedder=self.kernel.embedder, sqlite_index=sq_idx,
+                )
 
-        return ident
+            # --- Character seed planting (optional, non-blocking) ---
+            if self._character_enable:
+                seed_text = str(ident.seed.get("seed_text", "") or "").strip()
+                seed_id = str(ident.seed.get("seed_id", "") or "").strip()
+                if seed_text and seed_id:
+                    try:
+                        char_seed = self.character_store.load_seed(workspace_id, seed_id)
+                        if char_seed is None:
+                            char_seed = CharacterSeed(
+                                seed_id=seed_id,
+                                character_name=seed_id,
+                                seed_text=seed_text,
+                            )
+                        if not char_seed.seed_motif_id:
+                            # Determine domain (first available or "default")
+                            dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+                            mreg = ws.motif_regs.get(dom)
+                            if mreg is not None:
+                                char_seed = plant_seed(
+                                    graph=self.private_graphs[ak],
+                                    motif_registry=mreg,
+                                    coherence_field=None,
+                                    embedder=self.kernel.embedder,
+                                    seed=char_seed,
+                                    agent_id=agent_id,
+                                    step=0,
+                                )
+                                self.character_store.save_seed(workspace_id, char_seed)
+                    except Exception:
+                        pass  # Character is optional — never blocks agent creation
+
+            return ident
 
     def _get_collective_field(self, workspace_id: str):
-        """Lazy-init and return the CollectiveField for a workspace."""
-        if workspace_id not in self._collective_fields:
-            from .collective_field import CollectiveField
-            self._collective_fields[workspace_id] = CollectiveField(
-                workspace_id=workspace_id, data_dir=self.data_dir,
-            )
+        """Lazy-init and return the CollectiveField for a workspace.
+
+        Uses double-checked locking to prevent duplicate initialization
+        when multiple threads access the same workspace concurrently.
+        """
+        if workspace_id in self._collective_fields:
+            return self._collective_fields[workspace_id]
+        with self.locks.init_lock:
+            if workspace_id not in self._collective_fields:
+                from .collective_field import CollectiveField
+                self._collective_fields[workspace_id] = CollectiveField(
+                    workspace_id=workspace_id, data_dir=self.data_dir,
+                )
         return self._collective_fields[workspace_id]
 
     def _get_proposal_bridge(self, workspace_id: str):
-        """Lazy-init and return the CollectiveProposalBridge for a workspace."""
-        if workspace_id not in self._proposal_bridges:
-            from .collective_proposals import CollectiveProposalBridge
-            self._proposal_bridges[workspace_id] = CollectiveProposalBridge(
-                data_dir=self.data_dir, workspace_id=workspace_id,
-            )
+        """Lazy-init and return the CollectiveProposalBridge for a workspace.
+
+        Uses double-checked locking for thread safety.
+        """
+        if workspace_id in self._proposal_bridges:
+            return self._proposal_bridges[workspace_id]
+        with self.locks.init_lock:
+            if workspace_id not in self._proposal_bridges:
+                from .collective_proposals import CollectiveProposalBridge
+                self._proposal_bridges[workspace_id] = CollectiveProposalBridge(
+                    data_dir=self.data_dir, workspace_id=workspace_id,
+                )
         return self._proposal_bridges[workspace_id]
 
     def _collective_query_context(self, workspace_id: str, domains: List[str]) -> Dict[str, Any]:
@@ -2466,8 +2485,8 @@ class TormentFabric:
                 # --- Hivemind: emit ResonancePacket into collective field ---
                 # === TEMPORARY PACKET DEBUG (print to stdout — remove after diagnosis) ===
                 import sys as _hm_sys
-                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}", flush=True)
-                _hm_sys.stdout.flush()
+                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}", file=_hm_sys.stderr, flush=True)
+                _hm_sys.stderr.flush()
                 if self._hivemind_enable and stored and eid is not None:
                     try:
                         from .collective_models import ResonancePacket
@@ -2489,7 +2508,7 @@ class TormentFabric:
                                     _hm_emit_ok = False
                                     _hm_skip_reason = "governance: collective provenance (echo invariant)"
                         except Exception as _gov_exc:
-                            print(f"[PACKET-GATE] governance check exception: {_gov_exc}", flush=True)
+                            print(f"[PACKET-GATE] governance check exception: {_gov_exc}", file=_hm_sys.stderr, flush=True)
 
                         # Gate 2: coherence minimum threshold
                         # Restored to 0.15 after DISP_SCALE recalibration (7e-4 → 0.10)
@@ -2497,7 +2516,7 @@ class TormentFabric:
                         _HM_COH_THRESHOLD = 0.15
                         _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
 
-                        print(f"[PACKET-GATE] gate1_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f} (threshold={_HM_COH_THRESHOLD}), skip_reason={_hm_skip_reason}", flush=True)
+                        print(f"[PACKET-GATE] gate1_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f} (threshold={_HM_COH_THRESHOLD}), skip_reason={_hm_skip_reason}", file=_hm_sys.stderr, flush=True)
 
                         if _hm_emit_ok and _hm_coherence >= _HM_COH_THRESHOLD:
                             _hm_emb_hash = ""
@@ -2609,7 +2628,7 @@ class TormentFabric:
                         _hm_reasons.append("stored=False")
                     if eid is None:
                         _hm_reasons.append("eid=None")
-                    print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", flush=True)
+                    print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", file=_hm_sys.stderr, flush=True)
 
                 pol = ws.domain_policies.get(chosen_domain, {})
                 try:

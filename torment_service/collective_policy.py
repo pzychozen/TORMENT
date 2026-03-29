@@ -133,6 +133,51 @@ class ReingestTracker:
             with open(self._log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
+    def check_and_reserve(self, agent_id: str, event_id: str) -> bool:
+        """Atomic check-and-reserve for deduplication.
+
+        Returns True if the event was NOT already reingested and has been
+        reserved (marked as reingested). Returns False if it's a duplicate.
+
+        This eliminates the race window between is_duplicate() and record()
+        where two threads could both pass the check before either records.
+
+        Call this BEFORE performing the actual reingest. If the reingest
+        fails, call unreserve() to roll back.
+        """
+        key = f"{agent_id}|{event_id}"
+        with self._lock:
+            if key in self._reingested:
+                return False  # duplicate
+            self._reingested.add(key)
+            return True  # reserved
+
+    def confirm_reservation(self, agent_id: str, event_id: str) -> None:
+        """Persist a previously reserved reingest to disk.
+
+        Call this AFTER the reingest succeeds. The in-memory reservation
+        was already made by check_and_reserve().
+        """
+        now = int(time.time())
+        record = {
+            "agent_id": agent_id,
+            "event_id": event_id,
+            "ts": now,
+        }
+        with self._lock:
+            self._agent_timestamps.setdefault(agent_id, []).append(now)
+            with open(self._log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+    def unreserve(self, agent_id: str, event_id: str) -> None:
+        """Roll back a reservation if the reingest failed.
+
+        Removes the in-memory mark so the event can be retried later.
+        """
+        key = f"{agent_id}|{event_id}"
+        with self._lock:
+            self._reingested.discard(key)
+
 
 # ---------------------------------------------------------------------------
 # Drift budget checker
@@ -238,6 +283,17 @@ class CollectivePolicy:
         # Persistent dedup + rate tracker
         self.tracker = ReingestTracker(data_dir, workspace_id)
 
+        # Track active reservation from evaluate() for cleanup on failure
+        self._reserved_event_id: Optional[str] = None
+        self._reserved_agent_id: Optional[str] = None
+
+    def _unreserve_if_needed(self) -> None:
+        """Roll back any active reservation from a failed gate evaluation."""
+        if self._reserved_event_id and self._reserved_agent_id:
+            self.tracker.unreserve(self._reserved_agent_id, self._reserved_event_id)
+            self._reserved_event_id = None
+            self._reserved_agent_id = None
+
     def set_agent_opt_out(self, agent_id: str, opt_out: bool = True) -> None:
         """Set whether an agent refuses collective echoes."""
         if opt_out:
@@ -305,9 +361,9 @@ class CollectivePolicy:
                 ),
             )
 
-        # ── Gate 4: Deduplication ─────────────────────────────────────
+        # ── Gate 4: Deduplication (atomic check-and-reserve) ─────────
         event_id = event.get("event_id", "")
-        if self.tracker.is_duplicate(target_agent_id, event_id):
+        if not self.tracker.check_and_reserve(target_agent_id, event_id):
             return PolicyResult(
                 eligible=False,
                 gate_failed="dedup",
@@ -316,12 +372,17 @@ class CollectivePolicy:
                     f"agent '{target_agent_id}'"
                 ),
             )
+        # NOTE: event is now reserved in-memory. If any later gate fails,
+        # we must unreserve. The _reserved_event_id flag tracks this.
+        self._reserved_event_id = event_id
+        self._reserved_agent_id = target_agent_id
 
         # ── Gate 5: Rate limiting ─────────────────────────────────────
         recent_count = self.tracker.count_recent(
             target_agent_id, self.rate_limit_window,
         )
         if recent_count >= self.rate_limit_max:
+            self._unreserve_if_needed()
             return PolicyResult(
                 eligible=False,
                 gate_failed="rate_limit",
@@ -344,6 +405,7 @@ class CollectivePolicy:
             drift_budget=self.drift_budget,
         )
         if not drift_ok:
+            self._unreserve_if_needed()
             return PolicyResult(
                 eligible=False,
                 gate_failed="drift_budget",
@@ -363,5 +425,18 @@ class CollectivePolicy:
         )
 
     def record_reingest(self, agent_id: str, event_id: str) -> None:
-        """Record a successful reingest (call AFTER re-ingestion succeeds)."""
-        self.tracker.record(agent_id, event_id)
+        """Confirm and persist a successful reingest (call AFTER re-ingestion succeeds).
+
+        If called after evaluate() reserved the event (normal flow), this
+        persists the reservation to disk. If called standalone (legacy/tests),
+        this does a full record (both in-memory add and disk persist).
+        """
+        if (self._reserved_event_id == event_id
+                and self._reserved_agent_id == agent_id):
+            # Normal flow: evaluate() already reserved in-memory via check_and_reserve
+            self.tracker.confirm_reservation(agent_id, event_id)
+            self._reserved_event_id = None
+            self._reserved_agent_id = None
+        else:
+            # Legacy/standalone path: do full record (in-memory + disk)
+            self.tracker.record(agent_id, event_id)
