@@ -27,15 +27,12 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, Security
-from fastapi.security import APIKeyHeader
+from fastapi import HTTPException, Request
 
 from .request_context import (
     RequestContext,
     TRUST_OPERATOR,
-    TRUST_READ_ONLY,
     InsufficientTrustError,
-    system_context,
 )
 
 logger = logging.getLogger("torment.auth")
@@ -77,13 +74,13 @@ class APIKeyStore:
                 continue
             parts = entry.split(":")
             if len(parts) < 3:
-                logger.warning("Skipping malformed API key entry (need key:client:tier): %s", entry[:20])
+                logger.warning("Skipping malformed API key entry (need key:client:tier format)")
                 continue
             key, client_id, tier_str = parts[0], parts[1], parts[2]
             try:
                 tier = float(tier_str)
             except ValueError:
-                logger.warning("Skipping API key with invalid trust tier: %s", tier_str)
+                logger.warning("Skipping API key with invalid (non-numeric) trust tier")
                 continue
             self._keys[key] = ClientRecord(
                 client_id=client_id,
@@ -164,10 +161,6 @@ def get_key_store() -> APIKeyStore:
 # ---------------------------------------------------------------------------
 # FastAPI integration
 # ---------------------------------------------------------------------------
-
-# Header-based API key (standard pattern)
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
 
 def resolve_request_context(
     request: Request,
