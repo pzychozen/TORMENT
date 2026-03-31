@@ -135,7 +135,7 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        self.index_dir = index_dir
+        self.index_dir = os.path.normpath(index_dir)
         os.makedirs(self.index_dir, exist_ok=True)
         self.db_path = os.path.join(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
@@ -165,8 +165,8 @@ class IndexManager:
         if self._conn:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("SQLite close ignored: %s", e)
             self._conn = None
 
     # ------------------------------------------------------------------
@@ -569,8 +569,8 @@ class IndexManager:
                     for eid in members:
                         if self.index_motif_membership(int(eid), mid, strength):
                             counts["core_motifs"] += 1
-            except (json.JSONDecodeError, KeyError, ValueError):
-                pass
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.warning("Motif rebuild skipped (corrupt file): %s", e)
 
         # Record rebuild timestamp
         self._safe_execute(
