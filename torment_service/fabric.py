@@ -3821,6 +3821,7 @@ class TormentFabric:
         return {"workspace_id": workspace_id, "domain_id": domain_id, "conflict_id": conflict_id, "decision": decision}
 
     def approve_domain_suggestion(self, workspace_id: str, suggested_domain_id: str) -> Dict[str, Any]:
+        _validate_path_component(workspace_id, "workspace_id")
         ws = self.get_workspace(workspace_id)
         dom = re.sub(r"[^a-zA-Z0-9_\-]", "_", suggested_domain_id.strip().lower())
         if not dom:
@@ -3934,6 +3935,7 @@ class TormentFabric:
 
     def _maybe_suggest_domain(self, ws: Workspace, domain_id: str) -> None:
         """Suggest new domains based on strong motifs that are poorly aligned with their current domain centroid."""
+        _validate_path_component(domain_id, "domain_id")
         # Build domain centroid from motif centroids
         dom_centroids: Dict[str, np.ndarray] = {}
         for d, r in ws.motif_regs.items():
@@ -4006,6 +4008,10 @@ class TormentFabric:
 
     def trace(self, workspace_id: str, agent_id: str, query_text: str, eids: List[int], domain_id: Optional[str] = None) -> Dict[str, Any]:
         """Explain why specific memories scored the way they did for a query."""
+        _validate_path_component(workspace_id, "workspace_id")
+        _validate_path_component(agent_id, "agent_id")
+        if domain_id:
+            _validate_path_component(domain_id, "domain_id")
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         self.create_agent(workspace_id, agent_id)
@@ -4112,6 +4118,11 @@ class TormentFabric:
 
     def memory_chain(self, workspace_id: str, eid: int, scope: str = "shared", domain_id: Optional[str] = None, agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Return append-only event chain for a memory (from its graph event log)."""
+        _validate_path_component(workspace_id, "workspace_id")
+        if domain_id:
+            _validate_path_component(domain_id, "domain_id")
+        if agent_id:
+            _validate_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         events = []
         if scope == 'private':
@@ -4142,6 +4153,11 @@ class TormentFabric:
 
     def trace_full_graph(self, workspace_id: str, eid: int, scope: str = "shared", domain_id: Optional[str] = None, agent_id: Optional[str] = None, depth: int = 2, explain: bool = False, export: str = "none") -> Dict[str, Any]:
         """Build a causal trace graph for a memory. Simplified but complete enough for tooling."""
+        _validate_path_component(workspace_id, "workspace_id")
+        if domain_id:
+            _validate_path_component(domain_id, "domain_id")
+        if agent_id:
+            _validate_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         # base node
         nodes = []
@@ -4214,6 +4230,11 @@ class TormentFabric:
 
     def trace_bundle(self, workspace_id: str, eid: int, scope: str = "shared", domain_id: Optional[str] = None, agent_id: Optional[str] = None, depth: int = 2, explain: bool = False, export: str = "bundle") -> Dict[str, Any]:
         """Create a trace bundle folder: graph.json, graph.dot, narrative.md, manifest.json."""
+        _validate_path_component(workspace_id, "workspace_id")
+        if domain_id:
+            _validate_path_component(domain_id, "domain_id")
+        if agent_id:
+            _validate_path_component(agent_id, "agent_id")
         dom = domain_id or 'research'
         graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='bundle')
         out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports', f"bundle_{eid}_{dom}"))
@@ -4317,7 +4338,10 @@ def random_chance(p: float) -> bool:
 def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
     _validate_path_component(workspace_id, "workspace_id")
     _validate_path_component(agent_id, "agent_id")
-    base = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id))
+    safe_dir = os.path.normpath(data_dir)
+    base = os.path.normpath(os.path.join(safe_dir, "workspaces", workspace_id, "agents", agent_id))
+    if not base.startswith(safe_dir):
+        raise ValueError("Path escapes data directory")
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, "affect_state.json")
 
