@@ -167,6 +167,7 @@ def _now_ts() -> int:
 
 
 def _embed_audit_path(data_dir: str, workspace_id: str) -> str:
+    _validate_path_component(workspace_id, "workspace_id")
     return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "embed_audit.json"))
 
 
@@ -263,6 +264,8 @@ def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 
 
 def _symbol_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "symbol_state.json"))
 
 
@@ -456,6 +459,17 @@ class Workspace:
         # update router
         self.router = DomainRouter(self.motif_regs, embed_dim=int(self.embed_dim))
 
+def _validate_path_component(value: str, label: str = "identifier") -> str:
+    """Reject path traversal characters in user-provided identifiers.
+
+    Raises HTTPException(400) if the value contains '/', '\\', or '..'.
+    Returns the value unchanged for valid inputs.
+    """
+    if ".." in value or "/" in value or "\\" in value:
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
 class TormentFabric:
 
     @staticmethod
@@ -572,6 +586,7 @@ class TormentFabric:
         return self._sqlite_indexes[key]
 
     def get_workspace(self, workspace_id: str, domains: Optional[List[str]] = None) -> Workspace:
+        _validate_path_component(workspace_id, "workspace_id")
         ws = self.workspaces.get(workspace_id)
         if ws is None:
             try:
@@ -874,6 +889,7 @@ class TormentFabric:
 
         For large workspaces, prefer the async job endpoint which calls the same implementation.
         """
+        _validate_path_component(workspace_id, "workspace_id")
         # Prevent concurrent heavy operations.
         if not self._clone_mutex.acquire(blocking=False):
             raise HTTPException(status_code=429, detail="Another heavy workspace operation is already in progress")
@@ -1516,6 +1532,8 @@ class TormentFabric:
           - Copies nodes/edges/events verbatim and regenerates emb_*.npy from stored summaries.
           - Keeps EIDs stable within each graph by overwriting emb_{eid}.npy in-place.
         """
+        _validate_path_component(source_workspace_id, "source_workspace_id")
+        _validate_path_component(target_workspace_id, "target_workspace_id")
         now = time.time()
         if self._clone_min_gap_s and (now - float(self._last_clone_ts or 0.0)) < float(self._clone_min_gap_s):
             wait_s = int(max(1.0, float(self._clone_min_gap_s) - (now - float(self._last_clone_ts or 0.0))))
@@ -1772,6 +1790,7 @@ class TormentFabric:
     
     
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
+        _validate_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         # Serialize entire agent creation to prevent duplicate init under concurrency
@@ -4293,6 +4312,8 @@ def random_chance(p: float) -> bool:
     return random.random() < float(p)
 
 def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     base = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id))
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, "affect_state.json")
