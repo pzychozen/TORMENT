@@ -71,7 +71,11 @@ W_USER_APPROVED = 0.10  # explicit user/dev approval
 # ---------------------------------------------------------------------------
 
 def _retrieval_counts_path(archive_dir: str) -> str:
-    return os.path.join(os.path.normpath(archive_dir), "retrieval_counts.json")
+    safe = os.path.normpath(archive_dir)
+    result = os.path.join(safe, "retrieval_counts.json")
+    if not os.path.normpath(result).startswith(safe):
+        raise ValueError("Path escapes archive directory")
+    return result
 
 
 def load_retrieval_counts(archive_dir: str) -> Dict[str, int]:
@@ -89,8 +93,9 @@ def load_retrieval_counts(archive_dir: str) -> Dict[str, int]:
 def save_retrieval_counts(archive_dir: str, counts: Dict[str, int]) -> None:
     """Persist retrieval counts."""
     path = _retrieval_counts_path(archive_dir)
+    safe_dir = os.path.normpath(os.path.dirname(path))
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(safe_dir, exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(counts, f)
