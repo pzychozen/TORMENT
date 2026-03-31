@@ -297,7 +297,7 @@ def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 class Workspace:
     def __init__(self, data_dir: str, workspace_id: str, kernel: TriOctaMemoryKernel,
                  requested_domains: Optional[List[str]] = None) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.normpath(data_dir)
         self.workspace_id = workspace_id
         self.kernel = kernel
         self.meta = self._load_or_init_meta()
@@ -338,7 +338,7 @@ class Workspace:
         }
 
         # domain suggestions (emergent suggestions require admin approval later)
-        self.domain_suggestions_path = os.path.join(data_dir, "workspaces", workspace_id, "domain_suggestions.json")
+        self.domain_suggestions_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_suggestions.json"))
         os.makedirs(os.path.dirname(self.domain_suggestions_path), exist_ok=True)
 
         # per-domain policy knobs (throttles, governance, peeks)
@@ -470,7 +470,7 @@ class TormentFabric:
         return f"{workspace_id}/{agent_id}"
 
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.normpath(data_dir)
         os.makedirs(self.data_dir, exist_ok=True)
         # v1.10: embedder is configured via env and attached to the kernel.
         self.embedder_error: str = ""
@@ -1561,10 +1561,10 @@ class TormentFabric:
                        job_id, source_workspace_id, target_workspace_id, include_private, include_shared, reembed, reembed_mode)
     
         try:
-            src_root = os.path.join(self.data_dir, "workspaces", source_workspace_id)
+            src_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", source_workspace_id))
             if not os.path.isdir(src_root):
                 raise HTTPException(status_code=404, detail=f"Source workspace '{source_workspace_id}' not found")
-            tgt_root = os.path.join(self.data_dir, "workspaces", target_workspace_id)
+            tgt_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", target_workspace_id))
             if os.path.exists(tgt_root):
                 raise HTTPException(status_code=409, detail=f"Target workspace '{target_workspace_id}' already exists")
     
@@ -4168,7 +4168,7 @@ class TormentFabric:
         graph["embed_context"] = self._embed_context(ws)
 
         export_files = {}
-        out_dir = os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports')
+        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports'))
         os.makedirs(out_dir, exist_ok=True)
         if export in ('json','bundle'):
             jp = os.path.join(out_dir, f"trace_{eid}_{dom}.json")
@@ -4194,7 +4194,7 @@ class TormentFabric:
         """Create a trace bundle folder: graph.json, graph.dot, narrative.md, manifest.json."""
         dom = domain_id or 'research'
         graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='bundle')
-        out_dir = os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports', f"bundle_{eid}_{dom}")
+        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports', f"bundle_{eid}_{dom}"))
         os.makedirs(out_dir, exist_ok=True)
         # write graph.json/dot already created in exports; copy into bundle
         import shutil
@@ -4293,7 +4293,7 @@ def random_chance(p: float) -> bool:
     return random.random() < float(p)
 
 def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    base = os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id)
+    base = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id))
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, "affect_state.json")
 
