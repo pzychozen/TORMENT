@@ -167,7 +167,7 @@ def _now_ts() -> int:
 
 
 def _embed_audit_path(data_dir: str, workspace_id: str) -> str:
-    return os.path.join(data_dir, "workspaces", workspace_id, "embed_audit.json")
+    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "embed_audit.json"))
 
 
 def _write_embed_audit(
@@ -263,7 +263,7 @@ def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 
 
 def _symbol_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    return os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "symbol_state.json")
+    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "symbol_state.json"))
 
 
 def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
@@ -342,7 +342,7 @@ class Workspace:
         os.makedirs(os.path.dirname(self.domain_suggestions_path), exist_ok=True)
 
         # per-domain policy knobs (throttles, governance, peeks)
-        self.domain_policies_path = os.path.join(data_dir, "workspaces", workspace_id, "domain_policies.json")
+        self.domain_policies_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_policies.json"))
         self.domain_policies = self._load_or_init_domain_policies()
 
         # collective kernel placeholder (domain kernels would live here later)
@@ -359,7 +359,7 @@ class Workspace:
         return {}
 
     def _meta_path(self) -> str:
-        return os.path.join(self.data_dir, "workspaces", self.workspace_id, "workspace_meta.json")
+        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "workspace_meta.json"))
 
     def _load_or_init_meta(self) -> Dict[str, Any]:
         p = self._meta_path()
@@ -382,7 +382,7 @@ class Workspace:
         return meta
 
     def _domains_path(self) -> str:
-        return os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains.json")
+        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains.json"))
 
     def _load_or_init_domains(self, requested_domains: Optional[List[str]] = None) -> List[str]:
         p = self._domains_path()
@@ -439,7 +439,7 @@ class Workspace:
         with open(self._domains_path(), "w", encoding="utf-8") as f:
             json.dump({"domains": self.domains}, f, indent=2)
         # instantiate registries and stores (shared graph first so shard reader is available)
-        dom_dir = os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", domain_id, "shared")
+        dom_dir = os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", domain_id, "shared"))
         self.shared_graphs[domain_id] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
         self.motif_regs[domain_id] = MotifRegistry(
             data_dir=self.data_dir, workspace_id=self.workspace_id, domain_id=domain_id,
@@ -639,7 +639,7 @@ class TormentFabric:
 
     # ---- job persistence helpers (v1.10.10) ----
     def _job_path(self, kind: str, job_id: str) -> str:
-        return os.path.join(self._jobs_root, kind, f"{job_id}.json")
+        return os.path.normpath(os.path.join(self._jobs_root, kind, f"{job_id}.json"))
 
     def _load_jobs(self, kind: str) -> None:
         """Load persisted jobs from disk into in-memory stores.
@@ -928,7 +928,7 @@ class TormentFabric:
         if lock_model and cur_model and lock_model != cur_model:
             raise HTTPException(status_code=409, detail=f"Active embedder model '{cur_model}' does not match workspace lock '{lock_model}'. Use /workspace/clone to migrate.")
 
-        ws_root = os.path.join(self.data_dir, "workspaces", workspace_id)
+        ws_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", workspace_id))
         if not os.path.isdir(ws_root):
             raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
