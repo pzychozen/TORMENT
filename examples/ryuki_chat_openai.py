@@ -35,6 +35,7 @@ Type your messages. 'quit' to exit.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import textwrap
@@ -42,6 +43,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -146,8 +149,8 @@ class OpenAICompatClient:
         try:
             from openai import OpenAI
             self._sdk = OpenAI(base_url=base_url, api_key=api_key)
-        except ImportError:
-            pass
+        except ImportError as e:
+            log.debug(f"OpenAI SDK import failed; using fallback: {e}")
 
     def message(self, system: str, messages: list, max_tokens: int = 1024) -> str:
         all_messages = [{"role": "system", "content": system}] + messages

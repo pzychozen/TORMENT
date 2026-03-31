@@ -35,6 +35,8 @@ from .checkpoint import (
     build_motif_summary, build_shard_snapshot,
 )
 
+log = logging.getLogger("torment.fabric")
+
 class _JobCancelled(Exception):
     pass
 
@@ -1760,9 +1762,9 @@ class TormentFabric:
                     lock={"provider": meta.get("embed_provider", ""), "model": meta.get("embed_model", ""), "dim": meta.get("embed_dim", 0)},
                     embedder={"provider": meta.get("embed_provider", ""), "model": meta.get("embed_model", ""), "dim": meta.get("embed_dim", 0)},
                 )
-            except Exception:
-                pass
-    
+            except Exception as e:
+                self._log.debug("Failed to write embedding audit for workspace_id=%s: %s", target_workspace_id, e)
+
             return {
                 "ok": True,
                 "job_id": job_id,
@@ -1802,8 +1804,8 @@ class TormentFabric:
             # init role profile (character continuity guidance)
             try:
                 _ = self.role_store.load(workspace_id, agent_id)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log.debug("Failed to load role_store for workspace_id=%s agent_id=%s: %s", workspace_id, agent_id, e)
             # init kernel state if needed — route character seed through oscillator physics
             if ak not in self.agent_states:
                 char_mod = None
@@ -1998,8 +2000,8 @@ class TormentFabric:
                     cseed = self.character_store.load_seed(workspace_id, seed_id)
                     if cseed:
                         agent_seed_motif_id = cseed.seed_motif_id
-        except Exception:
-            pass
+        except Exception as e:
+            self._log.debug("Failed to load character seed for agent_id=%s: %s", target_agent_id, e)
 
         # Determine target domain
         target_domain = event_dict.get("domain_id", "")
@@ -2082,10 +2084,10 @@ class TormentFabric:
                         # Flush the patched entity to disk
                         try:
                             graph.flush_node(int(echo_eid))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as e:
+                            self._log.debug("Failed to flush node eid=%s: %s", echo_eid, e)
+            except Exception as e:
+                self._log.debug("Failed to process reingest for agent_id=%s event_id=%s: %s", target_agent_id, event_id, e)
 
         # Record the reingest in the tracker (for dedup + rate limiting)
         policy.record_reingest(target_agent_id, event_id)
@@ -2412,8 +2414,8 @@ class TormentFabric:
                         is_new_motif=bool(created_motif is not None),
                         symbol_trace=prev_trace,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Failed to record symbol motif trace for eid=%s: %s", eid, e)
 
                 # Enrich the entity payload with symbol + resonance data IN-MEMORY
                 # (no nodes.jsonl write yet — flush_node below handles that)
@@ -2444,14 +2446,14 @@ class TormentFabric:
                                 "dominant_transition": res.get("dominant_transition"),
                                 "cycles": res.get("cycles", []),
                             })
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Failed to enrich resonance data for eid=%s: %s", eid, e)
 
                 # --- Single flush: write the complete, enriched record once ---
                 try:
                     graph.flush_node(int(eid))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Failed to flush node eid=%s: %s", eid, e)
 
                 # --- SRG collision detection (Phase 3) ---
                 if self._srg_enable and _srg_dict and eid is not None:
@@ -2499,8 +2501,8 @@ class TormentFabric:
                                     if _my_ent is not None:
                                         _my_ent.payload["srg"] = _new_srg.to_dict()
                                         _my_ent.payload["srg_collision"] = _col_report
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self._log.debug("Failed to process SRG collision for eid=%s: %s", eid, e)
 
                 # --- Hivemind: emit ResonancePacket into collective field ---
                 # === TEMPORARY PACKET DEBUG (print to stdout — remove after diagnosis) ===
@@ -2543,8 +2545,8 @@ class TormentFabric:
                             try:
                                 import hashlib
                                 _hm_emb_hash = hashlib.md5(emb.tobytes()).hexdigest()[:12]
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self._log.debug("Failed to compute embedding hash: %s", e)
 
                             # Safely extract resonance data (may not exist if sym enrichment failed)
                             _hm_res_score = None
@@ -2554,8 +2556,8 @@ class TormentFabric:
                                 if _hm_ent and _hm_ent.payload:
                                     _hm_res_score = _hm_ent.payload.get("resonance_score")
                                     _hm_loop_type = _hm_ent.payload.get("loop_type")
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self._log.debug("Failed to extract resonance data for packet: %s", e)
 
                             # Drift info (may not exist yet)
                             _hm_drift = None
@@ -2567,8 +2569,8 @@ class TormentFabric:
                                     _hm_drift = _hm_cstate.drift_score
                                     _hm_drift_dir = _hm_cstate.drift_direction
                                     _hm_seed_id = _hm_cstate.seed_id
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self._log.debug("Failed to load character state for packet: %s", e)
 
                             # SRG fields
                             _hm_srg_band = None
@@ -2660,22 +2662,22 @@ class TormentFabric:
                         auto_merge=bool(pol.get("auto_merge_motifs", False)),
                         auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("motif entropy update failed for domain=%s: %s", chosen_domain, e)
 
                 # optional B-layers (safe to keep wrapped)
                 try:
                     _ = self._maybe_emit_identity_anchor(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), motif_ids=list(motif_ids))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("identity anchor emission failed: %s", e)
                 try:
                     self._refine_identity_anchors(ws, agent_id=agent_id, domain_id=chosen_domain, motif_ids=list(motif_ids))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("identity anchor refinement failed: %s", e)
                 try:
                     self._maybe_emit_mood_drift(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), affect_tag=affect_tag, affect_conf=affect_conf)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("mood drift emission failed: %s", e)
 
         # world evolves continuously (non-finite seeds), even if no memory stored this tick
         try:
@@ -2745,8 +2747,8 @@ class TormentFabric:
                     _ckpt_reg = ws.motif_regs.get(chosen_domain)
                     if _ckpt_reg:
                         _motif_summary = build_motif_summary(_ckpt_reg)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("checkpoint motif summary build failed: %s", e)
                 _shard_snap = None
                 try:
                     _priv_dir = os.path.join(
@@ -2754,16 +2756,16 @@ class TormentFabric:
                         "agents", agent_id, "private", "embeddings",
                     )
                     _shard_snap = build_shard_snapshot(_priv_dir)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("checkpoint shard snapshot build failed for path=%s: %s", _priv_dir, e)
                 _char_state_dict = None
                 try:
                     _ckpt_cstate = self.character_store.load_state(workspace_id, agent_id)
                     if _ckpt_cstate:
                         from dataclasses import asdict as _da
                         _char_state_dict = _da(_ckpt_cstate)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("checkpoint character state load failed: %s", e)
                 save_checkpoint(
                     checkpoint_dir=_ckpt_dir,
                     step=int(step),
@@ -2774,8 +2776,8 @@ class TormentFabric:
                     shard_snapshot=_shard_snap,
                     max_checkpoints=self._checkpoint_max_keep,
                 )
-            except Exception:
-                pass  # Checkpoint failure is always non-fatal
+            except Exception as e:
+                self._log.debug("checkpoint save failed for step=%s: %s", step, e)
 
         # --- Event-gated compression (Phase 6) — non-blocking ---
         if self._compress_enable and int(step) >= self._compress_min_step:
@@ -3103,8 +3105,8 @@ class TormentFabric:
                 for _hh in all_hits:
                     try:
                         _torment_cur_step = max(_torment_cur_step, int(_hh.get("step", -1)))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self._log.debug("failed to extract step from hit: %s", e)
                 if _torment_cur_step >= 0:
                     _neg = {"stressed", "sad", "angry"}
                     for _e in _dh[-20:]:
@@ -3318,8 +3320,8 @@ class TormentFabric:
                                         break
                             if _hit_ent is not None:
                                 _hit_ent.payload["srg"] = _srg_live.to_dict()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self._log.debug("failed to write srg payload to entity eid=%s: %s", _hit_eid, e)
 
             # Phase D3: collective-provenance retrieval discount
             # Echoes are influences, not autobiography — discount so they don't
@@ -3747,8 +3749,8 @@ class TormentFabric:
                         auto_merge=bool(pol.get("auto_merge_motifs", False)),
                         auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("group proposal motif entropy update failed for domain=%s: %s", domain_id, e)
 
                 # mark all proposals in group approved
                 for k in group:
@@ -4352,5 +4354,5 @@ def _save_affect_state(data_dir: str, workspace_id: str, agent_id: str, state: D
             state["drift_hist"] = list(state["drift_hist"])[-50:]
         with open(p, "w", encoding="utf-8") as f:
             json.dump(state or {}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("failed to save affect state for agent=%s: %s", agent_id, e)

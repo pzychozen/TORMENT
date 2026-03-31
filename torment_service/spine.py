@@ -453,8 +453,8 @@ def _fast_query_state(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> D
                 "total_events": getattr(detector, "compression_events_total", 0),
                 "last_step": getattr(detector, "last_compression_step", 0),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load compression status for %s/%s: %s", ws_id, agent_id, e)
 
     return result
 
@@ -501,8 +501,8 @@ def _fast_governance_set(fabric, ctx: RequestContext, payload: Dict[str, Any]) -
         audit_log = GovernanceAuditLog(data_dir=data_dir, workspace_id=ctx.workspace_id)
         audit_log.log(eid=eid, agent_id=ctx.agent_id, changes=audit_record.get("changed", {}),
                       actor=actor, source=source)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to log audit entry for %s: %s", eid, e)
 
     return {"ok": True, "eid": eid, "audit": audit_record}
 
@@ -592,8 +592,8 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
                     "drift_direction": str(cstate.drift_direction or "stable"),
                     "seed_id": str(cstate.seed_id or ""),
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load character state for %s/%s: %s", ws_id, ag_id, e)
         return {}
 
     # Run pipeline
@@ -759,8 +759,8 @@ def submit_task(
             if cstate:
                 drift_score = float(cstate.drift_score)
                 drift_direction = str(cstate.drift_direction or "stable")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load drift state for escalation check %s/%s: %s", req.workspace_id, req.agent_id, e)
 
         esc_reasons = escalation_reasons(req.operation, req.payload, ctx, drift_score, drift_direction)
         if esc_reasons:
@@ -775,8 +775,8 @@ def submit_task(
         cstate = fabric.character_store.load_state(req.workspace_id, req.agent_id)
         if cstate:
             drift_score = float(cstate.drift_score)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load drift state for envelope %s/%s: %s", req.workspace_id, req.agent_id, e)
     drift_status = _classify_drift(drift_score)
 
     # --- 7. Dispatch ---

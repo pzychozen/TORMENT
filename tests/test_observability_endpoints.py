@@ -11,11 +11,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
 import time
 import unittest
+
+log = logging.getLogger(__name__)
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -241,15 +244,15 @@ class TestAdminStatusMCPResource(unittest.TestCase):
                 cstate = fabric.character_store.load_state(ws, ag)
                 if cstate:
                     drift_score = float(cstate.drift_score)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Failed to load character state for {ws}:{ag}: {e}")
             mem_count = 0
             try:
                 graph = fabric.private_graphs.get(key)
                 if graph:
                     mem_count = len(graph.entities)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"Failed to load private graph for {key}: {e}")
             agents.append({
                 "workspace_id": ws, "agent_id": ag,
                 "memory_count": mem_count,

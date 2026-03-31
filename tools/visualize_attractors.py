@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -34,6 +35,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 # matplotlib must be set to non-interactive backend before import
 import matplotlib
@@ -161,10 +164,11 @@ def load_member_embeddings(data_dir: str, workspace: str, agent: str,
                         eid = rec.get("eid")
                         if eid is not None:
                             nodes_by_eid[int(eid)] = rec.get("payload", {})
-                    except Exception:
+                    except Exception as e:
+                        log.debug(f"Failed to parse embedding JSON record: {e}")
                         continue
-    except ImportError:
-        pass
+    except ImportError as e:
+        log.debug(f"Could not load embedding store module; skipping shard payloads: {e}")
 
     all_eids = set()
     for m in motifs.values():
@@ -182,8 +186,8 @@ def load_member_embeddings(data_dir: str, workspace: str, agent: str,
                     emb_vec = load_embedding(eid, payload, shard_reader, private_dir)
                     if emb_vec is not None:
                         emb = _unit(emb_vec)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug(f"Failed to load embedding for eid {eid} from shard: {e}")
 
             # Fallback: legacy file
             if emb is None:
@@ -192,8 +196,8 @@ def load_member_embeddings(data_dir: str, workspace: str, agent: str,
                     if os.path.exists(p):
                         try:
                             emb = _unit(np.load(p))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.debug(f"Failed to load legacy embedding file {p}: {e}")
                         break
 
             if emb is not None:
