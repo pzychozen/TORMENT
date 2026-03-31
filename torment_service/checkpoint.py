@@ -28,12 +28,16 @@ import logging
 import os
 import re
 import time
-from dataclasses import asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 log = logging.getLogger("torment.checkpoint")
+
+
+def _sanitize_log(value: str) -> str:
+    """Strip control characters that could forge log entries."""
+    return str(value).replace("\n", "\\n").replace("\r", "\\r")
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +179,10 @@ def build_motif_summary(motif_registry) -> Dict[str, Any]:
 
 def build_shard_snapshot(embeddings_dir: str) -> Optional[Dict[str, Any]]:
     """Read current shard manifest for checkpoint."""
-    manifest_path = os.path.join(embeddings_dir, "manifest.json")
+    safe_dir = os.path.normpath(embeddings_dir)
+    manifest_path = os.path.normpath(os.path.join(safe_dir, "manifest.json"))
+    if not manifest_path.startswith(safe_dir):
+        return None
     if not os.path.exists(manifest_path):
         return None
     try:
@@ -219,7 +226,8 @@ def save_checkpoint(
     Keeps at most ``max_checkpoints`` files, removing the oldest.
     """
     try:
-        os.makedirs(checkpoint_dir, exist_ok=True)
+        safe_dir = os.path.normpath(checkpoint_dir)
+        os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
             "version": 1,
@@ -233,16 +241,18 @@ def save_checkpoint(
             "shard_snapshot": shard_snapshot,
         }
 
-        path = os.path.join(checkpoint_dir, _checkpoint_filename(step))
+        path = os.path.normpath(os.path.join(safe_dir, _checkpoint_filename(step)))
+        if not path.startswith(safe_dir):
+            raise ValueError("Path escapes checkpoint directory")
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         os.replace(tmp, path)
 
         # Prune old checkpoints
-        _prune_old_checkpoints(checkpoint_dir, max_checkpoints)
+        _prune_old_checkpoints(safe_dir, max_checkpoints)
 
-        log.info("Checkpoint saved: step=%d -> %s", step, path)
+        log.info("Checkpoint saved: step=%d -> %s", step, _sanitize_log(path))
         return path
 
     except Exception as exc:
@@ -252,31 +262,38 @@ def save_checkpoint(
 
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
     """Remove oldest checkpoints, keeping at most `keep`."""
-    files = sorted(glob.glob(os.path.join(checkpoint_dir, "checkpoint_*.json")))
+    safe_dir = os.path.normpath(checkpoint_dir)
+    files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
         return
     for old in files[: len(files) - keep]:
+        old = os.path.normpath(old)
+        if not old.startswith(safe_dir):
+            continue
         try:
             os.remove(old)
         except Exception as e:
-            log.debug("Could not remove old checkpoint %s: %s", old, e)
+            log.debug("Could not remove old checkpoint: %s", e)
 
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    if not os.path.isdir(checkpoint_dir):
+    safe_dir = os.path.normpath(checkpoint_dir)
+    if not os.path.isdir(safe_dir):
         return None
-    files = sorted(glob.glob(os.path.join(checkpoint_dir, "checkpoint_*.json")))
+    files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if not files:
         return None
-    path = files[-1]
+    path = os.path.normpath(files[-1])
+    if not path.startswith(safe_dir):
+        return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        log.info("Checkpoint loaded: step=%d from %s", data.get("step", -1), path)
+        log.info("Checkpoint loaded: step=%d", data.get("step", -1))
         return data
     except Exception as exc:
-        log.warning("Checkpoint load failed (%s): %s", path, exc)
+        log.warning("Checkpoint load failed: %s", exc)
         return None
 
 
