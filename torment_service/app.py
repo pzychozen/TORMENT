@@ -1,23 +1,25 @@
 # app.py
 from __future__ import annotations
 from typing import Dict, Any, Optional, List
+import logging
 import os, json
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .fabric import TormentFabric
-from .router import DEFAULT_DOMAINS
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
-from .request_context import RequestContext, InsufficientTrustError, system_context
 from .auth import (
     resolve_request_context,
-    handle_trust_error,
     AUTH_ENABLED,
     get_key_store,
 )
 
-DATA_DIR = os.environ.get("TORMENT_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
+_log = logging.getLogger("torment.app")
+
+DATA_DIR = os.path.normpath(
+    os.environ.get("TORMENT_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
+)
 
 # Apply optional preset profile (defaults only; explicit env vars always win)
 ACTIVE_PROFILE = os.environ.get("TORMENT_PROFILE", "").strip().lower() or None
@@ -32,8 +34,7 @@ fabric = TormentFabric(data_dir=DATA_DIR)
 @app.get("/workspace/{workspace_id}/embed_audit")
 def workspace_embed_audit(workspace_id: str) -> Dict[str, Any]:
     """Return persisted embedding health index for a workspace (fast; no scan)."""
-    import os, json
-    path = os.path.join(DATA_DIR, "workspaces", workspace_id, "embed_audit.json")
+    path = os.path.normpath(os.path.join(DATA_DIR, "workspaces", workspace_id, "embed_audit.json"))
     if not os.path.exists(path):
         return {
             "ok": False,
@@ -49,7 +50,6 @@ def workspace_embed_audit(workspace_id: str) -> Dict[str, Any]:
 @app.get("/workspaces/embed_audit_summary")
 def workspaces_embed_audit_summary(limit: int = 200) -> Dict[str, Any]:
     """Return embedding audit summaries across workspaces (fast; no scan)."""
-    import os, json
     wroot = os.path.join(DATA_DIR, "workspaces")
     out: List[Dict[str, Any]] = []
     if not os.path.isdir(wroot):
@@ -775,8 +775,8 @@ def collective_reingest(workspace_id: str, req: CollectiveReingestRequest, reque
         raise HTTPException(status_code=404, detail="Hivemind not enabled")
     try:
         fabric.create_agent(workspace_id, req.agent_id)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Agent may already exist: %s", e)
     spine_req = SpineRequest(
         workspace_id=workspace_id, agent_id=req.agent_id,
         operation="collective_reingest",
@@ -839,8 +839,8 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
     ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     try:
         fabric.create_agent(req.workspace_id, req.agent_id)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Agent may already exist: %s", e)
     spine_req = SpineRequest(
         workspace_id=req.workspace_id, agent_id=req.agent_id,
         operation="ingest",
@@ -1033,9 +1033,10 @@ def approve_domain(req: ApproveDomainSuggestionReq) -> Dict[str, Any]:
 @app.get("/workspace/{workspace_id}/domain_suggestions")
 def domain_suggestions(workspace_id: str) -> Dict[str, Any]:
     ws = fabric.get_workspace(workspace_id)
-    if not os.path.exists(ws.domain_suggestions_path):
+    ds_path = os.path.normpath(ws.domain_suggestions_path)
+    if not os.path.exists(ds_path):
         return {"workspace_id": workspace_id, "suggestions": []}
-    with open(ws.domain_suggestions_path, "r", encoding="utf-8") as f:
+    with open(ds_path, "r", encoding="utf-8") as f:
         obj = json.load(f)
     return {"workspace_id": workspace_id, "suggestions": obj.get("suggestions", [])}
 
@@ -1244,8 +1245,8 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
             )
             _ret_ids = [h.get("chunk_id") for h in archive_hits if h.get("chunk_id")]
             increment_retrieval_counts(_arc_dir, _ret_ids)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("Non-critical lookup failed: %s", e)
 
     # 3. Load seed text and drift info for identity context
     seed_text = ""
@@ -1415,8 +1416,8 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         for reg in ws.motif_regs.values():
             motif_summary = build_motif_summary(reg)
             break
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Motif summary unavailable: %s", e)
 
     shard_snap = None
     try:
@@ -1425,16 +1426,16 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
             "agents", req.agent_id, "private", "embeddings",
         )
         shard_snap = build_shard_snapshot(emb_dir)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Shard snapshot unavailable: %s", e)
 
     char_state_dict = None
     try:
         cstate = fabric.character_store.load_state(req.workspace_id, req.agent_id)
         if cstate:
             char_state_dict = asdict(cstate)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Character state unavailable: %s", e)
 
     path = save_checkpoint(
         checkpoint_dir=ckpt_dir,
@@ -1476,7 +1477,7 @@ def checkpoint_list(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     from .checkpoint import get_checkpoint_dir, _extract_step_from_filename
     import glob as _glob
 
-    ckpt_dir = get_checkpoint_dir(DATA_DIR, workspace_id, agent_id)
+    ckpt_dir = os.path.normpath(get_checkpoint_dir(DATA_DIR, workspace_id, agent_id))
     if not os.path.isdir(ckpt_dir):
         return {"ok": True, "checkpoints": []}
 
@@ -1549,8 +1550,8 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
                         if embs:
                             import numpy as np
                             seed_emb = np.mean(embs, axis=0)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Seed embedding unavailable: %s", e)
 
     # Evaluate
     result = evaluate_promotion(
@@ -1627,8 +1628,8 @@ def promote_suggestions(
                                 embs.append(ent.embedding)
                         if embs:
                             seed_emb = np.mean(embs, axis=0)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Seed embedding unavailable: %s", e)
 
     suggestions = suggest_promotions(
         archive_store=store,
@@ -1670,14 +1671,16 @@ async def trigger_compression(workspace_id: str, req: CompressTriggerRequest):
         coherence_field = None
         try:
             mp = _find_motifs_path(fabric, req.agent_id)
+            if mp:
+                mp = os.path.normpath(mp)
             if mp and os.path.exists(mp):
                 with open(mp, "r", encoding="utf-8") as f:
                     md = json.load(f)
                 if isinstance(md, dict):
                     md = md.get("motifs", [])
                 coherence_field = _ccf(md)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("Coherence field unavailable: %s", e)
 
         nodes = []
         for eid, ent in graph.entities.items():
@@ -1836,7 +1839,7 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
             detail=f"Workspace '{req.workspace_id}' not found"
         )
     try:
-        ident = fabric.create_agent(req.workspace_id, req.agent_id)
+        fabric.create_agent(req.workspace_id, req.agent_id)
     except Exception as exc:
         raise HTTPException(
             status_code=404,
@@ -2023,8 +2026,8 @@ def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
             if cstate:
                 drift_score = float(cstate.drift_score)
                 drift_dir = str(cstate.drift_direction or "stable")
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("Drift lookup failed: %s", e)
 
         # Memory count
         mem_count = 0
@@ -2032,8 +2035,8 @@ def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
             graph = fabric.private_graphs.get(key)
             if graph:
                 mem_count = len(graph.entities)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("Memory count lookup failed: %s", e)
 
         agents.append({
             "workspace_id": ws,
@@ -2200,8 +2203,8 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
                         "ridge_count": roles.count("ridge"),
                         "plateau_count": roles.count("plateau"),
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("Coherence field unavailable: %s", e)
         else:
             dm["motif_count"] = 0
 
@@ -2217,8 +2220,8 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
         if prop_reg is not None:
             try:
                 dm["proposals_total"] = len(getattr(prop_reg, "proposals", []))
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("Proposal count unavailable: %s", e)
 
         domains_metrics[domain_id] = dm
 
