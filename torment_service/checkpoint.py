@@ -40,6 +40,18 @@ def _sanitize_log(value: str) -> str:
     return str(value).replace("\n", "\\n").replace("\r", "\\r")
 
 
+def _safe_checkpoint_dir(checkpoint_dir: str) -> str:
+    """Normalize and validate a checkpoint directory path.
+
+    Rejects paths containing '..' segments after normalization to prevent
+    directory traversal attacks.
+    """
+    safe = os.path.normpath(checkpoint_dir)
+    if ".." in safe.split(os.sep):
+        raise ValueError("Invalid checkpoint directory: contains '..' traversal")
+    return safe
+
+
 # ---------------------------------------------------------------------------
 # Serialisation helpers
 # ---------------------------------------------------------------------------
@@ -226,7 +238,7 @@ def save_checkpoint(
     Keeps at most ``max_checkpoints`` files, removing the oldest.
     """
     try:
-        safe_dir = os.path.normpath(checkpoint_dir)
+        safe_dir = _safe_checkpoint_dir(checkpoint_dir)
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -278,7 +290,7 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    safe_dir = os.path.normpath(checkpoint_dir)
+    safe_dir = _safe_checkpoint_dir(checkpoint_dir)
     if not os.path.isdir(safe_dir):
         return None
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
