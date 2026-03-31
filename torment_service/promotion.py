@@ -39,6 +39,11 @@ from .affect import classify_affect
 log = logging.getLogger("torment.promotion")
 
 
+def _sanitize_log(value: str) -> str:
+    """Strip control characters that could forge log entries."""
+    return value.replace("\n", "\\n").replace("\r", "\\r")
+
+
 # ---------------------------------------------------------------------------
 # Promotion config (tunable)
 # ---------------------------------------------------------------------------
@@ -66,7 +71,7 @@ W_USER_APPROVED = 0.10  # explicit user/dev approval
 # ---------------------------------------------------------------------------
 
 def _retrieval_counts_path(archive_dir: str) -> str:
-    return os.path.join(archive_dir, "retrieval_counts.json")
+    return os.path.join(os.path.normpath(archive_dir), "retrieval_counts.json")
 
 
 def load_retrieval_counts(archive_dir: str) -> Dict[str, int]:
@@ -291,11 +296,11 @@ def promote_chunk(
         # Flush the node to JSONL
         memory_graph.flush_node(int(eid))
 
-        log.info("Promoted chunk %s → core eid=%d", chunk_id, eid)
+        log.info("Promoted chunk %s → core eid=%d", _sanitize_log(chunk_id), eid)
         return int(eid)
 
     except Exception as exc:
-        log.warning("Promotion failed for chunk %s: %s", chunk_id, exc)
+        log.warning("Promotion failed for chunk %s: %s", _sanitize_log(chunk_id), exc)
         return None
 
 
@@ -323,7 +328,6 @@ def suggest_promotions(
     for chunk_id, chunk in chunks.items():
         text = getattr(chunk, "text", "") or ""
         doc_id = getattr(chunk, "doc_id", "") or ""
-        meta = {}
 
         # Check if chunk's document has canon marking
         docs = getattr(archive_store, "_documents", {})
