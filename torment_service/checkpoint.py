@@ -238,7 +238,9 @@ def save_checkpoint(
     Keeps at most ``max_checkpoints`` files, removing the oldest.
     """
     try:
-        safe_dir = _safe_checkpoint_dir(checkpoint_dir)
+        safe_dir = os.path.normpath(checkpoint_dir)
+        if ".." in safe_dir.split(os.sep):
+            raise ValueError("Invalid checkpoint directory: contains '..' traversal")
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -290,7 +292,9 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    safe_dir = _safe_checkpoint_dir(checkpoint_dir)
+    safe_dir = os.path.normpath(checkpoint_dir)
+    if ".." in safe_dir.split(os.sep):
+        return None
     if not os.path.isdir(safe_dir):
         return None
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
