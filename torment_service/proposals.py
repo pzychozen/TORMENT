@@ -1,12 +1,18 @@
 # proposals.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 import os, json, time, uuid
 import numpy as np
 
 def _now_ts() -> int:
     return int(time.time())
+
+def _validate_path_component(value: str, label: str = "identifier") -> str:
+    """Reject path traversal characters in user-provided identifiers."""
+    if ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
 
 @dataclass
 class ShareProposal:
@@ -36,7 +42,12 @@ class ProposalRegistry:
         self.data_dir = data_dir
         self.workspace_id = workspace_id
         self.domain_id = domain_id
-        root = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", domain_id)
+        _validate_path_component(workspace_id, "workspace_id")
+        _validate_path_component(domain_id, "domain_id")
+        safe_dir = os.path.normpath(data_dir)
+        root = os.path.normpath(os.path.join(safe_dir, "workspaces", workspace_id, "domains", domain_id))
+        if not root.startswith(safe_dir):
+            raise ValueError("Path escapes data directory")
         os.makedirs(root, exist_ok=True)
         self.path = os.path.join(root, "proposals.jsonl")
         self.events_path = os.path.join(root, "proposal_events.jsonl")
