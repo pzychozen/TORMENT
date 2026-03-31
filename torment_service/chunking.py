@@ -15,9 +15,8 @@ Design rules:
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +31,7 @@ def _estimate_tokens(text: str) -> int:
 # ---------------------------------------------------------------------------
 # Section detection
 # ---------------------------------------------------------------------------
-_MD_HEADING = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(\S.*)$", re.MULTILINE)
 _UNDERLINE_H1 = re.compile(r"^(.+)\n={3,}$", re.MULTILINE)
 _UNDERLINE_H2 = re.compile(r"^(.+)\n-{3,}$", re.MULTILINE)
 
