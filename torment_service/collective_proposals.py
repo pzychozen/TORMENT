@@ -22,11 +22,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+log = logging.getLogger("torment.collective_proposals")
 
 import numpy as np
 
@@ -128,8 +131,8 @@ class ConvergencePersistenceTracker:
                                 )
                     except (json.JSONDecodeError, ValueError):
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Could not load proposals file: %s", e)
 
     def record_event(self, event: Dict[str, Any]) -> None:
         """Record a convergence event for persistence tracking."""

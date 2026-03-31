@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -38,6 +39,8 @@ from fastapi.testclient import TestClient
 # env vars (COMPRESS_ENABLE, etc.) are set before the TormentFabric instance
 # is created at module level in app.py.
 DEFAULT_DOMAINS = None  # loaded lazily
+
+log = logging.getLogger("torment.examples.health_diagnostic")
 
 # ---------------------------------------------------------------------------
 # Test data generator — varied domain content with repeats for duplication test
@@ -380,8 +383,8 @@ def run_diagnostic(n_steps: int = 250, n_agents: int = 3, data_dir: Optional[str
                         rec = json.loads(line)
                         if rec.get("payload", {}).get("provenance") == "collective":
                             echoes += 1
-                    except json.JSONDecodeError:
-                        pass
+                    except json.JSONDecodeError as e:
+                        log.debug("Skipped malformed node record: %s", e)
         private_records[aid] = count
         echo_records[aid] = echoes
 
@@ -420,8 +423,8 @@ def run_diagnostic(n_steps: int = 250, n_agents: int = 3, data_dir: Optional[str
                         evt = json.loads(line)
                         if evt.get("type") in ("COMPRESSION", "COMPRESS_EVENT", "MEMORY_COMPRESS"):
                             comp_evts.append(evt)
-                    except json.JSONDecodeError:
-                        pass
+                    except json.JSONDecodeError as e:
+                        log.debug("Skipped malformed event record: %s", e)
         compression_events[aid] = comp_evts
 
     report.compression = {

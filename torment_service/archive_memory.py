@@ -27,6 +27,7 @@ Promotion from archive → core is EXPLICIT and requires Phase 5.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, asdict, field
@@ -37,6 +38,10 @@ import numpy as np
 from .chunking import chunk_text, TextChunk
 from .embedding_store import EmbeddingShardWriter, EmbeddingShardReader
 from .embeddings import Embedder, HashEmbedding
+
+
+# Logger
+log = logging.getLogger("torment.archive_memory")
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +268,8 @@ class ArchiveStore:
         if self._sqlite_index:
             try:
                 self._sqlite_index.index_document(asdict(doc))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("SQLite index_document skipped: %s", e)
 
         # Process each chunk: embed + store
         for tc in chunks:
@@ -285,7 +290,8 @@ class ArchiveStore:
                         step=0,
                         extra_meta={"doc_id": doc_id, "chunk_id": chunk_id},
                     )
-                except Exception:
+                except Exception as e:
+                    log.debug("Shard write skipped: %s", e)
                     emb_ref = None
 
             chunk = ArchiveChunk(
@@ -305,8 +311,8 @@ class ArchiveStore:
             if self._sqlite_index:
                 try:
                     self._sqlite_index.index_chunk(asdict(chunk))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("SQLite index_chunk skipped: %s", e)
 
             # Cache embedding for search
             self._chunk_embeddings[chunk_id] = _unit(emb)
@@ -491,8 +497,8 @@ class ArchiveStore:
         if self._sqlite_index:
             try:
                 self._sqlite_index.delete_document_index(doc_id)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("SQLite delete_document_index skipped: %s", e)
 
         return True
 

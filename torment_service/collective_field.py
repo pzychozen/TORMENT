@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import threading
@@ -19,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .collective_models import ResonancePacket, ConvergenceEvent
+
+log = logging.getLogger("torment.collective_field")
 
 
 class CollectiveField:
@@ -338,8 +341,8 @@ class CollectiveField:
                     dist = abs(sa - sb)
                     if dist <= 1:
                         score += 0.3
-                except (ValueError, AttributeError):
-                    pass
+                except (ValueError, AttributeError) as e:
+                    log.debug("Stage number parse skipped: %s", e)
         # Identity state match
         if a.identity_state and b.identity_state:
             if a.identity_state == b.identity_state:

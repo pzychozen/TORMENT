@@ -22,11 +22,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+log = logging.getLogger("torment.collective_policy")
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +109,8 @@ class ReingestTracker:
                             self._agent_timestamps.setdefault(agent_id, []).append(ts)
                     except (json.JSONDecodeError, ValueError):
                         continue
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Could not load reingestion log: %s", e)
 
     def is_duplicate(self, agent_id: str, event_id: str) -> bool:
         """Check if this event has already been reingested into this agent."""

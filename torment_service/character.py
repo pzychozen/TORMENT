@@ -29,6 +29,7 @@ Design:
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import random
@@ -40,6 +41,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .motifs import cosine
+
+log = logging.getLogger("torment.character")
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +484,8 @@ def measure_drift(
             basin_kappa = float(sf.get("kappa", 0.0))
             basin_tension = float(sf.get("tension", 0.0))
             basin_role = str(sf.get("role", "plateau"))
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Coherence field read skipped: %s", e)
 
     # --- Drift direction (compare to previous) ---
     direction = "stable"
@@ -594,8 +597,8 @@ def gravity_correction(
                 summary=correction_text,
                 attach_threshold=0.50,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Motif attach skipped: %s", e)
 
     graph.flush_node(int(eid))
 

@@ -333,8 +333,8 @@ class CompressionScorer:
             from .governance import is_compression_protected
             if is_compression_protected(payload):
                 return True
-        except ImportError:
-            pass
+        except ImportError as e:
+            logger.debug("Governance check unavailable: %s", e)
         return False
 
     def score(
@@ -663,8 +663,8 @@ class CompressionExecutor:
                 self.memory_graph._shard_reader,
                 self.memory_graph.data_dir,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load embedding for deep store: %s", e)
 
         # Export to deep store
         self.deep_store.export(candidate, embedding, payload)

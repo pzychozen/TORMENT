@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 import os, json, time
+import logging
 
 import numpy as np
 
@@ -16,6 +17,8 @@ from .embedding_store import (
     load_embedding as _load_embedding_universal,
     load_legacy_embedding,
 )
+
+log = logging.getLogger("torment.memory_graph")
 
 
 def _now_ts() -> int:
@@ -361,8 +364,8 @@ class MemoryGraph:
         if self._sqlite_index:
             try:
                 self._sqlite_index.index_event(evt)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("SQLite index_event skipped: %s", e)
 
     def _load(self) -> None:
         """
@@ -425,8 +428,8 @@ class MemoryGraph:
         # Prevent EID collisions on future spawns
         try:
             self.world._next_id = int(max_eid) + 1  # SeedWorld uses _next_id internally
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Could not set _next_id: %s", e)
 
     # ----------------------------
     # Node ops
@@ -451,18 +454,18 @@ class MemoryGraph:
         if "pos" in ent.payload:
             try:
                 ent.pos = _as3(ent.payload["pos"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Could not parse pos from payload: %s", e)
         if "vel" in ent.payload:
             try:
                 ent.vel = _as3(ent.payload["vel"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Could not parse vel from payload: %s", e)
         if "vel0" in ent.payload:
             try:
                 ent.vel0 = _as3(ent.payload["vel0"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Could not parse vel0 from payload: %s", e)
 
         self._append_jsonl(
             self.meta_path,
@@ -477,8 +480,8 @@ class MemoryGraph:
         if self._sqlite_index:
             try:
                 self._sqlite_index.index_node(int(ent.eid), ent.payload or {})
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("SQLite index_node skipped: %s", e)
 
     @staticmethod
     def _vec3(x, default=(0.0, 0.0, 0.0)):
@@ -612,8 +615,8 @@ class MemoryGraph:
         if self._sqlite_index:
             try:
                 self._sqlite_index.index_node(int(ent.eid), ent.payload or {})
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("SQLite index_node skipped: %s", e)
 
     def add_memory(
         self,
@@ -673,8 +676,8 @@ class MemoryGraph:
                     continue
                 try:
                     self.traj.log_entity(ent, step=int(step))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("Trajectory log skipped: %s", e)
 
         # 3) classify occasionally (in-memory only — no nodes.jsonl write)
         #    Trajectory labels are diagnostic; they stay in the entity payload
@@ -699,8 +702,8 @@ class MemoryGraph:
                             "eid": int(ent.eid),
                             "traj_label": ent.payload.get("traj_label"),
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("Traj classify event write skipped: %s", e)
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("Trajectory classification skipped for eid=%s: %s", getattr(ent, "eid", "?"), e)

@@ -577,8 +577,8 @@ def create_mcp_server() -> FastMCP:
                         motif_summary[domain_id] = active
                 if motif_summary:
                     summary["active_motifs"] = motif_summary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Motif summary skipped: %s", e)
 
         return json.dumps(summary, indent=2, default=str)
 
@@ -622,15 +622,15 @@ def create_mcp_server() -> FastMCP:
                 cstate = fabric.character_store.load_state(ws, ag)
                 if cstate:
                     drift_score = float(cstate.drift_score)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Character state load skipped: %s", e)
             mem_count = 0
             try:
                 graph = fabric.private_graphs.get(key)
                 if graph:
                     mem_count = len(graph.entities)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Graph entity count skipped: %s", e)
             agents.append({
                 "workspace_id": ws, "agent_id": ag,
                 "memory_count": mem_count,

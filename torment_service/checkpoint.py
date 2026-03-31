@@ -258,8 +258,8 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
     for old in files[: len(files) - keep]:
         try:
             os.remove(old)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Could not remove old checkpoint %s: %s", old, e)
 
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:

@@ -686,8 +686,8 @@ class TormentFabric:
                 try:
                     with open(p, 'w', encoding='utf-8') as f:
                         json.dump(st, f, indent=2, sort_keys=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Job state write failed: %s", e)
             store[job_id] = st
         self._prune_jobs(kind)
 
@@ -703,8 +703,8 @@ class TormentFabric:
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, 'w', encoding='utf-8') as f:
                 json.dump(st, f, indent=2, sort_keys=True)
-        except Exception:
-            pass
+        except Exception as e:
+            self._log.debug("Job persist failed: %s", e)
 
     def _prune_jobs(self, kind: str) -> None:
         """Keep only the most recent N jobs (by started_ts) in memory and on disk."""
@@ -720,8 +720,8 @@ class TormentFabric:
             if self._job_persist:
                 try:
                     os.remove(self._job_path(kind, jid))
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Job file removal failed: %s", e)
 
 
 
@@ -864,8 +864,8 @@ class TormentFabric:
                 self._prune_jobs('repair')
                 try:
                     self._clone_mutex.release()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Mutex release failed: %s", e)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -1105,8 +1105,8 @@ class TormentFabric:
                 lock={"provider": lock_provider, "model": lock_model, "dim": lock_dim},
                 embedder={"provider": cur_provider, "model": cur_model, "dim": cur_dim},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            self._log.debug("Embed audit write failed: %s", e)
 
         return {
             "ok": True,
@@ -1178,8 +1178,8 @@ class TormentFabric:
             mult = role_multipliers(r)
             min_count = int(max(2, round(float(min_count) * float(mult.get("anchor_count_mult", 1.0)))))
             min_gap = int(max(10, round(float(min_gap) * float(mult.get("anchor_gap_mult", 1.0)))))
-        except Exception:
-            pass
+        except Exception as e:
+            self._log.debug("Role store load skipped: %s", e)
 
         if not motif_ids:
             return None
@@ -1306,8 +1306,8 @@ class TormentFabric:
                         "anchor_superseded_by": int(eid),
                         "last_reinforced": int(step),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                self._log.debug("Anchor retire failed: %s", e)
 
             seen[mid] = {"last_step": int(step), "count_at_create": int(agent_count), "last_eid": int(eid)}
             state["motifs"] = seen
@@ -1428,11 +1428,12 @@ class TormentFabric:
                 dh.append({"from": str(last_tag), "to": str(affect_tag), "step": int(step), "conf": float(conf)})
                 st2["drift_hist"] = dh[-50:]
                 _save_affect_state(self.data_dir, ws.workspace_id, agent_id, st2)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log.debug("Affect state save failed: %s", e)
             return int(eid)
 
-        except Exception:
+        except Exception as e:
+            self._log.debug("Mood drift emit failed: %s", e)
             return None
 
     def _refine_identity_anchors(self, ws: "Workspace", agent_id: str, domain_id: str, motif_ids: List[str]) -> None:
@@ -1495,8 +1496,8 @@ class TormentFabric:
                         "anchor_merged_into": int(best_eid),
                         "last_reinforced": int(now_step),
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log.debug("Anchor supersede update failed: %s", e)
 
             # Soft-retire weak anchors that are old (even if within keep set, except best).
             for (eid, member_n, step0, p) in keep:
@@ -1510,8 +1511,8 @@ class TormentFabric:
                             "anchor_superseded_by": int(best_eid),
                             "last_reinforced": int(now_step),
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self._log.debug("Weak anchor retire failed: %s", e)
 
 
     def clone_workspace(self, source_workspace_id: str, target_workspace_id: str, include_private: bool = True, include_shared: bool = True, reembed: bool = True, reembed_mode: str = "selective") -> Dict[str, Any]:
