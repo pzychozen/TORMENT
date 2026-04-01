@@ -462,12 +462,12 @@ class Workspace:
         self.router = DomainRouter(self.motif_regs, embed_dim=int(self.embed_dim))
 
 def _validate_path_component(value: str, label: str = "identifier") -> str:
-    """Reject path traversal characters in user-provided identifiers.
+    """Reject empty values and path traversal characters in user-provided identifiers.
 
-    Raises HTTPException(400) if the value contains '/', '\\', or '..'.
+    Raises HTTPException(400) if the value is empty or contains '/', '\\', or '..'.
     Returns the value unchanged for valid inputs.
     """
-    if ".." in value or "/" in value or "\\" in value:
+    if not value or ".." in value or "/" in value or "\\" in value:
         raise HTTPException(status_code=400, detail=f"Invalid {label}: must not contain path separators or '..'")
     return value
 
@@ -1785,7 +1785,7 @@ class TormentFabric:
             self._log.exception("clone error job_id=%s err=%s", job_id, err)
             if isinstance(e, HTTPException):
                 raise
-            raise HTTPException(status_code=500, detail=err)
+            raise HTTPException(status_code=500, detail="Clone operation failed")
         finally:
             try:
                 self._clone_mutex.release()

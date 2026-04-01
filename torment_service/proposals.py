@@ -9,8 +9,8 @@ def _now_ts() -> int:
     return int(time.time())
 
 def _validate_path_component(value: str, label: str = "identifier") -> str:
-    """Reject path traversal characters in user-provided identifiers."""
-    if ".." in value or "/" in value or "\\" in value:
+    """Reject empty values and path traversal characters in user-provided identifiers."""
+    if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
 

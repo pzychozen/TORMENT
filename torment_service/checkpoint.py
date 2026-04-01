@@ -40,17 +40,6 @@ def _sanitize_log(value: str) -> str:
     return str(value).replace("\n", "\\n").replace("\r", "\\r")
 
 
-def _safe_checkpoint_dir(checkpoint_dir: str) -> str:
-    """Normalize and validate a checkpoint directory path.
-
-    Rejects paths containing '..' segments after normalization to prevent
-    directory traversal attacks.
-    """
-    safe = os.path.normpath(checkpoint_dir)
-    if ".." in safe.split(os.sep):
-        raise ValueError("Invalid checkpoint directory: contains '..' traversal")
-    return safe
-
 
 # ---------------------------------------------------------------------------
 # Serialisation helpers
