@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .chunking import chunk_text, TextChunk
+from .chunking import chunk_text
 from .embedding_store import EmbeddingShardWriter, EmbeddingShardReader
 from .embeddings import Embedder, HashEmbedding
 
@@ -52,6 +52,15 @@ ARCHIVE_MEMORY_CLASS = "archive"  # Never changes. Never "core".
 
 def _now_ts() -> int:
     return int(time.time())
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    """Resolve *path* and verify it lives inside *base_dir* (CWE-22 guard)."""
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -104,7 +113,7 @@ class ArchiveStore:
         embedder: Optional[Embedder] = None,
         sqlite_index=None,
     ) -> None:
-        self.archive_dir = archive_dir
+        self.archive_dir = os.path.realpath(archive_dir)
         self.embedder = embedder or HashEmbedding()
         # Optional SQLite sidecar index (Phase 4).
         # Mirror writes go to SQLite after JSONL. Failure is non-fatal.
@@ -114,12 +123,24 @@ class ArchiveStore:
         os.makedirs(self.archive_dir, exist_ok=True)
 
         # File paths
-        self.documents_path = os.path.join(self.archive_dir, "documents.jsonl")
-        self.chunks_path = os.path.join(self.archive_dir, "chunks.jsonl")
-        self.events_path = os.path.join(self.archive_dir, "events.jsonl")
+        self.documents_path = _ensure_within_base(
+            os.path.join(self.archive_dir, "documents.jsonl"),
+            self.archive_dir,
+        )
+        self.chunks_path = _ensure_within_base(
+            os.path.join(self.archive_dir, "chunks.jsonl"),
+            self.archive_dir,
+        )
+        self.events_path = _ensure_within_base(
+            os.path.join(self.archive_dir, "events.jsonl"),
+            self.archive_dir,
+        )
 
         # Embedding storage — separate shard directory from core
-        self._emb_dir = os.path.join(self.archive_dir, "embeddings")
+        self._emb_dir = _ensure_within_base(
+            os.path.join(self.archive_dir, "embeddings"),
+            self.archive_dir,
+        )
         self._shard_writer: Optional[EmbeddingShardWriter] = None
         self._shard_reader: Optional[EmbeddingShardReader] = None
         self._init_shard_storage()
