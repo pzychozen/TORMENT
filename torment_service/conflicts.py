@@ -10,6 +10,20 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+def _validate_path_component(value: str, label: str) -> str:
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
+
+
 @dataclass
 class CanonConflict:
     conflict_id: str
@@ -31,13 +45,16 @@ class ConflictRegistry:
     """Append-only canon conflict registry per workspace+domain."""
 
     def __init__(self, data_dir: str, workspace_id: str, domain_id: str) -> None:
-        self.data_dir = data_dir
-        self.workspace_id = workspace_id
-        self.domain_id = domain_id
-        root = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", domain_id)
+        self.data_dir = os.path.realpath(data_dir)
+        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        self.domain_id = _validate_path_component(domain_id, "domain_id")
+        root = _ensure_within_base(
+            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id),
+            self.data_dir,
+        )
         os.makedirs(root, exist_ok=True)
-        self.path = os.path.join(root, "conflicts.jsonl")
-        self.events_path = os.path.join(root, "conflict_events.jsonl")
+        self.path = _ensure_within_base(os.path.join(root, "conflicts.jsonl"), root)
+        self.events_path = _ensure_within_base(os.path.join(root, "conflict_events.jsonl"), root)
 
     def add(self, eid_a: int, eid_b: int, sim: float, conflict_score: float, reason: str) -> CanonConflict:
         c = CanonConflict(
