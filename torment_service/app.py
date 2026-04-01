@@ -42,6 +42,7 @@ fabric = TormentFabric(data_dir=DATA_DIR)
 @app.get("/workspace/{workspace_id}/embed_audit")
 def workspace_embed_audit(workspace_id: str) -> Dict[str, Any]:
     """Return persisted embedding health index for a workspace (fast; no scan)."""
+    _validate_path_component(workspace_id, "workspace_id")
     path = os.path.normpath(os.path.join(DATA_DIR, "workspaces", workspace_id, "embed_audit.json"))
     if not os.path.exists(path):
         return {
@@ -839,7 +840,7 @@ def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
             },
         }
     except Exception as e:
-        _log.exception("Collective proposals status failed for workspace %s", workspace_id)
+        _log.exception("Collective proposals status failed for workspace %r", workspace_id)
         return {"workspace_id": workspace_id, "error": "Internal error retrieving proposal status"}
 
 
@@ -1098,10 +1099,12 @@ from .archive_memory import ArchiveStore
 _archive_stores: Dict[str, ArchiveStore] = {}
 
 def _get_archive_store(workspace_id: str, agent_id: str) -> ArchiveStore:
-    key = f"{workspace_id}/{agent_id}"
+    safe_ws = _validate_path_component(workspace_id, "workspace_id")
+    safe_ag = _validate_path_component(agent_id, "agent_id")
+    key = f"{safe_ws}/{safe_ag}"
     if key not in _archive_stores:
         archive_dir = os.path.join(
-            DATA_DIR, "workspaces", workspace_id, "agents", agent_id, "memory_archive"
+            DATA_DIR, "workspaces", safe_ws, "agents", safe_ag, "memory_archive"
         )
         sq_idx = fabric._get_sqlite_index(workspace_id, agent_id)
         _archive_stores[key] = ArchiveStore(
@@ -1529,6 +1532,8 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
     )
 
     # Get archive store
+    _validate_path_component(req.workspace_id, "workspace_id")
+    _validate_path_component(req.agent_id, "agent_id")
     archive_dir = os.path.join(
         DATA_DIR, "workspaces", req.workspace_id,
         "agents", req.agent_id, "memory_archive",
@@ -1617,6 +1622,8 @@ def promote_suggestions(
     """Scan archive chunks and return top promotion candidates."""
     from .promotion import suggest_promotions, load_retrieval_counts
 
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     archive_dir = os.path.join(
         DATA_DIR, "workspaces", workspace_id,
         "agents", agent_id, "memory_archive",
