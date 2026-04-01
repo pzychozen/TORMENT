@@ -21,11 +21,20 @@ import os
 import time
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    """Resolve *path* and verify it lives inside *base_dir* (CWE-22 guard)."""
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
 
 # Reuse existing shard infrastructure
 from .embedding_store import (
@@ -89,11 +98,17 @@ class DeepMemoryStore:
     """
 
     def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
-        self.base_dir = Path(base_dir)
+        safe_base = os.path.realpath(str(base_dir))
+        self.base_dir = Path(_ensure_within_base(safe_base, safe_base))
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-        self.memories_path = self.base_dir / "memories.jsonl"
-        self.emb_dir = str(self.base_dir / "embeddings")
+        self.memories_path = Path(
+            _ensure_within_base(str(self.base_dir / "memories.jsonl"), str(self.base_dir))
+        )
+        self.emb_dir = _ensure_within_base(
+            str(self.base_dir / "embeddings"),
+            str(self.base_dir),
+        )
         self.dim = int(dim)
 
         # Initialize shard storage
