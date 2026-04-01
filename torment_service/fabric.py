@@ -231,6 +231,8 @@ def _mark_embed_audit_dirty(data_dir: str, workspace_id: str) -> None:
 
 
 def _anchor_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     return os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "anchors.json")
 
 
@@ -1614,7 +1616,7 @@ class TormentFabric:
                         srcp = os.path.join(root, fn)
                         dstp = os.path.join(out_root, fn)
                         os.makedirs(os.path.dirname(dstp), exist_ok=True)
-                        shutil.copy2(srcp, dstp)
+                        shutil.copy2(srcp, dstp, follow_symlinks=False)
     
             _copytree_filtered(src_root, tgt_root)
     
