@@ -24,16 +24,31 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
 from .coherence_field import compute_coherence_field
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_path_component(value: str, label: str) -> str:
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
+
 
 # ---------------------------------------------------------------------------
 # Configuration (env-based, sensible defaults)
@@ -899,10 +914,26 @@ def _find_motifs_path(fabric_instance, agent_id: str, workspace_id: str = "defau
 def _log_compression_event(fabric_instance, agent_id: str, event: CompressionEvent, workspace_id: str = "default") -> None:
     """Append compression event to agent's compression_log.jsonl (workspace-scoped)."""
     try:
-        data_dir = getattr(fabric_instance, "data_dir", "data")
-        log_dir = os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
+        safe_data_dir = os.path.realpath(getattr(fabric_instance, "data_dir", "data"))
+        safe_workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        safe_agent_id = _validate_path_component(agent_id, "agent_id")
+
+        log_dir = _ensure_within_base(
+            os.path.join(
+                safe_data_dir,
+                "workspaces",
+                safe_workspace_id,
+                "agents",
+                safe_agent_id,
+                "private",
+            ),
+            safe_data_dir,
+        )
         os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, "compression_log.jsonl")
+        log_path = _ensure_within_base(
+            os.path.join(log_dir, "compression_log.jsonl"),
+            log_dir,
+        )
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
     except Exception as exc:
