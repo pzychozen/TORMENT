@@ -13,6 +13,18 @@ from .embedding_store import (
 def _now_ts() -> int:
     return int(time.time())
 
+def _validate_path_component(value: str, label: str) -> str:
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
+
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     na = float(np.linalg.norm(a) + 1e-12)
     nb = float(np.linalg.norm(b) + 1e-12)
@@ -58,14 +70,19 @@ class MotifRegistry:
         shard_reader: Optional[EmbeddingShardReader] = None,
         entity_payload_fn: Optional[Any] = None,
     ) -> None:
-        self.data_dir = data_dir
-        self.workspace_id = workspace_id
-        self.domain_id = domain_id
-        self.path = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", domain_id, "motifs.json")
-        self.events_path = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", domain_id, "motif_events.jsonl")
-        self.merges_path = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", domain_id, "motif_merges.json")
+        self.data_dir = os.path.realpath(data_dir)
+        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        self.domain_id = _validate_path_component(domain_id, "domain_id")
+
+        motif_dir = _ensure_within_base(
+            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id),
+            self.data_dir,
+        )
+        self.path = _ensure_within_base(os.path.join(motif_dir, "motifs.json"), motif_dir)
+        self.events_path = _ensure_within_base(os.path.join(motif_dir, "motif_events.jsonl"), motif_dir)
+        self.merges_path = _ensure_within_base(os.path.join(motif_dir, "motif_merges.json"), motif_dir)
         self._merge_suggestions: Dict[str, Dict[str, Any]] = {}
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        os.makedirs(motif_dir, exist_ok=True)
         self.motifs: Dict[str, Motif] = {}
         self._next_id: int = 1  # monotonic counter — never decreases
         # Shard-aware embedding loading
