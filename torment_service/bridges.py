@@ -1,13 +1,27 @@
 # bridges.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import os, json, time
-import numpy as np
 from .motifs import cosine, MotifRegistry
+
 
 def _now_ts() -> int:
     return int(time.time())
+
+
+def _validate_path_component(value: str, label: str) -> str:
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
 
 @dataclass
 class Bridge:
@@ -22,11 +36,22 @@ class Bridge:
 
 class BridgeRegistry:
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        self.data_dir = data_dir
-        self.workspace_id = workspace_id
-        self.path = os.path.join(self.data_dir, "workspaces", workspace_id, "bridges.json")
-        self.events_path = os.path.join(self.data_dir, "workspaces", workspace_id, "bridge_events.jsonl")
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.data_dir = os.path.realpath(data_dir)
+        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+
+        workspace_dir = _ensure_within_base(
+            os.path.join(self.data_dir, "workspaces", self.workspace_id),
+            self.data_dir,
+        )
+        self.path = _ensure_within_base(
+            os.path.join(workspace_dir, "bridges.json"),
+            workspace_dir,
+        )
+        self.events_path = _ensure_within_base(
+            os.path.join(workspace_dir, "bridge_events.jsonl"),
+            workspace_dir,
+        )
+        os.makedirs(workspace_dir, exist_ok=True)
         self.bridges: List[Bridge] = []
         self._load()
 
