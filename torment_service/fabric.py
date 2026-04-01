@@ -2948,7 +2948,7 @@ class TormentFabric:
 
                     # Warmup tracker (lazy init per agent)
                     _warmup_dir = Path(self.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
-                    _warmup = WarmupTracker(_warmup_dir)
+                    _warmup = WarmupTracker(_warmup_dir, base_dir=self.data_dir)
 
                     # Check which deep EIDs also exist in core (short-path compressed)
                     _core_compressed: set = set()

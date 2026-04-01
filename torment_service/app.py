@@ -1786,7 +1786,7 @@ async def spirit_return_status(workspace_id: str, agent_id: str):
     try:
         from .spirit_return import WarmupTracker
         warmup_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
-        tracker = WarmupTracker(warmup_dir)
+        tracker = WarmupTracker(warmup_dir, base_dir=DATA_DIR)
         result["warmup"] = tracker.stats()
     except Exception as exc:
         result["warmup"] = None

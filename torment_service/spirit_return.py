@@ -442,10 +442,17 @@ class WarmupTracker:
 
     Storage: warmup_state.jsonl (append-only, with periodic compaction).
     In-memory dict keyed by EID for fast lookup.
+
+    *base_dir* is the trusted root directory.  The resolved storage path
+    is verified to stay inside it before any file access.
     """
 
-    def __init__(self, storage_path: Path) -> None:
-        self.storage_path = Path(storage_path)
+    def __init__(self, storage_path: Path, *, base_dir: str) -> None:
+        base = os.path.realpath(base_dir)
+        resolved = os.path.realpath(str(storage_path))
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError("WarmupTracker storage_path escapes base directory")
+        self.storage_path = Path(resolved)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self._file = self.storage_path / "warmup_state.jsonl"
         self._states: Optional[Dict[int, WarmupState]] = None

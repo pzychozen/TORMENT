@@ -337,7 +337,7 @@ class TestWarmupTracker(unittest.TestCase):
 
     def test_create_new_state(self):
         """First access creates a new warmup state."""
-        tracker = WarmupTracker(Path(self.tmpdir))
+        tracker = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         ws = tracker.get_or_create(42, current_step=100)
         self.assertEqual(ws.eid, 42)
         self.assertEqual(ws.appearance_count, 1)
@@ -345,7 +345,7 @@ class TestWarmupTracker(unittest.TestCase):
 
     def test_increment_count(self):
         """Same EID increments appearance count."""
-        tracker = WarmupTracker(Path(self.tmpdir))
+        tracker = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         ws1 = tracker.get_or_create(42, current_step=100)
         ws2 = tracker.get_or_create(42, current_step=110)
         self.assertEqual(ws2.appearance_count, 2)
@@ -353,13 +353,13 @@ class TestWarmupTracker(unittest.TestCase):
 
     def test_persistence_roundtrip(self):
         """Warmup state survives reload from disk."""
-        tracker1 = WarmupTracker(Path(self.tmpdir))
+        tracker1 = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         tracker1.get_or_create(10, current_step=50)
         tracker1.get_or_create(10, current_step=60)
         tracker1.get_or_create(20, current_step=70)
 
         # Create new tracker from same path
-        tracker2 = WarmupTracker(Path(self.tmpdir))
+        tracker2 = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         ws10 = tracker2.get_or_create(10, current_step=80)
         # Should have loaded previous state (count=2) and incremented to 3
         self.assertEqual(ws10.appearance_count, 3)
@@ -370,14 +370,14 @@ class TestWarmupTracker(unittest.TestCase):
 
     def test_stats_empty(self):
         """Empty tracker returns zero stats."""
-        tracker = WarmupTracker(Path(self.tmpdir))
+        tracker = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         s = tracker.stats()
         self.assertEqual(s["tracked_eids"], 0)
         self.assertEqual(s["total_appearances"], 0)
 
     def test_stats_with_data(self):
         """Stats reflect tracked data."""
-        tracker = WarmupTracker(Path(self.tmpdir))
+        tracker = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         tracker.get_or_create(1, 100)
         tracker.get_or_create(2, 100)
         tracker.get_or_create(1, 110)  # increment EID 1
@@ -388,7 +388,7 @@ class TestWarmupTracker(unittest.TestCase):
 
     def test_different_eids_isolated(self):
         """Different EIDs don't affect each other."""
-        tracker = WarmupTracker(Path(self.tmpdir))
+        tracker = WarmupTracker(Path(self.tmpdir), base_dir=self.tmpdir)
         tracker.get_or_create(1, 100)
         tracker.get_or_create(1, 110)
         tracker.get_or_create(1, 120)  # 3 appearances for eid=1
@@ -557,7 +557,7 @@ class TestEdgeCases(unittest.TestCase):
             # Create empty file
             f = Path(tmpdir) / "warmup_state.jsonl"
             f.write_text("")
-            tracker = WarmupTracker(Path(tmpdir))
+            tracker = WarmupTracker(Path(tmpdir), base_dir=tmpdir)
             ws = tracker.get_or_create(1, 100)
             self.assertEqual(ws.appearance_count, 1)
         finally:
@@ -569,7 +569,7 @@ class TestEdgeCases(unittest.TestCase):
         try:
             f = Path(tmpdir) / "warmup_state.jsonl"
             f.write_text("not valid json\n{\"eid\":5,\"appearance_count\":2,\"current_warmth\":0.35,\"max_warmth\":0.35,\"first_appearance_step\":10,\"last_retrieved_step\":20}\n")
-            tracker = WarmupTracker(Path(tmpdir))
+            tracker = WarmupTracker(Path(tmpdir), base_dir=tmpdir)
             # Should have loaded eid=5 and skipped corrupt line
             ws = tracker.get_or_create(5, 30)
             self.assertEqual(ws.appearance_count, 3)  # loaded 2 + 1 new

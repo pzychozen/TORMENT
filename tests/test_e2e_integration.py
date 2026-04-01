@@ -615,7 +615,7 @@ class TestWarmupTrackerPersistence(IntegrationBase):
         warmup_dir = Path(self.tmpdir) / "warmup_test"
         warmup_dir.mkdir(parents=True, exist_ok=True)
 
-        tracker1 = WarmupTracker(warmup_dir)
+        tracker1 = WarmupTracker(warmup_dir, base_dir=self.tmpdir)
         ws = tracker1.get_or_create(42, 100)
         self.assertEqual(ws.appearance_count, 1)
         self.assertAlmostEqual(ws.current_warmth, 0.2, places=2)
@@ -626,7 +626,7 @@ class TestWarmupTrackerPersistence(IntegrationBase):
         self.assertGreater(ws.current_warmth, 0.2)
 
         # Reload from disk
-        tracker2 = WarmupTracker(warmup_dir)
+        tracker2 = WarmupTracker(warmup_dir, base_dir=self.tmpdir)
         ws2 = tracker2.get_or_create(42, 120)
         self.assertEqual(ws2.appearance_count, 3)
         # Warmth should be even higher
