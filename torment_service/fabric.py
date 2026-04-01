@@ -20,7 +20,7 @@ from .scoring import score_hit
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
-from .symbols import assign_symbol_state, update_symbol_trace
+from .symbols import assign_symbol_state
 from .affect import classify_affect, looks_personal
 from .roles import RoleStore, dominant_role, role_multipliers
 from .character import (
@@ -31,7 +31,7 @@ from .character import (
 from .agent_locks import AgentLockManager
 from .checkpoint import (
     save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
-    get_checkpoint_dir, serialize_model_state, serialize_corridor_monitor,
+    get_checkpoint_dir,
     build_motif_summary, build_shard_snapshot,
 )
 
@@ -718,7 +718,6 @@ class TormentFabric:
             return
         store = self._clone_jobs if kind == 'clone' else self._repair_jobs
         items = sorted(store.items(), key=lambda kv: float(kv[1].get('started_ts', 0) or 0), reverse=True)
-        keep = dict(items[:n])
         drop = [jid for jid,_ in items[n:]]
         for jid in drop:
             store.pop(jid, None)
@@ -1365,7 +1364,6 @@ class TormentFabric:
         st = _load_affect_state(self.data_dir, ws.workspace_id, agent_id)
         last_tag = st.get("last_tag")
         last_step = int(st.get("last_step", -10**9))
-        last_conf = float(st.get("last_conf", 0.0))
 
         # Update state regardless (best-effort) to track the latest tag.
         st["last_tag"] = str(affect_tag)
@@ -2174,9 +2172,7 @@ class TormentFabric:
             _rp = self.role_store.update_from_text(_rp, summary)
             self.role_store.save(_rp)
         except Exception:
-            _rp = None
-
-        # Character continuity (v1.11): lightweight affect tagging.
+            pass
 
         # Character continuity (v1.11): lightweight affect tagging.
         # This is a guidance signal only; it must not dominate or rewrite persona.
@@ -2685,8 +2681,8 @@ class TormentFabric:
         # world evolves continuously (non-finite seeds), even if no memory stored this tick
         try:
             graph.step_world(step=int(step), classify_every=50, log_every=1)
-        except Exception:
-            pass
+        except Exception as e:
+            self._log.debug("step_world failed at step=%s for workspace_id=%s agent_id=%s: %s", step, workspace_id, agent_id, e)
 
         # --- Character drift check (periodic, non-blocking) ---
         if self._character_enable and stored and int(step) > 0 and int(step) % self._character_drift_every == 0:
