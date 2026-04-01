@@ -40,6 +40,21 @@ def _sanitize_log(value: str) -> str:
     return str(value).replace("\n", "\\n").replace("\r", "\\r")
 
 
+def ensure_within_base(path: str, base_dir: str) -> str:
+    """Resolve *path* and verify it stays inside *base_dir*.
+
+    Returns the resolved absolute path on success.
+    Raises ``ValueError`` if the path escapes the base directory.
+
+    Uses ``os.path.realpath`` to resolve symlinks, then ``startswith``
+    against the resolved base (the pattern CodeQL models as a sanitizer).
+    """
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError(f"Path escapes base directory")
+    return resolved
+
 
 # ---------------------------------------------------------------------------
 # Serialisation helpers
@@ -178,13 +193,22 @@ def build_motif_summary(motif_registry) -> Dict[str, Any]:
 # Shard manifest snapshot
 # ---------------------------------------------------------------------------
 
-def build_shard_snapshot(embeddings_dir: str) -> Optional[Dict[str, Any]]:
-    """Read current shard manifest for checkpoint."""
-    if ".." in embeddings_dir:
-        return None
-    safe_dir = os.path.realpath(embeddings_dir)
-    manifest_path = os.path.realpath(os.path.join(safe_dir, "manifest.json"))
-    if not manifest_path.startswith(safe_dir + os.sep) and manifest_path != safe_dir:
+def build_shard_snapshot(embeddings_dir: str, base_dir: str = "") -> Optional[Dict[str, Any]]:
+    """Read current shard manifest for checkpoint.
+
+    If *base_dir* is provided the resolved path is verified to stay inside it.
+    """
+    try:
+        if base_dir:
+            safe_dir = ensure_within_base(embeddings_dir, base_dir)
+        else:
+            if ".." in embeddings_dir:
+                return None
+            safe_dir = os.path.realpath(embeddings_dir)
+        manifest_path = ensure_within_base(
+            os.path.join(safe_dir, "manifest.json"), safe_dir
+        )
+    except ValueError:
         return None
     if not os.path.exists(manifest_path):
         return None
@@ -223,15 +247,20 @@ def save_checkpoint(
     motif_summary: Optional[Dict[str, Any]] = None,
     shard_snapshot: Optional[Dict[str, Any]] = None,
     max_checkpoints: int = 10,
+    base_dir: str = "",
 ) -> Optional[str]:
     """Save a checkpoint to disk.  Returns the file path on success, None on failure.
 
     Keeps at most ``max_checkpoints`` files, removing the oldest.
+    If *base_dir* is provided all resolved paths are verified to stay inside it.
     """
     try:
-        if ".." in checkpoint_dir:
-            raise ValueError("Invalid checkpoint directory: contains '..' traversal")
-        safe_dir = os.path.realpath(checkpoint_dir)
+        if base_dir:
+            safe_dir = ensure_within_base(checkpoint_dir, base_dir)
+        else:
+            if ".." in checkpoint_dir:
+                raise ValueError("Invalid checkpoint directory: contains '..' traversal")
+            safe_dir = os.path.realpath(checkpoint_dir)
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -246,9 +275,9 @@ def save_checkpoint(
             "shard_snapshot": shard_snapshot,
         }
 
-        path = os.path.realpath(os.path.join(safe_dir, _checkpoint_filename(step)))
-        if not path.startswith(safe_dir + os.sep) and path != safe_dir:
-            raise ValueError("Path escapes checkpoint directory")
+        path = ensure_within_base(
+            os.path.join(safe_dir, _checkpoint_filename(step)), safe_dir
+        )
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -266,35 +295,45 @@ def save_checkpoint(
 
 
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
-    """Remove oldest checkpoints, keeping at most `keep`."""
-    if ".." in checkpoint_dir:
-        return
+    """Remove oldest checkpoints, keeping at most `keep`.
+
+    ``checkpoint_dir`` must already be resolved (via ``ensure_within_base``
+    or ``os.path.realpath``) by the caller.
+    """
     safe_dir = os.path.realpath(checkpoint_dir)
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
         return
     for old in files[: len(files) - keep]:
-        old = os.path.realpath(old)
-        if not old.startswith(safe_dir + os.sep) and old != safe_dir:
-            continue
         try:
+            old = ensure_within_base(old, safe_dir)
             os.remove(old)
-        except Exception as e:
+        except (ValueError, OSError) as e:
             log.debug("Could not remove old checkpoint: %s", e)
 
 
-def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
-    """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    if ".." in checkpoint_dir:
+def load_latest_checkpoint(checkpoint_dir: str, base_dir: str = "") -> Optional[Dict[str, Any]]:
+    """Load the most recent checkpoint file.  Returns None if no checkpoint exists.
+
+    If *base_dir* is provided all resolved paths are verified to stay inside it.
+    """
+    try:
+        if base_dir:
+            safe_dir = ensure_within_base(checkpoint_dir, base_dir)
+        else:
+            if ".." in checkpoint_dir:
+                return None
+            safe_dir = os.path.realpath(checkpoint_dir)
+    except ValueError:
         return None
-    safe_dir = os.path.realpath(checkpoint_dir)
     if not os.path.isdir(safe_dir):
         return None
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if not files:
         return None
-    path = os.path.realpath(files[-1])
-    if not path.startswith(safe_dir + os.sep) and path != safe_dir:
+    try:
+        path = ensure_within_base(files[-1], safe_dir)
+    except ValueError:
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
