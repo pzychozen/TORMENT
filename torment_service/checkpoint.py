@@ -196,17 +196,15 @@ def build_motif_summary(motif_registry) -> Dict[str, Any]:
 def build_shard_snapshot(embeddings_dir: str, base_dir: str = "") -> Optional[Dict[str, Any]]:
     """Read current shard manifest for checkpoint.
 
-    If *base_dir* is provided the resolved path is verified to stay inside it.
+    *base_dir* is the trusted root directory.  All resolved paths are
+    verified to stay inside it.  Falls back to *embeddings_dir* itself
+    as root when *base_dir* is omitted (test convenience only).
     """
+    root = base_dir or embeddings_dir
     try:
-        if base_dir:
-            safe_dir = ensure_within_base(embeddings_dir, base_dir)
-        else:
-            if ".." in embeddings_dir:
-                return None
-            safe_dir = os.path.realpath(embeddings_dir)
+        safe_dir = ensure_within_base(embeddings_dir, root)
         manifest_path = ensure_within_base(
-            os.path.join(safe_dir, "manifest.json"), safe_dir
+            os.path.join(safe_dir, "manifest.json"), root
         )
     except ValueError:
         return None
@@ -252,15 +250,13 @@ def save_checkpoint(
     """Save a checkpoint to disk.  Returns the file path on success, None on failure.
 
     Keeps at most ``max_checkpoints`` files, removing the oldest.
-    If *base_dir* is provided all resolved paths are verified to stay inside it.
+    *base_dir* is the trusted root directory.  All resolved paths are
+    verified to stay inside it.  Falls back to *checkpoint_dir* itself
+    as root when *base_dir* is omitted (test convenience only).
     """
     try:
-        if base_dir:
-            safe_dir = ensure_within_base(checkpoint_dir, base_dir)
-        else:
-            if ".." in checkpoint_dir:
-                raise ValueError("Invalid checkpoint directory: contains '..' traversal")
-            safe_dir = os.path.realpath(checkpoint_dir)
+        root = base_dir or checkpoint_dir
+        safe_dir = ensure_within_base(checkpoint_dir, root)
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -297,17 +293,15 @@ def save_checkpoint(
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str = "") -> None:
     """Remove oldest checkpoints, keeping at most ``keep``.
 
-    If *base_dir* is provided the checkpoint directory is verified against it
-    before any filesystem operation.  Deletion targets are reconstructed from
-    ``os.path.basename`` so glob output never reaches ``os.remove`` directly.
+    *base_dir* is the trusted root directory.  Falls back to
+    *checkpoint_dir* itself as root when omitted (test convenience only).
+    Deletion targets are reconstructed from ``os.path.basename`` so
+    glob output never reaches ``os.remove`` directly.
     """
-    if base_dir:
-        root = os.path.realpath(base_dir)
-        safe_dir = os.path.realpath(checkpoint_dir)
-        if safe_dir != root and not safe_dir.startswith(root + os.sep):
-            return
-    else:
-        safe_dir = os.path.realpath(checkpoint_dir)
+    root = os.path.realpath(base_dir or checkpoint_dir)
+    safe_dir = os.path.realpath(checkpoint_dir)
+    if safe_dir != root and not safe_dir.startswith(root + os.sep):
+        return
 
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
@@ -328,15 +322,13 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str = "") -
 def load_latest_checkpoint(checkpoint_dir: str, base_dir: str = "") -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists.
 
-    If *base_dir* is provided all resolved paths are verified to stay inside it.
+    *base_dir* is the trusted root directory.  All resolved paths are
+    verified to stay inside it.  Falls back to *checkpoint_dir* itself
+    as root when *base_dir* is omitted (test convenience only).
     """
+    root = base_dir or checkpoint_dir
     try:
-        if base_dir:
-            safe_dir = ensure_within_base(checkpoint_dir, base_dir)
-        else:
-            if ".." in checkpoint_dir:
-                return None
-            safe_dir = os.path.realpath(checkpoint_dir)
+        safe_dir = ensure_within_base(checkpoint_dir, root)
     except ValueError:
         return None
     if not os.path.isdir(safe_dir):
@@ -345,7 +337,7 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str = "") -> Optional[
     if not files:
         return None
     try:
-        path = ensure_within_base(files[-1], safe_dir)
+        path = ensure_within_base(files[-1], root)
     except ValueError:
         return None
     try:
