@@ -184,7 +184,7 @@ def build_shard_snapshot(embeddings_dir: str) -> Optional[Dict[str, Any]]:
         return None
     safe_dir = os.path.realpath(embeddings_dir)
     manifest_path = os.path.realpath(os.path.join(safe_dir, "manifest.json"))
-    if os.path.commonpath([safe_dir, manifest_path]) != safe_dir:
+    if not manifest_path.startswith(safe_dir + os.sep) and manifest_path != safe_dir:
         return None
     if not os.path.exists(manifest_path):
         return None
@@ -247,7 +247,7 @@ def save_checkpoint(
         }
 
         path = os.path.realpath(os.path.join(safe_dir, _checkpoint_filename(step)))
-        if os.path.commonpath([safe_dir, path]) != safe_dir:
+        if not path.startswith(safe_dir + os.sep) and path != safe_dir:
             raise ValueError("Path escapes checkpoint directory")
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -275,7 +275,7 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
         return
     for old in files[: len(files) - keep]:
         old = os.path.realpath(old)
-        if os.path.commonpath([safe_dir, old]) != safe_dir:
+        if not old.startswith(safe_dir + os.sep) and old != safe_dir:
             continue
         try:
             os.remove(old)
@@ -294,7 +294,7 @@ def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     if not files:
         return None
     path = os.path.realpath(files[-1])
-    if os.path.commonpath([safe_dir, path]) != safe_dir:
+    if not path.startswith(safe_dir + os.sep) and path != safe_dir:
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
