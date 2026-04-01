@@ -2756,7 +2756,7 @@ class TormentFabric:
                         self.data_dir, "workspaces", workspace_id,
                         "agents", agent_id, "private", "embeddings",
                     )
-                    _shard_snap = build_shard_snapshot(_priv_dir)
+                    _shard_snap = build_shard_snapshot(_priv_dir, base_dir=self.data_dir)
                 except Exception as e:
                     self._log.debug("checkpoint shard snapshot build failed for path=%s: %s", _priv_dir, e)
                 _char_state_dict = None
@@ -2776,6 +2776,7 @@ class TormentFabric:
                     motif_summary=_motif_summary,
                     shard_snapshot=_shard_snap,
                     max_checkpoints=self._checkpoint_max_keep,
+                    base_dir=self.data_dir,
                 )
             except Exception as e:
                 self._log.debug("checkpoint save failed for step=%s: %s", step, e)

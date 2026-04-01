@@ -1438,7 +1438,7 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
             DATA_DIR, "workspaces", req.workspace_id,
             "agents", req.agent_id, "private", "embeddings",
         )
-        shard_snap = build_shard_snapshot(emb_dir)
+        shard_snap = build_shard_snapshot(emb_dir, base_dir=DATA_DIR)
     except Exception as e:
         _log.debug("Shard snapshot unavailable: %s", e)
 
@@ -1458,6 +1458,7 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         character_state_dict=char_state_dict,
         motif_summary=motif_summary,
         shard_snapshot=shard_snap,
+        base_dir=DATA_DIR,
     )
     return {"ok": path is not None, "step": step, "path": path}
 
@@ -1470,7 +1471,7 @@ def checkpoint_latest(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     from .checkpoint import load_latest_checkpoint, get_checkpoint_dir
 
     ckpt_dir = get_checkpoint_dir(DATA_DIR, workspace_id, agent_id)
-    data = load_latest_checkpoint(ckpt_dir)
+    data = load_latest_checkpoint(ckpt_dir, base_dir=DATA_DIR)
     if data is None:
         return {"ok": False, "detail": "No checkpoints found"}
     # Return metadata only — not the full state arrays

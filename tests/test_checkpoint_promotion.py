@@ -44,6 +44,9 @@ from torment_service.promotion import (
 def _tmp():
     return tempfile.mkdtemp(prefix="torment_p5_test_")
 
+# Trusted root for checkpoint path-containment checks in tests.
+_BASE_DIR = tempfile.gettempdir()
+
 
 def _make_model_state():
     """Create a ModelState with realistic values."""
@@ -195,11 +198,12 @@ class TestCheckpointSaveLoad:
                 character_state_dict={"drift_score": 0.12, "seed_id": "test_v1"},
                 motif_summary={"total_count": 5, "top_motifs": []},
                 shard_snapshot={"active_shard": 0, "next_row": 42},
+                base_dir=_BASE_DIR,
             )
             assert path is not None
             assert os.path.exists(path)
 
-            loaded = load_latest_checkpoint(tmp)
+            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
             assert loaded is not None
             assert loaded["step"] == 500
             assert loaded["character_state"]["drift_score"] == 0.12
@@ -213,8 +217,8 @@ class TestCheckpointSaveLoad:
             state = _make_model_state()
             mon = _make_corridor_monitor()
 
-            save_checkpoint(tmp, 1000, state, mon)
-            loaded = load_latest_checkpoint(tmp)
+            save_checkpoint(tmp, 1000, state, mon, base_dir=_BASE_DIR)
+            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
             restored = restore_from_checkpoint(loaded)
 
             assert restored["step"] == 1000
@@ -231,7 +235,7 @@ class TestCheckpointSaveLoad:
 
             # Save 15 checkpoints, keep max 5
             for i in range(15):
-                save_checkpoint(tmp, (i + 1) * 100, state, mon, max_checkpoints=5)
+                save_checkpoint(tmp, (i + 1) * 100, state, mon, max_checkpoints=5, base_dir=_BASE_DIR)
 
             files = [f for f in os.listdir(tmp) if f.endswith(".json")]
             assert len(files) == 5
@@ -244,7 +248,7 @@ class TestCheckpointSaveLoad:
     def test_load_empty_directory(self):
         tmp = _tmp()
         try:
-            loaded = load_latest_checkpoint(tmp)
+            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
             assert loaded is None
         finally:
             shutil.rmtree(tmp)
@@ -254,11 +258,11 @@ class TestCheckpointSaveLoad:
         try:
             state = _make_model_state()
             mon = _make_corridor_monitor()
-            save_checkpoint(tmp, 100, state, mon)
-            save_checkpoint(tmp, 500, state, mon)
-            save_checkpoint(tmp, 300, state, mon)
+            save_checkpoint(tmp, 100, state, mon, base_dir=_BASE_DIR)
+            save_checkpoint(tmp, 500, state, mon, base_dir=_BASE_DIR)
+            save_checkpoint(tmp, 300, state, mon, base_dir=_BASE_DIR)
 
-            loaded = load_latest_checkpoint(tmp)
+            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
             assert loaded["step"] == 500  # highest step number
         finally:
             shutil.rmtree(tmp)
