@@ -202,7 +202,7 @@ def build_shard_snapshot(embeddings_dir: str, base_dir: str) -> Optional[Dict[st
     try:
         safe_dir = ensure_within_base(embeddings_dir, base_dir)
         manifest_path = ensure_within_base(
-            os.path.join(safe_dir, "manifest.json"), base_dir
+            os.path.join(safe_dir, "manifest.json"), safe_dir
         )
     except ValueError:
         return None
@@ -290,28 +290,26 @@ def save_checkpoint(
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> None:
     """Remove oldest checkpoints, keeping at most ``keep``.
 
-    *base_dir* is the trusted root directory.  Deletion targets are
-    reconstructed from ``os.path.basename`` so glob output never
-    reaches ``os.remove`` directly.
+    *base_dir* is the trusted root directory. Deletion targets are
+    validated against the resolved checkpoint directory before removal.
     """
-    root = os.path.realpath(base_dir)
-    safe_dir = os.path.realpath(checkpoint_dir)
-    if safe_dir != root and not safe_dir.startswith(root + os.sep):
+    try:
+        safe_dir = ensure_within_base(checkpoint_dir, base_dir)
+    except ValueError:
         return
 
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
         return
+
     for old in files[: len(files) - keep]:
         name = os.path.basename(old)
         if not re.match(r"^checkpoint_\d+\.json$", name):
             continue
-        candidate = os.path.realpath(os.path.join(safe_dir, name))
-        if candidate != safe_dir and not candidate.startswith(safe_dir + os.sep):
-            continue
         try:
+            candidate = ensure_within_base(os.path.join(safe_dir, name), safe_dir)
             os.remove(candidate)
-        except OSError as e:
+        except (ValueError, OSError) as e:
             log.debug("Could not remove old checkpoint: %s", e)
 
 
@@ -331,7 +329,7 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
     if not files:
         return None
     try:
-        path = ensure_within_base(files[-1], base_dir)
+        path = ensure_within_base(files[-1], safe_dir)
     except ValueError:
         return None
     try:
