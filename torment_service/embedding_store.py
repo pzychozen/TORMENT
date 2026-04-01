@@ -55,6 +55,15 @@ def _shard_name(idx: int) -> str:
     return f"shard_{idx:06d}"
 
 
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    """Resolve *path* and verify it lives inside *base_dir* (CWE-22 guard)."""
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError(f"Path escapes base directory: {resolved}")
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # EmbeddingShardWriter
 # ---------------------------------------------------------------------------
@@ -66,11 +75,14 @@ class EmbeddingShardWriter:
     """
 
     def __init__(self, embeddings_dir: str, dim: int = DEFAULT_DIM) -> None:
-        self.embeddings_dir = embeddings_dir
+        self.embeddings_dir = os.path.realpath(embeddings_dir)
         self.dim = int(dim)
         os.makedirs(self.embeddings_dir, exist_ok=True)
 
-        self.manifest_path = os.path.join(self.embeddings_dir, "manifest.json")
+        self.manifest_path = _ensure_within_base(
+            os.path.join(self.embeddings_dir, "manifest.json"),
+            self.embeddings_dir,
+        )
         self.manifest = self._load_or_create_manifest()
 
         # Ensure dim consistency
@@ -103,18 +115,27 @@ class EmbeddingShardWriter:
 
     @staticmethod
     def _write_json(path: str, obj: Dict[str, Any]) -> None:
-        tmp = path + ".tmp"
+        safe_path = os.path.realpath(path)
+        base_dir = os.path.dirname(safe_path)
+        safe_path = _ensure_within_base(safe_path, base_dir)
+        tmp = _ensure_within_base(safe_path + ".tmp", base_dir)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, path)
+        os.replace(tmp, safe_path)
 
     # ---- shard management ----
 
     def _shard_npy_path(self, idx: int) -> str:
-        return os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy")
+        return _ensure_within_base(
+            os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy"),
+            self.embeddings_dir,
+        )
 
     def _shard_map_path(self, idx: int) -> str:
-        return os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl")
+        return _ensure_within_base(
+            os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl"),
+            self.embeddings_dir,
+        )
 
     def _ensure_active_shard(self) -> None:
         """Create or open the active shard memmap."""
@@ -218,11 +239,14 @@ class EmbeddingShardReader:
     """
 
     def __init__(self, embeddings_dir: str) -> None:
-        self.embeddings_dir = embeddings_dir
+        self.embeddings_dir = os.path.realpath(embeddings_dir)
         self._shard_cache: Dict[int, np.ndarray] = {}
         self._map_cache: Dict[int, List[Dict[str, Any]]] = {}
 
-        self.manifest_path = os.path.join(self.embeddings_dir, "manifest.json")
+        self.manifest_path = _ensure_within_base(
+            os.path.join(self.embeddings_dir, "manifest.json"),
+            self.embeddings_dir,
+        )
         self.manifest: Optional[Dict[str, Any]] = None
         if os.path.exists(self.manifest_path):
             with open(self.manifest_path, "r", encoding="utf-8") as f:
@@ -242,10 +266,16 @@ class EmbeddingShardReader:
     # ---- shard loading ----
 
     def _shard_npy_path(self, idx: int) -> str:
-        return os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy")
+        return _ensure_within_base(
+            os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy"),
+            self.embeddings_dir,
+        )
 
     def _shard_map_path(self, idx: int) -> str:
-        return os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl")
+        return _ensure_within_base(
+            os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl"),
+            self.embeddings_dir,
+        )
 
     def _load_shard(self, idx: int) -> np.ndarray:
         """Load a shard into cache (read-only memmap)."""
@@ -367,7 +397,11 @@ def load_legacy_embedding(data_dir: str, eid: int) -> Optional[np.ndarray]:
 
     Returns None if the file doesn't exist.
     """
-    path = os.path.join(data_dir, f"emb_{int(eid)}.npy")
+    safe_data_dir = os.path.realpath(data_dir)
+    path = _ensure_within_base(
+        os.path.join(safe_data_dir, f"emb_{int(eid)}.npy"),
+        safe_data_dir,
+    )
     if not os.path.exists(path):
         return None
     try:
