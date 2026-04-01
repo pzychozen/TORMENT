@@ -1489,6 +1489,8 @@ def checkpoint_latest(workspace_id: str, agent_id: str) -> Dict[str, Any]:
 @app.get("/checkpoint/{workspace_id}/{agent_id}/list")
 def checkpoint_list(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     """List all available checkpoints for an agent."""
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     from .checkpoint import get_checkpoint_dir, _extract_step_from_filename
     import glob as _glob
 

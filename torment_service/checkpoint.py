@@ -180,6 +180,8 @@ def build_motif_summary(motif_registry) -> Dict[str, Any]:
 
 def build_shard_snapshot(embeddings_dir: str) -> Optional[Dict[str, Any]]:
     """Read current shard manifest for checkpoint."""
+    if ".." in embeddings_dir:
+        return None
     safe_dir = os.path.realpath(embeddings_dir)
     manifest_path = os.path.realpath(os.path.join(safe_dir, "manifest.json"))
     if os.path.commonpath([safe_dir, manifest_path]) != safe_dir:
@@ -227,9 +229,9 @@ def save_checkpoint(
     Keeps at most ``max_checkpoints`` files, removing the oldest.
     """
     try:
-        safe_dir = os.path.realpath(checkpoint_dir)
-        if ".." in safe_dir.split(os.sep):
+        if ".." in checkpoint_dir:
             raise ValueError("Invalid checkpoint directory: contains '..' traversal")
+        safe_dir = os.path.realpath(checkpoint_dir)
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -265,6 +267,8 @@ def save_checkpoint(
 
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
     """Remove oldest checkpoints, keeping at most `keep`."""
+    if ".." in checkpoint_dir:
+        return
     safe_dir = os.path.realpath(checkpoint_dir)
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
@@ -281,9 +285,9 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    safe_dir = os.path.realpath(checkpoint_dir)
-    if ".." in safe_dir.split(os.sep):
+    if ".." in checkpoint_dir:
         return None
+    safe_dir = os.path.realpath(checkpoint_dir)
     if not os.path.isdir(safe_dir):
         return None
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
@@ -326,7 +330,14 @@ def restore_from_checkpoint(
 
 
 def get_checkpoint_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    """Standard checkpoint directory path for an agent."""
+    """Standard checkpoint directory path for an agent.
+
+    Validates workspace_id and agent_id to reject path traversal attempts
+    before they reach any filesystem operation.
+    """
+    for val, label in [(workspace_id, "workspace_id"), (agent_id, "agent_id")]:
+        if not val or ".." in val or "/" in val or "\\" in val:
+            raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return os.path.join(
         data_dir, "workspaces", workspace_id,
         "agents", agent_id, "private", "checkpoints",
