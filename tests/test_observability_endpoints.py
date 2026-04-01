@@ -10,12 +10,9 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
-import tempfile
-import time
 import unittest
 
 log = logging.getLogger(__name__)

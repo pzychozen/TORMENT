@@ -76,4 +76,3 @@ class RoleBase(ABC):
           - Set confidence < 1.0 when uncertain
           - Populate uncertainties and contradictions fields when relevant
         """
-        ...
