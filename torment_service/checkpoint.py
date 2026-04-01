@@ -284,7 +284,7 @@ def save_checkpoint(
         os.replace(tmp, path)
 
         # Prune old checkpoints
-        _prune_old_checkpoints(safe_dir, max_checkpoints)
+        _prune_old_checkpoints(safe_dir, max_checkpoints, base_dir=base_dir)
 
         log.info("Checkpoint saved: step=%d -> %s", step, _sanitize_log(path))
         return path
@@ -294,21 +294,34 @@ def save_checkpoint(
         return None
 
 
-def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
-    """Remove oldest checkpoints, keeping at most `keep`.
+def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str = "") -> None:
+    """Remove oldest checkpoints, keeping at most ``keep``.
 
-    ``checkpoint_dir`` must already be resolved (via ``ensure_within_base``
-    or ``os.path.realpath``) by the caller.
+    If *base_dir* is provided the checkpoint directory is verified against it
+    before any filesystem operation.  Deletion targets are reconstructed from
+    ``os.path.basename`` so glob output never reaches ``os.remove`` directly.
     """
-    safe_dir = os.path.realpath(checkpoint_dir)
+    if base_dir:
+        root = os.path.realpath(base_dir)
+        safe_dir = os.path.realpath(checkpoint_dir)
+        if safe_dir != root and not safe_dir.startswith(root + os.sep):
+            return
+    else:
+        safe_dir = os.path.realpath(checkpoint_dir)
+
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
         return
     for old in files[: len(files) - keep]:
+        name = os.path.basename(old)
+        if not re.match(r"^checkpoint_\d+\.json$", name):
+            continue
+        candidate = os.path.realpath(os.path.join(safe_dir, name))
+        if candidate != safe_dir and not candidate.startswith(safe_dir + os.sep):
+            continue
         try:
-            old = ensure_within_base(old, safe_dir)
-            os.remove(old)
-        except (ValueError, OSError) as e:
+            os.remove(candidate)
+        except OSError as e:
             log.debug("Could not remove old checkpoint: %s", e)
 
 
