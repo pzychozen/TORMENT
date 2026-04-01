@@ -15,10 +15,18 @@ from .embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
     load_embedding as _load_embedding_universal,
-    load_legacy_embedding,
 )
 
 log = logging.getLogger("torment.memory_graph")
+
+
+def _ensure_within_base(path: str, base: str) -> str:
+    """Resolve *path* and verify it lives inside *base* (CWE-22 guard)."""
+    resolved = os.path.realpath(path)
+    base_resolved = os.path.realpath(base)
+    if resolved != base_resolved and not resolved.startswith(base_resolved + os.sep):
+        raise ValueError(f"Path escapes base directory: {resolved}")
+    return resolved
 
 
 def _now_ts() -> int:
@@ -70,7 +78,7 @@ class MemoryGraph:
     """
 
     def __init__(self, data_dir: str, embedder: Optional[Embedder] = None, sqlite_index=None) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.realpath(data_dir)
         os.makedirs(self.data_dir, exist_ok=True)
 
         # Optional SQLite sidecar index (Phase 4).
@@ -89,7 +97,9 @@ class MemoryGraph:
         self._index_dirty: bool = True
 
         # --- shard-based embedding storage ---
-        self._emb_dir = os.path.join(self.data_dir, "embeddings")
+        self._emb_dir = _ensure_within_base(
+            os.path.join(self.data_dir, "embeddings"), self.data_dir
+        )
         self._shard_writer: Optional[EmbeddingShardWriter] = None
         self._shard_reader: Optional[EmbeddingShardReader] = None
         self._init_shard_storage()
@@ -99,9 +109,15 @@ class MemoryGraph:
 
         self.traj = TrajectoryLogger(root_dir=self.data_dir)
 
-        self.meta_path = os.path.join(self.data_dir, "nodes.jsonl")
-        self.edges_path = os.path.join(self.data_dir, "edges.jsonl")
-        self.events_path = os.path.join(self.data_dir, "memory_events.jsonl")
+        self.meta_path = _ensure_within_base(
+            os.path.join(self.data_dir, "nodes.jsonl"), self.data_dir
+        )
+        self.edges_path = _ensure_within_base(
+            os.path.join(self.data_dir, "edges.jsonl"), self.data_dir
+        )
+        self.events_path = _ensure_within_base(
+            os.path.join(self.data_dir, "memory_events.jsonl"), self.data_dir
+        )
 
         self.edges: List[Dict[str, Any]] = []
 
@@ -125,7 +141,9 @@ class MemoryGraph:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
     def _emb_path(self, eid: int) -> str:
-        return os.path.join(self.data_dir, f"emb_{int(eid)}.npy")
+        return _ensure_within_base(
+            os.path.join(self.data_dir, f"emb_{int(eid)}.npy"), self.data_dir
+        )
 
     def _normalize(self, v: np.ndarray) -> np.ndarray:
         v = np.asarray(v, dtype=np.float32).reshape(-1)
@@ -568,12 +586,10 @@ class MemoryGraph:
                 ent.payload["embedding_ref"] = emb_ref
             except Exception:
                 # Fallback to legacy if shard write fails
-                emb_path = os.path.join(self.data_dir, f"emb_{ent.eid}.npy")
-                np.save(emb_path, emb_vec)
+                np.save(self._emb_path(int(ent.eid)), emb_vec)
         else:
             # Legacy mode — per-file storage
-            emb_path = os.path.join(self.data_dir, f"emb_{ent.eid}.npy")
-            np.save(emb_path, emb_vec)
+            np.save(self._emb_path(int(ent.eid)), emb_vec)
 
         self._register_embedding(int(ent.eid), embedding)
 
