@@ -191,9 +191,9 @@ def build_motif_summary(motif_registry) -> Dict[str, Any]:
 
 def build_shard_snapshot(embeddings_dir: str) -> Optional[Dict[str, Any]]:
     """Read current shard manifest for checkpoint."""
-    safe_dir = os.path.normpath(embeddings_dir)
-    manifest_path = os.path.normpath(os.path.join(safe_dir, "manifest.json"))
-    if not manifest_path.startswith(safe_dir):
+    safe_dir = os.path.realpath(embeddings_dir)
+    manifest_path = os.path.realpath(os.path.join(safe_dir, "manifest.json"))
+    if os.path.commonpath([safe_dir, manifest_path]) != safe_dir:
         return None
     if not os.path.exists(manifest_path):
         return None
@@ -238,7 +238,7 @@ def save_checkpoint(
     Keeps at most ``max_checkpoints`` files, removing the oldest.
     """
     try:
-        safe_dir = os.path.normpath(checkpoint_dir)
+        safe_dir = os.path.realpath(checkpoint_dir)
         if ".." in safe_dir.split(os.sep):
             raise ValueError("Invalid checkpoint directory: contains '..' traversal")
         os.makedirs(safe_dir, exist_ok=True)
@@ -255,8 +255,8 @@ def save_checkpoint(
             "shard_snapshot": shard_snapshot,
         }
 
-        path = os.path.normpath(os.path.join(safe_dir, _checkpoint_filename(step)))
-        if not path.startswith(safe_dir):
+        path = os.path.realpath(os.path.join(safe_dir, _checkpoint_filename(step)))
+        if os.path.commonpath([safe_dir, path]) != safe_dir:
             raise ValueError("Path escapes checkpoint directory")
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -276,13 +276,13 @@ def save_checkpoint(
 
 def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
     """Remove oldest checkpoints, keeping at most `keep`."""
-    safe_dir = os.path.normpath(checkpoint_dir)
+    safe_dir = os.path.realpath(checkpoint_dir)
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if len(files) <= keep:
         return
     for old in files[: len(files) - keep]:
-        old = os.path.normpath(old)
-        if not old.startswith(safe_dir):
+        old = os.path.realpath(old)
+        if os.path.commonpath([safe_dir, old]) != safe_dir:
             continue
         try:
             os.remove(old)
@@ -292,7 +292,7 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int) -> None:
 
 def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists."""
-    safe_dir = os.path.normpath(checkpoint_dir)
+    safe_dir = os.path.realpath(checkpoint_dir)
     if ".." in safe_dir.split(os.sep):
         return None
     if not os.path.isdir(safe_dir):
@@ -300,8 +300,8 @@ def load_latest_checkpoint(checkpoint_dir: str) -> Optional[Dict[str, Any]]:
     files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
     if not files:
         return None
-    path = os.path.normpath(files[-1])
-    if not path.startswith(safe_dir):
+    path = os.path.realpath(files[-1])
+    if os.path.commonpath([safe_dir, path]) != safe_dir:
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:

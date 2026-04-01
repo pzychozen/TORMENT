@@ -17,6 +17,14 @@ from .auth import (
 
 _log = logging.getLogger("torment.app")
 
+
+def _validate_path_component(name: str, label: str = "identifier") -> str:
+    """Reject path-separator characters and traversal sequences in user input."""
+    if not name or ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(400, f"Invalid {label}: must not contain path separators or '..'")
+    return name
+
+
 DATA_DIR = os.path.normpath(
     os.environ.get("TORMENT_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
 )
@@ -1399,6 +1407,8 @@ class CheckpointSaveReq(BaseModel):
 @app.post("/checkpoint/save")
 def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
     """Manually trigger a checkpoint save for an agent."""
+    _validate_path_component(req.workspace_id, "workspace_id")
+    _validate_path_component(req.agent_id, "agent_id")
     from .checkpoint import (
         save_checkpoint, get_checkpoint_dir,
         build_motif_summary, build_shard_snapshot,
@@ -1455,6 +1465,8 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
 @app.get("/checkpoint/{workspace_id}/{agent_id}/latest")
 def checkpoint_latest(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     """Load and return the latest checkpoint metadata."""
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
     from .checkpoint import load_latest_checkpoint, get_checkpoint_dir
 
     ckpt_dir = get_checkpoint_dir(DATA_DIR, workspace_id, agent_id)
