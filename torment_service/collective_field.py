@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import threading
 import time
@@ -22,6 +21,20 @@ import numpy as np
 from .collective_models import ResonancePacket, ConvergenceEvent
 
 log = logging.getLogger("torment.collective_field")
+
+
+def _validate_path_component(value: str, label: str) -> str:
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(path)
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return resolved
 
 
 class CollectiveField:
@@ -40,12 +53,22 @@ class CollectiveField:
     CONVERGENCE_COOLDOWN = 30            # seconds between events for same agent pair + domain
 
     def __init__(self, workspace_id: str, data_dir: str) -> None:
-        self.workspace_id = workspace_id
-        self._base = os.path.join(data_dir, "workspaces", workspace_id, "collective")
+        safe_data_dir = os.path.realpath(data_dir)
+        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        self._base = _ensure_within_base(
+            os.path.join(safe_data_dir, "workspaces", self.workspace_id, "collective"),
+            safe_data_dir,
+        )
         os.makedirs(self._base, exist_ok=True)
 
-        self._packets_path = os.path.join(self._base, "packets.jsonl")
-        self._events_path = os.path.join(self._base, "events.jsonl")
+        self._packets_path = _ensure_within_base(
+            os.path.join(self._base, "packets.jsonl"),
+            self._base,
+        )
+        self._events_path = _ensure_within_base(
+            os.path.join(self._base, "events.jsonl"),
+            self._base,
+        )
 
         self._lock = threading.Lock()
 
