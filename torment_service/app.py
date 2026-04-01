@@ -310,7 +310,7 @@ def health() -> Dict[str, Any]:
         "embed_audit_sample": audit_sample if include_audits else None,
         "embedder": info,
         "embedder_degraded": degraded,
-        "embedder_error": str(getattr(fabric, "embedder_error", "")) if degraded else "",
+        "embedder_error": "embedder degraded" if degraded else "",
         "requested_embedder": {
             "provider": str(getattr(fabric, "requested_embed_provider", "")),
             "model": str(getattr(fabric, "requested_embed_model", "")),
@@ -403,8 +403,10 @@ def embedder_check() -> Dict[str, Any]:
         }
     except Exception as e:
         dt_ms = (_time.perf_counter() - t0) * 1000.0
-        err = f"{type(e).__name__}: {e}"
-        hint = _embedder_actionable_hint(provider, err)
+        _log.exception("Embedder check failed (provider=%s, model=%s)", provider, model)
+        # Build hint from error internally but don't expose raw error to caller
+        internal_err = f"{type(e).__name__}: {e}"
+        hint = _embedder_actionable_hint(provider, internal_err)
         return {
             "ok": False,
             "provider": provider,
@@ -412,7 +414,7 @@ def embedder_check() -> Dict[str, Any]:
             "dim": int(getattr(embedder, "dim", 0) or 0) if embedder else 0,
             "elapsed_ms": float(dt_ms),
             "degraded": bool(getattr(fabric, "embedder_error", "")),
-            "error": err,
+            "error": "Embedder check failed",
             "hint": hint,
         }
 
@@ -829,7 +831,8 @@ def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
             },
         }
     except Exception as e:
-        return {"workspace_id": workspace_id, "error": str(e)}
+        _log.exception("Collective proposals status failed for workspace %s", workspace_id)
+        return {"workspace_id": workspace_id, "error": "Internal error retrieving proposal status"}
 
 
 @app.post("/agent/ingest")

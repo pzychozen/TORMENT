@@ -487,7 +487,8 @@ class TormentFabric:
 
     def __init__(self, data_dir: str) -> None:
         self.data_dir = os.path.normpath(data_dir)
-        os.makedirs(self.data_dir, exist_ok=True)
+        if self.data_dir != ":memory:":
+            os.makedirs(self.data_dir, exist_ok=True)
         # v1.10: embedder is configured via env and attached to the kernel.
         self.embedder_error: str = ""
         self.requested_embed_provider: str = str(os.environ.get("TORMENT_EMBED_PROVIDER") or "hash")

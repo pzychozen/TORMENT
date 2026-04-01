@@ -11,7 +11,10 @@ See AGENT_SPINE_PLAN.md §1 ("single-pass pipeline, request in → response out"
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Optional
+
+_log = logging.getLogger(__name__)
 
 from cognition.task_models import TaskPacket, RoutingDecision, ReintegrationResult
 from cognition.router import route
@@ -100,11 +103,12 @@ def run_cognition_pipeline(
         return _build_response(task, routing, result)
 
     except Exception as exc:
+        _log.exception("Cognition pipeline failed for task %s", task.task_id)
         return {
             "ok": False,
             "task_id": task.task_id,
-            "error": str(exc),
-            "error_type": type(exc).__name__,
+            "error": "Cognition pipeline failed",
+            "error_type": "InternalError",
         }
 
 
