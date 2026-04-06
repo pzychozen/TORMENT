@@ -700,10 +700,6 @@ def analyze_rsb_history(
     T = len(spectral_entropy_series)
     t_axis = np.arange(T, dtype=float)
 
-    # If analyze_rsb_history gets a seed argument, you can thread it through.
-    # For now, we'll assume we don't know the seed here:
-    seed_value = None
-
     seed_summary = summarize_rsb_seed(
         stats,
         t=t_axis,

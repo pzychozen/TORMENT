@@ -6,22 +6,11 @@
 import numpy as np
 from .definitions import (
     estimate_chirality_timescale,
-    compute_spectral_energy_series,
-    compute_dominant_band_series,
-    compute_spectral_entropy_series,
-    compute_recursive_velocity,
-    compute_recursive_velocity_geom,
-    compute_rsb_observables,
-    analyze_rsb_history,
-    classify_run,
-    summarize_rsb_seed,
-    format_rsb_seed_summary,
 )
 
 
 # --- Core model imports ---
 from .model_core import ModelParams, ModelState, TriOctaPhaseLockModel
-from .constants_selector import default_k_triplet
 
 # --- Flavor / physics observables ---
 from .physics_sampler import sample_physics_observables
@@ -39,7 +28,6 @@ from .cp_windows import cp_mask_from_phi_indices, default_cp_config
 from .tangent_corridor_analysis import (
     detect_tangent_corridors,
     cluster_delta_kz,
-    cp_split_big_delta_events,
 )
 
 # ============================================================
@@ -79,7 +67,7 @@ def run_once(params: ModelParams):
     detect_chirality_selection_window(hist, obs)
 
     # Tangent corridor alignment + Δ
-    mask_tan, xy, jumpvec, dot = detect_tangent_corridors(hist)
+    _mask_tan, _xy, _jumpvec, _dot = detect_tangent_corridors(hist)
 
     # (κ,Z) clustering view
     big_steps_mask, mags = cluster_delta_kz(hist, frac_of_max=0.5)
@@ -468,7 +456,7 @@ def run_long_time_stability_test(params: ModelParams,
     print(f"Mean J_eff late window   ≈ {np.mean(J_late):.4e}, sign = {int(sign_late)}")
 
     # Δ(κ,Z) cluster structure over full run
-    big_mask_full, mags_full = cluster_delta_kz(hist, frac_of_max=frac_of_max)
+    _big_mask_full, _mags_full = cluster_delta_kz(hist, frac_of_max=frac_of_max)
 
     # Restrict history to early and late segments for local Δ analysis
     # We slice κ, Z, phi_index, uxy_coords, etc. consistently.
