@@ -382,6 +382,22 @@ Scenarios: `research`, `ops`, `creative`, `mixed`, `collaborative_mixed_200`.
 
 ---
 
+## Support This Project
+
+If TORMENT Fabric is useful to you, consider supporting its development.
+
+**Crypto**
+
+- **BTC:** `bc1p8g9dd2y4fgnshdsvyq5ecu22mdr5kjfw8zdcptfdhghh4a0837ssjqzgka`
+- **ETH:** `0x52a31b19bC79d412621aA898adCC2BDd3580fDf4`
+- **SOL:** `2AmeJwpE68FbytofrUgrNtYwwtzLnjfDi1ACzkBDxBUj`
+
+**Ko-fi**
+
+- [ko-fi.com/hilmirhalldorsson](https://ko-fi.com/hilmirhalldorsson)
+
+---
+
 ## Notes
 
 - If you have a real summarizer/embedder, pass `supplied_summary` and/or `supplied_embedding` to `/agent/ingest`
