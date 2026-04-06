@@ -235,3 +235,4 @@ In addition to tools, the MCP server should expose these as **resources** (read-
 4. **Auto-escalation is a Spine decision.** Fabric has no concept of fast vs full paths.
 5. **The response envelope is the Spine's contract.** MCP and HTTP consumers should parse the envelope, not raw Fabric results.
 6. **Legacy endpoints are compatibility shims.** They internally construct SpineRequests and call `submit_task`. New code should never add new legacy-style endpoints.
+7. **The thinking layer is advisory, not authoritative.** When enabled (`TORMENT_THINKING_ADVISORY=1`), the thinking controller runs alongside Spine to provide task framing, memory planning, and stance recommendations. It never writes memory, never blocks execution, and never overrides Spine decisions. See `docs/advanced_cognition.md` for details.

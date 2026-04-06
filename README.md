@@ -1,4 +1,4 @@
-# TORMENT Memory Fabric — v2.4.0
+# TORMENT Memory Fabric — v2.4.2
 
 **TORMENT** is a governed memory and identity engine for building persistent AI characters and agents.
 
@@ -14,6 +14,42 @@ Built for **modders, developers, and experimental character systems**, TORMENT i
 If you want AI characters that feel more consistent, more alive, and more structurally grounded than standard prompt-based systems, this is the engine.
 
 Built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons. Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
+
+---
+
+## What's New in v2.4.2 — Provenance, Recursion Safety & Capability Boundary
+
+This release adds provenance tracking to every memory write, validates recursion safety for archivist write-back, fixes the cognition/drift path, and formally defines the MCP capability boundary.
+
+**Provenance System** (`provenance_v1.py`) — every `fabric.ingest()` call now attaches structured provenance metadata: `schema_version`, `source_type`, `source_role`, `write_path`, `parent_eids`, `created_at_step`, `created_at_ts`. New debug endpoint `GET /debug/provenance` exposes stored provenance for inspection. This is the foundation for all future governance — the system can now distinguish user-origin memories from derived or archivist-generated material.
+
+**Recursion Safety Policy** (`RECURSION_SAFETY_POLICY_v2.4.x.md`, implemented in `cognition/pipeline.py`) — six rules (A–F) that prevent archivist write-back from creating self-reinforcing loops. Live-validated: second-pass write-back is correctly blocked with `archivist_parent_blocked` when it detects archivist-origin parent memories. Safe parent classes defined: `user_input`, `tool_result`, `memory` (migrated). Archivist write-back remains gated behind `TORMENT_ARCHIVIST_WRITEBACK=0` but the recursion guard is now proven to work.
+
+**Cognition/Drift Bugfixes** (`cognition/drift.py`) — two shape mismatches fixed in the live drift adapter. The drift check was accessing `ident.graph`, `ident.character_seed`, and `ident.character_state` on `AgentIdentity`, but `AgentIdentity` is a lightweight dataclass. Fixed to use `fabric_instance.private_graphs`, `character_store.load_seed()`, and `character_store.load_state()` — the same patterns used throughout `fabric.py`. Also fixed `ws.motif_registry` (doesn't exist) to `ws.motif_regs[domain]` (the actual per-domain dict). The `/cognition/run` endpoint now completes with a structured drift report instead of falling through to the error fallback.
+
+**Memory Plan Validation** — A/B tested advisory ON vs OFF across 5 query types (identity, live/social, technical, provenance, stable design). Result: advisory does not break retrieval rankings or lose identity-anchor memories. Passes "do no harm" but not yet "earns influence." Memory Plan remains gated behind `TORMENT_THINKING_ADVISORY=0`.
+
+**MCP Capability Boundary** (`docs/MCP_CAPABILITY_BOUNDARY.md`) — formal documentation of what TORMENT's MCP layer does and does not do. TORMENT MCP is a governed memory interface, not an action execution system. No tool dispatch, no autonomous loops, no external API calling. The boundary between epistemology (memory, reasoning, provenance) and capability (actions, tools, execution) is intentional and enforced.
+
+**Doctrine** (`DOCTRINE_v2.4.x.md`) — 12 architectural principles codified. Key rules: "automatic is allowed before autonomous," "provenance is a hard boundary," "advisory logic must earn influence," "retrieval quality beats feature sprawl."
+
+---
+
+## What's New in v2.4.1 — Thinking Layer, Stance Policy & Live Agent
+
+This release adds a pre-cognition thinking layer, a geometric stance policy, and the first working live agent deployment (voice-active characters on X Spaces).
+
+**Thinking Controller** (`thinking_controller.py`) — first-pass cognition controller that runs before the Spine dispatches. Heuristic-first, deterministic, no ML calls. Five-stage pipeline: task framing (urgency, ambiguity, governance/identity sensitivity, tool needs, live-social context), cognitive mode selection (7 modes: Fast, Retrieval, Reflective, Tool, Governed, Identity-Sensitive, Live-Social), memory plan construction (lane-specific top_k, weights, token budgets, safety constraints), action routing (Answer, Governance Review, Use Tool, Ask Clarification, Propose Share, Create Archive Note, No-Op), and self-review (identity overconfidence softening, live-social trimming, governance mismatch blocking).
+
+**Stance Policy** (`stance_policy.py`) — optional participation decision layer on top of thinking. Determines *whether and how* a character should engage. Advisory only — never blocks Spine execution. Only active when `TORMENT_CONTEXTUAL_ABSTENTION=1`. Geometric kernel state (coherence, stability, identity lock, ambiguity tolerance, social resonance) modulates thresholds within bounded ±15% bands.
+
+**Geometric Stance Context** (`thinking_models.py`) — normalized 0–1 interface derived from raw kernel internals. Five signals: coherence (phase synchrony), stability (basin health vs tearing risk), identity_lock (drift distance from seed), ambiguity_tolerance (capacity to absorb uncertainty), social_resonance (willingness to engage socially). Designed so the stance layer never touches raw kernel variables directly.
+
+**Thinking Advisory Sidecar** (in `spine.py`) — the thinking controller runs as a non-authoritative observer inside the Spine. Compares what the Spine routes (by operation type + trust) against what the thinking layer recommends (by content heuristics). Alignment records tracked in a ring buffer with divergence notes. Feature-gated: `TORMENT_THINKING_ADVISORY=1`.
+
+**Live Agent Pipeline** (`live_agent/`) — first working deployment of TORMENT characters as live voice agents. Whisper STT → TORMENT memory retrieval → local Qwen 3.5 4B base model generation → Voicebox/edge-tts speech synthesis. Two characters deployed: Limn (curious, bold, roasts trolls) and Bibs (witty, sharp, BS-buster). Four modes: text, voice (mic), listen (system audio transcript), space (X Spaces with loopback capture + VB-CABLE routing). Turn-taking architecture for continuous audio environments. TTS benchmark tooling for engine comparison.
+
+**Security Hardening** — 40+ CodeQL alerts resolved across the codebase. Path traversal protection (CWE-22) in checkpoint, deep_memory, compression, collective_field, collective_proposals, bridges, archive_memory, embedding_store, governance, memory_graph, motifs, spirit_return. Log injection prevention. Stack trace exposure fixes. Empty-except audit (debug logging added to all silent catches).
 
 ---
 
@@ -37,7 +73,7 @@ This release closes the gap between "the hive mind works" and "the memory system
 
 **Unified Observability** (`GET /debug/metrics`) — single endpoint aggregating feature flags, per-agent memory/compression/character state, per-domain motif/coherence/proposal stats, and collective packet/convergence counts. Reads only RAM — cheap to poll. All existing per-component debug endpoints preserved.
 
-**1,200+ Tests** — up from 663. Full coverage of decay, dedup, fallback triggers, retention tiers, hard cap, Agent Spine acceptance scenarios, observability, incident log, MCP server, Spine governance, and real-host hardening (weird inputs, missing context, tier blocking).
+**1,266+ Tests** — up from 663. Full coverage of decay, dedup, fallback triggers, retention tiers, hard cap, Agent Spine acceptance scenarios, observability, incident log, MCP server, Spine governance, and real-host hardening (weird inputs, missing context, tier blocking).
 
 ---
 
@@ -132,8 +168,10 @@ This release closes the gap between "the hive mind works" and "the memory system
 | `docs/MEMORY_KERNEL_ARCHITECTURE.md` | Internal kernel design + compression gating + warmup mechanics |
 | `docs/AGENT_SPINE_OVERVIEW.md` | Agent Spine cognition pipeline — architecture, invariants, data contracts |
 | `docs/SPINE_CONTRACT.md` | Spine invariants, trust tiers, decision codes, exposure tiers |
+| `docs/TORMENT_Architectural_Audit_Spirit_Return_Voice.docx` | Full architectural audit — spirit return, voice systems, identity persistence |
 | `docs/MCP_README.md` | MCP server setup, configuration, and Claude Desktop integration |
 | `docs/MCP_EXPANSION_GUIDE.md` | Adding new MCP tools — worked example, decision matrix, checklist |
+| `docs/MCP_CAPABILITY_BOUNDARY.md` | MCP capability boundary — what TORMENT MCP does and does not do |
 | `docs/MEMORY_HEALTH_REPORT.md` | Memory growth analysis and lifecycle tuning findings |
 | `docs/PROJECT_OVERVIEW.md` | Comprehensive architecture reference |
 
@@ -165,7 +203,7 @@ make verify
 
 ## Architecture
 
-TORMENT has six layers:
+TORMENT has seven layers:
 
 **Layer 1 — The Kernel** (`torment_service/kernel/`): a TriOcta phase-lock model (three coupled oscillators on Mexican-hat potentials with D24 phase scaffold). Produces stability signals — coherence, corridor alignment, identity state — that govern memory behavior. Accepts per-character modulation of coupling strength and phase angles.
 
@@ -177,7 +215,9 @@ TORMENT has six layers:
 
 **Layer 5 — The Agent Spine** (`spine.py`, `request_context.py`, `incident_log.py`): governed authority layer between external callers and the Fabric. Dual-lane routing (fast path for structured ops, full path for 4-role cognition pipeline). Trust-tier enforcement, auto-escalation from fast→full on identity-sensitive content, structured decision/result codes, and a ring-buffer incident log for observability. MCP and HTTP never touch Fabric directly — everything flows through the Spine.
 
-**Layer 6 — Interfaces** (`app.py`, `mcp_server.py`, `sim/`, `tests/`): FastAPI REST service, MCP stdio server with exposure-tier policy, simulation harness, stress tests, 1,200+ test suite.
+**Layer 6 — Thinking + Stance** (`thinking_controller.py`, `thinking_models.py`, `stance_policy.py`): pre-cognition layer that runs as an advisory sidecar inside the Spine. Frames incoming input (urgency, ambiguity, governance/identity sensitivity), selects cognitive mode (7 modes), builds a lane-specific memory retrieval plan, chooses an action route, and self-reviews. The stance policy adds geometric modulation — kernel-derived signals (coherence, stability, identity lock) nudge participation thresholds within bounded ±15% bands. Purely observational: alignment between Spine routing and thinking recommendations is tracked but thinking never overrides execution.
+
+**Layer 7 — Interfaces** (`app.py`, `mcp_server.py`, `sim/`, `tests/`, `../live_agent/`): FastAPI REST service, MCP stdio server with exposure-tier policy, simulation harness, stress tests, 1,200+ test suite, and a live voice agent pipeline (Whisper STT → TORMENT memory → local LLM → TTS) for deploying characters on X Spaces and other live audio environments.
 
 ---
 
@@ -224,6 +264,9 @@ TORMENT has six layers:
 - Run via `python -m torment_service.mcp_server` (stdio transport for Claude Desktop)
 - Tools: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`
 - Resources: `torment://admin/status`, `torment://workspace/{ws}/agent/{ag}/state`, `torment://workspace/{ws}/agent/{ag}/memory-summary`, `torment://workspace/{ws}/collective/status`
+
+**Provenance (v2.4.2):**
+- `GET /debug/provenance?workspace_id=...&agent_id=...` — inspect stored provenance metadata per memory
 
 **Observability (v2.4):**
 - `GET /debug/metrics?workspace_id=...&agent_id=...` — unified metrics (flags, agents, domains, collective)
@@ -283,7 +326,15 @@ export TORMENT_MCP_TRUST_TIER=0.6
 export TORMENT_MCP_INCIDENT_LOG=./data/spine_incidents.jsonl
 ```
 
-Each layer is independently flag-gated. Zero overhead when off. They compose naturally: compression provides the memory lifecycle, SRG adds geometric memory physics, hivemind enables multi-agent resonance coupling, and the MCP server exposes governed operations to external tools.
+```bash
+# Thinking Advisory (v2.4.1) — pre-cognition sidecar in the Spine
+export TORMENT_THINKING_ADVISORY=1
+
+# Contextual Abstention (v2.4.1) — stance policy geometric modulation
+export TORMENT_CONTEXTUAL_ABSTENTION=1
+```
+
+Each layer is independently flag-gated. Zero overhead when off. They compose naturally: compression provides the memory lifecycle, SRG adds geometric memory physics, hivemind enables multi-agent resonance coupling, thinking adds pre-cognition routing, stance adds geometric participation modulation, and the MCP server exposes governed operations to external tools.
 
 ---
 

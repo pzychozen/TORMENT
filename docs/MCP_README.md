@@ -207,3 +207,5 @@ TORMENT Fabric (fabric.py)
 ```
 
 The MCP server never touches the Fabric directly. All operations go through the Spine's governed authority layer.
+
+When the advisory thinking layer is enabled (`TORMENT_THINKING_ADVISORY=1`), MCP-connected characters gain access to task framing, memory planning, and optional stance modulation (contextual abstention). This means characters can decline to respond, ask for clarification, or choose brevity based on cognitive context — not just always answer. The thinking layer is a sidecar that observes and advises; it never overrides Spine decisions. See `docs/advanced_cognition.md` for the full architecture.

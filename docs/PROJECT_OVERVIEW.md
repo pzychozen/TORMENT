@@ -202,6 +202,95 @@ When a query finds too few private hits, the system reaches into the deep memory
 - **Warmth secondary sort**: within the same score, warmer spirit hits rank above cold ones
 - **spirit_return_summary**: character context assembly includes a summary dict with total count, breakdown by mode, and average warmth
 
+**Spirit reflection (Phase 7b):** after the LLM generates a response, the caller can invoke a post-response write-back loop that records which spirit return hits *actually influenced* the response. This creates a derived reflection artifact — NOT a copy of the original memory. Reflections record the *event of return* and its measured influence. See Section 7b below.
+
+---
+
+## 7b. Spirit Reflection — Post-Response Write-Back (v2.2)
+
+When a spirit return memory *actually influences* a generated response, the system can record that event as a **derived reflection artifact**. This is the write-back half of the spirit return loop — Phase 7 reads from deep memory, Phase 7b records that the reading mattered.
+
+**Core principle:** re-ingestion records the *event of return*, not the original memory again. Reflections are continuity artifacts, not resurrected originals.
+
+**Four-stage pipeline (`spirit_reflection.py`):**
+
+1. **Extract** (`extract_spirit_return_candidates`): pull spirit-return hits from assembled context blocks. Anything with `generation_depth >= 1` is excluded — reflections cannot spawn reflections.
+
+2. **Score** (`score_spirit_return_influence`): conservative heuristic measuring how much the spirit return shaped the response. Weighted combination of lexical overlap (40%), concept alignment (30%), warmth bonus (15%), and resonance mode bonus (15%). Ultra-short candidates (< 5 tokens) are dampened to prevent false positives from incidental single-word matches.
+
+3. **Build** (`build_spirit_reflection_event`): create a derived `SpiritReflectionEvent` that describes the return event. The summary says "A prior deep memory resurfaced in X mode via Y interaction and materially shaped the present reply" — never copies the original summary.
+
+4. **Guard** (`should_store_reflection`): anti-echo checks in order: generation depth must be 1, influence must meet threshold (default 0.30), cooldown by `source_eid:mode:interaction` key (default 50 steps), duplicate suppression for same source + same step.
+
+**Anti-echo protections (non-negotiable):**
+
+- `eligible_for_spirit_return = False` — hardcoded in the dataclass, forced False on deserialization even if tampered on disk
+- `generation_depth` capped at 1 — reflections cannot spawn reflections
+- Cooldown by composite key — same return event cannot reflect again within 50 steps
+- Influence threshold — weak influence is silently dropped
+- Original deep memories are never mutated
+
+**Storage:** `SpiritReflectionStore` persists to `data/agents/{agent_id}/spirit_reflections/reflections.jsonl`, completely separate from `deep_memory/`. Append-only JSONL with in-memory cache. Same CWE-22 path traversal guard as WarmupTracker.
+
+**Wiring:** a dedicated `POST /workspace/{ws}/spirit-reflections/process` endpoint. The caller invokes it AFTER generating a response, passing the assembled context blocks and response text. If it fails, it returns `{"ok": false}` — never raises an HTTP exception, never affects the main response path.
+
+**Diagnostics:** `GET /workspace/{ws}/spirit-reflections/status?agent_id=X` returns total count, unique sources, average influence, mode distribution, and last 10 reflections.
+
+**Current limitations (v1):**
+
+- Heuristic influence scoring is approximate — paraphrased influence is a known blind spot
+- Reflections are pure observability artifacts — nothing reads them for decision-making yet
+- No embedding index for reflections — they cannot be retrieved via vector similarity
+- Cooldown is step-based, not time-based
+
+**What reflections are NOT:** not identity mutation, not deep memory rewrite, not resurrection of originals, not a recursive feedback loop, not automatic. The caller explicitly invokes the endpoint; if they don't, nothing happens.
+
+---
+
+## 7c. Geometric Stance Modulation (v2.2)
+
+The stance policy — which decides whether to respond, ask clarification, defer, or observe — can now be geometrically nudged by signals derived from the kernel's current state.
+
+**GeometricStanceContext** (`thinking_models.py`): five normalized signals (0–1) harvested from kernel state:
+
+| Signal | Source | Meaning |
+|--------|--------|---------|
+| coherence | phase coherence (coh) | how aligned the oscillator triad is |
+| stability | 1 - tearing_risk | how stable the current corridor is |
+| identity_lock | coherence × stability (clamped) | how firmly identity is held |
+| ambiguity_tolerance | 1 - dispersion (clamped) | how much ambiguity the system can absorb |
+| social_resonance | live social boost from retrieval | responsiveness to social context |
+
+**Multiplicative modulation** (`stance_policy.py`): each geometric signal produces a bounded modifier in [0.85, 1.15] that scales specific stance thresholds:
+
+- **Identity-defer modifier**: `0.85 + (0.6 × identity_lock + 0.4 × stability) × 0.30` — affects rule 4 (identity-sensitive defer threshold)
+- **Ambiguity-clarify modifier**: `0.85 + (0.7 × ambiguity_tolerance + 0.3 × coherence) × 0.30` — affects rule 5 (clarification threshold)
+- **Social-compactness modifier**: `0.85 + social_resonance × 0.30` — affects rules 6 and 7 (live-social silence and brevity thresholds)
+
+**Key design property:** the modulation is *optional*. When `geometric_context` is None, all modifiers default to 1.0 and the stance policy behaves exactly as before. The modifiers *nudge* thresholds by at most ±15%, never override decisions.
+
+**Empirical results:** out of 63 input×profile comparisons, 3 real stance shifts occurred (4.8% shift rate), all classified as GOOD. A fragile agent asks for clarification on vague input. A socially-open agent stays silent on ultra-short turns. Governance behavior was unchanged across all 8 profiles. See `docs/geometric_modulation_report.md` for the full analysis.
+
+**Named profiles** for debug/testing: neutral, stable_locked, drifting_fragile, socially_open, ambiguity_tolerant (available via `GET /thinking/debug/geo_profiles`).
+
+---
+
+## 7d. Thinking Controller (v2.2)
+
+The thinking controller (`thinking_controller.py`) provides a lightweight cognitive loop that sits between raw input and response generation. It is NOT the Agent Spine — it is a simpler, single-pass deliberation layer.
+
+**Pipeline:** `think(workspace_id, agent_id, raw_input, ...)` →
+
+1. **Frame** (`frame_task`): classify the input into a TaskFrame with mode, urgency, ambiguity, identity sensitivity, governance sensitivity
+2. **Mode** (`choose_mode`): select cognitive mode — engineering, strategic, identity, live_social, or auto
+3. **Memory plan** (`build_memory_plan`): decide what memory to retrieve and how
+4. **Action** (`choose_action`): select action type — respond, ask clarification, use tool, governance review, propose share, archive, or no-op
+5. **Draft** (`_draft_response`): generate a response draft based on mode and action
+6. **Review** (`review`): self-review pass — softens identity overconfidence, trims live-social responses
+7. **Stance** (`determine_stance`): optional stance policy with geometric modulation (see 7c above)
+
+**Integration:** the thinking controller accepts `geometric_context: Optional[GeometricStanceContext]` and passes it through to the stance policy. ThinkingResult carries the full chain: frame → mode → plan → action → review → stance.
+
 ---
 
 ## 8. Phase-Cycle Time (v2.1)
@@ -226,9 +315,9 @@ Explicit step-counting of how long the system stays in a given phase or corridor
 
 ---
 
-## 9. Testing (v2.1)
+## 9. Testing (v2.2)
 
-The test suite covers 185 tests across 8 test files:
+The test suite covers 1266+ passing tests. Key suites by area:
 
 | Suite | Tests | Scope |
 |-------|-------|-------|
@@ -237,7 +326,12 @@ The test suite covers 185 tests across 8 test files:
 | `test_spirit_return_voice.py` | 34 | Tier classification, voice cues, block enrichment, sorting, character context assembly |
 | `test_phase_timer.py` | 29 | PhaseTimer core, durations, transitions, serialization, compression resistance, warmth boost |
 | `test_e2e_integration.py` | 23 | Full pipeline: ingest → kernel → PhaseTimer → compression → deep memory → spirit return → character prompt |
-| Pre-existing (need fastapi/pytest) | 4 | Skipped in offline environments |
+| `test_spirit_reflection.py` | 31 | Reflection pipeline: extraction, influence scoring, building, anti-echo guards, storage, end-to-end |
+| `test_spirit_reflection_integration.py` | 12 | Fail-soft behavior, persistence + reload, tamper resistance, retrieval precedence unchanged |
+| `test_stance_policy.py` | 15+ | Geometric modulation, modifier bounds, threshold shifts, no-geo baseline unchanged |
+| `test_geometric_harvester.py` | 11 | GeometricStanceContext extraction from character state |
+| `run_geo_compare.py` | (offline) | Comparison harness: 7 profiles × 9 inputs, shift detection, governance robustness check |
+| Pre-existing (need fastapi/mcp) | 4 | Skipped in offline environments |
 
 ---
 
@@ -281,6 +375,9 @@ TORMENT is highly configurable via environment variables (`TORMENT_*` prefix). K
 11. **Spirit return over retrieval** (v2.1): deep memories don't simply reappear — they return through a symbolic resonance pipeline with warmth, voice, and contextual meaning
 12. **Trigger registry compliance** (v2.1): Dynamics → Observables → Triggers → Diagnostics. Reverse influence forbidden. Compression observes the kernel, never modifies it.
 13. **Symbols stay hidden** (v2.1): raw symbol characters never reach the character layer — only interaction types and flavor text are exposed
+14. **Reflections are derived, not duplicated** (v2.2): spirit reflection records the *event of return*, never copies the original memory. Reflections cannot feed back into spirit return (`eligible_for_spirit_return = False`, tamper-resistant on deserialization). Separate storage prevents contamination of deep memory.
+15. **Geometric modulation nudges, never overrides** (v2.2): kernel-derived signals scale stance thresholds by at most ±15%. When geometric context is absent, behavior is identical to pre-modulation. The system is always safe to run without geometry.
+16. **Post-response, not inline** (v2.2): spirit reflection runs as a separate endpoint after LLM response generation, not wired into the retrieval path. Fail-soft by design — if it breaks, the main path is unaffected.
 
 ---
 
@@ -297,8 +394,12 @@ torment_fabric_v1_9_9/
     compression.py          # Event-gated compression — detector, scorer, router, executor (v2.1)
     deep_memory.py          # Long-path deep memory store + shard embeddings (v2.1)
     spirit_return.py        # Spirit return — symbol matrix, return modes, warmup (v2.1)
+    spirit_reflection.py    # Spirit reflection — post-response write-back, anti-echo, derived artifacts (v2.2)
     phase_timer.py          # Phase/corridor duration tracking (v2.1)
     retrieval_assembler.py  # Context assembly — tiers, voice cues, token budgets (v2.1)
+    thinking_controller.py  # Cognitive loop — framing, mode, memory plan, action, review, stance (v2.2)
+    thinking_models.py      # Thinking data models — TaskFrame, GeometricStanceContext, ThinkingResult (v2.2)
+    stance_policy.py        # Stance policy — geometric modulation of decision thresholds (v2.2)
     motifs.py               # Motif clustering
     coherence_field.py      # Structural epistemic layer
     embeddings.py           # Embedding backends
@@ -348,7 +449,15 @@ torment_fabric_v1_9_9/
 
 ### Completed (v2.1)
 
-- ~~**Memory aging and compression**~~ ✓ — Event-gated compression with J→Z two-channel scoring (relational 60%, geometric 40%), two-path routing (short-path fade, long-path deep store export), protected classes (canon, identity, seeds never touched), duration resistance for sustained corridors, and spirit return with symbolic resonance (19-rule interaction matrix, three return modes, warmup mechanics, character voice cues). Full memory lifecycle from ingest → kernel → compression → deep memory → spirit return → character prompt. 185 tests covering the complete pipeline.
+- ~~**Memory aging and compression**~~ ✓ — Event-gated compression with J→Z two-channel scoring (relational 60%, geometric 40%), two-path routing (short-path fade, long-path deep store export), protected classes (canon, identity, seeds never touched), duration resistance for sustained corridors, and spirit return with symbolic resonance (19-rule interaction matrix, three return modes, warmup mechanics, character voice cues). Full memory lifecycle from ingest → kernel → compression → deep memory → spirit return → character prompt.
+
+### Completed (v2.2)
+
+- ~~**Spirit reflection**~~ ✓ — Post-response write-back loop for spirit return. Records when returned deep memories actually influenced responses, as derived artifacts (not copies). Anti-echo protections: generation depth cap, cooldown by composite key, influence threshold, tamper-resistant `eligible_for_spirit_return = False`. Separate JSONL storage, fail-soft dedicated endpoint, read-only diagnostics. 43 tests (31 unit + 12 integration).
+
+- ~~**Geometric stance modulation**~~ ✓ — Kernel-derived signals (coherence, stability, identity lock, ambiguity tolerance, social resonance) produce bounded modifiers [0.85, 1.15] that nudge stance policy thresholds. Optional layer — system behaves identically without it. Empirically validated: 3 real shifts out of 63 comparisons, all classified GOOD, governance unchanged. Named profiles for testing.
+
+- ~~**Thinking controller**~~ ✓ — Lightweight cognitive loop: input framing → mode selection → memory plan → action decision → response draft → self-review → stance. Integrates geometric modulation when context is available.
 
 ### Next Up
 

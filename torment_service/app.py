@@ -14,6 +14,7 @@ from .auth import (
     AUTH_ENABLED,
     get_key_store,
 )
+from .thinking_controller import ThinkingController
 
 _log = logging.getLogger("torment.app")
 
@@ -34,9 +35,11 @@ ACTIVE_PROFILE = os.environ.get("TORMENT_PROFILE", "").strip().lower() or None
 PROFILE_APPLIED = apply_profile_env(ACTIVE_PROFILE)
 PROFILE_KNOWN = bool(ACTIVE_PROFILE) and (ACTIVE_PROFILE in PROFILES)
 
-app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.0.0' )
+app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.4.2' )
 
 fabric = TormentFabric(data_dir=DATA_DIR)
+
+thinking_controller = ThinkingController()
 
 
 @app.get("/workspace/{workspace_id}/embed_audit")
@@ -871,6 +874,60 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
 
 @app.post("/agent/query")
 def query(req: QueryReq) -> Dict[str, Any]:
+    # When thinking advisory is active, run the ThinkingController to
+    # produce a MemoryPlan that influences lane-specific retrieval.
+    _mp: Optional[Dict[str, Any]] = None
+    if os.environ.get("TORMENT_THINKING_ADVISORY", "0").strip() == "1":
+        try:
+            from .thinking_controller import ThinkingController
+            from .geometric_harvester import harvest_geometric_context
+
+            # Harvest real geometric context from kernel + character state
+            _geo = None
+            try:
+                _tri_mod = None
+                if hasattr(fabric, "kernel") and hasattr(fabric.kernel, "mon"):
+                    mon = fabric.kernel.mon
+                    _tri_mod = {
+                        "coh_phase": getattr(mon, "coh_ema", 0.5),
+                        "tearing_risk": getattr(mon, "tear_score_ema", 0.35),
+                        "survival_steps": getattr(mon, "surv_ema", 0.0),
+                    }
+                _char_state = None
+                if hasattr(fabric, "character_store"):
+                    cstate = fabric.character_store.load_state(
+                        req.workspace_id, req.agent_id
+                    )
+                    if cstate:
+                        _char_state = {
+                            "seed_id": getattr(cstate, "seed_id", ""),
+                            "drift_score": getattr(cstate, "drift_score", 0.0),
+                            "drift_direction": getattr(cstate, "drift_direction", "stable"),
+                            "seed_basin_phi": getattr(cstate, "seed_basin_phi", 0.0),
+                            "seed_basin_role": getattr(cstate, "seed_basin_role", "plateau"),
+                        }
+                _geo = harvest_geometric_context(
+                    character_state=_char_state,
+                    tri_mod=_tri_mod,
+                )
+            except Exception:
+                _geo = None
+
+            _ctl = ThinkingController()
+            _result = _ctl.think(
+                workspace_id=req.workspace_id,
+                agent_id=req.agent_id,
+                raw_input=req.query,
+                geometric_context=_geo,
+            )
+            _plan = _result.memory_plan
+            _mp = {
+                "top_k_by_lane": _plan.top_k_by_lane,
+                "weight_by_lane": _plan.weight_by_lane,
+            }
+        except Exception:
+            _mp = None  # fall back to flat retrieval on any error
+
     return fabric.query(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -880,6 +937,7 @@ def query(req: QueryReq) -> Dict[str, Any]:
         peek_bridges=req.peek_bridges,
         explain=req.explain,
         continuity_debug=req.continuity_debug,
+        memory_plan=_mp,
     )
 
 
@@ -1785,16 +1843,32 @@ class DeepMemoryQueryRequest(BaseModel):
 
 @app.get("/workspace/{workspace_id}/spirit-return/status")
 async def spirit_return_status(workspace_id: str, agent_id: str):
-    """Warmup tracker stats + last return info for an agent."""
+    """Spirit return diagnostics for an agent.
+
+    Returns warmup tracker stats (including warmth distribution),
+    deep memory count, and compaction status. Pure read-only.
+    """
     from pathlib import Path
     result: Dict[str, Any] = {"agent_id": agent_id, "workspace_id": workspace_id}
 
-    # Warmup tracker stats
+    # Warmup tracker stats + warmth distribution
     try:
         from .spirit_return import WarmupTracker
         warmup_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
         tracker = WarmupTracker(warmup_dir, base_dir=DATA_DIR)
-        result["warmup"] = tracker.stats()
+        stats = tracker.stats()
+
+        # Add warmth distribution buckets
+        tracker._ensure_loaded()
+        if tracker._states:
+            warmths = [ws.current_warmth for ws in tracker._states.values()]
+            stats["warmth_distribution"] = {
+                "cold_0_25": sum(1 for w in warmths if w < 0.25),
+                "cool_25_50": sum(1 for w in warmths if 0.25 <= w < 0.50),
+                "warm_50_75": sum(1 for w in warmths if 0.50 <= w < 0.75),
+                "hot_75_100": sum(1 for w in warmths if w >= 0.75),
+            }
+        result["warmup"] = stats
     except Exception as exc:
         result["warmup"] = None
         result["warmup_error"] = str(exc)
@@ -1810,6 +1884,149 @@ async def spirit_return_status(workspace_id: str, agent_id: str):
         result["deep_memory"] = None
 
     return result
+
+
+# --------------------------------------------------------------------------
+# Spirit Reflection — post-response write-back (Phase 7b)
+# --------------------------------------------------------------------------
+
+class SpiritReflectionProcessReq(BaseModel):
+    """Request body for POST /spirit-reflections/process.
+
+    Called by the external orchestrator AFTER generating a response,
+    passing the assembled context blocks and the final response text.
+    """
+    workspace_id: str
+    agent_id: str
+    query_text: str
+    response_text: str
+    blocks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Assembled context blocks from /retrieve (the ones that were "
+                    "actually sent to the LLM). Must include spirit-return metadata.",
+    )
+    current_step: int = Field(
+        default=0,
+        description="Current step counter for the agent.",
+    )
+    influence_threshold: Optional[float] = Field(
+        default=None,
+        description="Override default influence threshold (0.30). Lower = more reflections.",
+    )
+    cooldown_steps: Optional[int] = Field(
+        default=None,
+        description="Override default cooldown window (50 steps).",
+    )
+
+
+@app.post("/workspace/{workspace_id}/spirit-reflections/process")
+def process_spirit_reflections_endpoint(
+    workspace_id: str, req: SpiritReflectionProcessReq,
+) -> Dict[str, Any]:
+    """Run the post-response spirit reflection pipeline.
+
+    This endpoint is called AFTER the LLM generates a response.
+    It inspects which spirit-return hits were in the assembled context,
+    scores their influence on the response, and stores qualified
+    reflection events.
+
+    Fail-soft: if anything goes wrong, returns an error dict but
+    NEVER raises an HTTP exception. The main response path is never
+    affected.
+    """
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(req.agent_id, "agent_id")
+
+    try:
+        from pathlib import Path
+        from .spirit_reflection import (
+            process_spirit_reflections,
+            SpiritReflectionStore,
+            DEFAULT_INFLUENCE_THRESHOLD,
+            DEFAULT_COOLDOWN_STEPS,
+        )
+
+        sr_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / req.agent_id / "spirit_reflections"
+        store = SpiritReflectionStore(sr_dir, base_dir=DATA_DIR)
+
+        threshold = req.influence_threshold if req.influence_threshold is not None else DEFAULT_INFLUENCE_THRESHOLD
+        cooldown = req.cooldown_steps if req.cooldown_steps is not None else DEFAULT_COOLDOWN_STEPS
+
+        stored = process_spirit_reflections(
+            blocks=req.blocks,
+            response_text=req.response_text,
+            query_text=req.query_text,
+            current_step=req.current_step,
+            store=store,
+            influence_threshold=threshold,
+            cooldown_steps=cooldown,
+        )
+
+        return {
+            "ok": True,
+            "reflections_stored": len(stored),
+            "reflections": [e.to_dict() for e in stored],
+            "store_stats": store.stats(),
+        }
+
+    except Exception as exc:
+        # Fail soft — never break the caller's response flow
+        _log.warning("spirit reflection processing failed: %s", exc)
+        return {
+            "ok": False,
+            "reflections_stored": 0,
+            "error": str(exc),
+        }
+
+
+@app.get("/workspace/{workspace_id}/spirit-reflections/status")
+def spirit_reflections_status(workspace_id: str, agent_id: str) -> Dict[str, Any]:
+    """Read-only diagnostics for the spirit reflection store.
+
+    Returns: total count, recent reflections, rejection reason distribution,
+    average influence score, mode distribution.
+    """
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
+
+    try:
+        from pathlib import Path
+        from .spirit_reflection import SpiritReflectionStore
+
+        sr_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / agent_id / "spirit_reflections"
+        if not sr_dir.exists():
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "workspace_id": workspace_id,
+                "stats": {
+                    "total_reflections": 0,
+                    "unique_sources": 0,
+                    "avg_influence": 0.0,
+                    "mode_counts": {},
+                },
+                "recent": [],
+            }
+
+        store = SpiritReflectionStore(sr_dir, base_dir=DATA_DIR)
+        recent = store.recent(n=10)
+
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "workspace_id": workspace_id,
+            "stats": store.stats(),
+            "recent": [e.to_dict() for e in recent],
+        }
+
+    except Exception as exc:
+        _log.warning("spirit reflection status failed: %s", exc)
+        return {
+            "ok": False,
+            "agent_id": agent_id,
+            "workspace_id": workspace_id,
+            "error": str(exc),
+        }
 
 
 @app.post("/workspace/{workspace_id}/deep-memory/query")
@@ -1906,15 +2123,30 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     drift_check_fn = make_live_drift_check(fabric)
 
     # Get domain ranking
-    primary_domains = list(ws.domains.keys()) if hasattr(ws, 'domains') else []
+    _raw_domains = getattr(ws, 'domains', [])
+    primary_domains = list(_raw_domains.keys()) if isinstance(_raw_domains, dict) else list(_raw_domains)
 
-    # Run pipeline
+    # Lookup function for parent provenance inspection (Rules A-F).
+    # Returns the payload dict for a memory entity, or None.
+    def _lookup_memory_payload(ws_id: str, ag_id: str, eid: int):
+        ak = fabric._agent_key(ws_id, ag_id)
+        graph = fabric.private_graphs.get(ak)
+        if graph is None or not hasattr(graph, "entities"):
+            return None
+        entity = graph.entities.get(eid)
+        if entity is None:
+            return None
+        return entity.payload
+
+    # Run pipeline (with write-back: approved proposals → fabric.ingest)
     result = run_cognition_pipeline(
         task=task,
         query_fn=query_fn,
         character_fn=character_fn,
         drift_check_fn=drift_check_fn,
         primary_domains=primary_domains[:3],  # top 3 domains
+        ingest_fn=fabric.ingest,
+        lookup_fn=_lookup_memory_payload,
     )
 
     if not result.get("ok", False):
@@ -2076,6 +2308,114 @@ def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
     result["agent_count"] = len(agents)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Thinking Layer — Debug Endpoint
+# ---------------------------------------------------------------------------
+
+class GeometricContextReq(BaseModel):
+    """Optional geometric kernel state for stance modulation testing."""
+    coherence: float = Field(default=0.5, ge=0.0, le=1.0)
+    stability: float = Field(default=0.5, ge=0.0, le=1.0)
+    identity_lock: float = Field(default=0.5, ge=0.0, le=1.0)
+    ambiguity_tolerance: float = Field(default=0.5, ge=0.0, le=1.0)
+    social_resonance: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+# Named geometric profiles for quick debug testing.
+# Use via geometric_profile field instead of hand-typing all 5 values.
+_GEO_PROFILES: Dict[str, Dict[str, float]] = {
+    "neutral":             {"coherence": 0.50, "stability": 0.50, "identity_lock": 0.50, "ambiguity_tolerance": 0.50, "social_resonance": 0.50},
+    "stable_locked":       {"coherence": 0.92, "stability": 0.90, "identity_lock": 0.95, "ambiguity_tolerance": 0.80, "social_resonance": 0.50},
+    "drifting_fragile":    {"coherence": 0.30, "stability": 0.15, "identity_lock": 0.10, "ambiguity_tolerance": 0.20, "social_resonance": 0.35},
+    "socially_open":       {"coherence": 0.70, "stability": 0.60, "identity_lock": 0.50, "ambiguity_tolerance": 0.50, "social_resonance": 0.95},
+    "ambiguity_tolerant":  {"coherence": 0.85, "stability": 0.70, "identity_lock": 0.60, "ambiguity_tolerance": 0.95, "social_resonance": 0.50},
+}
+
+
+class ThinkingDebugReq(BaseModel):
+    workspace_id: str = Field(default="default")
+    agent_id: str
+    text: str
+    source_type: str = Field(default="user_text")
+    metadata: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Dict[str, bool]] = Field(
+        default=None,
+        description="Optional character capability flags (e.g. contextual_abstention). "
+                    "Pass to test stance layer behavior.",
+    )
+    geometric_context: Optional[GeometricContextReq] = Field(
+        default=None,
+        description="Optional geometric kernel state (all 0-1 normalized). "
+                    "When supplied, stance thresholds are multiplicatively modulated. "
+                    "Ignored if geometric_profile is set.",
+    )
+    geometric_profile: Optional[str] = Field(
+        default=None,
+        description="Named geometric profile for quick testing. "
+                    "One of: neutral, stable_locked, drifting_fragile, socially_open, ambiguity_tolerant. "
+                    "Takes precedence over geometric_context if both are set.",
+    )
+
+
+@app.get("/thinking/debug/geo_profiles")
+def list_geo_profiles() -> Dict[str, Any]:
+    """Return available named geometric profiles for debug testing."""
+    return {"ok": True, "profiles": _GEO_PROFILES}
+
+
+@app.post("/thinking/debug")
+def thinking_debug(req: ThinkingDebugReq) -> Dict[str, Any]:
+    """Run the thinking controller on raw input and return the full decision chain.
+
+    Returns task frame, mode decision, memory plan, action decision, review result,
+    optional response draft, and optional stance — all as JSON.
+    Pass ``capabilities: {"contextual_abstention": true}`` to see stance output.
+    Pass ``geometric_context: {...}`` or ``geometric_profile: "stable_locked"`` to test
+    kernel-informed stance modulation.
+    """
+    from .thinking_models import GeometricStanceContext
+
+    geo = None
+    if req.geometric_profile and req.geometric_profile in _GEO_PROFILES:
+        vals = _GEO_PROFILES[req.geometric_profile]
+        geo = GeometricStanceContext(**vals)
+    elif req.geometric_context is not None:
+        geo = GeometricStanceContext(
+            coherence=req.geometric_context.coherence,
+            stability=req.geometric_context.stability,
+            identity_lock=req.geometric_context.identity_lock,
+            ambiguity_tolerance=req.geometric_context.ambiguity_tolerance,
+            social_resonance=req.geometric_context.social_resonance,
+        )
+
+    result = thinking_controller.think(
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+        raw_input=req.text,
+        source_type=req.source_type,
+        metadata=req.metadata,
+        capabilities=req.capabilities,
+        geometric_context=geo,
+    )
+    return {"ok": True, "result": result.to_dict()}
+
+
+@app.get("/spine/thinking_alignment/recent")
+@app.get("/spine/alignment")
+def thinking_alignment_recent(last_n: int = 50) -> Dict[str, Any]:
+    """Return a summary of recent Spine ↔ thinking-controller alignment records.
+
+    Query params:
+        last_n  — how many of the most-recent records to include (default 50, max 200)
+
+    The ring buffer only populates when TORMENT_THINKING_ADVISORY=1.
+    Accessible via both /spine/thinking_alignment/recent and /spine/alignment.
+    """
+    from .spine import get_alignment_summary
+    clamped = max(1, min(last_n, 200))
+    return {"ok": True, **get_alignment_summary(clamped)}
 
 
 # ---------------------------------------------------------------------------
@@ -2264,5 +2604,111 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
             result["collective"] = None
     except Exception:
         result["collective"] = None
+
+    return result
+
+
+@app.get("/debug/provenance")
+async def debug_provenance(
+    workspace_id: str = "default",
+    agent_id: Optional[str] = None,
+    limit: int = 50,
+    source_role: Optional[str] = None,
+    write_path: Optional[str] = None,
+):
+    """Inspect provenance metadata on stored memories.
+
+    Returns provenance objects from the most recent memories, with optional
+    filtering by source_role or write_path. This is the primary debug surface
+    for verifying that provenance tagging works correctly.
+
+    Query params:
+        workspace_id: workspace to inspect (default: "default")
+        agent_id: if provided, inspect only this agent's private graph
+        limit: max memories to return (default: 50, max: 200)
+        source_role: filter to only this source_role value
+        write_path: filter to only this write_path value
+    """
+    limit = min(max(1, limit), 200)
+    result: Dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "filters": {},
+    }
+    if source_role:
+        result["filters"]["source_role"] = source_role
+    if write_path:
+        result["filters"]["write_path"] = write_path
+
+    ws = fabric.workspaces.get(workspace_id)
+    if ws is None:
+        result["error"] = f"workspace '{workspace_id}' not found"
+        return result
+
+    # Collect memories from relevant graphs
+    memories: List[Dict[str, Any]] = []
+
+    # Discover agents
+    agent_ids_list: List[str] = []
+    if agent_id:
+        agent_ids_list = [agent_id]
+    else:
+        prefix = f"{workspace_id}::"
+        for ak in fabric.private_graphs:
+            if ak.startswith(prefix):
+                agent_ids_list.append(ak[len(prefix):])
+
+    for aid in agent_ids_list:
+        ak = fabric._agent_key(workspace_id, aid)
+        graph = fabric.private_graphs.get(ak)
+        if graph is None or not hasattr(graph, "entities"):
+            continue
+        for eid, entity in graph.entities.items():
+            payload = entity.payload or {}
+            prov = payload.get("provenance")
+            # Apply filters
+            if source_role and (not prov or prov.get("source_role") != source_role):
+                continue
+            if write_path and (not prov or prov.get("write_path") != write_path):
+                continue
+            memories.append({
+                "eid": eid,
+                "agent_id": aid,
+                "scope": "private",
+                "summary": (payload.get("summary") or str(payload.get("text", ""))[:120]) if payload else "",
+                "provenance": prov,
+                "has_provenance": prov is not None,
+                "created_step": payload.get("step"),
+            })
+
+    # Sort by eid descending (most recent first), then cap
+    memories.sort(key=lambda m: m["eid"], reverse=True)
+    memories = memories[:limit]
+
+    # Summary stats
+    total = len(memories)
+    with_prov = sum(1 for m in memories if m["has_provenance"])
+    by_source_type: Dict[str, int] = {}
+    by_write_path: Dict[str, int] = {}
+    by_source_role: Dict[str, int] = {}
+    for m in memories:
+        p = m.get("provenance")
+        if p:
+            st = p.get("source_type", "unknown")
+            wp = p.get("write_path", "unknown")
+            sr = p.get("source_role") or "(null)"
+            by_source_type[st] = by_source_type.get(st, 0) + 1
+            by_write_path[wp] = by_write_path.get(wp, 0) + 1
+            by_source_role[sr] = by_source_role.get(sr, 0) + 1
+
+    result["stats"] = {
+        "total_inspected": total,
+        "with_provenance": with_prov,
+        "without_provenance": total - with_prov,
+        "by_source_type": by_source_type,
+        "by_write_path": by_write_path,
+        "by_source_role": by_source_role,
+    }
+    result["memories"] = memories
 
     return result

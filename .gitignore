@@ -23,6 +23,8 @@ env/
 # TORMENT runtime data (workspace state, memories, embeddings)
 data/
 data4/
+:memory:/
+smoke_data/
 outputs/
 
 # Simulation outputs

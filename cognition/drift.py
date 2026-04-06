@@ -101,13 +101,32 @@ def make_live_drift_check(fabric_instance) -> "DriftCheckFn":
             ws = fabric_instance.get_workspace(workspace_id)
             ident = fabric_instance.create_agent(workspace_id, agent_id)
 
-            # Get required objects from workspace/agent
-            graph = ident.graph
-            motif_registry = ws.motif_registry
+            # Get required objects from fabric (not from identity —
+            # AgentIdentity is a lightweight dataclass; graph/seed/state
+            # live on the fabric instance and character_store).
+            ak = f"{workspace_id}/{agent_id}"
+            graph = fabric_instance.private_graphs.get(ak)
+            if graph is None:
+                raise ValueError(f"No private graph for {ak}")
+
+            # Workspace stores one MotifRegistry per domain in ws.motif_regs.
+            # Resolve the agent's primary domain (same pattern as fabric.py
+            # line 1853 — first available domain key).
+            _dom = list(ws.motif_regs.keys())[0] if ws.motif_regs else None
+            motif_registry = ws.motif_regs.get(_dom) if _dom else None
             coherence_field = getattr(ws, "coherence_field", None)
-            seed = ident.character_seed
+
+            seed_id = ident.seed.get("seed_id", "")
+            seed = fabric_instance.character_store.load_seed(
+                workspace_id, seed_id
+            )
+            if seed is None:
+                raise ValueError(f"No character seed for {seed_id!r}")
+
             current_step = getattr(ws, "step_counter", 0)
-            previous_state = getattr(ident, "character_state", None)
+            previous_state = fabric_instance.character_store.load_state(
+                workspace_id, agent_id
+            )
 
             raw = measure_drift(
                 graph=graph,
