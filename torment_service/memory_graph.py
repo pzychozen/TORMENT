@@ -256,6 +256,9 @@ class MemoryGraph:
             mtype = str(payload.get("type") or payload.get("mtype") or "")
             if type_set and mtype and mtype not in type_set:
                 continue
+            # user filter (parity with search_by_embedding)
+            if user_id is not None and str(payload.get("user_id", "")) != str(user_id):
+                continue
             # Half-life decay: adjust effective score for ranking
             decay = _half_life_decay_factor(payload, _now)
             effective_score = float(sc) * decay
