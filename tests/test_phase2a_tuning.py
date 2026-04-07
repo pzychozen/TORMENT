@@ -88,8 +88,8 @@ class TestPeriodicCompressionFloor(unittest.TestCase):
 
     def test_floor_constant_is_040(self):
         """COMPRESS_PERIODIC_FLOOR should be 0.40."""
-        from torment_service.compression import COMPRESS_PERIODIC_FLOOR
-        self.assertAlmostEqual(COMPRESS_PERIODIC_FLOOR, 0.40, places=2)
+        import torment_service.compression as comp_mod
+        self.assertAlmostEqual(comp_mod.COMPRESS_PERIODIC_FLOOR, 0.40, places=2)
 
     def test_floor_env_override(self):
         """Environment variable can still override the default."""
@@ -102,15 +102,13 @@ class TestPeriodicCompressionFloor(unittest.TestCase):
             importlib.reload(comp_mod)
             self.assertAlmostEqual(comp_mod.COMPRESS_PERIODIC_FLOOR, 0.35, places=2)
         finally:
-            # Always restore env AND reload to clean state, even on failure
             if old is None:
                 os.environ.pop("TORMENT_COMPRESS_PERIODIC_FLOOR", None)
             else:
                 os.environ["TORMENT_COMPRESS_PERIODIC_FLOOR"] = old
             importlib.reload(comp_mod)
-            # Verify restoration
-            assert abs(comp_mod.COMPRESS_PERIODIC_FLOOR - 0.40) < 0.01, \
-                "Failed to restore COMPRESS_PERIODIC_FLOOR after env override test"
+            self.assertAlmostEqual(comp_mod.COMPRESS_PERIODIC_FLOOR, 0.40, places=2,
+                                   msg="Failed to restore COMPRESS_PERIODIC_FLOOR after env override test")
 
     def test_candidate_at_045_passes_floor(self):
         """A candidate with score 0.45 should pass the 0.40 floor."""

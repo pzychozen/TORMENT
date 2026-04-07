@@ -104,16 +104,15 @@ class TestCrossWorkspaceIsolation(unittest.TestCase):
 class TestLegacyProvenanceSafety(unittest.TestCase):
     """Verify that legacy string provenance doesn't crash field access."""
 
+    def _normalize(self, prov):
+        """Reproduce the normalization logic from /debug/provenance."""
+        if prov and not isinstance(prov, dict):
+            return {"source_type": "legacy_string", "raw": str(prov)}
+        return prov
+
     def test_legacy_string_provenance_normalization(self):
         """Legacy 'collective' string should be safe to call .get() on after normalization."""
-        prov = "collective"
-        # Simulate the normalization logic from /debug/provenance
-        _prov_is_dict = isinstance(prov, dict)
-        if prov and not _prov_is_dict:
-            prov = {"source_type": "legacy_string", "raw": str(prov)}
-            _prov_is_dict = True
-
-        # Now safe to call .get()
+        prov = self._normalize("collective")
         self.assertEqual(prov.get("source_type"), "legacy_string")
         self.assertEqual(prov.get("raw"), "collective")
         self.assertIsNone(prov.get("source_role"))
@@ -121,20 +120,13 @@ class TestLegacyProvenanceSafety(unittest.TestCase):
 
     def test_dict_provenance_unchanged(self):
         """Dict provenance should pass through without wrapping."""
-        prov = {"source_type": "tool_result", "write_path": "tool_ingest"}
-        _prov_is_dict = isinstance(prov, dict)
-        if prov and not _prov_is_dict:
-            prov = {"source_type": "legacy_string", "raw": str(prov)}
+        prov = self._normalize({"source_type": "tool_result", "write_path": "tool_ingest"})
         self.assertEqual(prov["source_type"], "tool_result")
 
     def test_none_provenance_safe(self):
         """None provenance should skip filters safely."""
-        prov = None
-        _prov_is_dict = isinstance(prov, dict)
-        if prov and not _prov_is_dict:
-            prov = {"source_type": "legacy_string", "raw": str(prov)}
+        prov = self._normalize(None)
         self.assertIsNone(prov)
-        self.assertFalse(_prov_is_dict)
 
 
 # =========================================================================

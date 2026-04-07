@@ -440,8 +440,8 @@ class TestToolResultRetrievalScoring(unittest.TestCase):
         # Find tool-result vs user hit
         tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
         user_hits = [h for h in hits if h.get("provenance_type") is None or h.get("provenance_type") not in ("tool_result", "collective_echo", "collective")]
-        self.assertTrue(len(tool_hits) >= 1, "Expected at least one tool-result hit")
-        self.assertTrue(len(user_hits) >= 1, "Expected at least one user hit")
+        self.assertGreaterEqual(len(tool_hits), 1, "Expected at least one tool-result hit")
+        self.assertGreaterEqual(len(user_hits), 1, "Expected at least one user hit")
         # The tool-result discount (0.85x) means its final_score should be lower
         # than an equally-similar user hit, all else being equal.
         # We check that the tool hit's score is strictly less than the top user hit.
@@ -469,7 +469,7 @@ class TestToolResultRetrievalScoring(unittest.TestCase):
             tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
             # With discount=1.0, tool results are not penalized.
             # We just verify the query runs without error and tool hits exist.
-            self.assertTrue(len(tool_hits) >= 1, "Tool-result hit should still appear")
+            self.assertGreaterEqual(len(tool_hits), 1, "Tool-result hit should still appear")
         finally:
             os.environ.pop("TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT", None)
 
@@ -507,7 +507,7 @@ class TestToolResultNoContinuityBonus(unittest.TestCase):
         )
         hits = results.get("results", [])
         tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
-        self.assertTrue(len(tool_hits) >= 1, "Expected at least one tool-result hit")
+        self.assertGreaterEqual(len(tool_hits), 1, "Expected at least one tool-result hit")
         # Check the continuity debug breakdown in the response
         cd = results.get("continuity_debug")
         if cd is not None:
@@ -558,9 +558,9 @@ class TestProvenanceBadgeOnHit(unittest.TestCase):
             top_k=5,
         )
         hits = results.get("results", [])
-        self.assertTrue(len(hits) >= 1)
+        self.assertGreaterEqual(len(hits), 1)
         tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
-        self.assertTrue(len(tool_hits) >= 1, "Expected provenance_type='tool_result' on hit")
+        self.assertGreaterEqual(len(tool_hits), 1, "Expected provenance_type='tool_result' on hit")
         # Check tool_name badge
         self.assertEqual(tool_hits[0].get("provenance_tool_name"), "geocoding_api")
 
@@ -580,7 +580,7 @@ class TestProvenanceBadgeOnHit(unittest.TestCase):
             top_k=5,
         )
         hits = results.get("results", [])
-        self.assertTrue(len(hits) >= 1)
+        self.assertGreaterEqual(len(hits), 1)
         # User memory should NOT have provenance_type == "tool_result"
         # (it may be None or a default provenance type depending on ingest path)
         tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
@@ -609,7 +609,7 @@ class TestProvenanceBadgeOnHit(unittest.TestCase):
         )
         hits = results.get("results", [])
         coll_hits = [h for h in hits if h.get("provenance_type") == "collective_echo"]
-        self.assertTrue(len(coll_hits) >= 1, "Collective echo should appear as provenance_type='collective_echo'")
+        self.assertGreaterEqual(len(coll_hits), 1, "Collective echo should appear as provenance_type='collective_echo'")
 
 
 if __name__ == "__main__":
