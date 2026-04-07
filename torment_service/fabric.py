@@ -3219,6 +3219,7 @@ class TormentFabric:
             q_affect_tag=_q_affect_tag,
             q_affect_conf=_q_affect_conf,
             spiral_neg_recent=_spiral_neg_recent,
+            anchor_full_boost_eids=frozenset(_anchor_full_boost),
         )
 
         now_ts = _now_ts()
@@ -3279,46 +3280,17 @@ class TormentFabric:
                     "mood_spiral_penalty": 0.0,
                 }
 
-            # Character continuity: prefer the agent's own private thread.
-            try:
-                self_bonus = float(os.getenv("TORMENT_SELF_MEMORY_BONUS", "0.06"))
-            except Exception:
-                self_bonus = 0.06
-            if str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id) and not _h_is_tool_result:
-                type_bonus += self_bonus
-                if _bon is not None:
-                    _bon["self_thread"] += float(self_bonus)
-
-            # Shared continuity bonuses (thread-window, affect, mood-drift, mood-spiral)
+            # All continuity bonuses via shared helper (self-thread, self-anchor,
+            # thread-window, affect, mood-drift, mood-spiral)
             _cont = compute_continuity_bonuses(h, _cont_ctx, is_tool_result=_h_is_tool_result)
             type_bonus += _cont.total
             if _bon is not None:
+                _bon["self_thread"] += _cont.self_thread_bonus
+                _bon["self_anchor"] += _cont.self_anchor_bonus
                 _bon["thread_window"] += _cont.thread_window_bonus
                 _bon["affect_match"] += _cont.affect_match_bonus
                 _bon["mood_drift"] += _cont.mood_drift_bonus
                 _bon["mood_spiral_penalty"] += _cont.mood_spiral_penalty
-
-            if mtype == "identity_anchor":
-                # Character continuity: identity anchors get a consistent lift, but cap dominance.
-                _ab = 0.12
-                try:
-                    _eid = int(h.get("eid", -1))
-                except Exception:
-                    _eid = -1
-                if _anchor_full_boost and _eid not in _anchor_full_boost:
-                    _ab = float(_ab) * float(_anchor_rest_mult)
-                type_bonus += float(_ab)
-                if _bon is not None:
-                    _bon["self_anchor"] += float(_ab)
-                # Additional lift when the anchor belongs to the querying agent's private thread.
-                if str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id):
-                    try:
-                        _sab = float(os.getenv("TORMENT_SELF_ANCHOR_BONUS", "0.04"))
-                    except Exception:
-                        _sab = 0.04
-                    type_bonus += float(_sab)
-                    if _bon is not None:
-                        _bon["self_anchor"] += float(_sab)
 
             base_score = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=0.0)
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
@@ -4187,15 +4159,8 @@ class TormentFabric:
             except Exception:
                 _trace_spiral_neg_recent = 0
 
-        # 4. Build shared ContinuityContext
-        _trace_cont_ctx = ContinuityContext.from_env(
-            agent_id=str(agent_id),
-            canonical_step=_trace_canonical_step,
-            affect_personal=_trace_affect_personal,
-            q_affect_tag=_trace_q_affect_tag,
-            q_affect_conf=_trace_q_affect_conf,
-            spiral_neg_recent=_trace_spiral_neg_recent,
-        )
+        # 4. Build shared ContinuityContext (anchor_full_boost_eids set after raw-hit gather below)
+        _trace_anchor_full_boost: frozenset = frozenset()
 
         def explain_for_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
             now_ts = _now_ts()
@@ -4238,25 +4203,8 @@ class TormentFabric:
                 # Mirror query(): escalate contradiction_risk for contested canon
                 contradiction_risk = max(contradiction_risk, 0.5 * conflict_penalty)
 
-            # Character continuity: prefer the agent's own private thread.
-            try:
-                self_bonus = float(os.getenv("TORMENT_SELF_MEMORY_BONUS", "0.06"))
-            except Exception:
-                self_bonus = 0.06
-            if str(hit.get("scope", "")) == "private" and str(hit.get("agent_id", "")) == str(agent_id) and not _is_tool_result:
-                type_bonus += self_bonus
-
-            if mtype == "identity_anchor":
-                # Character continuity: identity anchors get a consistent lift.
-                type_bonus += 0.12
-                # Additional lift when the anchor belongs to the querying agent's private thread.
-                if str(hit.get("scope", "")) == "private" and str(hit.get("agent_id", "")) == str(agent_id):
-                    try:
-                        type_bonus += float(os.getenv("TORMENT_SELF_ANCHOR_BONUS", "0.04"))
-                    except Exception:
-                        type_bonus += 0.04
-
-            # --- Continuity bonuses (parity with query()) ---
+            # All continuity bonuses via shared helper (self-thread, self-anchor,
+            # thread-window, affect, mood-drift, mood-spiral)
             _cont = compute_continuity_bonuses(hit, _trace_cont_ctx, is_tool_result=_is_tool_result)
             type_bonus += _cont.total
 
@@ -4301,6 +4249,8 @@ class TormentFabric:
                         _prov_raw.get("source_type") if isinstance(_prov_raw, dict)
                         else (str(_prov_raw) if isinstance(_prov_raw, str) else None)
                     ),
+                    "self_thread_bonus": _cont.self_thread_bonus,
+                    "self_anchor_bonus": _cont.self_anchor_bonus,
                     "thread_window_bonus": _cont.thread_window_bonus,
                     "affect_match_bonus": _cont.affect_match_bonus,
                     "mood_drift_bonus": _cont.mood_drift_bonus,
@@ -4355,16 +4305,14 @@ class TormentFabric:
                 "step": int(getattr(ent, 'born_step', 0) or payload.get('step', 0) or 0),
             }
 
-        # gather hits by looking up in graphs
-        out = []
-        # private
+        # gather raw hits first (needed for anchor top-k before explain)
+        _raw_hits: List[Dict[str, Any]] = []
         priv = self.private_graphs.get(ak)
         if priv:
             for eid in eids:
                 ent = priv.entities.get(int(eid))
                 if ent:
-                    out.append(explain_for_hit(_build_trace_hit(priv, eid, ent, 'private')))
-        # shared domain graphs
+                    _raw_hits.append(_build_trace_hit(priv, eid, ent, 'private'))
         for d in domains:
             sg = ws.shared_graphs.get(d)
             if not sg:
@@ -4373,7 +4321,40 @@ class TormentFabric:
                 ent = sg.entities.get(int(eid))
                 if not ent:
                     continue
-                out.append(explain_for_hit(_build_trace_hit(sg, eid, ent, 'shared')))
+                _raw_hits.append(_build_trace_hit(sg, eid, ent, 'shared'))
+
+        # Compute anchor top-k from gathered hits (parity with query())
+        try:
+            _t_anchor_topk = int(os.getenv("TORMENT_ANCHOR_BOOST_TOPK", "3"))
+        except Exception:
+            _t_anchor_topk = 3
+        if _t_anchor_topk > 0:
+            try:
+                _t_acand = []
+                for _rh in _raw_hits:
+                    if str(_rh.get("type")) != "identity_anchor":
+                        continue
+                    if bool(_rh.get("anchor_retired")):
+                        continue
+                    _t_acand.append((int(_rh.get("eid", -1)), float(_rh.get("score", 0.0))))
+                _t_acand.sort(key=lambda x: x[1], reverse=True)
+                _trace_anchor_full_boost = frozenset(e for (e, _s) in _t_acand[:_t_anchor_topk] if e >= 0)
+            except Exception:
+                _trace_anchor_full_boost = frozenset()
+
+        # Build ContinuityContext now that anchor_full_boost_eids is known
+        _trace_cont_ctx = ContinuityContext.from_env(
+            agent_id=str(agent_id),
+            canonical_step=_trace_canonical_step,
+            affect_personal=_trace_affect_personal,
+            q_affect_tag=_trace_q_affect_tag,
+            q_affect_conf=_trace_q_affect_conf,
+            spiral_neg_recent=_trace_spiral_neg_recent,
+            anchor_full_boost_eids=_trace_anchor_full_boost,
+        )
+
+        # Explain each raw hit
+        out = [explain_for_hit(rh) for rh in _raw_hits]
 
         return {"workspace_id": workspace_id, "agent_id": agent_id, "query": query_text, "domains": domains, "items": out, "embed_context": self._embed_context(ws)}
 

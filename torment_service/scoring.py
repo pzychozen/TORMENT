@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 import numpy as np
 from .motifs import cosine
 
@@ -55,6 +55,15 @@ class ContinuityContext:
     spiral_older_than: int = 250
     spiral_window: int = 800
     spiral_penalty_max: float = 0.08
+    # self-thread bonus
+    self_thread_bonus_val: float = 0.06
+    # identity-anchor bonus
+    anchor_base_bonus: float = 0.12
+    self_anchor_bonus_val: float = 0.04
+    # anchor top-k dominance cap
+    anchor_topk: int = 3
+    anchor_rest_mult: float = 0.35
+    anchor_full_boost_eids: FrozenSet[int] = field(default_factory=frozenset)
 
     @classmethod
     def from_env(
@@ -65,6 +74,7 @@ class ContinuityContext:
         q_affect_tag: str,
         q_affect_conf: float,
         spiral_neg_recent: int,
+        anchor_full_boost_eids: FrozenSet[int] = frozenset(),
     ) -> "ContinuityContext":
         """Build from environment variables + caller-supplied values."""
         def _env_float(key: str, default: str) -> float:
@@ -102,6 +112,12 @@ class ContinuityContext:
             spiral_older_than=_env_int("TORMENT_MOOD_SPIRAL_OLDER_THAN_STEPS", "250"),
             spiral_window=_env_int("TORMENT_MOOD_SPIRAL_WINDOW_STEPS", "800"),
             spiral_penalty_max=_env_float("TORMENT_MOOD_SPIRAL_PENALTY_MAX", "0.08"),
+            self_thread_bonus_val=_env_float("TORMENT_SELF_MEMORY_BONUS", "0.06"),
+            anchor_base_bonus=0.12,
+            self_anchor_bonus_val=_env_float("TORMENT_SELF_ANCHOR_BONUS", "0.04"),
+            anchor_topk=_env_int("TORMENT_ANCHOR_BOOST_TOPK", "3"),
+            anchor_rest_mult=_env_float("TORMENT_ANCHOR_BOOST_REST_MULT", "0.35"),
+            anchor_full_boost_eids=anchor_full_boost_eids,
         )
 
 
@@ -112,6 +128,8 @@ class ContinuityResult:
     affect_match_bonus: float = 0.0
     mood_drift_bonus: float = 0.0
     mood_spiral_penalty: float = 0.0
+    self_thread_bonus: float = 0.0
+    self_anchor_bonus: float = 0.0
 
     @property
     def total(self) -> float:
@@ -120,6 +138,8 @@ class ContinuityResult:
             + self.affect_match_bonus
             + self.mood_drift_bonus
             - self.mood_spiral_penalty
+            + self.self_thread_bonus
+            + self.self_anchor_bonus
         )
 
     def to_dict(self) -> Dict[str, float]:
@@ -128,6 +148,8 @@ class ContinuityResult:
             "affect_match_bonus": self.affect_match_bonus,
             "mood_drift_bonus": self.mood_drift_bonus,
             "mood_spiral_penalty": self.mood_spiral_penalty,
+            "self_thread_bonus": self.self_thread_bonus,
+            "self_anchor_bonus": self.self_anchor_bonus,
         }
 
 
@@ -143,20 +165,41 @@ def compute_continuity_bonuses(
     Used by both ``query()`` and ``trace()`` to ensure parity.
 
     Args:
-        hit: dict with at least: scope, agent_id, step, type, affect_tag, affect_conf
+        hit: dict with at least: scope, agent_id, step, type, affect_tag,
+            affect_conf, eid
         ctx: pre-computed per-query continuity context
         is_tool_result: True if the hit has tool_result provenance (excluded
-            from thread-window bonus, matching query() behavior)
+            from self-thread and thread-window bonus, matching query() behavior)
     """
     r = ContinuityResult()
 
     hit_scope = str(hit.get("scope", ""))
     hit_agent = str(hit.get("agent_id", ""))
+    mtype = str(hit.get("type") or "")
     is_own_private = (
         hit_scope == "private"
         and hit_agent == ctx.agent_id
         and not is_tool_result
     )
+
+    # --- Self-thread bonus ---
+    if is_own_private and ctx.self_thread_bonus_val > 0.0:
+        r.self_thread_bonus = ctx.self_thread_bonus_val
+
+    # --- Identity-anchor bonus ---
+    if mtype == "identity_anchor":
+        _ab = ctx.anchor_base_bonus
+        # Top-k dominance cap: reduce bonus for non-top anchors
+        try:
+            _eid = int(hit.get("eid", -1))
+        except Exception:
+            _eid = -1
+        if ctx.anchor_full_boost_eids and _eid not in ctx.anchor_full_boost_eids:
+            _ab = float(_ab) * float(ctx.anchor_rest_mult)
+        r.self_anchor_bonus = float(_ab)
+        # Additional lift when anchor belongs to querying agent's private thread
+        if hit_scope == "private" and hit_agent == ctx.agent_id:
+            r.self_anchor_bonus += ctx.self_anchor_bonus_val
 
     # --- Thread-window bonus ---
     if (
