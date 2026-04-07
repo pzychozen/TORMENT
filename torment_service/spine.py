@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -44,6 +45,272 @@ from .request_context import (
 from .incident_log import log_spine_decision
 
 logger = logging.getLogger("torment.spine")
+
+# ---------------------------------------------------------------------------
+# Advisory thinking layer (observation only — does not influence execution)
+# ---------------------------------------------------------------------------
+
+_THINKING_ADVISORY_ENABLE = os.environ.get("TORMENT_THINKING_ADVISORY", "0").strip() == "1"
+
+# Bounded ring buffer for alignment records (in-memory, not persisted)
+_ALIGNMENT_BUFFER_MAX = 200
+_alignment_buffer: List[Dict[str, Any]] = []
+_alignment_lock = __import__("threading").Lock()
+
+
+def _resolve_capabilities() -> Optional[Dict[str, bool]]:
+    """Build a capabilities dict from env vars for the advisory sidecar.
+
+    Returns None if no cognition capability flags are set, which keeps
+    the stance layer fully off.
+    """
+    caps: Dict[str, bool] = {}
+    if os.environ.get("TORMENT_CONTEXTUAL_ABSTENTION", "0").strip() == "1":
+        caps["contextual_abstention"] = True
+    return caps or None
+
+
+def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
+                               live_social: bool = False):
+    """Harvest real geometric context from kernel + character state.
+
+    Returns a GeometricStanceContext or None if state is unavailable.
+    Read-only — never modifies kernel or character state.
+    """
+    try:
+        from .geometric_harvester import harvest_geometric_context
+        from .thinking_models import GeometricStanceContext
+
+        # Kernel state: corridor monitor has persistent EMAs
+        tri_mod = None
+        if hasattr(fabric, "kernel") and hasattr(fabric.kernel, "mon"):
+            mon = fabric.kernel.mon
+            tri_mod = {
+                "coh_phase": getattr(mon, "coh_ema", 0.5),
+                "tearing_risk": getattr(mon, "tear_score_ema", 0.35),
+                "survival_steps": getattr(mon, "surv_ema", 0.0),
+            }
+
+        # Character state: drift, basin info
+        char_state = None
+        if hasattr(fabric, "character_store"):
+            try:
+                cstate = fabric.character_store.load_state(workspace_id, agent_id)
+                if cstate:
+                    char_state = {
+                        "seed_id": getattr(cstate, "seed_id", ""),
+                        "drift_score": getattr(cstate, "drift_score", 0.0),
+                        "drift_direction": getattr(cstate, "drift_direction", "stable"),
+                        "seed_basin_phi": getattr(cstate, "seed_basin_phi", 0.0),
+                        "seed_basin_role": getattr(cstate, "seed_basin_role", "plateau"),
+                    }
+            except Exception:
+                pass
+
+        return harvest_geometric_context(
+            character_state=char_state,
+            tri_mod=tri_mod,
+            live_social=live_social,
+        )
+    except Exception as e:
+        logger.debug("Geometric context harvest failed (non-fatal): %s", e)
+        return None
+
+
+def _advisory_thinking(workspace_id: str, agent_id: str, text: str,
+                       geometric_context=None) -> Optional[Dict[str, Any]]:
+    """Run the thinking controller as a non-authoritative advisory sidecar.
+
+    Returns the full ThinkingResult as a dict, or None if disabled / errored.
+    This NEVER influences execution — it is purely observational.
+    """
+    if not _THINKING_ADVISORY_ENABLE:
+        return None
+    try:
+        from .thinking_controller import ThinkingController
+        _ctl = ThinkingController()
+        result = _ctl.think(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            raw_input=text,
+            capabilities=_resolve_capabilities(),
+            geometric_context=geometric_context,
+        )
+        return result.to_dict()
+    except Exception as e:
+        logger.debug("Advisory thinking failed (non-fatal): %s", e)
+        return None
+
+
+# Spine path/op_class → expected thinking weight
+# "light" = quick processing, "medium" = some retrieval/reasoning, "heavy" = governed/identity
+# Uses string literals (not PATH_*/OP_CLASS_* constants) to avoid module ordering issues.
+_SPINE_WEIGHT: Dict[tuple, str] = {
+    ("fast", "read"):       "light",
+    ("fast", "write"):      "medium",
+    ("fast", "collective"): "medium",
+    ("full", "cognitive"):  "heavy",
+    ("full", "identity"):   "heavy",
+    ("full", "collective"): "heavy",
+}
+
+# Thinking mode → weight
+_THINKING_WEIGHT: Dict[str, str] = {
+    "fast":               "light",
+    "retrieval":          "medium",
+    "reflective":         "medium",
+    "tool":               "medium",
+    "governed":           "heavy",
+    "identity_sensitive": "heavy",
+    "live_social":        "light",
+}
+
+
+def _build_thinking_alignment(
+    spine_path: str,
+    spine_op_class: str,
+    spine_escalated: bool,
+    thinking_mode: str,
+    thinking_action: str,
+) -> Dict[str, Any]:
+    """Build a compact comparison between Spine routing and advisory thinking.
+
+    Returns a dict with:
+      spine_path, spine_op_class, thinking_mode, thinking_action,
+      spine_weight, thinking_weight, aligned (bool), note (str)
+
+    Alignment is best-effort. The two systems use different taxonomies —
+    Spine routes by operation type + trust, thinking routes by content
+    heuristics. They won't always agree, and that's the point: divergences
+    are the interesting data.
+    """
+    s_weight = _SPINE_WEIGHT.get((spine_path, spine_op_class), "medium")
+    # Escalation always bumps to heavy
+    if spine_escalated:
+        s_weight = "heavy"
+
+    t_weight = _THINKING_WEIGHT.get(thinking_mode, "medium")
+
+    aligned = (s_weight == t_weight)
+
+    # Build a human-readable note for divergences
+    note = ""
+    if not aligned:
+        if s_weight == "light" and t_weight == "heavy":
+            note = "thinking sees governance/identity concern that Spine fast-pathed"
+        elif s_weight == "heavy" and t_weight == "light":
+            note = "Spine escalated but thinking sees a lightweight request"
+        elif s_weight == "light" and t_weight == "medium":
+            note = "thinking wants retrieval/reasoning for a read-only Spine op"
+        elif s_weight == "medium" and t_weight == "heavy":
+            note = "thinking sees governance/identity concern in a standard write"
+        elif s_weight == "heavy" and t_weight == "medium":
+            note = "Spine routed full-cognition but thinking sees standard complexity"
+        elif s_weight == "medium" and t_weight == "light":
+            note = "thinking sees simpler request than Spine's write classification"
+        else:
+            note = f"weight divergence: spine={s_weight}, thinking={t_weight}"
+
+    return {
+        "spine_path": spine_path,
+        "spine_op_class": spine_op_class,
+        "spine_escalated": spine_escalated,
+        "thinking_mode": thinking_mode,
+        "thinking_action": thinking_action,
+        "spine_weight": s_weight,
+        "thinking_weight": t_weight,
+        "aligned": aligned,
+        "note": note,
+    }
+
+
+def _record_alignment(record: Dict[str, Any]) -> None:
+    """Push an alignment record into the ring buffer (thread-safe)."""
+    import time as _time
+    stamped = {**record, "ts": _time.time()}
+    with _alignment_lock:
+        _alignment_buffer.append(stamped)
+        if len(_alignment_buffer) > _ALIGNMENT_BUFFER_MAX:
+            # Trim oldest entries to stay within budget
+            del _alignment_buffer[: len(_alignment_buffer) - _ALIGNMENT_BUFFER_MAX]
+
+
+def get_alignment_summary(last_n: int = 50) -> Dict[str, Any]:
+    """Return a compact summary of recent alignment records.
+
+    Keys:
+      total       — number of records in the snapshot
+      aligned     — count of aligned records
+      misaligned  — count of misaligned records
+      thinking_heavier_than_spine — thinking saw more complexity than Spine
+      spine_heavier_than_thinking — Spine escalated beyond what thinking expected
+      equal_weight — both systems agreed on weight (superset of aligned)
+      records     — the raw records (most recent last)
+      by_spine_weight  — {weight: count}
+      by_thinking_weight — {weight: count}
+      top_mismatch_notes — most common divergence notes, descending
+    """
+    from collections import Counter
+
+    _WEIGHT_RANK = {"light": 0, "medium": 1, "heavy": 2}
+
+    with _alignment_lock:
+        snapshot = list(_alignment_buffer[-last_n:])
+
+    if not snapshot:
+        return {
+            "total": 0,
+            "aligned": 0,
+            "misaligned": 0,
+            "thinking_heavier_than_spine": 0,
+            "spine_heavier_than_thinking": 0,
+            "equal_weight": 0,
+            "records": [],
+            "by_spine_weight": {},
+            "by_thinking_weight": {},
+            "top_mismatch_notes": [],
+        }
+
+    aligned_count = sum(1 for r in snapshot if r.get("aligned"))
+    misaligned_count = len(snapshot) - aligned_count
+
+    # Directional mismatch counts
+    thinking_heavier = 0
+    spine_heavier = 0
+    equal_weight = 0
+    for r in snapshot:
+        sw = _WEIGHT_RANK.get(r.get("spine_weight", "medium"), 1)
+        tw = _WEIGHT_RANK.get(r.get("thinking_weight", "medium"), 1)
+        if tw > sw:
+            thinking_heavier += 1
+        elif sw > tw:
+            spine_heavier += 1
+        else:
+            equal_weight += 1
+
+    spine_w = Counter(r.get("spine_weight", "unknown") for r in snapshot)
+    think_w = Counter(r.get("thinking_weight", "unknown") for r in snapshot)
+
+    mismatch_notes = Counter(
+        r["note"] for r in snapshot if r.get("note")
+    )
+    top_notes = [
+        {"note": n, "count": c}
+        for n, c in mismatch_notes.most_common(10)
+    ]
+
+    return {
+        "total": len(snapshot),
+        "aligned": aligned_count,
+        "misaligned": misaligned_count,
+        "thinking_heavier_than_spine": thinking_heavier,
+        "spine_heavier_than_thinking": spine_heavier,
+        "equal_weight": equal_weight,
+        "records": snapshot,
+        "by_spine_weight": dict(spine_w),
+        "by_thinking_weight": dict(think_w),
+        "top_mismatch_notes": top_notes,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -460,7 +727,27 @@ def _fast_query_state(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> D
 
 
 def _fast_query_memory(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fast-path query memory: search agent memory, read-only."""
+    """Fast-path query memory: search agent memory, read-only.
+
+    When thinking advisory is active, runs the ThinkingController to
+    produce a MemoryPlan that influences lane-specific retrieval.
+    """
+    _mp: Optional[Dict[str, Any]] = None
+    if _THINKING_ADVISORY_ENABLE:
+        try:
+            _text = payload.get("query", payload.get("text", ""))
+            _geo = _harvest_geometric_context(fabric, ctx.workspace_id, ctx.agent_id)
+            _advisory = _advisory_thinking(ctx.workspace_id, ctx.agent_id, _text,
+                                           geometric_context=_geo)
+            if _advisory:
+                _plan = _advisory.get("memory_plan", {})
+                _mp = {
+                    "top_k_by_lane": _plan.get("top_k_by_lane", {}),
+                    "weight_by_lane": _plan.get("weight_by_lane", {}),
+                }
+        except Exception:
+            _mp = None
+
     return fabric.query(
         workspace_id=ctx.workspace_id,
         agent_id=ctx.agent_id,
@@ -469,6 +756,7 @@ def _fast_query_memory(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> 
         domain_id=payload.get("domain_id"),
         peek_bridges=bool(payload.get("peek_bridges", False)),
         explain=bool(payload.get("explain", False)),
+        memory_plan=_mp,
     )
 
 
@@ -769,6 +1057,12 @@ def submit_task(
             logger.info("Auto-escalated %s from fast→full for %s/%s (reasons: %s)",
                         req.operation, req.workspace_id, req.agent_id, ", ".join(esc_reasons))
 
+    # --- 4b. Advisory thinking (observation only, never influences dispatch) ---
+    advisory_text = str(req.payload.get("text", "") or req.payload.get("query", "") or req.payload.get("user_input", ""))
+    _geo_ctx = _harvest_geometric_context(fabric, req.workspace_id, req.agent_id) if advisory_text else None
+    advisory_thinking_result = _advisory_thinking(req.workspace_id, req.agent_id, advisory_text,
+                                                  geometric_context=_geo_ctx) if advisory_text else None
+
     # --- 5-6. Load drift for envelope ---
     drift_score = 0.0
     try:
@@ -852,6 +1146,26 @@ def submit_task(
     else:
         r_code = _OPERATION_RESULT_CODES.get(req.operation, RESULT_NONE)
 
+    audit_dict = ctx.to_audit_dict()
+    if advisory_thinking_result is not None:
+        audit_dict["advisory_thinking"] = advisory_thinking_result
+        alignment = _build_thinking_alignment(
+            spine_path=chosen_path,
+            spine_op_class=spec.op_class,
+            spine_escalated=escalated,
+            thinking_mode=advisory_thinking_result.get("mode_decision", {}).get("chosen_mode", ""),
+            thinking_action=advisory_thinking_result.get("action_decision", {}).get("action", ""),
+        )
+        audit_dict["thinking_alignment"] = alignment
+        # Attach stance to the raw alignment record for observability
+        # (does not affect alignment comparison logic)
+        stance_data = advisory_thinking_result.get("stance")
+        if stance_data is not None:
+            alignment["stance"] = stance_data.get("stance")
+            alignment["stance_reason"] = stance_data.get("reason")
+            alignment["stance_confidence"] = stance_data.get("confidence")
+        _record_alignment(alignment)
+
     resp = SpineResponse(
         ok=True,
         path=chosen_path,
@@ -864,7 +1178,7 @@ def submit_task(
         decision_code=d_code,
         result_code=r_code,
         result=result,
-        audit=ctx.to_audit_dict(),
+        audit=audit_dict,
         task_id=req.task_id,
         escalated=escalated,
         escalation_reasons=esc_reasons,

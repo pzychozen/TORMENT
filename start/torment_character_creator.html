@@ -1108,6 +1108,81 @@
     </div>
   </div>
 
+  <!-- 05c ADVANCED COGNITION (SOLO — optional runtime capabilities) -->
+  <div class="solo-mode section" id="cognition-section">
+    <div class="section-label">advanced cognition <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(optional)</span></div>
+    <div class="section-desc">Optional runtime capabilities that control how this character thinks, remembers, and participates in the TORMENT system. These are execution-layer features — not personality traits. Leave everything off for standard operation.</div>
+
+    <div class="toggle-row" id="toggle-cog-spine" onclick="toggleFeature('cog-spine')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Spine-Governed Execution</div>
+        <div class="toggle-desc">Use governed action routing and trust-aware execution paths. All cognition requests pass through the Spine authority layer.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-thinking" onclick="toggleFeature('cog-thinking')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Thinking-Layer Assist</div>
+        <div class="toggle-desc">Use the advisory thinking controller for task framing, memory planning, and action hints. Runs as a non-authoritative sidecar — observes but never overrides.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-identity" onclick="toggleFeature('cog-identity')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Identity-Sensitive Cognition</div>
+        <div class="toggle-desc">Protect character continuity and prioritize drift-sensitive responses. The thinking layer will escalate identity-adjacent inputs to governed review.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-collective" onclick="toggleFeature('cog-collective')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Collective / Hive Participation</div>
+        <div class="toggle-desc">Allow this character to participate in collective field and hive-style cognition paths, including echo re-ingestion and convergence detection.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-srg" onclick="toggleFeature('cog-srg')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label" style="color:#b388ff">SRG-Aware State Handling</div>
+        <div class="toggle-desc">Expose SRG-linked state and resonance-aware runtime behavior. The thinking layer will incorporate crystal frequency and heartbeat class into memory planning.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-archive" onclick="toggleFeature('cog-archive')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Archive / Deep-Memory Recall</div>
+        <div class="toggle-desc">Allow archive and deep-memory lanes to participate in recall. Enables the thinking layer to route queries through compressed and spirit-returned memory stores.</div>
+      </div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-livesocial" onclick="toggleFeature('cog-livesocial')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Live-Social Mode Ready</div>
+        <div class="toggle-desc">Prepare the character for live transcript and audio conversational contexts. Enables fast-path social routing with minimal latency overhead.</div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+      <div class="section-desc" style="margin-bottom:8px;color:var(--text-dim);font-size:10px;letter-spacing:0.08em;text-transform:uppercase">stance and participation</div>
+      <div class="section-desc" style="margin-bottom:10px;color:var(--text-dim);font-size:11px;line-height:1.5">When Contextual Abstention is enabled, the stance policy decides when the character responds, defers, asks for clarification, or stays silent. If the kernel provides geometric state, stance thresholds are nudged by &#177;15% based on coherence, stability, and social resonance &#8212; but behavior remains deterministic without it. Three levels: stance off (always respond), stance on without geometry (rule-based), stance on with geometry (kernel-modulated rules).</div>
+    </div>
+
+    <div class="toggle-row" id="toggle-cog-abstention" onclick="toggleFeature('cog-abstention')">
+      <div class="toggle-switch"></div>
+      <div class="toggle-info">
+        <div class="toggle-label">Contextual Abstention</div>
+        <div class="toggle-desc">Allows the character to decline, defer, remain silent, or wait for a better context before responding. Enables alive-feeling behavior where the character chooses when and how to participate rather than always answering directly.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═════════════════════════════════════════════════════════════════ HIVEMIND MODE ═ -->
 
   <!-- 01 WORKSPACE + TEAM (HIVEMIND) -->
@@ -1441,6 +1516,11 @@ let selectedEmbed = 'st';
 let selectedModel = 'claude';
 let features = { character: true, compression: false, srg: false, crystal: true };
 let featuresHivemind = { 'character-hive': true, 'hivemind-feature': true };
+let cognitionCaps = {
+  'cog-spine': false, 'cog-thinking': false, 'cog-identity': false,
+  'cog-collective': false, 'cog-srg': false, 'cog-archive': false,
+  'cog-livesocial': false, 'cog-abstention': false
+};
 
 let hivemindDomains = ['research', 'engineering', 'creative', 'operations', 'meta'];
 let hivemindAgents = [];
@@ -1835,7 +1915,11 @@ function updateCharCount() {
 // ════════════════════════════════════════════════════════════════════════════════════
 
 function toggleFeature(feature) {
-  if (feature.includes('hive')) {
+  if (feature.startsWith('cog-')) {
+    cognitionCaps[feature] = !cognitionCaps[feature];
+    const el = document.getElementById('toggle-' + feature);
+    if (el) el.classList.toggle('active');
+  } else if (feature.includes('hive')) {
     featuresHivemind[feature] = !featuresHivemind[feature];
     const el = document.getElementById('toggle-' + feature);
     if (el) el.classList.toggle('active');
@@ -2028,6 +2112,23 @@ function generateSolo() {
     }
 
     envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});
+  }
+
+  // Advanced Cognition capabilities (only if any are enabled)
+  const cogVars = [];
+  let cogNote = '';
+  const anyCog = Object.values(cognitionCaps).some(v => v);
+  if (anyCog) {
+    if (cognitionCaps['cog-spine'])      cogVars.push({key: 'TORMENT_SPINE_ENABLE', val: '1'});
+    if (cognitionCaps['cog-thinking'])   cogVars.push({key: 'TORMENT_THINKING_ADVISORY', val: '1'});
+    if (cognitionCaps['cog-identity'])   cogVars.push({key: 'TORMENT_IDENTITY_SENSITIVE', val: '1'});
+    if (cognitionCaps['cog-collective']) cogVars.push({key: 'TORMENT_HIVEMIND_ENABLE', val: '1'});
+    if (cognitionCaps['cog-srg'])        cogVars.push({key: 'TORMENT_SRG_COGNITION', val: '1'});
+    if (cognitionCaps['cog-archive'])    cogVars.push({key: 'TORMENT_ARCHIVE_RECALL', val: '1'});
+    if (cognitionCaps['cog-livesocial']) cogVars.push({key: 'TORMENT_LIVE_SOCIAL', val: '1'});
+    if (cognitionCaps['cog-abstention']) cogVars.push({key: 'TORMENT_CONTEXTUAL_ABSTENTION', val: '1'});
+    cogNote = '# Advanced Cognition — runtime capabilities (advisory, non-mandatory).';
+    envParts.push({comment: 'Advanced Cognition', vars: cogVars, note: cogNote});
   }
 
   const overlayNote = 'write_threshold: ' + wtVal.toFixed(2) + ', decay_scale: ' + dsVal.toFixed(2) +

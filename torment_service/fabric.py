@@ -2114,6 +2114,7 @@ class TormentFabric:
         supplied_summary: Optional[str] = None,
         supplied_embedding: Optional[List[float]] = None,
         scope: str = "private",
+        provenance: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         # === BOUNDARY GUARD ===
         # Core ingest ALWAYS creates "core" memory. Archive documents use
@@ -2124,6 +2125,19 @@ class TormentFabric:
         ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
         ws = self.get_workspace(workspace_id)
+
+        # --- Provenance (v2.4.x first-pass) ---
+        # Rule 1: every ingested memory must have provenance.
+        # Rule 2: default for plain user ingest if caller did not supply one.
+        # Rule 4: non-direct writes must supply explicit provenance.
+        from .provenance_v1 import ProvenanceV1
+        if provenance is not None:
+            # Validate by round-tripping through the dataclass
+            _prov = ProvenanceV1.from_dict(provenance)
+            _prov_dict = _prov.to_dict()
+        else:
+            _prov = ProvenanceV1.for_user_ingest(step=step)
+            _prov_dict = _prov.to_dict()
 
         state = self.agent_states[ak]
         # process kernel (text only used for gating signals)
@@ -2287,12 +2301,22 @@ class TormentFabric:
                                 _old_str = float((_existing_ent.payload or {}).get("strength", 0.5))
                                 # Asymptotic reinforcement: diminishing returns, cap at 0.98
                                 _new_str = min(0.98, _old_str + (1.0 - _old_str) * 0.3)
-                                graph.update_payload(_existing_eid, {
+                                # On reinforcement:
+                                # - NEVER overwrite existing provenance (Rule F: no laundering)
+                                # - Only backfill if missing AND the new provenance is
+                                #   user-origin (direct_ingest). Do not stamp archivist/
+                                #   derived provenance onto old user memories.
+                                _reinforce_updates: Dict[str, Any] = {
                                     "strength": round(_new_str, 4),
                                     "last_reinforced": int(step),
                                     "last_reinforced_ts": _now_ts(),
                                     "reinforce_count": int((_existing_ent.payload or {}).get("reinforce_count", 0)) + 1,
-                                })
+                                }
+                                _existing_prov = (_existing_ent.payload or {}).get("provenance")
+                                if (not _existing_prov
+                                        and _prov.write_path == "direct_ingest"):
+                                    _reinforce_updates["provenance"] = _prov_dict
+                                graph.update_payload(_existing_eid, _reinforce_updates)
                                 _reinforced_eid = _existing_eid
                                 break
                 except Exception:
@@ -2349,6 +2373,9 @@ class TormentFabric:
 
                     # SRG dual-field state (None when flag is off — filtered below)
                     "srg": _srg_dict,
+
+                    # Provenance (v2.4.x first-pass)
+                    "provenance": _prov_dict,
                 },
                 )
                 stored = True
@@ -2873,6 +2900,7 @@ class TormentFabric:
         peek_bridges: bool = False,
         explain: bool = False,
         continuity_debug: bool = False,
+        memory_plan: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
@@ -2890,11 +2918,26 @@ class TormentFabric:
             domains = [domain_id] + [d for d in domains if d != domain_id]
             domains = domains[:2]
 
+        # --- Memory-plan-aware retrieval (v2.4.2) ---
+        # When a MemoryPlan is provided (from the thinking controller),
+        # use lane-specific top_k instead of flat top_k for everything.
+        # Clamped to sane bounds: each lane top_k in [0, top_k*2].
+        _mp = memory_plan or {}
+        _mp_topk = _mp.get("top_k_by_lane", {})
+        _mp_weights = _mp.get("weight_by_lane", {})
+        _topk_cap = top_k * 2  # safety cap per lane
+
+        _core_k = min(max(0, int(_mp_topk.get("core", top_k))), _topk_cap)
+        _relational_k = min(max(0, int(_mp_topk.get("relational", top_k))), _topk_cap)
+        _deep_k = min(max(0, int(_mp_topk.get("deep", 0))), _topk_cap)
+
         # candidate hits from private store + each domain shared
-        private_hits = self.private_graphs[ak].search(query_text, top_k=top_k, user_id=agent_id)
+        # Skip searches when lane top_k is 0 (search() clamps to min 1 internally)
+        private_hits = self.private_graphs[ak].search(query_text, top_k=_core_k, user_id=agent_id) if _core_k > 0 else []
         shared_hits: List[Dict[str, Any]] = []
-        for d in domains:
-            shared_hits.extend(ws.shared_graphs[d].search(query_text, top_k=top_k, user_id=None))
+        if _relational_k > 0:
+            for d in domains:
+                shared_hits.extend(ws.shared_graphs[d].search(query_text, top_k=_relational_k, user_id=None))
 
 
         # optional bridge peek: bounded fan-out into bridged domains (approved by confidence threshold)
@@ -2930,7 +2973,13 @@ class TormentFabric:
 
 
         # --- Deep memory fallback with spirit return (Phase 6) ---
-        if self._compress_enable and len(private_hits) + len(shared_hits) < top_k:
+        # Deep is primarily a gap-filler: only query when core+shared didn't
+        # fill top_k. The memory plan can raise the deep budget, but never
+        # above the remaining headroom to prevent deep from crowding out
+        # core/relational results that already exist.
+        _remaining = max(0, top_k - len(private_hits) - len(shared_hits))
+        _deep_budget = min(_deep_k, _remaining) if _deep_k > 0 else _remaining
+        if self._compress_enable and _deep_budget > 0:
             try:
                 from .spirit_return import enrich_deep_memory_hit, WarmupTracker, inject_spirit_return_into_hit
 
@@ -2939,7 +2988,7 @@ class TormentFabric:
                     _deep_qv = np.asarray(qemb, dtype=np.float32).reshape(-1)
                     _deep_hits = _deep_store.query(
                         _deep_qv,
-                        top_k=max(1, top_k - len(private_hits) - len(shared_hits)),
+                        top_k=max(1, _deep_budget),
                     )
 
                     # Current kernel symbol from persisted state
@@ -3333,6 +3382,28 @@ class TormentFabric:
                 except Exception:
                     _coll_discount = 0.50
                 final *= _coll_discount
+
+            # Memory-plan lane weights (v2.4.2):
+            # Apply weight multiplier based on hit source/provenance.
+            # Private hits → "core" lane, shared → "relational",
+            # deep/spirit-return → "deep".
+            # NOTE: collective provenance is EXCLUDED — Phase D3 already
+            # applies a dedicated discount. Stacking would over-penalize.
+            if _mp_weights:
+                _hit_scope = str(h.get("scope", "private"))
+                _is_deep = bool(h.get("spirit_return_mode") or h.get("deep_memory"))
+                if _is_deep:
+                    _lane_w = float(_mp_weights.get("deep", 1.0))
+                elif _h_provenance == "collective":
+                    # Skip — Phase D3 collective discount already applied above.
+                    _lane_w = 1.0
+                elif _hit_scope == "shared":
+                    _lane_w = float(_mp_weights.get("relational", 1.0))
+                else:
+                    _lane_w = float(_mp_weights.get("core", 1.0))
+                # Clamp weight to [0.1, 2.0] to prevent extreme distortion
+                _lane_w = max(0.1, min(2.0, _lane_w))
+                final *= _lane_w
 
             hh = dict(h)
             hh["motifs"] = motifs

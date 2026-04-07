@@ -477,6 +477,12 @@ class WarmupTracker:
             except Exception as exc:
                 logger.warning("warmup state load failed: %s", exc)
 
+        # Auto-compact on first load if the file has grown significantly
+        try:
+            self.compact()
+        except Exception:
+            pass  # compaction is never critical
+
     def _persist(self, ws: WarmupState) -> None:
         """Append a warmup state update to disk."""
         try:
@@ -523,6 +529,75 @@ class WarmupTracker:
         self._states[eid] = ws
         self._persist(ws)
         return ws
+
+    def compact(self) -> Dict[str, Any]:
+        """Compact the append-only JSONL file.
+
+        Reads all entries, keeps only the latest state per EID (which
+        _ensure_loaded already deduplicates into self._states), then
+        rewrites the file atomically. Safe to call at any time.
+
+        Returns a summary of what was compacted.
+        """
+        self._ensure_loaded()
+        assert self._states is not None
+
+        if not self._file.exists():
+            return {"compacted": False, "reason": "no_file", "entries_before": 0, "entries_after": 0}
+
+        # Count lines before compaction
+        try:
+            with open(self._file, "r", encoding="utf-8") as f:
+                lines_before = sum(1 for line in f if line.strip())
+        except Exception:
+            lines_before = 0
+
+        entries_after = len(self._states)
+
+        # Skip if compaction would save less than 20% or fewer than 10 lines
+        if lines_before - entries_after < max(10, int(lines_before * 0.2)):
+            return {
+                "compacted": False,
+                "reason": "not_needed",
+                "entries_before": lines_before,
+                "entries_after": entries_after,
+            }
+
+        # Write compacted file atomically: write to temp, then rename
+        tmp_file = self._file.with_suffix(".jsonl.tmp")
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                for ws in self._states.values():
+                    f.write(json.dumps(ws.to_dict(), ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Atomic replace (on POSIX; on Windows this is close enough)
+            tmp_file.replace(self._file)
+
+            logger.info(
+                "Warmup state compacted: %d → %d entries",
+                lines_before, entries_after,
+            )
+            return {
+                "compacted": True,
+                "entries_before": lines_before,
+                "entries_after": entries_after,
+                "saved_entries": lines_before - entries_after,
+            }
+        except Exception as exc:
+            logger.warning("Warmup compaction failed (file unchanged): %s", exc)
+            # Clean up temp file if it exists
+            try:
+                tmp_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return {
+                "compacted": False,
+                "reason": str(exc),
+                "entries_before": lines_before,
+                "entries_after": entries_after,
+            }
 
     def stats(self) -> Dict[str, Any]:
         """Return warmup tracker statistics."""
