@@ -4214,6 +4214,28 @@ class TormentFabric:
 
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
 
+            # --- SRG scoring bonuses (parity with query(), Phase 3) ---
+            # NOTE: breathing evolution side effects are intentionally NOT
+            # mirrored here — trace is read-only. Only score multipliers.
+            _srg_same_band = 1.0
+            _srg_crystal = 1.0
+            _srg_heartbeat = 1.0
+            if self._srg_enable:
+                _srg_hit = hit.get("srg")
+                if _srg_hit and isinstance(_srg_hit, dict):
+                    # Same-band resonance: 8% boost
+                    if hasattr(self, "_srg_last_ingest_band") and _srg_hit.get("R_band") == self._srg_last_ingest_band:
+                        _srg_same_band = 1.08
+                        final *= _srg_same_band
+                    # Crystal identity anchor: 5% boost
+                    if _srg_hit.get("is_crystal", False):
+                        _srg_crystal = 1.05
+                        final *= _srg_crystal
+                    # Class A (deep/slow heartbeat): 3% stability bonus
+                    if _srg_hit.get("heartbeat_class") == "A":
+                        _srg_heartbeat = 1.03
+                        final *= _srg_heartbeat
+
             # --- Post-score discounts (parity with query()) ---
             collective_discount = 1.0
             tool_result_discount = 1.0
@@ -4285,6 +4307,10 @@ class TormentFabric:
                     "mood_drift_bonus": _cont.mood_drift_bonus,
                     "mood_spiral_penalty": _cont.mood_spiral_penalty,
                     "continuity_total_adjustment": _cont.total,
+                    "srg_same_band_bonus": _srg_same_band,
+                    "srg_crystal_bonus": _srg_crystal,
+                    "srg_heartbeat_bonus": _srg_heartbeat,
+                    "srg_total_multiplier": _srg_same_band * _srg_crystal * _srg_heartbeat,
                     "memory_plan_lane": _lane,
                     "lane_weight": _lane_w,
                     "lane_weight_applied": _lane_applied,
@@ -4337,6 +4363,7 @@ class TormentFabric:
                 "step": int(getattr(ent, 'born_step', 0) or payload.get('step', 0) or 0),
                 "spirit_return_mode": payload.get('spirit_return_mode'),
                 "deep_memory": bool(payload.get('deep_memory', False)),
+                "srg": payload.get('srg'),
             }
 
         # gather raw hits first (needed for anchor top-k before explain)
