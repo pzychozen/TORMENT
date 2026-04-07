@@ -204,6 +204,7 @@ class TraceReq(BaseModel):
     query: str
     eids: List[int] = Field(default_factory=list)
     domain_id: Optional[str] = None
+    memory_plan: Optional[Dict[str, Any]] = None
 
 class ChainReq(BaseModel):
     workspace_id: str = Field(default="default")
@@ -949,6 +950,7 @@ def trace(req: TraceReq) -> Dict[str, Any]:
         query_text=req.query,
         eids=req.eids,
         domain_id=req.domain_id,
+        memory_plan=req.memory_plan,
     )
 
 

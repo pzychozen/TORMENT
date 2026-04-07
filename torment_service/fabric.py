@@ -4059,7 +4059,7 @@ class TormentFabric:
         return {"workspace_id": workspace_id, "bridges": [b.__dict__ for b in bridges]}
 
 
-    def trace(self, workspace_id: str, agent_id: str, query_text: str, eids: List[int], domain_id: Optional[str] = None) -> Dict[str, Any]:
+    def trace(self, workspace_id: str, agent_id: str, query_text: str, eids: List[int], domain_id: Optional[str] = None, memory_plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Explain why specific memories scored the way they did for a query."""
         _validate_path_component(workspace_id, "workspace_id")
         _validate_path_component(agent_id, "agent_id")
@@ -4098,6 +4098,10 @@ class TormentFabric:
                         if c.conflict_id not in ids:
                             ids.append(c.conflict_id)
                         ent["conflict_ids"] = ids
+
+        # --- Memory-plan lane weights (parity with query()) ---
+        _trace_mp = memory_plan or {}
+        _trace_mp_weights = _trace_mp.get("weight_by_lane", {})
 
         # --- Continuity context (parity with query()) ---
         # 1. Canonical step from agent kernel state
@@ -4228,6 +4232,31 @@ class TormentFabric:
                     tool_result_discount = 0.85
                 final *= tool_result_discount
 
+            # --- Memory-plan lane weights (parity with query()) ---
+            _lane = "core"
+            _lane_w = 1.0
+            _lane_applied = False
+            if _trace_mp_weights:
+                _hit_scope = str(hit.get("scope", "private"))
+                _is_deep = bool(hit.get("spirit_return_mode") or hit.get("deep_memory"))
+                if _is_deep:
+                    _lane = "deep"
+                    _lane_w = float(_trace_mp_weights.get("deep", 1.0))
+                elif _is_collective:
+                    # Skip — Phase D3 collective discount already applied above.
+                    _lane = "collective"
+                    _lane_w = 1.0
+                elif _hit_scope == "shared":
+                    _lane = "relational"
+                    _lane_w = float(_trace_mp_weights.get("relational", 1.0))
+                else:
+                    _lane = "core"
+                    _lane_w = float(_trace_mp_weights.get("core", 1.0))
+                # Clamp weight to [0.1, 2.0] to prevent extreme distortion
+                _lane_w = max(0.1, min(2.0, _lane_w))
+                final *= _lane_w
+                _lane_applied = True
+
             return {
                 "eid": _hit_eid,
                 "scope": hit.get('scope'),
@@ -4256,6 +4285,9 @@ class TormentFabric:
                     "mood_drift_bonus": _cont.mood_drift_bonus,
                     "mood_spiral_penalty": _cont.mood_spiral_penalty,
                     "continuity_total_adjustment": _cont.total,
+                    "memory_plan_lane": _lane,
+                    "lane_weight": _lane_w,
+                    "lane_weight_applied": _lane_applied,
                 },
             }
 
@@ -4303,6 +4335,8 @@ class TormentFabric:
                 "canon": bool(payload.get('canon', False)),
                 "provenance": payload.get('provenance'),
                 "step": int(getattr(ent, 'born_step', 0) or payload.get('step', 0) or 0),
+                "spirit_return_mode": payload.get('spirit_return_mode'),
+                "deep_memory": bool(payload.get('deep_memory', False)),
             }
 
         # gather raw hits first (needed for anchor top-k before explain)
