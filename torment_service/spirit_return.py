@@ -31,10 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional
 
 from .symbols import SYMBOL_MEANINGS
 
@@ -590,8 +589,8 @@ class WarmupTracker:
             # Clean up temp file if it exists
             try:
                 tmp_file.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                logger.debug("temp file cleanup failed during compaction rollback: %s", cleanup_exc)
             return {
                 "compacted": False,
                 "reason": str(exc),
