@@ -30,6 +30,30 @@ DATA_DIR = os.path.normpath(
     os.environ.get("TORMENT_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
 )
 
+
+def _safe_join_data_dir(*parts: str, validate_parts: bool = True) -> str:
+    """Build a path under DATA_DIR with traversal protection.
+
+    1. Optionally validates each user-supplied part via _validate_path_component
+    2. Joins under DATA_DIR
+    3. Normalizes/resolves
+    4. Verifies the result stays under DATA_DIR
+
+    Raises HTTPException 400 on any traversal attempt.
+    """
+    if validate_parts:
+        for p in parts:
+            _validate_path_component(p, "path component")
+    joined = os.path.normpath(os.path.join(DATA_DIR, *parts))
+    if not joined.startswith(DATA_DIR + os.sep) and joined != DATA_DIR:
+        raise HTTPException(400, "Path escapes data directory")
+    return joined
+
+
+def _safe_log_value(value: str) -> str:
+    """Escape CR/LF in values before logging to prevent log injection."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
 # Apply optional preset profile (defaults only; explicit env vars always win)
 ACTIVE_PROFILE = os.environ.get("TORMENT_PROFILE", "").strip().lower() or None
 PROFILE_APPLIED = apply_profile_env(ACTIVE_PROFILE)
@@ -45,8 +69,7 @@ thinking_controller = ThinkingController()
 @app.get("/workspace/{workspace_id}/embed_audit")
 def workspace_embed_audit(workspace_id: str) -> Dict[str, Any]:
     """Return persisted embedding health index for a workspace (fast; no scan)."""
-    _validate_path_component(workspace_id, "workspace_id")
-    path = os.path.normpath(os.path.join(DATA_DIR, "workspaces", workspace_id, "embed_audit.json"))
+    path = _safe_join_data_dir("workspaces", workspace_id, "embed_audit.json")
     if not os.path.exists(path):
         return {
             "ok": False,
@@ -844,7 +867,7 @@ def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
             },
         }
     except Exception as e:
-        _log.exception("Collective proposals status failed for workspace %r", workspace_id)
+        _log.exception("Collective proposals status failed for workspace %r", _safe_log_value(workspace_id))
         return {"workspace_id": workspace_id, "error": "Internal error retrieving proposal status"}
 
 
@@ -1117,21 +1140,24 @@ def motif_entropy(workspace_id: str, domain_id: str) -> Dict[str, Any]:
     try:
         return fabric.motif_entropy(workspace_id, domain_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        _log.debug("motif_entropy not found: %s", e)
+        raise HTTPException(status_code=404, detail="Motif entropy not found for this domain")
 
 @app.get("/workspace/{workspace_id}/domain/{domain_id}/motif_merges")
 def list_motif_merges(workspace_id: str, domain_id: str, status: str = "suggested", limit: int = 200) -> Dict[str, Any]:
     try:
         return fabric.list_motif_merges(workspace_id, domain_id, status=status, limit=limit)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        _log.debug("list_motif_merges not found: %s", e)
+        raise HTTPException(status_code=404, detail="Motif merges not found for this domain")
 
 @app.post("/workspace/motif_merges/decide")
 def decide_motif_merge(req: MotifMergeDecideReq) -> Dict[str, Any]:
     try:
         return fabric.decide_motif_merge(req.workspace_id, req.domain_id, req.suggestion_id, req.decision, note=req.note)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        _log.debug("decide_motif_merge validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid motif merge request")
 
 
 @app.get("/workspace/{workspace_id}/domain/{domain_id}/conflicts")
@@ -1139,7 +1165,8 @@ def list_conflicts(workspace_id: str, domain_id: str, status: str = "open", limi
     try:
         return fabric.list_conflicts(workspace_id, domain_id, status=status, limit=limit)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        _log.debug("list_conflicts not found: %s", e)
+        raise HTTPException(status_code=404, detail="Conflicts not found for this domain")
 
 
 @app.post("/workspace/conflicts/decide")
@@ -1147,7 +1174,8 @@ def decide_conflict(req: ConflictDecideReq) -> Dict[str, Any]:
     try:
         return fabric.decide_conflict(req.workspace_id, req.domain_id, req.conflict_id, req.decision, note=req.note)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        _log.debug("decide_conflict validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid conflict decision request")
 
 
 # ====================================================================
@@ -1163,8 +1191,9 @@ def _get_archive_store(workspace_id: str, agent_id: str) -> ArchiveStore:
     safe_ag = _validate_path_component(agent_id, "agent_id")
     key = f"{safe_ws}/{safe_ag}"
     if key not in _archive_stores:
-        archive_dir = os.path.join(
-            DATA_DIR, "workspaces", safe_ws, "agents", safe_ag, "memory_archive"
+        archive_dir = _safe_join_data_dir(
+            "workspaces", safe_ws, "agents", safe_ag, "memory_archive",
+            validate_parts=False,  # already validated above
         )
         sq_idx = fabric._get_sqlite_index(workspace_id, agent_id)
         _archive_stores[key] = ArchiveStore(
@@ -1313,8 +1342,8 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
     if archive_hits:
         try:
             from .promotion import increment_retrieval_counts
-            _arc_dir = os.path.join(
-                DATA_DIR, "workspaces", req.workspace_id,
+            _arc_dir = _safe_join_data_dir(
+                "workspaces", req.workspace_id,
                 "agents", req.agent_id, "memory_archive",
             )
             _ret_ids = [h.get("chunk_id") for h in archive_hits if h.get("chunk_id")]
@@ -1442,7 +1471,7 @@ def index_rebuild(req: RebuildIndexReq) -> Dict[str, Any]:
         return {"ok": False, "detail": "SQLite index not available"}
 
     # Locate canonical source files
-    agent_dir = os.path.join(DATA_DIR, "workspaces", req.workspace_id, "agents", req.agent_id)
+    agent_dir = _safe_join_data_dir("workspaces", req.workspace_id, "agents", req.agent_id)
     private_dir = os.path.join(agent_dir, "private")
     archive_dir = os.path.join(agent_dir, "memory_archive")
 
@@ -1498,8 +1527,8 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
 
     shard_snap = None
     try:
-        emb_dir = os.path.join(
-            DATA_DIR, "workspaces", req.workspace_id,
+        emb_dir = _safe_join_data_dir(
+            "workspaces", req.workspace_id,
             "agents", req.agent_id, "private", "embeddings",
         )
         shard_snap = build_shard_snapshot(emb_dir, base_dir=DATA_DIR)
@@ -1593,10 +1622,8 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
     )
 
     # Get archive store
-    _validate_path_component(req.workspace_id, "workspace_id")
-    _validate_path_component(req.agent_id, "agent_id")
-    archive_dir = os.path.join(
-        DATA_DIR, "workspaces", req.workspace_id,
+    archive_dir = _safe_join_data_dir(
+        "workspaces", req.workspace_id,
         "agents", req.agent_id, "memory_archive",
     )
     store = _get_archive_store(req.workspace_id, req.agent_id)
@@ -1685,10 +1712,8 @@ def promote_suggestions(
     """Scan archive chunks and return top promotion candidates."""
     from .promotion import suggest_promotions, load_retrieval_counts
 
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    archive_dir = os.path.join(
-        DATA_DIR, "workspaces", workspace_id,
+    archive_dir = _safe_join_data_dir(
+        "workspaces", workspace_id,
         "agents", agent_id, "memory_archive",
     )
     store = _get_archive_store(workspace_id, agent_id)
@@ -1804,7 +1829,8 @@ async def trigger_compression(workspace_id: str, req: CompressTriggerRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.exception("compress/trigger failed")
+        raise HTTPException(status_code=500, detail="Internal error during compression")
 
 
 @app.get("/workspace/{workspace_id}/compress/status")
@@ -1860,7 +1886,7 @@ async def spirit_return_status(workspace_id: str, agent_id: str):
     # Warmup tracker stats + warmth distribution
     try:
         from .spirit_return import WarmupTracker
-        warmup_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
+        warmup_dir = Path(_safe_join_data_dir("workspaces", workspace_id, "agents", agent_id, "warmup"))
         tracker = WarmupTracker(warmup_dir, base_dir=DATA_DIR)
         stats = tracker.stats()
 
@@ -1877,7 +1903,8 @@ async def spirit_return_status(workspace_id: str, agent_id: str):
         result["warmup"] = stats
     except Exception as exc:
         result["warmup"] = None
-        result["warmup_error"] = str(exc)
+        _log.debug("warmup tracker failed: %s", exc)
+        result["warmup_error"] = "warmup data unavailable"
 
     # Deep memory stats (for context)
     deep_store = fabric._deep_stores.get(fabric._agent_key(workspace_id, agent_id))
@@ -1940,9 +1967,6 @@ def process_spirit_reflections_endpoint(
     NEVER raises an HTTP exception. The main response path is never
     affected.
     """
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(req.agent_id, "agent_id")
-
     try:
         from pathlib import Path
         from .spirit_reflection import (
@@ -1952,7 +1976,7 @@ def process_spirit_reflections_endpoint(
             DEFAULT_COOLDOWN_STEPS,
         )
 
-        sr_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / req.agent_id / "spirit_reflections"
+        sr_dir = Path(_safe_join_data_dir("workspaces", workspace_id, "agents", req.agent_id, "spirit_reflections"))
         store = SpiritReflectionStore(sr_dir, base_dir=DATA_DIR)
 
         threshold = req.influence_threshold if req.influence_threshold is not None else DEFAULT_INFLUENCE_THRESHOLD
@@ -1977,11 +2001,11 @@ def process_spirit_reflections_endpoint(
 
     except Exception as exc:
         # Fail soft — never break the caller's response flow
-        _log.warning("spirit reflection processing failed: %s", exc)
+        _log.warning("spirit reflection processing failed: %s", _safe_log_value(str(exc)))
         return {
             "ok": False,
             "reflections_stored": 0,
-            "error": str(exc),
+            "error": "spirit reflection processing failed",
         }
 
 
@@ -1992,14 +2016,11 @@ def spirit_reflections_status(workspace_id: str, agent_id: str) -> Dict[str, Any
     Returns: total count, recent reflections, rejection reason distribution,
     average influence score, mode distribution.
     """
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-
     try:
         from pathlib import Path
         from .spirit_reflection import SpiritReflectionStore
 
-        sr_dir = Path(DATA_DIR) / "workspaces" / workspace_id / "agents" / agent_id / "spirit_reflections"
+        sr_dir = Path(_safe_join_data_dir("workspaces", workspace_id, "agents", agent_id, "spirit_reflections"))
         if not sr_dir.exists():
             return {
                 "ok": True,
@@ -2026,12 +2047,12 @@ def spirit_reflections_status(workspace_id: str, agent_id: str) -> Dict[str, Any
         }
 
     except Exception as exc:
-        _log.warning("spirit reflection status failed: %s", exc)
+        _log.warning("spirit reflection status failed: %s", _safe_log_value(str(exc)))
         return {
             "ok": False,
             "agent_id": agent_id,
             "workspace_id": workspace_id,
-            "error": str(exc),
+            "error": "spirit reflection status unavailable",
         }
 
 
@@ -2052,7 +2073,8 @@ async def deep_memory_query(workspace_id: str, req: DeepMemoryQueryRequest):
             "results": [h.to_dict() for h in hits],
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.exception("deep-memory/query failed")
+        raise HTTPException(status_code=500, detail="Internal error querying deep memory")
 
 
 # ==========================================================================
@@ -2090,9 +2112,10 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     try:
         fabric.create_agent(req.workspace_id, req.agent_id)
     except Exception as exc:
+        _log.debug("cognition/run agent setup failed: %s", exc)
         raise HTTPException(
             status_code=404,
-            detail=f"Agent '{req.agent_id}' in workspace '{req.workspace_id}': {exc}"
+            detail="Agent not found or could not be initialised"
         )
 
     # Build TaskPacket
@@ -2105,7 +2128,8 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
             priority=req.priority,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        _log.debug("cognition/run invalid task: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid cognition task parameters")
 
     # Build query function wrapping fabric.query()
     def query_fn(workspace_id, agent_id, query_text, top_k, domain_id):
