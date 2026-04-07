@@ -8,6 +8,8 @@ import numpy as np
 from .embedding_store import (
     EmbeddingShardReader,
     load_embedding as _load_embedding_universal,
+    _canonical_storage_root,
+    _child_path,
 )
 
 def _now_ts() -> int:
@@ -17,13 +19,6 @@ def _validate_path_component(value: str, label: str) -> str:
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
-
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
 
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     na = float(np.linalg.norm(a) + 1e-12)
@@ -70,19 +65,18 @@ class MotifRegistry:
         shard_reader: Optional[EmbeddingShardReader] = None,
         entity_payload_fn: Optional[Any] = None,
     ) -> None:
-        self.data_dir = os.path.realpath(data_dir)
         self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
         self.domain_id = _validate_path_component(domain_id, "domain_id")
 
-        motif_dir = _ensure_within_base(
+        self.data_dir = _canonical_storage_root(data_dir)
+        motif_dir = _canonical_storage_root(
             os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id),
-            self.data_dir,
+            mkdir=True,
         )
-        self.path = _ensure_within_base(os.path.join(motif_dir, "motifs.json"), motif_dir)
-        self.events_path = _ensure_within_base(os.path.join(motif_dir, "motif_events.jsonl"), motif_dir)
-        self.merges_path = _ensure_within_base(os.path.join(motif_dir, "motif_merges.json"), motif_dir)
+        self.path = _child_path(motif_dir, "motifs.json")
+        self.events_path = _child_path(motif_dir, "motif_events.jsonl")
+        self.merges_path = _child_path(motif_dir, "motif_merges.json")
         self._merge_suggestions: Dict[str, Dict[str, Any]] = {}
-        os.makedirs(motif_dir, exist_ok=True)
         self.motifs: Dict[str, Motif] = {}
         self._next_id: int = 1  # monotonic counter — never decreases
         # Shard-aware embedding loading
@@ -202,7 +196,10 @@ class MotifRegistry:
         if vec is not None:
             return _unit(vec)
         # Final fallback: direct legacy file (for backward compat)
-        p = os.path.join(self.data_dir, f"emb_{int(eid)}.npy")
+        try:
+            p = _child_path(self.data_dir, f"emb_{int(eid)}.npy")
+        except ValueError:
+            return None
         if not os.path.exists(p):
             return None
         try:
