@@ -33,19 +33,13 @@ log = logging.getLogger("torment.collective_proposals")
 
 import numpy as np
 
+from .embedding_store import _canonical_storage_root, _child_path
+
 
 def _validate_path_component(value: str, label: str) -> str:
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
-
-
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -96,17 +90,16 @@ class ConvergencePersistenceTracker:
     """
 
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        safe_data_dir = os.path.realpath(data_dir)
         safe_workspace_id = _validate_path_component(workspace_id, "workspace_id")
-        self._base = _ensure_within_base(
-            os.path.join(safe_data_dir, "workspaces", safe_workspace_id, "collective"),
-            safe_data_dir,
+
+        # Canonical trust chain: data_dir → workspaces/<id>/collective
+        canonical_data = _canonical_storage_root(data_dir)
+        collective_root = _canonical_storage_root(
+            os.path.join(canonical_data, "workspaces", safe_workspace_id, "collective"),
+            mkdir=True,
         )
-        os.makedirs(self._base, exist_ok=True)
-        self._log_path = _ensure_within_base(
-            os.path.join(self._base, "convergence_patterns.jsonl"),
-            self._base,
-        )
+        self._base = collective_root
+        self._log_path = _child_path(collective_root, "convergence_patterns.jsonl")
         self._lock = threading.Lock()
 
         # pattern_key -> list of (event_id, timestamp)
