@@ -35,7 +35,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -315,7 +315,6 @@ def build_spirit_reflection_event(
     influence_tags = influence_result["influence_reason_tags"]
 
     # Build a derived summary — NOT a copy of the original
-    original_summary_snippet = str(candidate.get("summary", ""))[:60]
     summary = (
         f"A prior deep memory (eid={source_eid}) resurfaced in {return_mode} mode "
         f"via {interaction} interaction and materially shaped the present reply."
@@ -402,6 +401,24 @@ def should_store_reflection(
 # Storage — spirit_reflections.jsonl (separate from deep memory)
 # ---------------------------------------------------------------------------
 
+def _ensure_within_base(path: str, base_dir: str) -> Path:
+    """Resolve *path* and verify it stays inside *base_dir*.
+
+    Returns a resolved ``Path`` object that is safe to use for I/O.
+    Raises ``ValueError`` on any escape attempt (traversal, symlink, etc.).
+    """
+    base = os.path.realpath(base_dir)
+    resolved = os.path.realpath(str(path))
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("Path escapes base directory")
+    return Path(resolved)
+
+
+def _safe_log_value(value: Any) -> str:
+    """Neutralize newlines / carriage returns to prevent log injection."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 class SpiritReflectionStore:
     """Persists spirit reflection events to a separate JSONL file.
 
@@ -415,13 +432,11 @@ class SpiritReflectionStore:
     """
 
     def __init__(self, storage_path: Path, *, base_dir: str) -> None:
-        base = os.path.realpath(base_dir)
-        resolved = os.path.realpath(str(storage_path))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise ValueError("SpiritReflectionStore path escapes base directory")
-        self._dir = Path(resolved)
+        self._dir = _ensure_within_base(str(storage_path), base_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._file = self._dir / "reflections.jsonl"
+        self._file = _ensure_within_base(
+            str(self._dir / "reflections.jsonl"), base_dir,
+        )
         self._cache: Optional[List[SpiritReflectionEvent]] = None
 
     def _ensure_loaded(self) -> None:
@@ -546,12 +561,15 @@ def process_spirit_reflections(
                 stored.append(event)
                 logger.debug(
                     "spirit reflection stored: source_eid=%d mode=%s influence=%.3f",
-                    event.source_eid, event.return_mode, event.influence_score,
+                    event.source_eid,
+                    _safe_log_value(event.return_mode),
+                    event.influence_score,
                 )
         else:
             logger.debug(
-                "spirit reflection rejected: source_eid=%d reason=%s",
-                candidate.get("eid", "?"), guard["reason"],
+                "spirit reflection rejected: source_eid=%s reason=%s",
+                _safe_log_value(candidate.get("eid", "?")),
+                _safe_log_value(guard["reason"]),
             )
 
     return stored
