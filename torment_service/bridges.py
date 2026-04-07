@@ -1,7 +1,7 @@
 # bridges.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 import os, json, time
 from .motifs import cosine, MotifRegistry
 
@@ -10,18 +10,13 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+from .embedding_store import _canonical_storage_root, _child_path
+
+
 def _validate_path_component(value: str, label: str) -> str:
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
-
-
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
 
 @dataclass
 class Bridge:
@@ -36,22 +31,16 @@ class Bridge:
 
 class BridgeRegistry:
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        self.data_dir = os.path.realpath(data_dir)
         self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
 
-        workspace_dir = _ensure_within_base(
-            os.path.join(self.data_dir, "workspaces", self.workspace_id),
-            self.data_dir,
+        canonical_data = _canonical_storage_root(data_dir)
+        workspace_dir = _canonical_storage_root(
+            os.path.join(canonical_data, "workspaces", self.workspace_id),
+            mkdir=True,
         )
-        self.path = _ensure_within_base(
-            os.path.join(workspace_dir, "bridges.json"),
-            workspace_dir,
-        )
-        self.events_path = _ensure_within_base(
-            os.path.join(workspace_dir, "bridge_events.jsonl"),
-            workspace_dir,
-        )
-        os.makedirs(workspace_dir, exist_ok=True)
+        self.data_dir = canonical_data
+        self.path = _child_path(workspace_dir, "bridges.json")
+        self.events_path = _child_path(workspace_dir, "bridge_events.jsonl")
         self.bridges: List[Bridge] = []
         self._load()
 
