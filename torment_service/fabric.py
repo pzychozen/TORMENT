@@ -4155,6 +4155,25 @@ class TormentFabric:
             for m in ws.motif_regs.get(d, MotifRegistry(self.data_dir, workspace_id, d)).motifs.values():
                 motif_centroids[m.motif_id] = m.centroid_np()
 
+        # Build conflict map for traced domains (parity with query())
+        _trace_conflict_map: Dict[int, Dict[str, Any]] = {}
+        for d in domains:
+            try:
+                clist = ws.conflicts[d].list(status="open", limit=500)
+            except Exception:
+                clist = []
+            for c in clist:
+                for _ceid in (int(c.eid_a), int(c.eid_b)):
+                    ent = _trace_conflict_map.get(_ceid)
+                    if ent is None:
+                        _trace_conflict_map[_ceid] = {"max_score": float(c.conflict_score), "conflict_ids": [c.conflict_id]}
+                    else:
+                        ent["max_score"] = max(float(ent.get("max_score", 0.0)), float(c.conflict_score))
+                        ids = ent.get("conflict_ids") or []
+                        if c.conflict_id not in ids:
+                            ids.append(c.conflict_id)
+                        ent["conflict_ids"] = ids
+
         def explain_for_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
             now_ts = _now_ts()
             sim = float(hit.get('score', 0.0))
@@ -4172,12 +4191,36 @@ class TormentFabric:
             mtype = str(hit.get("type") or "")
             type_bonus = 0.0
 
+            # --- Provenance extraction (parity with query()) ---
+            _prov_raw = hit.get("provenance")
+            _is_tool_result = (
+                isinstance(_prov_raw, dict)
+                and _prov_raw.get("source_type") == "tool_result"
+            )
+            _is_collective = (
+                _prov_raw == "collective"
+                or (isinstance(_prov_raw, dict) and _prov_raw.get("source_type") == "collective_echo")
+            )
+
+            # --- Conflict penalty (parity with query()) ---
+            _hit_eid = int(hit.get("eid", -1))
+            conflict_info = _trace_conflict_map.get(_hit_eid)
+            conflict_penalty = 0.0
+            conflict_ids: List[str] = []
+            conflict_status = None
+            if conflict_info is not None and str(hit.get("scope", "")) == "shared" and bool(hit.get("canon", False)):
+                conflict_status = "open"
+                conflict_ids = list(conflict_info.get("conflict_ids") or [])
+                conflict_penalty = float(conflict_info.get("max_score", 0.0))
+                # Mirror query(): escalate contradiction_risk for contested canon
+                contradiction_risk = max(contradiction_risk, 0.5 * conflict_penalty)
+
             # Character continuity: prefer the agent's own private thread.
             try:
                 self_bonus = float(os.getenv("TORMENT_SELF_MEMORY_BONUS", "0.06"))
             except Exception:
                 self_bonus = 0.06
-            if str(hit.get("scope", "")) == "private" and str(hit.get("agent_id", "")) == str(agent_id):
+            if str(hit.get("scope", "")) == "private" and str(hit.get("agent_id", "")) == str(agent_id) and not _is_tool_result:
                 type_bonus += self_bonus
 
             if mtype == "identity_anchor":
@@ -4189,9 +4232,29 @@ class TormentFabric:
                         type_bonus += float(os.getenv("TORMENT_SELF_ANCHOR_BONUS", "0.04"))
                     except Exception:
                         type_bonus += 0.04
+
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
+
+            # --- Post-score discounts (parity with query()) ---
+            collective_discount = 1.0
+            tool_result_discount = 1.0
+
+            if _is_collective:
+                try:
+                    collective_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
+                except Exception:
+                    collective_discount = 0.50
+                final *= collective_discount
+
+            if _is_tool_result:
+                try:
+                    tool_result_discount = float(os.getenv("TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT", "0.85"))
+                except Exception:
+                    tool_result_discount = 0.85
+                final *= tool_result_discount
+
             return {
-                "eid": int(hit.get('eid')),
+                "eid": _hit_eid,
                 "scope": hit.get('scope'),
                 "domain_id": hit.get('domain_id'),
                 "final_score": final,
@@ -4202,6 +4265,15 @@ class TormentFabric:
                     "motif_alignment": motif_alignment,
                     "contradiction_risk": contradiction_risk,
                     "weights": {"alpha": 0.35, "beta": 0.10, "gamma": 0.20, "delta": 0.30},
+                    "collective_discount": collective_discount,
+                    "tool_result_discount": tool_result_discount,
+                    "conflict_penalty": conflict_penalty,
+                    "conflict_status": conflict_status,
+                    "conflict_ids": conflict_ids,
+                    "provenance_type": (
+                        _prov_raw.get("source_type") if isinstance(_prov_raw, dict)
+                        else (str(_prov_raw) if isinstance(_prov_raw, str) else None)
+                    ),
                 },
             }
 
