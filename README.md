@@ -15,6 +15,8 @@ If you want AI characters that feel more consistent, more alive, and more struct
 
 Built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons. Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
+The TriOctagon toy model at the heart of this system has its own standalone research archive with full mathematical diagnostics across 12 versioned releases — each version dives deep into the coupled-oscillator math, phase-space analysis, and stability proofs that underpin the kernel's behavior. The complete diagnostic series is available on Zenodo: [TriOctagon Toy Model — Full Diagnostics (12 versions)](https://zenodo.org/records/18215874).
+
 ---
 
 ## What's New in v2.4.3 — Tool-Result Memory Lane
