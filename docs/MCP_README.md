@@ -110,6 +110,16 @@ These wrap `torment_submit_task` with typed parameters for common operations:
 | `torment_feedback` | feedback | Reinforcement feedback on retrieved memories |
 | `torment_reinforce` | reinforce | Direct memory reinforcement |
 
+### Convenience Tools (Tier 2 — Guarded)
+
+Available when `TORMENT_MCP_EXPOSURE_TIER=guarded`:
+
+| Tool | Operation | Description |
+|---|---|---|
+| `torment_tool_result_ingest` | tool_result_ingest | Store externally obtained tool output as provenance-tagged memory |
+
+`torment_tool_result_ingest` is **memory storage, not tool execution**. TORMENT remembers what tools returned — it does not call tools. Results are tagged with `provenance_type: "tool_result"` and governed by the same Spine trust enforcement as regular ingest.
+
 ## Resources
 
 Read-only views into agent and workspace state:
@@ -119,13 +129,14 @@ Read-only views into agent and workspace state:
 | `torment://workspace/{ws}/agent/{agent}/state` | Identity, drift, memory count, compression |
 | `torment://workspace/{ws}/agent/{agent}/memory-summary` | Memory count, active motifs, drift status |
 | `torment://workspace/{ws}/collective/status` | Agents, bridges, convergence events, hivemind flag |
+| `torment://workspace/{ws}/agent/{agent}/provenance` | Recent memory provenance metadata for verification |
 
 ## Exposure Tiers
 
 The MCP server only exposes operations allowed by the Spine's `exposure_tier` policy:
 
 - **Tier 1 (open):** `query_state`, `query_memory`, `ingest`, `feedback`, `reinforce` — available by default
-- **Tier 2 (guarded):** `collective_reingest`, `memory_governance_set`, `compression_run`, `cognition_run` — available only when `TORMENT_MCP_EXPOSURE_TIER=guarded`
+- **Tier 2 (guarded):** `tool_result_ingest`, `collective_reingest`, `memory_governance_set`, `compression_run`, `cognition_run` — available only when `TORMENT_MCP_EXPOSURE_TIER=guarded`
 - **Tier 3 (internal):** `identity_rewrite`, `seed_change`, etc. — never exposed through MCP
 
 Set `TORMENT_MCP_EXPOSURE_TIER=guarded` to enable Tier 2 operations.
@@ -185,6 +196,49 @@ Using Claude Desktop with the MCP server connected:
 4. **Provide feedback:** Call `torment_feedback` with the memory IDs that were useful. This shapes future retrieval ranking.
 
 5. **Check drift:** Read the `torment://workspace/default/agent/default/state` resource. The `drift_status` field shows whether the agent's character is drifting from its seed.
+
+### Worked Example: Ingest Tool Result → Query → Verify Provenance
+
+This workflow requires `TORMENT_MCP_EXPOSURE_TIER=guarded`.
+
+1. **Ingest tool output:** Call `torment_tool_result_ingest` with `tool_name: "weather_api"`, `content: "Reykjavik: 3°C cloudy"`. Returns `decision_code: "fast_allowed"`, `result_code: "stored"`.
+
+2. **Query memory:** Call `torment_query_memory` with `query: "weather in Reykjavik"`. Results include `provenance_type: "tool_result"` and `provenance_tool_name: "weather_api"` on the matching hit.
+
+3. **Verify provenance:** Read the `torment://workspace/default/agent/default/provenance` resource. The memory appears with `source_type: "tool_result"`, `write_path: "tool_ingest"`, and `tool_name: "weather_api"`.
+
+Tool-result memories are governed differently from regular memories: they receive a retrieval discount (default 0.85×), are excluded from continuity bonuses, have a capped half-life (default 7 days), and are prioritized for compression. This ensures tool output informs retrieval without dominating it.
+
+### Worked Example: What a Blocked Call Looks Like
+
+If an operation is not available at the current exposure tier, or trust is insufficient, you get a governed rejection:
+
+```
+torment_submit_task(
+  operation: "identity_rewrite",
+  payload: '{"new_seed": "something"}'
+)
+→ {
+    "ok": false,
+    "decision_code": "blocked_mcp_not_exposed",
+    "result_code": "none",
+    "result": null
+  }
+```
+
+If workspace or agent context is missing:
+
+```
+torment_ingest(text: "hello")   # with no default workspace set
+→ {
+    "ok": false,
+    "decision_code": "blocked_mcp_missing_context",
+    "result_code": "none",
+    "result": null
+  }
+```
+
+The `decision_code` tells you exactly what went wrong. See the Decision Codes table above for the full list.
 
 ## Architecture
 

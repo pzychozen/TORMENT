@@ -47,8 +47,8 @@ Claude Desktop config (`claude_desktop_config.json`):
 | # | Test | Pass criteria | P/F |
 |---|---|---|---|
 | 1.1 | Start Claude Desktop with config | No error in logs, server process running | |
-| 1.2 | Tools visible in host | 6 tools appear: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce` | |
-| 1.3 | Resources visible in host | 3 resource templates appear with `torment://` URIs | |
+| 1.2 | Tools visible in host | 7 tools appear: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`, `torment_tool_result_ingest` (last one requires guarded tier) | |
+| 1.3 | Resources visible in host | 4 resource templates appear with `torment://` URIs (including provenance) | |
 | 1.4 | No schema errors | Host does not report validation or schema errors on startup | |
 | 1.5 | Server name shows as "torment-memory" | Correct name in host server list | |
 
@@ -96,6 +96,15 @@ Claude Desktop config (`claude_desktop_config.json`):
 | 2.6a | Ingest via canonical | `operation: "ingest"`, `payload: '{"text": "Canonical test."}'` | `ok: true`, `result_code: "stored"` | |
 | 2.6b | Query via canonical | `operation: "query_memory"`, `payload: '{"query": "canonical"}'` | `ok: true`, `result_code: "queried"` | |
 
+### 2.7 torment_tool_result_ingest (requires `TORMENT_MCP_EXPOSURE_TIER=guarded`)
+
+| # | Test | Input | Expected | P/F |
+|---|---|---|---|---|
+| 2.7a | Valid tool-result ingest | `tool_name: "weather_api"`, `content: "Reykjavik: 3C cloudy"` | `ok: true`, `decision_code: "fast_allowed"`, `result_code: "stored"` | |
+| 2.7b | Query returns provenance badge | `torment_query_memory` with `query: "Reykjavik weather"` | Hit includes `provenance_type: "tool_result"`, `provenance_tool_name: "weather_api"` | |
+| 2.7c | Submit_task canonical path | `torment_submit_task` with `operation: "tool_result_ingest"`, `payload: '{"tool_name":"calc","content":"2+2=4","step":1}'` | `ok: true`, `result_code: "stored"` | |
+| 2.7d | Not available at open tier | Set `TORMENT_MCP_EXPOSURE_TIER=open`, call `torment_submit_task` with `operation: "tool_result_ingest"` | `blocked_mcp_not_exposed` | |
+
 ---
 
 ## 3. Error & Rejection Tests
@@ -116,8 +125,10 @@ Claude Desktop config (`claude_desktop_config.json`):
 | 4.1 | Agent state | `torment://workspace/smoke_ws/agent/smoke_agent/state` | JSON with `workspace_id`, `agent_id`, `memory_count`, `character` | |
 | 4.2 | Memory summary | `torment://workspace/smoke_ws/agent/smoke_agent/memory-summary` | JSON with `memory_count`, `drift_status` | |
 | 4.3 | Collective status | `torment://workspace/smoke_ws/collective/status` | JSON with `agents`, `agent_count`, `shared_domains` | |
-| 4.4 | Wrong workspace | `torment://workspace/nonexistent/agent/x/state` | Graceful error, no crash | |
-| 4.5 | No internal leakage | Check all resource outputs | No file paths, no internal class names, no stack traces | |
+| 4.4 | Provenance resource | `torment://workspace/smoke_ws/agent/smoke_agent/provenance` | JSON with `stats` (total, with/without provenance, by_source_type), `memories` array | |
+| 4.5 | Provenance after tool ingest | Ingest a tool result first, then read provenance resource | Entry with `source_type: "tool_result"` appears in memories | |
+| 4.6 | Wrong workspace | `torment://workspace/nonexistent/agent/x/state` | Graceful error, no crash | |
+| 4.7 | No internal leakage | Check all resource outputs | No file paths, no internal class names, no stack traces | |
 
 ---
 
@@ -141,7 +152,7 @@ After running all tests above, verify these codes were observed:
 |---|---|---|
 | `fast_allowed` | All successful Tier 1 tool calls | |
 | `state_read` | query_state calls | |
-| `stored` | ingest calls | |
+| `stored` | ingest and tool_result_ingest calls | |
 | `queried` | query_memory calls | |
 | `reinforced` | feedback/reinforce calls | |
 | `blocked_mcp_not_exposed` | Non-exposed operation attempt (3.2, 3.3) | |
@@ -192,9 +203,9 @@ Copy this for each issue found:
 | Category | Pass | Fail | Notes |
 |---|---|---|---|
 | Connection & Discovery | /5 | | |
-| Tool Sanity | /8 | | |
+| Tool Sanity | /12 | | |
 | Error & Rejection | /4 | | |
-| Resource Sanity | /5 | | |
+| Resource Sanity | /7 | | |
 | Context Behavior | /5 | | |
 | Decision/Result Codes | /8 | | |
-| **Total** | **/35** | | |
+| **Total** | **/41** | | |

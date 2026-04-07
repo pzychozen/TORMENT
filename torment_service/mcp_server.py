@@ -509,6 +509,59 @@ def create_mcp_server() -> FastMCP:
                                  agent_id=agent_id or None)
             return json.dumps(result, default=str)
 
+    # --- torment_tool_result_ingest (guarded tier) ---
+    if "tool_result_ingest" in exposed_ops:
+        @mcp.tool(
+            name="torment_tool_result_ingest",
+            description=(
+                "Store externally obtained tool output as governed memory. "
+                "This is memory storage, not tool execution — TORMENT remembers "
+                "what tools returned, it does not call tools. "
+                "Provenance-tagged with source_type='tool_result'. "
+                "Governed by the Spine with trust enforcement."
+            ),
+        )
+        def torment_tool_result_ingest(
+            tool_name: str,
+            content: str,
+            workspace_id: str = "",
+            agent_id: str = "",
+            summary: str = "",
+            step: int = 0,
+            domain_id: str = "",
+            session_id: str = "",
+            scope: str = "private",
+        ) -> str:
+            """Ingest tool output as governed memory.
+
+            Args:
+                tool_name: Identity of the tool that produced this output
+                content: Raw tool output to store as memory
+                workspace_id: Target workspace (uses default if empty)
+                agent_id: Target agent (uses default if empty)
+                summary: Optional short summary (auto-generated if empty)
+                step: Simulation step number (0 for external input)
+                domain_id: Optional domain classification
+                session_id: Optional session identifier for provenance
+                scope: "private" (default) or "shared"
+            """
+            payload: Dict[str, Any] = {
+                "tool_name": tool_name,
+                "content": content,
+                "step": step,
+                "scope": scope,
+            }
+            if summary:
+                payload["summary"] = summary
+            if domain_id:
+                payload["domain_id"] = domain_id
+            if session_id:
+                payload["session_id"] = session_id
+            result = _spine_call("tool_result_ingest", payload,
+                                 workspace_id=workspace_id or None,
+                                 agent_id=agent_id or None)
+            return json.dumps(result, default=str)
+
     # -----------------------------------------------------------------------
     # Resources — read-only Spine-backed views
     # -----------------------------------------------------------------------
@@ -699,6 +752,75 @@ def create_mcp_server() -> FastMCP:
             status["error"] = str(e)
 
         return json.dumps(status, indent=2, default=str)
+
+    # --- Resource: provenance (read-only) ---
+    @mcp.resource(
+        uri="torment://workspace/{workspace_id}/agent/{agent_id}/provenance",
+        name="Recent Provenance",
+        description=(
+            "Recent memory provenance metadata for verification. "
+            "Shows source_type, write_path, and source_role for each memory. "
+            "Use this to verify that tool-result ingest, user ingest, and "
+            "collective operations are tagged correctly."
+        ),
+        mime_type="application/json",
+    )
+    def resource_provenance(workspace_id: str, agent_id: str) -> str:
+        """Read-only provenance inspection — same logic as /debug/provenance."""
+        fabric = _get_fabric()
+        limit = 50
+
+        memories: List[Dict[str, Any]] = []
+        ak = f"{workspace_id}/{agent_id}"
+        graph = fabric.private_graphs.get(ak)
+
+        if graph is not None and hasattr(graph, "entities"):
+            for eid, entity in graph.entities.items():
+                payload = entity.payload or {}
+                prov = payload.get("provenance")
+                memories.append({
+                    "eid": eid,
+                    "agent_id": agent_id,
+                    "scope": "private",
+                    "summary": (
+                        (payload.get("summary") or str(payload.get("text", ""))[:120])
+                        if payload else ""
+                    ),
+                    "provenance": prov,
+                    "has_provenance": prov is not None,
+                    "created_step": payload.get("step"),
+                })
+
+        # Most recent first
+        memories.sort(key=lambda m: m["eid"], reverse=True)
+        memories = memories[:limit]
+
+        # Summary stats
+        total = len(memories)
+        with_prov = sum(1 for m in memories if m["has_provenance"])
+        by_source_type: Dict[str, int] = {}
+        by_write_path: Dict[str, int] = {}
+        for m in memories:
+            p = m.get("provenance")
+            if p and isinstance(p, dict):
+                st = p.get("source_type", "unknown")
+                wp = p.get("write_path", "unknown")
+                by_source_type[st] = by_source_type.get(st, 0) + 1
+                by_write_path[wp] = by_write_path.get(wp, 0) + 1
+
+        result: Dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "stats": {
+                "total_inspected": total,
+                "with_provenance": with_prov,
+                "without_provenance": total - with_prov,
+                "by_source_type": by_source_type,
+                "by_write_path": by_write_path,
+            },
+            "memories": memories,
+        }
+        return json.dumps(result, indent=2, default=str)
 
     return mcp
 

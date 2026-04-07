@@ -572,7 +572,7 @@ class TestExposureTiers(unittest.TestCase):
         tier2 = get_exposed_operations(EXPOSURE_GUARDED)
         self.assertGreater(len(tier2), len(tier1))
         self.assertEqual(len(tier1), 5)  # query_state, query_memory, ingest, feedback, reinforce
-        self.assertEqual(len(tier2), 9)  # tier1 + 4 guarded
+        self.assertEqual(len(tier2), 10)  # tier1 + 5 guarded (incl. tool_result_ingest)
 
 
 if __name__ == "__main__":
