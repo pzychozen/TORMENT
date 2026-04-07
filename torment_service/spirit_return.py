@@ -288,7 +288,7 @@ def select_return_mode(
 # ---------------------------------------------------------------------------
 
 # Warmth increases within this many steps of the first appearance
-WARMTH_WINDOW_STEPS = 200
+WARMTH_WINDOW_STEPS = 400
 WARMTH_FLOOR = 0.2
 WARMTH_INCREMENT = 0.15
 WARMTH_CAP = 1.0

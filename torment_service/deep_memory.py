@@ -280,7 +280,7 @@ class DeepMemoryStore:
         self,
         embedding: np.ndarray,
         top_k: int = 5,
-        min_similarity: float = 0.3,
+        min_similarity: float = 0.4,
     ) -> List[DeepMemory]:
         """Cosine similarity search over deep memory embeddings.
 
