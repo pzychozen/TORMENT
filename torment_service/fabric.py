@@ -577,7 +577,7 @@ class TormentFabric:
         """
         if not self._sqlite_enable:
             return None
-        key = f"{workspace_id}/{agent_id}"
+        key = self._agent_key(workspace_id, agent_id)
         if key not in self._sqlite_indexes:
             try:
                 from .sqlite_index import IndexManager
@@ -3176,7 +3176,7 @@ class TormentFabric:
             _spiral_penalty_max = 0.08
 
         _spiral_neg_recent = 0
-        if _spiral_enable and str(agent_id) in self.private_graphs:
+        if _spiral_enable and ak in self.private_graphs:
             try:
                 _st = _load_affect_state(self.data_dir, ws.workspace_id, str(agent_id))
                 _dh = _st.get("drift_hist") or []

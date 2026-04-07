@@ -104,7 +104,7 @@ def make_live_drift_check(fabric_instance) -> "DriftCheckFn":
             # Get required objects from fabric (not from identity —
             # AgentIdentity is a lightweight dataclass; graph/seed/state
             # live on the fabric instance and character_store).
-            ak = f"{workspace_id}/{agent_id}"
+            ak = fabric_instance._agent_key(workspace_id, agent_id)
             graph = fabric_instance.private_graphs.get(ak)
             if graph is None:
                 raise ValueError(f"No private graph for {ak}")
