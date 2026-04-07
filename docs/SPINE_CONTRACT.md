@@ -99,7 +99,7 @@ Every response wraps the Fabric result with governance metadata:
 
 | Code | Meaning |
 |---|---|
-| `stored` | New memory created (ingest) |
+| `stored` | New memory created (ingest, tool_result_ingest) |
 | `reinforced` | Feedback/reinforcement applied |
 | `reingested` | Collective reingest completed |
 | `queried` | Read-only query returned results |
@@ -162,6 +162,7 @@ Use `get_exposed_operations(max_tier)` in code to query the registry:
 | `cognition_run` | cognitive | guarded | full | 0.6 | no | Run full 4-role cognition pipeline |
 | `role_conflict_resolution` | cognitive | internal | full | 1.0 | no | Resolve inter-role conflicts |
 | `architecture_review` | cognitive | internal | full | 1.0 | no | Full pipeline review of change |
+| `tool_result_ingest` | write | guarded | fast | 0.6 | no | Ingest externally obtained tool output as memory |
 
 ---
 
@@ -188,6 +189,7 @@ This matrix defines which operations should be exposed through the MCP protocol 
 | `compression_run` | Tier 2 | **Maybe** | Maintenance operation, operator trust. Expose only for admin MCP clients. |
 | `memory_governance_set` | Tier 2 | **Maybe** | Governance mutation, operator trust. Expose only for admin MCP clients. |
 | `cognition_run` | Tier 2 | **Maybe** | Expensive full pipeline. Expose with rate limiting and elevated trust. |
+| `tool_result_ingest` | Tier 2 | **Maybe** | Governed tool-result memory write. Not tool execution. Expose for MCP clients that supply external tool output. |
 | `proposal_review` | Tier 3 | **No** | Internal collective governance. Not v1 MCP. |
 | `collective_policy_change` | Tier 3 | **No** | Policy mutation too sensitive for broad MCP access. |
 | `identity_rewrite` | Tier 3 | **No** | Identity mutation must never be MCP-accessible in v1. |
@@ -236,3 +238,4 @@ In addition to tools, the MCP server should expose these as **resources** (read-
 5. **The response envelope is the Spine's contract.** MCP and HTTP consumers should parse the envelope, not raw Fabric results.
 6. **Legacy endpoints are compatibility shims.** They internally construct SpineRequests and call `submit_task`. New code should never add new legacy-style endpoints.
 7. **The thinking layer is advisory, not authoritative.** When enabled (`TORMENT_THINKING_ADVISORY=1`), the thinking controller runs alongside Spine to provide task framing, memory planning, and stance recommendations. It never writes memory, never blocks execution, and never overrides Spine decisions. See `docs/advanced_cognition.md` for details.
+8. **Tool-result ingest is memory, not execution.** The `tool_result_ingest` operation stores externally obtained tool output as provenance-tagged memory. It does not execute tools, dispatch actions, create automation loops, or grant execution authority. TORMENT may remember what tools returned before it is ever allowed to decide what tools to run.

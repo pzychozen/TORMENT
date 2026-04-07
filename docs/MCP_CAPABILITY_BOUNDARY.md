@@ -108,21 +108,41 @@ TORMENT does not allow:
 
 ---
 
-## Future Expansion (Not in 2.4.x)
+## Tool-Result Ingest (v2.4.3)
 
-The system is structurally prepared for:
+TORMENT now supports governed ingest of externally obtained tool output as memory artifacts.
 
-- Tool result ingestion (`source_type: "tool_result"`)
-- Governed capability expansion
+**What this is:**
 
-However, no external tool execution exists in 2.4.x.
+- A Spine-governed write operation (`tool_result_ingest`)
+- Stores externally supplied tool output with `source_type: "tool_result"`, `write_path: "tool_ingest"` provenance
+- Queryable in normal retrieval, visible in `/debug/provenance`
+- Endpoint: `POST /tool/ingest`
 
-Any future capability layer must:
+**What this is not:**
+
+- Not tool execution. TORMENT does not call tools.
+- Not automation. There are no background polls, scheduled refreshes, or chained tool calls.
+- Not autonomous. Internal roles cannot trigger tool usage.
+- Not identity-canonical. Tool results are external observations, not self-knowledge.
+
+**Doctrine:**
+
+> TORMENT may remember what tools returned before it is ever allowed to decide what tools to run.
+
+Tool-result memories are safe parents for archivist writeback (included in `_SAFE_PARENT_SOURCE_TYPES`), but they do not grant execution authority and cannot trigger follow-up tool calls.
+
+---
+
+## Future Expansion
+
+Any future capability layer (tool execution, automation, scheduling) must:
 
 - Pass through Spine governance
 - Carry provenance
 - Respect exposure tiers
 - Remain explicitly gated
+- Be implemented as a separate governed phase, not folded into the memory system
 
 ---
 

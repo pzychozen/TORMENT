@@ -265,6 +265,9 @@ TORMENT has seven layers:
 - Tools: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`
 - Resources: `torment://admin/status`, `torment://workspace/{ws}/agent/{ag}/state`, `torment://workspace/{ws}/agent/{ag}/memory-summary`, `torment://workspace/{ws}/collective/status`
 
+**Tool-result ingest (v2.4.3):**
+- `POST /tool/ingest` `{ workspace_id, agent_id, tool_name, content, summary?, step?, domain_id?, session_id?, tool_metadata?, supplied_embedding? }` — governed ingest of externally obtained tool output as memory. This is a memory artifact operation, not tool execution. TORMENT remembers what tools returned; it does not decide what tools to run.
+
 **Provenance (v2.4.2):**
 - `GET /debug/provenance?workspace_id=...&agent_id=...` — inspect stored provenance metadata per memory
 
