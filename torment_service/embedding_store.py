@@ -64,6 +64,36 @@ def _ensure_within_base(path: str, base_dir: str) -> str:
     return resolved
 
 
+def _canonical_storage_root(path: str, *, mkdir: bool = False) -> str:
+    """Canonicalize a storage root path.
+
+    1. Resolves symlinks and normalizes to an absolute real path.
+    2. Optionally creates the directory.
+    3. Returns only the trusted, canonical root.
+
+    All child paths must be derived from this return value to ensure
+    CodeQL can trace the trust chain from canonicalization to file sink.
+    """
+    root = os.path.realpath(os.path.normpath(path))
+    if mkdir:
+        os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _child_path(root: str, filename: str) -> str:
+    """Derive a child file path from a canonical root, with traversal check.
+
+    ``filename`` must be a simple name (no separators, no '..').
+    """
+    if not filename or ".." in filename or os.sep in filename or "/" in filename:
+        raise ValueError(f"Invalid child filename: {filename!r}")
+    child = os.path.join(root, filename)
+    resolved = os.path.realpath(child)
+    if not resolved.startswith(root + os.sep):
+        raise ValueError(f"Child path escapes storage root: {resolved}")
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # EmbeddingShardWriter
 # ---------------------------------------------------------------------------
@@ -75,14 +105,10 @@ class EmbeddingShardWriter:
     """
 
     def __init__(self, embeddings_dir: str, dim: int = DEFAULT_DIM) -> None:
-        self.embeddings_dir = os.path.realpath(embeddings_dir)
+        self.embeddings_dir = _canonical_storage_root(embeddings_dir, mkdir=True)
         self.dim = int(dim)
-        os.makedirs(self.embeddings_dir, exist_ok=True)
 
-        self.manifest_path = _ensure_within_base(
-            os.path.join(self.embeddings_dir, "manifest.json"),
-            self.embeddings_dir,
-        )
+        self.manifest_path = _child_path(self.embeddings_dir, "manifest.json")
         self.manifest = self._load_or_create_manifest()
 
         # Ensure dim consistency
@@ -113,12 +139,11 @@ class EmbeddingShardWriter:
     def _save_manifest(self) -> None:
         self._write_json(self.manifest_path, self.manifest)
 
-    @staticmethod
-    def _write_json(path: str, obj: Dict[str, Any]) -> None:
-        safe_path = os.path.realpath(path)
-        base_dir = os.path.dirname(safe_path)
-        safe_path = _ensure_within_base(safe_path, base_dir)
-        tmp = _ensure_within_base(safe_path + ".tmp", base_dir)
+    def _write_json(self, path: str, obj: Dict[str, Any]) -> None:
+        """Atomically write JSON, verifying both target and temp stay inside storage root."""
+        safe_path = _ensure_within_base(path, self.embeddings_dir)
+        tmp = safe_path + ".tmp"
+        _ensure_within_base(tmp, self.embeddings_dir)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, ensure_ascii=False)
         os.replace(tmp, safe_path)
@@ -126,16 +151,10 @@ class EmbeddingShardWriter:
     # ---- shard management ----
 
     def _shard_npy_path(self, idx: int) -> str:
-        return _ensure_within_base(
-            os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy"),
-            self.embeddings_dir,
-        )
+        return _child_path(self.embeddings_dir, _shard_name(idx) + ".npy")
 
     def _shard_map_path(self, idx: int) -> str:
-        return _ensure_within_base(
-            os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl"),
-            self.embeddings_dir,
-        )
+        return _child_path(self.embeddings_dir, _shard_name(idx) + ".map.jsonl")
 
     def _ensure_active_shard(self) -> None:
         """Create or open the active shard memmap."""
@@ -239,14 +258,11 @@ class EmbeddingShardReader:
     """
 
     def __init__(self, embeddings_dir: str) -> None:
-        self.embeddings_dir = os.path.realpath(embeddings_dir)
+        self.embeddings_dir = _canonical_storage_root(embeddings_dir)
         self._shard_cache: Dict[int, np.ndarray] = {}
         self._map_cache: Dict[int, List[Dict[str, Any]]] = {}
 
-        self.manifest_path = _ensure_within_base(
-            os.path.join(self.embeddings_dir, "manifest.json"),
-            self.embeddings_dir,
-        )
+        self.manifest_path = _child_path(self.embeddings_dir, "manifest.json")
         self.manifest: Optional[Dict[str, Any]] = None
         if os.path.exists(self.manifest_path):
             with open(self.manifest_path, "r", encoding="utf-8") as f:
@@ -266,16 +282,10 @@ class EmbeddingShardReader:
     # ---- shard loading ----
 
     def _shard_npy_path(self, idx: int) -> str:
-        return _ensure_within_base(
-            os.path.join(self.embeddings_dir, _shard_name(idx) + ".npy"),
-            self.embeddings_dir,
-        )
+        return _child_path(self.embeddings_dir, _shard_name(idx) + ".npy")
 
     def _shard_map_path(self, idx: int) -> str:
-        return _ensure_within_base(
-            os.path.join(self.embeddings_dir, _shard_name(idx) + ".map.jsonl"),
-            self.embeddings_dir,
-        )
+        return _child_path(self.embeddings_dir, _shard_name(idx) + ".map.jsonl")
 
     def _load_shard(self, idx: int) -> np.ndarray:
         """Load a shard into cache (read-only memmap)."""
@@ -397,11 +407,8 @@ def load_legacy_embedding(data_dir: str, eid: int) -> Optional[np.ndarray]:
 
     Returns None if the file doesn't exist.
     """
-    safe_data_dir = os.path.realpath(data_dir)
-    path = _ensure_within_base(
-        os.path.join(safe_data_dir, f"emb_{int(eid)}.npy"),
-        safe_data_dir,
-    )
+    safe_data_dir = _canonical_storage_root(data_dir)
+    path = _child_path(safe_data_dir, f"emb_{int(eid)}.npy")
     if not os.path.exists(path):
         return None
     try:
