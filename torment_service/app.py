@@ -1476,7 +1476,8 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
     )
     from dataclasses import asdict
 
-    state = fabric.agent_states.get(req.agent_id)
+    _ak = fabric._agent_key(req.workspace_id, req.agent_id)
+    state = fabric.agent_states.get(_ak)
     if state is None:
         raise HTTPException(404, f"Agent '{req.agent_id}' has no active state")
 
@@ -1621,7 +1622,8 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
             if seed_id:
                 cseed = fabric.character_store.load_seed(req.workspace_id, seed_id)
                 if cseed and cseed.seed_eids:
-                    graph = fabric.private_graphs.get(req.agent_id)
+                    _promote_ak = fabric._agent_key(req.workspace_id, req.agent_id)
+                    graph = fabric.private_graphs.get(_promote_ak)
                     if graph:
                         embs = []
                         for seid in cseed.seed_eids[:5]:
@@ -1648,11 +1650,12 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
     # Execute promotion if approved
     promoted_eid = None
     if result.promote or req.force:
-        graph = fabric.private_graphs.get(req.agent_id)
+        _exec_ak = fabric._agent_key(req.workspace_id, req.agent_id)
+        graph = fabric.private_graphs.get(_exec_ak)
         if graph is None:
             # Ensure agent is initialized
             fabric.create_agent(req.workspace_id, req.agent_id)
-            graph = fabric.private_graphs.get(req.agent_id)
+            graph = fabric.private_graphs.get(_exec_ak)
 
         if graph:
             promoted_eid = promote_chunk(
@@ -1744,16 +1747,17 @@ async def trigger_compression(workspace_id: str, req: CompressTriggerRequest):
         )
         from .coherence_field import compute_coherence_field as _ccf
 
-        graph = fabric.private_graphs.get(req.agent_id)
+        _trig_ak = fabric._agent_key(workspace_id, req.agent_id)
+        graph = fabric.private_graphs.get(_trig_ak)
         if graph is None:
             raise HTTPException(status_code=404, detail=f"No private graph for agent {req.agent_id}")
 
-        deep_store = _get_or_create_deep_store(fabric, req.agent_id)
+        deep_store = _get_or_create_deep_store(fabric, req.agent_id, workspace_id=workspace_id)
 
         # Load coherence field
         coherence_field = None
         try:
-            mp = _find_motifs_path(fabric, req.agent_id)
+            mp = _find_motifs_path(fabric, req.agent_id, workspace_id=workspace_id)
             if mp:
                 mp = os.path.normpath(mp)
             if mp and os.path.exists(mp):
@@ -2032,7 +2036,8 @@ def spirit_reflections_status(workspace_id: str, agent_id: str) -> Dict[str, Any
 @app.post("/workspace/{workspace_id}/deep-memory/query")
 async def deep_memory_query(workspace_id: str, req: DeepMemoryQueryRequest):
     """Direct query against deep memory store. For debugging/research."""
-    deep_store = fabric._deep_stores.get(req.agent_id)
+    _dm_ak = fabric._agent_key(workspace_id, req.agent_id)
+    deep_store = fabric._deep_stores.get(_dm_ak)
     if deep_store is None:
         return {"ok": True, "results": [], "message": "no deep memory store for this agent"}
 
@@ -2346,8 +2351,14 @@ def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
     # --- Active agents from Fabric state ---
     agents: List[Dict[str, Any]] = []
     for key in fabric.agent_states:
-        sep = "/" if "/" in key else ":"
-        ws, ag = key.split(sep, 1) if sep in key else ("unknown", key)
+        # Canonical format is "workspace/agent" — split on first "/" only.
+        # Legacy ":"-separated keys are handled as fallback.
+        if "/" in key:
+            ws, ag = key.split("/", 1)
+        elif ":" in key:
+            ws, ag = key.split(":", 1)
+        else:
+            ws, ag = "unknown", key
         if workspace_id and ws != workspace_id:
             continue
         # Get drift for this agent
@@ -2741,10 +2752,16 @@ async def debug_provenance(
         for eid, entity in graph.entities.items():
             payload = entity.payload or {}
             prov = payload.get("provenance")
-            # Apply filters
-            if source_role and (not prov or prov.get("source_role") != source_role):
+            # Normalize legacy provenance strings to a synthetic dict for safe access
+            _prov_is_dict = isinstance(prov, dict)
+            if prov and not _prov_is_dict:
+                # Legacy bare string like "collective" — wrap for safe field access
+                prov = {"source_type": "legacy_string", "raw": str(prov)}
+                _prov_is_dict = True
+            # Apply filters (only on dict provenance)
+            if source_role and (not _prov_is_dict or prov.get("source_role") != source_role):
                 continue
-            if write_path and (not prov or prov.get("write_path") != write_path):
+            if write_path and (not _prov_is_dict or prov.get("write_path") != write_path):
                 continue
             memories.append({
                 "eid": eid,
