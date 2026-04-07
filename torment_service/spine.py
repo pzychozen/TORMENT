@@ -639,17 +639,22 @@ def _fast_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[s
 
 
 def _fast_feedback(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fast-path feedback: trust-checked, locked, dispatched to Fabric."""
+    """Fast-path feedback: trust-checked, locked, dispatched to Fabric.
+
+    Normalizes payload types at the Spine boundary: MCP tools may send
+    arrays (e.g. ``[1, 3]``) for fields that Fabric expects as booleans.
+    We convert truthy lists to ``True`` and falsy/empty to ``False``.
+    """
     with fabric.locks.agent_lock(ctx.workspace_id, ctx.agent_id):
         return fabric.feedback(
             workspace_id=ctx.workspace_id,
             agent_id=ctx.agent_id,
             retrieved_ids=payload.get("retrieved_ids", []),
-            used_successfully=payload.get("used_successfully", []),
-            user_confirmed=payload.get("user_confirmed", []),
-            contradiction_detected=payload.get("contradiction_detected", []),
-            novel_motif_created=payload.get("novel_motif_created", False),
-            shared_memory_used=payload.get("shared_memory_used", []),
+            used_successfully=bool(payload.get("used_successfully", False)),
+            user_confirmed=bool(payload.get("user_confirmed", False)),
+            contradiction_detected=bool(payload.get("contradiction_detected", False)),
+            novel_motif_created=bool(payload.get("novel_motif_created", False)),
+            shared_memory_used=bool(payload.get("shared_memory_used", False)),
             bridges_used=payload.get("bridges_used", []),
         )
 

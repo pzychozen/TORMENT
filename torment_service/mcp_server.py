@@ -668,8 +668,13 @@ def create_mcp_server() -> FastMCP:
         # Active agents
         agents = []
         for key in fabric.agent_states:
-            sep = "/" if "/" in key else ":"
-            ws, ag = key.split(sep, 1) if sep in key else ("unknown", key)
+            # Canonical format is "workspace/agent"; legacy ":" is fallback.
+            if "/" in key:
+                ws, ag = key.split("/", 1)
+            elif ":" in key:
+                ws, ag = key.split(":", 1)
+            else:
+                ws, ag = "unknown", key
             drift_score = 0.0
             try:
                 cstate = fabric.character_store.load_state(ws, ag)
@@ -717,11 +722,12 @@ def create_mcp_server() -> FastMCP:
             # Shared graphs
             status["shared_domains"] = list(ws.shared_graphs.keys())
 
-            # Agents in workspace
+            # Agents in workspace (canonical "ws/agent" key format)
             agents = []
+            _ws_prefix = f"{workspace_id}/"
             for key in fabric.agent_states:
-                if key.startswith(f"{workspace_id}:"):
-                    agents.append(key.split(":", 1)[1])
+                if key.startswith(_ws_prefix):
+                    agents.append(key[len(_ws_prefix):])
             status["agents"] = agents
             status["agent_count"] = len(agents)
 
@@ -771,13 +777,16 @@ def create_mcp_server() -> FastMCP:
         limit = 50
 
         memories: List[Dict[str, Any]] = []
-        ak = f"{workspace_id}/{agent_id}"
+        ak = fabric._agent_key(workspace_id, agent_id)
         graph = fabric.private_graphs.get(ak)
 
         if graph is not None and hasattr(graph, "entities"):
             for eid, entity in graph.entities.items():
                 payload = entity.payload or {}
                 prov = payload.get("provenance")
+                # Normalize legacy string provenance for safe .get() access
+                if prov and not isinstance(prov, dict):
+                    prov = {"source_type": "legacy_string", "raw": str(prov)}
                 memories.append({
                     "eid": eid,
                     "agent_id": agent_id,
