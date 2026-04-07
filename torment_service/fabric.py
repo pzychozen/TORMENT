@@ -16,7 +16,7 @@ from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry
 from .conflicts import ConflictRegistry
-from .scoring import score_hit
+from .scoring import score_hit, ContinuityContext, ContinuityResult, compute_continuity_bonuses
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
@@ -3210,6 +3210,17 @@ class TormentFabric:
                             continue
             except Exception:
                 _spiral_neg_recent = 0
+
+        # Build shared continuity context (used by per-hit scoring below)
+        _cont_ctx = ContinuityContext.from_env(
+            agent_id=str(agent_id),
+            canonical_step=_canonical_step,
+            affect_personal=_affect_personal,
+            q_affect_tag=_q_affect_tag,
+            q_affect_conf=_q_affect_conf,
+            spiral_neg_recent=_spiral_neg_recent,
+        )
+
         now_ts = _now_ts()
         for h in all_hits:
             # Extract provenance early so all scoring phases can use it.
@@ -3278,30 +3289,15 @@ class TormentFabric:
                 if _bon is not None:
                     _bon["self_thread"] += float(self_bonus)
 
-            # Character continuity: recent thread coherence window.
-            # Boost memories from the same agent's private thread that are very recent in step-time.
-            # This makes the agent feel like it stays "in the conversation" without adding governance.
-            try:
-                thread_window_steps = int(os.getenv("TORMENT_THREAD_WINDOW_STEPS", "50"))
-            except Exception:
-                thread_window_steps = 50
-            try:
-                thread_window_bonus = float(os.getenv("TORMENT_THREAD_WINDOW_BONUS", "0.08"))
-            except Exception:
-                thread_window_bonus = 0.08
-            if thread_window_steps > 0 and thread_window_bonus > 0.0 and str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id) and not _h_is_tool_result:
-                try:
-                    hit_step = int(h.get("step", -1))
-                except Exception:
-                    hit_step = -1
-                if _canonical_step >= 0 and hit_step >= 0:
-                    delta = max(0, _canonical_step - hit_step)
-                    if delta <= thread_window_steps:
-                        # Linear taper: newest gets full bonus.
-                        _tw = thread_window_bonus * (1.0 - (float(delta) / float(max(1, thread_window_steps))))
-                        type_bonus += _tw
-                        if _bon is not None:
-                            _bon["thread_window"] += float(_tw)
+            # Shared continuity bonuses (thread-window, affect, mood-drift, mood-spiral)
+            _cont = compute_continuity_bonuses(h, _cont_ctx, is_tool_result=_h_is_tool_result)
+            type_bonus += _cont.total
+            if _bon is not None:
+                _bon["thread_window"] += _cont.thread_window_bonus
+                _bon["affect_match"] += _cont.affect_match_bonus
+                _bon["mood_drift"] += _cont.mood_drift_bonus
+                _bon["mood_spiral_penalty"] += _cont.mood_spiral_penalty
+
             if mtype == "identity_anchor":
                 # Character continuity: identity anchors get a consistent lift, but cap dominance.
                 _ab = 0.12
@@ -3313,7 +3309,6 @@ class TormentFabric:
                     _ab = float(_ab) * float(_anchor_rest_mult)
                 type_bonus += float(_ab)
                 if _bon is not None:
-                    # This is the anchor lift (capped by top-k logic elsewhere).
                     _bon["self_anchor"] += float(_ab)
                 # Additional lift when the anchor belongs to the querying agent's private thread.
                 if str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id):
@@ -3324,48 +3319,6 @@ class TormentFabric:
                     type_bonus += float(_sab)
                     if _bon is not None:
                         _bon["self_anchor"] += float(_sab)
-
-            # Emotional continuity: if the query looks personal and has a confident affect tag,
-            # lightly prefer memories with matching affect.
-            if _affect_personal and _q_affect_tag and _q_affect_tag != "neutral" and _q_affect_conf >= _affect_min_conf:
-                try:
-                    h_tag = str(h.get("affect_tag") or "")
-                    h_conf = float(h.get("affect_conf") or 0.0)
-                except Exception:
-                    h_tag, h_conf = "", 0.0
-                if h_tag and h_tag == _q_affect_tag and h_conf >= _affect_min_conf:
-                    _am = _affect_match_bonus * float(min(_q_affect_conf, h_conf))
-                    type_bonus += _am
-                    if _bon is not None:
-                        _bon["affect_match"] += float(_am)
-                # Emotional continuity v2: mood drift memories are useful for personal queries.
-                try:
-                    _md_bonus = float(os.getenv("TORMENT_MOOD_DRIFT_QUERY_BONUS", "0.04"))
-                except Exception:
-                    _md_bonus = 0.04
-                if _affect_personal and str(h.get("type")) == "mood_drift":
-                    type_bonus += float(_md_bonus)
-                    if _bon is not None:
-                        _bon["mood_drift"] += float(_md_bonus)
-
-                # Emotional stability: dampen older negative-tone memories if recent mood drift trends negative.
-                if _spiral_enable and _spiral_neg_recent >= _spiral_min_drifts:
-                    try:
-                        _neg = {"stressed", "sad", "angry"}
-                        _ht = str(h.get("affect_tag") or "")
-                        _hs = int(h.get("step", -1))
-                    except Exception:
-                        _ht, _hs = "", -1
-                    if _ht in _neg and _hs >= 0:
-                        if _canonical_step >= 0:
-                            _age = max(0, _canonical_step - _hs)
-                            if _age > _spiral_older_than:
-                                _age_fac = min(1.0, float(_age - _spiral_older_than) / float(max(1, _spiral_window)))
-                                _trend_fac = min(1.0, 0.5 + 0.25 * float(_spiral_neg_recent - _spiral_min_drifts + 1))
-                                _sp = float(_spiral_penalty_max) * float(_age_fac) * float(_trend_fac)
-                                type_bonus -= _sp
-                                if _bon is not None:
-                                    _bon["mood_spiral_penalty"] += float(_sp)
 
             base_score = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=0.0)
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
@@ -4174,6 +4127,76 @@ class TormentFabric:
                             ids.append(c.conflict_id)
                         ent["conflict_ids"] = ids
 
+        # --- Continuity context (parity with query()) ---
+        # 1. Canonical step from agent kernel state
+        _trace_canonical_step: int = -1
+        try:
+            _trace_agent_state = self.agent_states.get(ak)
+            if _trace_agent_state is not None:
+                _trace_canonical_step = int(getattr(_trace_agent_state, "step", -1))
+        except Exception:
+            pass
+        if _trace_canonical_step < 0:
+            _pg_fb = self.private_graphs.get(ak)
+            if _pg_fb:
+                for _ent_fb in _pg_fb.entities.values():
+                    _trace_canonical_step = max(_trace_canonical_step, int(getattr(_ent_fb, "born_step", 0) or 0))
+
+        # 2. Affect classification of the query
+        try:
+            _trace_affect_enable = str(os.getenv("TORMENT_AFFECT_ENABLE", "1")).strip().lower() not in ("0", "false", "no")
+        except Exception:
+            _trace_affect_enable = True
+        _trace_affect_personal = bool(_trace_affect_enable and looks_personal(query_text))
+        _trace_q_affect_tag = "neutral"
+        _trace_q_affect_conf = 0.0
+        if _trace_affect_personal:
+            try:
+                _trace_qa = classify_affect(query_text)
+                _trace_q_affect_tag = str(_trace_qa.tag)
+                _trace_q_affect_conf = float(_trace_qa.conf)
+            except Exception:
+                _trace_q_affect_tag, _trace_q_affect_conf = "neutral", 0.0
+
+        # 3. Mood-spiral: count recent negative drifts
+        _trace_spiral_neg_recent = 0
+        try:
+            _trace_spiral_enable = str(os.getenv("TORMENT_MOOD_SPIRAL_ENABLE", "1")).strip().lower() not in ("0", "false", "no")
+        except Exception:
+            _trace_spiral_enable = True
+        if _trace_spiral_enable and ak in self.private_graphs:
+            try:
+                _tst = _load_affect_state(self.data_dir, ws.workspace_id, str(agent_id))
+                _tdh = _tst.get("drift_hist") or []
+                if not isinstance(_tdh, list):
+                    _tdh = []
+                if _trace_canonical_step >= 0:
+                    try:
+                        _t_spiral_window = int(os.getenv("TORMENT_MOOD_SPIRAL_WINDOW_STEPS", "800"))
+                    except Exception:
+                        _t_spiral_window = 800
+                    _neg = {"stressed", "sad", "angry"}
+                    for _te in _tdh[-20:]:
+                        try:
+                            if int(_te.get("step", -10**9)) < _trace_canonical_step - _t_spiral_window:
+                                continue
+                            if str(_te.get("to")) in _neg:
+                                _trace_spiral_neg_recent += 1
+                        except Exception:
+                            continue
+            except Exception:
+                _trace_spiral_neg_recent = 0
+
+        # 4. Build shared ContinuityContext
+        _trace_cont_ctx = ContinuityContext.from_env(
+            agent_id=str(agent_id),
+            canonical_step=_trace_canonical_step,
+            affect_personal=_trace_affect_personal,
+            q_affect_tag=_trace_q_affect_tag,
+            q_affect_conf=_trace_q_affect_conf,
+            spiral_neg_recent=_trace_spiral_neg_recent,
+        )
+
         def explain_for_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
             now_ts = _now_ts()
             sim = float(hit.get('score', 0.0))
@@ -4233,6 +4256,10 @@ class TormentFabric:
                     except Exception:
                         type_bonus += 0.04
 
+            # --- Continuity bonuses (parity with query()) ---
+            _cont = compute_continuity_bonuses(hit, _trace_cont_ctx, is_tool_result=_is_tool_result)
+            type_bonus += _cont.total
+
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
 
             # --- Post-score discounts (parity with query()) ---
@@ -4274,6 +4301,11 @@ class TormentFabric:
                         _prov_raw.get("source_type") if isinstance(_prov_raw, dict)
                         else (str(_prov_raw) if isinstance(_prov_raw, str) else None)
                     ),
+                    "thread_window_bonus": _cont.thread_window_bonus,
+                    "affect_match_bonus": _cont.affect_match_bonus,
+                    "mood_drift_bonus": _cont.mood_drift_bonus,
+                    "mood_spiral_penalty": _cont.mood_spiral_penalty,
+                    "continuity_total_adjustment": _cont.total,
                 },
             }
 
@@ -4320,6 +4352,7 @@ class TormentFabric:
                 "affect_conf": float(payload.get('affect_conf', 0.0) or 0.0),
                 "canon": bool(payload.get('canon', False)),
                 "provenance": payload.get('provenance'),
+                "step": int(getattr(ent, 'born_step', 0) or payload.get('step', 0) or 0),
             }
 
         # gather hits by looking up in graphs
