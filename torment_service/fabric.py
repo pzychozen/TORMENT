@@ -4210,6 +4210,51 @@ class TormentFabric:
                 },
             }
 
+        # Compute real cosine similarity for a graph entity against the
+        # query embedding so trace scores reflect actual retrieval ranking
+        # instead of the previous hardcoded 0.0.
+        from .embedding_store import load_embedding as _load_emb_trace
+        _qv_norm = np.asarray(qemb, dtype=np.float32).reshape(-1)
+        _qv_n = np.linalg.norm(_qv_norm)
+        if _qv_n > 1e-12:
+            _qv_norm = _qv_norm / _qv_n
+
+        def _real_sim(graph, eid: int, payload: dict) -> float:
+            """Return cosine similarity between qemb and stored embedding."""
+            try:
+                raw = _load_emb_trace(
+                    eid, payload,
+                    graph._shard_reader, graph.data_dir,
+                )
+                if raw is None:
+                    return 0.0
+                v = np.asarray(raw, dtype=np.float32).reshape(-1)
+                n = np.linalg.norm(v)
+                if n < 1e-12:
+                    return 0.0
+                return float(np.dot(_qv_norm, v / n))
+            except Exception:
+                return 0.0
+
+        def _build_trace_hit(graph, eid: int, ent, default_scope: str) -> dict:
+            """Build a hit dict with real similarity and full payload fields."""
+            payload = dict(ent.payload or {})
+            return {
+                "eid": int(eid),
+                "score": _real_sim(graph, int(eid), payload),
+                "strength": float(payload.get('strength', 0.0)),
+                "created_ts": int(payload.get('created_ts', 0) or 0),
+                "domain_id": payload.get('domain_id'),
+                "scope": payload.get('scope', default_scope),
+                "motifs": payload.get('motifs', []),
+                "type": str(payload.get('type') or ''),
+                "agent_id": payload.get('agent_id', ''),
+                "affect_tag": payload.get('affect_tag', ''),
+                "affect_conf": float(payload.get('affect_conf', 0.0) or 0.0),
+                "canon": bool(payload.get('canon', False)),
+                "provenance": payload.get('provenance'),
+            }
+
         # gather hits by looking up in graphs
         out = []
         # private
@@ -4218,15 +4263,7 @@ class TormentFabric:
             for eid in eids:
                 ent = priv.entities.get(int(eid))
                 if ent:
-                    out.append(explain_for_hit({
-                        "eid": int(eid),
-                        "score": 0.0,
-                        "strength": float(ent.payload.get('strength', 0.0)),
-                        "created_ts": int(ent.payload.get('created_ts', 0) or 0),
-                        "domain_id": ent.payload.get('domain_id'),
-                        "scope": ent.payload.get('scope','private'),
-                        "motifs": ent.payload.get('motifs', []),
-                    }))
+                    out.append(explain_for_hit(_build_trace_hit(priv, eid, ent, 'private')))
         # shared domain graphs
         for d in domains:
             sg = ws.shared_graphs.get(d)
@@ -4236,15 +4273,7 @@ class TormentFabric:
                 ent = sg.entities.get(int(eid))
                 if not ent:
                     continue
-                out.append(explain_for_hit({
-                    "eid": int(eid),
-                    "score": 0.0,
-                    "strength": float(ent.payload.get('strength', 0.0)),
-                    "created_ts": int(ent.payload.get('created_ts', 0) or 0),
-                    "domain_id": ent.payload.get('domain_id'),
-                    "scope": ent.payload.get('scope','shared'),
-                    "motifs": ent.payload.get('motifs', []),
-                }))
+                out.append(explain_for_hit(_build_trace_hit(sg, eid, ent, 'shared')))
 
         return {"workspace_id": workspace_id, "agent_id": agent_id, "query": query_text, "domains": domains, "items": out, "embed_context": self._embed_context(ws)}
 
