@@ -1950,7 +1950,7 @@ class TormentFabric:
         Echoes are:
             - Low-amplitude (0.25x default, 0.40x hard cap)
             - Terminal (collective_reingest_blocked + collective_export_blocked)
-            - Provenance-marked (provenance='collective', source_event_id, source_agents)
+            - Provenance-marked (ProvenanceV1 source_type='collective_echo', source_event_id, source_agents)
             - Retrieval-discounted (0.5x weight at query time)
             - Excluded from seed-basin correction
 
@@ -2067,8 +2067,11 @@ class TormentFabric:
                 if graph:
                     ent = graph.entities.get(int(echo_eid))
                     if ent is not None:
-                        # Mark provenance
-                        ent.payload["provenance"] = "collective"
+                        # Mark provenance (proper ProvenanceV1 dict)
+                        from .provenance_v1 import ProvenanceV1
+                        ent.payload["provenance"] = ProvenanceV1.for_collective_echo(
+                            notes=f"event_id={event_id}",
+                        ).to_dict()
                         ent.payload["source_event_id"] = event_id
                         ent.payload["source_agents"] = source_agents
 
@@ -2552,7 +2555,12 @@ class TormentFabric:
                                     _hm_skip_reason = "governance: non_shareable or export_blocked"
                                 # Gate 1b: collective-provenance memories never emit packets
                                 # (terminal echo invariant — echoes don't echo)
-                                if str((_hm_ent_gov.payload or {}).get("provenance", "")) == "collective":
+                                _hm_prov = (_hm_ent_gov.payload or {}).get("provenance")
+                                _hm_is_collective = (
+                                    _hm_prov == "collective"  # legacy bare string
+                                    or (isinstance(_hm_prov, dict) and _hm_prov.get("source_type") == "collective_echo")
+                                )
+                                if _hm_is_collective:
                                     _hm_emit_ok = False
                                     _hm_skip_reason = "governance: collective provenance (echo invariant)"
                         except Exception as _gov_exc:
@@ -3375,8 +3383,12 @@ class TormentFabric:
             # Phase D3: collective-provenance retrieval discount
             # Echoes are influences, not autobiography — discount so they don't
             # outrank organic private memories in retrieval.
-            _h_provenance = str((h.get("payload") or h).get("provenance", "") or h.get("provenance", "") or "")
-            if _h_provenance == "collective":
+            _h_prov_raw = (h.get("payload") or h).get("provenance") or h.get("provenance")
+            _h_is_collective = (
+                _h_prov_raw == "collective"  # legacy bare string
+                or (isinstance(_h_prov_raw, dict) and _h_prov_raw.get("source_type") == "collective_echo")
+            )
+            if _h_is_collective:
                 try:
                     _coll_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
                 except Exception:
@@ -3394,7 +3406,7 @@ class TormentFabric:
                 _is_deep = bool(h.get("spirit_return_mode") or h.get("deep_memory"))
                 if _is_deep:
                     _lane_w = float(_mp_weights.get("deep", 1.0))
-                elif _h_provenance == "collective":
+                elif _h_is_collective:
                     # Skip — Phase D3 collective discount already applied above.
                     _lane_w = 1.0
                 elif _hit_scope == "shared":

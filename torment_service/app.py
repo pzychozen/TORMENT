@@ -2460,7 +2460,7 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
         agent_ids_list = [agent_id]
     else:
         # Discover agents from private_graphs keys
-        prefix = f"{workspace_id}::"
+        prefix = f"{workspace_id}/"
         for ak in fabric.private_graphs:
             if ak.startswith(prefix):
                 agent_ids_list.append(ak[len(prefix):])
@@ -2653,7 +2653,7 @@ async def debug_provenance(
     if agent_id:
         agent_ids_list = [agent_id]
     else:
-        prefix = f"{workspace_id}::"
+        prefix = f"{workspace_id}/"
         for ak in fabric.private_graphs:
             if ak.startswith(prefix):
                 agent_ids_list.append(ak[len(prefix):])

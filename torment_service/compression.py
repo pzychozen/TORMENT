@@ -285,9 +285,13 @@ def derive_retention_tier(payload: dict) -> str:
     if hl >= 365:
         return "identity"
 
-    # Echo: collective provenance
-    prov = str(payload.get("provenance", "") or "")
-    if prov == "collective":
+    # Echo: collective provenance (dict or legacy bare string)
+    _prov = payload.get("provenance")
+    _is_collective = (
+        _prov == "collective"  # legacy bare string
+        or (isinstance(_prov, dict) and _prov.get("source_type") == "collective_echo")
+    )
+    if _is_collective:
         return "echo"
 
     # Relational: half_life >= 7 days

@@ -29,7 +29,8 @@ SOURCE_USER_INPUT   = "user_input"
 SOURCE_ROLE_OUTPUT  = "role_output"
 SOURCE_DERIVED      = "derived"
 SOURCE_MEMORY       = "memory"
-SOURCE_TOOL_RESULT  = "tool_result"
+SOURCE_TOOL_RESULT      = "tool_result"
+SOURCE_COLLECTIVE_ECHO  = "collective_echo"
 
 VALID_SOURCE_TYPES = frozenset({
     SOURCE_USER_INPUT,
@@ -37,6 +38,7 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_DERIVED,
     SOURCE_MEMORY,
     SOURCE_TOOL_RESULT,
+    SOURCE_COLLECTIVE_ECHO,
 })
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
@@ -45,6 +47,7 @@ WRITE_REFLECTION_WRITEBACK = "reflection_writeback"
 WRITE_TOOL_INGEST         = "tool_ingest"
 WRITE_MIGRATION           = "migration"
 WRITE_SYSTEM_IMPORT       = "system_import"
+WRITE_COLLECTIVE_REINGEST = "collective_reingest"
 
 VALID_WRITE_PATHS = frozenset({
     WRITE_DIRECT_INGEST,
@@ -53,6 +56,7 @@ VALID_WRITE_PATHS = frozenset({
     WRITE_TOOL_INGEST,
     WRITE_MIGRATION,
     WRITE_SYSTEM_IMPORT,
+    WRITE_COLLECTIVE_REINGEST,
 })
 
 SCHEMA_VERSION = "1.0"
@@ -198,6 +202,24 @@ class ProvenanceV1:
             created_at_step=step,
             tool_name=tool_name,
             session_id=session_id,
+        )
+
+    @classmethod
+    def for_collective_echo(
+        cls,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a collective/hivemind echo reingested into an agent."""
+        return cls(
+            source_type=SOURCE_COLLECTIVE_ECHO,
+            source_role=None,
+            write_path=WRITE_COLLECTIVE_REINGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
         )
 
     # ── Safety checks ───────────────────────────────────────────────
