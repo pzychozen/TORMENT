@@ -1,4 +1,4 @@
-# TORMENT Memory Fabric — v2.4.2
+# TORMENT Memory Fabric — v2.4.3
 
 **TORMENT** is a governed memory and identity engine for building persistent AI characters and agents.
 
@@ -14,6 +14,24 @@ Built for **modders, developers, and experimental character systems**, TORMENT i
 If you want AI characters that feel more consistent, more alive, and more structurally grounded than standard prompt-based systems, this is the engine.
 
 Built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons. Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
+
+---
+
+## What's New in v2.4.3 — Tool-Result Memory Lane
+
+TORMENT can now remember externally obtained tool outputs as governed memory artifacts without crossing into tool execution or automation.
+
+**Tool-Result Ingest** (`spine.py`, `app.py`) — new Spine-governed write operation `tool_result_ingest` with dedicated `POST /tool/ingest` endpoint. External tool outputs (API responses, search results, sensor data) are stored as provenance-tagged private memories via `ProvenanceV1.for_tool_result()`. Routed through the fast path at trust tier 0.6, exposure tier guarded. The Spine governs the write; no tool execution or dispatch occurs.
+
+**Tool-Result Retrieval Semantics** (`fabric.py`) — three provenance-aware scoring changes in the retrieval pipeline. (1) Tool-result memories receive a configurable retrieval discount (default 0.85x, env `TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT`) so external observations don't outrank the agent's experiential memories. (2) Self-thread and thread-window continuity bonuses are excluded for tool-result hits — these bonuses exist for conversational continuity, not ingested observations. (3) Every returned hit now carries `provenance_type` and `provenance_tool_name` at top level so downstream consumers can see provenance without payload parsing.
+
+**Provenance Normalization** — collective provenance writes now use `ProvenanceV1.for_collective_echo()` instead of bare `"collective"` strings. All three comparison sites (hivemind gate, retrieval discount, compression classifier) updated with backward-compatible checks that accept both legacy strings and ProvenanceV1 dicts. Debug endpoint separator bug fixed (`"::"` → `"/"` in agent key construction).
+
+**Tests** — 41 tests in `test_tool_result_ingest.py` covering ingest governance, provenance round-trip, retrieval semantics (discount, continuity bonus exclusion, provenance badge), trust enforcement, malformed payloads, and provenance factory behavior.
+
+**Docs** — `MCP_CAPABILITY_BOUNDARY.md` updated with tool-result ingest section and doctrine. `SPINE_CONTRACT.md` updated with operation table entry, exposure matrix row, result codes, and design rule 8. `TOOL_RESULT_RETRIEVAL_SEMANTICS.md` added with full audit of the retrieval pipeline and policy rationale.
+
+**Doctrine line:** *"TORMENT may remember what tools returned before it is ever allowed to decide what tools to run."*
 
 ---
 

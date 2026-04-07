@@ -2285,6 +2285,18 @@ class TormentFabric:
 
             half_life_days = max(1.0, float(signals.half_life) * decay_scale * hl_mult)
 
+            # Tool-result lifecycle: cap half-life for informational memories.
+            # Tool outputs are observations, not experiences — their value decays
+            # faster than experiential or identity memory.
+            if (isinstance(_prov_dict, dict)
+                    and _prov_dict.get("source_type") == "tool_result"):
+                try:
+                    _tool_hl_cap = float(os.getenv(
+                        "TORMENT_TOOL_RESULT_MAX_HALF_LIFE_DAYS", "7"))
+                except Exception:
+                    _tool_hl_cap = 7.0
+                half_life_days = min(half_life_days, _tool_hl_cap)
+
             # --- Duplicate suppression: reinforce existing instead of creating new ---
             # Same-agent only, strict threshold, recent-window search.
             _reinforce_sim_threshold = float(os.getenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0.92"))
@@ -2302,8 +2314,19 @@ class TormentFabric:
                             _existing_ent = graph.entities.get(_existing_eid)
                             if _existing_ent is not None:
                                 _old_str = float((_existing_ent.payload or {}).get("strength", 0.5))
-                                # Asymptotic reinforcement: diminishing returns, cap at 0.98
-                                _new_str = min(0.98, _old_str + (1.0 - _old_str) * 0.3)
+                                # Check if the EXISTING entity is a tool-result memory.
+                                # Tool-result reinforcement: do NOT boost strength.
+                                # Repeated tool output is a staleness signal, not importance.
+                                _existing_prov_for_guard = (_existing_ent.payload or {}).get("provenance")
+                                _existing_is_tool_result = (
+                                    isinstance(_existing_prov_for_guard, dict)
+                                    and _existing_prov_for_guard.get("source_type") == "tool_result"
+                                )
+                                if _existing_is_tool_result:
+                                    _new_str = _old_str  # no strength boost
+                                else:
+                                    # Asymptotic reinforcement: diminishing returns, cap at 0.98
+                                    _new_str = min(0.98, _old_str + (1.0 - _old_str) * 0.3)
                                 # On reinforcement:
                                 # - NEVER overwrite existing provenance (Rule F: no laundering)
                                 # - Only backfill if missing AND the new provenance is
@@ -2315,6 +2338,8 @@ class TormentFabric:
                                     "last_reinforced_ts": _now_ts(),
                                     "reinforce_count": int((_existing_ent.payload or {}).get("reinforce_count", 0)) + 1,
                                 }
+                                if _existing_is_tool_result:
+                                    _reinforce_updates["last_tool_refresh_ts"] = _now_ts()
                                 _existing_prov = (_existing_ent.payload or {}).get("provenance")
                                 if (not _existing_prov
                                         and _prov.write_path == "direct_ingest"):
@@ -3178,6 +3203,13 @@ class TormentFabric:
                 _spiral_neg_recent = 0
         now_ts = _now_ts()
         for h in all_hits:
+            # Extract provenance early so all scoring phases can use it.
+            _h_prov_raw = (h.get("payload") or h).get("provenance") or h.get("provenance")
+            _h_is_tool_result = (
+                isinstance(_h_prov_raw, dict)
+                and _h_prov_raw.get("source_type") == "tool_result"
+            )
+
             sim = float(h.get("score", 0.0))
             strength = float(h.get("strength", 0.5))
             ts = int(h.get("created_ts", now_ts))
@@ -3232,7 +3264,7 @@ class TormentFabric:
                 self_bonus = float(os.getenv("TORMENT_SELF_MEMORY_BONUS", "0.06"))
             except Exception:
                 self_bonus = 0.06
-            if str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id):
+            if str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id) and not _h_is_tool_result:
                 type_bonus += self_bonus
                 if _bon is not None:
                     _bon["self_thread"] += float(self_bonus)
@@ -3248,7 +3280,7 @@ class TormentFabric:
                 thread_window_bonus = float(os.getenv("TORMENT_THREAD_WINDOW_BONUS", "0.08"))
             except Exception:
                 thread_window_bonus = 0.08
-            if thread_window_steps > 0 and thread_window_bonus > 0.0 and str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id):
+            if thread_window_steps > 0 and thread_window_bonus > 0.0 and str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id) and not _h_is_tool_result:
                 # Determine the current step from available hits (best-effort).
                 if "_torment_q_step" not in locals():
                     _torment_q_step = -1
@@ -3383,7 +3415,7 @@ class TormentFabric:
             # Phase D3: collective-provenance retrieval discount
             # Echoes are influences, not autobiography — discount so they don't
             # outrank organic private memories in retrieval.
-            _h_prov_raw = (h.get("payload") or h).get("provenance") or h.get("provenance")
+            # NOTE: _h_prov_raw extracted at top of scoring loop.
             _h_is_collective = (
                 _h_prov_raw == "collective"  # legacy bare string
                 or (isinstance(_h_prov_raw, dict) and _h_prov_raw.get("source_type") == "collective_echo")
@@ -3394,6 +3426,16 @@ class TormentFabric:
                 except Exception:
                     _coll_discount = 0.50
                 final *= _coll_discount
+
+            # Phase D3b: tool-result retrieval discount
+            # Tool results are external observations, not self-knowledge —
+            # discount so they don't outrank organic experiential memories.
+            if _h_is_tool_result:
+                try:
+                    _tool_discount = float(os.getenv("TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT", "0.85"))
+                except Exception:
+                    _tool_discount = 0.85
+                final *= _tool_discount
 
             # Memory-plan lane weights (v2.4.2):
             # Apply weight multiplier based on hit source/provenance.
@@ -3420,6 +3462,14 @@ class TormentFabric:
             hh = dict(h)
             hh["motifs"] = motifs
             hh["final_score"] = final
+            # Provenance badge: surface source_type for downstream consumers.
+            if isinstance(_h_prov_raw, dict):
+                hh["provenance_type"] = _h_prov_raw.get("source_type")
+                hh["provenance_tool_name"] = _h_prov_raw.get("tool_name")
+            elif isinstance(_h_prov_raw, str):
+                hh["provenance_type"] = _h_prov_raw  # legacy bare string
+            else:
+                hh["provenance_type"] = None
             if _cd_enable:
                 hh["_base_score"] = float(base_score)
                 hh["_bonus_components"] = _bon

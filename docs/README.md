@@ -1,4 +1,4 @@
-# TORMENT Fabric — v2.4.2
+# TORMENT Fabric — v2.4.3
 
 TORMENT is a **governed memory and identity engine for AI agents**.
 

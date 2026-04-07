@@ -81,6 +81,8 @@ COMPRESS_LONG_PATH_STRENGTH = _env_float("TORMENT_COMPRESS_LONG_STRENGTH", 0.1)
 # Tier-specific short-path multipliers (Proposal D — Phase 2.2)
 COMPRESS_RELATIONAL_MULT = _env_float("TORMENT_COMPRESS_RELATIONAL_MULT", 0.7)
 COMPRESS_ECHO_MULT = _env_float("TORMENT_COMPRESS_ECHO_MULT", 0.4)
+COMPRESS_TOOL_RESULT_MULT = _env_float("TORMENT_COMPRESS_TOOL_RESULT_MULT", 0.45)
+COMPRESS_TOOL_RESULT_SCORE_MULT = 1.10  # +10% compressibility for tool-result tier
 COMPRESS_ECHO_DEEP_AGE = _env_int("TORMENT_COMPRESS_ECHO_DEEP_AGE", 150)
 
 # Fallback trigger thresholds (Proposal A — Phase 2.2)
@@ -294,6 +296,10 @@ def derive_retention_tier(payload: dict) -> str:
     if _is_collective:
         return "echo"
 
+    # Tool result: external observation, decays faster than experiential memory
+    if isinstance(_prov, dict) and _prov.get("source_type") == "tool_result":
+        return "tool_result"
+
     # Relational: half_life >= 7 days
     if hl >= 7:
         return "relational"
@@ -484,6 +490,8 @@ class CompressionScorer:
         # Echo memories are slightly more compressible; relational slightly less
         if retention_tier == "echo":
             composite = min(1.0, composite * 1.15)   # +15% compressibility
+        elif retention_tier == "tool_result":
+            composite = min(1.0, composite * COMPRESS_TOOL_RESULT_SCORE_MULT)  # +10% compressibility
         elif retention_tier == "relational":
             composite = max(0.0, composite * 0.85)   # -15% compressibility (more resistant)
         elif retention_tier == "identity":
@@ -648,6 +656,8 @@ class CompressionExecutor:
             mult = COMPRESS_RELATIONAL_MULT
         elif candidate.tier == "echo":
             mult = COMPRESS_ECHO_MULT
+        elif candidate.tier == "tool_result":
+            mult = COMPRESS_TOOL_RESULT_MULT
         else:
             mult = COMPRESS_SHORT_PATH_MULT
 

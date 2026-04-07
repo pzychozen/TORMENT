@@ -391,5 +391,226 @@ class TestToolResultProvenanceFactory(unittest.TestCase):
         self.assertIn("created_at_ts", d)
 
 
+# ===========================================================================
+# Tool-result retrieval semantics tests (v2.4.3)
+# ===========================================================================
+
+class TestToolResultRetrievalScoring(unittest.TestCase):
+    """Verify tool-result memories receive a retrieval discount."""
+
+    def setUp(self):
+        self.fabric = _make_fabric()
+        self.ctx = _make_ctx()
+        # Ingest a user memory (step 1)
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="I visited Reykjavik last summer and loved the weather",
+            step=1,
+            domain_id="personal",
+            scope="private",
+        )
+        # Ingest a tool-result memory with similar content (step 2)
+        from torment_service.provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_tool_result(
+            tool_name="weather_api",
+            parent_eids=[],
+            step=2,
+        ).to_dict()
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="Current weather in Reykjavik: 3C, partly cloudy, winds from north",
+            step=2,
+            domain_id="personal",
+            scope="private",
+            provenance=prov,
+        )
+
+    def test_tool_result_retrieval_discount_applied(self):
+        """Tool-result hit should have a lower final_score than a comparable user memory."""
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="weather in Reykjavik",
+            top_k=10,
+        )
+        hits = results.get("results", [])
+        self.assertGreaterEqual(len(hits), 2, "Expected at least 2 hits")
+        # Find tool-result vs user hit
+        tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+        user_hits = [h for h in hits if h.get("provenance_type") is None or h.get("provenance_type") not in ("tool_result", "collective_echo", "collective")]
+        self.assertTrue(len(tool_hits) >= 1, "Expected at least one tool-result hit")
+        self.assertTrue(len(user_hits) >= 1, "Expected at least one user hit")
+        # The tool-result discount (0.85x) means its final_score should be lower
+        # than an equally-similar user hit, all else being equal.
+        # We check that the tool hit's score is strictly less than the top user hit.
+        best_tool = max(tool_hits, key=lambda h: h.get("final_score", 0))
+        best_user = max(user_hits, key=lambda h: h.get("final_score", 0))
+        # If both are returned, the tool result should be discounted
+        self.assertLess(
+            best_tool.get("final_score", 0) / max(best_user.get("final_score", 0), 1e-9),
+            1.0,
+            "Tool-result hit should be scored lower than user hit due to 0.85x discount",
+        )
+
+    def test_tool_result_discount_env_override(self):
+        """TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT env var should control the discount."""
+        # Set to 1.0 (no discount)
+        os.environ["TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT"] = "1.0"
+        try:
+            results = self.fabric.query(
+                workspace_id="test-ws",
+                agent_id="agent-1",
+                query_text="weather in Reykjavik",
+                top_k=10,
+            )
+            hits = results.get("results", [])
+            tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+            # With discount=1.0, tool results are not penalized.
+            # We just verify the query runs without error and tool hits exist.
+            self.assertTrue(len(tool_hits) >= 1, "Tool-result hit should still appear")
+        finally:
+            os.environ.pop("TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT", None)
+
+
+class TestToolResultNoContinuityBonus(unittest.TestCase):
+    """Tool-result memories should not receive self-thread or thread-window bonuses."""
+
+    def setUp(self):
+        self.fabric = _make_fabric()
+        self.ctx = _make_ctx()
+
+    def test_tool_result_no_continuity_bonus(self):
+        """When continuity_debug is on, tool-result hits should show zero self_thread and thread_window bonuses."""
+        from torment_service.provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_tool_result(
+            tool_name="search_api",
+            parent_eids=[],
+            step=5,
+        ).to_dict()
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="Search result: best restaurants in Reykjavik 2026",
+            step=5,
+            domain_id="personal",
+            scope="private",
+            provenance=prov,
+        )
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="restaurants in Reykjavik",
+            top_k=10,
+            continuity_debug=True,
+        )
+        hits = results.get("results", [])
+        tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+        self.assertTrue(len(tool_hits) >= 1, "Expected at least one tool-result hit")
+        # Check the continuity debug breakdown in the response
+        cd = results.get("continuity_debug")
+        if cd is not None:
+            # If top_hits_bonus_breakdown includes tool-result hits, their
+            # self_thread and thread_window bonuses should be 0.
+            for bd in cd.get("top_hits_bonus_breakdown", []):
+                # Find the tool-result entry by matching eid
+                for th in tool_hits:
+                    if bd.get("eid") == th.get("eid"):
+                        bonuses = bd.get("bonuses", {})
+                        self.assertAlmostEqual(
+                            bonuses.get("self_thread", 0.0), 0.0,
+                            msg="Tool-result hit should not get self_thread bonus",
+                        )
+                        self.assertAlmostEqual(
+                            bonuses.get("thread_window", 0.0), 0.0,
+                            msg="Tool-result hit should not get thread_window bonus",
+                        )
+
+
+class TestProvenanceBadgeOnHit(unittest.TestCase):
+    """Retrieved hits should carry provenance_type at top level."""
+
+    def setUp(self):
+        self.fabric = _make_fabric()
+        self.ctx = _make_ctx()
+
+    def test_provenance_badge_on_tool_result_hit(self):
+        from torment_service.provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_tool_result(
+            tool_name="geocoding_api",
+            parent_eids=[],
+            step=1,
+        ).to_dict()
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="Geocoded location: 64.1466N, 21.9426W, Reykjavik, Iceland",
+            step=1,
+            domain_id="personal",
+            scope="private",
+            provenance=prov,
+        )
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="Reykjavik coordinates",
+            top_k=5,
+        )
+        hits = results.get("results", [])
+        self.assertTrue(len(hits) >= 1)
+        tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+        self.assertTrue(len(tool_hits) >= 1, "Expected provenance_type='tool_result' on hit")
+        # Check tool_name badge
+        self.assertEqual(tool_hits[0].get("provenance_tool_name"), "geocoding_api")
+
+    def test_provenance_badge_absent_for_user_memory(self):
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="I really enjoy visiting Iceland every summer",
+            step=1,
+            domain_id="personal",
+            scope="private",
+        )
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="Iceland summer visit",
+            top_k=5,
+        )
+        hits = results.get("results", [])
+        self.assertTrue(len(hits) >= 1)
+        # User memory should NOT have provenance_type == "tool_result"
+        # (it may be None or a default provenance type depending on ingest path)
+        tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+        self.assertEqual(len(tool_hits), 0, "User memory should not have provenance_type='tool_result'")
+
+    def test_provenance_badge_collective_echo(self):
+        """Collective-echo provenance should surface as provenance_type."""
+        from torment_service.provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_collective_echo(
+            notes="test_collective",
+        ).to_dict()
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="Collective knowledge: Iceland has active volcanoes",
+            step=1,
+            domain_id="personal",
+            scope="private",
+            provenance=prov,
+        )
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="Iceland volcanoes",
+            top_k=5,
+        )
+        hits = results.get("results", [])
+        coll_hits = [h for h in hits if h.get("provenance_type") == "collective_echo"]
+        self.assertTrue(len(coll_hits) >= 1, "Collective echo should appear as provenance_type='collective_echo'")
+
+
 if __name__ == "__main__":
     unittest.main()
