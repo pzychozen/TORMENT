@@ -3005,6 +3005,28 @@ class TormentFabric:
                         shared_hits.append(hh)
 
 
+        # --- Canonical current step (v2.4.x) ---
+        # Use the agent's kernel ModelState.step as the authoritative
+        # "now" for all step-relative scoring (thread-window bonus,
+        # mood-spiral penalty, deep-memory warmup).  Previous code
+        # inferred the current step from max(hit["step"]), which is
+        # circular — scoring bonuses should not depend on which
+        # memories happened to be retrieved.
+        _canonical_step: int = -1
+        try:
+            _agent_state = self.agent_states.get(ak)
+            if _agent_state is not None:
+                _canonical_step = int(getattr(_agent_state, "step", -1))
+        except Exception:
+            pass
+        # Fallback: max born_step from the private graph (still canonical,
+        # just slightly stale if kernel state is missing).
+        if _canonical_step < 0:
+            _pg_fallback = self.private_graphs.get(ak)
+            if _pg_fallback:
+                for _ent_fb in _pg_fallback.entities.values():
+                    _canonical_step = max(_canonical_step, int(getattr(_ent_fb, "born_step", 0) or 0))
+
         # --- Deep memory fallback with spirit return (Phase 6) ---
         # Deep is primarily a gap-filler: only query when core+shared didn't
         # fill top_k. The memory plan can raise the deep budget, but never
@@ -3040,14 +3062,8 @@ class TormentFabric:
                             if (_ent.payload or {}).get("compressed"):
                                 _core_compressed.add(int(_eid_key))
 
-                    # Current step (best-effort from existing hits)
-                    _cur_step = max(
-                        (int(h.get("step", 0)) for h in private_hits + shared_hits),
-                        default=0,
-                    )
-
                     for _dm in _deep_hits:
-                        _ws = _warmup.get_or_create(_dm.eid, _cur_step)
+                        _ws = _warmup.get_or_create(_dm.eid, _canonical_step)
                         _spirit = enrich_deep_memory_hit(
                             _dm, _current_sym, _ws, int(_dm.eid) in _core_compressed
                         )
@@ -3182,18 +3198,11 @@ class TormentFabric:
                 _dh = _st.get("drift_hist") or []
                 if not isinstance(_dh, list):
                     _dh = []
-                # Determine current step from hits (best-effort)
-                _torment_cur_step = -1
-                for _hh in all_hits:
-                    try:
-                        _torment_cur_step = max(_torment_cur_step, int(_hh.get("step", -1)))
-                    except Exception as e:
-                        self._log.debug("failed to extract step from hit: %s", e)
-                if _torment_cur_step >= 0:
+                if _canonical_step >= 0:
                     _neg = {"stressed", "sad", "angry"}
                     for _e in _dh[-20:]:
                         try:
-                            if int(_e.get("step", -10**9)) < _torment_cur_step - _spiral_window:
+                            if int(_e.get("step", -10**9)) < _canonical_step - _spiral_window:
                                 continue
                             if str(_e.get("to")) in _neg:
                                 _spiral_neg_recent += 1
@@ -3281,22 +3290,12 @@ class TormentFabric:
             except Exception:
                 thread_window_bonus = 0.08
             if thread_window_steps > 0 and thread_window_bonus > 0.0 and str(h.get("scope", "")) == "private" and str(h.get("agent_id", "")) == str(agent_id) and not _h_is_tool_result:
-                # Determine the current step from available hits (best-effort).
-                if "_torment_q_step" not in locals():
-                    _torment_q_step = -1
-                    for _hh in all_hits:
-                        try:
-                            s = int(_hh.get("step", -1))
-                        except Exception:
-                            s = -1
-                        if s > _torment_q_step:
-                            _torment_q_step = s
                 try:
                     hit_step = int(h.get("step", -1))
                 except Exception:
                     hit_step = -1
-                if _torment_q_step >= 0 and hit_step >= 0:
-                    delta = max(0, _torment_q_step - hit_step)
+                if _canonical_step >= 0 and hit_step >= 0:
+                    delta = max(0, _canonical_step - hit_step)
                     if delta <= thread_window_steps:
                         # Linear taper: newest gets full bonus.
                         _tw = thread_window_bonus * (1.0 - (float(delta) / float(max(1, thread_window_steps))))
@@ -3358,12 +3357,8 @@ class TormentFabric:
                     except Exception:
                         _ht, _hs = "", -1
                     if _ht in _neg and _hs >= 0:
-                        try:
-                            _cur = int(_torment_cur_step if "_torment_cur_step" in locals() else -1)
-                        except Exception:
-                            _cur = -1
-                        if _cur >= 0:
-                            _age = max(0, _cur - _hs)
+                        if _canonical_step >= 0:
+                            _age = max(0, _canonical_step - _hs)
                             if _age > _spiral_older_than:
                                 _age_fac = min(1.0, float(_age - _spiral_older_than) / float(max(1, _spiral_window)))
                                 _trend_fac = min(1.0, 0.5 + 0.25 * float(_spiral_neg_recent - _spiral_min_drifts + 1))
