@@ -28,19 +28,13 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    """Resolve *path* and verify it lives inside *base_dir* (CWE-22 guard)."""
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
-
-# Reuse existing shard infrastructure
+# Reuse path hardening and shard infrastructure from embedding_store
 from .embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
     DEFAULT_DIM,
+    _canonical_storage_root,
+    _child_path,
 )
 
 
@@ -98,17 +92,11 @@ class DeepMemoryStore:
     """
 
     def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
-        safe_base = os.path.realpath(str(base_dir))
-        self.base_dir = Path(_ensure_within_base(safe_base, safe_base))
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        canonical_root = _canonical_storage_root(str(base_dir), mkdir=True)
+        self.base_dir = Path(canonical_root)
 
-        self.memories_path = Path(
-            _ensure_within_base(str(self.base_dir / "memories.jsonl"), str(self.base_dir))
-        )
-        self.emb_dir = _ensure_within_base(
-            str(self.base_dir / "embeddings"),
-            str(self.base_dir),
-        )
+        self.memories_path = Path(_child_path(canonical_root, "memories.jsonl"))
+        self.emb_dir = _child_path(canonical_root, "embeddings")
         self.dim = int(dim)
 
         # Initialize shard storage
