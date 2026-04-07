@@ -388,6 +388,9 @@ _ALWAYS_FAST = [
     OperationSpec("compression_run",      PATH_FAST, TRUST_OPERATOR,
                   op_class=OP_CLASS_WRITE, exposure_tier=EXPOSURE_GUARDED,
                   description="Trigger compression cycle"),
+    OperationSpec("tool_result_ingest",  PATH_FAST, TRUST_INGEST,
+                  op_class=OP_CLASS_WRITE, exposure_tier=EXPOSURE_GUARDED,
+                  description="Ingest externally obtained tool/MCP result as memory"),
 ]
 
 # Always-full operations
@@ -831,6 +834,57 @@ def _fast_compression_run(fabric, ctx: RequestContext, payload: Dict[str, Any]) 
     return result
 
 
+def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fast-path tool-result ingest: governed write for externally obtained tool output.
+
+    This is a MEMORY operation, not an execution operation.
+    TORMENT may remember what tools returned; it does not decide what tools to run.
+
+    The ingested memory is:
+      - external-origin (source_type='tool_result', write_path='tool_ingest')
+      - queryable in normal retrieval
+      - visible in /debug/provenance
+      - NOT identity-canonical (stored as ordinary domain memory)
+      - safe parent for archivist writeback (included in _SAFE_PARENT_SOURCE_TYPES)
+    """
+    from .provenance_v1 import ProvenanceV1
+
+    tool_name = payload.get("tool_name", "unknown_tool")
+    content = payload.get("content", "")
+    summary = payload.get("summary") or (content.strip()[:240] + ("…" if len(content.strip()) > 240 else ""))
+    step = int(payload.get("step", 0))
+    session_id = payload.get("session_id")
+    tool_metadata = payload.get("tool_metadata")
+
+    # Build tool-result provenance
+    _notes_parts = [f"tool_name={tool_name}"]
+    if tool_metadata:
+        _notes_parts.append(f"metadata={tool_metadata}")
+    prov = ProvenanceV1.for_tool_result(
+        tool_name=tool_name,
+        parent_eids=payload.get("parent_eids") or [],
+        step=step,
+        session_id=session_id,
+    )
+    prov_dict = prov.to_dict()
+    # Append tool metadata to notes if present
+    if tool_metadata:
+        prov_dict["notes"] = f"tool_metadata={tool_metadata}"
+
+    with fabric.locks.agent_lock(ctx.workspace_id, ctx.agent_id):
+        return fabric.ingest(
+            workspace_id=ctx.workspace_id,
+            agent_id=ctx.agent_id,
+            text=content,
+            step=step,
+            domain_id=payload.get("domain_id"),
+            supplied_summary=summary,
+            supplied_embedding=payload.get("supplied_embedding"),
+            scope=payload.get("scope", "private"),
+            provenance=prov_dict,
+        )
+
+
 # Fast dispatch table
 FAST_DISPATCH: Dict[str, Callable] = {
     "ingest": _fast_ingest,
@@ -841,6 +895,7 @@ FAST_DISPATCH: Dict[str, Callable] = {
     "query_state": _fast_query_state,
     "query_memory": _fast_query_memory,
     "compression_run": _fast_compression_run,
+    "tool_result_ingest": _fast_tool_result_ingest,
 }
 
 

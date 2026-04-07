@@ -2234,6 +2234,81 @@ def spine_list_operations() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Tool-result ingest — governed memory write for external tool output
+# ---------------------------------------------------------------------------
+
+class ToolResultIngestReq(BaseModel):
+    """Request model for POST /tool/ingest.
+
+    This is a MEMORY operation, not an execution operation.
+    TORMENT may remember what tools returned; it does not decide what tools
+    to run.
+    """
+    workspace_id: str = Field(default="default")
+    agent_id: str
+    tool_name: str = Field(..., description="Identity of the tool that produced this result")
+    content: str = Field(..., description="Raw tool output to store as memory")
+    summary: Optional[str] = Field(default=None, description="Optional retrieval-friendly summary")
+    step: int = Field(default=0)
+    domain_id: Optional[str] = Field(default=None)
+    session_id: Optional[str] = Field(default=None)
+    tool_metadata: Optional[Dict[str, Any]] = Field(default=None,
+        description="Optional structured metadata about the tool invocation (audit only)")
+    supplied_embedding: Optional[List[float]] = Field(default=None)
+    scope: str = Field(default="private")
+
+
+@app.post("/tool/ingest")
+def tool_result_ingest(req: ToolResultIngestReq, request: Request) -> Dict[str, Any]:
+    """Ingest externally obtained tool output as a governed memory artifact.
+
+    Routes through Spine governance as a 'tool_result_ingest' operation.
+    The result is stored with tool-result provenance (source_type='tool_result',
+    write_path='tool_ingest') and is queryable in normal retrieval.
+
+    This endpoint does NOT execute tools, trigger autonomous actions, or
+    create automation loops. It only stores what was already obtained
+    externally.
+    """
+    from .spine import SpineRequest, submit_task
+
+    ctx = resolve_request_context(
+        request,
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
+
+    # Ensure agent exists
+    try:
+        fabric.create_agent(req.workspace_id, req.agent_id)
+    except Exception:
+        pass
+
+    spine_req = SpineRequest(
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+        operation="tool_result_ingest",
+        payload={
+            "tool_name": req.tool_name,
+            "content": req.content,
+            "summary": req.summary,
+            "step": req.step,
+            "domain_id": req.domain_id,
+            "session_id": req.session_id,
+            "tool_metadata": req.tool_metadata,
+            "supplied_embedding": req.supplied_embedding,
+            "scope": req.scope,
+        },
+    )
+    response = submit_task(spine_req, fabric, ctx)
+    if not response.allowed:
+        raise HTTPException(status_code=403, detail=response.reason)
+    if not response.ok:
+        raise HTTPException(status_code=500, detail=response.reason)
+    return response.result
+
+
+# ---------------------------------------------------------------------------
 # Spine status — lightweight pulse check for observability
 # ---------------------------------------------------------------------------
 
