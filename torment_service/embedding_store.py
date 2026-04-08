@@ -56,12 +56,24 @@ def _shard_name(idx: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Backward-compatible re-exports from the centralised pathing module.
+# Backward-compatible wrappers around the centralised pathing module.
 # Existing callers that import from embedding_store continue to work.
 # New code should import from torment_service.pathing directly.
 # ---------------------------------------------------------------------------
 from .pathing import ensure_within_base as _ensure_within_base   # noqa: F401
-from .pathing import stable_filename as _child_path              # noqa: F401
+from .pathing import stable_filename as _stable_filename
+
+
+def _child_path(root: str, filename: str) -> str:
+    """Derive a child file path from a canonical root, with traversal check.
+
+    Thin wrapper around ``pathing.stable_filename`` that preserves the
+    original ``_child_path(root, filename)`` call signature used by
+    every module that imports from ``embedding_store``.
+
+    ``filename`` must be a simple name (no separators, no '..').
+    """
+    return _stable_filename(root, filename)
 
 
 def _canonical_storage_root(path: str) -> str:

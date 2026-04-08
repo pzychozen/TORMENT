@@ -43,14 +43,34 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# 1. safe_slug — sanitise a dynamic path component
+# 1. safe_slug — validate a dynamic path component
 # ---------------------------------------------------------------------------
 
 def safe_slug(value: str, label: str = "identifier") -> str:
     """Validate that *value* is safe to embed in a filesystem path.
 
-    Rejects empty strings, ``..``, forward-slash, and back-slash.
-    Returns *value* unchanged if valid; raises ``ValueError`` otherwise.
+    This is a **strict validator**, not a transformer — it returns *value*
+    unchanged when valid and raises ``ValueError`` when the value contains
+    path-traversal sequences or separators.
+
+    Rejected patterns: empty strings, ``..``, ``/``, ``\\``.
+
+    Parameters
+    ----------
+    value : str
+        The dynamic component to validate (workspace ID, agent ID, etc.).
+    label : str
+        Human-readable name used in the error message (e.g. ``"workspace_id"``).
+
+    Returns
+    -------
+    str
+        *value* unchanged, if it passes validation.
+
+    Raises
+    ------
+    ValueError
+        If *value* is empty or contains path separators / traversal sequences.
 
     This replaces the per-module ``_validate_path_component`` duplicates.
     """
