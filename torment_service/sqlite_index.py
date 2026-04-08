@@ -24,7 +24,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from .embedding_store import _canonical_storage_root, _child_path
+from .embedding_store import _child_path
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +137,10 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        # Inline canonicalization — CodeQL needs realpath visible before makedirs
+        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
         self.index_dir = os.path.realpath(index_dir)
-        if ".." in self.index_dir.split(os.sep):
-            raise ValueError(f"index_dir resolves to path with traversal: {self.index_dir!r}")
+        if not self.index_dir.startswith(os.sep):
+            raise ValueError(f"index_dir did not resolve to absolute path: {self.index_dir!r}")
         os.makedirs(self.index_dir, exist_ok=True)
         self.db_path = _child_path(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
