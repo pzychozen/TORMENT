@@ -1097,7 +1097,7 @@ class TormentFabric:
         _push_progress("", 0)
 
         for gi, gdir in enumerate(graph_dirs, start=1):
-            nodes_path = os.path.join(gdir, "nodes.jsonl")
+            nodes_path = _safe_child(gdir, "nodes.jsonl")
             if not os.path.exists(nodes_path):
                 continue
             counts["graphs"] += 1
@@ -1123,7 +1123,7 @@ class TormentFabric:
 
                     expected_ck = embedding_checksum(summary, cur_provider, cur_model)
                     stored_ck = str(payload.get("embedding_checksum") or "").strip()
-                    emb_path = os.path.join(gdir, f"emb_{eid}.npy")
+                    emb_path = _safe_child(gdir, f"emb_{eid}.npy")
 
                     stale_reason = ""
                     if not os.path.exists(emb_path):
@@ -1677,10 +1677,10 @@ class TormentFabric:
                        job_id, source_workspace_id, target_workspace_id, include_private, include_shared, reembed, reembed_mode)
     
         try:
-            src_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", source_workspace_id))
+            src_root = _ws_root(self.data_dir, source_workspace_id)
             if not os.path.isdir(src_root):
                 raise HTTPException(status_code=404, detail=f"Source workspace '{source_workspace_id}' not found")
-            tgt_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", target_workspace_id))
+            tgt_root = _ws_root(self.data_dir, target_workspace_id)
             if os.path.exists(tgt_root):
                 raise HTTPException(status_code=409, detail=f"Target workspace '{target_workspace_id}' already exists")
     
@@ -1688,11 +1688,15 @@ class TormentFabric:
     
             _job_update(phase="copy")
             def _copytree_filtered(src: str, dst: str) -> None:
-                os.makedirs(dst, exist_ok=True)
+                # Guard the destination root before walking.
+                _dst = os.path.realpath(dst)
+                if not _dst.startswith(os.sep):
+                    raise ValueError(f"Clone dst not absolute: {_dst!r}")
+                os.makedirs(_dst, exist_ok=True)
                 for root, dirs, files in os.walk(src):
                     rel = os.path.relpath(root, src)
-                    out_root = os.path.join(dst, rel) if rel != "." else dst
-    
+                    out_root = _safe_child(_dst, rel) if rel != "." else _dst
+
                     parts = rel.split(os.sep) if rel != "." else []
                     if (not include_private) and ("agents" in parts) and ("private" in parts):
                         dirs[:] = []
@@ -1700,13 +1704,13 @@ class TormentFabric:
                     if (not include_shared) and ("domains" in parts) and ("shared" in parts):
                         dirs[:] = []
                         continue
-    
+
                     os.makedirs(out_root, exist_ok=True)
                     for fn in files:
                         if fn.startswith("emb_") and fn.endswith(".npy"):
                             continue
-                        srcp = os.path.join(root, fn)
-                        dstp = os.path.join(out_root, fn)
+                        srcp = _safe_child(root, fn)
+                        dstp = _safe_child(out_root, fn)
                         os.makedirs(os.path.dirname(dstp), exist_ok=True)
                         shutil.copy2(srcp, dstp, follow_symlinks=False)
     
@@ -1721,7 +1725,7 @@ class TormentFabric:
                 "embed_model": str(getattr(emb, "model", "")),
                 "source_workspace_id": source_workspace_id,
             }
-            mp = os.path.join(tgt_root, "workspace_meta.json")
+            mp = _safe_child(tgt_root, "workspace_meta.json")
             with open(mp, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
     
@@ -1731,16 +1735,18 @@ class TormentFabric:
     
                 def _iter_graph_dirs() -> List[str]:
                     gdirs: List[str] = []
-                    agents_root = os.path.join(tgt_root, "agents")
+                    agents_root = _safe_child(tgt_root, "agents")
                     if include_private and os.path.isdir(agents_root):
                         for aid in sorted(os.listdir(agents_root)):
-                            gdir = os.path.join(agents_root, aid, "private")
+                            _validate_path_component(aid, "agent_id")
+                            gdir = _safe_child(agents_root, aid, "private")
                             if os.path.isdir(gdir):
                                 gdirs.append(gdir)
-                    domains_root = os.path.join(tgt_root, "domains")
+                    domains_root = _safe_child(tgt_root, "domains")
                     if include_shared and os.path.isdir(domains_root):
                         for dom in sorted(os.listdir(domains_root)):
-                            gdir = os.path.join(domains_root, dom, "shared")
+                            _validate_path_component(dom, "domain_id")
+                            gdir = _safe_child(domains_root, dom, "shared")
                             if os.path.isdir(gdir):
                                 gdirs.append(gdir)
                     return gdirs
@@ -1749,7 +1755,7 @@ class TormentFabric:
                 _prog(graphs_total=len(graph_dirs), graphs_done=0, embeddings_done=0, current_graph="")
     
                 def _regen_graph(graph_dir: str) -> None:
-                    nodes_path = os.path.join(graph_dir, "nodes.jsonl")
+                    nodes_path = _safe_child(graph_dir, "nodes.jsonl")
                     if not os.path.exists(nodes_path):
                         return
                     regenerated["graphs"] += 1
@@ -1767,7 +1773,7 @@ class TormentFabric:
                             summary = str(payload.get("summary") or payload.get("text") or "").strip()
                             if not summary:
                                 summary = "(empty)"
-                            emb_path = os.path.join(graph_dir, f"emb_{eid}.npy")
+                            emb_path = _safe_child(graph_dir, f"emb_{eid}.npy")
                             mode = (reembed_mode or "selective").lower().strip()
                             if mode not in ("all", "selective", "missing"):
                                 mode = "selective"
@@ -3684,8 +3690,11 @@ class TormentFabric:
 
         self.ident_store.save(ident)
         # log feedback event (append-only) for causal tracing
-        fb_path = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "feedback_events.jsonl")
-        os.makedirs(os.path.dirname(fb_path), exist_ok=True)
+        fb_path = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "feedback_events.jsonl")
+        _fb_dir = os.path.realpath(os.path.dirname(fb_path))
+        if not _fb_dir.startswith(os.sep):
+            raise ValueError(f"Feedback dir not absolute: {_fb_dir!r}")
+        os.makedirs(_fb_dir, exist_ok=True)
         with open(fb_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({
                 "type": "FEEDBACK",
@@ -4604,15 +4613,18 @@ class TormentFabric:
         graph["embed_context"] = self._embed_context(ws)
 
         export_files = {}
-        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports'))
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports')
+        _od = os.path.realpath(out_dir)
+        if not _od.startswith(os.sep):
+            raise ValueError(f"Export dir not absolute: {_od!r}")
+        os.makedirs(_od, exist_ok=True)
         if export in ('json','bundle'):
-            jp = os.path.join(out_dir, f"trace_{eid}_{dom}.json")
+            jp = _safe_child(out_dir, f"trace_{eid}_{dom}.json")
             with open(jp,'w',encoding='utf-8') as f:
                 json.dump(graph, f, indent=2, ensure_ascii=False)
             export_files['json'] = jp
         if export in ('dot','bundle'):
-            dp = os.path.join(out_dir, f"trace_{eid}_{dom}.dot")
+            dp = _safe_child(out_dir, f"trace_{eid}_{dom}.dot")
             with open(dp,'w',encoding='utf-8') as f:
                 f.write('digraph G {\n')
                 for n in nodes:
@@ -4635,21 +4647,24 @@ class TormentFabric:
             _validate_path_component(agent_id, "agent_id")
         dom = domain_id or 'research'
         graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='bundle')
-        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports', f"bundle_{eid}_{dom}"))
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports', f"bundle_{eid}_{dom}")
+        _od = os.path.realpath(out_dir)
+        if not _od.startswith(os.sep):
+            raise ValueError(f"Bundle dir not absolute: {_od!r}")
+        os.makedirs(_od, exist_ok=True)
         # write graph.json/dot already created in exports; copy into bundle
         import shutil
         jp = graph.get('export_files', {}).get('json')
         dp = graph.get('export_files', {}).get('dot')
-        bjp = os.path.join(out_dir, 'graph.json')
-        bdp = os.path.join(out_dir, 'graph.dot')
+        bjp = _safe_child(out_dir, 'graph.json')
+        bdp = _safe_child(out_dir, 'graph.dot')
         if jp and os.path.exists(jp):
             shutil.copy(jp, bjp)
         if dp and os.path.exists(dp):
             shutil.copy(dp, bdp)
         # narrative
         narrative = self._trace_narrative(workspace_id, eid=eid, scope=scope, domain_id=dom, agent_id=agent_id)
-        npath = os.path.join(out_dir, 'narrative.md')
+        npath = _safe_child(out_dir, 'narrative.md')
         with open(npath,'w',encoding='utf-8') as f:
             f.write(narrative)
         manifest = {
@@ -4665,7 +4680,7 @@ class TormentFabric:
                 'narrative_md': npath,
             }
         }
-        mpath = os.path.join(out_dir, 'manifest.json')
+        mpath = _safe_child(out_dir, 'manifest.json')
         with open(mpath,'w',encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
         return {"bundle_dir": out_dir, "manifest": manifest}
