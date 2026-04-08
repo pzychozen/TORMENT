@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-import torment_service.spirit_reflection as spirit_reflection_mod
 from torment_service.spirit_reflection import (
     SpiritReflectionStore,
     _ensure_within_base,
@@ -160,7 +159,8 @@ class TestCleanup:
     def test_no_unused_field_import(self):
         """The unused 'field' import from dataclasses should be removed."""
         import inspect
-        mod = spirit_reflection_mod
+        import sys
+        mod = sys.modules['torment_service.spirit_reflection']
         source = inspect.getsource(mod)
         # 'field' should not appear in a dataclass import line
         import re

@@ -112,14 +112,14 @@ class TestPeriodicCompressionFloor(unittest.TestCase):
 
     def test_candidate_at_045_passes_floor(self):
         """A candidate with score 0.45 should pass the 0.40 floor."""
-        from torment_service.compression import COMPRESS_PERIODIC_FLOOR
+        COMPRESS_PERIODIC_FLOOR = comp_mod.COMPRESS_PERIODIC_FLOOR
         score = 0.45
         self.assertGreaterEqual(score, COMPRESS_PERIODIC_FLOOR,
                                 "Score 0.45 should pass the lowered 0.40 floor")
 
     def test_candidate_at_035_fails_floor(self):
         """A candidate with score 0.35 should still fail the 0.40 floor."""
-        from torment_service.compression import COMPRESS_PERIODIC_FLOOR
+        COMPRESS_PERIODIC_FLOOR = comp_mod.COMPRESS_PERIODIC_FLOOR
         score = 0.35
         self.assertLess(score, COMPRESS_PERIODIC_FLOOR,
                         "Score 0.35 should still fail the 0.40 floor")
