@@ -17,7 +17,6 @@ import json
 import os
 import sys
 import tempfile
-import time
 import unittest
 
 import numpy as np
@@ -26,7 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from torment_service.collective_models import (
     ResonancePacket,
-    ConvergenceEvent,
     CharacterSelfState,
 )
 from torment_service.collective_field import CollectiveField

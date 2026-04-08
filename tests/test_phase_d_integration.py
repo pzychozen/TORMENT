@@ -21,7 +21,6 @@ import sys
 import tempfile
 import time
 import unittest
-from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -369,7 +368,7 @@ class TestFullPipelineSimulation(unittest.TestCase):
     def test_domain_isolation_across_pipeline(self):
         """Events from one domain should not affect another domain's pipeline."""
         event_research = _make_event(domain_id="research")
-        event_creative = _make_event(event_id="cev_creative", domain_id="creative")
+        _make_event(event_id="cev_creative", domain_id="creative")
 
         policy = CollectivePolicy(self.tmp, "ws_pipe")
 

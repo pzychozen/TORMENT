@@ -89,7 +89,7 @@ def test_high_ambiguity_without_question_triggers_clarification():
 
 def test_live_social_short_turn_becomes_no_op():
     ctl = ThinkingController()
-    result = ctl.think(
+    ctl.think(
         "default",
         "ryuki",
         "yo",
