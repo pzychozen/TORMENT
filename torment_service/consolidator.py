@@ -1,7 +1,6 @@
 # consolidator.py
 from __future__ import annotations
-from typing import Dict, List
-import os, json
+import os
 from .memory_graph import MemoryGraph
 
 def build_cold_archive(graph: MemoryGraph, user_id: str = "default") -> str:

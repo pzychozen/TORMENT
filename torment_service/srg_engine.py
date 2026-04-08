@@ -30,10 +30,8 @@ from __future__ import annotations
 import math
 import os
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
 
 # ============================================================================
 # SRG Constants  (all from the paper)

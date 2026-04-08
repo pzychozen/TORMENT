@@ -19,7 +19,7 @@ v1 implements user_interaction roles only.
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 import json, os, time, re
 
 def _now_ts() -> int:
