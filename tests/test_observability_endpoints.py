@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
-import torment_service.incident_log as incident_mod
+incident_mod = sys.modules["torment_service.incident_log"]
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +204,7 @@ class TestAdminStatusMCPResource(unittest.TestCase):
 
     def _call_admin_status(self) -> dict:
         """Call the MCP resource handler directly."""
-        from torment_service.mcp_server import create_mcp_server
-        import torment_service.mcp_server as mcp_mod
+        mcp_mod = sys.modules["torment_service.mcp_server"]
 
         # Set up the module-level fabric and client context
         mcp_mod._fabric = fabric
@@ -219,7 +218,6 @@ class TestAdminStatusMCPResource(unittest.TestCase):
         # The resource_admin_status function is registered during create_mcp_server(),
         # but we can also call it by constructing the same logic inline.
         # Instead, let's use the same code path as the resource handler.
-        from torment_service.incident_log import get_incident_log
         import time as _time
 
         log = get_incident_log()

@@ -44,7 +44,7 @@ from torment_service.request_context import (
 )
 from torment_service.fabric import TormentFabric
 from torment_service.incident_log import IncidentLog, get_incident_log
-import torment_service.incident_log as incident_mod
+incident_mod = sys.modules["torment_service.incident_log"]
 
 
 # ---------------------------------------------------------------------------
