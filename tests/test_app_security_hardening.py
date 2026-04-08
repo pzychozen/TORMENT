@@ -9,10 +9,10 @@ Covers:
 
 import os
 import unittest
-from unittest.mock import patch
 
 # We import the helpers directly from the app module.
 # _safe_join_data_dir and _safe_log_value are module-level functions.
+import torment_service.app as app_mod
 from torment_service.app import (
     _validate_path_component,
     _safe_join_data_dir,
@@ -101,12 +101,11 @@ class TestNoRawExceptionInResponses(unittest.TestCase):
         detail= parameter or an 'error' dict value is a regression.
         """
         import inspect
-        import torment_service.app as app_mod
+        import re
 
         source = inspect.getsource(app_mod)
 
         # Find lines that have both 'HTTPException' and 'str(exc)' or 'str(e)'
-        import re
         # Pattern: detail=str(exc) or detail=str(e) in raise HTTPException
         http_exc_pattern = re.compile(r'raise\s+HTTPException\(.*detail\s*=\s*str\(')
         matches = http_exc_pattern.findall(source)
@@ -128,11 +127,9 @@ class TestNoRawExceptionInResponses(unittest.TestCase):
     def test_no_f_string_exc_in_http_detail(self):
         """Check that f-string interpolation of {exc} is not used in HTTPException detail."""
         import inspect
-        import torment_service.app as app_mod
+        import re
 
         source = inspect.getsource(app_mod)
-
-        import re
         # Pattern: detail=f"...{exc}..." or detail=f"...{e}..."
         fstring_pattern = re.compile(r'detail\s*=\s*f["\'].*\{exc\}')
         matches = fstring_pattern.findall(source)
