@@ -214,15 +214,15 @@ def _write_back_approved(
             if _eid is not None:
                 try:
                     _context_eids.append(int(_eid))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    _log.debug("Skipping non-integer private eid %r: %s", _eid, e)
         for mem in (getattr(memory_context, 'shared_memories', []) or []):
             _eid = mem.get("eid")
             if _eid is not None:
                 try:
                     _context_eids.append(int(_eid))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    _log.debug("Skipping non-integer shared eid %r: %s", _eid, e)
     # Deduplicate, preserve order
     _seen_eids: set = set()
     _deduped_eids: List[int] = []
