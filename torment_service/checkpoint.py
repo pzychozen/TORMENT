@@ -305,16 +305,21 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
     except ValueError:
         return
 
-    files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
-    if len(files) <= keep:
+    raw_files = glob.glob(os.path.join(safe_dir, "checkpoint_*.json"))
+    # Extract and validate basenames, discard anything unexpected
+    valid_names: List[str] = []
+    for raw in raw_files:
+        name = os.path.basename(raw)
+        if re.match(r"^checkpoint_\d+\.json$", name):
+            valid_names.append(name)
+    valid_names.sort()
+
+    if len(valid_names) <= keep:
         return
 
-    for old in files[: len(files) - keep]:
-        name = os.path.basename(old)
-        if not re.match(r"^checkpoint_\d+\.json$", name):
-            continue
+    for name in valid_names[: len(valid_names) - keep]:
         try:
-            candidate = _ensure_within_base(os.path.join(safe_dir, name), safe_dir)
+            candidate = _child_path(safe_dir, name)
             os.remove(candidate)
         except (ValueError, OSError) as e:
             log.debug("Could not remove old checkpoint: %s", e)
@@ -333,11 +338,18 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
         return None
     if not os.path.isdir(safe_dir):
         return None
-    files = sorted(glob.glob(os.path.join(safe_dir, "checkpoint_*.json")))
-    if not files:
+    raw_files = glob.glob(os.path.join(safe_dir, "checkpoint_*.json"))
+    # Extract and validate basenames, discard anything unexpected
+    valid_names: List[str] = []
+    for raw in raw_files:
+        name = os.path.basename(raw)
+        if re.match(r"^checkpoint_\d+\.json$", name):
+            valid_names.append(name)
+    valid_names.sort()
+    if not valid_names:
         return None
     try:
-        path = _ensure_within_base(files[-1], safe_dir)
+        path = _child_path(safe_dir, valid_names[-1])
     except ValueError:
         return None
     try:

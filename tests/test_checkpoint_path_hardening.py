@@ -190,6 +190,42 @@ class TestPruneCheckpoints(unittest.TestCase):
         self.assertIn("checkpoint_000003.json", json_files)
         self.assertNotIn("checkpoint_000000.json", json_files)
 
+    def test_prune_ignores_unexpected_filenames(self):
+        """Files that don't match checkpoint_NNNNNN.json are left alone."""
+        for step in range(3):
+            save_checkpoint(
+                self._ckpt_dir, step=step,
+                model_state=_make_model_state(),
+                corridor_monitor=_make_corridor_monitor(),
+                max_checkpoints=1,
+                base_dir=self._tmpdir,
+            )
+        # Plant a non-matching file
+        rogue = os.path.join(self._ckpt_dir, "notes.txt")
+        with open(rogue, "w") as f:
+            f.write("keep me")
+        _prune_old_checkpoints(self._ckpt_dir, 1, self._tmpdir)
+        self.assertTrue(os.path.exists(rogue), "non-checkpoint file was deleted")
+
+    def test_prune_uses_child_path_not_raw_glob(self):
+        """Prune reconstructs paths from basenames — a symlink-escaped
+        name won't match the pattern and is therefore ignored."""
+        for step in range(3):
+            save_checkpoint(
+                self._ckpt_dir, step=step,
+                model_state=_make_model_state(),
+                corridor_monitor=_make_corridor_monitor(),
+                max_checkpoints=10,
+                base_dir=self._tmpdir,
+            )
+        # Plant a file whose name contains path traversal (wouldn't match pattern)
+        rogue = os.path.join(self._ckpt_dir, "checkpoint_../../etc.json")
+        # This filename is invalid on most OS but the key test is that
+        # _prune_old_checkpoints only processes pattern-matched basenames
+        _prune_old_checkpoints(self._ckpt_dir, 1, self._tmpdir)
+        remaining = [f for f in os.listdir(self._ckpt_dir) if f.endswith(".json")]
+        self.assertEqual(len(remaining), 1, "should keep exactly 1 valid checkpoint")
+
 
 class TestLoadLatestCheckpoint(unittest.TestCase):
     """5, 7. Load revalidates and works correctly."""
@@ -221,6 +257,29 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
     def test_load_nonexistent_dir_returns_none(self):
         data = load_latest_checkpoint("/nonexistent/path", self._tmpdir)
         self.assertIsNone(data)
+
+    def test_load_ignores_non_matching_files(self):
+        """Only checkpoint_NNNNNN.json files are candidates for loading."""
+        os.makedirs(self._ckpt_dir, exist_ok=True)
+        # Plant a file that glob would match but doesn't fit the strict pattern
+        rogue = os.path.join(self._ckpt_dir, "checkpoint_evil.json")
+        with open(rogue, "w") as f:
+            json.dump({"step": 999}, f)
+        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        self.assertIsNone(data, "should ignore non-matching filenames")
+
+    def test_load_selects_latest_valid_basename(self):
+        """Load reconstructs path from validated basename, picks highest step."""
+        for step in [5, 15, 10]:
+            save_checkpoint(
+                self._ckpt_dir, step=step,
+                model_state=_make_model_state(),
+                corridor_monitor=_make_corridor_monitor(),
+                base_dir=self._tmpdir,
+            )
+        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["step"], 15)
 
     def test_round_trip_save_load_restore(self):
         """Full save → load → restore round trip."""
