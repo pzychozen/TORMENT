@@ -32,6 +32,7 @@ from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from .collective_models import MemoryGovernanceFlags
+from .embedding_store import _canonical_storage_root, _child_path
 
 
 # ---------------------------------------------------------------------------
@@ -42,14 +43,6 @@ def _validate_path_component(value: str, label: str) -> str:
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
-
-
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -215,17 +208,16 @@ class GovernanceAuditLog:
     """
 
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        safe_data_dir = os.path.realpath(data_dir)
         safe_workspace_id = _validate_path_component(workspace_id, "workspace_id")
-        self._base = _ensure_within_base(
-            os.path.join(safe_data_dir, "workspaces", safe_workspace_id, "governance"),
-            safe_data_dir,
+
+        # Canonical trust chain: data_dir → workspaces/<id>/governance
+        canonical_data = _canonical_storage_root(data_dir)
+        governance_root = _canonical_storage_root(
+            os.path.join(canonical_data, "workspaces", safe_workspace_id, "governance"),
+            mkdir=True,
         )
-        os.makedirs(self._base, exist_ok=True)
-        self._path = _ensure_within_base(
-            os.path.join(self._base, "audit.jsonl"),
-            self._base,
-        )
+        self._base = governance_root
+        self._path = _child_path(governance_root, "audit.jsonl")
         self._lock = threading.Lock()
 
     def log(
