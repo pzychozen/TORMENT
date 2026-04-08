@@ -71,7 +71,10 @@ class MemoryGraph:
     """
 
     def __init__(self, data_dir: str, embedder: Optional[Embedder] = None, sqlite_index=None) -> None:
-        self.data_dir = _canonical_storage_root(data_dir)
+        # Inline canonicalization — CodeQL needs realpath visible before makedirs
+        self.data_dir = os.path.realpath(data_dir)
+        if ".." in self.data_dir.split(os.sep):
+            raise ValueError(f"data_dir resolves to path with traversal: {self.data_dir!r}")
         os.makedirs(self.data_dir, exist_ok=True)
 
         # Optional SQLite sidecar index (Phase 4).
@@ -90,9 +93,11 @@ class MemoryGraph:
         self._index_dirty: bool = True
 
         # --- shard-based embedding storage ---
-        self._emb_dir = _canonical_storage_root(
+        self._emb_dir = os.path.realpath(
             os.path.join(self.data_dir, "embeddings")
         )
+        if not self._emb_dir.startswith(self.data_dir + os.sep):
+            raise ValueError(f"Embeddings dir escapes data root: {self._emb_dir!r}")
         os.makedirs(self._emb_dir, exist_ok=True)
         self._shard_writer: Optional[EmbeddingShardWriter] = None
         self._shard_reader: Optional[EmbeddingShardReader] = None

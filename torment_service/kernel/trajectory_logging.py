@@ -33,7 +33,10 @@ class TrajectoryLogger:
         *,
         use_daily_rotation: bool = True,
     ) -> None:
+        # Inline canonicalization — CodeQL needs realpath visible before makedirs
         self.root_dir = os.path.realpath(root_dir)
+        if ".." in self.root_dir.split(os.sep):
+            raise ValueError(f"root_dir resolves to path with traversal: {self.root_dir!r}")
         os.makedirs(self.root_dir, exist_ok=True)
         self._use_daily = use_daily_rotation
         # Legacy single-file path (used when daily rotation is off, or
