@@ -64,6 +64,26 @@ def _ensure_within_base(path: str, base_dir: str) -> str:
     return resolved
 
 
+def _validated_checkpoint_root(
+    checkpoint_dir: str, base_dir: str, *, mkdir: bool = False,
+) -> str:
+    """Canonicalize *checkpoint_dir* and verify containment in *base_dir*.
+
+    Inlines ``os.path.realpath`` + ``startswith`` containment so that
+    static-analysis tools (CodeQL) see the sanitiser barrier in the
+    same module as the filesystem sinks that consume the returned path.
+    """
+    root = os.path.realpath(os.path.normpath(checkpoint_dir))
+    if ".." in root.split(os.sep):
+        raise ValueError(f"Canonical path contains traversal segment: {root!r}")
+    base = os.path.realpath(os.path.normpath(base_dir))
+    if root != base and not root.startswith(base + os.sep):
+        raise ValueError("Checkpoint directory escapes base")
+    if mkdir:
+        os.makedirs(root, exist_ok=True)
+    return root
+
+
 # ---------------------------------------------------------------------------
 # Serialisation helpers
 # ---------------------------------------------------------------------------
@@ -259,8 +279,7 @@ def save_checkpoint(
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = _canonical_storage_root(checkpoint_dir, mkdir=True)
-        _ensure_within_base(safe_dir, base_dir)
+        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir, mkdir=True)
 
         payload: Dict[str, Any] = {
             "version": 1,
@@ -299,8 +318,7 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
     revalidated against the canonical checkpoint directory before removal.
     """
     try:
-        safe_dir = _canonical_storage_root(checkpoint_dir)
-        _ensure_within_base(safe_dir, base_dir)
+        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir)
     except ValueError:
         return
 
@@ -334,8 +352,7 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = _canonical_storage_root(checkpoint_dir)
-        _ensure_within_base(safe_dir, base_dir)
+        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir)
     except ValueError:
         return None
     if not os.path.isdir(safe_dir):

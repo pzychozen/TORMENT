@@ -27,6 +27,7 @@ from torment_service.checkpoint import (
     restore_from_checkpoint,
     _validate_path_component,
     _ensure_within_base,
+    _validated_checkpoint_root,
 )
 from torment_service.kernel.model_core import ModelState
 from torment_service.memory_kernel import CorridorMonitor
@@ -343,6 +344,46 @@ class TestPathHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(ValueError):
                 _ensure_within_base("/etc/passwd", td)
+
+
+class TestValidatedCheckpointRoot(unittest.TestCase):
+    """Inline sanitiser returns canonical path inside base, rejects escapes."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_returns_realpath_inside_base(self):
+        sub = os.path.join(self._tmpdir, "ckpts")
+        os.makedirs(sub)
+        result = _validated_checkpoint_root(sub, self._tmpdir)
+        self.assertEqual(result, os.path.realpath(sub))
+
+    def test_mkdir_creates_directory(self):
+        sub = os.path.join(self._tmpdir, "new_ckpts")
+        result = _validated_checkpoint_root(sub, self._tmpdir, mkdir=True)
+        self.assertTrue(os.path.isdir(result))
+
+    def test_rejects_escape_via_dotdot(self):
+        outside = os.path.join(self._tmpdir, "..", "escape")
+        with self.assertRaises(ValueError):
+            _validated_checkpoint_root(outside, self._tmpdir)
+
+    def test_rejects_unrelated_directory(self):
+        with self.assertRaises(ValueError):
+            _validated_checkpoint_root("/tmp/unrelated", self._tmpdir)
+
+    def test_accepts_base_dir_itself(self):
+        result = _validated_checkpoint_root(self._tmpdir, self._tmpdir)
+        self.assertEqual(result, os.path.realpath(self._tmpdir))
+
+    def test_normalises_trailing_separators(self):
+        sub = os.path.join(self._tmpdir, "ckpts")
+        os.makedirs(sub)
+        result = _validated_checkpoint_root(sub + os.sep + os.sep, self._tmpdir)
+        self.assertEqual(result, os.path.realpath(sub))
 
 
 if __name__ == "__main__":
