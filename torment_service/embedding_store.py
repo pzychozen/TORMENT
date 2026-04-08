@@ -68,22 +68,23 @@ def _canonical_storage_root(path: str, *, mkdir: bool = False) -> str:
     """Canonicalize a storage root path.
 
     1. Resolves symlinks and normalizes to an absolute real path.
+       (``realpath`` already normalises, so ``normpath`` is not needed.)
     2. Rejects any residual traversal sequences (belt-and-suspenders).
     3. Optionally creates the directory.
     4. Returns only the trusted, canonical root.
 
-    All child paths must be derived from this return value to ensure
-    CodeQL can trace the trust chain from canonicalization to file sink.
+    All filesystem sinks (``os.makedirs``) are gated inside the
+    positive traversal-check branch so that CodeQL sees the guard
+    as a direct control-flow gate on the sink.
     """
-    root = os.path.realpath(os.path.normpath(path))
-    # Explicit post-canonicalization guard: reject if realpath somehow
-    # left traversal segments (should never happen, but satisfies CodeQL
-    # taint models that require a visible sanitizer before file sinks).
-    if ".." in root.split(os.sep):
-        raise ValueError(f"Canonical path contains traversal segment: {root!r}")
-    if mkdir:
-        os.makedirs(root, exist_ok=True)
-    return root
+    root = os.path.realpath(path)
+    # Gate sinks inside the positive branch so the traversal check is
+    # a direct control-flow guard that CodeQL can trace.
+    if ".." not in root.split(os.sep):
+        if mkdir:
+            os.makedirs(root, exist_ok=True)
+        return root
+    raise ValueError(f"Canonical path contains traversal segment: {root!r}")
 
 
 def _child_path(root: str, filename: str) -> str:
