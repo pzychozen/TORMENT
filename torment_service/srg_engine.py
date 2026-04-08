@@ -31,7 +31,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 # ============================================================================
 # SRG Constants  (all from the paper)
