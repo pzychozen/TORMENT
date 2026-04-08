@@ -66,8 +66,8 @@ def run_once(params: ModelParams):
     plot_Jeff_vs_time(hist, obs)
     detect_chirality_selection_window(hist, obs)
 
-    # Tangent corridor alignment + Δ
-    _mask_tan, _xy, _jumpvec, _dot = detect_tangent_corridors(hist)
+    # Tangent corridor alignment + Δ (called for printed diagnostics)
+    detect_tangent_corridors(hist)
 
     # (κ,Z) clustering view
     big_steps_mask, mags = cluster_delta_kz(hist, frac_of_max=0.5)
@@ -455,8 +455,8 @@ def run_long_time_stability_test(params: ModelParams,
     print(f"Mean J_eff early window  ≈ {np.mean(J_early):.4e}, sign = {int(sign_early)}")
     print(f"Mean J_eff late window   ≈ {np.mean(J_late):.4e}, sign = {int(sign_late)}")
 
-    # Δ(κ,Z) cluster structure over full run
-    _big_mask_full, _mags_full = cluster_delta_kz(hist, frac_of_max=frac_of_max)
+    # Δ(κ,Z) cluster structure over full run (called for printed diagnostics)
+    cluster_delta_kz(hist, frac_of_max=frac_of_max)
 
     # Restrict history to early and late segments for local Δ analysis
     # We slice κ, Z, phi_index, uxy_coords, etc. consistently.
