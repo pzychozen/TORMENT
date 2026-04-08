@@ -20,14 +20,9 @@ import numpy as np
 
 from .collective_models import ResonancePacket, ConvergenceEvent
 from .embedding_store import _canonical_storage_root, _child_path
+from .pathing import safe_slug
 
 log = logging.getLogger("torment.collective_field")
-
-
-def _validate_path_component(value: str, label: str) -> str:
-    if not value or ".." in value or "/" in value or "\\" in value:
-        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
 
 
 class CollectiveField:
@@ -46,7 +41,7 @@ class CollectiveField:
     CONVERGENCE_COOLDOWN = 30            # seconds between events for same agent pair + domain
 
     def __init__(self, workspace_id: str, data_dir: str) -> None:
-        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        self.workspace_id = safe_slug(workspace_id, "workspace_id")
 
         # Canonical trust chain: data_dir → workspaces/<id>/collective
         canonical_data = _canonical_storage_root(data_dir)

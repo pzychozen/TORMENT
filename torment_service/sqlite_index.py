@@ -25,6 +25,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .embedding_store import _canonical_storage_root, _child_path
+from .pathing import safe_slug, safe_join, stable_filename, approved_subdir
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,8 @@ import shutil
 import tempfile
 import unittest
 
-from torment_service.governance import GovernanceAuditLog, _validate_path_component
+from torment_service.governance import GovernanceAuditLog
+from torment_service.pathing import safe_slug
 
 
 class TestGovernanceAuditLogPathIntegrity(unittest.TestCase):
@@ -80,7 +81,7 @@ class TestGovernanceAuditLogInvalidPaths(unittest.TestCase):
 
     def test_validate_path_component_rejects_dotdot(self):
         with self.assertRaises(ValueError):
-            _validate_path_component("..", "test")
+            safe_slug("..")
 
 
 class TestGovernanceAuditLogBehavior(unittest.TestCase):

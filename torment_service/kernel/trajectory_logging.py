@@ -5,26 +5,46 @@ import json, os, time
 from typing import Any, Dict
 import numpy as np
 
-from ..embedding_store import _canonical_storage_root, _child_path
+from ..pathing import dated_log_path, stable_filename
 
 
 def _now_ts() -> int:
     return int(time.time())
 
 class TrajectoryLogger:
-    """
-    Lightweight append-only trajectory logger.
-    Writes per-step kinematics snapshots to trajectories.jsonl.
+    """Lightweight append-only trajectory logger.
 
-    This is intentionally simple:
-      - No heavy aggregation
-      - No coupling back into the kernel
-      - Just persistent telemetry for later analysis/plots
+    Writes per-step kinematics snapshots to daily-rotated JSONL files
+    under ``logs/trajectories/daily/YYYY-MM-DD.jsonl``.
+
+    When *use_daily_rotation* is ``True`` (the default), each call to
+    ``log_entity`` writes to today's dated log file.  This prevents a
+    single ``trajectories.jsonl`` from growing without bound and keeps
+    the root directory clean.
+
+    Set *use_daily_rotation* to ``False`` to fall back to the legacy
+    single-file behaviour (useful for existing tests).
     """
-    def __init__(self, root_dir: str, filename: str = "trajectories.jsonl") -> None:
-        self.root_dir = _canonical_storage_root(root_dir)
+
+    def __init__(
+        self,
+        root_dir: str,
+        filename: str = "trajectories.jsonl",
+        *,
+        use_daily_rotation: bool = True,
+    ) -> None:
+        self.root_dir = os.path.realpath(root_dir)
         os.makedirs(self.root_dir, exist_ok=True)
-        self.path = _child_path(self.root_dir, filename)
+        self._use_daily = use_daily_rotation
+        # Legacy single-file path (used when daily rotation is off, or
+        # as fallback for callers that read self.path directly).
+        self.path = stable_filename(self.root_dir, filename)
+
+    def _today_path(self) -> str:
+        """Return today's dated log path, creating the directory if needed."""
+        p = dated_log_path(self.root_dir, "trajectories")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        return p
 
     def log_entity(self, ent: Any, step: int) -> None:
         try:
@@ -50,5 +70,6 @@ class TrajectoryLogger:
             "traj_last_classify_step": payload.get("traj_last_classify_step"),
         }
 
-        with open(self.path, "a", encoding="utf-8") as f:
+        target = self._today_path() if self._use_daily else self.path
+        with open(target, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

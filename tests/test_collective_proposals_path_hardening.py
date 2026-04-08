@@ -18,8 +18,8 @@ from torment_service.collective_proposals import (
     ConvergencePersistenceTracker,
     CollectiveProposalBridge,
     ProposalDraftResult,
-    _validate_path_component,
 )
+from torment_service.pathing import safe_slug
 
 
 class TestTrackerPathIntegrity(unittest.TestCase):
@@ -86,7 +86,7 @@ class TestTrackerInvalidPaths(unittest.TestCase):
 
     def test_validate_path_component_rejects_dotdot(self):
         with self.assertRaises(ValueError):
-            _validate_path_component("..", "test")
+            safe_slug("..")
 
 
 class TestTrackerBehavior(unittest.TestCase):

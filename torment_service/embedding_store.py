@@ -55,45 +55,26 @@ def _shard_name(idx: int) -> str:
     return f"shard_{idx:06d}"
 
 
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    """Resolve *path* and verify it lives inside *base_dir* (CWE-22 guard)."""
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError(f"Path escapes base directory: {resolved}")
-    return resolved
+# ---------------------------------------------------------------------------
+# Backward-compatible re-exports from the centralised pathing module.
+# Existing callers that import from embedding_store continue to work.
+# New code should import from torment_service.pathing directly.
+# ---------------------------------------------------------------------------
+from .pathing import ensure_within_base as _ensure_within_base   # noqa: F401
+from .pathing import stable_filename as _child_path              # noqa: F401
+from .pathing import safe_join as _safe_join                     # noqa: F401
 
 
 def _canonical_storage_root(path: str) -> str:
-    """Canonicalize a storage root path.
+    """Canonicalize a storage root path — thin wrapper kept for compat.
 
-    1. Resolves symlinks and normalizes to an absolute real path.
-       (``realpath`` already normalises, so ``normpath`` is not needed.)
-    2. Rejects any residual traversal sequences (belt-and-suspenders).
-    3. Returns only the trusted, canonical root.
-
-    Callers that need directory creation should call ``os.makedirs``
-    on the returned value themselves — keeping the I/O sink at a site
-    where a ``startswith(base)`` guard is visible to CodeQL.
+    New code should use ``pathing.safe_join`` or ``pathing.approved_subdir``
+    instead, which combine canonicalization with base-containment in one call.
     """
     root = os.path.realpath(path)
     if ".." not in root.split(os.sep):
         return root
     raise ValueError(f"Canonical path contains traversal segment: {root!r}")
-
-
-def _child_path(root: str, filename: str) -> str:
-    """Derive a child file path from a canonical root, with traversal check.
-
-    ``filename`` must be a simple name (no separators, no '..').
-    """
-    if not filename or ".." in filename or os.sep in filename or "/" in filename:
-        raise ValueError(f"Invalid child filename: {filename!r}")
-    child = os.path.join(root, filename)
-    resolved = os.path.realpath(child)
-    if not resolved.startswith(root + os.sep):
-        raise ValueError(f"Child path escapes storage root: {resolved}")
-    return resolved
 
 
 # ---------------------------------------------------------------------------
