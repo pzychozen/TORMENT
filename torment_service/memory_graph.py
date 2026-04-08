@@ -14,19 +14,12 @@ from .embeddings import Embedder, HashEmbedding
 from .embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
+    _canonical_storage_root,
+    _child_path,
     load_embedding as _load_embedding_universal,
 )
 
 log = logging.getLogger("torment.memory_graph")
-
-
-def _ensure_within_base(path: str, base: str) -> str:
-    """Resolve *path* and verify it lives inside *base* (CWE-22 guard)."""
-    resolved = os.path.realpath(path)
-    base_resolved = os.path.realpath(base)
-    if resolved != base_resolved and not resolved.startswith(base_resolved + os.sep):
-        raise ValueError(f"Path escapes base directory: {resolved}")
-    return resolved
 
 
 def _now_ts() -> int:
@@ -78,8 +71,7 @@ class MemoryGraph:
     """
 
     def __init__(self, data_dir: str, embedder: Optional[Embedder] = None, sqlite_index=None) -> None:
-        self.data_dir = os.path.realpath(data_dir)
-        os.makedirs(self.data_dir, exist_ok=True)
+        self.data_dir = _canonical_storage_root(data_dir, mkdir=True)
 
         # Optional SQLite sidecar index (Phase 4).
         # If provided, mirror writes go to SQLite after JSONL.
@@ -97,8 +89,8 @@ class MemoryGraph:
         self._index_dirty: bool = True
 
         # --- shard-based embedding storage ---
-        self._emb_dir = _ensure_within_base(
-            os.path.join(self.data_dir, "embeddings"), self.data_dir
+        self._emb_dir = _canonical_storage_root(
+            os.path.join(self.data_dir, "embeddings"), mkdir=True
         )
         self._shard_writer: Optional[EmbeddingShardWriter] = None
         self._shard_reader: Optional[EmbeddingShardReader] = None
@@ -109,15 +101,10 @@ class MemoryGraph:
 
         self.traj = TrajectoryLogger(root_dir=self.data_dir)
 
-        self.meta_path = _ensure_within_base(
-            os.path.join(self.data_dir, "nodes.jsonl"), self.data_dir
-        )
-        self.edges_path = _ensure_within_base(
-            os.path.join(self.data_dir, "edges.jsonl"), self.data_dir
-        )
-        self.events_path = _ensure_within_base(
-            os.path.join(self.data_dir, "memory_events.jsonl"), self.data_dir
-        )
+        # Derive fixed child paths from the canonical root.
+        self.meta_path = _child_path(self.data_dir, "nodes.jsonl")
+        self.edges_path = _child_path(self.data_dir, "edges.jsonl")
+        self.events_path = _child_path(self.data_dir, "memory_events.jsonl")
 
         self.edges: List[Dict[str, Any]] = []
 
@@ -141,9 +128,7 @@ class MemoryGraph:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
     def _emb_path(self, eid: int) -> str:
-        return _ensure_within_base(
-            os.path.join(self.data_dir, f"emb_{int(eid)}.npy"), self.data_dir
-        )
+        return _child_path(self.data_dir, f"emb_{int(eid)}.npy")
 
     def _normalize(self, v: np.ndarray) -> np.ndarray:
         v = np.asarray(v, dtype=np.float32).reshape(-1)
@@ -394,9 +379,17 @@ class MemoryGraph:
         """
         max_eid = 0
 
+        # Inline containment re-assertions: CodeQL traces instance
+        # attributes back to the constructor's tainted data_dir param,
+        # so it needs a local realpath+startswith guard before each
+        # filesystem sink in this method.
+        _root = os.path.realpath(self.data_dir)
+        _meta = os.path.realpath(self.meta_path)
+        _edges = os.path.realpath(self.edges_path)
+
         # Load nodes (canonical per EID)
-        if os.path.exists(self.meta_path):
-            with open(self.meta_path, "r", encoding="utf-8") as f:
+        if _meta.startswith(_root + os.sep) and os.path.exists(_meta):
+            with open(_meta, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -439,8 +432,8 @@ class MemoryGraph:
                         self.world.entities.append(ent)
 
         # Load edges
-        if os.path.exists(self.edges_path):
-            with open(self.edges_path, "r", encoding="utf-8") as f:
+        if _edges.startswith(_root + os.sep) and os.path.exists(_edges):
+            with open(_edges, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
