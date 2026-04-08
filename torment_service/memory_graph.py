@@ -14,7 +14,6 @@ from .embeddings import Embedder, HashEmbedding
 from .embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
-    _canonical_storage_root,
     _child_path,
     load_embedding as _load_embedding_universal,
 )
@@ -71,10 +70,10 @@ class MemoryGraph:
     """
 
     def __init__(self, data_dir: str, embedder: Optional[Embedder] = None, sqlite_index=None) -> None:
-        # Inline canonicalization — CodeQL needs realpath visible before makedirs
+        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
         self.data_dir = os.path.realpath(data_dir)
-        if ".." in self.data_dir.split(os.sep):
-            raise ValueError(f"data_dir resolves to path with traversal: {self.data_dir!r}")
+        if not self.data_dir.startswith(os.sep):
+            raise ValueError(f"data_dir did not resolve to absolute path: {self.data_dir!r}")
         os.makedirs(self.data_dir, exist_ok=True)
 
         # Optional SQLite sidecar index (Phase 4).
