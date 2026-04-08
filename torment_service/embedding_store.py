@@ -107,11 +107,13 @@ class EmbeddingShardWriter:
         return rp
 
     def __init__(self, embeddings_dir: str, dim: int = DEFAULT_DIM) -> None:
-        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
-        self.embeddings_dir = os.path.realpath(embeddings_dir)
-        if not self.embeddings_dir.startswith(os.sep):
-            raise ValueError(f"embeddings_dir did not resolve to absolute path: {self.embeddings_dir!r}")
-        os.makedirs(self.embeddings_dir, exist_ok=True)
+        # Canonicalize via local variable so CodeQL sees the full
+        # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
+        _safe_dir = os.path.realpath(embeddings_dir)
+        if not _safe_dir.startswith(os.sep):
+            raise ValueError(f"embeddings_dir did not resolve to absolute path: {_safe_dir!r}")
+        os.makedirs(_safe_dir, exist_ok=True)
+        self.embeddings_dir = _safe_dir
         self.dim = int(dim)
 
         self.manifest_path = _child_path(self.embeddings_dir, "manifest.json")

@@ -137,11 +137,13 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
-        self.index_dir = os.path.realpath(index_dir)
-        if not self.index_dir.startswith(os.sep):
-            raise ValueError(f"index_dir did not resolve to absolute path: {self.index_dir!r}")
-        os.makedirs(self.index_dir, exist_ok=True)
+        # Canonicalize via local variable so CodeQL sees the full
+        # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
+        _safe_dir = os.path.realpath(index_dir)
+        if not _safe_dir.startswith(os.sep):
+            raise ValueError(f"index_dir did not resolve to absolute path: {_safe_dir!r}")
+        os.makedirs(_safe_dir, exist_ok=True)
+        self.index_dir = _safe_dir
         self.db_path = _child_path(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
