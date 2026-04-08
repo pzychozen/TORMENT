@@ -17,7 +17,7 @@ See AGENT_SPINE_PLAN.md §7 (Archivist).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from roles.base import RoleBase
 from cognition.task_models import TaskPacket

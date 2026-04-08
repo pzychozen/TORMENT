@@ -18,16 +18,15 @@ Usage:
 """
 import os
 import sys
-import copy
 from collections import Counter
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from torment_service.memory_kernel import TriOctaMemoryKernel, CorridorMonitor
+from torment_service.memory_kernel import TriOctaMemoryKernel
 from torment_service.kernel.model_core import ModelParams
 from torment_service.symbols import assign_symbol_state
 
