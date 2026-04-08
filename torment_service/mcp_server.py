@@ -599,7 +599,6 @@ def create_mcp_server() -> FastMCP:
     def resource_memory_summary(workspace_id: str, agent_id: str) -> str:
         """Read a summary of agent memory through Spine-backed helpers."""
         fabric = _get_fabric()
-        client = _get_client_ctx()
 
         summary: Dict[str, Any] = {
             "workspace_id": workspace_id,

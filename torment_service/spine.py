@@ -104,8 +104,8 @@ def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
                         "seed_basin_phi": getattr(cstate, "seed_basin_phi", 0.0),
                         "seed_basin_role": getattr(cstate, "seed_basin_role", "plateau"),
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Character state extraction failed (non-fatal): %s", e)
 
         return harvest_geometric_context(
             character_state=char_state,

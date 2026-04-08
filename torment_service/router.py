@@ -1,7 +1,7 @@
 # router.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 from .motifs import MotifRegistry, cosine
 
