@@ -69,20 +69,14 @@ def _validated_checkpoint_root(
 ) -> str:
     """Canonicalize *checkpoint_dir* and verify containment in *base_dir*.
 
-    Inlines ``os.path.realpath`` + ``startswith`` containment so that
-    static-analysis tools (CodeQL) see the sanitiser barrier in the
-    same module as the filesystem sinks that consume the returned path.
-
-    All filesystem operations (``os.makedirs``) are gated inside the
-    positive containment branch so the ``startswith`` check is a direct
-    control-flow guard on every sink.
+    Uses bare ``os.path.realpath`` (which already normalises) so that
+    CodeQL's taint model recognises the sanitiser.  All filesystem sinks
+    are gated inside the positive ``startswith`` branch.
     """
-    root = os.path.realpath(os.path.normpath(checkpoint_dir))
+    root = os.path.realpath(checkpoint_dir)
     if ".." in root.split(os.sep):
         raise ValueError(f"Canonical path contains traversal segment: {root!r}")
-    base = os.path.realpath(os.path.normpath(base_dir))
-    # Gate all sinks inside the positive branch so CodeQL sees startswith
-    # as a direct control-flow guard before os.makedirs.
+    base = os.path.realpath(base_dir)
     if root == base or root.startswith(base + os.sep):
         if mkdir:
             os.makedirs(root, exist_ok=True)
@@ -285,15 +279,15 @@ def save_checkpoint(
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir, mkdir=True)
-
-        # Inline containment re-assertion: CodeQL needs a local
-        # realpath+startswith guard visible before every sink in this
-        # function (open, os.replace).  The helper already verified
-        # this but CodeQL does not follow into called functions.
+        # Inline full sanitisation so CodeQL sees realpath → startswith
+        # → sink in a single straight-line scope.
+        safe_dir = os.path.realpath(checkpoint_dir)
         _base = os.path.realpath(base_dir)
+        if ".." in safe_dir.split(os.sep):
+            return None
         if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
             return None
+        os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
             "version": 1,
@@ -330,19 +324,19 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
 
     *base_dir* is the trusted root directory. Deletion targets are
     revalidated against the canonical checkpoint directory before removal.
-    """
-    try:
-        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir)
-    except ValueError:
-        return
 
-    # Inline containment re-assertion for static analysis visibility.
+    Path sanitisation is fully inlined (``os.path.realpath`` →
+    ``startswith`` guard → sinks) so that CodeQL sees the complete
+    trust chain without crossing function boundaries.
+    """
+    # --- inline sanitisation (no helper calls) ---
+    safe_dir = os.path.realpath(checkpoint_dir)
     _base = os.path.realpath(base_dir)
+    if ".." in safe_dir.split(os.sep):
+        return
     if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
         return
 
-    # Use os.listdir on the trusted root instead of glob.glob to avoid
-    # passing a derived path into glob (which CodeQL traces as tainted).
     try:
         entries = os.listdir(safe_dir)
     except OSError:
@@ -369,21 +363,21 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
 
     *base_dir* is the trusted root directory.  All resolved paths are
     verified to stay inside it before any file access.
-    """
-    try:
-        safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir)
-    except ValueError:
-        return None
 
-    # Inline containment re-assertion for static analysis visibility.
+    Path sanitisation is fully inlined (``os.path.realpath`` →
+    ``startswith`` guard → sinks) so that CodeQL sees the complete
+    trust chain without crossing function boundaries.
+    """
+    # --- inline sanitisation (no helper calls) ---
+    safe_dir = os.path.realpath(checkpoint_dir)
     _base = os.path.realpath(base_dir)
+    if ".." in safe_dir.split(os.sep):
+        return None
     if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
         return None
 
     if not os.path.isdir(safe_dir):
         return None
-    # Use os.listdir on the trusted root instead of glob.glob to avoid
-    # passing a derived path into glob (which CodeQL traces as tainted).
     try:
         entries = os.listdir(safe_dir)
     except OSError:
