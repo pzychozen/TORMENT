@@ -137,7 +137,8 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        self.index_dir = _canonical_storage_root(index_dir, mkdir=True)
+        self.index_dir = _canonical_storage_root(index_dir)
+        os.makedirs(self.index_dir, exist_ok=True)
         self.db_path = _child_path(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()

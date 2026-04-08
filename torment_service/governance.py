@@ -213,9 +213,9 @@ class GovernanceAuditLog:
         # Canonical trust chain: data_dir → workspaces/<id>/governance
         canonical_data = _canonical_storage_root(data_dir)
         governance_root = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", safe_workspace_id, "governance"),
-            mkdir=True,
+            os.path.join(canonical_data, "workspaces", safe_workspace_id, "governance")
         )
+        os.makedirs(governance_root, exist_ok=True)
         self._base = governance_root
         self._path = _child_path(governance_root, "audit.jsonl")
         self._lock = threading.Lock()

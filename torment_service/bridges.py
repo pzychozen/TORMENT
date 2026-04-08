@@ -35,9 +35,9 @@ class BridgeRegistry:
 
         canonical_data = _canonical_storage_root(data_dir)
         workspace_dir = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", self.workspace_id),
-            mkdir=True,
+            os.path.join(canonical_data, "workspaces", self.workspace_id)
         )
+        os.makedirs(workspace_dir, exist_ok=True)
         self.data_dir = canonical_data
         self.path = _child_path(workspace_dir, "bridges.json")
         self.events_path = _child_path(workspace_dir, "bridge_events.jsonl")

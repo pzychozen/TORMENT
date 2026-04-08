@@ -70,9 +70,9 @@ class MotifRegistry:
 
         self.data_dir = _canonical_storage_root(data_dir)
         motif_dir = _canonical_storage_root(
-            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id),
-            mkdir=True,
+            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id)
         )
+        os.makedirs(motif_dir, exist_ok=True)
         self.path = _child_path(motif_dir, "motifs.json")
         self.events_path = _child_path(motif_dir, "motif_events.jsonl")
         self.merges_path = _child_path(motif_dir, "motif_merges.json")

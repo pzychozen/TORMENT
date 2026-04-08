@@ -71,7 +71,8 @@ class MemoryGraph:
     """
 
     def __init__(self, data_dir: str, embedder: Optional[Embedder] = None, sqlite_index=None) -> None:
-        self.data_dir = _canonical_storage_root(data_dir, mkdir=True)
+        self.data_dir = _canonical_storage_root(data_dir)
+        os.makedirs(self.data_dir, exist_ok=True)
 
         # Optional SQLite sidecar index (Phase 4).
         # If provided, mirror writes go to SQLite after JSONL.
@@ -90,8 +91,9 @@ class MemoryGraph:
 
         # --- shard-based embedding storage ---
         self._emb_dir = _canonical_storage_root(
-            os.path.join(self.data_dir, "embeddings"), mkdir=True
+            os.path.join(self.data_dir, "embeddings")
         )
+        os.makedirs(self._emb_dir, exist_ok=True)
         self._shard_writer: Optional[EmbeddingShardWriter] = None
         self._shard_reader: Optional[EmbeddingShardReader] = None
         self._init_shard_storage()

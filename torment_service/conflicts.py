@@ -45,9 +45,9 @@ class ConflictRegistry:
         # Canonical trust chain: data_dir → workspaces/<ws>/domains/<dom>
         self.data_dir = _canonical_storage_root(data_dir)
         domain_root = _canonical_storage_root(
-            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id),
-            mkdir=True,
+            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id)
         )
+        os.makedirs(domain_root, exist_ok=True)
         self.path = _child_path(domain_root, "conflicts.jsonl")
         self.events_path = _child_path(domain_root, "conflict_events.jsonl")
 

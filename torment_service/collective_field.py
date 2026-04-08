@@ -51,9 +51,9 @@ class CollectiveField:
         # Canonical trust chain: data_dir → workspaces/<id>/collective
         canonical_data = _canonical_storage_root(data_dir)
         ws_dir = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", self.workspace_id, "collective"),
-            mkdir=True,
+            os.path.join(canonical_data, "workspaces", self.workspace_id, "collective")
         )
+        os.makedirs(ws_dir, exist_ok=True)
         self._base = ws_dir
         self._packets_path = _child_path(ws_dir, "packets.jsonl")
         self._events_path = _child_path(ws_dir, "events.jsonl")

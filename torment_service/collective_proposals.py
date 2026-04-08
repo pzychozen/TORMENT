@@ -95,9 +95,9 @@ class ConvergencePersistenceTracker:
         # Canonical trust chain: data_dir → workspaces/<id>/collective
         canonical_data = _canonical_storage_root(data_dir)
         collective_root = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", safe_workspace_id, "collective"),
-            mkdir=True,
+            os.path.join(canonical_data, "workspaces", safe_workspace_id, "collective")
         )
+        os.makedirs(collective_root, exist_ok=True)
         self._base = collective_root
         self._log_path = _child_path(collective_root, "convergence_patterns.jsonl")
         self._lock = threading.Lock()

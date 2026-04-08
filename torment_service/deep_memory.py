@@ -92,7 +92,8 @@ class DeepMemoryStore:
     """
 
     def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
-        canonical_root = _canonical_storage_root(str(base_dir), mkdir=True)
+        canonical_root = _canonical_storage_root(str(base_dir))
+        os.makedirs(canonical_root, exist_ok=True)
         self.base_dir = Path(canonical_root)
 
         self.memories_path = Path(_child_path(canonical_root, "memories.jsonl"))

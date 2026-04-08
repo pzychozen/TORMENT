@@ -64,25 +64,20 @@ def _ensure_within_base(path: str, base_dir: str) -> str:
     return resolved
 
 
-def _canonical_storage_root(path: str, *, mkdir: bool = False) -> str:
+def _canonical_storage_root(path: str) -> str:
     """Canonicalize a storage root path.
 
     1. Resolves symlinks and normalizes to an absolute real path.
        (``realpath`` already normalises, so ``normpath`` is not needed.)
     2. Rejects any residual traversal sequences (belt-and-suspenders).
-    3. Optionally creates the directory.
-    4. Returns only the trusted, canonical root.
+    3. Returns only the trusted, canonical root.
 
-    All filesystem sinks (``os.makedirs``) are gated inside the
-    positive traversal-check branch so that CodeQL sees the guard
-    as a direct control-flow gate on the sink.
+    Callers that need directory creation should call ``os.makedirs``
+    on the returned value themselves — keeping the I/O sink at a site
+    where a ``startswith(base)`` guard is visible to CodeQL.
     """
     root = os.path.realpath(path)
-    # Gate sinks inside the positive branch so the traversal check is
-    # a direct control-flow guard that CodeQL can trace.
     if ".." not in root.split(os.sep):
-        if mkdir:
-            os.makedirs(root, exist_ok=True)
         return root
     raise ValueError(f"Canonical path contains traversal segment: {root!r}")
 
@@ -112,7 +107,8 @@ class EmbeddingShardWriter:
     """
 
     def __init__(self, embeddings_dir: str, dim: int = DEFAULT_DIM) -> None:
-        self.embeddings_dir = _canonical_storage_root(embeddings_dir, mkdir=True)
+        self.embeddings_dir = _canonical_storage_root(embeddings_dir)
+        os.makedirs(self.embeddings_dir, exist_ok=True)
         self.dim = int(dim)
 
         self.manifest_path = _child_path(self.embeddings_dir, "manifest.json")

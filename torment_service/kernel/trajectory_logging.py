@@ -1,7 +1,7 @@
 # trajectory_logging.py
 from __future__ import annotations
 
-import json, time
+import json, os, time
 from typing import Any, Dict
 import numpy as np
 
@@ -22,7 +22,8 @@ class TrajectoryLogger:
       - Just persistent telemetry for later analysis/plots
     """
     def __init__(self, root_dir: str, filename: str = "trajectories.jsonl") -> None:
-        self.root_dir = _canonical_storage_root(root_dir, mkdir=True)
+        self.root_dir = _canonical_storage_root(root_dir)
+        os.makedirs(self.root_dir, exist_ok=True)
         self.path = _child_path(self.root_dir, filename)
 
     def log_entity(self, ent: Any, step: int) -> None:

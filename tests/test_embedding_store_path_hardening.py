@@ -48,11 +48,13 @@ class TestCanonicalStorageRoot(unittest.TestCase):
             root = _canonical_storage_root(link_dir)
             self.assertEqual(root, os.path.realpath(real_dir))
 
-    def test_mkdir_creates_directory(self):
+    def test_mkdir_at_caller_site(self):
+        """mkdir is now the caller's responsibility after _canonical_storage_root."""
         with tempfile.TemporaryDirectory() as td:
             new_dir = os.path.join(td, "new_storage")
             self.assertFalse(os.path.exists(new_dir))
-            root = _canonical_storage_root(new_dir, mkdir=True)
+            root = _canonical_storage_root(new_dir)
+            os.makedirs(root, exist_ok=True)
             self.assertTrue(os.path.isdir(root))
 
 
