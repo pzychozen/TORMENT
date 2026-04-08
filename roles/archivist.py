@@ -23,7 +23,7 @@ from roles.base import RoleBase
 from cognition.task_models import TaskPacket
 from cognition.apertures import MemoryContext
 from schemas.role_output import RoleOutput
-from schemas.provenance import Provenance, STATUS_SKEPTIC_PASSED, STATUS_SKEPTIC_FLAGGED
+from schemas.provenance import Provenance, STATUS_SKEPTIC_FLAGGED
 from schemas.memory_proposal import MemoryProposal
 from schemas.drift_report import DriftReport
 
