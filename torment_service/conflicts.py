@@ -39,12 +39,22 @@ class ConflictRegistry:
 
         # Canonical trust chain: data_dir → workspaces/<ws>/domains/<dom>
         self.data_dir = _canonical_storage_root(data_dir)
-        domain_root = _canonical_storage_root(
+        domain_root = os.path.realpath(
             os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id)
         )
+        if not domain_root.startswith(self.data_dir + os.sep):
+            raise ValueError(f"Domain path escapes base: {domain_root!r}")
         os.makedirs(domain_root, exist_ok=True)
+        self._base = domain_root
         self.path = _child_path(domain_root, "conflicts.jsonl")
         self.events_path = _child_path(domain_root, "conflict_events.jsonl")
+
+    def _guard(self, path: str) -> str:
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes domain root: {rp!r}")
+        return rp
 
     def add(self, eid_a: int, eid_b: int, sim: float, conflict_score: float, reason: str) -> CanonConflict:
         c = CanonConflict(
@@ -59,7 +69,7 @@ class ConflictRegistry:
             status="open",
             created_ts=_now_ts(),
         )
-        with open(self.path, "a", encoding="utf-8") as f:
+        with open(self._guard(self.path), "a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(c), ensure_ascii=False) + "\n")
         return c
 
@@ -72,13 +82,13 @@ class ConflictRegistry:
             "note": note,
             "ts": _now_ts(),
         }
-        with open(self.events_path, "a", encoding="utf-8") as f:
+        with open(self._guard(self.events_path), "a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
 
     def apply_events(self) -> Dict[str, CanonConflict]:
         latest: Dict[str, CanonConflict] = {}
         if os.path.exists(self.path):
-            with open(self.path, "r", encoding="utf-8") as f:
+            with open(self._guard(self.path), "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -86,7 +96,7 @@ class ConflictRegistry:
                     c = CanonConflict(**obj)
                     latest[c.conflict_id] = c
         if os.path.exists(self.events_path):
-            with open(self.events_path, "r", encoding="utf-8") as f:
+            with open(self._guard(self.events_path), "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue

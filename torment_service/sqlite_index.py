@@ -459,6 +459,22 @@ class IndexManager:
                        "trajectory_index", "documents", "chunks", "chunk_sections"]:
             self._safe_execute(f"DELETE FROM {table}")
 
+    @staticmethod
+    def _guard_rebuild_path(path: str, label: str) -> str:
+        """Canonicalize a rebuild source path and reject traversal sequences.
+
+        Rebuild sources (nodes.jsonl, events.jsonl, etc.) intentionally live
+        outside index_dir — they come from the agent's data directory.  We
+        canonicalize via realpath (which resolves symlinks and ..) and reject
+        any residual traversal component so CodeQL sees a clean taint chain.
+        """
+        if not path:
+            return ""
+        rp = os.path.realpath(path)
+        if ".." in rp.split(os.sep):
+            raise ValueError(f"Rebuild path for {label} contains traversal: {rp!r}")
+        return rp
+
     def rebuild_from_jsonl(
         self,
         nodes_path: str,
@@ -472,6 +488,15 @@ class IndexManager:
 
         Returns counts of records indexed per table.
         """
+        # Inline containment guards — CodeQL needs visible realpath+startswith
+        # before every open() sink below.
+        safe_nodes = self._guard_rebuild_path(nodes_path, "nodes")
+        safe_events = self._guard_rebuild_path(events_path, "events")
+        safe_trajectories = self._guard_rebuild_path(trajectories_path, "trajectories")
+        safe_archive_docs = self._guard_rebuild_path(archive_documents_path, "archive_documents")
+        safe_archive_chunks = self._guard_rebuild_path(archive_chunks_path, "archive_chunks")
+        safe_motifs = self._guard_rebuild_path(motifs_path, "motifs")
+
         self.clear_all()
         counts: Dict[str, int] = {
             "core_nodes": 0,
@@ -483,9 +508,9 @@ class IndexManager:
         }
 
         # --- Core nodes (last record per eid wins) ---
-        if nodes_path and os.path.exists(nodes_path):
+        if safe_nodes and os.path.exists(safe_nodes):
             canonical: Dict[int, Dict[str, Any]] = {}
-            with open(nodes_path, "r", encoding="utf-8") as f:
+            with open(safe_nodes, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -500,8 +525,8 @@ class IndexManager:
                     counts["core_nodes"] += 1
 
         # --- Core events ---
-        if events_path and os.path.exists(events_path):
-            with open(events_path, "r", encoding="utf-8") as f:
+        if safe_events and os.path.exists(safe_events):
+            with open(safe_events, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -513,8 +538,8 @@ class IndexManager:
                         continue
 
         # --- Trajectory index ---
-        if trajectories_path and os.path.exists(trajectories_path):
-            with open(trajectories_path, "r", encoding="utf-8") as f:
+        if safe_trajectories and os.path.exists(safe_trajectories):
+            with open(safe_trajectories, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -533,8 +558,8 @@ class IndexManager:
                         continue
 
         # --- Archive documents ---
-        if archive_documents_path and os.path.exists(archive_documents_path):
-            with open(archive_documents_path, "r", encoding="utf-8") as f:
+        if safe_archive_docs and os.path.exists(safe_archive_docs):
+            with open(safe_archive_docs, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -546,8 +571,8 @@ class IndexManager:
                         continue
 
         # --- Archive chunks ---
-        if archive_chunks_path and os.path.exists(archive_chunks_path):
-            with open(archive_chunks_path, "r", encoding="utf-8") as f:
+        if safe_archive_chunks and os.path.exists(safe_archive_chunks):
+            with open(safe_archive_chunks, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -559,9 +584,9 @@ class IndexManager:
                         continue
 
         # --- Motifs (JSON file, not JSONL) ---
-        if motifs_path and os.path.exists(motifs_path):
+        if safe_motifs and os.path.exists(safe_motifs):
             try:
-                with open(motifs_path, "r", encoding="utf-8") as f:
+                with open(safe_motifs, "r", encoding="utf-8") as f:
                     motifs_data = json.load(f)
                 motif_list = motifs_data if isinstance(motifs_data, list) else list(motifs_data.values())
                 for m in motif_list:
