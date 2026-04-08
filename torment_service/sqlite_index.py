@@ -24,6 +24,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from .embedding_store import _canonical_storage_root, _child_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,9 +137,8 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        self.index_dir = os.path.normpath(index_dir)
-        os.makedirs(self.index_dir, exist_ok=True)
-        self.db_path = os.path.join(self.index_dir, "memory_index.sqlite")
+        self.index_dir = _canonical_storage_root(index_dir, mkdir=True)
+        self.db_path = _child_path(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
