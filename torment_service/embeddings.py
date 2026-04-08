@@ -38,7 +38,7 @@ class Embedder(Protocol):
     model: str
 
     def embed(self, text: str) -> np.ndarray:  # pragma: no cover
-        ...
+        pass
 
 
 @dataclass

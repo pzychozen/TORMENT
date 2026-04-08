@@ -52,8 +52,6 @@ from torment_service.collective_policy import (
 from torment_service.collective_proposals import (
     CollectiveProposalBridge,
     ConvergencePersistenceTracker,
-    PROPOSAL_CONFIDENCE_THRESHOLD,
-    PROPOSAL_PERSISTENCE_MIN,
 )
 
 
