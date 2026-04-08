@@ -6,16 +6,11 @@ from typing import Dict, List, Optional
 import os, json, time, uuid
 
 from .embedding_store import _canonical_storage_root, _child_path
+from .pathing import safe_slug
 
 
 def _now_ts() -> int:
     return int(time.time())
-
-
-def _validate_path_component(value: str, label: str) -> str:
-    if not value or ".." in value or "/" in value or "\\" in value:
-        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
 
 
 @dataclass
@@ -39,8 +34,8 @@ class ConflictRegistry:
     """Append-only canon conflict registry per workspace+domain."""
 
     def __init__(self, data_dir: str, workspace_id: str, domain_id: str) -> None:
-        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
-        self.domain_id = _validate_path_component(domain_id, "domain_id")
+        self.workspace_id = safe_slug(workspace_id, "workspace_id")
+        self.domain_id = safe_slug(domain_id, "domain_id")
 
         # Canonical trust chain: data_dir → workspaces/<ws>/domains/<dom>
         self.data_dir = _canonical_storage_root(data_dir)

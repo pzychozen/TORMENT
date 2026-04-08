@@ -11,12 +11,7 @@ def _now_ts() -> int:
 
 
 from .embedding_store import _canonical_storage_root, _child_path
-
-
-def _validate_path_component(value: str, label: str) -> str:
-    if not value or ".." in value or "/" in value or "\\" in value:
-        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
+from .pathing import safe_slug
 
 @dataclass
 class Bridge:
@@ -31,7 +26,7 @@ class Bridge:
 
 class BridgeRegistry:
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        self.workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        self.workspace_id = safe_slug(workspace_id, "workspace_id")
 
         canonical_data = _canonical_storage_root(data_dir)
         workspace_dir = _canonical_storage_root(

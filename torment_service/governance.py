@@ -33,16 +33,7 @@ from typing import Any, Dict, Optional
 
 from .collective_models import MemoryGovernanceFlags
 from .embedding_store import _canonical_storage_root, _child_path
-
-
-# ---------------------------------------------------------------------------
-# Path-safety helpers (CWE-22 guard)
-# ---------------------------------------------------------------------------
-
-def _validate_path_component(value: str, label: str) -> str:
-    if not value or ".." in value or "/" in value or "\\" in value:
-        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
+from .pathing import safe_slug
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +199,7 @@ class GovernanceAuditLog:
     """
 
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        safe_workspace_id = _validate_path_component(workspace_id, "workspace_id")
+        safe_workspace_id = safe_slug(workspace_id, "workspace_id")
 
         # Canonical trust chain: data_dir → workspaces/<id>/governance
         canonical_data = _canonical_storage_root(data_dir)

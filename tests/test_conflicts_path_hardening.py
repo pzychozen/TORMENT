@@ -13,7 +13,8 @@ import shutil
 import tempfile
 import unittest
 
-from torment_service.conflicts import ConflictRegistry, _validate_path_component
+from torment_service.conflicts import ConflictRegistry
+from torment_service.pathing import safe_slug
 
 
 class TestConflictRegistryPathIntegrity(unittest.TestCase):
@@ -94,7 +95,7 @@ class TestConflictRegistryInvalidPaths(unittest.TestCase):
 
     def test_validate_path_component_rejects_backslash(self):
         with self.assertRaises(ValueError):
-            _validate_path_component("a\\b", "test")
+            safe_slug("a\\b")
 
 
 class TestConflictRegistryBehavior(unittest.TestCase):

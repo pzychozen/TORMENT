@@ -13,7 +13,7 @@ import json
 import tempfile
 import unittest
 
-from torment_service.bridges import BridgeRegistry, _validate_path_component
+from torment_service.bridges import BridgeRegistry
 
 
 class TestBridgeRegistryPathIntegrity(unittest.TestCase):

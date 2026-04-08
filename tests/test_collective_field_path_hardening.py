@@ -16,7 +16,8 @@ import unittest
 
 import numpy as np
 
-from torment_service.collective_field import CollectiveField, _validate_path_component
+from torment_service.collective_field import CollectiveField
+from torment_service.pathing import safe_slug
 from torment_service.collective_models import ResonancePacket
 
 
@@ -119,11 +120,11 @@ class TestCollectiveFieldInvalidPaths(unittest.TestCase):
 
     def test_validate_path_component_rejects_dotdot(self):
         with self.assertRaises(ValueError):
-            _validate_path_component("..", "test")
+            safe_slug("..")
 
     def test_validate_path_component_rejects_empty(self):
         with self.assertRaises(ValueError):
-            _validate_path_component("", "test")
+            safe_slug("")
 
 
 class TestCollectiveFieldBehavior(unittest.TestCase):
