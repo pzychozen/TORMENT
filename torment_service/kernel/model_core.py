@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from .constants_selector import default_k_triplet
 from .su3_basis import project_to_uxy
-from .phase_triad_sync import apply_phase_triad_sync, triad_coherence
+from .phase_triad_sync import apply_phase_triad_sync
 from .latent_foreclosure import compute_option_volume
 from .identity_rules import (
     CycleConfig,

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, Tuple
 
 def wrap_pi(a: np.ndarray) -> np.ndarray:
     return (a + np.pi) % (2*np.pi) - np.pi
