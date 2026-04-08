@@ -72,7 +72,7 @@ class TestPipelineSmoke(unittest.TestCase):
         result = run_cognition_pipeline(task)
         self.assertTrue(result["ok"])
         self.assertEqual(result["task_id"], task.task_id)
-        self.assertTrue(len(result["final_answer"]) > 0)
+        self.assertGreater(len(result["final_answer"]), 0)
         self.assertIsNone(result["drift_report"])
 
     def test_engineering_mode_with_mocks(self):
@@ -83,7 +83,7 @@ class TestPipelineSmoke(unittest.TestCase):
             character_fn=_mock_character_fn,
         )
         self.assertTrue(result["ok"])
-        self.assertTrue(len(result["merged_findings"]) > 0)
+        self.assertGreater(len(result["merged_findings"]), 0)
 
     def test_strategic_mode(self):
         task = _make_task("What should we focus on next?", mode=MODE_STRATEGIC)
@@ -145,7 +145,7 @@ class TestResponseStructure(unittest.TestCase):
         task = _make_task(mode=MODE_ENGINEERING)
         result = run_cognition_pipeline(task)
         self.assertIsInstance(result["role_summaries"], list)
-        self.assertTrue(len(result["role_summaries"]) > 0)
+        self.assertGreater(len(result["role_summaries"]), 0)
         for rs in result["role_summaries"]:
             self.assertIn("role", rs)
             self.assertIn("summary", rs)

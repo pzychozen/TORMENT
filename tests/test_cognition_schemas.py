@@ -305,7 +305,7 @@ class TestMemoryProposal(unittest.TestCase):
             half_life_days=7.0,
             memory_type="episode",
         )
-        self.assertTrue(len(mp.proposal_id) > 0)
+        self.assertGreater(len(mp.proposal_id), 0)
 
     def test_create_factory(self):
         prov = Provenance.from_role("archivist", "tsk_f1")
@@ -318,7 +318,7 @@ class TestMemoryProposal(unittest.TestCase):
             memory_type="motif_seed",
             provenance=prov,
         )
-        self.assertTrue(len(mp.proposal_id) > 0)
+        self.assertGreater(len(mp.proposal_id), 0)
         self.assertEqual(mp.decision, "pending")
         self.assertEqual(mp.memory_type, "motif_seed")
 

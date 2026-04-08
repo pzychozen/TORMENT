@@ -159,14 +159,14 @@ class TestInterpreter(unittest.TestCase):
         out = self.role.run(task, ctx, [])
         self.assertEqual(out.role_name, "interpreter")
         self.assertIsNotNone(out.provenance)
-        self.assertTrue(len(out.findings) > 0)
+        self.assertGreater(len(out.findings), 0)
 
     def test_classifies_question(self):
         task = _make_task("What should we focus on?")
         ctx = _make_memory_context()
         out = self.role.run(task, ctx, [])
         found_intent = [f for f in out.findings if "Classified intent:" in f]
-        self.assertTrue(len(found_intent) > 0)
+        self.assertGreater(len(found_intent), 0)
         self.assertIn("question", found_intent[0].lower())
 
     def test_classifies_action(self):
@@ -174,7 +174,7 @@ class TestInterpreter(unittest.TestCase):
         ctx = _make_memory_context()
         out = self.role.run(task, ctx, [])
         found_intent = [f for f in out.findings if "Classified intent:" in f]
-        self.assertTrue(len(found_intent) > 0)
+        self.assertGreater(len(found_intent), 0)
         self.assertIn("action", found_intent[0].lower())
 
     def test_classifies_reflection(self):
@@ -182,7 +182,7 @@ class TestInterpreter(unittest.TestCase):
         ctx = _make_memory_context()
         out = self.role.run(task, ctx, [])
         found_intent = [f for f in out.findings if "Classified intent:" in f]
-        self.assertTrue(len(found_intent) > 0)
+        self.assertGreater(len(found_intent), 0)
         self.assertIn("reflection", found_intent[0].lower())
 
     def test_surfaces_memories(self):
@@ -191,7 +191,7 @@ class TestInterpreter(unittest.TestCase):
         task = _make_task()
         out = self.role.run(task, ctx, [])
         mem_findings = [f for f in out.findings if "Relevant memory:" in f]
-        self.assertTrue(len(mem_findings) > 0)
+        self.assertGreater(len(mem_findings), 0)
 
     def test_notes_missing_memory(self):
         ctx = _make_memory_context()
@@ -204,7 +204,7 @@ class TestInterpreter(unittest.TestCase):
         ctx = _make_memory_context()
         out = self.role.run(task, ctx, [])
         key_findings = [f for f in out.findings if "Key phrases:" in f]
-        self.assertTrue(len(key_findings) > 0)
+        self.assertGreater(len(key_findings), 0)
         self.assertIn("memory router", key_findings[0])
 
     def test_confidence_higher_with_phrases(self):
@@ -232,7 +232,7 @@ class TestEngineer(unittest.TestCase):
         out = self.role.run(task, ctx, [])
         self.assertEqual(out.role_name, "engineer")
         self.assertIsNotNone(out.provenance)
-        self.assertTrue(len(out.recommendations) > 0)
+        self.assertGreater(len(out.recommendations), 0)
 
     def test_consumes_interpreter_output(self):
         task = _make_task()
@@ -240,7 +240,7 @@ class TestEngineer(unittest.TestCase):
         interp_out = Interpreter().run(task, ctx, [])
         out = self.role.run(task, ctx, [interp_out])
         consumed = [f for f in out.findings if "[from interpreter]" in f]
-        self.assertTrue(len(consumed) > 0)
+        self.assertGreater(len(consumed), 0)
 
     def test_notes_missing_interpreter(self):
         task = _make_task()
@@ -253,7 +253,7 @@ class TestEngineer(unittest.TestCase):
         ctx = _make_memory_context()
         out = self.role.run(task, ctx, [])
         step_recs = [r for r in out.recommendations if r.startswith("Step")]
-        self.assertTrue(len(step_recs) > 0)
+        self.assertGreater(len(step_recs), 0)
 
     def test_proposes_memory_for_large_tasks(self):
         # Enough words to be "medium" scope + steps
@@ -279,8 +279,8 @@ class TestEngineer(unittest.TestCase):
         out_long = self.role.run(long_task, ctx, [])
         short_scope = [f for f in out_short.findings if "Scope assessment:" in f]
         long_scope = [f for f in out_long.findings if "Scope assessment:" in f]
-        self.assertTrue(len(short_scope) > 0)
-        self.assertTrue(len(long_scope) > 0)
+        self.assertGreater(len(short_scope), 0)
+        self.assertGreater(len(long_scope), 0)
 
 
 # ============================================================================
@@ -341,7 +341,7 @@ class TestSkeptic(unittest.TestCase):
             provenance=Provenance.from_role("engineer", task.task_id),
         )
         out = self.role.run(task, ctx, [out_a, out_b])
-        self.assertTrue(len(out.contradictions) > 0)
+        self.assertGreater(len(out.contradictions), 0)
 
     def test_flags_proposal_missing_provenance(self):
         task = _make_task()
@@ -497,7 +497,7 @@ class TestArchivist(unittest.TestCase):
         )
         out = self.role.run(task, ctx, [engineer_out, skeptic_out])
         rejected = [p for p in out.memory_proposals if p.is_rejected]
-        self.assertTrue(len(rejected) > 0)
+        self.assertGreater(len(rejected), 0)
 
     def test_rejects_deep_derivation_high_strength(self):
         task = _make_task()
@@ -511,7 +511,7 @@ class TestArchivist(unittest.TestCase):
         )
         out = self.role.run(task, ctx, [prior])
         rejected = [p for p in out.memory_proposals if p.is_rejected]
-        self.assertTrue(len(rejected) > 0)
+        self.assertGreater(len(rejected), 0)
         self.assertIn("Invariant G", rejected[0].rejection_reason)
 
     def test_rejects_near_max_episode(self):
@@ -526,7 +526,7 @@ class TestArchivist(unittest.TestCase):
         )
         out = self.role.run(task, ctx, [prior])
         rejected = [p for p in out.memory_proposals if p.is_rejected]
-        self.assertTrue(len(rejected) > 0)
+        self.assertGreater(len(rejected), 0)
 
     def test_allows_low_strength_in_yellow_drift(self):
         task = _make_task()

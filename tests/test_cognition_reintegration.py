@@ -171,7 +171,7 @@ class TestDissentDetection(unittest.TestCase):
         ctx = _make_ctx()
         result = reintegrate(task, routing, outputs, ctx)
         self.assertTrue(result.has_dissent)
-        self.assertTrue(len(result.dissent) > 0)
+        self.assertGreater(len(result.dissent), 0)
         d = result.dissent[0]
         self.assertIn("role_a", d)
         self.assertIn("role_b", d)
@@ -574,8 +574,8 @@ class TestFullReintegrationPipeline(unittest.TestCase):
         result = reintegrate(task, routing, outputs, ctx)
 
         self.assertIsInstance(result, ReintegrationResult)
-        self.assertTrue(len(result.final_answer) > 0)
-        self.assertTrue(len(result.merged_findings) > 0)
+        self.assertGreater(len(result.final_answer), 0)
+        self.assertGreater(len(result.merged_findings), 0)
         self.assertEqual(len(result.role_outputs), 4)
         self.assertIsNone(result.drift_report)  # no drift check required
 
