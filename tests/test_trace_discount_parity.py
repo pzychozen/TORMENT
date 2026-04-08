@@ -18,7 +18,6 @@ Tests:
   4. Discount fields are present in explanation output
 """
 
-import os
 import shutil
 import tempfile
 import unittest

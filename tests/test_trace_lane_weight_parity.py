@@ -17,7 +17,6 @@ Tests:
   5. trace final score stays aligned with query final score for the same memory_plan
 """
 
-import os
 import shutil
 import tempfile
 import unittest
@@ -68,8 +67,8 @@ class TestTraceLaneWeightParity(unittest.TestCase):
 
         items_no = t_no_plan.get("items", [])
         items_yes = t_with_plan.get("items", [])
-        self.assertTrue(len(items_no) >= 1)
-        self.assertTrue(len(items_yes) >= 1)
+        self.assertGreaterEqual(len(items_no), 1)
+        self.assertGreaterEqual(len(items_yes), 1)
 
         explain_no = items_no[0].get("explain", {})
         explain_yes = items_yes[0].get("explain", {})
@@ -109,7 +108,7 @@ class TestTraceLaneWeightParity(unittest.TestCase):
             memory_plan=mp,
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertEqual(explain.get("memory_plan_lane"), "relational")
@@ -145,7 +144,7 @@ class TestTraceLaneWeightParity(unittest.TestCase):
             memory_plan=mp,
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertEqual(explain.get("memory_plan_lane"), "deep")
@@ -175,7 +174,7 @@ class TestTraceLaneWeightParity(unittest.TestCase):
             memory_plan=mp,
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         # Lane should be "collective" with weight 1.0 (no multiplier applied)

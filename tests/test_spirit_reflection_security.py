@@ -158,8 +158,9 @@ class TestLogSanitization:
 class TestCleanup:
     def test_no_unused_field_import(self):
         """The unused 'field' import from dataclasses should be removed."""
-        import torment_service.spirit_reflection as mod
         import inspect
+        import sys
+        mod = sys.modules['torment_service.spirit_reflection']
         source = inspect.getsource(mod)
         # 'field' should not appear in a dataclass import line
         import re

@@ -17,7 +17,6 @@ Tests:
   3. Two queries from the same agent state produce consistent step
 """
 
-import os
 import shutil
 import tempfile
 import unittest
