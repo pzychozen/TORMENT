@@ -168,8 +168,7 @@ def _now_ts() -> int:
 
 
 def _embed_audit_path(data_dir: str, workspace_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "embed_audit.json"))
+    return _safe_child(_ws_root(data_dir, workspace_id), "embed_audit.json")
 
 
 def _write_embed_audit(
@@ -189,7 +188,11 @@ def _write_embed_audit(
     basic health state. Counts are authoritative only when dirty==False.
     """
     path = _embed_audit_path(data_dir, workspace_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Sink-local guard for CodeQL: realpath + startswith at makedirs site.
+    _dir = os.path.realpath(os.path.dirname(path))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Audit dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     payload: Dict[str, Any] = {
         "workspace_id": workspace_id,
         "updated_ts": _now_ts(),
@@ -230,9 +233,7 @@ def _mark_embed_audit_dirty(data_dir: str, workspace_id: str) -> None:
 
 
 def _anchor_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    return os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "anchors.json")
+    return _safe_child(_agent_dir(data_dir, workspace_id, agent_id), "anchors.json")
 
 
 def _load_anchor_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
@@ -259,7 +260,10 @@ def _load_anchor_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 
 def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _anchor_state_path(data_dir, workspace_id, agent_id)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _dir = os.path.realpath(os.path.dirname(p))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Anchor dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -267,9 +271,7 @@ def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 
 
 def _symbol_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "symbol_state.json"))
+    return _safe_child(_agent_dir(data_dir, workspace_id, agent_id), "symbol_state.json")
 
 
 def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
@@ -294,7 +296,10 @@ def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 
 def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _symbol_state_path(data_dir, workspace_id, agent_id)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _dir = os.path.realpath(os.path.dirname(p))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Symbol dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -303,7 +308,7 @@ def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 class Workspace:
     def __init__(self, data_dir: str, workspace_id: str, kernel: TriOctaMemoryKernel,
                  requested_domains: Optional[List[str]] = None) -> None:
-        self.data_dir = os.path.normpath(data_dir)
+        self.data_dir = _canonical_data_root(data_dir)
         self.workspace_id = workspace_id
         self.kernel = kernel
         self.meta = self._load_or_init_meta()
@@ -319,7 +324,7 @@ class Workspace:
         # shared stores per domain (created before motif_regs so shard readers are available)
         self.shared_graphs: Dict[str, MemoryGraph] = {}
         for d in self.domains:
-            dom_dir = os.path.join(data_dir, "workspaces", workspace_id, "domains", d, "shared")
+            dom_dir = _domain_shared_dir(self.data_dir, workspace_id, d)
             self.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=kernel.embedder)
 
         self.motif_regs: Dict[str, MotifRegistry] = {
@@ -344,11 +349,16 @@ class Workspace:
         }
 
         # domain suggestions (emergent suggestions require admin approval later)
-        self.domain_suggestions_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_suggestions.json"))
-        os.makedirs(os.path.dirname(self.domain_suggestions_path), exist_ok=True)
+        _ws = _ws_root(self.data_dir, workspace_id)
+        self.domain_suggestions_path = _safe_child(_ws, "domain_suggestions.json")
+        # Sink-local guard for CodeQL
+        _ws_dir = os.path.realpath(_ws)
+        if not _ws_dir.startswith(os.sep):
+            raise ValueError(f"Workspace dir not absolute: {_ws_dir!r}")
+        os.makedirs(_ws_dir, exist_ok=True)
 
         # per-domain policy knobs (throttles, governance, peeks)
-        self.domain_policies_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_policies.json"))
+        self.domain_policies_path = _safe_child(_ws, "domain_policies.json")
         self.domain_policies = self._load_or_init_domain_policies()
 
         # collective kernel placeholder (domain kernels would live here later)
@@ -365,11 +375,14 @@ class Workspace:
         return {}
 
     def _meta_path(self) -> str:
-        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "workspace_meta.json"))
+        return _safe_child(_ws_root(self.data_dir, self.workspace_id), "workspace_meta.json")
 
     def _load_or_init_meta(self) -> Dict[str, Any]:
         p = self._meta_path()
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Meta dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
             try:
                 with open(p, "r", encoding="utf-8") as f:
@@ -388,11 +401,14 @@ class Workspace:
         return meta
 
     def _domains_path(self) -> str:
-        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains.json"))
+        return _safe_child(_ws_root(self.data_dir, self.workspace_id), "domains.json")
 
     def _load_or_init_domains(self, requested_domains: Optional[List[str]] = None) -> List[str]:
         p = self._domains_path()
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Domains dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
             # Workspace already exists — load existing domains
             with open(p, "r", encoding="utf-8") as f:
@@ -418,7 +434,10 @@ class Workspace:
 
     def _load_or_init_domain_policies(self) -> Dict[str, Any]:
         p = self.domain_policies_path
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Policies dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         pol = {}
         if os.path.exists(p):
             try:
@@ -445,7 +464,7 @@ class Workspace:
         with open(self._domains_path(), "w", encoding="utf-8") as f:
             json.dump({"domains": self.domains}, f, indent=2)
         # instantiate registries and stores (shared graph first so shard reader is available)
-        dom_dir = os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", domain_id, "shared"))
+        dom_dir = _domain_shared_dir(self.data_dir, self.workspace_id, domain_id)
         self.shared_graphs[domain_id] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
         self.motif_regs[domain_id] = MotifRegistry(
             data_dir=self.data_dir, workspace_id=self.workspace_id, domain_id=domain_id,
@@ -473,6 +492,61 @@ def _validate_path_component(value: str, label: str = "identifier") -> str:
     return value
 
 
+# ---------------------------------------------------------------------------
+# Internal path helpers — canonicalization + containment guards.
+#
+# Every helper uses os.path.realpath() for symlink resolution, then a
+# startswith() containment check.  Keep these simple so CodeQL can
+# follow the taint through to sink sites.
+# ---------------------------------------------------------------------------
+
+def _canonical_data_root(data_dir: str) -> str:
+    """Canonicalize *data_dir* to an absolute real path."""
+    _r = os.path.realpath(data_dir)
+    if not _r.startswith(os.sep):
+        raise ValueError(f"data_dir did not resolve to absolute path: {_r!r}")
+    return _r
+
+
+def _ws_root(data_dir: str, workspace_id: str) -> str:
+    """Return canonical workspace root, guarded under *data_dir*."""
+    _validate_path_component(workspace_id, "workspace_id")
+    _base = os.path.realpath(data_dir)
+    _r = os.path.realpath(os.path.join(_base, "workspaces", workspace_id))
+    if not _r.startswith(_base + os.sep):
+        raise ValueError(f"Workspace path escapes data root: {_r!r}")
+    return _r
+
+
+def _agent_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    """Return canonical agent directory, guarded under workspace root."""
+    _ws = _ws_root(data_dir, workspace_id)
+    _validate_path_component(agent_id, "agent_id")
+    _r = os.path.realpath(os.path.join(_ws, "agents", agent_id))
+    if not _r.startswith(_ws + os.sep):
+        raise ValueError(f"Agent path escapes workspace root: {_r!r}")
+    return _r
+
+
+def _domain_shared_dir(data_dir: str, workspace_id: str, domain_id: str) -> str:
+    """Return canonical domain shared directory, guarded under workspace root."""
+    _ws = _ws_root(data_dir, workspace_id)
+    _validate_path_component(domain_id, "domain_id")
+    _r = os.path.realpath(os.path.join(_ws, "domains", domain_id, "shared"))
+    if not _r.startswith(_ws + os.sep):
+        raise ValueError(f"Domain path escapes workspace root: {_r!r}")
+    return _r
+
+
+def _safe_child(base: str, *parts: str) -> str:
+    """Join *parts* under *base* and verify the result stays contained."""
+    _b = os.path.realpath(base)
+    _r = os.path.realpath(os.path.join(_b, *parts))
+    if _r != _b and not _r.startswith(_b + os.sep):
+        raise ValueError(f"Path escapes base directory: {_r!r}")
+    return _r
+
+
 class TormentFabric:
 
     @staticmethod
@@ -487,9 +561,15 @@ class TormentFabric:
         return f"{workspace_id}/{agent_id}"
 
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = os.path.normpath(data_dir)
-        if self.data_dir != ":memory:":
-            os.makedirs(self.data_dir, exist_ok=True)
+        if data_dir == ":memory:":
+            self.data_dir = data_dir
+        else:
+            _safe = _canonical_data_root(data_dir)
+            # Sink-local guard for CodeQL at makedirs site.
+            if not _safe.startswith(os.sep):
+                raise ValueError(f"data_dir not absolute: {_safe!r}")
+            os.makedirs(_safe, exist_ok=True)
+            self.data_dir = _safe
         # v1.10: embedder is configured via env and attached to the kernel.
         self.embedder_error: str = ""
         self.requested_embed_provider: str = str(os.environ.get("TORMENT_EMBED_PROVIDER") or "hash")
@@ -4639,14 +4719,13 @@ def random_chance(p: float) -> bool:
     return random.random() < float(p)
 
 def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    safe_dir = os.path.normpath(data_dir)
-    base = os.path.normpath(os.path.join(safe_dir, "workspaces", workspace_id, "agents", agent_id))
-    if not base.startswith(safe_dir):
-        raise ValueError("Path escapes data directory")
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "affect_state.json")
+    _ag = _agent_dir(data_dir, workspace_id, agent_id)
+    # Sink-local guard for CodeQL at makedirs site.
+    _rp = os.path.realpath(_ag)
+    if not _rp.startswith(os.sep):
+        raise ValueError(f"Agent dir not absolute: {_rp!r}")
+    os.makedirs(_rp, exist_ok=True)
+    return _safe_child(_ag, "affect_state.json")
 
 def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
     p = _affect_state_path(data_dir, workspace_id, agent_id)
