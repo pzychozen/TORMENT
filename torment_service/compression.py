@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,14 +39,6 @@ def _validate_path_component(value: str, label: str) -> str:
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
     return value
-
-
-def _ensure_within_base(path: str, base_dir: str) -> str:
-    base = os.path.realpath(base_dir)
-    resolved = os.path.realpath(path)
-    if resolved != base and not resolved.startswith(base + os.sep):
-        raise ValueError("Path escapes base directory")
-    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -909,45 +900,64 @@ def _get_or_create_deep_store(fabric_instance, agent_id: str, workspace_id: str 
 
 
 def _find_motifs_path(fabric_instance, agent_id: str, workspace_id: str = "default") -> Optional[str]:
-    """Locate motifs.json for an agent (workspace-scoped)."""
-    data_dir = getattr(fabric_instance, "data_dir", "data")
+    """Locate motifs.json for an agent (workspace-scoped).
+
+    All candidate paths are resolved via ``os.path.realpath`` and verified
+    to stay inside the canonical data root before any filesystem access.
+    """
+    raw_data_dir = getattr(fabric_instance, "data_dir", "data")
+    safe_ws = _validate_path_component(workspace_id, "workspace_id")
+    safe_agent = _validate_path_component(agent_id, "agent_id")
+
+    # Canonicalize the data root once.
+    base = os.path.realpath(raw_data_dir)
+
     # Check workspace-scoped paths first, then legacy flat paths as fallback
     candidates = [
-        os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "private", "motifs.json"),
-        os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "motifs.json"),
+        os.path.join(base, "workspaces", safe_ws, "agents", safe_agent, "private", "motifs.json"),
+        os.path.join(base, "workspaces", safe_ws, "agents", safe_agent, "motifs.json"),
         # Legacy flat paths (for backward compatibility with pre-workspace layouts)
-        os.path.join(data_dir, "agents", agent_id, "private", "motifs.json"),
-        os.path.join(data_dir, "agents", agent_id, "motifs.json"),
+        os.path.join(base, "agents", safe_agent, "private", "motifs.json"),
+        os.path.join(base, "agents", safe_agent, "motifs.json"),
     ]
     for p in candidates:
-        if os.path.exists(p):
-            return p
+        resolved = os.path.realpath(p)
+        if not resolved.startswith(base + os.sep):
+            continue
+        if os.path.exists(resolved):
+            return resolved
     return None
 
 
 def _log_compression_event(fabric_instance, agent_id: str, event: CompressionEvent, workspace_id: str = "default") -> None:
-    """Append compression event to agent's compression_log.jsonl (workspace-scoped)."""
+    """Append compression event to agent's compression_log.jsonl (workspace-scoped).
+
+    Path sanitisation is fully inlined (``os.path.realpath`` →
+    ``startswith`` guard → sinks) so CodeQL sees the trust chain
+    without crossing function boundaries.
+    """
     try:
-        safe_data_dir = os.path.realpath(getattr(fabric_instance, "data_dir", "data"))
+        base = os.path.realpath(getattr(fabric_instance, "data_dir", "data"))
         safe_workspace_id = _validate_path_component(workspace_id, "workspace_id")
         safe_agent_id = _validate_path_component(agent_id, "agent_id")
 
-        log_dir = _ensure_within_base(
+        log_dir = os.path.realpath(
             os.path.join(
-                safe_data_dir,
+                base,
                 "workspaces",
                 safe_workspace_id,
                 "agents",
                 safe_agent_id,
                 "private",
-            ),
-            safe_data_dir,
+            )
         )
+        if not log_dir.startswith(base + os.sep):
+            return
         os.makedirs(log_dir, exist_ok=True)
-        log_path = _ensure_within_base(
-            os.path.join(log_dir, "compression_log.jsonl"),
-            log_dir,
-        )
+
+        log_path = os.path.realpath(os.path.join(log_dir, "compression_log.jsonl"))
+        if not log_path.startswith(log_dir + os.sep):
+            return
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
     except Exception as exc:
