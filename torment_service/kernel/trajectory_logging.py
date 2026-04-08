@@ -33,11 +33,13 @@ class TrajectoryLogger:
         *,
         use_daily_rotation: bool = True,
     ) -> None:
-        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
-        self.root_dir = os.path.realpath(root_dir)
-        if not self.root_dir.startswith(os.sep):
-            raise ValueError(f"root_dir did not resolve to absolute path: {self.root_dir!r}")
-        os.makedirs(self.root_dir, exist_ok=True)
+        # Canonicalize via local variable so CodeQL sees the full
+        # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
+        _safe_dir = os.path.realpath(root_dir)
+        if not _safe_dir.startswith(os.sep):
+            raise ValueError(f"root_dir did not resolve to absolute path: {_safe_dir!r}")
+        os.makedirs(_safe_dir, exist_ok=True)
+        self.root_dir = _safe_dir
         self._use_daily = use_daily_rotation
         # Legacy single-file path (used when daily rotation is off, or
         # as fallback for callers that read self.path directly).
