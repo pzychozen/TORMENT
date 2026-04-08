@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Iterable, Tuple
+from typing import Iterable
 import random
 
 DEFAULT_DOMAINS = ["research","engineering","operations","creative","meta"]

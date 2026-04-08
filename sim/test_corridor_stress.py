@@ -35,7 +35,6 @@ def get_first(d: dict, keys, default=0.0):
 
 
 def main(args=None):
-    import os
     import numpy as np
     import random
 
