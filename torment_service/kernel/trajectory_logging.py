@@ -5,6 +5,8 @@ import os, json, time
 from typing import Any, Dict
 import numpy as np
 
+from ..embedding_store import _canonical_storage_root, _child_path
+
 
 def _now_ts() -> int:
     return int(time.time())
@@ -20,9 +22,8 @@ class TrajectoryLogger:
       - Just persistent telemetry for later analysis/plots
     """
     def __init__(self, root_dir: str, filename: str = "trajectories.jsonl") -> None:
-        self.root_dir = os.path.normpath(root_dir)
-        os.makedirs(self.root_dir, exist_ok=True)
-        self.path = os.path.join(self.root_dir, filename)
+        self.root_dir = _canonical_storage_root(root_dir, mkdir=True)
+        self.path = _child_path(self.root_dir, filename)
 
     def log_entity(self, ent: Any, step: int) -> None:
         try:
