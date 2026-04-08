@@ -23,7 +23,6 @@ from torment_service.retrieval_assembler import (
     BLOCK_RELATIONAL,
     BLOCK_SITUATIONAL,
     BLOCK_ARCHIVE,
-    IDENTITY_MIN_TOKENS,
     _classify_core_hit,
     _estimate_tokens,
     AssembledContext,

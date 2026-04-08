@@ -48,8 +48,6 @@ from torment_service.collective_policy import (
     check_drift_budget,
     DEFAULT_ECHO_STRENGTH,
     DEFAULT_ECHO_STRENGTH_CAP,
-    DEFAULT_CONFIDENCE_THRESHOLD,
-    DEFAULT_DRIFT_BUDGET,
 )
 from torment_service.collective_proposals import (
     CollectiveProposalBridge,

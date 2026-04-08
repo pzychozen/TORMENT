@@ -20,7 +20,6 @@ from torment_service.collective_policy import (
     check_drift_budget,
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_RATE_LIMIT_MAX,
-    DEFAULT_RATE_LIMIT_WINDOW,
     DEFAULT_DRIFT_BUDGET,
     DEFAULT_ECHO_STRENGTH,
     DEFAULT_ECHO_STRENGTH_CAP,
