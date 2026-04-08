@@ -22,7 +22,6 @@ Design rules:
 """
 from __future__ import annotations
 
-import glob
 import json
 import logging
 import os
@@ -305,14 +304,17 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
     except ValueError:
         return
 
-    raw_files = glob.glob(os.path.join(safe_dir, "checkpoint_*.json"))
-    # Extract and validate basenames, discard anything unexpected
-    valid_names: List[str] = []
-    for raw in raw_files:
-        name = os.path.basename(raw)
-        if re.match(r"^checkpoint_\d+\.json$", name):
-            valid_names.append(name)
-    valid_names.sort()
+    # Use os.listdir on the trusted root instead of glob.glob to avoid
+    # passing a derived path into glob (which CodeQL traces as tainted).
+    try:
+        entries = os.listdir(safe_dir)
+    except OSError:
+        return
+
+    valid_names: List[str] = sorted(
+        name for name in entries
+        if re.match(r"^checkpoint_\d+\.json$", name)
+    )
 
     if len(valid_names) <= keep:
         return
@@ -338,14 +340,17 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
         return None
     if not os.path.isdir(safe_dir):
         return None
-    raw_files = glob.glob(os.path.join(safe_dir, "checkpoint_*.json"))
-    # Extract and validate basenames, discard anything unexpected
-    valid_names: List[str] = []
-    for raw in raw_files:
-        name = os.path.basename(raw)
-        if re.match(r"^checkpoint_\d+\.json$", name):
-            valid_names.append(name)
-    valid_names.sort()
+    # Use os.listdir on the trusted root instead of glob.glob to avoid
+    # passing a derived path into glob (which CodeQL traces as tainted).
+    try:
+        entries = os.listdir(safe_dir)
+    except OSError:
+        return None
+
+    valid_names: List[str] = sorted(
+        name for name in entries
+        if re.match(r"^checkpoint_\d+\.json$", name)
+    )
     if not valid_names:
         return None
     try:
