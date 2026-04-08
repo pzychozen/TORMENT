@@ -4,10 +4,11 @@ Covers:
   1. Canonical checkpoint root stays inside base dir
   2. Checkpoint filename path stays inside checkpoint root
   3. Temp file path stays inside checkpoint root
-  4. Globbed prune targets are revalidated before deletion
+  4. Prune targets are revalidated before deletion
   5. Latest checkpoint load revalidates selected file
   6. Invalid workspace/agent IDs are rejected
   7. Save/load/prune behavior still works after refactor
+  8. _build_checkpoint_dir inline validation
 """
 
 import json
@@ -23,6 +24,7 @@ from torment_service.checkpoint import (
     save_checkpoint,
     load_latest_checkpoint,
     _prune_old_checkpoints,
+    _build_checkpoint_dir,
     build_shard_snapshot,
     restore_from_checkpoint,
     _validate_path_component,
@@ -109,22 +111,65 @@ class TestGetCheckpointDir(unittest.TestCase):
             get_checkpoint_dir(self._tmpdir, "ws\\evil", "agent1")
 
 
+class TestBuildCheckpointDir(unittest.TestCase):
+    """8. _build_checkpoint_dir inline validation (used by save/load)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_returns_canonical_path(self):
+        result = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        self.assertTrue(os.path.isabs(result))
+        self.assertEqual(result, os.path.realpath(result))
+
+    def test_path_inside_data_dir(self):
+        result = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        canonical_data = os.path.realpath(self._tmpdir)
+        self.assertTrue(result.startswith(canonical_data + os.sep))
+
+    def test_rejects_dotdot_workspace(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "../escape", "agent1")
+
+    def test_rejects_slash_agent(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "ws1", "a/evil")
+
+    def test_rejects_empty_workspace(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "", "agent1")
+
+    def test_rejects_empty_agent(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "ws1", "")
+
+    def test_rejects_backslash_workspace(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "ws\\evil", "agent1")
+
+    def test_rejects_backslash_agent(self):
+        with self.assertRaises(ValueError):
+            _build_checkpoint_dir(self._tmpdir, "ws1", "agent\\evil")
+
+
 class TestSaveCheckpointPaths(unittest.TestCase):
     """2, 3. Checkpoint and temp file paths stay inside root."""
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
-        self._ckpt_dir = get_checkpoint_dir(self._tmpdir, "ws1", "agent1")
 
     def tearDown(self):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_save_creates_file_inside_root(self):
         path = save_checkpoint(
-            self._ckpt_dir, step=10,
+            data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+            step=10,
             model_state=_make_model_state(),
             corridor_monitor=_make_corridor_monitor(),
-            base_dir=self._tmpdir,
         )
         self.assertIsNotNone(path)
         canonical_data = os.path.realpath(self._tmpdir)
@@ -132,24 +177,44 @@ class TestSaveCheckpointPaths(unittest.TestCase):
 
     def test_save_correct_filename(self):
         path = save_checkpoint(
-            self._ckpt_dir, step=42,
+            data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+            step=42,
             model_state=_make_model_state(),
             corridor_monitor=_make_corridor_monitor(),
-            base_dir=self._tmpdir,
         )
         self.assertTrue(path.endswith("checkpoint_000042.json"))
 
     def test_no_tmp_file_left_after_save(self):
         save_checkpoint(
-            self._ckpt_dir, step=10,
+            data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+            step=10,
             model_state=_make_model_state(),
             corridor_monitor=_make_corridor_monitor(),
-            base_dir=self._tmpdir,
         )
-        # The .tmp file should have been replaced
-        files = os.listdir(self._ckpt_dir)
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        files = os.listdir(ckpt_dir)
         tmp_files = [f for f in files if f.endswith(".tmp")]
         self.assertEqual(tmp_files, [])
+
+    def test_save_rejects_invalid_workspace(self):
+        """save_checkpoint with traversal workspace returns None (non-fatal)."""
+        path = save_checkpoint(
+            data_dir=self._tmpdir, workspace_id="../escape", agent_id="agent1",
+            step=10,
+            model_state=_make_model_state(),
+            corridor_monitor=_make_corridor_monitor(),
+        )
+        self.assertIsNone(path)
+
+    def test_save_rejects_invalid_agent(self):
+        """save_checkpoint with traversal agent returns None (non-fatal)."""
+        path = save_checkpoint(
+            data_dir=self._tmpdir, workspace_id="ws1", agent_id="a/evil",
+            step=10,
+            model_state=_make_model_state(),
+            corridor_monitor=_make_corridor_monitor(),
+        )
+        self.assertIsNone(path)
 
 
 class TestPruneCheckpoints(unittest.TestCase):
@@ -157,7 +222,6 @@ class TestPruneCheckpoints(unittest.TestCase):
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
-        self._ckpt_dir = get_checkpoint_dir(self._tmpdir, "ws1", "agent1")
 
     def tearDown(self):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
@@ -165,28 +229,29 @@ class TestPruneCheckpoints(unittest.TestCase):
     def test_prune_keeps_max(self):
         for step in range(5):
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
                 max_checkpoints=3,
-                base_dir=self._tmpdir,
             )
-        files = sorted(os.listdir(self._ckpt_dir))
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        files = sorted(os.listdir(ckpt_dir))
         json_files = [f for f in files if f.endswith(".json")]
         self.assertLessEqual(len(json_files), 3)
 
     def test_prune_keeps_newest(self):
         for step in range(5):
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
                 max_checkpoints=2,
-                base_dir=self._tmpdir,
             )
-        files = sorted(os.listdir(self._ckpt_dir))
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        files = sorted(os.listdir(ckpt_dir))
         json_files = [f for f in files if f.endswith(".json")]
-        # Should have the last 2
         self.assertIn("checkpoint_000004.json", json_files)
         self.assertIn("checkpoint_000003.json", json_files)
         self.assertNotIn("checkpoint_000000.json", json_files)
@@ -195,17 +260,17 @@ class TestPruneCheckpoints(unittest.TestCase):
         """Files that don't match checkpoint_NNNNNN.json are left alone."""
         for step in range(3):
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
                 max_checkpoints=1,
-                base_dir=self._tmpdir,
             )
-        # Plant a non-matching file
-        rogue = os.path.join(self._ckpt_dir, "notes.txt")
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        rogue = os.path.join(ckpt_dir, "notes.txt")
         with open(rogue, "w") as f:
             f.write("keep me")
-        _prune_old_checkpoints(self._ckpt_dir, 1, self._tmpdir)
+        _prune_old_checkpoints(ckpt_dir, 1)
         self.assertTrue(os.path.exists(rogue), "non-checkpoint file was deleted")
 
     def test_prune_uses_child_path_not_raw_glob(self):
@@ -213,18 +278,15 @@ class TestPruneCheckpoints(unittest.TestCase):
         name won't match the pattern and is therefore ignored."""
         for step in range(3):
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
                 max_checkpoints=10,
-                base_dir=self._tmpdir,
             )
-        # Plant a file whose name contains path traversal (wouldn't match pattern)
-        rogue = os.path.join(self._ckpt_dir, "checkpoint_../../etc.json")
-        # This filename is invalid on most OS but the key test is that
-        # _prune_old_checkpoints only processes pattern-matched basenames
-        _prune_old_checkpoints(self._ckpt_dir, 1, self._tmpdir)
-        remaining = [f for f in os.listdir(self._ckpt_dir) if f.endswith(".json")]
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        _prune_old_checkpoints(ckpt_dir, 1)
+        remaining = [f for f in os.listdir(ckpt_dir) if f.endswith(".json")]
         self.assertEqual(len(remaining), 1, "should keep exactly 1 valid checkpoint")
 
 
@@ -233,7 +295,6 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
-        self._ckpt_dir = get_checkpoint_dir(self._tmpdir, "ws1", "agent1")
 
     def tearDown(self):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
@@ -241,59 +302,68 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
     def test_load_returns_latest(self):
         for step in [10, 20, 30]:
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
-                base_dir=self._tmpdir,
             )
-        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNotNone(data)
         self.assertEqual(data["step"], 30)
 
     def test_load_empty_dir_returns_none(self):
-        os.makedirs(self._ckpt_dir, exist_ok=True)
-        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        os.makedirs(ckpt_dir, exist_ok=True)
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNone(data)
 
-    def test_load_nonexistent_dir_returns_none(self):
-        data = load_latest_checkpoint("/nonexistent/path", self._tmpdir)
+    def test_load_nonexistent_returns_none(self):
+        data = load_latest_checkpoint(self._tmpdir, "ws_none", "agent_none")
+        self.assertIsNone(data)
+
+    def test_load_invalid_workspace_returns_none(self):
+        data = load_latest_checkpoint(self._tmpdir, "../escape", "agent1")
+        self.assertIsNone(data)
+
+    def test_load_invalid_agent_returns_none(self):
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "a/evil")
         self.assertIsNone(data)
 
     def test_load_ignores_non_matching_files(self):
         """Only checkpoint_NNNNNN.json files are candidates for loading."""
-        os.makedirs(self._ckpt_dir, exist_ok=True)
-        # Plant a file that glob would match but doesn't fit the strict pattern
-        rogue = os.path.join(self._ckpt_dir, "checkpoint_evil.json")
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        os.makedirs(ckpt_dir, exist_ok=True)
+        rogue = os.path.join(ckpt_dir, "checkpoint_evil.json")
         with open(rogue, "w") as f:
             json.dump({"step": 999}, f)
-        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNone(data, "should ignore non-matching filenames")
 
     def test_load_selects_latest_valid_basename(self):
         """Load reconstructs path from validated basename, picks highest step."""
         for step in [5, 15, 10]:
             save_checkpoint(
-                self._ckpt_dir, step=step,
+                data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+                step=step,
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
-                base_dir=self._tmpdir,
             )
-        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNotNone(data)
         self.assertEqual(data["step"], 15)
 
     def test_round_trip_save_load_restore(self):
-        """Full save → load → restore round trip."""
+        """Full save -> load -> restore round trip."""
         ms = _make_model_state()
         cm = _make_corridor_monitor()
         save_checkpoint(
-            self._ckpt_dir, step=50,
+            data_dir=self._tmpdir, workspace_id="ws1", agent_id="agent1",
+            step=50,
             model_state=ms,
             corridor_monitor=cm,
             character_state_dict={"drift_score": 0.05},
-            base_dir=self._tmpdir,
         )
-        data = load_latest_checkpoint(self._ckpt_dir, self._tmpdir)
+        data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNotNone(data)
         restored = restore_from_checkpoint(data)
         self.assertEqual(restored["step"], 50)

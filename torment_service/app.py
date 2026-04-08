@@ -1506,7 +1506,7 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
     _validate_path_component(req.workspace_id, "workspace_id")
     _validate_path_component(req.agent_id, "agent_id")
     from .checkpoint import (
-        save_checkpoint, get_checkpoint_dir,
+        save_checkpoint,
         build_motif_summary, build_shard_snapshot,
     )
     from dataclasses import asdict
@@ -1517,7 +1517,6 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         raise HTTPException(404, f"Agent '{req.agent_id}' has no active state")
 
     step = int(getattr(state, "step", 0))
-    ckpt_dir = get_checkpoint_dir(DATA_DIR, req.workspace_id, req.agent_id)
 
     # Gather optional context
     motif_summary = None
@@ -1548,14 +1547,15 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         _log.debug("Character state unavailable: %s", e)
 
     path = save_checkpoint(
-        checkpoint_dir=ckpt_dir,
+        data_dir=DATA_DIR,
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
         step=step,
         model_state=state,
         corridor_monitor=fabric.kernel.mon,
         character_state_dict=char_state_dict,
         motif_summary=motif_summary,
         shard_snapshot=shard_snap,
-        base_dir=DATA_DIR,
     )
     return {"ok": path is not None, "step": step, "path": path}
 
@@ -1565,10 +1565,9 @@ def checkpoint_latest(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     """Load and return the latest checkpoint metadata."""
     _validate_path_component(workspace_id, "workspace_id")
     _validate_path_component(agent_id, "agent_id")
-    from .checkpoint import load_latest_checkpoint, get_checkpoint_dir
+    from .checkpoint import load_latest_checkpoint
 
-    ckpt_dir = get_checkpoint_dir(DATA_DIR, workspace_id, agent_id)
-    data = load_latest_checkpoint(ckpt_dir, base_dir=DATA_DIR)
+    data = load_latest_checkpoint(DATA_DIR, workspace_id, agent_id)
     if data is None:
         return {"ok": False, "detail": "No checkpoints found"}
     # Return metadata only — not the full state arrays

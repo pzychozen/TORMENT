@@ -31,7 +31,6 @@ from .character import (
 from .agent_locks import AgentLockManager
 from .checkpoint import (
     save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
-    get_checkpoint_dir,
     build_motif_summary, build_shard_snapshot,
 )
 
@@ -2800,7 +2799,6 @@ class TormentFabric:
         # --- Periodic checkpoint (Phase 5) — non-blocking ---
         if self._checkpoint_enable and int(step) > 0 and int(step) % self._checkpoint_interval == 0:
             try:
-                _ckpt_dir = get_checkpoint_dir(self.data_dir, workspace_id, agent_id)
                 _motif_summary = None
                 try:
                     _ckpt_reg = ws.motif_regs.get(chosen_domain)
@@ -2826,7 +2824,9 @@ class TormentFabric:
                 except Exception as e:
                     self._log.debug("checkpoint character state load failed: %s", e)
                 save_checkpoint(
-                    checkpoint_dir=_ckpt_dir,
+                    data_dir=self.data_dir,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
                     step=int(step),
                     model_state=state,
                     corridor_monitor=self.kernel.mon,
@@ -2834,7 +2834,6 @@ class TormentFabric:
                     motif_summary=_motif_summary,
                     shard_snapshot=_shard_snap,
                     max_checkpoints=self._checkpoint_max_keep,
-                    base_dir=self.data_dir,
                 )
             except Exception as e:
                 self._log.debug("checkpoint save failed for step=%s: %s", step, e)

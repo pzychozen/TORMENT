@@ -260,8 +260,34 @@ def _extract_step_from_filename(filename: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _build_checkpoint_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    """Build and validate the checkpoint directory path.
+
+    All user-controlled components are validated inline so CodeQL
+    can trace the sanitisation chain without crossing function
+    boundaries.  Returns a ``realpath``-resolved directory that
+    is verified to reside under the ``realpath``-resolved *data_dir*.
+    """
+    # Inline component validation — no helper calls.
+    if not workspace_id or ".." in workspace_id or "/" in workspace_id or "\\" in workspace_id:
+        raise ValueError(f"Invalid workspace_id: {workspace_id!r}")
+    if not agent_id or ".." in agent_id or "/" in agent_id or "\\" in agent_id:
+        raise ValueError(f"Invalid agent_id: {agent_id!r}")
+
+    base = os.path.realpath(data_dir)
+    safe_dir = os.path.realpath(os.path.join(
+        base, "workspaces", workspace_id,
+        "agents", agent_id, "private", "checkpoints",
+    ))
+    if not safe_dir.startswith(base + os.sep):
+        raise ValueError("Checkpoint directory escapes data root")
+    return safe_dir
+
+
 def save_checkpoint(
-    checkpoint_dir: str,
+    data_dir: str,
+    workspace_id: str,
+    agent_id: str,
     step: int,
     model_state,
     corridor_monitor,
@@ -269,24 +295,17 @@ def save_checkpoint(
     motif_summary: Optional[Dict[str, Any]] = None,
     shard_snapshot: Optional[Dict[str, Any]] = None,
     max_checkpoints: int = 10,
-    *,
-    base_dir: str,
 ) -> Optional[str]:
     """Save a checkpoint to disk.  Returns the file path on success, None on failure.
 
     Keeps at most ``max_checkpoints`` files, removing the oldest.
-    *base_dir* is the trusted root directory.  All resolved paths are
-    verified to stay inside it before any file access.
+
+    Path is built internally from validated ``workspace_id`` /
+    ``agent_id`` components so that no pre-built tainted path
+    parameter reaches filesystem sinks.
     """
     try:
-        # Inline full sanitisation so CodeQL sees realpath → startswith
-        # → sink in a single straight-line scope.
-        safe_dir = os.path.realpath(checkpoint_dir)
-        _base = os.path.realpath(base_dir)
-        if ".." in safe_dir.split(os.sep):
-            return None
-        if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
-            return None
+        safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
         os.makedirs(safe_dir, exist_ok=True)
 
         payload: Dict[str, Any] = {
@@ -309,7 +328,7 @@ def save_checkpoint(
         os.replace(tmp, path)
 
         # Prune old checkpoints
-        _prune_old_checkpoints(safe_dir, max_checkpoints, base_dir)
+        _prune_old_checkpoints(safe_dir, max_checkpoints)
 
         log.info("Checkpoint saved: step=%d -> %s", step, _sanitize_log(path))
         return path
@@ -319,24 +338,12 @@ def save_checkpoint(
         return None
 
 
-def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> None:
+def _prune_old_checkpoints(safe_dir: str, keep: int) -> None:
     """Remove oldest checkpoints, keeping at most ``keep``.
 
-    *base_dir* is the trusted root directory. Deletion targets are
-    revalidated against the canonical checkpoint directory before removal.
-
-    Path sanitisation is fully inlined (``os.path.realpath`` →
-    ``startswith`` guard → sinks) so that CodeQL sees the complete
-    trust chain without crossing function boundaries.
+    *safe_dir* must already be a validated, ``realpath``-resolved
+    checkpoint directory (as returned by ``_build_checkpoint_dir``).
     """
-    # --- inline sanitisation (no helper calls) ---
-    safe_dir = os.path.realpath(checkpoint_dir)
-    _base = os.path.realpath(base_dir)
-    if ".." in safe_dir.split(os.sep):
-        return
-    if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
-        return
-
     try:
         entries = os.listdir(safe_dir)
     except OSError:
@@ -358,22 +365,18 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
             log.debug("Could not remove old checkpoint: %s", e)
 
 
-def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[str, Any]]:
+def load_latest_checkpoint(
+    data_dir: str, workspace_id: str, agent_id: str,
+) -> Optional[Dict[str, Any]]:
     """Load the most recent checkpoint file.  Returns None if no checkpoint exists.
 
-    *base_dir* is the trusted root directory.  All resolved paths are
-    verified to stay inside it before any file access.
-
-    Path sanitisation is fully inlined (``os.path.realpath`` →
-    ``startswith`` guard → sinks) so that CodeQL sees the complete
-    trust chain without crossing function boundaries.
+    Path is built internally from validated ``workspace_id`` /
+    ``agent_id`` components so that no pre-built tainted path
+    parameter reaches filesystem sinks.
     """
-    # --- inline sanitisation (no helper calls) ---
-    safe_dir = os.path.realpath(checkpoint_dir)
-    _base = os.path.realpath(base_dir)
-    if ".." in safe_dir.split(os.sep):
-        return None
-    if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
+    try:
+        safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
+    except ValueError:
         return None
 
     if not os.path.isdir(safe_dir):
