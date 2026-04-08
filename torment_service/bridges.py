@@ -29,20 +29,31 @@ class BridgeRegistry:
         self.workspace_id = safe_slug(workspace_id, "workspace_id")
 
         canonical_data = _canonical_storage_root(data_dir)
-        workspace_dir = _canonical_storage_root(
+        workspace_dir = os.path.realpath(
             os.path.join(canonical_data, "workspaces", self.workspace_id)
         )
+        if not workspace_dir.startswith(canonical_data + os.sep):
+            raise ValueError(f"Workspace path escapes base: {workspace_dir!r}")
         os.makedirs(workspace_dir, exist_ok=True)
+        self._base = workspace_dir
         self.data_dir = canonical_data
         self.path = _child_path(workspace_dir, "bridges.json")
         self.events_path = _child_path(workspace_dir, "bridge_events.jsonl")
         self.bridges: List[Bridge] = []
         self._load()
 
+    def _guard(self, path: str) -> str:
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes workspace root: {rp!r}")
+        return rp
+
     def _load(self) -> None:
-        if not os.path.exists(self.path):
+        safe = self._guard(self.path)
+        if not os.path.exists(safe):
             return
-        with open(self.path, "r", encoding="utf-8") as f:
+        with open(safe, "r", encoding="utf-8") as f:
             obj = json.load(f)
         tmp = []
         for b in obj.get("bridges", []):
@@ -54,7 +65,7 @@ class BridgeRegistry:
         self.bridges = tmp
 
     def save(self) -> None:
-        with open(self.path, "w", encoding="utf-8") as f:
+        with open(self._guard(self.path), "w", encoding="utf-8") as f:
             json.dump({"bridges": [asdict(b) for b in self.bridges]}, f, indent=2, sort_keys=True)
 
 
@@ -62,7 +73,7 @@ class BridgeRegistry:
         evt = dict(evt)
         evt.setdefault("ts", _now_ts())
         evt.setdefault("workspace_id", self.workspace_id)
-        with open(self.events_path, "a", encoding="utf-8") as f:
+        with open(self._guard(self.events_path), "a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
     def suggest(self, regs: Dict[str, MotifRegistry], sim_threshold: float = 0.82, max_new: int = 10) -> List[Bridge]:
         # Simple pass: compare motif centroids across domains.

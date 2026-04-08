@@ -43,8 +43,13 @@ class TrajectoryLogger:
     def _today_path(self) -> str:
         """Return today's dated log path, creating the directory if needed."""
         p = dated_log_path(self.root_dir, "trajectories")
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        return p
+        # Inline containment guard — CodeQL needs visible realpath+startswith
+        rp = os.path.realpath(p)
+        base = os.path.realpath(self.root_dir)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Dated log path escapes root: {rp!r}")
+        os.makedirs(os.path.dirname(rp), exist_ok=True)
+        return rp
 
     def log_entity(self, ent: Any, step: int) -> None:
         try:
@@ -71,5 +76,10 @@ class TrajectoryLogger:
         }
 
         target = self._today_path() if self._use_daily else self.path
-        with open(target, "a", encoding="utf-8") as f:
+        # Inline containment guard at the sink
+        safe_target = os.path.realpath(target)
+        base = os.path.realpath(self.root_dir)
+        if safe_target != base and not safe_target.startswith(base + os.sep):
+            raise ValueError(f"Log path escapes root: {safe_target!r}")
+        with open(safe_target, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

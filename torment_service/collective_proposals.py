@@ -89,9 +89,9 @@ class ConvergencePersistenceTracker:
 
         # Canonical trust chain: data_dir → workspaces/<id>/collective
         canonical_data = _canonical_storage_root(data_dir)
-        collective_root = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", safe_workspace_id, "collective")
-        )
+        collective_root = os.path.realpath(os.path.join(canonical_data, "workspaces", safe_workspace_id, "collective"))
+        if not collective_root.startswith(canonical_data + os.sep):
+            raise ValueError(f"Collective path escapes base: {collective_root!r}")
         os.makedirs(collective_root, exist_ok=True)
         self._base = collective_root
         self._log_path = _child_path(collective_root, "convergence_patterns.jsonl")
@@ -108,12 +108,19 @@ class ConvergencePersistenceTracker:
 
         self._load()
 
+    def _guard(self, path: str) -> str:
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes workspace root: {rp!r}")
+        return rp
+
     def _load(self) -> None:
         """Warm caches from disk."""
         if not os.path.exists(self._log_path):
             return
         try:
-            with open(self._log_path, "r", encoding="utf-8") as f:
+            with open(self._guard(self._log_path), "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -160,7 +167,7 @@ class ConvergencePersistenceTracker:
         }
         with self._lock:
             self._patterns.setdefault(key, []).append((event_id, ts))
-            with open(self._log_path, "a", encoding="utf-8") as f:
+            with open(self._guard(self._log_path), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
     def count_recent(
@@ -193,7 +200,7 @@ class ConvergencePersistenceTracker:
         with self._lock:
             self._proposed_events.add(event_id)
             self._domain_last_proposed[domain_id] = ts
-            with open(self._log_path, "a", encoding="utf-8") as f:
+            with open(self._guard(self._log_path), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
 

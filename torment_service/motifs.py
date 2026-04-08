@@ -65,9 +65,10 @@ class MotifRegistry:
         self.domain_id = safe_slug(domain_id, "domain_id")
 
         self.data_dir = _canonical_storage_root(data_dir)
-        motif_dir = _canonical_storage_root(
-            os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id)
-        )
+        motif_dir = os.path.realpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", self.domain_id))
+        if not motif_dir.startswith(self.data_dir + os.sep):
+            raise ValueError(f"Motif path escapes base: {motif_dir!r}")
+        self._motif_base = motif_dir
         os.makedirs(motif_dir, exist_ok=True)
         self.path = _child_path(motif_dir, "motifs.json")
         self.events_path = _child_path(motif_dir, "motif_events.jsonl")
@@ -80,6 +81,13 @@ class MotifRegistry:
         # Callable: entity_payload_fn(eid) -> dict or None  (for embedding_ref lookup)
         self._entity_payload_fn = entity_payload_fn
         self._load()
+
+    def _guard(self, path: str) -> str:
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._motif_base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes motif root: {rp!r}")
+        return rp
 
     @staticmethod
     def _extract_id_number(motif_id: str) -> int:
@@ -99,7 +107,7 @@ class MotifRegistry:
     def _load(self) -> None:
         if not os.path.exists(self.path):
             return
-        with open(self.path, "r", encoding="utf-8") as f:
+        with open(self._guard(self.path), "r", encoding="utf-8") as f:
             obj = json.load(f)
         max_seen = 0
         for mid, md in obj.get("motifs", {}).items():
@@ -120,7 +128,7 @@ class MotifRegistry:
         self._next_id = max(self._next_id, max_seen + 1)
         if os.path.exists(self.merges_path):
             try:
-                with open(self.merges_path, "r", encoding="utf-8") as f:
+                with open(self._guard(self.merges_path), "r", encoding="utf-8") as f:
                     ms = json.load(f)
                 self._merge_suggestions = dict(ms.get("suggestions", {}))
             except Exception:
@@ -128,12 +136,12 @@ class MotifRegistry:
 
     def save(self) -> None:
         obj = {"motifs": {mid: asdict(m) for mid, m in self.motifs.items()}}
-        with open(self.path, "w", encoding="utf-8") as f:
+        with open(self._guard(self.path), "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, sort_keys=True)
 
     def save_merges(self) -> None:
         obj = {"suggestions": self._merge_suggestions}
-        with open(self.merges_path, "w", encoding="utf-8") as f:
+        with open(self._guard(self.merges_path), "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, sort_keys=True)
 
     def _log_event(self, evt: Dict[str, Any]) -> None:
@@ -141,7 +149,7 @@ class MotifRegistry:
         evt.setdefault("ts", _now_ts())
         evt.setdefault("workspace_id", self.workspace_id)
         evt.setdefault("domain_id", self.domain_id)
-        with open(self.events_path, "a", encoding="utf-8") as f:
+        with open(self._guard(self.events_path), "a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
 
     def _density(self, m: Motif) -> float:
@@ -199,7 +207,7 @@ class MotifRegistry:
         if not os.path.exists(p):
             return None
         try:
-            return _unit(np.load(p))
+            return _unit(np.load(self._guard(p)))
         except Exception:
             return None
 

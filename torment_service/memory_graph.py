@@ -126,9 +126,19 @@ class MemoryGraph:
     # Persistence
     # ----------------------------
 
+    def _guard(self, path: str) -> str:
+        """Inline containment check — CodeQL needs visible realpath+startswith at sinks."""
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self.data_dir)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes data root: {rp!r}")
+        return rp
+
     def _append_jsonl(self, path: str, obj: Dict[str, Any]) -> None:
-        with open(path, "a", encoding="utf-8") as f:
+        safe = self._guard(path)
+        with open(safe, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
     def _emb_path(self, eid: int) -> str:
         return _child_path(self.data_dir, f"emb_{int(eid)}.npy")
 
@@ -584,10 +594,10 @@ class MemoryGraph:
                 ent.payload["embedding_ref"] = emb_ref
             except Exception:
                 # Fallback to legacy if shard write fails
-                np.save(self._emb_path(int(ent.eid)), emb_vec)
+                np.save(self._guard(self._emb_path(int(ent.eid))), emb_vec)
         else:
             # Legacy mode — per-file storage
-            np.save(self._emb_path(int(ent.eid)), emb_vec)
+            np.save(self._guard(self._emb_path(int(ent.eid))), emb_vec)
 
         self._register_embedding(int(ent.eid), embedding)
 
