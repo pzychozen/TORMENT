@@ -10,7 +10,6 @@ Covers:
   7. Normal graph load/save behavior still works after refactor
 """
 
-import json
 import os
 import shutil
 import tempfile
@@ -19,7 +18,6 @@ import unittest
 import numpy as np
 
 from torment_service.memory_graph import MemoryGraph
-from torment_service.embeddings import HashEmbedding
 
 
 class TestMemoryGraphInit(unittest.TestCase):
@@ -90,7 +88,7 @@ class TestEmbPath(unittest.TestCase):
 
     def test_emb_path_naming(self):
         path = self.mg._emb_path(42)
-        self.assertTrue(os.path.basename(path) == "emb_42.npy")
+        self.assertEqual(os.path.basename(path), "emb_42.npy")
 
     def test_emb_path_is_canonical(self):
         path = self.mg._emb_path(99)

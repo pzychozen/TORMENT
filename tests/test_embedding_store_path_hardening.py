@@ -18,7 +18,6 @@ import numpy as np
 from torment_service.embedding_store import (
     _canonical_storage_root,
     _child_path,
-    _ensure_within_base,
     EmbeddingShardWriter,
     EmbeddingShardReader,
     load_legacy_embedding,

@@ -14,16 +14,12 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Any
-
-import pytest
+from typing import Dict, Any
 
 from torment_service.spirit_reflection import (
-    SpiritReflectionEvent,
     SpiritReflectionStore,
     process_spirit_reflections,
     extract_spirit_return_candidates,
-    DEFAULT_INFLUENCE_THRESHOLD,
 )
 from torment_service.retrieval_assembler import _classify_core_hit
 
@@ -110,7 +106,7 @@ class TestFailSoftBehavior:
             # The store.store() returns False on write failure
             assert isinstance(result, list)
         finally:
-            os.chmod(str(store._file), 0o644)
+            os.chmod(str(store._file), 0o600)
 
     def test_empty_blocks_no_crash(self):
         store = _tmp_store()
@@ -192,7 +188,6 @@ class TestNonSpiritHitsIgnored:
         assert len(store.all_events()) == 0
 
     def test_mixed_hits_only_spirit_considered(self):
-        store = _tmp_store()
         blocks = [
             _normal_hit(eid=1),
             _spirit_hit(eid=2, summary="garden sunset vivid"),

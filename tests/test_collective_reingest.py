@@ -17,7 +17,6 @@ Invariants verified:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -32,14 +31,12 @@ from torment_service.governance import (
     is_compression_protected,
     update_governance,
 )
-from torment_service.collective_models import MemoryGovernanceFlags, ConvergenceEvent
 from torment_service.collective_policy import (
     CollectivePolicy,
     PolicyResult,
     ReingestTracker,
     DEFAULT_ECHO_STRENGTH,
     DEFAULT_ECHO_STRENGTH_CAP,
-    DEFAULT_CONFIDENCE_THRESHOLD,
 )
 
 
@@ -594,9 +591,11 @@ class TestEdgeCases(unittest.TestCase):
     def test_none_echo_strength_override(self):
         """None override should use default strength."""
         override = None
-        strength = DEFAULT_ECHO_STRENGTH
-        if override is not None:
-            strength = min(float(override), DEFAULT_ECHO_STRENGTH_CAP)
+        strength = (
+            min(float(override), DEFAULT_ECHO_STRENGTH_CAP)
+            if override is not None
+            else DEFAULT_ECHO_STRENGTH
+        )
         self.assertEqual(strength, 0.25)
 
 
