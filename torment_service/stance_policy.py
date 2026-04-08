@@ -20,7 +20,6 @@ from typing import Any, Dict, Optional
 from .thinking_models import (
     ActionDecision,
     ActionType,
-    CognitiveMode,
     CognitiveModeDecision,
     GeometricStanceContext,
     MemoryPlan,

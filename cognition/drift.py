@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from schemas.drift_report import DriftReport, DRIFT_GREEN, DRIFT_YELLOW, DRIFT_RED
+from schemas.drift_report import DriftReport, DRIFT_RED
 
 
 # ============================================================================

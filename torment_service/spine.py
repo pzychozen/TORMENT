@@ -35,7 +35,6 @@ from typing import Any, Callable, Dict, List, Optional
 from .request_context import (
     RequestContext,
     InsufficientTrustError,
-    system_context,
     TRUST_READ_ONLY,
     TRUST_QUERY_REINFORCE,
     TRUST_INGEST,

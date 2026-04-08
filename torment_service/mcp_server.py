@@ -26,7 +26,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -34,13 +34,9 @@ from mcp.server.fastmcp import FastMCP
 from .request_context import RequestContext
 from .spine import (
     SpineRequest,
-    SpineResponse,
     submit_task,
     get_exposed_operations,
-    OPERATION_REGISTRY,
     EXPOSURE_OPEN,
-    EXPOSURE_GUARDED,
-    OP_CLASS_READ,
 )
 from .fabric import TormentFabric
 
