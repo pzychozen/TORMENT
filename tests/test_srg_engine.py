@@ -359,7 +359,6 @@ class TestCollisionPhysics(unittest.TestCase):
     def test_amplitude_preserved(self):
         """R values remain distinct after collision."""
         a, b = self._pair()
-        r_a_before = a.R
         r_b_before = b.R
         collision(a, b, 0.85, 100)
         # b.R unchanged, a.R shifted slightly by equilibrium

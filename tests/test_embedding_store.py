@@ -118,7 +118,7 @@ class TestShardReader:
 
     def test_load_nonexistent(self, tmp_dir):
         emb_dir = os.path.join(tmp_dir, "embeddings")
-        writer = EmbeddingShardWriter(emb_dir, dim=8)  # create manifest
+        EmbeddingShardWriter(emb_dir, dim=8)  # create manifest
 
         reader = EmbeddingShardReader(emb_dir)
         result = reader.load_one({"shard": 99, "row": 0, "dim": 8})

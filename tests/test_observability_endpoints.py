@@ -435,7 +435,7 @@ class TestSpineIncidentLogIntegration(unittest.TestCase):
         self.assertEqual(ops[3], "ingest")
 
     def test_elapsed_ms_recorded(self):
-        resp = self._submit("ingest", {"text": "timing test", "step": 1})
+        self._submit("ingest", {"text": "timing test", "step": 1})
         log = get_incident_log()
         incidents = log.query(limit=1)
         self.assertGreater(incidents[0].elapsed_ms, 0)

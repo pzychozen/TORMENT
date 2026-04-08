@@ -600,7 +600,6 @@ def generate_visualization(
     n_layers = len(show_layers)
     if n_layers == 0:
         show_layers = {"basin", "orbits", "timeline"}
-        n_layers = 3
 
     layer_order = [l for l in ["basin", "orbits", "timeline"] if l in show_layers]
     height_ratios = []
