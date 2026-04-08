@@ -58,7 +58,6 @@ from torment_service.spirit_return import (
     enrich_deep_memory_hit,
     inject_spirit_return_into_hit,
     WarmupTracker,
-    compute_symbol_interaction,
     build_symbol_interaction_matrix,
 )
 from torment_service.phase_timer import PhaseTimer

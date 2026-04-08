@@ -17,10 +17,10 @@ import sys
 import tempfile
 import shutil
 import unittest
-from dataclasses import dataclass, field
+from dataclasses import field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from typing import Dict, List, Optional
+from unittest.mock import MagicMock
 
 import numpy as np
 

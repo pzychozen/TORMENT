@@ -21,14 +21,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from cognition.task_models import (
-    TaskPacket, MODE_AUTO, MODE_ENGINEERING, MODE_STRATEGIC, MODE_IDENTITY,
-)
+from cognition.task_models import TaskPacket
 from cognition.pipeline import run_cognition_pipeline
 from cognition.drift import stub_drift_check, zero_drift_check
 from schemas.provenance import (
-    SOURCE_ROLE_OUTPUT,
-    STATUS_SKEPTIC_PASSED,
     STATUS_SKEPTIC_FLAGGED,
 )
 

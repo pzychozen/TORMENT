@@ -20,13 +20,12 @@ from typing import List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from cognition.task_models import TaskPacket, MODE_AUTO, MODE_ENGINEERING, MODE_IDENTITY
-from cognition.apertures import MemoryContext, APERTURE_CONFIGS, build_memory_context
+from cognition.task_models import TaskPacket, MODE_AUTO, MODE_IDENTITY
+from cognition.apertures import MemoryContext, APERTURE_CONFIGS
 from schemas.role_output import RoleOutput
 from schemas.provenance import (
     Provenance,
     SOURCE_ROLE_OUTPUT,
-    STATUS_UNVERIFIED,
     STATUS_SKEPTIC_PASSED,
     STATUS_SKEPTIC_FLAGGED,
 )
