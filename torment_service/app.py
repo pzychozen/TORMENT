@@ -1127,8 +1127,12 @@ def approve_domain(req: ApproveDomainSuggestionReq) -> Dict[str, Any]:
 
 @app.get("/workspace/{workspace_id}/domain_suggestions")
 def domain_suggestions(workspace_id: str) -> Dict[str, Any]:
+    _validate_path_component(workspace_id, "workspace_id")
     ws = fabric.get_workspace(workspace_id)
-    ds_path = os.path.normpath(ws.domain_suggestions_path)
+    ds_path = os.path.realpath(ws.domain_suggestions_path)
+    _data = os.path.realpath(DATA_DIR)
+    if not ds_path.startswith(_data + os.sep) and ds_path != _data:
+        raise HTTPException(400, "Path escapes data directory")
     if not os.path.exists(ds_path):
         return {"workspace_id": workspace_id, "suggestions": []}
     with open(ds_path, "r", encoding="utf-8") as f:
@@ -1583,24 +1587,40 @@ def checkpoint_latest(workspace_id: str, agent_id: str) -> Dict[str, Any]:
 @app.get("/checkpoint/{workspace_id}/{agent_id}/list")
 def checkpoint_list(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     """List all available checkpoints for an agent."""
+    import re as _re
     _validate_path_component(workspace_id, "workspace_id")
     _validate_path_component(agent_id, "agent_id")
     from .checkpoint import get_checkpoint_dir, _extract_step_from_filename
-    import glob as _glob
 
-    ckpt_dir = os.path.normpath(get_checkpoint_dir(DATA_DIR, workspace_id, agent_id))
+    ckpt_dir = os.path.realpath(get_checkpoint_dir(DATA_DIR, workspace_id, agent_id))
+    _data = os.path.realpath(DATA_DIR)
+    if not ckpt_dir.startswith(_data + os.sep) and ckpt_dir != _data:
+        raise HTTPException(400, "Path escapes data directory")
     if not os.path.isdir(ckpt_dir):
         return {"ok": True, "checkpoints": []}
 
-    files = sorted(_glob.glob(os.path.join(ckpt_dir, "checkpoint_*.json")))
+    # Use os.listdir + regex filter instead of glob to avoid tainted
+    # glob patterns; reconstruct safe paths from the trusted root.
+    try:
+        entries = os.listdir(ckpt_dir)
+    except OSError:
+        return {"ok": True, "checkpoints": []}
+
+    valid_names = sorted(
+        name for name in entries
+        if _re.match(r"^checkpoint_\d+\.json$", name)
+    )
     items = []
-    for f in files:
-        step = _extract_step_from_filename(f)
+    for name in valid_names:
+        step = _extract_step_from_filename(name)
+        fpath = os.path.realpath(os.path.join(ckpt_dir, name))
+        if not fpath.startswith(ckpt_dir + os.sep):
+            continue
         try:
-            size = os.path.getsize(f)
-        except Exception:
+            size = os.path.getsize(fpath)
+        except OSError:
             size = 0
-        items.append({"step": step, "file": os.path.basename(f), "size_bytes": size})
+        items.append({"step": step, "file": name, "size_bytes": size})
     return {"ok": True, "checkpoints": items}
 
 
@@ -2237,8 +2257,8 @@ def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
     if spec and spec.min_trust > 0:
         try:
             fabric.create_agent(req.workspace_id, req.agent_id)
-        except Exception:
-            pass  # query_state and similar don't need agent creation
+        except Exception as exc:
+            _log.debug("Agent setup skipped (may already exist): %s", exc)
 
     # Submit to Spine
     response = submit_task(spine_req, fabric, ctx)
@@ -2312,8 +2332,8 @@ def tool_result_ingest(req: ToolResultIngestReq, request: Request) -> Dict[str, 
     # Ensure agent exists
     try:
         fabric.create_agent(req.workspace_id, req.agent_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("Agent setup skipped (may already exist): %s", exc)
 
     spine_req = SpineRequest(
         workspace_id=req.workspace_id,
