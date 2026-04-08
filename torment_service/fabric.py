@@ -1,6 +1,6 @@
 # fabric.py
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 import os, time, json, re, threading, uuid, logging, math
 import numpy as np
@@ -11,12 +11,12 @@ from .memory_kernel import TriOctaMemoryKernel
 from .memory_graph import MemoryGraph
 from .identity import IdentityStore, AgentIdentity, DEFAULT_AGENT_SEED, DEFAULT_AGENT_OVERLAY
 from .motifs import MotifRegistry, cosine as cos_sim
-from .router import DomainRouter, DEFAULT_DOMAINS, SINGLE_AGENT_DOMAIN
+from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry
 from .conflicts import ConflictRegistry
-from .scoring import score_hit, ContinuityContext, ContinuityResult, compute_continuity_bonuses
+from .scoring import score_hit, ContinuityContext, compute_continuity_bonuses
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
@@ -30,7 +30,7 @@ from .character import (
 )
 from .agent_locks import AgentLockManager
 from .checkpoint import (
-    save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
+    save_checkpoint,
     build_motif_summary, build_shard_snapshot,
 )
 
@@ -2224,7 +2224,6 @@ class TormentFabric:
         # ArchiveStore.ingest_document() via /archive/ingest_document endpoint.
         # This prevents archive content from entering the identity pipeline.
         # =====================
-        ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
         ws = self.get_workspace(workspace_id)
@@ -2288,8 +2287,8 @@ class TormentFabric:
             _rp = self.role_store.load(workspace_id, agent_id)
             _rp = self.role_store.update_from_text(_rp, summary)
             self.role_store.save(_rp)
-        except Exception:
-            pass
+        except Exception as _role_exc:
+            log.debug("Role inference update failed: %s", _role_exc)
 
         # Character continuity (v1.11): lightweight affect tagging.
         # This is a guidance signal only; it must not dominate or rewrite persona.
@@ -2805,8 +2804,10 @@ class TormentFabric:
                     _hm_reasons = []
                     if not self._hivemind_enable:
                         _hm_reasons.append("hivemind_enable=False (set TORMENT_HIVEMIND_ENABLE=1)")
-                    if not stored:
-                        _hm_reasons.append("stored=False")
+                    # Note: 'stored' is always True here (both reinforcement and
+                    # spawn branches set it; exceptions propagate before reaching
+                    # this else block), so the old `if not stored:` check was
+                    # unreachable and has been removed.
                     if eid is None:
                         _hm_reasons.append("eid=None")
                     print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", file=_hm_sys.stderr, flush=True)
@@ -3117,8 +3118,8 @@ class TormentFabric:
             _agent_state = self.agent_states.get(ak)
             if _agent_state is not None:
                 _canonical_step = int(getattr(_agent_state, "step", -1))
-        except Exception:
-            pass
+        except Exception as _step_exc:
+            log.debug("Failed to read canonical step from agent state: %s", _step_exc)
         # Fallback: max born_step from the private graph (still canonical,
         # just slightly stale if kernel state is missing).
         if _canonical_step < 0:
@@ -3203,14 +3204,6 @@ class TormentFabric:
                 _q_affect_conf = float(_qa.conf)
             except Exception:
                 _q_affect_tag, _q_affect_conf = "neutral", 0.0
-        try:
-            _affect_match_bonus = float(os.getenv("TORMENT_AFFECT_MATCH_BONUS", "0.05"))
-        except Exception:
-            _affect_match_bonus = 0.05
-        try:
-            _affect_min_conf = float(os.getenv("TORMENT_AFFECT_MIN_CONF", "0.40"))
-        except Exception:
-            _affect_min_conf = 0.40
         # conflict map: map eid->max conflict score and ids for open conflicts in the queried domains
         conflict_map: Dict[int, Dict[str, Any]] = {}
 
@@ -3246,10 +3239,6 @@ class TormentFabric:
             _anchor_topk = int(os.getenv("TORMENT_ANCHOR_BOOST_TOPK", "3"))
         except Exception:
             _anchor_topk = 3
-        try:
-            _anchor_rest_mult = float(os.getenv("TORMENT_ANCHOR_BOOST_REST_MULT", "0.35"))
-        except Exception:
-            _anchor_rest_mult = 0.35
         _anchor_full_boost: set = set()
         if _anchor_topk > 0:
             try:
@@ -3278,18 +3267,6 @@ class TormentFabric:
             _spiral_window = int(os.getenv("TORMENT_MOOD_SPIRAL_WINDOW_STEPS", "800"))
         except Exception:
             _spiral_window = 800
-        try:
-            _spiral_min_drifts = int(os.getenv("TORMENT_MOOD_SPIRAL_MIN_NEG_DRIFTS", "2"))
-        except Exception:
-            _spiral_min_drifts = 2
-        try:
-            _spiral_older_than = int(os.getenv("TORMENT_MOOD_SPIRAL_OLDER_THAN_STEPS", "250"))
-        except Exception:
-            _spiral_older_than = 250
-        try:
-            _spiral_penalty_max = float(os.getenv("TORMENT_MOOD_SPIRAL_PENALTY_MAX", "0.08"))
-        except Exception:
-            _spiral_penalty_max = 0.08
 
         _spiral_neg_recent = 0
         if _spiral_enable and ak in self.private_graphs:
@@ -3365,7 +3342,6 @@ class TormentFabric:
                 conflict_penalty = float(conflict_info.get("max_score", 0.0))
                 if not wants_contested:
                     contradiction_risk = max(contradiction_risk, 0.5 * conflict_penalty)
-            mtype = str(h.get("type") or "")
             type_bonus = 0.0
 
             # Continuity debug collects a compact breakdown (no behavioral change when disabled).
@@ -4213,8 +4189,8 @@ class TormentFabric:
             _trace_agent_state = self.agent_states.get(ak)
             if _trace_agent_state is not None:
                 _trace_canonical_step = int(getattr(_trace_agent_state, "step", -1))
-        except Exception:
-            pass
+        except Exception as _trace_step_exc:
+            log.debug("Failed to read canonical step for trace: %s", _trace_step_exc)
         if _trace_canonical_step < 0:
             _pg_fb = self.private_graphs.get(ak)
             if _pg_fb:
@@ -4283,7 +4259,6 @@ class TormentFabric:
                     continue
                 motif_alignment = max(motif_alignment, float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12))))
             contradiction_risk = float(hit.get('contradiction_risk', 0.0))
-            mtype = str(hit.get("type") or "")
             type_bonus = 0.0
 
             # --- Provenance extraction (parity with query()) ---
@@ -4658,10 +4633,20 @@ class TormentFabric:
         dp = graph.get('export_files', {}).get('dot')
         bjp = _safe_child(out_dir, 'graph.json')
         bdp = _safe_child(out_dir, 'graph.dot')
-        if jp and os.path.exists(jp):
-            shutil.copy(jp, bjp)
-        if dp and os.path.exists(dp):
-            shutil.copy(dp, bdp)
+        # Containment guard: validate source paths stay within workspace
+        _bundle_ws = os.path.realpath(_ws_root(self.data_dir, workspace_id))
+        if jp:
+            _jp_safe = os.path.realpath(jp)
+            if not _jp_safe.startswith(_bundle_ws + os.sep):
+                raise ValueError(f"Export JSON path escapes workspace: {_jp_safe!r}")
+            if os.path.exists(_jp_safe):
+                shutil.copy(_jp_safe, bjp)
+        if dp:
+            _dp_safe = os.path.realpath(dp)
+            if not _dp_safe.startswith(_bundle_ws + os.sep):
+                raise ValueError(f"Export DOT path escapes workspace: {_dp_safe!r}")
+            if os.path.exists(_dp_safe):
+                shutil.copy(_dp_safe, bdp)
         # narrative
         narrative = self._trace_narrative(workspace_id, eid=eid, scope=scope, domain_id=dom, agent_id=agent_id)
         npath = _safe_child(out_dir, 'narrative.md')
