@@ -461,19 +461,19 @@ class IndexManager:
 
     @staticmethod
     def _guard_rebuild_path(path: str, label: str) -> str:
-        """Canonicalize a rebuild source path and reject traversal sequences.
+        """Canonicalize a rebuild source path via ``os.path.realpath``.
 
         Rebuild sources (nodes.jsonl, events.jsonl, etc.) intentionally live
-        outside index_dir — they come from the agent's data directory.  We
-        canonicalize via realpath (which resolves symlinks and ..) and reject
-        any residual traversal component so CodeQL sees a clean taint chain.
+        outside ``index_dir`` — they come from the agent's data directory —
+        so no base-containment check is applied here.
+
+        The purpose of this helper is to resolve the path to an absolute
+        canonical form so that CodeQL's taint model sees a ``realpath``
+        call between the caller-supplied value and the ``open()`` sink.
         """
         if not path:
             return ""
-        rp = os.path.realpath(path)
-        if ".." in rp.split(os.sep):
-            raise ValueError(f"Rebuild path for {label} contains traversal: {rp!r}")
-        return rp
+        return os.path.realpath(path)
 
     def rebuild_from_jsonl(
         self,
