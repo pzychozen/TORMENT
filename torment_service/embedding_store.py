@@ -62,7 +62,6 @@ def _shard_name(idx: int) -> str:
 # ---------------------------------------------------------------------------
 from .pathing import ensure_within_base as _ensure_within_base   # noqa: F401
 from .pathing import stable_filename as _child_path              # noqa: F401
-from .pathing import safe_join as _safe_join                     # noqa: F401
 
 
 def _canonical_storage_root(path: str) -> str:
