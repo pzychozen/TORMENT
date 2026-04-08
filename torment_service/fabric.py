@@ -639,10 +639,16 @@ class TormentFabric:
         # job retention + persistence (v1.10.10)
         self._job_max: int = int(os.environ.get('TORMENT_JOB_MAX') or 50)
         self._job_persist: bool = str(os.environ.get('TORMENT_JOB_PERSIST') or '').strip().lower() in ('1','true','yes','on')
-        self._jobs_root: str = os.path.join(self.data_dir, 'jobs')
+        self._jobs_root: str = _safe_child(self.data_dir, 'jobs')
         if self._job_persist:
-            os.makedirs(os.path.join(self._jobs_root, 'clone'), exist_ok=True)
-            os.makedirs(os.path.join(self._jobs_root, 'repair'), exist_ok=True)
+            _clone_dir = os.path.realpath(os.path.join(self._jobs_root, 'clone'))
+            if not _clone_dir.startswith(os.sep):
+                raise ValueError(f"Clone job dir not absolute: {_clone_dir!r}")
+            os.makedirs(_clone_dir, exist_ok=True)
+            _repair_dir = os.path.realpath(os.path.join(self._jobs_root, 'repair'))
+            if not _repair_dir.startswith(os.sep):
+                raise ValueError(f"Repair job dir not absolute: {_repair_dir!r}")
+            os.makedirs(_repair_dir, exist_ok=True)
             self._load_jobs('clone')
             self._load_jobs('repair')
 
@@ -660,9 +666,9 @@ class TormentFabric:
         if key not in self._sqlite_indexes:
             try:
                 from .sqlite_index import IndexManager
-                index_dir = os.path.join(
-                    self.data_dir, "workspaces", workspace_id,
-                    "agents", agent_id, "index",
+                index_dir = _safe_child(
+                    _agent_dir(self.data_dir, workspace_id, agent_id),
+                    "index",
                 )
                 self._sqlite_indexes[key] = IndexManager(index_dir)
             except Exception:
@@ -686,7 +692,7 @@ class TormentFabric:
             for d in domains:
                 if d not in ws.domains:
                     # Add domain infrastructure
-                    dom_dir = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", d, "shared")
+                    dom_dir = _domain_shared_dir(self.data_dir, workspace_id, d)
                     ws.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
                     ws.motif_regs[d] = MotifRegistry(
                         data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d,
@@ -714,12 +720,13 @@ class TormentFabric:
         Reads from data/workspaces/<workspace_id>/workspace_meta.json.
         Safe for large numbers of workspaces; returns empty list if none exist.
         """
-        ws_root = os.path.join(self.data_dir, "workspaces")
+        ws_root = _safe_child(self.data_dir, "workspaces")
         if not os.path.exists(ws_root):
             return []
         out: List[Dict[str, Any]] = []
         for name in sorted(os.listdir(ws_root)):
-            p = os.path.join(ws_root, name, "workspace_meta.json")
+            _validate_path_component(name, "workspace_id")
+            p = _safe_child(ws_root, name, "workspace_meta.json")
             if not os.path.exists(p):
                 continue
             try:
@@ -738,7 +745,9 @@ class TormentFabric:
 
     # ---- job persistence helpers (v1.10.10) ----
     def _job_path(self, kind: str, job_id: str) -> str:
-        return os.path.normpath(os.path.join(self._jobs_root, kind, f"{job_id}.json"))
+        _validate_path_component(kind, "job_kind")
+        _validate_path_component(job_id, "job_id")
+        return _safe_child(self._jobs_root, kind, f"{job_id}.json")
 
     def _load_jobs(self, kind: str) -> None:
         """Load persisted jobs from disk into in-memory stores.
@@ -748,13 +757,14 @@ class TormentFabric:
         if not self._job_persist:
             return
         store = self._clone_jobs if kind == 'clone' else self._repair_jobs
-        root = os.path.join(self._jobs_root, kind)
+        _validate_path_component(kind, "job_kind")
+        root = _safe_child(self._jobs_root, kind)
         if not os.path.isdir(root):
             return
         for fn in sorted(os.listdir(root)):
             if not fn.endswith('.json'):
                 continue
-            p = os.path.join(root, fn)
+            p = _safe_child(root, fn)
             try:
                 with open(p, 'r', encoding='utf-8') as f:
                     st = json.load(f) or {}
@@ -784,7 +794,10 @@ class TormentFabric:
             return
         p = self._job_path(kind, job_id)
         try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
+            _dir = os.path.realpath(os.path.dirname(p))
+            if not _dir.startswith(os.sep):
+                raise ValueError(f"Job dir not absolute: {_dir!r}")
+            os.makedirs(_dir, exist_ok=True)
             with open(p, 'w', encoding='utf-8') as f:
                 json.dump(st, f, indent=2, sort_keys=True)
         except Exception as e:
@@ -1027,22 +1040,24 @@ class TormentFabric:
         if lock_model and cur_model and lock_model != cur_model:
             raise HTTPException(status_code=409, detail=f"Active embedder model '{cur_model}' does not match workspace lock '{lock_model}'. Use /workspace/clone to migrate.")
 
-        ws_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", workspace_id))
+        ws_root = _ws_root(self.data_dir, workspace_id)
         if not os.path.isdir(ws_root):
             raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
         def _iter_graph_dirs() -> List[str]:
             gdirs: List[str] = []
-            agents_root = os.path.join(ws_root, "agents")
+            agents_root = _safe_child(ws_root, "agents")
             if include_private and os.path.isdir(agents_root):
                 for aid in sorted(os.listdir(agents_root)):
-                    gdir = os.path.join(agents_root, aid, "private")
+                    _validate_path_component(aid, "agent_id")
+                    gdir = _safe_child(agents_root, aid, "private")
                     if os.path.isdir(gdir):
                         gdirs.append(gdir)
-            domains_root = os.path.join(ws_root, "domains")
+            domains_root = _safe_child(ws_root, "domains")
             if include_shared and os.path.isdir(domains_root):
                 for dom in sorted(os.listdir(domains_root)):
-                    gdir = os.path.join(domains_root, dom, "shared")
+                    _validate_path_component(dom, "domain_id")
+                    gdir = _safe_child(domains_root, dom, "shared")
                     if os.path.isdir(gdir):
                         gdirs.append(gdir)
             return gdirs
@@ -1908,7 +1923,7 @@ class TormentFabric:
                     self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
             # init private store
             if ak not in self.private_graphs:
-                pdir = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
+                pdir = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "private")
                 sq_idx = self._get_sqlite_index(workspace_id, agent_id)
                 self.private_graphs[ak] = MemoryGraph(
                     data_dir=pdir, embedder=self.kernel.embedder, sqlite_index=sq_idx,
