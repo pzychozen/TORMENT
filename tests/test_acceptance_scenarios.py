@@ -101,7 +101,7 @@ class TestScenario1_ImplementationRequest(unittest.TestCase):
     def test_engineer_produces_action_steps(self):
         eng = next(rs for rs in self.result["role_summaries"]
                    if rs["role"] == "engineer")
-        self.assertTrue(eng["findings_count"] > 0)
+        self.assertGreater(eng["findings_count"], 0)
 
     def test_archivist_low_impact_or_noop(self):
         """Archivist should either have no proposals or only low-strength ones."""
@@ -165,8 +165,8 @@ class TestScenario2_StrategyRequest(unittest.TestCase):
             if f.startswith("["):
                 role = f.split("]")[0].strip("[")
                 roles_in_findings.add(role)
-        self.assertTrue(len(roles_in_findings) >= 2,
-                        f"Expected findings from >= 2 roles, got: {roles_in_findings}")
+        self.assertGreaterEqual(len(roles_in_findings), 2,
+                               f"Expected findings from >= 2 roles, got: {roles_in_findings}")
 
     def test_dissent_is_list(self):
         """Dissent should be a list (possibly empty, but structurally correct)."""
@@ -286,7 +286,7 @@ class TestScenario3_IdentitySensitive(unittest.TestCase):
         skeptic = next(rs for rs in result["role_summaries"]
                        if rs["role"] == "skeptic")
         # Skeptic should have found something to report
-        self.assertTrue(skeptic["findings_count"] > 0)
+        self.assertGreater(skeptic["findings_count"], 0)
 
 
 # ============================================================================
@@ -347,8 +347,8 @@ class TestScenario4_ContaminationAttempt(unittest.TestCase):
         """Skeptic should flag the suspicious input."""
         skeptic = next(rs for rs in self.result["role_summaries"]
                        if rs["role"] == "skeptic")
-        self.assertTrue(skeptic["findings_count"] > 0,
-                        "Skeptic should flag contamination-style input")
+        self.assertGreater(skeptic["findings_count"], 0,
+                          "Skeptic should flag contamination-style input")
 
     def test_no_high_strength_proposals_approved(self):
         """No high-strength proposals should survive governance review.
@@ -471,8 +471,8 @@ class TestScenario5_ConflictingRoleOutputs(unittest.TestCase):
         # --- Core assertions: dissent is preserved, not flattened ---
         self.assertTrue(result.has_dissent,
                         "Contradictions MUST be preserved as dissent")
-        self.assertTrue(len(result.dissent) > 0,
-                        "At least one dissent entry expected")
+        self.assertGreater(len(result.dissent), 0,
+                          "At least one dissent entry expected")
 
         # Check dissent structure
         for d in result.dissent:
