@@ -136,7 +136,6 @@ def check_nodes_and_shards(private_dir: str, report: IntegrityReport):
         refs_checked += 1
         shard_idx = emb_ref.get("shard", -1)
         row = emb_ref.get("row", -1)
-        dim = emb_ref.get("dim", 0)
 
         # Verify shard file exists
         shard_file = os.path.join(emb_dir, f"shard_{shard_idx:06d}.npy")

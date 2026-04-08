@@ -201,7 +201,7 @@ class TestConvergenceCooldown(unittest.TestCase):
 
         # Different pair (a1 + a3)
         p3 = ResonancePacket(workspace_id="ws1", agent_id="a3", domain_id="d1")
-        event2 = self.field.append_packet(p3, embedding=_similar_embedding(self.emb, noise=0.05, seed=77))
+        self.field.append_packet(p3, embedding=_similar_embedding(self.emb, noise=0.05, seed=77))
         # Should be able to converge with a1 (different pair)
         # Note: might be None if similarity is too low — that's fine
         # The point is cooldown doesn't block it
