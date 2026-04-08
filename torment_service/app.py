@@ -1128,10 +1128,13 @@ def approve_domain(req: ApproveDomainSuggestionReq) -> Dict[str, Any]:
 @app.get("/workspace/{workspace_id}/domain_suggestions")
 def domain_suggestions(workspace_id: str) -> Dict[str, Any]:
     _validate_path_component(workspace_id, "workspace_id")
-    ws = fabric.get_workspace(workspace_id)
-    ds_path = os.path.realpath(ws.domain_suggestions_path)
+    # Build path from trusted root + validated component (never use ws.domain_suggestions_path
+    # which CodeQL traces as tainted through the Workspace constructor).
     _data = os.path.realpath(DATA_DIR)
-    if not ds_path.startswith(_data + os.sep) and ds_path != _data:
+    ds_path = os.path.realpath(os.path.join(
+        _data, "workspaces", workspace_id, "domain_suggestions.json",
+    ))
+    if not ds_path.startswith(_data + os.sep):
         raise HTTPException(400, "Path escapes data directory")
     if not os.path.exists(ds_path):
         return {"workspace_id": workspace_id, "suggestions": []}
@@ -1589,11 +1592,16 @@ def checkpoint_list(workspace_id: str, agent_id: str) -> Dict[str, Any]:
     import re as _re
     _validate_path_component(workspace_id, "workspace_id")
     _validate_path_component(agent_id, "agent_id")
-    from .checkpoint import get_checkpoint_dir, _extract_step_from_filename
+    from .checkpoint import _extract_step_from_filename
 
-    ckpt_dir = os.path.realpath(get_checkpoint_dir(DATA_DIR, workspace_id, agent_id))
+    # Build checkpoint dir inline from trusted root + validated components
+    # (never pass through get_checkpoint_dir — CodeQL can't follow into it).
     _data = os.path.realpath(DATA_DIR)
-    if not ckpt_dir.startswith(_data + os.sep) and ckpt_dir != _data:
+    ckpt_dir = os.path.realpath(os.path.join(
+        _data, "workspaces", workspace_id,
+        "agents", agent_id, "private", "checkpoints",
+    ))
+    if not ckpt_dir.startswith(_data + os.sep):
         raise HTTPException(400, "Path escapes data directory")
     if not os.path.isdir(ckpt_dir):
         return {"ok": True, "checkpoints": []}

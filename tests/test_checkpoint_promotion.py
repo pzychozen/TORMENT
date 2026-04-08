@@ -184,6 +184,11 @@ class TestCheckpointSerialization:
 # ---------------------------------------------------------------------------
 
 class TestCheckpointSaveLoad:
+    # New API: save_checkpoint(data_dir, workspace_id, agent_id, step, ...)
+    #          load_latest_checkpoint(data_dir, workspace_id, agent_id)
+    _WS = "test_ws"
+    _AG = "test_agent"
+
     def test_save_and_load_round_trip(self):
         tmp = _tmp()
         try:
@@ -191,19 +196,20 @@ class TestCheckpointSaveLoad:
             mon = _make_corridor_monitor()
 
             path = save_checkpoint(
-                checkpoint_dir=tmp,
+                data_dir=tmp,
+                workspace_id=self._WS,
+                agent_id=self._AG,
                 step=500,
                 model_state=state,
                 corridor_monitor=mon,
                 character_state_dict={"drift_score": 0.12, "seed_id": "test_v1"},
                 motif_summary={"total_count": 5, "top_motifs": []},
                 shard_snapshot={"active_shard": 0, "next_row": 42},
-                base_dir=_BASE_DIR,
             )
             assert path is not None
             assert os.path.exists(path)
 
-            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
             assert loaded is not None
             assert loaded["step"] == 500
             assert loaded["character_state"]["drift_score"] == 0.12
@@ -217,8 +223,11 @@ class TestCheckpointSaveLoad:
             state = _make_model_state()
             mon = _make_corridor_monitor()
 
-            save_checkpoint(tmp, 1000, state, mon, base_dir=_BASE_DIR)
-            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
+            save_checkpoint(
+                data_dir=tmp, workspace_id=self._WS, agent_id=self._AG,
+                step=1000, model_state=state, corridor_monitor=mon,
+            )
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
             restored = restore_from_checkpoint(loaded)
 
             assert restored["step"] == 1000
@@ -235,9 +244,15 @@ class TestCheckpointSaveLoad:
 
             # Save 15 checkpoints, keep max 5
             for i in range(15):
-                save_checkpoint(tmp, (i + 1) * 100, state, mon, max_checkpoints=5, base_dir=_BASE_DIR)
+                save_checkpoint(
+                    data_dir=tmp, workspace_id=self._WS, agent_id=self._AG,
+                    step=(i + 1) * 100, model_state=state, corridor_monitor=mon,
+                    max_checkpoints=5,
+                )
 
-            files = [f for f in os.listdir(tmp) if f.endswith(".json")]
+            from torment_service.checkpoint import _build_checkpoint_dir
+            ckpt_dir = _build_checkpoint_dir(tmp, self._WS, self._AG)
+            files = [f for f in os.listdir(ckpt_dir) if f.endswith(".json")]
             assert len(files) == 5
             # Highest steps should survive
             steps = sorted([int(f.split("_")[1].split(".")[0]) for f in files])
@@ -248,7 +263,7 @@ class TestCheckpointSaveLoad:
     def test_load_empty_directory(self):
         tmp = _tmp()
         try:
-            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
             assert loaded is None
         finally:
             shutil.rmtree(tmp)
@@ -258,11 +273,11 @@ class TestCheckpointSaveLoad:
         try:
             state = _make_model_state()
             mon = _make_corridor_monitor()
-            save_checkpoint(tmp, 100, state, mon, base_dir=_BASE_DIR)
-            save_checkpoint(tmp, 500, state, mon, base_dir=_BASE_DIR)
-            save_checkpoint(tmp, 300, state, mon, base_dir=_BASE_DIR)
+            save_checkpoint(data_dir=tmp, workspace_id=self._WS, agent_id=self._AG, step=100, model_state=state, corridor_monitor=mon)
+            save_checkpoint(data_dir=tmp, workspace_id=self._WS, agent_id=self._AG, step=500, model_state=state, corridor_monitor=mon)
+            save_checkpoint(data_dir=tmp, workspace_id=self._WS, agent_id=self._AG, step=300, model_state=state, corridor_monitor=mon)
 
-            loaded = load_latest_checkpoint(tmp, base_dir=_BASE_DIR)
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
             assert loaded["step"] == 500  # highest step number
         finally:
             shutil.rmtree(tmp)
