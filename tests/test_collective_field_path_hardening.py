@@ -14,8 +14,6 @@ import tempfile
 import time
 import unittest
 
-import numpy as np
-
 from torment_service.collective_field import CollectiveField
 from torment_service.pathing import safe_slug
 from torment_service.collective_models import ResonancePacket
