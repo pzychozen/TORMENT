@@ -11,7 +11,6 @@ from torment_service.embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
     load_embedding,
-    load_legacy_embedding,
     ROWS_PER_SHARD,
 )
 

@@ -27,10 +27,7 @@ from schemas.provenance import (
     SOURCE_USER_INPUT,
     SOURCE_ROLE_OUTPUT,
     SOURCE_DERIVED,
-    SOURCE_MEMORY,
     STATUS_UNVERIFIED,
-    STATUS_SKEPTIC_PASSED,
-    STATUS_SKEPTIC_FLAGGED,
 )
 from schemas.drift_report import (
     DriftReport,

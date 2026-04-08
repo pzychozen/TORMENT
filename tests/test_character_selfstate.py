@@ -25,7 +25,6 @@ from torment_service.character import (
     CharacterStore,
     build_self_state,
 )
-from torment_service.collective_models import CharacterSelfState
 
 
 class TestBuildSelfStateNoSeed(unittest.TestCase):

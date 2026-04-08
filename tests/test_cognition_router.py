@@ -36,7 +36,6 @@ from cognition.task_models import (
     APERTURE_PROTECTED,
 )
 from cognition.apertures import (
-    ApertureConfig,
     MemoryContext,
     APERTURE_CONFIGS,
     get_config,
