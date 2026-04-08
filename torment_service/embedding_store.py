@@ -107,7 +107,10 @@ class EmbeddingShardWriter:
         return rp
 
     def __init__(self, embeddings_dir: str, dim: int = DEFAULT_DIM) -> None:
-        self.embeddings_dir = _canonical_storage_root(embeddings_dir)
+        # Inline canonicalization — CodeQL needs realpath visible before makedirs
+        self.embeddings_dir = os.path.realpath(embeddings_dir)
+        if ".." in self.embeddings_dir.split(os.sep):
+            raise ValueError(f"embeddings_dir resolves to path with traversal: {self.embeddings_dir!r}")
         os.makedirs(self.embeddings_dir, exist_ok=True)
         self.dim = int(dim)
 

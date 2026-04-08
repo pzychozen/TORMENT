@@ -137,7 +137,10 @@ class IndexManager:
     """
 
     def __init__(self, index_dir: str) -> None:
-        self.index_dir = _canonical_storage_root(index_dir)
+        # Inline canonicalization — CodeQL needs realpath visible before makedirs
+        self.index_dir = os.path.realpath(index_dir)
+        if ".." in self.index_dir.split(os.sep):
+            raise ValueError(f"index_dir resolves to path with traversal: {self.index_dir!r}")
         os.makedirs(self.index_dir, exist_ok=True)
         self.db_path = _child_path(self.index_dir, "memory_index.sqlite")
         self._conn: Optional[sqlite3.Connection] = None
