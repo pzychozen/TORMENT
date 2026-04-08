@@ -481,7 +481,7 @@ class TestModuleSingleton(unittest.TestCase):
 
     def test_get_incident_log_returns_same_instance(self):
         # Reset the module-level singleton for clean test
-        import torment_service.incident_log as mod
+        mod = sys.modules["torment_service.incident_log"]
         old = mod._incident_log
         mod._incident_log = None
         try:
@@ -493,7 +493,7 @@ class TestModuleSingleton(unittest.TestCase):
 
     def test_env_var_enables_file_persistence(self):
         """TORMENT_MCP_INCIDENT_LOG env var wires up JSONL persistence."""
-        import torment_service.incident_log as mod
+        mod = sys.modules["torment_service.incident_log"]
         old = mod._incident_log
         mod._incident_log = None
 
@@ -517,7 +517,7 @@ class TestModuleSingleton(unittest.TestCase):
 
     def test_no_env_var_no_file(self):
         """Without the env var, no file persistence."""
-        import torment_service.incident_log as mod
+        mod = sys.modules["torment_service.incident_log"]
         old = mod._incident_log
         mod._incident_log = None
         os.environ.pop("TORMENT_MCP_INCIDENT_LOG", None)
@@ -536,7 +536,7 @@ class TestLogSpineDecision(unittest.TestCase):
     """Test the log_spine_decision() convenience function."""
 
     def test_log_spine_decision_records_incident(self):
-        import torment_service.incident_log as mod
+        mod = sys.modules["torment_service.incident_log"]
         old = mod._incident_log
         mod._incident_log = IncidentLog(max_size=100)
         try:

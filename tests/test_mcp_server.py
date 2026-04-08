@@ -31,7 +31,7 @@ from torment_service.spine import (
 from torment_service.request_context import RequestContext, TRUST_INGEST
 from torment_service.fabric import TormentFabric
 
-import torment_service.mcp_server as mcp_mod
+mcp_mod = sys.modules["torment_service.mcp_server"]
 
 
 class TestMCPClientContext(unittest.TestCase):
