@@ -22,7 +22,6 @@ Tests:
   6. For a fixed set of eids, trace final_score stays aligned with query
 """
 
-import os
 import shutil
 import tempfile
 import unittest
@@ -100,7 +99,7 @@ class TestTraceContinuityParity(unittest.TestCase):
             eids=[eid],
         )
         items = result.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0]["explain"]
         self.assertIn("affect_match_bonus", explain,
@@ -138,7 +137,7 @@ class TestTraceContinuityParity(unittest.TestCase):
             eids=[eid],
         )
         items = result.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0]["explain"]
         self.assertIn("mood_drift_bonus", explain,
@@ -179,7 +178,7 @@ class TestTraceContinuityParity(unittest.TestCase):
             eids=[eid],
         )
         items = result.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0]["explain"]
         self.assertIn("mood_spiral_penalty", explain,
@@ -207,7 +206,7 @@ class TestTraceContinuityParity(unittest.TestCase):
             eids=[eid],
         )
         items = result.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0]["explain"]
         # All continuity fields should exist

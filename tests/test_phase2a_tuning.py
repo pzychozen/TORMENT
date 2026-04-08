@@ -11,6 +11,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import torment_service.compression as comp_mod
+
 
 # =========================================================================
 # 1. Deep memory similarity threshold
@@ -88,13 +90,11 @@ class TestPeriodicCompressionFloor(unittest.TestCase):
 
     def test_floor_constant_is_040(self):
         """COMPRESS_PERIODIC_FLOOR should be 0.40."""
-        import torment_service.compression as comp_mod
         self.assertAlmostEqual(comp_mod.COMPRESS_PERIODIC_FLOOR, 0.40, places=2)
 
     def test_floor_env_override(self):
         """Environment variable can still override the default."""
         import importlib
-        import torment_service.compression as comp_mod
 
         old = os.environ.get("TORMENT_COMPRESS_PERIODIC_FLOOR")
         try:

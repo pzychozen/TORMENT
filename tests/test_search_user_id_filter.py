@@ -14,7 +14,6 @@ Tests:
   3. search(user_id=None) preserves unrestricted behavior
 """
 
-import os
 import shutil
 import tempfile
 
