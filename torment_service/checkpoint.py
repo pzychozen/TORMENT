@@ -32,6 +32,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from .embedding_store import _canonical_storage_root, _child_path
+
 log = logging.getLogger("torment.checkpoint")
 
 
@@ -40,14 +42,21 @@ def _sanitize_log(value: str) -> str:
     return str(value).replace("\n", "\\n").replace("\r", "\\r")
 
 
-def ensure_within_base(path: str, base_dir: str) -> str:
+def _validate_path_component(value: str, label: str) -> str:
+    """Reject path separators and traversal sequences in identifiers."""
+    if not value or ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
+    return value
+
+
+def _ensure_within_base(path: str, base_dir: str) -> str:
     """Resolve *path* and verify it stays inside *base_dir*.
 
     Returns the resolved absolute path on success.
     Raises ``ValueError`` if the path escapes the base directory.
 
-    Uses ``os.path.realpath`` to resolve symlinks, then ``startswith``
-    against the resolved base (the pattern CodeQL models as a sanitizer).
+    Used to revalidate externally-sourced paths (e.g. glob results)
+    against a trusted root.
     """
     base = os.path.realpath(base_dir)
     resolved = os.path.realpath(path)
@@ -200,10 +209,8 @@ def build_shard_snapshot(embeddings_dir: str, base_dir: str) -> Optional[Dict[st
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = ensure_within_base(embeddings_dir, base_dir)
-        manifest_path = ensure_within_base(
-            os.path.join(safe_dir, "manifest.json"), safe_dir
-        )
+        safe_dir = _ensure_within_base(embeddings_dir, base_dir)
+        manifest_path = _child_path(safe_dir, "manifest.json")
     except ValueError:
         return None
     if not os.path.exists(manifest_path):
@@ -253,8 +260,8 @@ def save_checkpoint(
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = ensure_within_base(checkpoint_dir, base_dir)
-        os.makedirs(safe_dir, exist_ok=True)
+        safe_dir = _canonical_storage_root(checkpoint_dir, mkdir=True)
+        _ensure_within_base(safe_dir, base_dir)
 
         payload: Dict[str, Any] = {
             "version": 1,
@@ -268,10 +275,9 @@ def save_checkpoint(
             "shard_snapshot": shard_snapshot,
         }
 
-        path = ensure_within_base(
-            os.path.join(safe_dir, _checkpoint_filename(step)), safe_dir
-        )
-        tmp = path + ".tmp"
+        ckpt_name = _checkpoint_filename(step)
+        path = _child_path(safe_dir, ckpt_name)
+        tmp = _child_path(safe_dir, ckpt_name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         os.replace(tmp, path)
@@ -291,10 +297,11 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
     """Remove oldest checkpoints, keeping at most ``keep``.
 
     *base_dir* is the trusted root directory. Deletion targets are
-    validated against the resolved checkpoint directory before removal.
+    revalidated against the canonical checkpoint directory before removal.
     """
     try:
-        safe_dir = ensure_within_base(checkpoint_dir, base_dir)
+        safe_dir = _canonical_storage_root(checkpoint_dir)
+        _ensure_within_base(safe_dir, base_dir)
     except ValueError:
         return
 
@@ -307,7 +314,7 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
         if not re.match(r"^checkpoint_\d+\.json$", name):
             continue
         try:
-            candidate = ensure_within_base(os.path.join(safe_dir, name), safe_dir)
+            candidate = _ensure_within_base(os.path.join(safe_dir, name), safe_dir)
             os.remove(candidate)
         except (ValueError, OSError) as e:
             log.debug("Could not remove old checkpoint: %s", e)
@@ -320,7 +327,8 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
     verified to stay inside it before any file access.
     """
     try:
-        safe_dir = ensure_within_base(checkpoint_dir, base_dir)
+        safe_dir = _canonical_storage_root(checkpoint_dir)
+        _ensure_within_base(safe_dir, base_dir)
     except ValueError:
         return None
     if not os.path.isdir(safe_dir):
@@ -329,7 +337,7 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
     if not files:
         return None
     try:
-        path = ensure_within_base(files[-1], safe_dir)
+        path = _ensure_within_base(files[-1], safe_dir)
     except ValueError:
         return None
     try:
@@ -366,15 +374,17 @@ def restore_from_checkpoint(
 
 
 def get_checkpoint_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    """Standard checkpoint directory path for an agent.
+    """Return the canonical checkpoint directory path for an agent.
 
-    Validates workspace_id and agent_id to reject path traversal attempts
-    before they reach any filesystem operation.
+    Validates workspace_id and agent_id, canonicalizes data_dir,
+    and returns a trusted root path.
     """
-    for val, label in [(workspace_id, "workspace_id"), (agent_id, "agent_id")]:
-        if not val or ".." in val or "/" in val or "\\" in val:
-            raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return os.path.join(
-        data_dir, "workspaces", workspace_id,
-        "agents", agent_id, "private", "checkpoints",
+    _validate_path_component(workspace_id, "workspace_id")
+    _validate_path_component(agent_id, "agent_id")
+    canonical_data = _canonical_storage_root(data_dir)
+    return _canonical_storage_root(
+        os.path.join(
+            canonical_data, "workspaces", workspace_id,
+            "agents", agent_id, "private", "checkpoints",
+        ),
     )
