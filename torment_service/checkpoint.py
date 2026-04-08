@@ -72,16 +72,22 @@ def _validated_checkpoint_root(
     Inlines ``os.path.realpath`` + ``startswith`` containment so that
     static-analysis tools (CodeQL) see the sanitiser barrier in the
     same module as the filesystem sinks that consume the returned path.
+
+    All filesystem operations (``os.makedirs``) are gated inside the
+    positive containment branch so the ``startswith`` check is a direct
+    control-flow guard on every sink.
     """
     root = os.path.realpath(os.path.normpath(checkpoint_dir))
     if ".." in root.split(os.sep):
         raise ValueError(f"Canonical path contains traversal segment: {root!r}")
     base = os.path.realpath(os.path.normpath(base_dir))
-    if root != base and not root.startswith(base + os.sep):
-        raise ValueError("Checkpoint directory escapes base")
-    if mkdir:
-        os.makedirs(root, exist_ok=True)
-    return root
+    # Gate all sinks inside the positive branch so CodeQL sees startswith
+    # as a direct control-flow guard before os.makedirs.
+    if root == base or root.startswith(base + os.sep):
+        if mkdir:
+            os.makedirs(root, exist_ok=True)
+        return root
+    raise ValueError("Checkpoint directory escapes base")
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +287,14 @@ def save_checkpoint(
     try:
         safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir, mkdir=True)
 
+        # Inline containment re-assertion: CodeQL needs a local
+        # realpath+startswith guard visible before every sink in this
+        # function (open, os.replace).  The helper already verified
+        # this but CodeQL does not follow into called functions.
+        _base = os.path.realpath(base_dir)
+        if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
+            return None
+
         payload: Dict[str, Any] = {
             "version": 1,
             "step": int(step),
@@ -322,6 +336,11 @@ def _prune_old_checkpoints(checkpoint_dir: str, keep: int, base_dir: str) -> Non
     except ValueError:
         return
 
+    # Inline containment re-assertion for static analysis visibility.
+    _base = os.path.realpath(base_dir)
+    if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
+        return
+
     # Use os.listdir on the trusted root instead of glob.glob to avoid
     # passing a derived path into glob (which CodeQL traces as tainted).
     try:
@@ -355,6 +374,12 @@ def load_latest_checkpoint(checkpoint_dir: str, base_dir: str) -> Optional[Dict[
         safe_dir = _validated_checkpoint_root(checkpoint_dir, base_dir)
     except ValueError:
         return None
+
+    # Inline containment re-assertion for static analysis visibility.
+    _base = os.path.realpath(base_dir)
+    if safe_dir != _base and not safe_dir.startswith(_base + os.sep):
+        return None
+
     if not os.path.isdir(safe_dir):
         return None
     # Use os.listdir on the trusted root instead of glob.glob to avoid
