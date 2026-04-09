@@ -2094,26 +2094,23 @@ function generateSolo() {
     const srgVars = [{key: 'TORMENT_SRG_ENABLE', val: '1'}];
     let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.';
 
-    // NOTE: TORMENT_SRG_BANDS, TORMENT_SRG_CLASS_A_RATIO, and TORMENT_SRG_CRYSTAL
-    // are NOT yet read by srg_engine.py. Values are hardcoded in the engine:
-    //   DEFAULT_NUM_BANDS=5, CLASS_A_RATIO=0.25.
-    // These env vars are emitted as comments so users know future versions may support them.
     const srgBands = document.getElementById('srg-bands')?.value || '5';
     if (srgBands !== '5') {
-      srgNote += '\n# TORMENT_SRG_BANDS=' + srgBands + '  (NOT YET WIRED — engine uses 5)';
+      srgVars.push({key: 'TORMENT_SRG_BANDS', val: srgBands});
     }
 
     const hbBias = document.getElementById('srg-heartbeat')?.value;
     if (hbBias === 'deep') {
-      srgNote += '\n# TORMENT_SRG_CLASS_A_RATIO=0.6  (NOT YET WIRED — engine uses 0.25)';
-      srgNote += '\n# Heartbeat bias: deep (60% Class A) — pending engine support.';
+      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.6'});
+      srgNote += '\n# Heartbeat bias: deep (60% Class A).';
     } else if (hbBias === 'active') {
-      srgNote += '\n# TORMENT_SRG_CLASS_A_RATIO=0.1  (NOT YET WIRED — engine uses 0.25)';
-      srgNote += '\n# Heartbeat bias: active (90% Class B) — pending engine support.';
+      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.1'});
+      srgNote += '\n# Heartbeat bias: active (90% Class B).';
     }
 
     if (!features.crystal) {
-      srgNote += '\n# TORMENT_SRG_CRYSTAL=0  (NOT YET WIRED — crystal is always active when SRG is on)';
+      srgVars.push({key: 'TORMENT_SRG_CRYSTAL', val: '0'});
+      srgNote += '\n# Crystal protection disabled.';
     }
 
     envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});

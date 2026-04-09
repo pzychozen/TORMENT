@@ -56,10 +56,10 @@ CLASS_A_FREQ: float = 0.005     # minority: slow, deep
 CLASS_B_FREQ: float = 0.095     # majority: fast, active
 CLASS_A_PHASE: float = -1.1
 CLASS_B_PHASE: float = -1.9
-CLASS_A_RATIO: float = 0.25     # ~25% of memories are Class A
+CLASS_A_RATIO: float = float(os.environ.get("TORMENT_SRG_CLASS_A_RATIO", "0.25"))  # ~25% default
 
 # Golden tower
-DEFAULT_NUM_BANDS: int = 5
+DEFAULT_NUM_BANDS: int = int(os.environ.get("TORMENT_SRG_BANDS", "5"))
 
 # Collision
 COLLISION_SIM_THRESHOLD: float = 0.75   # minimum cosine sim for collision
@@ -78,6 +78,17 @@ def srg_enabled() -> bool:
     """
     return str(os.environ.get("TORMENT_SRG_ENABLE", "0")).strip().lower() in (
         "1", "true", "yes", "on",
+    )
+
+
+def srg_crystal_enabled() -> bool:
+    """Check whether crystal protection is enabled for seed/identity memories.
+
+    Reads TORMENT_SRG_CRYSTAL env var.  Defaults to enabled (1) when SRG is on.
+    Set to 0 to disable centre-crystal protection on seed memories.
+    """
+    return str(os.environ.get("TORMENT_SRG_CRYSTAL", "1")).strip().lower() not in (
+        "0", "false", "no", "off",
     )
 
 
@@ -402,7 +413,7 @@ def build_memory_srg(
 
     Returns a fully initialised SRGMemoryState.
     """
-    if is_seed:
+    if is_seed and srg_crystal_enabled():
         return create_crystal_state(seed_coherence=coherence)
 
     band = assign_band(
