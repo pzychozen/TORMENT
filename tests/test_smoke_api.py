@@ -83,7 +83,7 @@ def test_end_to_end_private_memory(client: TestClient):
 
 
 def test_shared_governance_proposals_and_trace_view(client: TestClient):
-    client.post("/workspace/create", json={"workspace_id": "ws"})
+    client.post("/workspace/create", json={"workspace_id": "ws", "domains": ["personal", "meta"]})
 
     # Two agents to satisfy min_distinct_agents governance
     client.post("/agent/create", json={"workspace_id": "ws", "agent_id": "a1"})
