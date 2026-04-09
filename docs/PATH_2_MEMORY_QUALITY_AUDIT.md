@@ -79,13 +79,11 @@ Event-gated compression with 5 trigger types (emergency tear, corridor exit, cyc
 
 ### Where compression may underperform
 
-**Finding 5: Periodic trigger floor (0.50) may be too generous.**
+**Finding 5: Periodic trigger floor (0.50) may be too generous. — ADDRESSED (Tune 2)**
 
-The periodic trigger (every 200 steps) only compresses candidates with composite score ≥ 0.50. Given the scoring formula, a 0.50 composite requires moderate compressibility across both J and Z scores. Memories that are low-value but geometrically stable (low phi, low tension) may score below 0.50 and persist indefinitely — even though they're not useful.
+The periodic trigger (every 200 steps) originally only compressed candidates with composite score ≥ 0.50. This has been lowered to 0.40 (see Tune 2). The count overflow trigger (400) and hard cap (10,000) provide additional safety nets.
 
-Example: a situational memory with moderate retrieval count (resists J-score) but near-zero phi (helps Z-score) might score 0.48 and survive every periodic pass. It occupies core memory without contributing meaningfully.
-
-**Severity:** Low-medium. The count overflow trigger (400) and hard cap (10,000) prevent unbounded growth, but the space between "too low for periodic compression" and "count overflow" is where clutter accumulates.
+**Severity:** Low-medium → **Mitigated** by Tune 2 (floor lowered to 0.40).
 
 **Finding 6: No re-scoring of compressed memories.**
 
@@ -125,23 +123,23 @@ Long-path compressed memories are exported to JSONL + embedding shards. On query
 
 2. **Symbol interaction is a clever quality gate.** The 19-pair symbol matrix means deep memories don't just return by embedding similarity — they need symbolic coherence between their birth state and the current kernel state. A memory born during `⊗` (contradiction) returning during `⊘` (release) gets a "resolution" interaction (+0.25 confidence). This makes returns feel meaningful rather than random.
 
-3. **Warmth accumulation prevents cold returns.** First appearance starts at warmth 0.2 — meaning first-time recollection strength is only 0.1 × 0.2 = 0.02. A memory has to appear multiple times within 200 steps to accumulate enough warmth for resonance mode. This prevents sudden, disorienting returns of ancient memories.
+3. **Warmth accumulation prevents cold returns.** First appearance starts at warmth 0.2 — meaning first-time recollection strength is only 0.1 × 0.2 = 0.02. A memory has to appear multiple times within 400 steps to accumulate enough warmth for resonance mode. This prevents sudden, disorienting returns of ancient memories.
 
 4. **Sustained phase/corridor duration boost is well-gated.** Memories that spent 10+ steps in sustained geometric states get a warmth floor of 0.3 — ensuring important memories that were geometrically stable return with enough strength to be noticed.
 
 ### Where deep memory may underperform
 
-**Finding 9: Min similarity threshold (0.30) is very permissive.**
+**Finding 9: Min similarity threshold (0.30) is very permissive. — ADDRESSED (Tune 4)**
 
-The cosine similarity floor for deep memory returns is 0.30. For normalized embeddings, 0.30 is a very weak match — it means the memory and query share only loose topical overlap. Combined with the low recollection strength (0.1 × warmth), these weak matches are individually low-impact. But they still occupy retrieval budget slots and add noise to results.
+The cosine similarity floor for deep memory returns was 0.30 and has been raised to 0.40 (see Tune 4). This reduces weak matches that waste retrieval budget slots while keeping genuinely relevant deep returns.
 
-**Severity:** Low-medium. Each weak match is nearly invisible, but if 3 of 8 returned hits are weak deep matches, the effective retrieval quality drops.
+**Severity:** Low-medium → **Mitigated** by Tune 4 (threshold raised to 0.40).
 
-**Finding 10: Warmth window (200 steps) may be too short for real sessions.**
+**Finding 10: Warmth window (200 steps) may be too short for real sessions. — ADDRESSED (Tune 5)**
 
-`WARMTH_WINDOW_STEPS = 200` means if a deep memory doesn't reappear within 200 steps, warmth resets to floor (0.2). For agents in long sessions with varied topics, a memory that appeared at step 500 and becomes relevant again at step 800 has lost all accumulated warmth. This makes resonance mode extremely rare in practice — it requires 3+ appearances within 200 steps with the right symbol interaction.
+`WARMTH_WINDOW_STEPS` was 200 and has been extended to 400 (see Tune 5). This allows themes that recur at longer intervals to accumulate warmth toward resonance mode.
 
-**Severity:** Medium. Resonance is supposed to be rare, but 200 steps may be too restrictive for multi-topic conversations where themes recur at intervals.
+**Severity:** Medium → **Mitigated** by Tune 5 (window extended to 400 steps).
 
 **Finding 11: No quality signal feeds back from deep memory returns to future compression.**
 
@@ -164,9 +162,9 @@ The export preserves: type, kind, tier, affect_tag, state_symbol, resonance_scor
 | 1 | Thread-window bonus creates recency wall | Retrieval | Medium | Yes — reduce bonus or add ceiling |
 | 4 | No diversity in final top-k | Retrieval | Medium | Yes — MMR or topic dedup |
 | 6 | Short-path compressed memories never re-evaluated for long-path | Compression | Medium | Yes — age-based re-routing |
-| 10 | Warmth window too short for multi-topic sessions | Deep memory | Medium | Yes — extend window |
-| 5 | Periodic compression floor too generous | Compression | Low-medium | Yes — lower floor |
-| 9 | Deep memory min similarity too permissive | Deep memory | Low-medium | Yes — raise threshold |
+| 10 | ~~Warmth window too short for multi-topic sessions~~ | Deep memory | ~~Medium~~ | **Implemented** (Tune 5: 200→400) |
+| 5 | ~~Periodic compression floor too generous~~ | Compression | ~~Low-medium~~ | **Implemented** (Tune 2: 0.50→0.40) |
+| 9 | ~~Deep memory min similarity too permissive~~ | Deep memory | ~~Low-medium~~ | **Implemented** (Tune 4: 0.30→0.40) |
 | 2 | Motif alignment may be stale | Retrieval | Low-medium | Needs design thought |
 | 7 | Situational memories wait too long for long-path | Compression | Low | Yes — lower age threshold |
 | 3 | Recency bonus dead beyond ~3 days | Retrieval | Low | Leave alone |
@@ -194,9 +192,9 @@ The export preserves: type, kind, tier, affect_tag, state_symbol, resonance_scor
 
 ---
 
-## Minimal Tuning Opportunities (Proposal — Pending Architecture Review)
+## Minimal Tuning Opportunities (Tunes 2, 4, 5 Implemented)
 
-These are candidates for Phase 2A implementation, not decisions. Each should be reviewed by the architecture layer before code changes.
+These were candidates for Phase 2A implementation. Tunes 2, 4, and 5 have been approved and merged. Tunes 1 and 3 remain open proposals.
 
 ### Tune 1: Thread-window bonus ceiling
 
@@ -205,11 +203,11 @@ These are candidates for Phase 2A implementation, not decisions. Each should be 
 **Why:** Prevents recency wall without breaking continuity feel.
 **Risk:** Low. The bonus values are already env-configurable.
 
-### Tune 2: Periodic compression floor reduction
+### Tune 2: Periodic compression floor reduction — IMPLEMENTED
 
-**Current:** `COMPRESS_PERIODIC_FLOOR = 0.50` — only compresses scores ≥ 0.50 on periodic trigger.
-**Proposal:** Lower to 0.40.
-**Why:** Catches the "moderate compressibility but not quite 0.50" memories that currently accumulate.
+**Was:** `COMPRESS_PERIODIC_FLOOR = 0.50` — only compressed scores ≥ 0.50 on periodic trigger.
+**Now:** `COMPRESS_PERIODIC_FLOOR = 0.40` (compression.py:83).
+**Why:** Catches the "moderate compressibility but not quite 0.50" memories that were accumulating.
 **Risk:** Low. Protected tier is immune. Identity tier's -30% adjustment makes it unlikely to hit 0.40.
 
 ### Tune 3: Short-path re-evaluation on subsequent compression events
@@ -219,17 +217,17 @@ These are candidates for Phase 2A implementation, not decisions. Each should be 
 **Why:** Prevents stale short-path memories from accumulating in core indefinitely.
 **Risk:** Medium. Needs careful implementation — the re-evaluation must not re-compress already-deep memories.
 
-### Tune 4: Deep memory similarity threshold
+### Tune 4: Deep memory similarity threshold — IMPLEMENTED
 
-**Current:** `min_similarity = 0.30`
-**Proposal:** Raise to 0.40.
+**Was:** `min_similarity = 0.30`
+**Now:** `min_similarity = 0.40` (deep_memory.py:274).
 **Why:** Reduces weak matches that waste retrieval budget slots.
 **Risk:** Low. Strong matches still return. Weak matches were barely visible anyway (strength 0.02).
 
-### Tune 5: Warmth window extension
+### Tune 5: Warmth window extension — IMPLEMENTED
 
-**Current:** `WARMTH_WINDOW_STEPS = 200`
-**Proposal:** Extend to 400 or 500.
+**Was:** `WARMTH_WINDOW_STEPS = 200`
+**Now:** `WARMTH_WINDOW_STEPS = 400` (spirit_return.py:290).
 **Why:** Allows themes that recur at longer intervals to accumulate warmth toward resonance.
 **Risk:** Low. Warmth still caps at 1.0 and requires incremental appearances.
 

@@ -1,6 +1,6 @@
 # Design: Retention & Compression Policy — Phase 2.2
 
-Status: **awaiting review** — please analyze and reply with approved/modified design
+Status: **implemented** — all four proposals approved and merged into compression.py
 Date: March 26, 2026
 Authors: pzychozen + Claude (Opus 4.6)
 
@@ -29,7 +29,7 @@ This design proposes four policy additions. Each is independent and can be appro
 if memory_count(agent) > COMPRESS_COUNT_THRESHOLD:
     trigger = "count_overflow"
 ```
-- `COMPRESS_COUNT_THRESHOLD` = 500 (env: `TORMENT_COMPRESS_COUNT_THRESHOLD`)
+- `COMPRESS_COUNT_THRESHOLD` = 400 (env: `TORMENT_COMPRESS_COUNT_THRESHOLD`)
 - Fires when private memory count exceeds threshold
 - After firing, resets by compressing top candidates until count drops below 80% of threshold
 - Geometric triggers still take priority

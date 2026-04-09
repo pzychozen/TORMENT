@@ -43,6 +43,11 @@ from .request_context import (
 )
 from .incident_log import log_spine_decision
 
+try:
+    from fastapi import HTTPException as _FastAPIHTTPException
+except ImportError:  # pragma: no cover — tests may run without fastapi
+    _FastAPIHTTPException = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger("torment.spine")
 
 # ---------------------------------------------------------------------------
@@ -602,6 +607,7 @@ class SpineResponse:
     escalated: bool = False                 # True if auto escalated fast→full
     escalation_reasons: List[str] = field(default_factory=list)  # structured reason codes
     elapsed_ms: float = 0.0
+    http_status: int = 0                    # non-zero when a specific HTTP status should be returned (e.g. 409)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1172,9 +1178,18 @@ def submit_task(
         log_spine_decision(resp, req, ctx)
         return resp
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}"
-        _audit_blocked(req, ctx, reason, "dispatch_error")
-        logger.exception("Spine dispatch error for %s", req.operation)
+        # Preserve specific HTTP status codes from HTTPException (e.g. 409 dim lock)
+        http_status = 0
+        if _FastAPIHTTPException is not None and isinstance(e, _FastAPIHTTPException):
+            http_status = e.status_code
+            reason = str(e.detail)
+            _audit_blocked(req, ctx, reason, "dispatch_error")
+            logger.warning("Spine dispatch HTTPException(%d) for %s: %s",
+                           http_status, req.operation, reason)
+        else:
+            reason = f"{type(e).__name__}: {e}"
+            _audit_blocked(req, ctx, reason, "dispatch_error")
+            logger.exception("Spine dispatch error for %s", req.operation)
         resp = SpineResponse(
             ok=False, path=chosen_path, operation=req.operation,
             allowed=True, workspace_id=req.workspace_id,
@@ -1185,6 +1200,7 @@ def submit_task(
             reason=reason,
             task_id=req.task_id,
             audit=ctx.to_audit_dict(),
+            http_status=http_status,
         )
         log_spine_decision(resp, req, ctx)
         return resp

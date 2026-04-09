@@ -3724,6 +3724,14 @@ class TormentFabric:
         dom_scores = ws.router.rank_domains(emb, top_k=2)
         chosen_domain = domain_id or (dom_scores[0].domain_id if dom_scores else "research")
 
+        if chosen_domain not in ws.proposals:
+            available = sorted(ws.proposals.keys())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Domain '{chosen_domain}' not found in workspace '{workspace_id}'. "
+                       f"Available domains: {available}",
+            )
+
         prop = ws.proposals[chosen_domain].submit(
             agent_id=agent_id,
             summary=summary,

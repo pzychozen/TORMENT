@@ -123,7 +123,7 @@ The kernel's corridor transitions serve double duty: they govern memory formatio
 
 When compressed memories are retrieved from the deep store during a sparse query, they pass through a warmup pipeline before reaching the character layer.
 
-**Warmth accumulation**: each deep memory starts at warmth 0.2 on first retrieval. Each subsequent retrieval within a 200-step window adds 0.15, capping at 1.0. This prevents compressed memories from returning at full intensity immediately — they warm up gradually as the system retrieves them repeatedly.
+**Warmth accumulation**: each deep memory starts at warmth 0.2 on first retrieval. Each subsequent retrieval within a 400-step window adds 0.15, capping at 1.0. This prevents compressed memories from returning at full intensity immediately — they warm up gradually as the system retrieves them repeatedly.
 
 **Sustained warmth boost**: memories born during sustained corridors (phase_duration_steps or corridor_duration_steps ≥ 10) receive a warmth floor of 0.3 instead of 0.2. This connects Phase-Cycle Time to spirit return: sustained experience warms faster.
 

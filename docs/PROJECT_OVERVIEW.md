@@ -166,7 +166,7 @@ Compression is the system's garbage collection — but it fires at discrete corr
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TORMENT_COMPRESS_ENABLE` | 0 | Enable/disable compression |
-| `TORMENT_COMPRESS_MIN_STEP` | 50 | Earliest step for compression |
+| `TORMENT_COMPRESS_MIN_STEP` | 100 | Earliest step for compression |
 | `TORMENT_COMPRESS_MIN_AGE` | 50 | Minimum memory age (steps) before eligible |
 | `TORMENT_COMPRESS_DEEP_THRESHOLD` | 0.7 | Score threshold for long-path routing |
 | `TORMENT_COMPRESS_TEAR_EMERGENCY` | 0.7 | Tearing risk threshold for emergency compression |
@@ -188,7 +188,7 @@ When a query finds too few private hits, the system reaches into the deep memory
 **Warmup mechanics:** deep memories don't return at full intensity on first appearance. The WarmupTracker (JSONL-persisted per agent) manages warmth accumulation:
 
 - **Warmth floor**: 0.2 (first appearance)
-- **Increment**: +0.15 per retrieval within a 200-step window
+- **Increment**: +0.15 per retrieval within a 400-step window
 - **Cap**: 1.0
 - **Sustained warmth boost**: memories born during sustained corridors (≥10 steps) get a warmth floor of 0.3 instead of 0.2
 
@@ -317,7 +317,7 @@ Explicit step-counting of how long the system stays in a given phase or corridor
 
 ## 9. Testing (v2.2)
 
-The test suite covers 1266+ passing tests. Key suites by area:
+The test suite covers 1725+ passing tests. Key suites by area:
 
 | Suite | Tests | Scope |
 |-------|-------|-------|
@@ -384,7 +384,7 @@ TORMENT is highly configurable via environment variables (`TORMENT_*` prefix). K
 ## 13. File Quick Reference
 
 ```
-torment_fabric_v1_9_9/
+torment_fabric/
   torment_service/
     app.py                  # FastAPI endpoints
     fabric.py               # Orchestrator/brainstem
@@ -432,7 +432,7 @@ torment_fabric_v1_9_9/
       diagnostics.py        # Diagnostic helpers
       physics_sampler.py    # Physics sampling
   sim/                      # Simulation harness
-  tests/                    # Test suite (185 tests)
+  tests/                    # Test suite (1725+ tests)
     test_compression.py     # Compression unit tests (42)
     test_spirit_return.py   # Spirit return unit tests (53)
     test_spirit_return_voice.py  # Voice cue / assembly tests (34)
@@ -463,7 +463,7 @@ torment_fabric_v1_9_9/
 
 - **Noise injection analysis** — Stress-testing kernel stability under adversarial/random forcing. The simulation harness (`sim/run_sim.py`) and stress-test infrastructure are already in place, so this plugs in naturally. The compression layer adds a new surface to test: how does noise affect compression decisions and spirit return quality? *Low-medium complexity.*
 
-- **Multi-agent coupling (hive-mind coordination)** — The shared memory, domain isolation, and proposal/governance systems are solid foundations. Canon voting works. The next step is real-time kernel state influence between agents — letting one agent's corridor transitions or phase states ripple into others. Compression and spirit return add interesting dimensions: shared deep memories, cross-agent resonance. *Medium-high complexity — touches fabric.py, memory_kernel.py, and potentially compression routing.*
+- ~~**Multi-agent coupling (hive-mind coordination)**~~ ✓ — Implemented: collective policy, shared memory governance, domain isolation, proposal/canon voting, agent coupling. 165 hivemind tests pass. See `HIVEMIND_GUIDE.md`.
 
 - **Character seed evolution** — Migration between seed versions while preserving memory associations and deep memory references. The character layer (seed planting, drift protection, kernel modulation) is stable. The challenge is evolving a seed without breaking the gravitational basin or invalidating compressed memories that reference the old seed. *Medium complexity — touches character.py, deep_memory.py, needs backward compatibility handling.*
 

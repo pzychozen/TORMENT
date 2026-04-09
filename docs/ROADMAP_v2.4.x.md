@@ -156,7 +156,7 @@ To reduce confusion, the current architecture should be thought of like this:
 
 **Highest-value priority: Better memory selection.** Validate Memory Plan retrieval shaping, improve semantic retrieval choice by query type, preserve identity anchors, keep deep memory bounded, treat spirit return as a distinct resurfacing lane not generic retrieval.
 
-**Second priority: Provenance plumbing.** The structural prerequisite for the next wave: archivist write-back, tool-result memory, stronger autonomous actions, safer self-writing loops.
+**Second priority: Provenance plumbing.** The structural prerequisite for the next wave: archivist write-back, tool-result memory, stronger autonomous actions, safer self-writing loops. *Partially done: `provenance_v1.py` exists, tool-result ingest carries provenance metadata, `/debug/provenance` endpoint works. Archivist write-back remains correctly blocked (`TORMENT_ARCHIVIST_WRITEBACK=0`).*
 
 **Third priority: Bounded MCP capability refinement.** Not broad autonomy. Refine MCP as governed, auditable, narrow, optional, easy to disable.
 
