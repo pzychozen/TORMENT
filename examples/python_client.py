@@ -22,9 +22,7 @@ Config via env:
 from __future__ import annotations
 
 import os
-import sys
 import json
-import time
 from typing import Any, Dict, List, Optional
 
 import requests

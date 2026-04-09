@@ -17,7 +17,6 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 import traceback
 
 import numpy as np
@@ -28,12 +27,12 @@ from torment_service.checkpoint import (
     serialize_model_state, deserialize_model_state,
     serialize_corridor_monitor, deserialize_corridor_monitor,
     save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
-    get_checkpoint_dir, build_motif_summary, _prune_old_checkpoints,
+    get_checkpoint_dir, build_motif_summary,
 )
 from torment_service.promotion import (
     evaluate_promotion, promote_chunk, suggest_promotions,
     load_retrieval_counts, save_retrieval_counts, increment_retrieval_counts,
-    PromotionResult, RETRIEVAL_COUNT_THRESHOLD, PROMOTION_SCORE_THRESHOLD,
+    RETRIEVAL_COUNT_THRESHOLD, PROMOTION_SCORE_THRESHOLD,
 )
 
 
@@ -43,9 +42,6 @@ from torment_service.promotion import (
 
 def _tmp():
     return tempfile.mkdtemp(prefix="torment_p5_test_")
-
-# Trusted root for checkpoint path-containment checks in tests.
-_BASE_DIR = tempfile.gettempdir()
 
 
 def _make_model_state():

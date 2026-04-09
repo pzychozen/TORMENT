@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 

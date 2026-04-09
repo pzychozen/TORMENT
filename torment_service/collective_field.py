@@ -45,9 +45,9 @@ class CollectiveField:
 
         # Canonical trust chain: data_dir → workspaces/<id>/collective
         canonical_data = _canonical_storage_root(data_dir)
-        ws_dir = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", self.workspace_id, "collective")
-        )
+        ws_dir = os.path.realpath(os.path.join(canonical_data, "workspaces", self.workspace_id, "collective"))
+        if not ws_dir.startswith(canonical_data + os.sep):
+            raise ValueError(f"Workspace path escapes base: {ws_dir!r}")
         os.makedirs(ws_dir, exist_ok=True)
         self._base = ws_dir
         self._packets_path = _child_path(ws_dir, "packets.jsonl")
@@ -67,6 +67,14 @@ class CollectiveField:
         # Load existing packets into cache on startup
         self._warm_cache()
 
+    def _guard(self, path: str) -> str:
+        """Guard a path to ensure it doesn't escape the workspace root."""
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes workspace root: {rp!r}")
+        return rp
+
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
@@ -74,15 +82,16 @@ class CollectiveField:
     def _append_jsonl(self, path: str, obj: Dict[str, Any]) -> None:
         """Append one JSON line to a file (thread-safe)."""
         with self._lock:
-            with open(path, "a", encoding="utf-8") as f:
+            with open(self._guard(path), "a", encoding="utf-8") as f:
                 f.write(json.dumps(obj, separators=(",", ":")) + "\n")
 
     def _read_jsonl(self, path: str) -> List[Dict[str, Any]]:
         """Read all JSON lines from a file."""
-        if not os.path.exists(path):
+        guarded_path = self._guard(path)
+        if not os.path.exists(guarded_path):
             return []
         results = []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(guarded_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -386,10 +395,11 @@ class CollectiveField:
 
     def _count_lines(self, path: str) -> int:
         """Count lines in a file without loading all data."""
-        if not os.path.exists(path):
+        guarded_path = self._guard(path)
+        if not os.path.exists(guarded_path):
             return 0
         count = 0
-        with open(path, "r", encoding="utf-8") as f:
+        with open(guarded_path, "r", encoding="utf-8") as f:
             for _ in f:
                 count += 1
         return count

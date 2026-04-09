@@ -416,7 +416,6 @@ def classify_run(
 
     mean_h = h_tail_valid.mean()
     var_h = ((h_tail_valid - mean_h) ** 2).mean()
-    cv_h = (var_h ** 0.5) / max(abs(mean_h), 1e-6)
 
     # ------------------------------------------------------------------
     # Class III: spectral collapse

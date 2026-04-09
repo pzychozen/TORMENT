@@ -24,7 +24,7 @@ python -m pytest tests/ -v \
   --ignore=tests/test_smoke_api.py
 ```
 
-Current count: 1266+ passing tests.
+Current count: 1725+ passing tests.
 
 ---
 

@@ -687,7 +687,8 @@ def set_governance_flags(req: GovernanceSetRequest, request: Request) -> Dict[st
         raise HTTPException(status_code=403, detail=resp.reason)
     if not resp.ok:
         detail = resp.reason or resp.result.get("reason", "Governance update failed")
-        raise HTTPException(status_code=500, detail=detail)
+        status = resp.http_status if resp.http_status else 500
+        raise HTTPException(status_code=status, detail=detail)
     # Backward-compatible: return the Fabric result directly
     # The fast handler returns {"ok": True, "eid": ..., "audit": ...}
     return resp.result
@@ -831,7 +832,8 @@ def collective_reingest(workspace_id: str, req: CollectiveReingestRequest, reque
         reason = resp.reason or resp.result.get("reason", "")
         if "not found" in reason.lower():
             raise HTTPException(status_code=404, detail=reason)
-        raise HTTPException(status_code=500, detail=resp.reason)
+        status = resp.http_status if resp.http_status else 500
+        raise HTTPException(status_code=status, detail=resp.reason)
     result = resp.result
     if not result.get("eligible", False) and result.get("reason", "").startswith("Event "):
         raise HTTPException(status_code=404, detail=result["reason"])
@@ -893,7 +895,8 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
     if not resp.allowed:
         raise HTTPException(status_code=403, detail=resp.reason)
     if not resp.ok:
-        raise HTTPException(status_code=500, detail=resp.reason)
+        status = resp.http_status if resp.http_status else 500
+        raise HTTPException(status_code=status, detail=resp.reason)
     return resp.result
 
 @app.post("/agent/query")
@@ -1048,7 +1051,10 @@ def feedback(req: FeedbackReq, request: Request) -> Dict[str, Any]:
     )
     resp = submit_task(spine_req, fabric, ctx)
     if not resp.ok:
-        raise HTTPException(status_code=403 if not resp.allowed else 500, detail=resp.reason)
+        if not resp.allowed:
+            raise HTTPException(status_code=403, detail=resp.reason)
+        status = resp.http_status if resp.http_status else 500
+        raise HTTPException(status_code=status, detail=resp.reason)
     return resp.result
 
 @app.get("/workspace/{workspace_id}/domain/{domain_id}/motifs/active")

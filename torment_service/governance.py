@@ -203,13 +203,20 @@ class GovernanceAuditLog:
 
         # Canonical trust chain: data_dir → workspaces/<id>/governance
         canonical_data = _canonical_storage_root(data_dir)
-        governance_root = _canonical_storage_root(
-            os.path.join(canonical_data, "workspaces", safe_workspace_id, "governance")
-        )
+        governance_root = os.path.realpath(os.path.join(canonical_data, "workspaces", safe_workspace_id, "governance"))
+        if not governance_root.startswith(canonical_data + os.sep):
+            raise ValueError(f"Governance path escapes base: {governance_root!r}")
         os.makedirs(governance_root, exist_ok=True)
         self._base = governance_root
         self._path = _child_path(governance_root, "audit.jsonl")
         self._lock = threading.Lock()
+
+    def _guard(self, path: str) -> str:
+        rp = os.path.realpath(path)
+        base = os.path.realpath(self._base)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Path escapes governance root: {rp!r}")
+        return rp
 
     def log(
         self,
@@ -230,7 +237,7 @@ class GovernanceAuditLog:
             "source": source,
         }
         with self._lock:
-            with open(self._path, "a", encoding="utf-8") as f:
+            with open(self._guard(self._path), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, separators=(",", ":")) + "\n")
         return record
 
@@ -239,7 +246,7 @@ class GovernanceAuditLog:
         if not os.path.exists(self._path):
             return []
         records = []
-        with open(self._path, "r", encoding="utf-8") as f:
+        with open(self._guard(self._path), "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:

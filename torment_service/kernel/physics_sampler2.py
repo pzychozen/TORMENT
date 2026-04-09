@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from .definitions import estimate_chirality_commit_time
 
 from .cp_windows import cp_mask_from_phi_indices, default_cp_config
-from .physics_sampler import sample_physics_observables
 
 
 def cp_conditioned_masks(history):

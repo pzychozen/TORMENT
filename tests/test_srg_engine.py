@@ -28,8 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from torment_service.srg_engine import (
     # Constants
     PHI, OMEGA_0, LOCK_PRODUCT, ZETA_3, GAMMA_SRG, GAMMA_INF,
-    R_STAR, L_0, CLASS_A_FREQ, CLASS_B_FREQ, CLASS_A_PHASE, CLASS_B_PHASE,
-    DEFAULT_NUM_BANDS, COLLISION_SIM_THRESHOLD,
+    R_STAR, L_0, CLASS_A_FREQ, CLASS_B_FREQ, CLASS_B_PHASE,
+    DEFAULT_NUM_BANDS,
     # Feature flag
     srg_enabled,
     # Data structures
@@ -359,7 +359,6 @@ class TestCollisionPhysics(unittest.TestCase):
     def test_amplitude_preserved(self):
         """R values remain distinct after collision."""
         a, b = self._pair()
-        r_a_before = a.R
         r_b_before = b.R
         collision(a, b, 0.85, 100)
         # b.R unchanged, a.R shifted slightly by equilibrium

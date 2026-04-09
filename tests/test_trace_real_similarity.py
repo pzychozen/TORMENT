@@ -15,7 +15,6 @@ Tests:
   3. Trace does not hardcode score=0.0 synthetic hits anymore
 """
 
-import os
 import shutil
 import tempfile
 import unittest

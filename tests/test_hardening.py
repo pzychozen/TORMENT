@@ -15,10 +15,8 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-import json
 import os
 import sys
-import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -38,17 +36,15 @@ from torment_service.spine import (
     DECISION_BLOCKED_TRUST,
     DECISION_BLOCKED_NO_HANDLER,
     DECISION_ERROR_DISPATCH,
-    RESULT_NONE,
 )
 from torment_service.request_context import (
     RequestContext,
-    TRUST_READ_ONLY,
     TRUST_INGEST,
     TRUST_OPERATOR,
 )
 from torment_service.fabric import TormentFabric
 from torment_service.incident_log import IncidentLog, get_incident_log
-import torment_service.incident_log as incident_mod
+incident_mod = sys.modules["torment_service.incident_log"]
 
 
 # ---------------------------------------------------------------------------

@@ -8,12 +8,10 @@
 #   - Resource handlers
 #   - Exposure tier filtering (only exposed ops available via MCP)
 # ---------------------------------------------------------------------------
-import json
 import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 # Ensure the torment_fabric package root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -23,20 +21,17 @@ os.environ.setdefault("TORMENT_EMBED_PROVIDER", "hash")
 from torment_service.mcp_server import (
     MCPClientContext,
     _spine_call,
-    _get_fabric,
-    _get_client_ctx,
     create_mcp_server,
 )
 from torment_service.spine import (
     get_exposed_operations,
     EXPOSURE_OPEN,
     EXPOSURE_GUARDED,
-    OPERATION_REGISTRY,
 )
-from torment_service.request_context import RequestContext, TRUST_INGEST
+from torment_service.request_context import TRUST_INGEST
 from torment_service.fabric import TormentFabric
 
-import torment_service.mcp_server as mcp_mod
+mcp_mod = sys.modules["torment_service.mcp_server"]
 
 
 class TestMCPClientContext(unittest.TestCase):

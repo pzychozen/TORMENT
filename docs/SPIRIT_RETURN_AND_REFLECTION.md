@@ -122,7 +122,7 @@ Deep memories don't return at full intensity on first appearance.
 |-----------|-------|
 | Warmth floor (first appearance) | 0.2 |
 | Increment per subsequent retrieval | +0.15 |
-| Warmup window | 200 steps |
+| Warmup window | 400 steps |
 | Warmth cap | 1.0 |
 | Sustained corridor warmth floor | 0.3 (if phase/corridor duration ≥ 10 steps) |
 | SRG heartbeat class A boost | +0.15 floor |

@@ -17,10 +17,9 @@ import sys
 import tempfile
 import shutil
 import unittest
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from typing import Dict, List, Optional
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -298,7 +297,7 @@ class TestCompressionScorer(unittest.TestCase):
             _make_node(3, born_step=0, strength=0.5),
         ]
         candidates = scorer.select_candidates(nodes, current_step=100)
-        self.assertTrue(len(candidates) >= 2)
+        self.assertGreaterEqual(len(candidates), 2)
         for i in range(len(candidates) - 1):
             self.assertGreaterEqual(candidates[i].score, candidates[i + 1].score)
 

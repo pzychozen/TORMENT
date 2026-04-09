@@ -16,7 +16,6 @@ Tests covering:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -29,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from torment_service.collective_proposals import (
     CollectiveProposalBridge,
     ConvergencePersistenceTracker,
-    ProposalDraftResult,
     _pattern_key,
     PROPOSAL_CONFIDENCE_THRESHOLD,
     PROPOSAL_PERSISTENCE_MIN,

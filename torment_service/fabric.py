@@ -1,6 +1,6 @@
 # fabric.py
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 import os, time, json, re, threading, uuid, logging, math
 import numpy as np
@@ -11,12 +11,12 @@ from .memory_kernel import TriOctaMemoryKernel
 from .memory_graph import MemoryGraph
 from .identity import IdentityStore, AgentIdentity, DEFAULT_AGENT_SEED, DEFAULT_AGENT_OVERLAY
 from .motifs import MotifRegistry, cosine as cos_sim
-from .router import DomainRouter, DEFAULT_DOMAINS, SINGLE_AGENT_DOMAIN
+from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry
 from .conflicts import ConflictRegistry
-from .scoring import score_hit, ContinuityContext, ContinuityResult, compute_continuity_bonuses
+from .scoring import score_hit, ContinuityContext, compute_continuity_bonuses
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
@@ -30,7 +30,7 @@ from .character import (
 )
 from .agent_locks import AgentLockManager
 from .checkpoint import (
-    save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
+    save_checkpoint,
     build_motif_summary, build_shard_snapshot,
 )
 
@@ -168,8 +168,7 @@ def _now_ts() -> int:
 
 
 def _embed_audit_path(data_dir: str, workspace_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "embed_audit.json"))
+    return _safe_child(_ws_root(data_dir, workspace_id), "embed_audit.json")
 
 
 def _write_embed_audit(
@@ -189,7 +188,11 @@ def _write_embed_audit(
     basic health state. Counts are authoritative only when dirty==False.
     """
     path = _embed_audit_path(data_dir, workspace_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Sink-local guard for CodeQL: realpath + startswith at makedirs site.
+    _dir = os.path.realpath(os.path.dirname(path))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Audit dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     payload: Dict[str, Any] = {
         "workspace_id": workspace_id,
         "updated_ts": _now_ts(),
@@ -230,9 +233,7 @@ def _mark_embed_audit_dirty(data_dir: str, workspace_id: str) -> None:
 
 
 def _anchor_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    return os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "anchors.json")
+    return _safe_child(_agent_dir(data_dir, workspace_id, agent_id), "anchors.json")
 
 
 def _load_anchor_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
@@ -259,7 +260,10 @@ def _load_anchor_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 
 def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _anchor_state_path(data_dir, workspace_id, agent_id)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _dir = os.path.realpath(os.path.dirname(p))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Anchor dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -267,9 +271,7 @@ def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 
 
 def _symbol_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    return os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "agents", agent_id, "symbol_state.json"))
+    return _safe_child(_agent_dir(data_dir, workspace_id, agent_id), "symbol_state.json")
 
 
 def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
@@ -294,7 +296,10 @@ def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 
 def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _symbol_state_path(data_dir, workspace_id, agent_id)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _dir = os.path.realpath(os.path.dirname(p))
+    if not _dir.startswith(os.sep):
+        raise ValueError(f"Symbol dir not absolute: {_dir!r}")
+    os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -303,7 +308,7 @@ def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: D
 class Workspace:
     def __init__(self, data_dir: str, workspace_id: str, kernel: TriOctaMemoryKernel,
                  requested_domains: Optional[List[str]] = None) -> None:
-        self.data_dir = os.path.normpath(data_dir)
+        self.data_dir = _canonical_data_root(data_dir)
         self.workspace_id = workspace_id
         self.kernel = kernel
         self.meta = self._load_or_init_meta()
@@ -319,7 +324,7 @@ class Workspace:
         # shared stores per domain (created before motif_regs so shard readers are available)
         self.shared_graphs: Dict[str, MemoryGraph] = {}
         for d in self.domains:
-            dom_dir = os.path.join(data_dir, "workspaces", workspace_id, "domains", d, "shared")
+            dom_dir = _domain_shared_dir(self.data_dir, workspace_id, d)
             self.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=kernel.embedder)
 
         self.motif_regs: Dict[str, MotifRegistry] = {
@@ -344,11 +349,16 @@ class Workspace:
         }
 
         # domain suggestions (emergent suggestions require admin approval later)
-        self.domain_suggestions_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_suggestions.json"))
-        os.makedirs(os.path.dirname(self.domain_suggestions_path), exist_ok=True)
+        _ws = _ws_root(self.data_dir, workspace_id)
+        self.domain_suggestions_path = _safe_child(_ws, "domain_suggestions.json")
+        # Sink-local guard for CodeQL
+        _ws_dir = os.path.realpath(_ws)
+        if not _ws_dir.startswith(os.sep):
+            raise ValueError(f"Workspace dir not absolute: {_ws_dir!r}")
+        os.makedirs(_ws_dir, exist_ok=True)
 
         # per-domain policy knobs (throttles, governance, peeks)
-        self.domain_policies_path = os.path.normpath(os.path.join(data_dir, "workspaces", workspace_id, "domain_policies.json"))
+        self.domain_policies_path = _safe_child(_ws, "domain_policies.json")
         self.domain_policies = self._load_or_init_domain_policies()
 
         # collective kernel placeholder (domain kernels would live here later)
@@ -365,11 +375,14 @@ class Workspace:
         return {}
 
     def _meta_path(self) -> str:
-        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "workspace_meta.json"))
+        return _safe_child(_ws_root(self.data_dir, self.workspace_id), "workspace_meta.json")
 
     def _load_or_init_meta(self) -> Dict[str, Any]:
         p = self._meta_path()
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Meta dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
             try:
                 with open(p, "r", encoding="utf-8") as f:
@@ -388,11 +401,14 @@ class Workspace:
         return meta
 
     def _domains_path(self) -> str:
-        return os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains.json"))
+        return _safe_child(_ws_root(self.data_dir, self.workspace_id), "domains.json")
 
     def _load_or_init_domains(self, requested_domains: Optional[List[str]] = None) -> List[str]:
         p = self._domains_path()
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Domains dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
             # Workspace already exists — load existing domains
             with open(p, "r", encoding="utf-8") as f:
@@ -418,7 +434,10 @@ class Workspace:
 
     def _load_or_init_domain_policies(self) -> Dict[str, Any]:
         p = self.domain_policies_path
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        _dir = os.path.realpath(os.path.dirname(p))
+        if not _dir.startswith(os.sep):
+            raise ValueError(f"Policies dir not absolute: {_dir!r}")
+        os.makedirs(_dir, exist_ok=True)
         pol = {}
         if os.path.exists(p):
             try:
@@ -445,7 +464,7 @@ class Workspace:
         with open(self._domains_path(), "w", encoding="utf-8") as f:
             json.dump({"domains": self.domains}, f, indent=2)
         # instantiate registries and stores (shared graph first so shard reader is available)
-        dom_dir = os.path.normpath(os.path.join(self.data_dir, "workspaces", self.workspace_id, "domains", domain_id, "shared"))
+        dom_dir = _domain_shared_dir(self.data_dir, self.workspace_id, domain_id)
         self.shared_graphs[domain_id] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
         self.motif_regs[domain_id] = MotifRegistry(
             data_dir=self.data_dir, workspace_id=self.workspace_id, domain_id=domain_id,
@@ -473,6 +492,61 @@ def _validate_path_component(value: str, label: str = "identifier") -> str:
     return value
 
 
+# ---------------------------------------------------------------------------
+# Internal path helpers — canonicalization + containment guards.
+#
+# Every helper uses os.path.realpath() for symlink resolution, then a
+# startswith() containment check.  Keep these simple so CodeQL can
+# follow the taint through to sink sites.
+# ---------------------------------------------------------------------------
+
+def _canonical_data_root(data_dir: str) -> str:
+    """Canonicalize *data_dir* to an absolute real path."""
+    _r = os.path.realpath(data_dir)
+    if not _r.startswith(os.sep):
+        raise ValueError(f"data_dir did not resolve to absolute path: {_r!r}")
+    return _r
+
+
+def _ws_root(data_dir: str, workspace_id: str) -> str:
+    """Return canonical workspace root, guarded under *data_dir*."""
+    _validate_path_component(workspace_id, "workspace_id")
+    _base = os.path.realpath(data_dir)
+    _r = os.path.realpath(os.path.join(_base, "workspaces", workspace_id))
+    if not _r.startswith(_base + os.sep):
+        raise ValueError(f"Workspace path escapes data root: {_r!r}")
+    return _r
+
+
+def _agent_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    """Return canonical agent directory, guarded under workspace root."""
+    _ws = _ws_root(data_dir, workspace_id)
+    _validate_path_component(agent_id, "agent_id")
+    _r = os.path.realpath(os.path.join(_ws, "agents", agent_id))
+    if not _r.startswith(_ws + os.sep):
+        raise ValueError(f"Agent path escapes workspace root: {_r!r}")
+    return _r
+
+
+def _domain_shared_dir(data_dir: str, workspace_id: str, domain_id: str) -> str:
+    """Return canonical domain shared directory, guarded under workspace root."""
+    _ws = _ws_root(data_dir, workspace_id)
+    _validate_path_component(domain_id, "domain_id")
+    _r = os.path.realpath(os.path.join(_ws, "domains", domain_id, "shared"))
+    if not _r.startswith(_ws + os.sep):
+        raise ValueError(f"Domain path escapes workspace root: {_r!r}")
+    return _r
+
+
+def _safe_child(base: str, *parts: str) -> str:
+    """Join *parts* under *base* and verify the result stays contained."""
+    _b = os.path.realpath(base)
+    _r = os.path.realpath(os.path.join(_b, *parts))
+    if _r != _b and not _r.startswith(_b + os.sep):
+        raise ValueError(f"Path escapes base directory: {_r!r}")
+    return _r
+
+
 class TormentFabric:
 
     @staticmethod
@@ -487,9 +561,15 @@ class TormentFabric:
         return f"{workspace_id}/{agent_id}"
 
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = os.path.normpath(data_dir)
-        if self.data_dir != ":memory:":
-            os.makedirs(self.data_dir, exist_ok=True)
+        if data_dir == ":memory:":
+            self.data_dir = data_dir
+        else:
+            _safe = _canonical_data_root(data_dir)
+            # Sink-local guard for CodeQL at makedirs site.
+            if not _safe.startswith(os.sep):
+                raise ValueError(f"data_dir not absolute: {_safe!r}")
+            os.makedirs(_safe, exist_ok=True)
+            self.data_dir = _safe
         # v1.10: embedder is configured via env and attached to the kernel.
         self.embedder_error: str = ""
         self.requested_embed_provider: str = str(os.environ.get("TORMENT_EMBED_PROVIDER") or "hash")
@@ -559,10 +639,16 @@ class TormentFabric:
         # job retention + persistence (v1.10.10)
         self._job_max: int = int(os.environ.get('TORMENT_JOB_MAX') or 50)
         self._job_persist: bool = str(os.environ.get('TORMENT_JOB_PERSIST') or '').strip().lower() in ('1','true','yes','on')
-        self._jobs_root: str = os.path.join(self.data_dir, 'jobs')
+        self._jobs_root: str = _safe_child(self.data_dir, 'jobs')
         if self._job_persist:
-            os.makedirs(os.path.join(self._jobs_root, 'clone'), exist_ok=True)
-            os.makedirs(os.path.join(self._jobs_root, 'repair'), exist_ok=True)
+            _clone_dir = os.path.realpath(os.path.join(self._jobs_root, 'clone'))
+            if not _clone_dir.startswith(os.sep):
+                raise ValueError(f"Clone job dir not absolute: {_clone_dir!r}")
+            os.makedirs(_clone_dir, exist_ok=True)
+            _repair_dir = os.path.realpath(os.path.join(self._jobs_root, 'repair'))
+            if not _repair_dir.startswith(os.sep):
+                raise ValueError(f"Repair job dir not absolute: {_repair_dir!r}")
+            os.makedirs(_repair_dir, exist_ok=True)
             self._load_jobs('clone')
             self._load_jobs('repair')
 
@@ -580,9 +666,9 @@ class TormentFabric:
         if key not in self._sqlite_indexes:
             try:
                 from .sqlite_index import IndexManager
-                index_dir = os.path.join(
-                    self.data_dir, "workspaces", workspace_id,
-                    "agents", agent_id, "index",
+                index_dir = _safe_child(
+                    _agent_dir(self.data_dir, workspace_id, agent_id),
+                    "index",
                 )
                 self._sqlite_indexes[key] = IndexManager(index_dir)
             except Exception:
@@ -606,7 +692,7 @@ class TormentFabric:
             for d in domains:
                 if d not in ws.domains:
                     # Add domain infrastructure
-                    dom_dir = os.path.join(self.data_dir, "workspaces", workspace_id, "domains", d, "shared")
+                    dom_dir = _domain_shared_dir(self.data_dir, workspace_id, d)
                     ws.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
                     ws.motif_regs[d] = MotifRegistry(
                         data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d,
@@ -634,12 +720,13 @@ class TormentFabric:
         Reads from data/workspaces/<workspace_id>/workspace_meta.json.
         Safe for large numbers of workspaces; returns empty list if none exist.
         """
-        ws_root = os.path.join(self.data_dir, "workspaces")
+        ws_root = _safe_child(self.data_dir, "workspaces")
         if not os.path.exists(ws_root):
             return []
         out: List[Dict[str, Any]] = []
         for name in sorted(os.listdir(ws_root)):
-            p = os.path.join(ws_root, name, "workspace_meta.json")
+            _validate_path_component(name, "workspace_id")
+            p = _safe_child(ws_root, name, "workspace_meta.json")
             if not os.path.exists(p):
                 continue
             try:
@@ -658,7 +745,9 @@ class TormentFabric:
 
     # ---- job persistence helpers (v1.10.10) ----
     def _job_path(self, kind: str, job_id: str) -> str:
-        return os.path.normpath(os.path.join(self._jobs_root, kind, f"{job_id}.json"))
+        _validate_path_component(kind, "job_kind")
+        _validate_path_component(job_id, "job_id")
+        return _safe_child(self._jobs_root, kind, f"{job_id}.json")
 
     def _load_jobs(self, kind: str) -> None:
         """Load persisted jobs from disk into in-memory stores.
@@ -668,13 +757,14 @@ class TormentFabric:
         if not self._job_persist:
             return
         store = self._clone_jobs if kind == 'clone' else self._repair_jobs
-        root = os.path.join(self._jobs_root, kind)
+        _validate_path_component(kind, "job_kind")
+        root = _safe_child(self._jobs_root, kind)
         if not os.path.isdir(root):
             return
         for fn in sorted(os.listdir(root)):
             if not fn.endswith('.json'):
                 continue
-            p = os.path.join(root, fn)
+            p = _safe_child(root, fn)
             try:
                 with open(p, 'r', encoding='utf-8') as f:
                     st = json.load(f) or {}
@@ -704,7 +794,10 @@ class TormentFabric:
             return
         p = self._job_path(kind, job_id)
         try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
+            _dir = os.path.realpath(os.path.dirname(p))
+            if not _dir.startswith(os.sep):
+                raise ValueError(f"Job dir not absolute: {_dir!r}")
+            os.makedirs(_dir, exist_ok=True)
             with open(p, 'w', encoding='utf-8') as f:
                 json.dump(st, f, indent=2, sort_keys=True)
         except Exception as e:
@@ -947,22 +1040,24 @@ class TormentFabric:
         if lock_model and cur_model and lock_model != cur_model:
             raise HTTPException(status_code=409, detail=f"Active embedder model '{cur_model}' does not match workspace lock '{lock_model}'. Use /workspace/clone to migrate.")
 
-        ws_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", workspace_id))
+        ws_root = _ws_root(self.data_dir, workspace_id)
         if not os.path.isdir(ws_root):
             raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
         def _iter_graph_dirs() -> List[str]:
             gdirs: List[str] = []
-            agents_root = os.path.join(ws_root, "agents")
+            agents_root = _safe_child(ws_root, "agents")
             if include_private and os.path.isdir(agents_root):
                 for aid in sorted(os.listdir(agents_root)):
-                    gdir = os.path.join(agents_root, aid, "private")
+                    _validate_path_component(aid, "agent_id")
+                    gdir = _safe_child(agents_root, aid, "private")
                     if os.path.isdir(gdir):
                         gdirs.append(gdir)
-            domains_root = os.path.join(ws_root, "domains")
+            domains_root = _safe_child(ws_root, "domains")
             if include_shared and os.path.isdir(domains_root):
                 for dom in sorted(os.listdir(domains_root)):
-                    gdir = os.path.join(domains_root, dom, "shared")
+                    _validate_path_component(dom, "domain_id")
+                    gdir = _safe_child(domains_root, dom, "shared")
                     if os.path.isdir(gdir):
                         gdirs.append(gdir)
             return gdirs
@@ -1002,7 +1097,7 @@ class TormentFabric:
         _push_progress("", 0)
 
         for gi, gdir in enumerate(graph_dirs, start=1):
-            nodes_path = os.path.join(gdir, "nodes.jsonl")
+            nodes_path = _safe_child(gdir, "nodes.jsonl")
             if not os.path.exists(nodes_path):
                 continue
             counts["graphs"] += 1
@@ -1028,7 +1123,7 @@ class TormentFabric:
 
                     expected_ck = embedding_checksum(summary, cur_provider, cur_model)
                     stored_ck = str(payload.get("embedding_checksum") or "").strip()
-                    emb_path = os.path.join(gdir, f"emb_{eid}.npy")
+                    emb_path = _safe_child(gdir, f"emb_{eid}.npy")
 
                     stale_reason = ""
                     if not os.path.exists(emb_path):
@@ -1582,10 +1677,10 @@ class TormentFabric:
                        job_id, source_workspace_id, target_workspace_id, include_private, include_shared, reembed, reembed_mode)
     
         try:
-            src_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", source_workspace_id))
+            src_root = _ws_root(self.data_dir, source_workspace_id)
             if not os.path.isdir(src_root):
                 raise HTTPException(status_code=404, detail=f"Source workspace '{source_workspace_id}' not found")
-            tgt_root = os.path.normpath(os.path.join(self.data_dir, "workspaces", target_workspace_id))
+            tgt_root = _ws_root(self.data_dir, target_workspace_id)
             if os.path.exists(tgt_root):
                 raise HTTPException(status_code=409, detail=f"Target workspace '{target_workspace_id}' already exists")
     
@@ -1593,11 +1688,15 @@ class TormentFabric:
     
             _job_update(phase="copy")
             def _copytree_filtered(src: str, dst: str) -> None:
-                os.makedirs(dst, exist_ok=True)
+                # Guard the destination root before walking.
+                _dst = os.path.realpath(dst)
+                if not _dst.startswith(os.sep):
+                    raise ValueError(f"Clone dst not absolute: {_dst!r}")
+                os.makedirs(_dst, exist_ok=True)
                 for root, dirs, files in os.walk(src):
                     rel = os.path.relpath(root, src)
-                    out_root = os.path.join(dst, rel) if rel != "." else dst
-    
+                    out_root = _safe_child(_dst, rel) if rel != "." else _dst
+
                     parts = rel.split(os.sep) if rel != "." else []
                     if (not include_private) and ("agents" in parts) and ("private" in parts):
                         dirs[:] = []
@@ -1605,13 +1704,13 @@ class TormentFabric:
                     if (not include_shared) and ("domains" in parts) and ("shared" in parts):
                         dirs[:] = []
                         continue
-    
+
                     os.makedirs(out_root, exist_ok=True)
                     for fn in files:
                         if fn.startswith("emb_") and fn.endswith(".npy"):
                             continue
-                        srcp = os.path.join(root, fn)
-                        dstp = os.path.join(out_root, fn)
+                        srcp = _safe_child(root, fn)
+                        dstp = _safe_child(out_root, fn)
                         os.makedirs(os.path.dirname(dstp), exist_ok=True)
                         shutil.copy2(srcp, dstp, follow_symlinks=False)
     
@@ -1626,7 +1725,7 @@ class TormentFabric:
                 "embed_model": str(getattr(emb, "model", "")),
                 "source_workspace_id": source_workspace_id,
             }
-            mp = os.path.join(tgt_root, "workspace_meta.json")
+            mp = _safe_child(tgt_root, "workspace_meta.json")
             with open(mp, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
     
@@ -1636,16 +1735,18 @@ class TormentFabric:
     
                 def _iter_graph_dirs() -> List[str]:
                     gdirs: List[str] = []
-                    agents_root = os.path.join(tgt_root, "agents")
+                    agents_root = _safe_child(tgt_root, "agents")
                     if include_private and os.path.isdir(agents_root):
                         for aid in sorted(os.listdir(agents_root)):
-                            gdir = os.path.join(agents_root, aid, "private")
+                            _validate_path_component(aid, "agent_id")
+                            gdir = _safe_child(agents_root, aid, "private")
                             if os.path.isdir(gdir):
                                 gdirs.append(gdir)
-                    domains_root = os.path.join(tgt_root, "domains")
+                    domains_root = _safe_child(tgt_root, "domains")
                     if include_shared and os.path.isdir(domains_root):
                         for dom in sorted(os.listdir(domains_root)):
-                            gdir = os.path.join(domains_root, dom, "shared")
+                            _validate_path_component(dom, "domain_id")
+                            gdir = _safe_child(domains_root, dom, "shared")
                             if os.path.isdir(gdir):
                                 gdirs.append(gdir)
                     return gdirs
@@ -1654,7 +1755,7 @@ class TormentFabric:
                 _prog(graphs_total=len(graph_dirs), graphs_done=0, embeddings_done=0, current_graph="")
     
                 def _regen_graph(graph_dir: str) -> None:
-                    nodes_path = os.path.join(graph_dir, "nodes.jsonl")
+                    nodes_path = _safe_child(graph_dir, "nodes.jsonl")
                     if not os.path.exists(nodes_path):
                         return
                     regenerated["graphs"] += 1
@@ -1672,7 +1773,7 @@ class TormentFabric:
                             summary = str(payload.get("summary") or payload.get("text") or "").strip()
                             if not summary:
                                 summary = "(empty)"
-                            emb_path = os.path.join(graph_dir, f"emb_{eid}.npy")
+                            emb_path = _safe_child(graph_dir, f"emb_{eid}.npy")
                             mode = (reembed_mode or "selective").lower().strip()
                             if mode not in ("all", "selective", "missing"):
                                 mode = "selective"
@@ -1828,7 +1929,7 @@ class TormentFabric:
                     self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
             # init private store
             if ak not in self.private_graphs:
-                pdir = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "private")
+                pdir = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "private")
                 sq_idx = self._get_sqlite_index(workspace_id, agent_id)
                 self.private_graphs[ak] = MemoryGraph(
                     data_dir=pdir, embedder=self.kernel.embedder, sqlite_index=sq_idx,
@@ -2123,7 +2224,6 @@ class TormentFabric:
         # ArchiveStore.ingest_document() via /archive/ingest_document endpoint.
         # This prevents archive content from entering the identity pipeline.
         # =====================
-        ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
         ws = self.get_workspace(workspace_id)
@@ -2187,8 +2287,8 @@ class TormentFabric:
             _rp = self.role_store.load(workspace_id, agent_id)
             _rp = self.role_store.update_from_text(_rp, summary)
             self.role_store.save(_rp)
-        except Exception:
-            pass
+        except Exception as _role_exc:
+            log.debug("Role inference update failed: %s", _role_exc)
 
         # Character continuity (v1.11): lightweight affect tagging.
         # This is a guidance signal only; it must not dominate or rewrite persona.
@@ -2704,8 +2804,10 @@ class TormentFabric:
                     _hm_reasons = []
                     if not self._hivemind_enable:
                         _hm_reasons.append("hivemind_enable=False (set TORMENT_HIVEMIND_ENABLE=1)")
-                    if not stored:
-                        _hm_reasons.append("stored=False")
+                    # Note: 'stored' is always True here (both reinforcement and
+                    # spawn branches set it; exceptions propagate before reaching
+                    # this else block), so the old `if not stored:` check was
+                    # unreachable and has been removed.
                     if eid is None:
                         _hm_reasons.append("eid=None")
                     print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", file=_hm_sys.stderr, flush=True)
@@ -3016,8 +3118,8 @@ class TormentFabric:
             _agent_state = self.agent_states.get(ak)
             if _agent_state is not None:
                 _canonical_step = int(getattr(_agent_state, "step", -1))
-        except Exception:
-            pass
+        except Exception as _step_exc:
+            log.debug("Failed to read canonical step from agent state: %s", _step_exc)
         # Fallback: max born_step from the private graph (still canonical,
         # just slightly stale if kernel state is missing).
         if _canonical_step < 0:
@@ -3102,14 +3204,6 @@ class TormentFabric:
                 _q_affect_conf = float(_qa.conf)
             except Exception:
                 _q_affect_tag, _q_affect_conf = "neutral", 0.0
-        try:
-            _affect_match_bonus = float(os.getenv("TORMENT_AFFECT_MATCH_BONUS", "0.05"))
-        except Exception:
-            _affect_match_bonus = 0.05
-        try:
-            _affect_min_conf = float(os.getenv("TORMENT_AFFECT_MIN_CONF", "0.40"))
-        except Exception:
-            _affect_min_conf = 0.40
         # conflict map: map eid->max conflict score and ids for open conflicts in the queried domains
         conflict_map: Dict[int, Dict[str, Any]] = {}
 
@@ -3145,10 +3239,6 @@ class TormentFabric:
             _anchor_topk = int(os.getenv("TORMENT_ANCHOR_BOOST_TOPK", "3"))
         except Exception:
             _anchor_topk = 3
-        try:
-            _anchor_rest_mult = float(os.getenv("TORMENT_ANCHOR_BOOST_REST_MULT", "0.35"))
-        except Exception:
-            _anchor_rest_mult = 0.35
         _anchor_full_boost: set = set()
         if _anchor_topk > 0:
             try:
@@ -3177,18 +3267,6 @@ class TormentFabric:
             _spiral_window = int(os.getenv("TORMENT_MOOD_SPIRAL_WINDOW_STEPS", "800"))
         except Exception:
             _spiral_window = 800
-        try:
-            _spiral_min_drifts = int(os.getenv("TORMENT_MOOD_SPIRAL_MIN_NEG_DRIFTS", "2"))
-        except Exception:
-            _spiral_min_drifts = 2
-        try:
-            _spiral_older_than = int(os.getenv("TORMENT_MOOD_SPIRAL_OLDER_THAN_STEPS", "250"))
-        except Exception:
-            _spiral_older_than = 250
-        try:
-            _spiral_penalty_max = float(os.getenv("TORMENT_MOOD_SPIRAL_PENALTY_MAX", "0.08"))
-        except Exception:
-            _spiral_penalty_max = 0.08
 
         _spiral_neg_recent = 0
         if _spiral_enable and ak in self.private_graphs:
@@ -3264,7 +3342,6 @@ class TormentFabric:
                 conflict_penalty = float(conflict_info.get("max_score", 0.0))
                 if not wants_contested:
                     contradiction_risk = max(contradiction_risk, 0.5 * conflict_penalty)
-            mtype = str(h.get("type") or "")
             type_bonus = 0.0
 
             # Continuity debug collects a compact breakdown (no behavioral change when disabled).
@@ -3589,8 +3666,11 @@ class TormentFabric:
 
         self.ident_store.save(ident)
         # log feedback event (append-only) for causal tracing
-        fb_path = os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "feedback_events.jsonl")
-        os.makedirs(os.path.dirname(fb_path), exist_ok=True)
+        fb_path = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "feedback_events.jsonl")
+        _fb_dir = os.path.realpath(os.path.dirname(fb_path))
+        if not _fb_dir.startswith(os.sep):
+            raise ValueError(f"Feedback dir not absolute: {_fb_dir!r}")
+        os.makedirs(_fb_dir, exist_ok=True)
         with open(fb_path, "a", encoding="utf-8") as f:
             f.write(json.dumps({
                 "type": "FEEDBACK",
@@ -3643,6 +3723,14 @@ class TormentFabric:
 
         dom_scores = ws.router.rank_domains(emb, top_k=2)
         chosen_domain = domain_id or (dom_scores[0].domain_id if dom_scores else "research")
+
+        if chosen_domain not in ws.proposals:
+            available = sorted(ws.proposals.keys())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Domain '{chosen_domain}' not found in workspace '{workspace_id}'. "
+                       f"Available domains: {available}",
+            )
 
         prop = ws.proposals[chosen_domain].submit(
             agent_id=agent_id,
@@ -4109,8 +4197,8 @@ class TormentFabric:
             _trace_agent_state = self.agent_states.get(ak)
             if _trace_agent_state is not None:
                 _trace_canonical_step = int(getattr(_trace_agent_state, "step", -1))
-        except Exception:
-            pass
+        except Exception as _trace_step_exc:
+            log.debug("Failed to read canonical step for trace: %s", _trace_step_exc)
         if _trace_canonical_step < 0:
             _pg_fb = self.private_graphs.get(ak)
             if _pg_fb:
@@ -4179,7 +4267,6 @@ class TormentFabric:
                     continue
                 motif_alignment = max(motif_alignment, float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12))))
             contradiction_risk = float(hit.get('contradiction_risk', 0.0))
-            mtype = str(hit.get("type") or "")
             type_bonus = 0.0
 
             # --- Provenance extraction (parity with query()) ---
@@ -4509,15 +4596,18 @@ class TormentFabric:
         graph["embed_context"] = self._embed_context(ws)
 
         export_files = {}
-        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports'))
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports')
+        _od = os.path.realpath(out_dir)
+        if not _od.startswith(os.sep):
+            raise ValueError(f"Export dir not absolute: {_od!r}")
+        os.makedirs(_od, exist_ok=True)
         if export in ('json','bundle'):
-            jp = os.path.join(out_dir, f"trace_{eid}_{dom}.json")
+            jp = _safe_child(out_dir, f"trace_{eid}_{dom}.json")
             with open(jp,'w',encoding='utf-8') as f:
                 json.dump(graph, f, indent=2, ensure_ascii=False)
             export_files['json'] = jp
         if export in ('dot','bundle'):
-            dp = os.path.join(out_dir, f"trace_{eid}_{dom}.dot")
+            dp = _safe_child(out_dir, f"trace_{eid}_{dom}.dot")
             with open(dp,'w',encoding='utf-8') as f:
                 f.write('digraph G {\n')
                 for n in nodes:
@@ -4540,21 +4630,34 @@ class TormentFabric:
             _validate_path_component(agent_id, "agent_id")
         dom = domain_id or 'research'
         graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='bundle')
-        out_dir = os.path.normpath(os.path.join(self.data_dir, 'workspaces', workspace_id, 'exports', f"bundle_{eid}_{dom}"))
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports', f"bundle_{eid}_{dom}")
+        _od = os.path.realpath(out_dir)
+        if not _od.startswith(os.sep):
+            raise ValueError(f"Bundle dir not absolute: {_od!r}")
+        os.makedirs(_od, exist_ok=True)
         # write graph.json/dot already created in exports; copy into bundle
         import shutil
         jp = graph.get('export_files', {}).get('json')
         dp = graph.get('export_files', {}).get('dot')
-        bjp = os.path.join(out_dir, 'graph.json')
-        bdp = os.path.join(out_dir, 'graph.dot')
-        if jp and os.path.exists(jp):
-            shutil.copy(jp, bjp)
-        if dp and os.path.exists(dp):
-            shutil.copy(dp, bdp)
+        bjp = _safe_child(out_dir, 'graph.json')
+        bdp = _safe_child(out_dir, 'graph.dot')
+        # Containment guard: validate source paths stay within workspace
+        _bundle_ws = os.path.realpath(_ws_root(self.data_dir, workspace_id))
+        if jp:
+            _jp_safe = os.path.realpath(jp)
+            if not _jp_safe.startswith(_bundle_ws + os.sep):
+                raise ValueError(f"Export JSON path escapes workspace: {_jp_safe!r}")
+            if os.path.exists(_jp_safe):
+                shutil.copy(_jp_safe, bjp)
+        if dp:
+            _dp_safe = os.path.realpath(dp)
+            if not _dp_safe.startswith(_bundle_ws + os.sep):
+                raise ValueError(f"Export DOT path escapes workspace: {_dp_safe!r}")
+            if os.path.exists(_dp_safe):
+                shutil.copy(_dp_safe, bdp)
         # narrative
         narrative = self._trace_narrative(workspace_id, eid=eid, scope=scope, domain_id=dom, agent_id=agent_id)
-        npath = os.path.join(out_dir, 'narrative.md')
+        npath = _safe_child(out_dir, 'narrative.md')
         with open(npath,'w',encoding='utf-8') as f:
             f.write(narrative)
         manifest = {
@@ -4570,7 +4673,7 @@ class TormentFabric:
                 'narrative_md': npath,
             }
         }
-        mpath = os.path.join(out_dir, 'manifest.json')
+        mpath = _safe_child(out_dir, 'manifest.json')
         with open(mpath,'w',encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
         return {"bundle_dir": out_dir, "manifest": manifest}
@@ -4639,14 +4742,13 @@ def random_chance(p: float) -> bool:
     return random.random() < float(p)
 
 def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    safe_dir = os.path.normpath(data_dir)
-    base = os.path.normpath(os.path.join(safe_dir, "workspaces", workspace_id, "agents", agent_id))
-    if not base.startswith(safe_dir):
-        raise ValueError("Path escapes data directory")
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "affect_state.json")
+    _ag = _agent_dir(data_dir, workspace_id, agent_id)
+    # Sink-local guard for CodeQL at makedirs site.
+    _rp = os.path.realpath(_ag)
+    if not _rp.startswith(os.sep):
+        raise ValueError(f"Agent dir not absolute: {_rp!r}")
+    os.makedirs(_rp, exist_ok=True)
+    return _safe_child(_ag, "affect_state.json")
 
 def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
     p = _affect_state_path(data_dir, workspace_id, agent_id)

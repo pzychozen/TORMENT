@@ -10,12 +10,9 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
-import logging
 import os
 import sys
 import unittest
-
-log = logging.getLogger(__name__)
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -26,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
-import torment_service.incident_log as incident_mod
+incident_mod = sys.modules["torment_service.incident_log"]
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +203,7 @@ class TestAdminStatusMCPResource(unittest.TestCase):
 
     def _call_admin_status(self) -> dict:
         """Call the MCP resource handler directly."""
-        from torment_service.mcp_server import create_mcp_server
-        import torment_service.mcp_server as mcp_mod
+        mcp_mod = sys.modules["torment_service.mcp_server"]
 
         # Set up the module-level fabric and client context
         mcp_mod._fabric = fabric
@@ -221,7 +217,6 @@ class TestAdminStatusMCPResource(unittest.TestCase):
         # The resource_admin_status function is registered during create_mcp_server(),
         # but we can also call it by constructing the same logic inline.
         # Instead, let's use the same code path as the resource handler.
-        from torment_service.incident_log import get_incident_log
         import time as _time
 
         log = get_incident_log()
@@ -440,7 +435,7 @@ class TestSpineIncidentLogIntegration(unittest.TestCase):
         self.assertEqual(ops[3], "ingest")
 
     def test_elapsed_ms_recorded(self):
-        resp = self._submit("ingest", {"text": "timing test", "step": 1})
+        self._submit("ingest", {"text": "timing test", "step": 1})
         log = get_incident_log()
         incidents = log.query(limit=1)
         self.assertGreater(incidents[0].elapsed_ms, 0)

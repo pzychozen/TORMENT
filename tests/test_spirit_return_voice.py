@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -23,11 +23,9 @@ from torment_service.retrieval_assembler import (
     _hit_to_block,
     _get_voice_cue,
     assemble_context,
-    ContextBlock,
     BLOCK_IDENTITY,
     BLOCK_RELATIONAL,
     BLOCK_SITUATIONAL,
-    BLOCK_ARCHIVE,
 )
 
 

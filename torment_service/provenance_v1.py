@@ -17,10 +17,9 @@ See ROADMAP_v2.4.x.md §2.2 for design goals.
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ── Enum constants ──────────────────────────────────────────────────

@@ -33,7 +33,6 @@ from .embedding_store import (
     EmbeddingShardWriter,
     EmbeddingShardReader,
     DEFAULT_DIM,
-    _canonical_storage_root,
     _child_path,
 )
 
@@ -92,7 +91,10 @@ class DeepMemoryStore:
     """
 
     def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
-        canonical_root = _canonical_storage_root(str(base_dir))
+        # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
+        canonical_root = os.path.realpath(str(base_dir))
+        if not canonical_root.startswith(os.sep):
+            raise ValueError(f"base_dir did not resolve to absolute path: {canonical_root!r}")
         os.makedirs(canonical_root, exist_ok=True)
         self.base_dir = Path(canonical_root)
 

@@ -20,9 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cognition.task_models import (
     TaskPacket, RoutingDecision, ReintegrationResult,
-    MODE_AUTO, MODE_ENGINEERING, MODE_IDENTITY,
-    APERTURE_NARROW, APERTURE_BROAD, APERTURE_PROTECTED,
-    SCOPE_PRIVATE,
+    MODE_AUTO, MODE_IDENTITY,
+    APERTURE_NARROW, APERTURE_PROTECTED,
 )
 from cognition.apertures import MemoryContext, APERTURE_CONFIGS
 from cognition.reintegration import reintegrate
@@ -35,7 +34,6 @@ from schemas.role_output import RoleOutput
 from schemas.provenance import (
     Provenance,
     STATUS_SKEPTIC_PASSED,
-    STATUS_SKEPTIC_FLAGGED,
 )
 from schemas.memory_proposal import MemoryProposal
 from schemas.drift_report import DriftReport
@@ -173,7 +171,7 @@ class TestDissentDetection(unittest.TestCase):
         ctx = _make_ctx()
         result = reintegrate(task, routing, outputs, ctx)
         self.assertTrue(result.has_dissent)
-        self.assertTrue(len(result.dissent) > 0)
+        self.assertGreater(len(result.dissent), 0)
         d = result.dissent[0]
         self.assertIn("role_a", d)
         self.assertIn("role_b", d)
@@ -576,8 +574,8 @@ class TestFullReintegrationPipeline(unittest.TestCase):
         result = reintegrate(task, routing, outputs, ctx)
 
         self.assertIsInstance(result, ReintegrationResult)
-        self.assertTrue(len(result.final_answer) > 0)
-        self.assertTrue(len(result.merged_findings) > 0)
+        self.assertGreater(len(result.final_answer), 0)
+        self.assertGreater(len(result.merged_findings), 0)
         self.assertEqual(len(result.role_outputs), 4)
         self.assertIsNone(result.drift_report)  # no drift check required
 

@@ -48,7 +48,7 @@ def main():
     step = int(time.time()) % 1000000
     step = phase_ingest(args.base_url, args.workspace, args.agent, args.domain, step, NEU, args.neutral, "NEUTRAL")
     step = phase_ingest(args.base_url, args.workspace, args.agent, args.domain, step, NEG, args.negative, "NEGATIVE")
-    step = phase_ingest(args.base_url, args.workspace, args.agent, args.domain, step, POS, args.recovery, "RECOVERY")
+    phase_ingest(args.base_url, args.workspace, args.agent, args.domain, step, POS, args.recovery, "RECOVERY")
 
     probes = [
         ("personal_state", "How have I been lately?"),

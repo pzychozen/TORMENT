@@ -13,7 +13,6 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -28,8 +27,6 @@ from torment_service.spirit_reflection import (
     should_store_reflection,
     process_spirit_reflections,
     DEFAULT_INFLUENCE_THRESHOLD,
-    DEFAULT_COOLDOWN_STEPS,
-    MAX_GENERATION_DEPTH,
 )
 
 

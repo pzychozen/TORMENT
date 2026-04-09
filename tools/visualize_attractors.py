@@ -43,7 +43,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib.patches import FancyBboxPatch
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 
@@ -587,7 +586,6 @@ def generate_visualization(
     char_state = load_character_state(data_dir, workspace, agent)
     seed_motif_id = None
     if char_state:
-        seed_id = char_state.get("seed_id", "")
         # Find motif that contains seed memories
         for mid, m in motifs.items():
             if "seed" in m.label.lower() or mid.endswith("0001"):
@@ -602,7 +600,6 @@ def generate_visualization(
     n_layers = len(show_layers)
     if n_layers == 0:
         show_layers = {"basin", "orbits", "timeline"}
-        n_layers = 3
 
     layer_order = [l for l in ["basin", "orbits", "timeline"] if l in show_layers]
     height_ratios = []

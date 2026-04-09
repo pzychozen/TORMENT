@@ -7,7 +7,6 @@ Covers:
   - Plot rendering (no exceptions)
   - End-to-end on live Ryuki data
 """
-import json
 import os
 import shutil
 import sys

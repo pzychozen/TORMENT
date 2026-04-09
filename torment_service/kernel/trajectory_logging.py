@@ -33,8 +33,13 @@ class TrajectoryLogger:
         *,
         use_daily_rotation: bool = True,
     ) -> None:
-        self.root_dir = os.path.realpath(root_dir)
-        os.makedirs(self.root_dir, exist_ok=True)
+        # Canonicalize via local variable so CodeQL sees the full
+        # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
+        _safe_dir = os.path.realpath(root_dir)
+        if not _safe_dir.startswith(os.sep):
+            raise ValueError(f"root_dir did not resolve to absolute path: {_safe_dir!r}")
+        os.makedirs(_safe_dir, exist_ok=True)
+        self.root_dir = _safe_dir
         self._use_daily = use_daily_rotation
         # Legacy single-file path (used when daily rotation is off, or
         # as fallback for callers that read self.path directly).
@@ -43,8 +48,13 @@ class TrajectoryLogger:
     def _today_path(self) -> str:
         """Return today's dated log path, creating the directory if needed."""
         p = dated_log_path(self.root_dir, "trajectories")
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        return p
+        # Inline containment guard — CodeQL needs visible realpath+startswith
+        rp = os.path.realpath(p)
+        base = os.path.realpath(self.root_dir)
+        if rp != base and not rp.startswith(base + os.sep):
+            raise ValueError(f"Dated log path escapes root: {rp!r}")
+        os.makedirs(os.path.dirname(rp), exist_ok=True)
+        return rp
 
     def log_entity(self, ent: Any, step: int) -> None:
         try:
@@ -71,5 +81,10 @@ class TrajectoryLogger:
         }
 
         target = self._today_path() if self._use_daily else self.path
-        with open(target, "a", encoding="utf-8") as f:
+        # Inline containment guard at the sink
+        safe_target = os.path.realpath(target)
+        base = os.path.realpath(self.root_dir)
+        if safe_target != base and not safe_target.startswith(base + os.sep):
+            raise ValueError(f"Log path escapes root: {safe_target!r}")
+        with open(safe_target, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

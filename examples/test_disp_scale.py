@@ -15,11 +15,9 @@ Usage:
     python examples/test_disp_scale.py          # offline kernel comparison
     python examples/test_disp_scale.py --live    # also run against live server
 """
-import json
 import sys
 import os
 import argparse
-from typing import Any, Dict, List, Optional
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -56,8 +54,6 @@ def run_offline_comparison():
     """Run the kernel directly with different DISP_SCALE values."""
     from torment_service.memory_kernel import TriOctaMemoryKernel
     from torment_service.kernel.model_core import ModelParams
-    from torment_service.embeddings import Embedder, HashEmbedding
-
     # Try to use the ST embedder if available
     embedder = None
     try:

@@ -27,10 +27,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt

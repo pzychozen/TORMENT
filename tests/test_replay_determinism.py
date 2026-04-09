@@ -17,8 +17,6 @@ Tier 3: Collective-disabled replay
 import os, json, subprocess, sys
 from pathlib import Path
 
-import pytest
-
 
 def _run(cmd, env=None):
     p = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

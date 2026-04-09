@@ -17,7 +17,6 @@ import unittest
 from torment_service.collective_proposals import (
     ConvergencePersistenceTracker,
     CollectiveProposalBridge,
-    ProposalDraftResult,
 )
 from torment_service.pathing import safe_slug
 

@@ -177,7 +177,6 @@ def cluster_delta_kz(history, frac_of_max=0.5, n_clusters=3):
             f"(Δt ≈ {t_end - t_start:.3f})"
         )
     else:
-        t_start, t_end = None, None
         print("\nNo strong Δ(κ, Z) steps detected under current settings.")
 
     # ----- Plots for intuition / paper -----

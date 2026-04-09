@@ -75,7 +75,7 @@ class TestTraceSRGParity(unittest.TestCase):
             eids=[eid],
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertAlmostEqual(explain.get("srg_same_band_bonus"), 1.08, places=4)
@@ -100,7 +100,7 @@ class TestTraceSRGParity(unittest.TestCase):
             eids=[eid],
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertAlmostEqual(explain.get("srg_same_band_bonus"), 1.0, places=4)
@@ -125,7 +125,7 @@ class TestTraceSRGParity(unittest.TestCase):
             eids=[eid],
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertAlmostEqual(explain.get("srg_same_band_bonus"), 1.0, places=4)
@@ -164,8 +164,8 @@ class TestTraceSRGParity(unittest.TestCase):
 
         items_no = t_no_srg.get("items", [])
         items_yes = t_srg.get("items", [])
-        self.assertTrue(len(items_no) >= 1)
-        self.assertTrue(len(items_yes) >= 1)
+        self.assertGreaterEqual(len(items_no), 1)
+        self.assertGreaterEqual(len(items_yes), 1)
 
         score_no = items_no[0]["final_score"]
         score_yes = items_yes[0]["final_score"]
@@ -206,7 +206,7 @@ class TestTraceSRGParity(unittest.TestCase):
             eids=[eid],
         )
         items = t.get("items", [])
-        self.assertTrue(len(items) >= 1)
+        self.assertGreaterEqual(len(items), 1)
 
         explain = items[0].get("explain", {})
         self.assertAlmostEqual(explain.get("srg_same_band_bonus"), 1.0, places=4)
@@ -229,7 +229,7 @@ class TestTraceSRGParity(unittest.TestCase):
             eids=[eid2],
         )
         items2 = t2.get("items", [])
-        self.assertTrue(len(items2) >= 1)
+        self.assertGreaterEqual(len(items2), 1)
 
         explain2 = items2[0].get("explain", {})
         self.assertAlmostEqual(explain2.get("srg_same_band_bonus"), 1.0, places=4)
