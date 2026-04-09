@@ -65,7 +65,7 @@ Reduce or disable:
 ### "Compression not firing"
 Compression requires `TORMENT_COMPRESS_ENABLE=1` and a corridor transition event. If the kernel stays in a stable corridor forever, compression won't trigger.
 - `TORMENT_COMPRESS_ENABLE=1` — master switch (default `0`)
-- `TORMENT_COMPRESS_MIN_STEP=50` — earliest step for compression (lower for faster start)
+- `TORMENT_COMPRESS_MIN_STEP=100` — earliest step for compression (lower for faster start)
 - `TORMENT_COMPRESS_MIN_AGE=50` — minimum memory age before eligible (lower for more aggressive compression)
 
 ### "Too many memories compressed"
@@ -85,7 +85,7 @@ Spirit return has no dedicated env vars — it activates automatically when `TOR
 
 - **WARMTH_FLOOR** (0.2): starting warmth for first retrieval. Lower = colder initial returns.
 - **WARMTH_INCREMENT** (0.15): warmth gained per retrieval within the window. Lower = slower warm-up.
-- **WARMTH_WINDOW_STEPS** (200): retrieval must happen within this window to count. Larger = more forgiving.
+- **WARMTH_WINDOW_STEPS** (400): retrieval must happen within this window to count. Larger = more forgiving.
 - **WARMTH_CAP** (1.0): maximum warmth. Could lower if returns feel too strong.
 - **SUSTAINED_CORRIDOR_THRESHOLD** (10): corridor duration needed for warmth floor boost. Lower = easier boost.
 - **SUSTAINED_WARMTH_FLOOR** (0.3): boosted warmth floor for sustained memories.

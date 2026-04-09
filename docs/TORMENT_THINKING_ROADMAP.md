@@ -1,5 +1,7 @@
 # TORMENT Thinking Layer Roadmap
 
+**Status:** Phase 1 (Cognitive Core) is **implemented** — `thinking_controller.py`, `thinking_models.py`, and `stance_policy.py` are live. Phase 2 (Embodied / Live Agent) remains future work.
+
 ## Purpose
 
 Strengthen TORMENT’s internal cognition so it can:
