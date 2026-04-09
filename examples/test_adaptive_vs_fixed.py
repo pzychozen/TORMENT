@@ -49,7 +49,6 @@ class AdaptiveKernel(TriOctaMemoryKernel):
         self._window = window                # rolling window size
         self._warmup = warmup                # steps before full adaptive
         self._fallback = fallback            # fixed scale during warmup
-        self._last_effective_scale = fallback
 
     def _effective_disp_scale(self, disp: float) -> float:
         buf = self._disp_buffer

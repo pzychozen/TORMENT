@@ -43,9 +43,6 @@ from torment_service.promotion import (
 def _tmp():
     return tempfile.mkdtemp(prefix="torment_p5_test_")
 
-# Trusted root for checkpoint path-containment checks in tests.
-_BASE_DIR = tempfile.gettempdir()
-
 
 def _make_model_state():
     """Create a ModelState with realistic values."""
