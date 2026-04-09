@@ -1526,19 +1526,19 @@ let hivemindDomains = ['research', 'engineering', 'creative', 'operations', 'met
 let hivemindAgents = [];
 
 const driftMap = {
-  0: { label: 'locked', threshold: 0.05, value: 0.05 },
-  1: { label: 'conservative', threshold: 0.10, value: 0.10 },
-  2: { label: 'moderate', threshold: 0.20, value: 0.20 },
-  3: { label: 'permissive', threshold: 0.35, value: 0.35 },
-  4: { label: 'free', threshold: 0.50, value: 0.50 }
+  0: { label: 'locked', threshold: 0.10, value: 0.10 },
+  1: { label: 'conservative', threshold: 0.20, value: 0.20 },
+  2: { label: 'default', threshold: 0.35, value: 0.35 },
+  3: { label: 'permissive', threshold: 0.50, value: 0.50 },
+  4: { label: 'free', threshold: 0.70, value: 0.70 }
 };
 
 const gravityMap = {
   0: { label: 'none', value: 0 },
-  1: { label: 'gentle', value: 0.3 },
-  2: { label: 'default', value: 0.6 },
-  3: { label: 'strong', value: 0.85 },
-  4: { label: 'absolute', value: 1.0 }
+  1: { label: 'gentle', value: 0.05 },
+  2: { label: 'default', value: 0.12 },
+  3: { label: 'strong', value: 0.35 },
+  4: { label: 'locked', value: 0.85 }
 };
 
 const overlayMap = {
@@ -1811,7 +1811,7 @@ function updateDrift(v) {
   document.getElementById('drift-desc').textContent = 'Threshold: ' + d.threshold + ' — ' +
     (v === '0' ? 'Character stays locked to seed description.' :
      v === '1' ? 'Conservative. Character grows slowly, returns quickly to seed.' :
-     v === '2' ? 'Moderate. Character grows naturally, returns to seed when drifting too far.' :
+     v === '2' ? 'Default. Character grows naturally, returns to seed when drifting too far.' :
      v === '3' ? 'Permissive. Character evolves freely, seed is a gentle guide.' :
      'Free to evolve. Seed is minimal influence.');
 }
@@ -1824,7 +1824,7 @@ function updateGravity(v) {
      v === '1' ? 'Gentle nudge toward seed. Character can deviate significantly.' :
      v === '2' ? 'Balanced. Character feels grounded but not rigid.' :
      v === '3' ? 'Strong pull back to seed. Character innovations are minor.' :
-     'Absolute return to seed on each cycle. No personality drift.');
+     'Near-absolute return to seed. Character stays locked to original identity.');
 }
 
 function updateOverlay(key, v) {
@@ -2035,13 +2035,14 @@ function generateSolo() {
   const nbVal = overlayMap.nb[document.getElementById('nb-slider').value].val;
   const msVal = overlayMap.ms[document.getElementById('ms-slider').value].val;
 
+  // NOTE: fabric.py uses seed_id as the character display name internally.
+  // character_name is stored in the seed dict but not read by the engine.
   const agentPayload = {
     workspace_id: wsId,
     agent_id: agentId,
     seed: {
       seed_text: seed,
       seed_id: seedId,
-      character_name: name,
       drift_correction_threshold: driftVal.threshold,
       drift_gravity_strength: gravVal.value,
       coupling_mode: "read_only",
@@ -2053,6 +2054,7 @@ function generateSolo() {
   }
 
   document.getElementById('out-agent').textContent =
+    '# Display name in the engine = seed_id ("' + seedId + '")\n' +
     'curl -X POST ' + BASE + '/agent/create \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(agentPayload, null, 2) + '\'';
 
   // ── STEP 3: Env Config ──
@@ -2092,23 +2094,26 @@ function generateSolo() {
     const srgVars = [{key: 'TORMENT_SRG_ENABLE', val: '1'}];
     let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.';
 
+    // NOTE: TORMENT_SRG_BANDS, TORMENT_SRG_CLASS_A_RATIO, and TORMENT_SRG_CRYSTAL
+    // are NOT yet read by srg_engine.py. Values are hardcoded in the engine:
+    //   DEFAULT_NUM_BANDS=5, CLASS_A_RATIO=0.25.
+    // These env vars are emitted as comments so users know future versions may support them.
     const srgBands = document.getElementById('srg-bands')?.value || '5';
     if (srgBands !== '5') {
-      srgVars.push({key: 'TORMENT_SRG_BANDS', val: srgBands});
+      srgNote += '\n# TORMENT_SRG_BANDS=' + srgBands + '  (NOT YET WIRED — engine uses 5)';
     }
 
     const hbBias = document.getElementById('srg-heartbeat')?.value;
     if (hbBias === 'deep') {
-      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.6'});
-      srgNote += '\n# Heartbeat bias: deep (60% Class A).';
+      srgNote += '\n# TORMENT_SRG_CLASS_A_RATIO=0.6  (NOT YET WIRED — engine uses 0.25)';
+      srgNote += '\n# Heartbeat bias: deep (60% Class A) — pending engine support.';
     } else if (hbBias === 'active') {
-      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.1'});
-      srgNote += '\n# Heartbeat bias: active (90% Class B).';
+      srgNote += '\n# TORMENT_SRG_CLASS_A_RATIO=0.1  (NOT YET WIRED — engine uses 0.25)';
+      srgNote += '\n# Heartbeat bias: active (90% Class B) — pending engine support.';
     }
 
     if (!features.crystal) {
-      srgVars.push({key: 'TORMENT_SRG_CRYSTAL', val: '0'});
-      srgNote += '\n# Crystal protection disabled.';
+      srgNote += '\n# TORMENT_SRG_CRYSTAL=0  (NOT YET WIRED — crystal is always active when SRG is on)';
     }
 
     envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});
@@ -2119,13 +2124,16 @@ function generateSolo() {
   let cogNote = '';
   const anyCog = Object.values(cognitionCaps).some(v => v);
   if (anyCog) {
-    if (cognitionCaps['cog-spine'])      cogVars.push({key: 'TORMENT_SPINE_ENABLE', val: '1'});
+    // Only emit env vars that the engine actually reads.
+    // TORMENT_SPINE_ENABLE, TORMENT_IDENTITY_SENSITIVE, TORMENT_SRG_COGNITION,
+    // TORMENT_ARCHIVE_RECALL, and TORMENT_LIVE_SOCIAL are NOT yet wired.
+    if (cognitionCaps['cog-spine'])      cogVars.push({key: '# TORMENT_SPINE_ENABLE', val: '1  (NOT YET WIRED)'});
     if (cognitionCaps['cog-thinking'])   cogVars.push({key: 'TORMENT_THINKING_ADVISORY', val: '1'});
-    if (cognitionCaps['cog-identity'])   cogVars.push({key: 'TORMENT_IDENTITY_SENSITIVE', val: '1'});
+    if (cognitionCaps['cog-identity'])   cogVars.push({key: '# TORMENT_IDENTITY_SENSITIVE', val: '1  (NOT YET WIRED)'});
     if (cognitionCaps['cog-collective']) cogVars.push({key: 'TORMENT_HIVEMIND_ENABLE', val: '1'});
-    if (cognitionCaps['cog-srg'])        cogVars.push({key: 'TORMENT_SRG_COGNITION', val: '1'});
-    if (cognitionCaps['cog-archive'])    cogVars.push({key: 'TORMENT_ARCHIVE_RECALL', val: '1'});
-    if (cognitionCaps['cog-livesocial']) cogVars.push({key: 'TORMENT_LIVE_SOCIAL', val: '1'});
+    if (cognitionCaps['cog-srg'])        cogVars.push({key: '# TORMENT_SRG_COGNITION', val: '1  (NOT YET WIRED)'});
+    if (cognitionCaps['cog-archive'])    cogVars.push({key: '# TORMENT_ARCHIVE_RECALL', val: '1  (NOT YET WIRED)'});
+    if (cognitionCaps['cog-livesocial']) cogVars.push({key: '# TORMENT_LIVE_SOCIAL', val: '1  (NOT YET WIRED)'});
     if (cognitionCaps['cog-abstention']) cogVars.push({key: 'TORMENT_CONTEXTUAL_ABSTENTION', val: '1'});
     cogNote = '# Advanced Cognition — runtime capabilities (advisory, non-mandatory).';
     envParts.push({comment: 'Advanced Cognition', vars: cogVars, note: cogNote});
@@ -2441,7 +2449,8 @@ function generateHivemind() {
   document.getElementById('out-workspace').textContent =
     'curl -X POST ' + BASE + '/workspace/create \\\n' +
     '  -H "Content-Type: application/json" \\\n' +
-    '  -d \'{"workspace_id": "' + wsId + '", "domains": ' + domainsJson + ', "hivemind": true}\'';
+    '  -d \'{"workspace_id": "' + wsId + '", "domains": ' + domainsJson + '}\'\n\n' +
+    '# NOTE: Hivemind is enabled via env var TORMENT_HIVEMIND_ENABLE=1, not the workspace payload.';
 
   // ── STEP 2: Create multiple agents ──
   let agentCmds = '# Create ' + hivemindAgents.length + ' agents in collective\n\n';
@@ -2450,17 +2459,16 @@ function generateHivemind() {
     const agentId = agent.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     const seedId = agentId + '_v1';
 
+    // NOTE: fabric.py only reads seed_text, seed_id, coupling_mode, coupling_strength
+    // from the seed dict. role/primary_domain/character_name are stored but not used by engine.
     const payload = {
       workspace_id: wsId,
       agent_id: agentId,
       seed: {
         seed_text: agent.seed,
         seed_id: seedId,
-        character_name: agent.name,
-        role: agent.role,
-        primary_domain: agent.domain,
-        drift_correction_threshold: 0.25,
-        drift_gravity_strength: 0.15,
+        drift_correction_threshold: 0.35,
+        drift_gravity_strength: 0.12,
         coupling_mode: "read_only",
         coupling_strength: 0.25
       }
@@ -2636,7 +2644,7 @@ function generateHivemind() {
   integrationText += '# Runs through 7-gate policy engine. Echo is terminal (cannot re-emit).\n\n';
 
   integrationText += '# ── 5. Check agent health ──\n';
-  integrationText += 'curl "' + BASE + '/agent/' + exAgent1 + '/self-state?workspace_id=' + wsId + '"\n\n';
+  integrationText += 'curl "' + BASE + '/agent/' + exAgent1 + '/character/state?workspace_id=' + wsId + '"\n\n';
 
   integrationText += '# ── 6. Proposal bridge status ──\n';
   integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/proposals/status\n\n';
@@ -2808,9 +2816,9 @@ function generateHivemind() {
   pyScript += '        print("ERROR: TORMENT server not reachable at", TORMENT)\n';
   pyScript += '        print("Start it first:  python -m torment_service")\n';
   pyScript += '        sys.exit(1)\n\n';
-  pyScript += '    # Create workspace with domains and hivemind enabled\n';
+  pyScript += '    # Create workspace with domains (hivemind enabled via TORMENT_HIVEMIND_ENABLE=1 env var)\n';
   pyScript += '    r = requests.post(f"{TORMENT}/workspace/create", json={\n';
-  pyScript += '        "workspace_id": WS, "domains": DOMAINS, "hivemind": True,\n';
+  pyScript += '        "workspace_id": WS, "domains": DOMAINS,\n';
   pyScript += '    })\n';
   pyScript += '    print(f"Workspace \\"{WS}\\" — {r.status_code}")\n\n';
   pyScript += '    # Create each agent with seed\n';
@@ -2821,11 +2829,8 @@ function generateHivemind() {
   pyScript += '            "seed": {\n';
   pyScript += '                "seed_text": agent["seed"],\n';
   pyScript += '                "seed_id": agent["agent_id"] + "_v1",\n';
-  pyScript += '                "character_name": agent["name"],\n';
-  pyScript += '                "role": agent["role"],\n';
-  pyScript += '                "primary_domain": agent["domain"],\n';
-  pyScript += '                "drift_correction_threshold": 0.25,\n';
-  pyScript += '                "drift_gravity_strength": 0.15,\n';
+  pyScript += '                "drift_correction_threshold": 0.35,\n';
+  pyScript += '                "drift_gravity_strength": 0.12,\n';
   pyScript += '                "coupling_mode": "read_only",\n';
   pyScript += '                "coupling_strength": 0.25,\n';
   pyScript += '            },\n';
