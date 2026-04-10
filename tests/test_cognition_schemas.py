@@ -10,7 +10,7 @@ Tests for:
     - RoutingDecision: creation, aperture/scope validation, round-trip
     - ReintegrationResult: creation, dissent tracking, nested round-trip
 
-See AGENT_SPINE_PLAN.md §11 Patch 1: "serialization round-trips, default values,
+See docs/archive/AGENT_SPINE_PLAN.md §11 Patch 1: "serialization round-trips, default values,
 provenance chain validation."
 """
 from __future__ import annotations

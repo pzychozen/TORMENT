@@ -51,7 +51,7 @@ Process: one document at a time, read it, compare against code, test what's rele
 
 ## docs/archive/
 
-- [x] AGENT_SPINE_PLAN.md
+- [x] docs/archive/AGENT_SPINE_PLAN.md
 - [x] DISP_SCALE_data_for_recalibration.md
 - [x] HIVEMIND_IMPLEMENTATION_PLAN.md
 - [x] MCP_INTEGRATION_AUDIT.md
@@ -351,7 +351,7 @@ Process: one document at a time, read it, compare against code, test what's rele
 
 All 11 archive documents reviewed. Key findings:
 
-- **AGENT_SPINE_PLAN.md** — Implementation spec for cognition pipeline (v0.1). Current guidance doc.
+- **docs/archive/AGENT_SPINE_PLAN.md** — Implementation spec for cognition pipeline (v0.1). Current guidance doc.
 - **DISP_SCALE_data_for_recalibration.md** — Superseded by adaptive DISP_SCALE (k=2.0).
 - **HIVEMIND_IMPLEMENTATION_PLAN.md** — 4-phase roadmap. Current guidance.
 - **MCP_INTEGRATION_AUDIT.md** — Technical audit for MCP design prerequisites. Current reference.

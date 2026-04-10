@@ -8,7 +8,7 @@ Tests for:
     - Memory context builder: mock query integration, error resilience
     - Serialization round-trips for MemoryContext
 
-See AGENT_SPINE_PLAN.md §6 (router policy), §8 (aperture builder), §11 Patch 2.
+See docs/archive/AGENT_SPINE_PLAN.md §6 (router policy), §8 (aperture builder), §11 Patch 2.
 """
 from __future__ import annotations
 

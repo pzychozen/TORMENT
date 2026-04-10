@@ -6,7 +6,7 @@ TaskPacket     — incoming request context
 RoutingDecision — router output: which roles, what aperture, what constraints
 ReintegrationResult — merged output from the reintegration membrane
 
-See AGENT_SPINE_PLAN.md §5 for contract definitions and §15 for resolved
+See docs/archive/AGENT_SPINE_PLAN.md §5 for contract definitions and §15 for resolved
 design decisions.
 """
 from __future__ import annotations
@@ -94,7 +94,7 @@ APERTURE_PROTECTED = "protected"
 VALID_APERTURES = frozenset({APERTURE_NARROW, APERTURE_BROAD, APERTURE_PROTECTED})
 
 # Valid archival scopes — max eligible destination for archivist-approved writes.
-# Roles never write directly. (AGENT_SPINE_PLAN.md §15, tightening #1)
+# Roles never write directly. (docs/archive/AGENT_SPINE_PLAN.md §15, tightening #1)
 SCOPE_NONE = "none"
 SCOPE_PRIVATE = "private"
 VALID_ARCHIVAL_SCOPES = frozenset({SCOPE_NONE, SCOPE_PRIVATE})

@@ -3,7 +3,7 @@
 # These dataclasses define the communication protocol between cognition
 # components.  They are intentionally simple and serializable.
 #
-# See AGENT_SPINE_PLAN.md §5 for the design rationale.
+# See docs/archive/AGENT_SPINE_PLAN.md §5 for the design rationale.
 
 from .provenance import Provenance
 from .drift_report import DriftReport
