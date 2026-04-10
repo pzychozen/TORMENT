@@ -123,7 +123,6 @@ class QwenInference:
 
     def load(self) -> None:
         """Load model and tokenizer into memory."""
-        torch = _load_torch()
         AutoTokenizer, AutoModelForCausalLM = _load_transformers()
 
         log.info("Loading tokenizer from %s ...", self.model_path)

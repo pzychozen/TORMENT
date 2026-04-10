@@ -15,13 +15,10 @@ Dependencies:
 
 import io
 import os
-import sys
 import time
 import asyncio
 import logging
 import tempfile
-import threading
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -289,7 +286,8 @@ class EdgeTTS:
             data, sr = sf.read(path)
             sd.play(data, sr)
             sd.wait()
-        except Exception:
+        except Exception as exc:
+            log.debug("soundfile/sounddevice playback failed: %s — trying pydub", exc)
             try:
                 from pydub import AudioSegment
                 from pydub.playback import play

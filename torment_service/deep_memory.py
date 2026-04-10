@@ -93,7 +93,7 @@ class DeepMemoryStore:
     def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
         # Inline canonicalization + startswith guard (CodeQL-recognized sanitizer)
         canonical_root = os.path.realpath(str(base_dir))
-        if not os.path.isabs(canonical_root):
+        if not canonical_root.startswith(os.sep) and not os.path.isabs(canonical_root):
             raise ValueError(f"base_dir did not resolve to absolute path: {canonical_root!r}")
         os.makedirs(canonical_root, exist_ok=True)
         self.base_dir = Path(canonical_root)

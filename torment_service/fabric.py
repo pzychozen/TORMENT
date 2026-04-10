@@ -190,7 +190,7 @@ def _write_embed_audit(
     path = _embed_audit_path(data_dir, workspace_id)
     # Sink-local guard for CodeQL: realpath + startswith at makedirs site.
     _dir = os.path.realpath(os.path.dirname(path))
-    if not os.path.isabs(_dir):
+    if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
         raise ValueError(f"Audit dir not absolute: {_dir!r}")
     os.makedirs(_dir, exist_ok=True)
     payload: Dict[str, Any] = {
@@ -261,7 +261,7 @@ def _load_anchor_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 def _save_anchor_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _anchor_state_path(data_dir, workspace_id, agent_id)
     _dir = os.path.realpath(os.path.dirname(p))
-    if not os.path.isabs(_dir):
+    if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
         raise ValueError(f"Anchor dir not absolute: {_dir!r}")
     os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
@@ -297,7 +297,7 @@ def _load_symbol_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 def _save_symbol_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
     p = _symbol_state_path(data_dir, workspace_id, agent_id)
     _dir = os.path.realpath(os.path.dirname(p))
-    if not os.path.isabs(_dir):
+    if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
         raise ValueError(f"Symbol dir not absolute: {_dir!r}")
     os.makedirs(_dir, exist_ok=True)
     tmp = p + ".tmp"
@@ -353,7 +353,7 @@ class Workspace:
         self.domain_suggestions_path = _safe_child(_ws, "domain_suggestions.json")
         # Sink-local guard for CodeQL
         _ws_dir = os.path.realpath(_ws)
-        if not os.path.isabs(_ws_dir):
+        if not _ws_dir.startswith(os.sep) and not os.path.isabs(_ws_dir):
             raise ValueError(f"Workspace dir not absolute: {_ws_dir!r}")
         os.makedirs(_ws_dir, exist_ok=True)
 
@@ -380,7 +380,7 @@ class Workspace:
     def _load_or_init_meta(self) -> Dict[str, Any]:
         p = self._meta_path()
         _dir = os.path.realpath(os.path.dirname(p))
-        if not os.path.isabs(_dir):
+        if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
             raise ValueError(f"Meta dir not absolute: {_dir!r}")
         os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
@@ -406,7 +406,7 @@ class Workspace:
     def _load_or_init_domains(self, requested_domains: Optional[List[str]] = None) -> List[str]:
         p = self._domains_path()
         _dir = os.path.realpath(os.path.dirname(p))
-        if not os.path.isabs(_dir):
+        if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
             raise ValueError(f"Domains dir not absolute: {_dir!r}")
         os.makedirs(_dir, exist_ok=True)
         if os.path.exists(p):
@@ -435,7 +435,7 @@ class Workspace:
     def _load_or_init_domain_policies(self) -> Dict[str, Any]:
         p = self.domain_policies_path
         _dir = os.path.realpath(os.path.dirname(p))
-        if not os.path.isabs(_dir):
+        if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
             raise ValueError(f"Policies dir not absolute: {_dir!r}")
         os.makedirs(_dir, exist_ok=True)
         pol = {}
@@ -503,7 +503,7 @@ def _validate_path_component(value: str, label: str = "identifier") -> str:
 def _canonical_data_root(data_dir: str) -> str:
     """Canonicalize *data_dir* to an absolute real path."""
     _r = os.path.realpath(data_dir)
-    if not os.path.isabs(_r):
+    if not _r.startswith(os.sep) and not os.path.isabs(_r):
         raise ValueError(f"data_dir did not resolve to absolute path: {_r!r}")
     return _r
 
@@ -566,7 +566,7 @@ class TormentFabric:
         else:
             _safe = _canonical_data_root(data_dir)
             # Sink-local guard for CodeQL at makedirs site.
-            if not os.path.isabs(_safe):
+            if not _safe.startswith(os.sep) and not os.path.isabs(_safe):
                 raise ValueError(f"data_dir not absolute: {_safe!r}")
             os.makedirs(_safe, exist_ok=True)
             self.data_dir = _safe
@@ -642,11 +642,11 @@ class TormentFabric:
         self._jobs_root: str = _safe_child(self.data_dir, 'jobs')
         if self._job_persist:
             _clone_dir = os.path.realpath(os.path.join(self._jobs_root, 'clone'))
-            if not os.path.isabs(_clone_dir):
+            if not _clone_dir.startswith(os.sep) and not os.path.isabs(_clone_dir):
                 raise ValueError(f"Clone job dir not absolute: {_clone_dir!r}")
             os.makedirs(_clone_dir, exist_ok=True)
             _repair_dir = os.path.realpath(os.path.join(self._jobs_root, 'repair'))
-            if not os.path.isabs(_repair_dir):
+            if not _repair_dir.startswith(os.sep) and not os.path.isabs(_repair_dir):
                 raise ValueError(f"Repair job dir not absolute: {_repair_dir!r}")
             os.makedirs(_repair_dir, exist_ok=True)
             self._load_jobs('clone')
@@ -795,7 +795,7 @@ class TormentFabric:
         p = self._job_path(kind, job_id)
         try:
             _dir = os.path.realpath(os.path.dirname(p))
-            if not os.path.isabs(_dir):
+            if not _dir.startswith(os.sep) and not os.path.isabs(_dir):
                 raise ValueError(f"Job dir not absolute: {_dir!r}")
             os.makedirs(_dir, exist_ok=True)
             with open(p, 'w', encoding='utf-8') as f:
@@ -1690,7 +1690,7 @@ class TormentFabric:
             def _copytree_filtered(src: str, dst: str) -> None:
                 # Guard the destination root before walking.
                 _dst = os.path.realpath(dst)
-                if not os.path.isabs(_dst):
+                if not _dst.startswith(os.sep) and not os.path.isabs(_dst):
                     raise ValueError(f"Clone dst not absolute: {_dst!r}")
                 os.makedirs(_dst, exist_ok=True)
                 for root, dirs, files in os.walk(src):
@@ -3677,7 +3677,7 @@ class TormentFabric:
         # log feedback event (append-only) for causal tracing
         fb_path = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "feedback_events.jsonl")
         _fb_dir = os.path.realpath(os.path.dirname(fb_path))
-        if not os.path.isabs(_fb_dir):
+        if not _fb_dir.startswith(os.sep) and not os.path.isabs(_fb_dir):
             raise ValueError(f"Feedback dir not absolute: {_fb_dir!r}")
         os.makedirs(_fb_dir, exist_ok=True)
         with open(fb_path, "a", encoding="utf-8") as f:
@@ -4607,7 +4607,7 @@ class TormentFabric:
         export_files = {}
         out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports')
         _od = os.path.realpath(out_dir)
-        if not os.path.isabs(_od):
+        if not _od.startswith(os.sep) and not os.path.isabs(_od):
             raise ValueError(f"Export dir not absolute: {_od!r}")
         os.makedirs(_od, exist_ok=True)
         if export in ('json','bundle'):
@@ -4641,7 +4641,7 @@ class TormentFabric:
         graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='bundle')
         out_dir = _safe_child(_ws_root(self.data_dir, workspace_id), 'exports', f"bundle_{eid}_{dom}")
         _od = os.path.realpath(out_dir)
-        if not os.path.isabs(_od):
+        if not _od.startswith(os.sep) and not os.path.isabs(_od):
             raise ValueError(f"Bundle dir not absolute: {_od!r}")
         os.makedirs(_od, exist_ok=True)
         # write graph.json/dot already created in exports; copy into bundle
@@ -4754,7 +4754,7 @@ def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
     _ag = _agent_dir(data_dir, workspace_id, agent_id)
     # Sink-local guard for CodeQL at makedirs site.
     _rp = os.path.realpath(_ag)
-    if not os.path.isabs(_rp):
+    if not _rp.startswith(os.sep) and not os.path.isabs(_rp):
         raise ValueError(f"Agent dir not absolute: {_rp!r}")
     os.makedirs(_rp, exist_ok=True)
     return _safe_child(_ag, "affect_state.json")

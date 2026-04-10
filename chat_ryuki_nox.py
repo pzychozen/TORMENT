@@ -5,9 +5,7 @@ Run: python chat_ryuki_nox.py
 First run creates workspace + agent automatically.
 Server must be running first (python -m torment_service).
 """
-import os
 import sys
-import json
 import requests
 import anthropic
 

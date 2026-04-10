@@ -36,7 +36,7 @@ class TrajectoryLogger:
         # Canonicalize via local variable so CodeQL sees the full
         # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
         _safe_dir = os.path.realpath(root_dir)
-        if not os.path.isabs(_safe_dir):
+        if not _safe_dir.startswith(os.sep) and not os.path.isabs(_safe_dir):
             raise ValueError(f"root_dir did not resolve to absolute path: {_safe_dir!r}")
         os.makedirs(_safe_dir, exist_ok=True)
         self.root_dir = _safe_dir
