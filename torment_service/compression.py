@@ -894,8 +894,26 @@ def _get_or_create_deep_store(fabric_instance, agent_id: str, workspace_id: str 
         fabric_instance._deep_stores = {}
     if ak not in fabric_instance._deep_stores:
         from .deep_memory import DeepMemoryStore
-        base = Path(fabric_instance.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "deep_memory"
-        fabric_instance._deep_stores[ak] = DeepMemoryStore(base)
+        from .pathing import safe_slug
+
+        # Validate dynamic components before embedding in a path.
+        safe_slug(workspace_id, "workspace_id")
+        safe_slug(agent_id, "agent_id")
+
+        # Build path under the canonical data root and verify containment
+        # (inline startswith is CodeQL's recognised sanitiser).
+        _data_root = os.path.realpath(str(fabric_instance.data_dir))
+        _base = os.path.realpath(os.path.join(
+            _data_root, "workspaces", workspace_id,
+            "agents", agent_id, "deep_memory",
+        ))
+        if not _base.startswith(_data_root + os.sep):
+            raise ValueError(
+                f"Deep memory path escapes data root: {_base!r}"
+            )
+        fabric_instance._deep_stores[ak] = DeepMemoryStore(
+            Path(_base), trusted_root=_data_root,
+        )
     return fabric_instance._deep_stores[ak]
 
 

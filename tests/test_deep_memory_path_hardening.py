@@ -144,5 +144,55 @@ class TestDeepMemoryExportQuery(unittest.TestCase):
         self.assertTrue(s["has_embeddings"])
 
 
+class TestDeepMemoryTrustedRoot(unittest.TestCase):
+    """4b. trusted_root containment prevents path traversal."""
+
+    def test_valid_child_of_trusted_root(self):
+        """Normal path under trusted root works."""
+        with tempfile.TemporaryDirectory() as td:
+            child = os.path.join(td, "agents", "a1", "deep_memory")
+            os.makedirs(child)
+            store = DeepMemoryStore(Path(child), dim=8, trusted_root=td)
+            self.assertTrue(str(store.base_dir).startswith(os.path.realpath(td)))
+
+    def test_traversal_escapes_trusted_root(self):
+        """'../escape' under trusted root raises ValueError."""
+        with tempfile.TemporaryDirectory() as td:
+            inner = os.path.join(td, "inner")
+            os.makedirs(inner)
+            # Attempt to escape inner via ../
+            bad = os.path.join(inner, "..", "escape")
+            with self.assertRaises(ValueError):
+                DeepMemoryStore(Path(bad), dim=8, trusted_root=inner)
+
+    def test_sibling_dir_rejected(self):
+        """A path outside the trusted root is rejected even if absolute."""
+        with tempfile.TemporaryDirectory() as td:
+            trusted = os.path.join(td, "trusted")
+            sibling = os.path.join(td, "sibling")
+            os.makedirs(trusted)
+            os.makedirs(sibling)
+            with self.assertRaises(ValueError):
+                DeepMemoryStore(Path(sibling), dim=8, trusted_root=trusted)
+
+    def test_trusted_root_equal_to_base_dir(self):
+        """trusted_root == base_dir is allowed (root itself)."""
+        with tempfile.TemporaryDirectory() as td:
+            store = DeepMemoryStore(Path(td), dim=8, trusted_root=td)
+            self.assertEqual(
+                str(store.base_dir), os.path.realpath(td),
+            )
+
+    def test_nested_slash_in_component_rejected(self):
+        """Paths with embedded slashes that resolve outside root are rejected."""
+        with tempfile.TemporaryDirectory() as td:
+            # realpath resolves ".." so the result is outside td/inner
+            inner = os.path.join(td, "inner")
+            os.makedirs(inner)
+            bad = os.path.join(inner, "..", "..", "tmp", "pwned")
+            with self.assertRaises(ValueError):
+                DeepMemoryStore(Path(bad), dim=8, trusted_root=inner)
+
+
 if __name__ == "__main__":
     unittest.main()

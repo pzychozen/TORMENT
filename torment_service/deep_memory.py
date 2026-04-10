@@ -90,14 +90,35 @@ class DeepMemoryStore:
       - stats(): store statistics
     """
 
-    def __init__(self, base_dir: Path, dim: int = DEFAULT_DIM) -> None:
-        # Inline canonicalization + absolute-path guard.
-        # startswith(os.sep) is the CodeQL-recognized sanitizer; os.path.isabs()
-        # catches Windows drive-letter paths (e.g. C:\data) where os.sep == '\\'
-        # but the path does not start with a bare separator.
+    def __init__(
+        self,
+        base_dir: Path,
+        dim: int = DEFAULT_DIM,
+        *,
+        trusted_root: str = "",
+    ) -> None:
         canonical_root = os.path.realpath(str(base_dir))
-        if not canonical_root.startswith(os.sep) and not os.path.isabs(canonical_root):
+
+        # ---- sink-local containment guard --------------------------------
+        # CodeQL requires an *inline* ``startswith(… + os.sep)`` before every
+        # filesystem sink so the taint tracker can verify the path stays
+        # inside a trusted directory.  When the caller supplies a
+        # ``trusted_root`` (the canonical data-dir), we verify containment;
+        # otherwise we fall back to an absolute-path assertion.
+        if trusted_root:
+            _trust = os.path.realpath(trusted_root)
+            if canonical_root != _trust and not canonical_root.startswith(
+                _trust + os.sep
+            ):
+                raise ValueError(
+                    f"base_dir escapes trusted root: {canonical_root!r}"
+                )
+        if not canonical_root.startswith(os.sep) and not os.path.isabs(
+            canonical_root
+        ):
             raise ValueError(f"base_dir not absolute: {canonical_root!r}")
+        # ------------------------------------------------------------------
+
         os.makedirs(canonical_root, exist_ok=True)
         self.base_dir = Path(canonical_root)
 
