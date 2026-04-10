@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 
 SOURCE_USER_INPUT   = "user_input"
 SOURCE_ROLE_OUTPUT  = "role_output"
+# NOTE: These are intentionally retained as schema states.
+# They may be produced by future/interop flows even if current producers are limited.
 SOURCE_DERIVED      = "derived"
 SOURCE_MEMORY       = "memory"
 SOURCE_TOOL_RESULT      = "tool_result"
@@ -42,6 +44,8 @@ VALID_SOURCE_TYPES = frozenset({
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
 WRITE_COGNITION_WRITEBACK = "cognition_writeback"
+# NOTE: Reserved write paths remain valid for forward compatibility and
+# migration/import workflows. Do not remove without provenance migration plan.
 WRITE_REFLECTION_WRITEBACK = "reflection_writeback"
 WRITE_TOOL_INGEST         = "tool_ingest"
 WRITE_MIGRATION           = "migration"

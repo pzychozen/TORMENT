@@ -42,12 +42,13 @@ Status update (April 10, 2026):
 
 ### Next pick (recommended immediate task)
 
-Do a focused decision pass on the unused provenance constants:
-- classify each constant/value as **keep (future roadmap)** vs **deprecate now**
-- if kept, add a one-line "reserved for future use" note where declared
-- if deprecated, remove with targeted tests
+Do a focused provenance-intent pass on the currently unconnected constants:
+- confirm intended semantic role for each constant/value
+- document where each should be produced and consumed
+- wire the missing paths where intended behavior already exists
+- keep constants that represent valid future/interop states (do not delete blindly)
 
-Goal: reduce ambiguity and keep provenance contracts explicit before broader security hardening.
+Goal: reduce ambiguity, preserve provenance intent, and connect intended states before broader security hardening.
 
 ---
 
