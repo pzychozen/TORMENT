@@ -277,8 +277,8 @@ class EdgeTTS:
         finally:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                log.debug("Temp file cleanup failed: %s", exc)
 
     def _play_audio(self, path: str) -> None:
         try:
