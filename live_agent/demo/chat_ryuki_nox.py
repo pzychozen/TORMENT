@@ -1,15 +1,25 @@
 """
-TORMENT Integration — Ryuki Nox
-Run: python chat_ryuki_nox.py
+TORMENT Integration — Ryuki Nox demo
+
+Run:
+    py -3 live_agent/demo/chat_ryuki_nox.py
 
 First run creates workspace + agent automatically.
-Server must be running first (python -m torment_service).
+TORMENT server must be running first:
+    py -3 -m torment_service
+
+The TORMENT server URL is environment-configurable via TORMENT_URL
+(default: http://127.0.0.1:8787). Override when the server lives
+somewhere other than localhost on the default port:
+    set TORMENT_URL=http://192.168.1.50:8787   (Windows cmd)
+    $env:TORMENT_URL="http://192.168.1.50:8787" (PowerShell)
 """
+import os
 import sys
 import requests
 import anthropic
 
-TORMENT = "http://127.0.0.1:8787"
+TORMENT = os.environ.get("TORMENT_URL", "http://127.0.0.1:8787")
 WS = "ryuki_nox"
 AGENT = "ryuki_nox"
 
@@ -28,7 +38,8 @@ def setup():
         r.raise_for_status()
     except Exception:
         print("ERROR: TORMENT server not reachable at", TORMENT)
-        print("Start it first:  python -m torment_service")
+        print("Start it first:  py -3 -m torment_service")
+        print("Or set TORMENT_URL to point at a running instance.")
         sys.exit(1)
 
     r = requests.post(f"{TORMENT}/workspace/create", json={
@@ -101,7 +112,7 @@ def main():
         system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)
 
         resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             max_tokens=1024,
             system=system_prompt,
             messages=messages + [{"role": "user", "content": user_input}],

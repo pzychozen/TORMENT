@@ -164,11 +164,20 @@ def recursion_guard_check(
         if "archivist" in source_role:
             return False, REASON_ARCHIVIST_BLOCKED
 
-        # Explicit rejected source_types (collective_echo, derived).
-        if source_type == "collective_echo":
-            return False, REASON_COLLECTIVE_ECHO
-        if source_type == "derived":
-            return False, REASON_DERIVED
+        # Explicit rejected source_types. The set itself is the single
+        # source of truth (see ``_REJECTED_SOURCE_TYPES_IN_WALK`` above and
+        # ``docs/RECURSION_GUARD_TUNING_v2.4.x.md §3``). Each known member
+        # has its own specific REASON_* so logs/metrics stay informative.
+        # Any future member added to the set without a matching REASON_*
+        # branch falls through fail-closed with REASON_UNSAFE_SOURCE_TYPE,
+        # which keeps the set load-bearing rather than a documentation
+        # shim.
+        if source_type in _REJECTED_SOURCE_TYPES_IN_WALK:
+            if source_type == "collective_echo":
+                return False, REASON_COLLECTIVE_ECHO
+            if source_type == "derived":
+                return False, REASON_DERIVED
+            return False, REASON_UNSAFE_SOURCE_TYPE
 
         # General safe-set check.
         if source_type not in _SAFE_SOURCE_TYPES_IN_WALK:
