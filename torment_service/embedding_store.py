@@ -110,7 +110,7 @@ class EmbeddingShardWriter:
         # Canonicalize via local variable so CodeQL sees the full
         # realpath ➜ startswith ➜ makedirs chain without attribute indirection.
         _safe_dir = os.path.realpath(embeddings_dir)
-        if not _safe_dir.startswith(os.sep):
+        if not os.path.isabs(_safe_dir):
             raise ValueError(f"embeddings_dir did not resolve to absolute path: {_safe_dir!r}")
         os.makedirs(_safe_dir, exist_ok=True)
         self.embeddings_dir = _safe_dir

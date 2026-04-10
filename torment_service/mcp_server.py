@@ -432,37 +432,40 @@ def create_mcp_server() -> FastMCP:
             name="torment_feedback",
             description=(
                 "Provide reinforcement feedback on previously retrieved memories. "
-                "Tell the system which memories were useful, confirmed by the user, "
-                "or contradicted. This shapes future retrieval ranking."
+                "Pass the memory IDs and indicate whether they were useful and/or "
+                "confirmed correct. This shapes future retrieval ranking."
             ),
         )
         def torment_feedback(
-            retrieved_ids: str = "[]",
-            used_successfully: str = "[]",
-            user_confirmed: str = "[]",
-            contradiction_detected: str = "[]",
+            memory_ids: str = "[]",
+            useful: bool = True,
+            confirmed: bool = False,
+            contradicted: bool = False,
             workspace_id: str = "",
             agent_id: str = "",
         ) -> str:
             """Provide reinforcement feedback.
 
             Args:
-                retrieved_ids: JSON array of memory IDs that were retrieved
-                used_successfully: JSON array of memory IDs that were useful
-                user_confirmed: JSON array of memory IDs confirmed correct
-                contradiction_detected: JSON array of contradicted memory IDs
+                memory_ids: JSON array of memory IDs (ints) from retrieval results
+                useful: Were these memories useful in the response?
+                confirmed: Did the user confirm these memories are correct?
+                contradicted: Were any of these memories contradicted?
                 workspace_id: Target workspace (uses default if empty)
                 agent_id: Target agent (uses default if empty)
             """
             try:
-                payload = {
-                    "retrieved_ids": json.loads(retrieved_ids),
-                    "used_successfully": json.loads(used_successfully),
-                    "user_confirmed": json.loads(user_confirmed),
-                    "contradiction_detected": json.loads(contradiction_detected),
-                }
+                ids = json.loads(memory_ids)
             except json.JSONDecodeError as e:
-                return json.dumps({"ok": False, "reason": f"Invalid JSON in feedback arrays: {e}"})
+                return json.dumps({"ok": False, "reason": f"Invalid JSON in memory_ids: {e}"})
+
+            # Map simplified interface to canonical Spine payload
+            payload = {
+                "retrieved_ids": ids,
+                "used_successfully": ids if useful else [],
+                "user_confirmed": ids if confirmed else [],
+                "contradiction_detected": ids if contradicted else [],
+            }
 
             result = _spine_call("feedback", payload,
                                  workspace_id=workspace_id or None,

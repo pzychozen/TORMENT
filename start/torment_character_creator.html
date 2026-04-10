@@ -1164,8 +1164,8 @@
     <div class="toggle-row" id="toggle-cog-livesocial" onclick="toggleFeature('cog-livesocial')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
-        <div class="toggle-label">Live-Social Mode Ready</div>
-        <div class="toggle-desc">Prepare the character for live transcript and audio conversational contexts. Enables fast-path social routing with minimal latency overhead.</div>
+        <div class="toggle-label">Live-Social Compact Mode</div>
+        <div class="toggle-desc">Enable compact response mode for live conversational contexts (voice, spaces, audio). Reduces token budget and depth for faster, shorter replies.</div>
       </div>
     </div>
 
@@ -1478,6 +1478,15 @@
       </div>
       <div class="output-body" id="out-loop-curl"></div>
       <div class="output-body" id="out-loop-python" style="display:none"></div>
+    </div>
+
+    <!-- VOICE PIPELINE (optional, shown when Live-Social is enabled) -->
+    <div id="output-voice" class="output-block" style="display:none">
+      <div class="output-header">
+        <span class="output-title">OPTIONAL — VOICE PIPELINE</span>
+        <button class="btn-copy" onclick="copyBlock('out-voice',this)">copy</button>
+      </div>
+      <div class="output-body" id="out-voice"></div>
     </div>
 
     <!-- REFERENCE -->
@@ -1993,7 +2002,9 @@ function generate() {
 
 function generateSolo() {
   const name = document.getElementById('char-name').value.trim();
-  const wsId = document.getElementById('workspace-id').value.trim() || 'ws1';
+  const wsId = document.getElementById('workspace-id').value.trim()
+    || name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9_]/g, '')
+    || 'ws1';
   const seed = document.getElementById('seed-text').value.trim();
 
   if (!name) { alert('Enter a character name.'); return; }
@@ -2035,14 +2046,13 @@ function generateSolo() {
   const nbVal = overlayMap.nb[document.getElementById('nb-slider').value].val;
   const msVal = overlayMap.ms[document.getElementById('ms-slider').value].val;
 
-  // NOTE: fabric.py uses seed_id as the character display name internally.
-  // character_name is stored in the seed dict but not read by the engine.
   const agentPayload = {
     workspace_id: wsId,
     agent_id: agentId,
     seed: {
       seed_text: seed,
       seed_id: seedId,
+      character_name: name,
       drift_correction_threshold: driftVal.threshold,
       drift_gravity_strength: gravVal.value,
       coupling_mode: "read_only",
@@ -2054,7 +2064,7 @@ function generateSolo() {
   }
 
   document.getElementById('out-agent').textContent =
-    '# Display name in the engine = seed_id ("' + seedId + '")\n' +
+    '# Display name: "' + name + '" (seed_id: "' + seedId + '")\n' +
     'curl -X POST ' + BASE + '/agent/create \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(agentPayload, null, 2) + '\'';
 
   // ── STEP 3: Env Config ──
@@ -2121,16 +2131,13 @@ function generateSolo() {
   let cogNote = '';
   const anyCog = Object.values(cognitionCaps).some(v => v);
   if (anyCog) {
-    // Only emit env vars that the engine actually reads.
-    // TORMENT_SPINE_ENABLE, TORMENT_IDENTITY_SENSITIVE, TORMENT_SRG_COGNITION,
-    // TORMENT_ARCHIVE_RECALL, and TORMENT_LIVE_SOCIAL are NOT yet wired.
-    if (cognitionCaps['cog-spine'])      cogVars.push({key: '# TORMENT_SPINE_ENABLE', val: '1  (NOT YET WIRED)'});
+    if (cognitionCaps['cog-spine'])      cogVars.push({key: 'TORMENT_SPINE_ENABLE', val: '1'});
     if (cognitionCaps['cog-thinking'])   cogVars.push({key: 'TORMENT_THINKING_ADVISORY', val: '1'});
-    if (cognitionCaps['cog-identity'])   cogVars.push({key: '# TORMENT_IDENTITY_SENSITIVE', val: '1  (NOT YET WIRED)'});
+    if (cognitionCaps['cog-identity'])   cogVars.push({key: 'TORMENT_IDENTITY_SENSITIVE', val: '1'});
     if (cognitionCaps['cog-collective']) cogVars.push({key: 'TORMENT_HIVEMIND_ENABLE', val: '1'});
-    if (cognitionCaps['cog-srg'])        cogVars.push({key: '# TORMENT_SRG_COGNITION', val: '1  (NOT YET WIRED)'});
-    if (cognitionCaps['cog-archive'])    cogVars.push({key: '# TORMENT_ARCHIVE_RECALL', val: '1  (NOT YET WIRED)'});
-    if (cognitionCaps['cog-livesocial']) cogVars.push({key: '# TORMENT_LIVE_SOCIAL', val: '1  (NOT YET WIRED)'});
+    if (cognitionCaps['cog-srg'])        cogVars.push({key: 'TORMENT_SRG_COGNITION', val: '1'});
+    if (cognitionCaps['cog-archive'])    cogVars.push({key: 'TORMENT_ARCHIVE_RECALL', val: '1'});
+    if (cognitionCaps['cog-livesocial']) cogVars.push({key: 'TORMENT_LIVE_SOCIAL', val: '1'});
     if (cognitionCaps['cog-abstention']) cogVars.push({key: 'TORMENT_CONTEXTUAL_ABSTENTION', val: '1'});
     cogNote = '# Advanced Cognition — runtime capabilities (advisory, non-mandatory).';
     envParts.push({comment: 'Advanced Cognition', vars: cogVars, note: cogNote});
@@ -2416,6 +2423,32 @@ function generateSolo() {
     '  }\n' +
     '}';
 
+  // ── OPTIONAL: Voice Pipeline (when Live-Social is enabled) ──
+  if (cognitionCaps['cog-livesocial']) {
+    document.getElementById('out-voice').textContent =
+      '# ── Voice Pipeline (Live-Social Compact Mode) ──\n' +
+      '# Requires: live_agent/ directory with voice_pipeline.py and memory_bridge.py\n' +
+      '# Install deps: pip install sounddevice numpy websockets edge-tts\n' +
+      '#               (optional: voicebox for advanced TTS)\n\n' +
+      '# Linux / Mac / WSL\n' +
+      'export TORMENT_URL="http://127.0.0.1:8787"\n' +
+      'export TORMENT_WORKSPACE="' + wsId + '"\n' +
+      'export TORMENT_AGENT="' + agentId + '"\n' +
+      'python live_agent/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
+      '# Windows CMD\n' +
+      'set TORMENT_URL=http://127.0.0.1:8787\n' +
+      'set TORMENT_WORKSPACE=' + wsId + '\n' +
+      'set TORMENT_AGENT=' + agentId + '\n' +
+      'python live_agent/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
+      '# NOTE: Start the TORMENT server first (python -m torment_service),\n' +
+      '# then run the voice pipeline in a separate terminal.\n' +
+      '# Uses Whisper for STT, your chosen LLM for generation, and Voicebox/edge-tts for voice.\n' +
+      '# Run --help for all TTS and engine options.';
+    document.getElementById('output-voice').style.display = 'block';
+  } else {
+    document.getElementById('output-voice').style.display = 'none';
+  }
+
   // Show output
   document.getElementById('output-section').classList.add('visible');
   document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2456,14 +2489,13 @@ function generateHivemind() {
     const agentId = agent.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     const seedId = agentId + '_v1';
 
-    // NOTE: fabric.py only reads seed_text, seed_id, coupling_mode, coupling_strength
-    // from the seed dict. role/primary_domain/character_name are stored but not used by engine.
     const payload = {
       workspace_id: wsId,
       agent_id: agentId,
       seed: {
         seed_text: agent.seed,
         seed_id: seedId,
+        character_name: agent.name,
         drift_correction_threshold: 0.35,
         drift_gravity_strength: 0.12,
         coupling_mode: "read_only",
@@ -2522,6 +2554,29 @@ function generateHivemind() {
   envOutput += '# Current settings: echo=' + echoVal + ', convergence=' + convergenceVal + ',\n';
   envOutput += '# confidence=' + confidenceVal + ', drift_budget=' + driftBudgetVal + ', rate=' + rateLimitVal + '/hr\n\n';
 
+  // Crystal Attunement (SRG) — shared toggle, applies to hivemind too
+  if (features.srg) {
+    envOutput += '# Crystal Attunement (SRG)\n';
+    envOutput += 'export TORMENT_SRG_ENABLE=1\n';
+    const srgBands = document.getElementById('srg-bands')?.value || '5';
+    if (srgBands !== '5') {
+      envOutput += 'export TORMENT_SRG_BANDS=' + srgBands + '\n';
+    }
+    const hbBias = document.getElementById('srg-heartbeat')?.value;
+    if (hbBias === 'deep') {
+      envOutput += 'export TORMENT_SRG_CLASS_A_RATIO=0.6\n';
+      envOutput += '# Heartbeat bias: deep (60% Class A).\n';
+    } else if (hbBias === 'active') {
+      envOutput += 'export TORMENT_SRG_CLASS_A_RATIO=0.1\n';
+      envOutput += '# Heartbeat bias: active (90% Class B).\n';
+    }
+    if (!features.crystal) {
+      envOutput += 'export TORMENT_SRG_CRYSTAL=0\n';
+      envOutput += '# Crystal protection disabled.\n';
+    }
+    envOutput += '\n';
+  }
+
   // LLM config (from shared section 07)
   envOutput += '# Your LLM\n';
   if (selectedModel === 'claude') {
@@ -2555,6 +2610,15 @@ function generateHivemind() {
     envOutput += 'set TORMENT_EMBED_PROVIDER=hash\n';
   }
   envOutput += 'set TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT=' + discountVal + '\n';
+  if (features.srg) {
+    envOutput += 'set TORMENT_SRG_ENABLE=1\n';
+    const srgBandsW = document.getElementById('srg-bands')?.value || '5';
+    if (srgBandsW !== '5') envOutput += 'set TORMENT_SRG_BANDS=' + srgBandsW + '\n';
+    const hbBiasW = document.getElementById('srg-heartbeat')?.value;
+    if (hbBiasW === 'deep') envOutput += 'set TORMENT_SRG_CLASS_A_RATIO=0.6\n';
+    else if (hbBiasW === 'active') envOutput += 'set TORMENT_SRG_CLASS_A_RATIO=0.1\n';
+    if (!features.crystal) envOutput += 'set TORMENT_SRG_CRYSTAL=0\n';
+  }
   if (selectedModel === 'claude') {
     envOutput += 'set ANTHROPIC_API_KEY=' + (document.getElementById('claude-key')?.value || 'your_key_here') + '\n';
   } else if (selectedModel === 'openai') {
@@ -2965,6 +3029,9 @@ function generateHivemind() {
   document.getElementById('out-loop-python').textContent = pyScript;
   document.getElementById('out-response').textContent = '// Hivemind mode — see integration tab for convergence event reference.';
 
+  // Hivemind does not include voice pipeline output (solo only)
+  document.getElementById('output-voice').style.display = 'none';
+
   document.getElementById('output-section').classList.add('visible');
 }
 
@@ -3015,6 +3082,8 @@ function exportSetup() {
       ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
       ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
     ];
+    const voiceContent = document.getElementById('out-voice')?.textContent;
+    if (voiceContent) blocks.push(['Voice Pipeline (optional)', voiceContent, 'bash']);
 
     let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement_\n';
     blocks.forEach(([title, content, lang]) => {
@@ -3048,6 +3117,7 @@ function downloadFile(content, filename) {
 
 function resetOutput() {
   document.getElementById('output-section').classList.remove('visible');
+  document.getElementById('output-voice').style.display = 'none';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 

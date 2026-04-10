@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, Optional
 
@@ -99,6 +100,18 @@ ARCHIVE_HINT_WORDS = {
     "notes",
     "transcript",
 }
+
+# ---------------------------------------------------------------------------
+# Cognition feature flags — default OFF (opt-in via environment)
+# When disabled, detection still runs for tagging/logging but the thinking
+# controller will not escalate to the corresponding cognitive mode.
+# ---------------------------------------------------------------------------
+
+_SPINE_ENABLE = os.environ.get("TORMENT_SPINE_ENABLE", "1").strip() not in ("0", "false", "no", "off")
+_IDENTITY_SENSITIVE_ENABLE = os.environ.get("TORMENT_IDENTITY_SENSITIVE", "1").strip() not in ("0", "false", "no", "off")
+_SRG_COGNITION_ENABLE = os.environ.get("TORMENT_SRG_COGNITION", "1").strip() not in ("0", "false", "no", "off")
+_ARCHIVE_RECALL_ENABLE = os.environ.get("TORMENT_ARCHIVE_RECALL", "1").strip() not in ("0", "false", "no", "off")
+_LIVE_SOCIAL_ENABLE = os.environ.get("TORMENT_LIVE_SOCIAL", "1").strip() not in ("0", "false", "no", "off")
 
 
 def _normalize_text(text: str) -> str:
@@ -204,7 +217,7 @@ class ThinkingController:
         )
 
     def choose_mode(self, frame: TaskFrame) -> CognitiveModeDecision:
-        if frame.governance_sensitive:
+        if frame.governance_sensitive and _SPINE_ENABLE:
             return CognitiveModeDecision(
                 chosen_mode=CognitiveMode.GOVERNED,
                 reason="Governance-sensitive input requires stricter control.",
@@ -214,7 +227,7 @@ class ThinkingController:
                 confidence_floor=0.75,
             )
 
-        if frame.live_social:
+        if frame.live_social and _LIVE_SOCIAL_ENABLE:
             return CognitiveModeDecision(
                 chosen_mode=CognitiveMode.LIVE_SOCIAL,
                 reason="Live-social context requires compact and responsive cognition.",
@@ -224,7 +237,7 @@ class ThinkingController:
                 confidence_floor=0.55,
             )
 
-        if frame.identity_sensitive:
+        if frame.identity_sensitive and _IDENTITY_SENSITIVE_ENABLE:
             return CognitiveModeDecision(
                 chosen_mode=CognitiveMode.IDENTITY_SENSITIVE,
                 reason="Identity-sensitive input should preserve continuity and drift safety.",
@@ -285,12 +298,13 @@ class ThinkingController:
             CognitiveMode.IDENTITY_SENSITIVE,
             CognitiveMode.LIVE_SOCIAL,
         }
+        plan.retrieve_srg_state = _SRG_COGNITION_ENABLE and plan.retrieve_character_state
         plan.retrieve_relational = frame.memory_need or frame.live_social
-        plan.retrieve_archive = (
+        plan.retrieve_archive = _ARCHIVE_RECALL_ENABLE and (
             "archive" in frame.context_tags
             or "document" in frame.normalized_input.lower()
         )
-        plan.retrieve_deep = mode.chosen_mode in {
+        plan.retrieve_deep = _ARCHIVE_RECALL_ENABLE and mode.chosen_mode in {
             CognitiveMode.REFLECTIVE,
             CognitiveMode.IDENTITY_SENSITIVE,
         }

@@ -1,0 +1,9 @@
+torch>=2.0
+transformers>=4.57.0
+openai-whisper
+sounddevice
+numpy
+edge-tts
+requests
+soundfile
+pydub

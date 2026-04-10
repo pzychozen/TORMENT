@@ -120,6 +120,7 @@ class MemoryPlan:
     retrieve_deep: bool = False
     retrieve_collective: bool = False
     retrieve_character_state: bool = True
+    retrieve_srg_state: bool = False
     top_k_by_lane: Dict[str, int] = field(default_factory=dict)
     weight_by_lane: Dict[str, float] = field(default_factory=dict)
     max_token_budget: int = 2000
