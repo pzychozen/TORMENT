@@ -5,13 +5,13 @@ DriftReport — structured output from the drift checker.
 Used by the cognition layer to decide whether identity-sensitive durable
 writes should proceed, be downgraded to provisional, or be blocked.
 
-Drift threshold policy (from AGENT_SPINE_PLAN.md §15.3):
+Drift threshold policy (from docs/archive/AGENT_SPINE_PLAN.md §15.3):
   < 0.20          green  — proceed normally
   0.20 – 0.35     yellow — provisional/private proposals only
   0.35 – 0.50     red    — explicit block + warning
   >= 0.50          hard block
 
-See AGENT_SPINE_PLAN.md §5.6 for the contract definition.
+See docs/archive/AGENT_SPINE_PLAN.md §5.6 for the contract definition.
 """
 from __future__ import annotations
 

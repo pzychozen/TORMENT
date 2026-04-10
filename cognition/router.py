@@ -5,7 +5,7 @@ Deterministic Router — mode detection + role/aperture/constraint selection.
 v0.1 uses keyword matching on user_input to classify mode.
 No LLM calls, no learned weights. Must remain testable and predictable.
 
-See AGENT_SPINE_PLAN.md §6 for the routing table and §15 for design decisions.
+See docs/archive/AGENT_SPINE_PLAN.md §6 for the routing table and §15 for design decisions.
 
 Routing table (v0.1):
   engineering  → [interpreter, engineer, skeptic, archivist], narrow,  drift=no

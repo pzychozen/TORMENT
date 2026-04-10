@@ -9,7 +9,7 @@ The v0.1 engineer is a deterministic structure builder.
 It reads the interpreter's findings and the memory context to produce
 actionable steps. No LLM calls.
 
-See AGENT_SPINE_PLAN.md §7 (Engineer).
+See docs/archive/AGENT_SPINE_PLAN.md §7 (Engineer).
 """
 from __future__ import annotations
 

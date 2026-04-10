@@ -36,7 +36,7 @@ It is strongest as:
 
 All four items from the previous list are resolved. Remaining cosmetic items (not blocking):
 
-1. **AGENT_SPINE_PLAN.md references** — 30+ files reference docs/AGENT_SPINE_PLAN.md which is now in docs/archive/. Comments-only, not functional. Low priority.
+1. **docs/archive/AGENT_SPINE_PLAN.md references** — 30+ files reference docs/archive/AGENT_SPINE_PLAN.md which is now in docs/archive/. Comments-only, not functional. Low priority.
 
 2. **Unused provenance constants** — SOURCE_MEMORY, SOURCE_DERIVED.derive(), and 3 unused write_path values (reflection_writeback, migration, system_import) are defined but never used in production. Kept for future extensibility.
 

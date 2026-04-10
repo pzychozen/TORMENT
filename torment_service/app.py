@@ -2128,7 +2128,7 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     """Execute the Agent Spine cognition pipeline.
 
     Single-pass pipeline: TaskPacket → Router → Apertures → Roles →
-    Reintegration → Response.  See AGENT_SPINE_PLAN.md for design.
+    Reintegration → Response.  See docs/archive/AGENT_SPINE_PLAN.md for design.
     """
     from cognition.task_models import TaskPacket
     from cognition.pipeline import run_cognition_pipeline

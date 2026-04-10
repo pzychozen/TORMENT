@@ -7,7 +7,7 @@ Tests for:
     - Drift stub: zero/stub/failing drift checks, DriftReport generation
     - Full pipeline integration: roles → reintegration with drift gating
 
-See AGENT_SPINE_PLAN.md §9 and §11 Patch 4.
+See docs/archive/AGENT_SPINE_PLAN.md §9 and §11 Patch 4.
 """
 from __future__ import annotations
 

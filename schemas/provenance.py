@@ -5,7 +5,7 @@ Provenance — mandatory lineage metadata for every role output and memory propo
 Invariant B from the Agent Spine plan: provenance is mandatory and must be
 a structured object, never a string blob.
 
-See AGENT_SPINE_PLAN.md §5.3 for the contract definition.
+See docs/archive/AGENT_SPINE_PLAN.md §5.3 for the contract definition.
 """
 from __future__ import annotations
 

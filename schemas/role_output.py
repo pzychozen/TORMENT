@@ -5,7 +5,7 @@ RoleOutput — structured output from any cognition role.
 Each role (interpreter, engineer, skeptic, archivist) produces one of these.
 The reintegration membrane merges them, preserving contradictions (Invariant C).
 
-See AGENT_SPINE_PLAN.md §5.4 for the contract definition.
+See docs/archive/AGENT_SPINE_PLAN.md §5.4 for the contract definition.
 """
 from __future__ import annotations
 

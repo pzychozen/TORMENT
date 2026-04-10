@@ -5,7 +5,7 @@ MemoryProposal — structured durable-write proposal from the archivist.
 Invariant A: only the archivist path may propose durable memory writes.
 Invariant G: low-trust derived material cannot overwrite high-trust source memory.
 
-See AGENT_SPINE_PLAN.md §5.5 for the contract definition.
+See docs/archive/AGENT_SPINE_PLAN.md §5.5 for the contract definition.
 """
 from __future__ import annotations
 
