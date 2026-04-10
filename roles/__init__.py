@@ -11,7 +11,7 @@
 #   4. Reintegration membrane
 #   5. Archivist
 #
-# See AGENT_SPINE_PLAN.md §7 for the design rationale.
+# See docs/archive/AGENT_SPINE_PLAN.md §7 for the design rationale.
 
 from .base import RoleBase
 from .interpreter import Interpreter

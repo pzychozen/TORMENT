@@ -13,7 +13,7 @@ It enforces:
 
 v0.1 is deterministic — rule-based approval, not LLM judgment.
 
-See AGENT_SPINE_PLAN.md §7 (Archivist).
+See docs/archive/AGENT_SPINE_PLAN.md §7 (Archivist).
 """
 from __future__ import annotations
 

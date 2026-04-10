@@ -9,7 +9,7 @@ The v0.1 interpreter is a deterministic keyword/structure analyzer.
 It does NOT call an LLM. It classifies intent, extracts key phrases,
 and surfaces relevant memories from the aperture context.
 
-See AGENT_SPINE_PLAN.md §7 (Interpreter).
+See docs/archive/AGENT_SPINE_PLAN.md §7 (Interpreter).
 """
 from __future__ import annotations
 

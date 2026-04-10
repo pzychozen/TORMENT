@@ -7,7 +7,7 @@ Pipeline Orchestrator — wires the single-pass cognition pipeline.
 This is the main entry point called by the /cognition/run endpoint.
 It composes all components without itself being a role or service.
 
-See AGENT_SPINE_PLAN.md §1 ("single-pass pipeline, request in → response out").
+See docs/archive/AGENT_SPINE_PLAN.md §1 ("single-pass pipeline, request in → response out").
 """
 from __future__ import annotations
 

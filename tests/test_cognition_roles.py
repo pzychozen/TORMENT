@@ -9,7 +9,7 @@ Tests for:
     - Archivist: proposal review, invariant enforcement, drift gating
     - Full sequential pipeline: interpreter → engineer → skeptic → archivist
 
-See AGENT_SPINE_PLAN.md §7 and §11 Patch 3.
+See docs/archive/AGENT_SPINE_PLAN.md §7 and §11 Patch 3.
 """
 from __future__ import annotations
 

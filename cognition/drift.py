@@ -14,7 +14,7 @@ When running without a live fabric instance (tests, dry runs), use
 `stub_drift_check()` which returns a configurable DriftReport without
 touching the fabric layer.
 
-See AGENT_SPINE_PLAN.md §15.3 for drift threshold policy.
+See docs/archive/AGENT_SPINE_PLAN.md §15.3 for drift threshold policy.
 """
 from __future__ import annotations
 

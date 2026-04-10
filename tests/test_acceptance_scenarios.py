@@ -5,7 +5,7 @@ These scenarios force the Agent Spine architecture into its correct shape.
 Each one exercises a different invariant combination end-to-end through
 the full pipeline.
 
-See AGENT_SPINE_PLAN.md §12.
+See docs/archive/AGENT_SPINE_PLAN.md §12.
 
 Scenario 1 — Implementation Request
 Scenario 2 — Strategy Request

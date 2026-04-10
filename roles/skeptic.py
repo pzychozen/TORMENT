@@ -11,7 +11,7 @@ and flags anything suspicious.
 
 v0.1 is deterministic — pattern-based checks, not LLM reasoning.
 
-See AGENT_SPINE_PLAN.md §7 (Skeptic).
+See docs/archive/AGENT_SPINE_PLAN.md §7 (Skeptic).
 """
 from __future__ import annotations
 

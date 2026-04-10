@@ -6,7 +6,7 @@ The aperture controls the memory slice available to roles during execution.
 It calls fabric.query() with appropriate top_k and domain_id, then structures
 the results into a context dictionary roles can consume.
 
-Aperture Configuration (from AGENT_SPINE_PLAN.md §8):
+Aperture Configuration (from docs/archive/AGENT_SPINE_PLAN.md §8):
   narrow    → private top_k=6,  shared top_k=3,  depth=1, character=seed_only
   broad     → private top_k=12, shared top_k=8,  depth=2, character=full
   protected → private top_k=4,  shared top_k=2,  depth=1, character=full+drift
