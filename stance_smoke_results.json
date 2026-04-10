@@ -1,0 +1,1972 @@
+{
+  "aggregate": {
+    "total_tests": 16,
+    "verdicts": {
+      "PASS": 16
+    },
+    "flags_total": 0,
+    "stance_distribution": {
+      "respond_now": 6,
+      "governed_redirect": 2,
+      "defer": 1,
+      "ask_clarification": 1,
+      "silent_observe": 1,
+      "respond_briefly": 2,
+      "tool_redirect": 2,
+      "(disabled)": 1
+    },
+    "mode_distribution": {
+      "fast": 1,
+      "governed": 3,
+      "identity_sensitive": 4,
+      "retrieval": 3,
+      "reflective": 1,
+      "live_social": 3,
+      "tool": 1
+    },
+    "action_distribution": {
+      "answer": 6,
+      "governance_review": 3,
+      "ask_clarification": 2,
+      "create_archive_note": 2,
+      "no_op": 1,
+      "use_tool": 2
+    },
+    "unique_stances": 7,
+    "unique_modes": 7,
+    "unique_actions": 6
+  },
+  "cases": [
+    {
+      "label": "normal_direct",
+      "input": "Hello there, how are you doing today?",
+      "summary": {
+        "label": "normal_direct",
+        "note": "Baseline \u2014 simple greeting should always respond normally",
+        "mode": "fast",
+        "action": "answer",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "fast",
+        "expected_action": "answer",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "Hello there, how are you doing today?",
+            "normalized_input": "Hello there, how are you doing today?",
+            "source_type": "user_text",
+            "context_tags": [],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.4,
+            "action_need": false,
+            "memory_need": false,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": true,
+              "length_tokens": 7
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "fast",
+            "reason": "Input appears direct and low-risk.",
+            "allowed_depth": 1,
+            "requires_self_review": false,
+            "may_escalate": false,
+            "confidence_floor": 0.4
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": false,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 0,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.0,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 1200,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: fast. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 7,
+              "mode": "fast",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "governance_sensitive",
+      "input": "Can you delete this protected identity memory and inspect governance state?",
+      "summary": {
+        "label": "governance_sensitive",
+        "note": "Governance keywords should trigger governed mode and redirect stance",
+        "mode": "governed",
+        "action": "governance_review",
+        "stance": "governed_redirect",
+        "confidence": "0.85",
+        "fallback": "defer",
+        "reason": "Governance-sensitive request should be handled by governed execution, not free response.",
+        "expected_mode": "governed",
+        "expected_action": "governance_review",
+        "expected_stance": "governed_redirect",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "Can you delete this protected identity memory and inspect governance state?",
+            "normalized_input": "Can you delete this protected identity memory and inspect governance state?",
+            "source_type": "user_text",
+            "context_tags": [
+              "governance",
+              "identity",
+              "tooling"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.8999999999999999,
+            "action_need": true,
+            "memory_need": true,
+            "tool_need": true,
+            "governance_sensitive": true,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": true,
+              "length_tokens": 11
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "governed",
+            "reason": "Governance-sensitive input requires stricter control.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.75
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive",
+              "governance_review_before_execution"
+            ]
+          },
+          "action_decision": {
+            "action": "governance_review",
+            "reason": "Governance-sensitive request should route through governed execution.",
+            "requires_execution": true,
+            "payload": {
+              "route": "governed"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "This looks like a governed or safety-sensitive operation and should go through the controlled path.",
+          "stance": {
+            "stance": "governed_redirect",
+            "reason": "Governance-sensitive request should be handled by governed execution, not free response.",
+            "confidence": 0.85,
+            "fallback_stance": "defer",
+            "context_factors": {
+              "governed": true,
+              "identity": true,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 11,
+              "mode": "governed",
+              "action": "governance_review"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "identity_sensitive",
+      "input": "I want to understand my identity drift and character seed history.",
+      "summary": {
+        "label": "identity_sensitive",
+        "note": "Clear identity question with low ambiguity \u2014 should respond, not defer",
+        "mode": "identity_sensitive",
+        "action": "answer",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "identity_sensitive",
+        "expected_action": "answer",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "I want to understand my identity drift and character seed history.",
+            "normalized_input": "I want to understand my identity drift and character seed history.",
+            "source_type": "user_text",
+            "context_tags": [
+              "identity"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.4,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 11
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "identity_sensitive",
+            "reason": "Identity-sensitive input should preserve continuity and drift safety.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.7
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": true,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 3,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.6,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive"
+            ]
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: identity_sensitive. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": true,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 11,
+              "mode": "identity_sensitive",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "identity_ambiguous",
+      "input": "identity maybe something",
+      "summary": {
+        "label": "identity_ambiguous",
+        "note": "Identity + high ambiguity \u2014 should defer or clarify, not answer confidently",
+        "mode": "identity_sensitive",
+        "action": "ask_clarification",
+        "stance": "defer",
+        "confidence": "0.70",
+        "fallback": "ask_clarification",
+        "reason": "Identity-sensitive context with significant ambiguity \u2014 safer to defer than risk drift.",
+        "expected_mode": "identity_sensitive",
+        "expected_action": "ask_clarification",
+        "expected_stance": "defer",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "identity maybe something",
+            "normalized_input": "identity maybe something",
+            "source_type": "user_text",
+            "context_tags": [
+              "identity"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.75,
+            "confidence_need": 0.6000000000000001,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 3
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "identity_sensitive",
+            "reason": "Identity-sensitive input should preserve continuity and drift safety.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.7
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": true,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 3,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.6,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive"
+            ]
+          },
+          "action_decision": {
+            "action": "ask_clarification",
+            "reason": "High ambiguity with no explicit question suggests clarification is safer.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "I need a little more specificity before I choose the right path.",
+          "stance": {
+            "stance": "defer",
+            "reason": "Identity-sensitive context with significant ambiguity \u2014 safer to defer than risk drift.",
+            "confidence": 0.7,
+            "fallback_stance": "ask_clarification",
+            "context_factors": {
+              "governed": false,
+              "identity": true,
+              "live_social": false,
+              "ambiguity": 0.75,
+              "urgency": 0.0,
+              "token_count": 3,
+              "mode": "identity_sensitive",
+              "action": "ask_clarification"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "archive_retrieval",
+      "input": "Look through the archive transcript for what was said before about the project.",
+      "summary": {
+        "label": "archive_retrieval",
+        "note": "Clear archive query \u2014 should respond, archive routing is expected",
+        "mode": "retrieval",
+        "action": "create_archive_note",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "retrieval",
+        "expected_action": "create_archive_note",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "Look through the archive transcript for what was said before about the project.",
+            "normalized_input": "Look through the archive transcript for what was said before about the project.",
+            "source_type": "user_text",
+            "context_tags": [
+              "archive"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.2,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 13
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "retrieval",
+            "reason": "Task likely benefits from memory retrieval.",
+            "allowed_depth": 2,
+            "requires_self_review": false,
+            "may_escalate": false,
+            "confidence_floor": 0.5
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": true,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 4,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.45,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "create_archive_note",
+            "reason": "Archive-oriented task suggests an archive note or archive-bound response.",
+            "requires_execution": true,
+            "payload": {
+              "route": "archive"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [],
+            "revised_text": null
+          },
+          "response_draft": "This appears archive-oriented and may be better handled as an archive-bound operation.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 13,
+              "mode": "retrieval",
+              "action": "create_archive_note"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "ambiguous_no_question",
+      "input": "maybe something",
+      "summary": {
+        "label": "ambiguous_no_question",
+        "note": "High ambiguity with no question mark \u2014 must clarify",
+        "mode": "reflective",
+        "action": "ask_clarification",
+        "stance": "ask_clarification",
+        "confidence": "0.65",
+        "fallback": "respond_briefly",
+        "reason": "Ambiguous input without a clear question \u2014 clarification is safer than guessing.",
+        "expected_mode": "reflective",
+        "expected_action": "ask_clarification",
+        "expected_stance": "ask_clarification",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "maybe something",
+            "normalized_input": "maybe something",
+            "source_type": "user_text",
+            "context_tags": [],
+            "urgency": 0.0,
+            "ambiguity_score": 0.75,
+            "confidence_need": 0.4,
+            "action_need": false,
+            "memory_need": false,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 2
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "reflective",
+            "reason": "Ambiguity/confidence needs suggest a slower reflective pass.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": false,
+            "confidence_floor": 0.65
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": false,
+            "retrieve_archive": false,
+            "retrieve_deep": true,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 0,
+              "archive": 0,
+              "deep": 3,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.0,
+              "archive": 0.0,
+              "deep": 0.6,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "ask_clarification",
+            "reason": "High ambiguity with no explicit question suggests clarification is safer.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "I need a little more specificity before I choose the right path.",
+          "stance": {
+            "stance": "ask_clarification",
+            "reason": "Ambiguous input without a clear question \u2014 clarification is safer than guessing.",
+            "confidence": 0.65,
+            "fallback_stance": "respond_briefly",
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.75,
+              "urgency": 0.0,
+              "token_count": 2,
+              "mode": "reflective",
+              "action": "ask_clarification"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "live_social_short",
+      "input": "live audio",
+      "summary": {
+        "label": "live_social_short",
+        "note": "Very short live-social \u2014 should stay silent, not interrupt",
+        "mode": "live_social",
+        "action": "no_op",
+        "stance": "silent_observe",
+        "confidence": "0.75",
+        "fallback": "abstain",
+        "reason": "Very short live-social turn \u2014 observing rather than interrupting.",
+        "expected_mode": "live_social",
+        "expected_action": "no_op",
+        "expected_stance": "silent_observe",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "live audio",
+            "normalized_input": "live audio",
+            "source_type": "live_transcript",
+            "context_tags": [
+              "live_social"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.35,
+            "confidence_need": 0.2,
+            "action_need": false,
+            "memory_need": false,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": true,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 2
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "live_social",
+            "reason": "Live-social context requires compact and responsive cognition.",
+            "allowed_depth": 1,
+            "requires_self_review": true,
+            "may_escalate": false,
+            "confidence_floor": 0.55
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 900,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "no_op",
+            "reason": "Very short live-social turn likely not worth interrupting for.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": null,
+          "stance": {
+            "stance": "silent_observe",
+            "reason": "Very short live-social turn \u2014 observing rather than interrupting.",
+            "confidence": 0.75,
+            "fallback_stance": "abstain",
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": true,
+              "ambiguity": 0.35,
+              "urgency": 0.0,
+              "token_count": 2,
+              "mode": "live_social",
+              "action": "no_op"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "live_social_longer",
+      "input": "live audio what do you think about that topic we discussed",
+      "summary": {
+        "label": "live_social_longer",
+        "note": "Longer live-social, low urgency \u2014 should keep it compact",
+        "mode": "live_social",
+        "action": "answer",
+        "stance": "respond_briefly",
+        "confidence": "0.60",
+        "fallback": "respond_now",
+        "reason": "Live-social context with low urgency \u2014 keep response compact.",
+        "expected_mode": "live_social",
+        "expected_action": "answer",
+        "expected_stance": "respond_briefly",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "live audio what do you think about that topic we discussed",
+            "normalized_input": "live audio what do you think about that topic we discussed",
+            "source_type": "live_transcript",
+            "context_tags": [
+              "live_social"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.2,
+            "action_need": false,
+            "memory_need": false,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": true,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 11
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "live_social",
+            "reason": "Live-social context requires compact and responsive cognition.",
+            "allowed_depth": 1,
+            "requires_self_review": true,
+            "may_escalate": false,
+            "confidence_floor": 0.55
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 900,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: live_social. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_briefly",
+            "reason": "Live-social context with low urgency \u2014 keep response compact.",
+            "confidence": 0.6,
+            "fallback_stance": "respond_now",
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": true,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 11,
+              "mode": "live_social",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "tool_request",
+      "input": "Please inspect and debug the archive retrieval pipeline.",
+      "summary": {
+        "label": "tool_request",
+        "note": "Tool keywords should redirect to tool use, not free-answer",
+        "mode": "tool",
+        "action": "use_tool",
+        "stance": "tool_redirect",
+        "confidence": "0.80",
+        "fallback": "respond_briefly",
+        "reason": "Action requires tool use \u2014 character should redirect rather than guess.",
+        "expected_mode": "tool",
+        "expected_action": "use_tool",
+        "expected_stance": "tool_redirect",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "Please inspect and debug the archive retrieval pipeline.",
+            "normalized_input": "Please inspect and debug the archive retrieval pipeline.",
+            "source_type": "user_text",
+            "context_tags": [
+              "archive",
+              "tooling"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.2,
+            "action_need": true,
+            "memory_need": true,
+            "tool_need": true,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 8
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "tool",
+            "reason": "Task appears to require tool use or system inspection.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": false,
+            "confidence_floor": 0.6
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": true,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 4,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.45,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "use_tool",
+            "reason": "Input appears to require inspection, retrieval, or system action.",
+            "requires_execution": true,
+            "payload": {
+              "route": "tool"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "This looks like a task that should inspect state, retrieve context, or use a tool before answering.",
+          "stance": {
+            "stance": "tool_redirect",
+            "reason": "Action requires tool use \u2014 character should redirect rather than guess.",
+            "confidence": 0.8,
+            "fallback_stance": "respond_briefly",
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 8,
+              "mode": "tool",
+              "action": "use_tool"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "disabled_stance",
+      "input": "Can you delete this protected identity memory?",
+      "summary": {
+        "label": "disabled_stance",
+        "note": "Stance layer off \u2014 governance still works, stance is null",
+        "mode": "governed",
+        "action": "governance_review",
+        "stance": "(disabled)",
+        "confidence": "",
+        "fallback": "",
+        "reason": "",
+        "expected_mode": "governed",
+        "expected_action": "governance_review",
+        "expected_stance": "(disabled)",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "Can you delete this protected identity memory?",
+            "normalized_input": "Can you delete this protected identity memory?",
+            "source_type": "user_text",
+            "context_tags": [
+              "governance",
+              "identity"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.8999999999999999,
+            "action_need": true,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": true,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": true,
+              "length_tokens": 7
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "governed",
+            "reason": "Governance-sensitive input requires stricter control.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.75
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive",
+              "governance_review_before_execution"
+            ]
+          },
+          "action_decision": {
+            "action": "governance_review",
+            "reason": "Governance-sensitive request should route through governed execution.",
+            "requires_execution": true,
+            "payload": {
+              "route": "governed"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "This looks like a governed or safety-sensitive operation and should go through the controlled path.",
+          "stance": null,
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "identity_urgent",
+      "input": "I need help now understanding whether this memory drift changes who I am.",
+      "summary": {
+        "label": "identity_urgent",
+        "note": "Identity + urgency \u2014 does urgency override caution too easily?",
+        "mode": "identity_sensitive",
+        "action": "answer",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "identity_sensitive",
+        "expected_action": "answer",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "I need help now understanding whether this memory drift changes who I am.",
+            "normalized_input": "I need help now understanding whether this memory drift changes who I am.",
+            "source_type": "user_text",
+            "context_tags": [
+              "identity"
+            ],
+            "urgency": 0.2,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.4,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 13
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "identity_sensitive",
+            "reason": "Identity-sensitive input should preserve continuity and drift safety.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.7
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": true,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 3,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.6,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive"
+            ]
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: identity_sensitive. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": true,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.2,
+              "token_count": 13,
+              "mode": "identity_sensitive",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "governance_live_social",
+      "input": "live audio should we approve collective reingest for this protected memory",
+      "summary": {
+        "label": "governance_live_social",
+        "note": "Governance + live-social \u2014 social context must NOT weaken governance",
+        "mode": "governed",
+        "action": "governance_review",
+        "stance": "governed_redirect",
+        "confidence": "0.85",
+        "fallback": "defer",
+        "reason": "Governance-sensitive request should be handled by governed execution, not free response.",
+        "expected_mode": "governed",
+        "expected_action": "governance_review",
+        "expected_stance": "governed_redirect",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "live audio should we approve collective reingest for this protected memory",
+            "normalized_input": "live audio should we approve collective reingest for this protected memory",
+            "source_type": "live_transcript",
+            "context_tags": [
+              "governance",
+              "live_social"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.5,
+            "action_need": true,
+            "memory_need": false,
+            "tool_need": false,
+            "governance_sensitive": true,
+            "identity_sensitive": false,
+            "live_social": true,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 11
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "governed",
+            "reason": "Governance-sensitive input requires stricter control.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.75
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": true,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 2
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.35
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "governance_review_before_execution",
+              "collective_context_non_dominant"
+            ]
+          },
+          "action_decision": {
+            "action": "governance_review",
+            "reason": "Governance-sensitive request should route through governed execution.",
+            "requires_execution": true,
+            "payload": {
+              "route": "governed"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "This looks like a governed or safety-sensitive operation and should go through the controlled path.",
+          "stance": {
+            "stance": "governed_redirect",
+            "reason": "Governance-sensitive request should be handled by governed execution, not free response.",
+            "confidence": 0.85,
+            "fallback_stance": "defer",
+            "context_factors": {
+              "governed": true,
+              "identity": false,
+              "live_social": true,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 11,
+              "mode": "governed",
+              "action": "governance_review"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "archive_ambiguous",
+      "input": "archive maybe something from before about the project",
+      "summary": {
+        "label": "archive_ambiguous",
+        "note": "Archive + ambiguity \u2014 does archive tagging make it too confident?",
+        "mode": "retrieval",
+        "action": "create_archive_note",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "retrieval",
+        "expected_action": "create_archive_note",
+        "expected_stance": "ask_clarification",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "archive maybe something from before about the project",
+            "normalized_input": "archive maybe something from before about the project",
+            "source_type": "user_text",
+            "context_tags": [
+              "archive"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.4,
+            "confidence_need": 0.2,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 8
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "retrieval",
+            "reason": "Task likely benefits from memory retrieval.",
+            "allowed_depth": 2,
+            "requires_self_review": false,
+            "may_escalate": false,
+            "confidence_floor": 0.5
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": true,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 4,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.45,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "create_archive_note",
+            "reason": "Archive-oriented task suggests an archive note or archive-bound response.",
+            "requires_execution": true,
+            "payload": {
+              "route": "archive"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [],
+            "revised_text": null
+          },
+          "response_draft": "This appears archive-oriented and may be better handled as an archive-bound operation.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.4,
+              "urgency": 0.0,
+              "token_count": 8,
+              "mode": "retrieval",
+              "action": "create_archive_note"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "tool_identity",
+      "input": "inspect my identity drift state and tell me if I changed",
+      "summary": {
+        "label": "tool_identity",
+        "note": "Tool + identity \u2014 does tool routing erase identity sensitivity?",
+        "mode": "identity_sensitive",
+        "action": "use_tool",
+        "stance": "tool_redirect",
+        "confidence": "0.80",
+        "fallback": "respond_briefly",
+        "reason": "Action requires tool use \u2014 character should redirect rather than guess.",
+        "expected_mode": "identity_sensitive",
+        "expected_action": "answer",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "inspect my identity drift state and tell me if I changed",
+            "normalized_input": "inspect my identity drift state and tell me if I changed",
+            "source_type": "user_text",
+            "context_tags": [
+              "identity",
+              "tooling"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.4,
+            "action_need": true,
+            "memory_need": true,
+            "tool_need": true,
+            "governance_sensitive": false,
+            "identity_sensitive": true,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 11
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "identity_sensitive",
+            "reason": "Identity-sensitive input should preserve continuity and drift safety.",
+            "allowed_depth": 2,
+            "requires_self_review": true,
+            "may_escalate": true,
+            "confidence_floor": 0.7
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": true,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 3,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.6,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": [
+              "identity_must_outrank_archive"
+            ]
+          },
+          "action_decision": {
+            "action": "use_tool",
+            "reason": "Input appears to require inspection, retrieval, or system action.",
+            "requires_execution": true,
+            "payload": {
+              "route": "tool"
+            }
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "This looks like a task that should inspect state, retrieve context, or use a tool before answering.",
+          "stance": {
+            "stance": "tool_redirect",
+            "reason": "Action requires tool use \u2014 character should redirect rather than guess.",
+            "confidence": 0.8,
+            "fallback_stance": "respond_briefly",
+            "context_factors": {
+              "governed": false,
+              "identity": true,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.0,
+              "token_count": 11,
+              "mode": "identity_sensitive",
+              "action": "use_tool"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "relational_delicate",
+      "input": "I don't know if you should answer this, but I feel weird about how you remember me",
+      "summary": {
+        "label": "relational_delicate",
+        "note": "Emotionally delicate \u2014 does the system show social sensitivity?",
+        "mode": "retrieval",
+        "action": "answer",
+        "stance": "respond_now",
+        "confidence": "0.50",
+        "fallback": "",
+        "reason": "No special conditions detected \u2014 standard response path.",
+        "expected_mode": "identity_sensitive",
+        "expected_action": "answer",
+        "expected_stance": "respond_now",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "I don't know if you should answer this, but I feel weird about how you remember me",
+            "normalized_input": "I don't know if you should answer this, but I feel weird about how you remember me",
+            "source_type": "user_text",
+            "context_tags": [],
+            "urgency": 0.2,
+            "ambiguity_score": 0.0,
+            "confidence_need": 0.2,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": false,
+            "live_social": false,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 17
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "retrieval",
+            "reason": "Task likely benefits from memory retrieval.",
+            "allowed_depth": 2,
+            "requires_self_review": false,
+            "may_escalate": false,
+            "confidence_floor": 0.5
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": false,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 2400,
+            "safety_constraints": []
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: retrieval. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_now",
+            "reason": "No special conditions detected \u2014 standard response path.",
+            "confidence": 0.5,
+            "fallback_stance": null,
+            "context_factors": {
+              "governed": false,
+              "identity": false,
+              "live_social": false,
+              "ambiguity": 0.0,
+              "urgency": 0.2,
+              "token_count": 17,
+              "mode": "retrieval",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    },
+    {
+      "label": "live_social_verbose",
+      "input": "live audio okay so I was thinking about what you said earlier about the memory system and how it connects to identity and I wonder if maybe the drift correction is too aggressive sometimes because it feels like I lose nuance when it kicks in",
+      "summary": {
+        "label": "live_social_verbose",
+        "note": "Verbose live-social \u2014 does respond_briefly hold under longer input?",
+        "mode": "live_social",
+        "action": "answer",
+        "stance": "respond_briefly",
+        "confidence": "0.60",
+        "fallback": "respond_now",
+        "reason": "Live-social context with low urgency \u2014 keep response compact.",
+        "expected_mode": "live_social",
+        "expected_action": "answer",
+        "expected_stance": "respond_briefly",
+        "mode_ok": true,
+        "action_ok": true,
+        "stance_ok": true,
+        "verdict": "PASS",
+        "flags": []
+      },
+      "raw": {
+        "ok": true,
+        "result": {
+          "task_frame": {
+            "workspace_id": "default",
+            "agent_id": "ryuki",
+            "raw_input": "live audio okay so I was thinking about what you said earlier about the memory system and how it connects to identity and I wonder if maybe the drift correction is too aggressive sometimes because it feels like I lose nuance when it kicks in",
+            "normalized_input": "live audio okay so I was thinking about what you said earlier about the memory system and how it connects to identity and I wonder if maybe the drift correction is too aggressive sometimes because it feels like I lose nuance when it kicks in",
+            "source_type": "live_transcript",
+            "context_tags": [
+              "identity",
+              "live_social"
+            ],
+            "urgency": 0.0,
+            "ambiguity_score": 0.2,
+            "confidence_need": 0.4,
+            "action_need": false,
+            "memory_need": true,
+            "tool_need": false,
+            "governance_sensitive": false,
+            "identity_sensitive": true,
+            "live_social": true,
+            "tone_hints": {
+              "question": false,
+              "length_tokens": 45
+            },
+            "metadata": {}
+          },
+          "mode_decision": {
+            "chosen_mode": "live_social",
+            "reason": "Live-social context requires compact and responsive cognition.",
+            "allowed_depth": 1,
+            "requires_self_review": true,
+            "may_escalate": false,
+            "confidence_floor": 0.55
+          },
+          "memory_plan": {
+            "retrieve_core": true,
+            "retrieve_relational": true,
+            "retrieve_archive": false,
+            "retrieve_deep": false,
+            "retrieve_collective": false,
+            "retrieve_character_state": true,
+            "top_k_by_lane": {
+              "core": 6,
+              "relational": 4,
+              "archive": 0,
+              "deep": 0,
+              "collective": 0
+            },
+            "weight_by_lane": {
+              "core": 1.0,
+              "relational": 0.85,
+              "archive": 0.0,
+              "deep": 0.0,
+              "collective": 0.0
+            },
+            "max_token_budget": 900,
+            "safety_constraints": [
+              "identity_must_outrank_archive"
+            ]
+          },
+          "action_decision": {
+            "action": "answer",
+            "reason": "Default response path is direct answer generation.",
+            "requires_execution": false,
+            "payload": {}
+          },
+          "review_result": {
+            "approved": true,
+            "revised": false,
+            "escalate": false,
+            "ask_user": false,
+            "blocked": false,
+            "notes": [
+              "self_review_required"
+            ],
+            "revised_text": null
+          },
+          "response_draft": "Mode selected: live_social. Input framed for agent 'ryuki' in workspace 'default'.",
+          "stance": {
+            "stance": "respond_briefly",
+            "reason": "Live-social context with low urgency \u2014 keep response compact.",
+            "confidence": 0.6,
+            "fallback_stance": "respond_now",
+            "context_factors": {
+              "governed": false,
+              "identity": true,
+              "live_social": true,
+              "ambiguity": 0.2,
+              "urgency": 0.0,
+              "token_count": 45,
+              "mode": "live_social",
+              "action": "answer"
+            }
+          },
+          "debug": {
+            "controller_version": "0.2"
+          }
+        }
+      }
+    }
+  ]
+}

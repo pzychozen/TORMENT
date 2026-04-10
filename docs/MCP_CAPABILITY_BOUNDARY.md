@@ -130,7 +130,7 @@ TORMENT now supports governed ingest of externally obtained tool output as memor
 
 > TORMENT may remember what tools returned before it is ever allowed to decide what tools to run.
 
-Tool-result memories are safe parents for archivist writeback (included in `_SAFE_PARENT_SOURCE_TYPES`), but they do not grant execution authority and cannot trigger follow-up tool calls.
+Tool-result memories are safe parents for archivist writeback (admitted by the bounded-DFS guard in `cognition/recursion_guard.py`), but they do not grant execution authority and cannot trigger follow-up tool calls.
 
 ---
 

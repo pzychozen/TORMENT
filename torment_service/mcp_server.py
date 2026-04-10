@@ -782,9 +782,17 @@ def create_mcp_server() -> FastMCP:
             for eid, entity in graph.entities.items():
                 payload = entity.payload or {}
                 prov = payload.get("provenance")
-                # Normalize legacy string provenance for safe .get() access
+                # Normalize legacy string provenance for safe .get() access.
+                # Legacy bare string (e.g. "collective") is a pre-ProvenanceV1 artifact —
+                # normalize to SOURCE_MEMORY with the raw value preserved in `notes` so
+                # the read-path vocabulary stays inside VALID_SOURCE_TYPES
+                # (provenance_v1.py). Display-only; no writeback uses this dict.
                 if prov and not isinstance(prov, dict):
-                    prov = {"source_type": "legacy_string", "raw": str(prov)}
+                    _legacy_raw = str(prov)
+                    prov = {
+                        "source_type": "memory",  # SOURCE_MEMORY
+                        "notes": f"legacy_bare_string={_legacy_raw!r}",
+                    }
                 memories.append({
                     "eid": eid,
                     "agent_id": agent_id,

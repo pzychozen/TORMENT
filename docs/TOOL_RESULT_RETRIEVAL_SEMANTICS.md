@@ -155,12 +155,15 @@ if _h_is_tool_result:
 
 ```python
 # Provenance badge: surface source_type for downstream consumers
+# Legacy bare-string provenance (pre-ProvenanceV1 artifact) is normalized
+# to SOURCE_MEMORY so the badge surface always carries a value from
+# VALID_SOURCE_TYPES (or None). See PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.2.
 _hh_prov = (h.get("payload") or h).get("provenance") or h.get("provenance")
 if isinstance(_hh_prov, dict):
     hh["provenance_type"] = _hh_prov.get("source_type")
     hh["provenance_tool_name"] = _hh_prov.get("tool_name")
 elif isinstance(_hh_prov, str):
-    hh["provenance_type"] = _hh_prov  # legacy bare string
+    hh["provenance_type"] = "memory"  # SOURCE_MEMORY (legacy bare string normalized)
 else:
     hh["provenance_type"] = None
 ```

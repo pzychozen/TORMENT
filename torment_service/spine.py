@@ -855,7 +855,8 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
       - queryable in normal retrieval
       - visible in /debug/provenance
       - NOT identity-canonical (stored as ordinary domain memory)
-      - safe parent for archivist writeback (included in _SAFE_PARENT_SOURCE_TYPES)
+      - safe parent for archivist writeback (admissible in the bounded
+        ancestry walk in cognition/recursion_guard.py)
     """
     from .provenance_v1 import ProvenanceV1
 

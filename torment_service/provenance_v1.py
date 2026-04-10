@@ -2,7 +2,7 @@
 """
 ProvenanceV1 — ingest-level lineage metadata for every stored memory.
 
-First-pass schema (v2.4.x) per DOCTRINE_v2.4.x.md rule #1:
+First-pass schema (v2.4.x) per DOCTRINE_v2.4.x.md rule #5:
 "Provenance is a hard boundary."
 
 This is NOT the spine-level Provenance (schemas/provenance.py) which tracks
@@ -225,38 +225,69 @@ class ProvenanceV1:
             notes=notes,
         )
 
-    # ── Safety checks ───────────────────────────────────────────────
-
-    def is_archivist_writeback(self) -> bool:
-        """Check if this provenance indicates archivist write-back origin."""
-        return (
-            self.write_path == WRITE_COGNITION_WRITEBACK
-            and self.source_role is not None
-            and "archivist" in self.source_role.lower()
-        )
+    # ── Normalization ───────────────────────────────────────────────
 
     @staticmethod
-    def check_recursion_safe(
-        new_provenance: "ProvenanceV1",
-        parent_provenances: Optional[List[Dict[str, Any]]] = None,
-    ) -> bool:
-        """First-pass recursion guard for archivist write-back.
+    def normalize_parent(raw: Any) -> Optional[Dict[str, Any]]:
+        """Normalize a raw parent-provenance value into a canonical dict shape.
 
-        Returns True if the write is safe (no archivist chain detected).
-        Returns False if:
-          - The new write is archivist write-back AND any parent memory
-            was also archivist write-back.
+        Storage-layer-only helper. Reduces the four input shapes the recursion
+        guard can encounter on an old corpus down to a single canonical form so
+        downstream code never has to branch on raw provenance type.
+
+        Handled shapes:
+          - None                  → None
+          - legacy bare ``str``   → ``{"source_type": "memory", "notes": ...}``
+                                    (consistent with the read-path normalization
+                                    in ``torment_service/{app,mcp_server,fabric}.py``
+                                    established in step 4; see
+                                    ``docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7``)
+          - ``dict`` with valid ``source_type`` → passed through unchanged
+          - ``dict`` missing / invalid ``source_type`` → None (fail-closed)
+          - ``ProvenanceV1`` instance → ``.to_dict()``
+
+        Any other value (int, list, arbitrary object) → None.
+
+        Returning ``None`` MUST be treated by callers as "unknown /
+        non-admissible" — this helper is fail-closed by design, matching the
+        corridor-tearing posture of Rule C in the Recursion-Safety Policy.
+
+        This helper does NOT determine admissibility. It only produces a
+        canonical shape that a guard (such as
+        ``cognition.recursion_guard.recursion_guard_check``) can inspect
+        without defensive type-checking.
         """
-        if not new_provenance.is_archivist_writeback():
-            return True  # Not archivist, always safe
-        if not parent_provenances:
-            return True  # No parents to check
-        for parent_prov in parent_provenances:
-            if not parent_prov:
-                continue
-            p_write_path = parent_prov.get("write_path", "")
-            p_source_role = parent_prov.get("source_role", "") or ""
-            if (p_write_path == WRITE_COGNITION_WRITEBACK
-                    and "archivist" in p_source_role.lower()):
-                return False  # Parent was also archivist write-back → block
-        return True
+        if raw is None:
+            return None
+        if isinstance(raw, ProvenanceV1):
+            return raw.to_dict()
+        if isinstance(raw, str):
+            # Legacy bare-string provenance (pre-ProvenanceV1 artifact).
+            # Preserve the raw value in notes so migration tooling can
+            # recover original intent later.
+            return {
+                "source_type": SOURCE_MEMORY,
+                "notes": f"legacy_bare_string={raw!r}",
+            }
+        if isinstance(raw, dict):
+            st = raw.get("source_type")
+            if st not in VALID_SOURCE_TYPES:
+                # Malformed / missing / undeclared vocabulary → fail-closed.
+                return None
+            return raw
+        # Anything else (int, list, object) → not a provenance shape.
+        return None
+
+    # ── Safety checks ───────────────────────────────────────────────
+    #
+    # Recursion safety for archivist writeback is enforced by
+    # ``cognition/recursion_guard.py::recursion_guard_check``, which
+    # walks the ancestor graph to a bounded depth. The prior one-hop
+    # helpers (``is_archivist_writeback``, ``check_recursion_safe``)
+    # were removed in step 5 commit B of the v2.4.x tactical provenance
+    # pass — they described a one-hop check that was neither the live
+    # enforcement shape nor the policy shape, and leaving them in place
+    # would have been actively misleading to future readers.
+    # See ``docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.3`` for the
+    # removal rationale and the safety asymmetry note preserved there
+    # for historical context.

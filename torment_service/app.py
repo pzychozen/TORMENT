@@ -2811,11 +2811,18 @@ async def debug_provenance(
         for eid, entity in graph.entities.items():
             payload = entity.payload or {}
             prov = payload.get("provenance")
-            # Normalize legacy provenance strings to a synthetic dict for safe access
+            # Normalize legacy provenance strings to a synthetic dict for safe access.
+            # Legacy bare string (e.g. "collective") is a pre-ProvenanceV1 artifact —
+            # normalize to SOURCE_MEMORY and preserve the raw value in `notes` so the
+            # read-path vocabulary stays inside VALID_SOURCE_TYPES (provenance_v1.py).
+            # This is display-only; no writeback path uses this normalized dict.
             _prov_is_dict = isinstance(prov, dict)
             if prov and not _prov_is_dict:
-                # Legacy bare string like "collective" — wrap for safe field access
-                prov = {"source_type": "legacy_string", "raw": str(prov)}
+                _legacy_raw = str(prov)
+                prov = {
+                    "source_type": "memory",  # SOURCE_MEMORY
+                    "notes": f"legacy_bare_string={_legacy_raw!r}",
+                }
                 _prov_is_dict = True
             # Apply filters (only on dict provenance)
             if source_role and (not _prov_is_dict or prov.get("source_role") != source_role):

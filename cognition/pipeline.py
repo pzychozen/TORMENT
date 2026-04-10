@@ -149,21 +149,25 @@ def _write_back_approved(
 ) -> List[Dict[str, Any]]:
     """Ingest archivist-approved memory proposals back into the fabric.
 
-    Implements the TORMENT 2.4.x Recursion-Safety Policy (Rules A–F):
+    Implements the TORMENT 2.4.x Recursion-Safety Policy (Rules A–F) via
+    the bounded-DFS guard in ``cognition.recursion_guard``. That guard is
+    the single source of truth for recursion safety; this function only
+    orchestrates proposal selection, parent-EID extraction, and write I/O.
+
       Rule A: reject if any parent_eid has archivist-origin provenance
-      Rule B: any archivist parent → reject (strict, not majority-based)
-      Rule C: unknown/missing parent provenance → reject
+      Rule B: any archivist ancestor → reject (strict, walked to depth 3)
+      Rule C: unknown/missing/malformed parent provenance → reject
       Rule D: archivist-origin memories may be retrieved but not re-written
-      Rule E: effective archivist depth >= 1 → blocked
+      Rule E: effective archivist depth >= 1 → blocked (via ancestry walk)
       Rule F: reinforcement/resurfacing does not reset provenance origin
 
     Parameters
     ----------
     lookup_fn : callable, optional
         lookup_fn(workspace_id, agent_id, eid) -> dict or None
-        Returns the payload dict for a memory entity. Needed for parent
-        provenance inspection. If None, parent inspection is skipped and
-        the safety posture defaults to allowing only parentless proposals.
+        Returns the payload dict for a memory entity. Needed for ancestor
+        provenance inspection. If None and the proposal has parent EIDs,
+        the guard rejects conservatively.
     memory_context : MemoryContext, optional
         The retrieval context from this pipeline run. Used to extract
         the actual parent memory EIDs (the retrieved memories that the
@@ -172,11 +176,15 @@ def _write_back_approved(
     if ingest_fn is None:
         return []
 
-    # Late import to avoid circular dependency at module load
+    # Late imports to avoid circular dependency at module load
     from torment_service.provenance_v1 import ProvenanceV1
+    from cognition.recursion_guard import recursion_guard_check
 
-    # Safe parent source_types for first pass (per GPT policy)
-    _SAFE_PARENT_SOURCE_TYPES = frozenset({"user_input", "tool_result", "memory"})
+    # NOTE (step 5, v2.4.x): direct-parent safe_set is no longer enforced
+    # here. The bounded-DFS guard in cognition/recursion_guard.py applies
+    # the unified source_type + source_role rule across the whole walk
+    # window. See docs/RECURSION_SAFETY_POLICY_v2.4.x.md for the policy
+    # and docs/RECURSION_GUARD_TUNING_v2.4.x.md for the tuning discipline.
 
     approved = [
         p for p in result.all_memory_proposals
@@ -244,55 +252,17 @@ def _write_back_approved(
         _parent_eids = _context_eids
 
         # --- Recursion-safety check (Rules A, B, C, E) ---
-        # Inspect stored provenance of each parent memory.
-        _safe = True
-        _rejection_reason: Optional[str] = None
-
-        if _parent_eids and lookup_fn is not None:
-            for parent_eid in _parent_eids:
-                try:
-                    parent_payload = lookup_fn(
-                        task.workspace_id, task.agent_id, parent_eid
-                    )
-                except Exception:
-                    parent_payload = None
-
-                if parent_payload is None:
-                    # Could not retrieve parent → treat as unknown
-                    _safe = False
-                    _rejection_reason = "unknown_parent_provenance"
-                    break
-
-                parent_prov = parent_payload.get("provenance") if isinstance(parent_payload, dict) else None
-
-                if not parent_prov:
-                    # Rule C: missing provenance → not safe
-                    _safe = False
-                    _rejection_reason = "unknown_parent_provenance"
-                    break
-
-                # Rule A + E: archivist-origin parent → blocked
-                p_source_role = parent_prov.get("source_role") or ""
-                if "archivist" in p_source_role.lower():
-                    _safe = False
-                    _rejection_reason = "archivist_parent_blocked"
-                    break
-
-                # Rule B: check source_type is in safe set
-                p_source_type = parent_prov.get("source_type", "")
-                if p_source_type not in _SAFE_PARENT_SOURCE_TYPES:
-                    _safe = False
-                    _rejection_reason = "unsafe_parent_source_type"
-                    break
-
-        elif _parent_eids and lookup_fn is None:
-            # No lookup function available — cannot inspect parents.
-            # Conservative posture: reject if there are parent EIDs we can't verify.
-            _safe = False
-            _rejection_reason = "unknown_parent_provenance"
-
-        # else: no parent_eids → proposal derives from context, not specific
-        # memories. Allow (this is typical for first-generation proposals).
+        # Step 5 (v2.4.x): replaced the one-hop inline check with a
+        # bounded-DFS ancestry walk. The guard enforces the unified
+        # archivist + source_type rule across every node in the window
+        # and is fail-closed on unknown, malformed, or cap-exceeded
+        # ancestry. See cognition/recursion_guard.py.
+        _safe, _rejection_reason = recursion_guard_check(
+            seed_eids=_parent_eids,
+            lookup_fn=lookup_fn,
+            workspace_id=task.workspace_id,
+            agent_id=task.agent_id,
+        )
 
         if not _safe:
             results.append({

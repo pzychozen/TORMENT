@@ -102,19 +102,36 @@ class TestCrossWorkspaceIsolation(unittest.TestCase):
 # =========================================================================
 
 class TestLegacyProvenanceSafety(unittest.TestCase):
-    """Verify that legacy string provenance doesn't crash field access."""
+    """Verify that legacy string provenance doesn't crash field access.
+
+    As of the v2.4.x tactical provenance pass, legacy bare strings are no
+    longer normalized to a synthetic 'legacy_string' source_type. They are
+    normalized to SOURCE_MEMORY with the raw value preserved in `notes`, so
+    the read-path vocabulary stays inside VALID_SOURCE_TYPES.
+    """
 
     def _normalize(self, prov):
         """Reproduce the normalization logic from /debug/provenance."""
         if prov and not isinstance(prov, dict):
-            return {"source_type": "legacy_string", "raw": str(prov)}
+            _legacy_raw = str(prov)
+            return {
+                "source_type": "memory",  # SOURCE_MEMORY
+                "notes": f"legacy_bare_string={_legacy_raw!r}",
+            }
         return prov
 
     def test_legacy_string_provenance_normalization(self):
         """Legacy 'collective' string should be safe to call .get() on after normalization."""
         prov = self._normalize("collective")
-        self.assertEqual(prov.get("source_type"), "legacy_string")
-        self.assertEqual(prov.get("raw"), "collective")
+        # Source type is now SOURCE_MEMORY — inside VALID_SOURCE_TYPES.
+        self.assertEqual(prov.get("source_type"), "memory")
+        # Raw value is preserved in notes for debugging.
+        self.assertIn("collective", prov.get("notes", ""))
+        self.assertIn("legacy_bare_string", prov.get("notes", ""))
+        # Legacy pseudo-type is no longer emitted at read time.
+        self.assertNotEqual(prov.get("source_type"), "legacy_string")
+        self.assertNotIn("raw", prov)
+        # Optional fields remain absent.
         self.assertIsNone(prov.get("source_role"))
         self.assertIsNone(prov.get("write_path"))
 

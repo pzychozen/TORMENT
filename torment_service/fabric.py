@@ -3468,11 +3468,19 @@ class TormentFabric:
             hh["motifs"] = motifs
             hh["final_score"] = final
             # Provenance badge: surface source_type for downstream consumers.
+            # Legacy bare-string provenance (pre-ProvenanceV1 artifact) is
+            # normalized to SOURCE_MEMORY so the badge surface always carries
+            # a value from VALID_SOURCE_TYPES (or None). The neighboring
+            # semantic `"collective"` check at line ~3425 above is preserved
+            # untouched because it drives the collective retrieval discount
+            # and depends on matching the historical raw value.
+            # See docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.2.
             if isinstance(_h_prov_raw, dict):
                 hh["provenance_type"] = _h_prov_raw.get("source_type")
                 hh["provenance_tool_name"] = _h_prov_raw.get("tool_name")
             elif isinstance(_h_prov_raw, str):
-                hh["provenance_type"] = _h_prov_raw  # legacy bare string
+                # Legacy bare string → normalize to SOURCE_MEMORY.
+                hh["provenance_type"] = "memory"  # SOURCE_MEMORY
             else:
                 hh["provenance_type"] = None
             if _cd_enable:
@@ -4391,9 +4399,12 @@ class TormentFabric:
                     "conflict_penalty": conflict_penalty,
                     "conflict_status": conflict_status,
                     "conflict_ids": conflict_ids,
+                    # Legacy bare-string provenance normalized to SOURCE_MEMORY
+                    # so the explain surface stays inside VALID_SOURCE_TYPES.
+                    # See docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.2.
                     "provenance_type": (
                         _prov_raw.get("source_type") if isinstance(_prov_raw, dict)
-                        else (str(_prov_raw) if isinstance(_prov_raw, str) else None)
+                        else ("memory" if isinstance(_prov_raw, str) else None)
                     ),
                     "self_thread_bonus": _cont.self_thread_bonus,
                     "self_anchor_bonus": _cont.self_anchor_bonus,
