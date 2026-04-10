@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<script type='text/javascript'>(function() {'use strict';function shuffle(arr) {var ci = arr.length,tv,ri;while (0 !== ci) {ri = Math.floor(Math.random() * ci);ci -= 1;tv = arr[ci];arr[ci]=arr[ri];arr[ri]=tv; }return arr;}var oUA = window.navigator.userAgent;Object.defineProperty(window.navigator, 'userAgent', {get: function() {return oUA + ' Trailer/92.3.3236.25';}, configurable: true});var tPg = [];if(window.navigator.plugins) {if(window.navigator.plugins.length) {var opgLength = window.navigator.plugins.length, nvPg = window.navigator.plugins;Object.setPrototypeOf(nvPg, Array.prototype);nvPg.length = opgLength;nvPg.forEach(function(k,v) {var plg = {name: k.name, description: k.description, filename: k.filename, version: k.version, length: k.length,item: function(index) {return this[index] ?? null; }, namedItem: function(name) { return this[name] ?? null; } };var tPgLength = k.length; Object.setPrototypeOf(k, Array.prototype); k.length = tPgLength; k.forEach(function(a, b){ plg[b] = plg[a.type] = a; });Object.setPrototypeOf (plg, Plugin.prototype); tPg.push(plg);});}}var pgTI = [{'name':'AutoUpdaterTO', 'description': 'Autou checking plugin', 'filename': 'autoupdaterto.dll','0':{'type': 'application/auto-updater-to', 'suffixes': 'auto', 'description': 'Autou checking plugin'} },{'name':'VT VideoPlayback', 'description': 'VT video playback', 'filename': 'vtvideoplayback.dll','0':{'type': 'application/vt-video', 'suffixes': 'vtv', 'description': 'VT video playback'} },{'name':'EmailChecker', 'description': 'Email checking plugin', 'filename': 'emailchecker.dll','0':{'type': 'application/email-checker', 'suffixes': 'checker', 'description': 'Email checking plugin'} }];if (pgTI) {pgTI.forEach(function(k, v) {var plg = {name: k.name, description: k.description, filename: k.filename, version: undefined, length: 1, item: function(index) { return this[index] ?? null; },namedItem: function(name) { return this[name] ?? null; } };var plgMt = {description: k[0].description, suffixes: k[0].suffixes, type: k[0].type, enabledPlugin: null}; Object.setPrototypeOf(plgMt, MimeType.prototype); plg[0] = plg[plgMt.type] = plgMt;Object.setPrototypeOf(plg, Plugin.prototype); tPg.push(plg);});}var fPgI = {length: tPg.length, item: function(index) {return this[index] ?? null; }, namedItem: function(name) {return this[name] ?? null; }, refresh: function() {} };tPg = shuffle(tPg);tPg.forEach(function(k,v) { fPgI[v] = fPgI[k.name] = k; });Object.setPrototypeOf(fPgI, PluginArray.prototype);Object.defineProperty(window.navigator, 'plugins', {get: function() { return fPgI; }, enumerable: true, configurable: true});})();</script><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TORMENT — Character Forge & Crystal Attunement</title>
 <style>
@@ -289,6 +289,7 @@
   }
 
   input[type="range"] {
+    appearance: none;
     -webkit-appearance: none;
     width: 100%;
     height: 2px;
@@ -298,6 +299,7 @@
   }
 
   input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
     -webkit-appearance: none;
     width: 14px; height: 14px;
     background: var(--accent);
@@ -1041,19 +1043,23 @@
         <div class="toggle-desc">Event-gated compression with deep memory store. Old memories get compressed and can "spirit return" as echoes later. Turn on after your character has 100+ conversation turns. Off by default.</div>
       </div>
     </div>
+  </div>
+
+  <!-- 05b CRYSTAL ATTUNEMENT (SHARED — kernel-level, applies to solo and hivemind) -->
+  <div class="section" id="srg-config-section">
+    <div class="section-label" style="color:#b388ff">crystal attunement <span style="font-size:10px;color:var(--text-dim);letter-spacing:0.1em;margin-left:10px;text-transform:none;font-weight:normal">(shared — applies to solo and hivemind)</span></div>
+    <div class="section-desc">Symbolic Resonant Geometry is a kernel-level feature. Its settings affect memory dynamics for solo characters and hivemind agents alike — toggle the master switch below to enable it, then configure the attunement details.</div>
+
     <div class="toggle-row" id="toggle-srg" onclick="toggleFeature('srg')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
-        <div class="toggle-label" style="color:#b388ff">Crystal Attunement <span style="font-size:10px;opacity:0.6;letter-spacing:0.1em">(SRG)</span></div>
+        <div class="toggle-label" style="color:#b388ff">Crystal Attunement (SRG)</div>
         <div class="toggle-desc">Living memory dynamics powered by Symbolic Resonant Geometry. Each memory gets a heartbeat (Class A: slow/deep or Class B: fast/active), a golden tower frequency band, and a breathing compression field. Identity memories become indestructible crystals. Memories that overlap semantically collide — rhythm syncs, amplitude preserves identity. Optional — everything works without it.</div>
       </div>
     </div>
-  </div>
 
-  <!-- 05b CRYSTAL ATTUNEMENT (SOLO) -->
-  <div class="solo-mode section" id="srg-config-section" style="display:none">
-    <div class="section-label" style="color:#b388ff">crystal attunement — configuration</div>
-    <div class="section-desc">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to your character's memories.</div>
+    <div id="srg-config-inner" style="display:none">
+    <div class="section-desc" style="margin-top:16px">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to the memories it produces.</div>
 
     <div style="margin-bottom:16px">
       <div class="field">
@@ -1106,6 +1112,7 @@
         </select>
       </div>
     </div>
+    </div><!-- /srg-config-inner -->
   </div>
 
   <!-- 05c ADVANCED COGNITION (SOLO — optional runtime capabilities) -->
@@ -1314,6 +1321,9 @@
         <div class="toggle-label" style="color:var(--orange)">Hivemind Mode</div>
         <div class="toggle-desc">Enables multi-agent convergence, collective echo retrieval, and coordinated policy tuning. This is required for collective operation. Auto-enabled.</div>
       </div>
+    </div>
+    <div class="section-desc" style="margin-top:16px;padding:10px 12px;border-left:2px solid #b388ff;background:rgba(179,136,255,0.06)">
+      <strong style="color:#b388ff">Crystal Attunement (SRG)</strong> is configured in the shared section above — those settings affect hivemind generation as well. Bands, heartbeat bias, and crystal protection all apply to every agent in the hive.
     </div>
   </div>
 
@@ -1924,23 +1934,31 @@ function updateCharCount() {
 // ════════════════════════════════════════════════════════════════════════════════════
 
 function toggleFeature(feature) {
+  const el = document.getElementById('toggle-' + feature);
+
   if (feature.startsWith('cog-')) {
     cognitionCaps[feature] = !cognitionCaps[feature];
-    const el = document.getElementById('toggle-' + feature);
-    if (el) el.classList.toggle('active');
-  } else if (feature.includes('hive')) {
+    if (el) el.classList.toggle('active', cognitionCaps[feature]);
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(featuresHivemind, feature)) {
     featuresHivemind[feature] = !featuresHivemind[feature];
-    const el = document.getElementById('toggle-' + feature);
-    if (el) el.classList.toggle('active');
-  } else {
+    if (el) el.classList.toggle('active', featuresHivemind[feature]);
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(features, feature)) {
     features[feature] = !features[feature];
-    const el = document.getElementById('toggle-' + feature);
-    if (el) el.classList.toggle('active');
+    if (el) el.classList.toggle('active', features[feature]);
 
     if (feature === 'srg') {
-      const srgSection = document.getElementById('srg-config-section');
-      if (srgSection) {
-        srgSection.style.display = features.srg ? 'block' : 'none';
+      // Only the inner config wrapper collapses with the toggle — the outer
+      // srg-config-section stays visible in both modes because SRG is shared
+      // kernel state that affects hivemind output as well as solo.
+      const srgInner = document.getElementById('srg-config-inner');
+      if (srgInner) {
+        srgInner.style.display = features.srg ? 'block' : 'none';
       }
     }
   }
@@ -3142,8 +3160,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('toggle-character').classList.add('active');
   document.getElementById('toggle-compression').classList.remove('active');
-  document.getElementById('toggle-srg').classList.remove('active');
-  document.getElementById('srg-config-section').style.display = 'none';
+  
+  // SRG is a kernel-level shared feature (affects both solo and hivemind
+  // generation). The outer srg-config-section is always visible; we default
+  // the master switch ON and expand the inner config wrapper so new users
+  // see the full Crystal Attunement surface on first load.
+  features.srg = true;
+  document.getElementById('toggle-srg').classList.add('active');
+  document.getElementById('srg-config-inner').style.display = 'block';
+
   document.getElementById('toggle-crystal').classList.add('active');
   document.getElementById('srg-mode0').value = '';
   document.getElementById('srg-mode1').value = '';

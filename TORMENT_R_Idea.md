@@ -36,7 +36,7 @@ It is strongest as:
 
 Status update (April 10, 2026):
 
-1. ~~**docs/archive/AGENT_SPINE_PLAN.md references**~~ — resolved; stale references were normalized to the archived path.
+1. **docs/archive/AGENT_SPINE_PLAN.md references** — 30+ files reference docs/archive/AGENT_SPINE_PLAN.md which is now in docs/archive/. Comments-only, not functional. Low priority.
 
 2. **Unused provenance constants** — SOURCE_MEMORY, SOURCE_DERIVED.derive(), and 3 unused write_path values (reflection_writeback, migration, system_import) are defined but never used in production. Kept for future extensibility.
 
