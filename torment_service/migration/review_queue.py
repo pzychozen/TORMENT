@@ -44,12 +44,15 @@ re-running gate 2 themselves.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .constants import CURSOR_DIRNAME, REVIEW_QUEUE_FILENAME
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -123,7 +126,21 @@ def append_review(workspace_root: str, entry: ReviewEntry) -> None:
         try:
             os.fsync(f.fileno())
         except (AttributeError, OSError):
-            pass
+            # Non-fatal: fsync is a durability best-effort for the
+            # review queue. The row has already been flushed to the
+            # OS buffer; the only thing fsync adds is survival past a
+            # sudden power loss between append and the next planned
+            # sync. On platforms/filesystems where fsync is unsupported
+            # (AttributeError) or the underlying fd refuses the sync
+            # (OSError), the append path must still succeed — we log
+            # at DEBUG so operators running with INFO-level configs do
+            # not get spurious warnings, but the failure is still
+            # captured for post-hoc diagnosis.
+            logger.debug(
+                "Non-fatal fsync failure for review queue file: %s",
+                path,
+                exc_info=True,
+            )
 
 
 def read_reviews(workspace_root: str) -> List[ReviewEntry]:

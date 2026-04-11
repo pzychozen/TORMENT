@@ -22,7 +22,7 @@ Non-goals
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from torment_service.provenance_v1 import (
     SOURCE_COLLECTIVE_ECHO,
@@ -178,24 +178,22 @@ def classify_row(raw_provenance: Any, *, eid: Optional[int] = None) -> Gate1Resu
     # ── Dict shapes ──────────────────────────────────────────────────
     if isinstance(raw_provenance, dict):
         # Class 7 — zero-event artifact detection.
+        #
         # Commit A ships with ZERO_EVENT_ARTIFACT_PATTERNS empty, so
         # this branch never fires. Decision 4 requires enumeration,
-        # not fuzzy matching, so the predicate walks the tuple
-        # explicitly and only a dict that matches every key/value of a
-        # registered pattern is classified as class 7.
-        for pattern in ZERO_EVENT_ARTIFACT_PATTERNS:
-            if _dict_matches_pattern(raw_provenance, pattern):
-                return Gate1Result(
-                    class_id=GATE1_CLASS_ZERO_EVENT_ARTIFACT,
-                    outcome=GATE1_OUTCOME_FAIL,
-                    recovered_source_type=None,
-                    recovered_source_role=None,
-                    recovered_parent_eids=[],
-                    recovery_notes=(
-                        f"{eid_tag}zero_event_artifact pattern={pattern!r}"
-                    ),
-                    raw_original=raw_provenance,
-                )
+        # not fuzzy matching; the helper walks the tuple explicitly
+        # and only a dict that matches every key/value of a registered
+        # pattern is classified as class 7.
+        if _matches_zero_event_artifact(raw_provenance):
+            return Gate1Result(
+                class_id=GATE1_CLASS_ZERO_EVENT_ARTIFACT,
+                outcome=GATE1_OUTCOME_FAIL,
+                recovered_source_type=None,
+                recovered_source_role=None,
+                recovered_parent_eids=[],
+                recovery_notes=f"{eid_tag}zero_event_artifact_matched",
+                raw_original=raw_provenance,
+            )
 
         source_type = raw_provenance.get("source_type")
 
@@ -347,3 +345,27 @@ def _dict_matches_pattern(d: Dict[str, Any], pattern: Dict[str, Any]) -> bool:
         if d.get(k) != v:
             return False
     return True
+
+
+def _matches_zero_event_artifact(raw: Any) -> bool:
+    """Class 7 predicate — True iff ``raw`` matches any enumerated
+    zero-event artifact pattern in ``ZERO_EVENT_ARTIFACT_PATTERNS``.
+
+    This is the single consumption site of ``ZERO_EVENT_ARTIFACT_PATTERNS``
+    in the gate 1 recovery module. The constant is doctrinal and stable,
+    shipped as an intentionally empty tuple in commit A — a deliberate
+    conservative default documented in ``docs/ADMISSION_POLICY_v2.4.x.md``.
+    Patterns are added only in response to dry-run evidence from a real
+    corpus and each addition requires a policy-version bump.
+
+    When the tuple is empty (commit A state), the loop body never
+    executes and this function returns ``False`` for every input — which
+    is the correct evidence-first behavior: no patterns enumerated, no
+    rows classified as class 7.
+    """
+    if not isinstance(raw, dict):
+        return False
+    for pattern in ZERO_EVENT_ARTIFACT_PATTERNS:
+        if _dict_matches_pattern(raw, pattern):
+            return True
+    return False

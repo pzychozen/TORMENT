@@ -32,7 +32,7 @@ import sys
 from typing import Any, Iterator, List, Optional, Tuple
 
 from .cursor import processed_eids, read_entries
-from .dry_run import DryRunReport, run_dry_run
+from .dry_run import run_dry_run
 from .review_queue import read_reviews
 
 

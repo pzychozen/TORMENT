@@ -19,7 +19,6 @@ enforces enumeration equality on the reason set.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from torment_service.provenance_v1 import (
     SOURCE_COLLECTIVE_ECHO,
@@ -35,7 +34,6 @@ from .constants import (
     ADMISSION_REASON_SOURCE_TYPE_REJECTED_SET,
     ADMISSION_REASON_ZERO_EVENT_ARTIFACT,
     GATE1_CLASS_DEPRECATED_VOCABULARY,
-    GATE1_CLASS_DICT_TRUNCATED,
     GATE1_CLASS_LEGACY_BARE_STRING,
     GATE1_CLASS_ZERO_EVENT_ARTIFACT,
     GATE1_OUTCOME_FAIL,
