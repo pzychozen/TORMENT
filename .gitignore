@@ -37,3 +37,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+closure_runs/
+step6_guard_reverify_live.py
+step6_export_bridge.py
