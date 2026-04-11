@@ -26,7 +26,6 @@ from torment_service.migration.constants import (
 )
 from torment_service.migration.gate2_admission import Gate2Result
 from torment_service.migration.rerun_policy import (
-    RerunDecision,
     StoredAdmissionState,
     decide_rerun,
     is_stale_version,

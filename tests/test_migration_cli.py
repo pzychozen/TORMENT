@@ -31,7 +31,6 @@ from torment_service.migration.constants import (
     ADMISSION_POLICY_VERSION,
     CURSOR_DIRNAME,
     CURSOR_FILENAME,
-    REVIEW_QUEUE_FILENAME,
 )
 from torment_service.migration.cursor import processed_eids
 from torment_service.provenance_v1 import (

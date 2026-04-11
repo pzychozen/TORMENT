@@ -25,10 +25,7 @@ from torment_service.migration.constants import (
     GATE1_CLASS_NULL_OR_EMPTY,
 )
 from torment_service.migration.cursor import processed_eids
-from torment_service.migration.dry_run import (
-    DryRunReport,
-    run_dry_run,
-)
+from torment_service.migration.dry_run import run_dry_run
 from torment_service.provenance_v1 import (
     SOURCE_USER_INPUT,
     WRITE_DIRECT_INGEST,
