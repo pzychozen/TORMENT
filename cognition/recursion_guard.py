@@ -47,13 +47,26 @@ Design invariants
    — the former per the step-4 exclusion, the latter because
    ``SOURCE_DERIVED`` is deferred vocabulary and must not be pre-authorized
    through ancestry chaining.
+
+7. **Migration refusal short-circuit (step 6 commit A).** If the stored
+   provenance carries ``admission_refused=True`` from a prior
+   ``WRITE_MIGRATION`` pass, or if ``source_type`` is the storage
+   sentinel ``SOURCE_GATE1_UNRECOVERABLE``, the walk rejects immediately
+   with ``REASON_MIGRATION_REFUSED``. These rows have already been
+   classified as non-admissible by gate 2 under a ratified policy
+   version; the guard must never re-authorize them through chaining.
+   See ``docs/ADMISSION_POLICY_v2.4.x.md`` and
+   ``docs/WRITE_MIGRATION_IMPLEMENTATION_PLAN_v2.4.x.md``.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Callable, List, Optional, Tuple
 
-from torment_service.provenance_v1 import ProvenanceV1
+from torment_service.provenance_v1 import (
+    ProvenanceV1,
+    SOURCE_GATE1_UNRECOVERABLE,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -74,8 +87,9 @@ _SAFE_SOURCE_TYPES_IN_WALK = frozenset({
 })
 
 _REJECTED_SOURCE_TYPES_IN_WALK = frozenset({
-    "collective_echo",  # step-4 exclusion
-    "derived",          # deferred vocabulary — must not be chain-admitted
+    "collective_echo",               # step-4 exclusion
+    "derived",                       # deferred vocabulary — must not be chain-admitted
+    SOURCE_GATE1_UNRECOVERABLE,      # step-6 storage sentinel — migration-refused rows
 })
 
 # Rejection reason vocabulary (stable strings for tests / logs / metrics)
@@ -86,6 +100,7 @@ REASON_DERIVED              = "derived_in_ancestry"
 REASON_UNSAFE_SOURCE_TYPE   = "unsafe_parent_source_type"
 REASON_DEPTH_EXCEEDED       = "ancestry_depth_exceeded"
 REASON_MALFORMED_ROLE_OUT   = "role_output_missing_source_role"
+REASON_MIGRATION_REFUSED    = "migration_admission_refused"
 
 
 def recursion_guard_check(
@@ -159,6 +174,31 @@ def recursion_guard_check(
 
         source_type = prov.get("source_type")
         source_role = (prov.get("source_role") or "").lower()
+
+        # Step-6 migration refusal short-circuit. A row that WRITE_MIGRATION
+        # has already classified as non-admissible must never be chain-
+        # admitted by ancestry walking. Two independent signals carry
+        # this state:
+        #   (a) ``admission_refused=True`` on the stored row — the
+        #       load-bearing flag set by gate 2 under a ratified policy
+        #       version. Checked first because it is the narrower signal
+        #       and can appear on rows whose source_type is otherwise
+        #       safe (e.g. a memory row whose gate-2 evaluation refused
+        #       it for ancestry reasons).
+        #   (b) ``source_type == SOURCE_GATE1_UNRECOVERABLE`` — the
+        #       storage sentinel applied when gate 1 cannot recover a
+        #       row at all. Redundant with ``admission_refused=True`` on
+        #       well-formed rows (the ProvenanceV1 invariant enforces
+        #       the pairing) but kept here as defense-in-depth against
+        #       malformed dicts that slip past construction-time checks.
+        # Both signals land on the same REASON_MIGRATION_REFUSED so
+        # telemetry aggregates migration rejections cleanly, without
+        # having to distinguish "refused by gate 2" from "couldn't
+        # recover in gate 1" at the corridor layer.
+        if prov.get("admission_refused") is True:
+            return False, REASON_MIGRATION_REFUSED
+        if source_type == SOURCE_GATE1_UNRECOVERABLE:
+            return False, REASON_MIGRATION_REFUSED
 
         # Decisive blocker: archivist role at any depth.
         if "archivist" in source_role:

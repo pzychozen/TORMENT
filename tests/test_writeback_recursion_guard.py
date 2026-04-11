@@ -24,8 +24,13 @@ from cognition.recursion_guard import (
     REASON_DERIVED,
     REASON_DEPTH_EXCEEDED,
     REASON_MALFORMED_ROLE_OUT,
+    REASON_MIGRATION_REFUSED,
 )
-from torment_service.provenance_v1 import ProvenanceV1, SOURCE_MEMORY
+from torment_service.provenance_v1 import (
+    ProvenanceV1,
+    SOURCE_GATE1_UNRECOVERABLE,
+    SOURCE_MEMORY,
+)
 
 
 # ── Test helpers ────────────────────────────────────────────────────
@@ -296,6 +301,128 @@ class TestRecursionGuardDepthCap(unittest.TestCase):
         # Both nodes are memory → admitted; the walk terminates because
         # each eid is only visited once.
         self.assertTrue(ok, msg=f"rejected: {reason}")
+
+
+# ── Step-6 migration refusal guard tests ───────────────────────────
+
+class TestRecursionGuardMigrationRefusal(unittest.TestCase):
+    """WRITE_MIGRATION step-6 commit A: rows that the migration has
+    refused must never be chain-admitted through the recursion guard,
+    on either of the two independent signals that carry that state."""
+
+    def test_admission_refused_direct_parent_rejects(self):
+        # A memory row whose stored provenance carries admission_refused=True.
+        # This is the load-bearing signal set by gate 2 under a
+        # ratified policy version. Even though source_type is otherwise
+        # in the safe set, the guard must reject.
+        prov = {
+            "source_type": SOURCE_MEMORY,
+            "parent_eids": [],
+            "admission_refused": True,
+            "admission_reason": "gate1_unrecoverable",
+            "admission_policy_version": "v2.4.x-step6-a",
+        }
+        corpus = {1: {"eid": 1, "provenance": prov}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_MIGRATION_REFUSED)
+
+    def test_admission_refused_deep_ancestor_rejects(self):
+        # Clean memory chain that terminates in a migration-refused
+        # node at depth 3. Must still reject — the refusal propagates
+        # through ancestry walking.
+        refused_prov = {
+            "source_type": SOURCE_MEMORY,
+            "parent_eids": [],
+            "admission_refused": True,
+            "admission_reason": "bare_string_rejected_class",
+            "admission_policy_version": "v2.4.x-step6-a",
+        }
+        corpus = {
+            1: make_payload("memory", parent_eids=[2]),
+            2: make_payload("memory", parent_eids=[3]),
+            3: {"eid": 3, "provenance": refused_prov},
+        }
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_MIGRATION_REFUSED)
+
+    def test_sentinel_source_type_direct_parent_rejects(self):
+        # Defense-in-depth: source_type == SOURCE_GATE1_UNRECOVERABLE
+        # must reject even if admission_refused is somehow missing on
+        # a malformed dict that bypassed construction-time invariants.
+        prov = {
+            "source_type": SOURCE_GATE1_UNRECOVERABLE,
+            "parent_eids": [],
+            "admission_refused": True,
+            "admission_reason": "gate1_unrecoverable",
+            "admission_policy_version": "v2.4.x-step6-a",
+        }
+        corpus = {1: {"eid": 1, "provenance": prov}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_MIGRATION_REFUSED)
+
+    def test_sentinel_source_type_deep_ancestor_rejects(self):
+        refused_prov = {
+            "source_type": SOURCE_GATE1_UNRECOVERABLE,
+            "parent_eids": [],
+            "admission_refused": True,
+            "admission_reason": "gate1_unrecoverable",
+            "admission_policy_version": "v2.4.x-step6-a",
+        }
+        corpus = {
+            1: make_payload("memory", parent_eids=[2]),
+            2: {"eid": 2, "provenance": refused_prov},
+        }
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_MIGRATION_REFUSED)
+
+    def test_admission_refused_false_does_not_reject(self):
+        # Pre-step-6 rows (no admission fields) and fresh live-ingest
+        # rows that explicitly serialize with admission_refused=False
+        # must pass through without triggering the refusal branch.
+        prov = {
+            "source_type": SOURCE_MEMORY,
+            "parent_eids": [],
+            "admission_refused": False,
+        }
+        corpus = {1: {"eid": 1, "provenance": prov}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertTrue(ok, msg=f"rejected: {reason}")
+
+    def test_missing_admission_fields_treated_as_no_decision(self):
+        # The production serializer strips default-valued admission
+        # fields so pre-step-6 and fresh-ingest payloads are byte-
+        # compatible. The guard must read "missing" as "no migration
+        # decision on file" — i.e. continue normal admissibility flow.
+        prov = {
+            "source_type": SOURCE_MEMORY,
+            "parent_eids": [],
+        }
+        corpus = {1: {"eid": 1, "provenance": prov}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertTrue(ok, msg=f"rejected: {reason}")
+
+    def test_migration_refused_takes_priority_over_archivist_role(self):
+        # Belt-and-braces: an archivist-role row that has ALSO been
+        # refused by the migration must report REASON_MIGRATION_REFUSED,
+        # not REASON_ARCHIVIST_BLOCKED. The migration signal is more
+        # informative for telemetry and ordered strictly earlier in
+        # the guard's decision sequence.
+        prov = {
+            "source_type": SOURCE_MEMORY,
+            "parent_eids": [],
+            "source_role": "archivist",
+            "admission_refused": True,
+            "admission_reason": "gate1_unrecoverable",
+            "admission_policy_version": "v2.4.x-step6-a",
+        }
+        corpus = {1: {"eid": 1, "provenance": prov}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_MIGRATION_REFUSED)
 
 
 if __name__ == "__main__":

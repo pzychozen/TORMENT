@@ -33,6 +33,17 @@ SOURCE_MEMORY       = "memory"
 SOURCE_TOOL_RESULT      = "tool_result"
 SOURCE_COLLECTIVE_ECHO  = "collective_echo"
 
+# Storage sentinel for rows that fail the WRITE_MIGRATION gate-1 recovery
+# predicate. NOT an admissible origin class — see
+# ``torment_service/migration/constants.py::SOURCE_GATE1_UNRECOVERABLE``
+# module docstring and ``docs/ADMISSION_POLICY_v2.4.x.md``. Registered here
+# only so gate-1 FAIL rows can be stored in the uniform ProvenanceV1 schema
+# (rather than left in a pre-migration shape). Live ingest paths MUST NEVER
+# emit this value; only the WRITE_MIGRATION writer produces it. The
+# bounded-DFS recursion guard rejects it at any depth via
+# ``_REJECTED_SOURCE_TYPES_IN_WALK``.
+SOURCE_GATE1_UNRECOVERABLE = "gate1_unrecoverable"
+
 VALID_SOURCE_TYPES = frozenset({
     SOURCE_USER_INPUT,
     SOURCE_ROLE_OUTPUT,
@@ -40,6 +51,7 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_MEMORY,
     SOURCE_TOOL_RESULT,
     SOURCE_COLLECTIVE_ECHO,
+    SOURCE_GATE1_UNRECOVERABLE,
 })
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
@@ -92,6 +104,31 @@ class ProvenanceV1:
     session_id: Optional[str] = None
     notes: Optional[str] = None
 
+    # ── WRITE_MIGRATION admission fields (v2.4.x step 6) ───────────
+    #
+    # These three fields record the gate-2 admission decision separately
+    # from the source_type origin class, so that "what something is" and
+    # "what we decided to do with it" remain cleanly separated.
+    #
+    # Default values (False / "" / "") encode the "no admission decision
+    # on file" state that every live ingest path produces. Only the
+    # WRITE_MIGRATION writer ever sets these to non-default values.
+    #
+    # ``admission_refused`` is the load-bearing flag: when True, the
+    # recursion guard rejects the row at any depth with
+    # REASON_MIGRATION_REFUSED, regardless of source_type or source_role.
+    # ``admission_reason`` names the specific gate-2 rule that fired
+    # (one of ``migration.constants.ADMISSION_REASONS``).
+    # ``admission_policy_version`` records the doctrine revision the
+    # decision was made under, enabling the monotonic-in-tightness
+    # re-run policy to detect stale decisions and re-evaluate them.
+    #
+    # See ``docs/ADMISSION_POLICY_v2.4.x.md`` and
+    # ``docs/WRITE_MIGRATION_FRAMING_v2.4.x.md`` Decision 1.
+    admission_refused: bool = False
+    admission_reason: str = ""
+    admission_policy_version: str = ""
+
     # ── Validation (Rule 3, 4, 5, 6) ───────────────────────────────
 
     def __post_init__(self) -> None:
@@ -129,16 +166,57 @@ class ProvenanceV1:
             self.created_at_ts = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
+        # WRITE_MIGRATION admission-field invariants (v2.4.x step 6).
+        # These catch half-formed admission records at construction time
+        # so malformed rows cannot be written to storage and later
+        # confuse the recursion guard or the re-run policy.
+        if self.admission_refused and not self.admission_reason:
+            raise ValueError(
+                "admission_reason must not be empty when admission_refused=True"
+            )
+        if (self.admission_refused or self.admission_reason) and not self.admission_policy_version:
+            raise ValueError(
+                "admission_policy_version must not be empty when any admission "
+                "decision is recorded"
+            )
+        # Sentinel source_type pairs with an explicit refusal record.
+        # Without this invariant, a row could carry the sentinel (which
+        # the guard rejects via _REJECTED_SOURCE_TYPES_IN_WALK) while
+        # claiming admission_refused=False, which would be an
+        # internally contradictory state.
+        if self.source_type == SOURCE_GATE1_UNRECOVERABLE and not self.admission_refused:
+            raise ValueError(
+                "source_type=SOURCE_GATE1_UNRECOVERABLE requires admission_refused=True"
+            )
 
     # ── Serialization ───────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize to JSON-safe dict. Omits None optional fields."""
+        """Serialize to JSON-safe dict. Omits None optional fields and
+        default-valued WRITE_MIGRATION admission fields.
+
+        The admission fields (``admission_refused``, ``admission_reason``,
+        ``admission_policy_version``) are stripped when they carry their
+        defaults. This keeps payloads written by live ingest paths
+        byte-compatible with the pre-step-6 shape, so the v2.4.x schema
+        addition is additive and invisible to rows the migration has not
+        touched. ``from_dict`` and the recursion guard both treat missing
+        admission fields as "no admission decision on file", which is the
+        correct reading for any row produced outside the migration.
+        """
         d = asdict(self)
         # Strip None optional fields to keep payloads compact
         for k in ("tool_name", "session_id", "notes"):
             if d.get(k) is None:
                 del d[k]
+        # Strip default-valued admission fields so pre-step-6 rows and
+        # fresh live-ingest rows serialize identically.
+        if d.get("admission_refused") is False:
+            del d["admission_refused"]
+        if d.get("admission_reason") == "":
+            del d["admission_reason"]
+        if d.get("admission_policy_version") == "":
+            del d["admission_policy_version"]
         return d
 
     @classmethod
