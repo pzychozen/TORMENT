@@ -104,6 +104,13 @@ GATE1_CLASSES = frozenset({
 #
 # DO NOT add speculative patterns here. Each entry must be justified
 # against an observed row in a dry-run report.
+#
+# Intentionally empty conservative default; exercised by tests via
+# monkeypatch to prove live configuration. See
+# ``tests/test_migration_gate1_recovery.py::TestClass7ZeroEventArtifact``
+# for the live-configuration proof test. If static analysis ever
+# flags this constant as unused, the monkeypatch test is the
+# authoritative contradiction.
 
 ZERO_EVENT_ARTIFACT_PATTERNS: tuple = tuple()
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -169,7 +170,14 @@ class TestClass6DeprecatedVocabulary(unittest.TestCase):
 class TestClass7ZeroEventArtifact(unittest.TestCase):
     """Commit A ships the class-7 pattern list deliberately empty. This
     test guards that posture — adding a pattern here requires a
-    doctrine policy version bump."""
+    doctrine policy version bump.
+
+    The live-configuration proof test below monkeypatches
+    ``ZERO_EVENT_ARTIFACT_PATTERNS`` to a non-empty tuple and exercises
+    the classification through the public ``classify_row`` path. It is
+    the authoritative contradiction to any static-analysis claim that
+    the constant is unused — it is intentionally empty-by-default, not
+    dead ballast, and this test is the evidence."""
 
     def test_pattern_list_empty_in_commit_a(self) -> None:
         self.assertEqual(ZERO_EVENT_ARTIFACT_PATTERNS, ())
@@ -188,6 +196,71 @@ class TestClass7ZeroEventArtifact(unittest.TestCase):
         self.assertNotEqual(
             result.class_id, GATE1_CLASS_ZERO_EVENT_ARTIFACT
         )
+
+    def test_class7_fires_when_pattern_list_has_entries(self) -> None:
+        """Live-configuration proof.
+
+        Monkeypatch ``ZERO_EVENT_ARTIFACT_PATTERNS`` in the
+        ``gate1_recovery`` module namespace (the site where the helper
+        looks it up) to a non-empty tuple, pass a raw row dict that
+        matches the pattern into the public ``classify_row`` entry
+        point, and assert the class-7 path fires. Under the default
+        empty-tuple posture the same row falls to class 4 — asserted
+        first as a control so any future change to the default state
+        is caught.
+
+        The pattern key ``zero_event_marker`` is deliberately not a
+        real source_type, so:
+
+        - With the empty default: classify_row follows the class-4
+          branch because ``zero_event_marker`` is not in
+          ``VALID_SOURCE_TYPES`` and there is no deprecated mapping.
+        - With the monkeypatched tuple: classify_row hits the class-7
+          branch FIRST because the dict-shape check runs before the
+          source_type validity check.
+
+        This proves the constant is live configuration: its value
+        changes classification behavior end-to-end via the public API.
+        """
+        raw = {"source_type": "zero_event_marker", "marker": "live"}
+
+        # Control: default empty tuple → class 4 (unknown source_type).
+        baseline = classify_row(raw)
+        self.assertEqual(
+            baseline.class_id, GATE1_CLASS_DICT_INVALID_TYPE
+        )
+        self.assertNotEqual(
+            baseline.class_id, GATE1_CLASS_ZERO_EVENT_ARTIFACT
+        )
+
+        # Monkeypatch the read site: gate1_recovery's module namespace
+        # is where ``_matches_zero_event_artifact`` resolves the name
+        # at runtime via ``patterns = ZERO_EVENT_ARTIFACT_PATTERNS``.
+        patched = (
+            {"source_type": "zero_event_marker", "marker": "live"},
+        )
+        with patch(
+            "torment_service.migration.gate1_recovery."
+            "ZERO_EVENT_ARTIFACT_PATTERNS",
+            patched,
+        ):
+            result = classify_row(raw)
+
+        self.assertEqual(
+            result.class_id, GATE1_CLASS_ZERO_EVENT_ARTIFACT
+        )
+        self.assertEqual(result.outcome, GATE1_OUTCOME_FAIL)
+        self.assertIsNone(result.recovered_source_type)
+        self.assertEqual(result.recovered_parent_eids, [])
+
+        # Confirm the patch context cleanly reverted — the same row
+        # once again classifies as class 4 after the with-block exits.
+        post = classify_row(raw)
+        self.assertEqual(
+            post.class_id, GATE1_CLASS_DICT_INVALID_TYPE
+        )
+        # And the module-level constant is still the empty default.
+        self.assertEqual(ZERO_EVENT_ARTIFACT_PATTERNS, ())
 
 
 class TestSentinelRowHandling(unittest.TestCase):
