@@ -989,9 +989,18 @@ RESULT_COGNITION = "cognition"
 RESULT_STATE_READ = "state_read"
 RESULT_NONE = "none"
 
-# Operation → result code mapping (for successful fast-path dispatch)
+# Operation → result code mapping (for successful fast-path dispatch).
+#
+# Every entry in _ALWAYS_FAST must have a corresponding entry here.
+# The startup consistency check below enforces this at import time so
+# adding a new fast-path operation cannot silently ship the wrong
+# result_code. See: historical tool_result_ingest bug (2026-04-11)
+# where a successful guarded-tier write stamped result_code='none'
+# because the operation was registered in _ALWAYS_FAST but missing
+# from this dict.
 _OPERATION_RESULT_CODES: Dict[str, str] = {
     "ingest": RESULT_STORED,
+    "tool_result_ingest": RESULT_STORED,
     "feedback": RESULT_REINFORCED,
     "reinforce": RESULT_REINFORCED,
     "collective_reingest": RESULT_REINGESTED,
@@ -1000,6 +1009,21 @@ _OPERATION_RESULT_CODES: Dict[str, str] = {
     "query_memory": RESULT_QUERIED,
     "compression_run": RESULT_COMPRESSED,
 }
+
+# Startup-time consistency check: every fast-path OperationSpec must
+# have a corresponding entry in _OPERATION_RESULT_CODES. This catches
+# the class of bug where a new fast-path operation is added to
+# _ALWAYS_FAST but the result_code mapping is forgotten, which would
+# silently stamp result_code='none' on successful writes.
+_missing_result_codes = {
+    spec.name for spec in _ALWAYS_FAST
+} - set(_OPERATION_RESULT_CODES.keys())
+if _missing_result_codes:
+    raise RuntimeError(
+        f"Fast-path operations missing from _OPERATION_RESULT_CODES: "
+        f"{sorted(_missing_result_codes)}. Every fast-path OperationSpec "
+        f"in _ALWAYS_FAST must have a corresponding result_code mapping."
+    )
 
 
 # ---------------------------------------------------------------------------

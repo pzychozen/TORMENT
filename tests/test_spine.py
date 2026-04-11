@@ -512,6 +512,74 @@ class TestDecisionResultCodes(unittest.TestCase):
         self.assertEqual(resp.decision_code, DECISION_BLOCKED_UNKNOWN_OP)
         self.assertEqual(resp.result_code, RESULT_NONE)
 
+    def test_tool_result_ingest_codes(self):
+        """Regression for 2026-04-11 bug: successful tool_result_ingest
+        stamped result_code='none' because the operation was registered
+        in _ALWAYS_FAST without a matching _OPERATION_RESULT_CODES entry.
+        A successful write must stamp RESULT_STORED.
+        """
+        ctx = RequestContext(client_id="claude", trust_tier=TRUST_INGEST,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="tool_result_ingest",
+            payload={
+                "tool_name": "test_tool",
+                "content": "tool returned this payload",
+                "summary": "test summary",
+            },
+            mode="fast",
+        )
+        resp = submit_task(req, self.fabric, ctx)
+        self.assertTrue(resp.ok, f"tool_result_ingest should succeed, got: {resp.to_dict()}")
+        self.assertEqual(resp.decision_code, DECISION_FAST_ALLOWED)
+        self.assertEqual(
+            resp.result_code, RESULT_STORED,
+            "tool_result_ingest must stamp RESULT_STORED on success — "
+            "result_code='none' on a successful write is the exact "
+            "regression this test exists to prevent.",
+        )
+
+
+class TestResultCodeMappingInvariant(unittest.TestCase):
+    """Guardrail for the 2026-04-11 tool_result_ingest result_code bug.
+
+    The spine has a startup-time consistency check that raises if any
+    fast-path OperationSpec is missing from _OPERATION_RESULT_CODES.
+    These tests run the same invariant at test time so a regression is
+    caught in CI before it ever reaches MCP runtime.
+    """
+
+    def test_every_fast_path_op_has_result_code(self):
+        """Every OperationSpec.name in _ALWAYS_FAST must have a
+        corresponding entry in _OPERATION_RESULT_CODES. Missing entries
+        cause successful writes to silently stamp result_code='none'."""
+        from torment_service.spine import _ALWAYS_FAST, _OPERATION_RESULT_CODES
+        fast_names = {spec.name for spec in _ALWAYS_FAST}
+        mapped_names = set(_OPERATION_RESULT_CODES.keys())
+        missing = fast_names - mapped_names
+        self.assertEqual(
+            missing, set(),
+            f"Fast-path operations missing from _OPERATION_RESULT_CODES: "
+            f"{sorted(missing)}. Every fast-path op must have a "
+            f"result_code mapping or successful writes will stamp "
+            f"result_code='none' (see 2026-04-11 tool_result_ingest bug).",
+        )
+
+    def test_result_code_mapping_has_no_orphan_entries(self):
+        """_OPERATION_RESULT_CODES should not carry entries for
+        operations that are not registered as fast-path. Orphan entries
+        are not a live bug but indicate drift between the two tables."""
+        from torment_service.spine import _ALWAYS_FAST, _OPERATION_RESULT_CODES
+        fast_names = {spec.name for spec in _ALWAYS_FAST}
+        mapped_names = set(_OPERATION_RESULT_CODES.keys())
+        orphans = mapped_names - fast_names
+        self.assertEqual(
+            orphans, set(),
+            f"_OPERATION_RESULT_CODES has orphan entries not in "
+            f"_ALWAYS_FAST: {sorted(orphans)}",
+        )
+
 
 class TestExposureTiers(unittest.TestCase):
     """Test exposure_tier assignments and get_exposed_operations helper."""

@@ -2780,6 +2780,7 @@ class TormentFabric:
                             print(
                                 f"[PACKET-EMIT] packet BUILT and appended: agent={agent_id}, domain={chosen_domain}, "
                                 f"coherence={_hm_coherence:.3f}, eid={eid}, convergence_event={_hm_conv_event is not None}",
+                                file=_hm_sys.stderr,
                                 flush=True,
                             )
 
@@ -2787,7 +2788,11 @@ class TormentFabric:
                             # If convergence was detected, feed it to the proposal bridge.
                             # Proposals are auto-drafted (pending), never auto-approved.
                             if _hm_conv_event is not None:
-                                print(f"[PACKET-CONVERGE] convergence event detected! {_hm_conv_event}", flush=True)
+                                print(
+                                    f"[PACKET-CONVERGE] convergence event detected! {_hm_conv_event}",
+                                    file=_hm_sys.stderr,
+                                    flush=True,
+                                )
                                 try:
                                     _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
                                     _hm_prop_reg = ws.proposals.get(chosen_domain)
@@ -2802,12 +2807,17 @@ class TormentFabric:
                             print(
                                 f"[PACKET-SKIP] packet NOT built: emit_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f}, "
                                 f"reason={_hm_skip_reason if not _hm_emit_ok else 'coherence_below_0.15'}",
+                                file=_hm_sys.stderr,
                                 flush=True,
                             )
                     except Exception as _hm_exc:
                         import traceback
-                        print(f"[PACKET-ERROR] exception in packet emission: {_hm_exc}", flush=True)
-                        traceback.print_exc()
+                        print(
+                            f"[PACKET-ERROR] exception in packet emission: {_hm_exc}",
+                            file=_hm_sys.stderr,
+                            flush=True,
+                        )
+                        traceback.print_exc(file=_hm_sys.stderr)
                 else:
                     # Outer gate failed — print which condition was False
                     _hm_reasons = []
