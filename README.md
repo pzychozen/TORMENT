@@ -1,4 +1,4 @@
-# TORMENT Memory Fabric — v2.4.3
+# TORMENT Memory Fabric — v2.4.4
 
 **TORMENT** is a governed memory and identity engine for building persistent AI characters and agents.
 
@@ -16,6 +16,34 @@ If you want AI characters that feel more consistent, more alive, and more struct
 Built around a TriOcta coupled-oscillator kernel that stabilizes memory formation, prevents drift, and maintains identity over long horizons. Designed for local AI companions, multi-agent hive-minds (200+ bots), persistent identity experiments, and research environments.
 
 The TriOctagon toy model at the heart of this system has its own standalone research archive with full mathematical diagnostics across 12 versioned releases — each version dives deep into the coupled-oscillator math, phase-space analysis, and stability proofs that underpin the kernel's behavior. The complete diagnostic series is available on Zenodo: [TriOctagon Toy Model — Full Diagnostics (12 versions)](https://zenodo.org/records/18215874).
+
+---
+
+## Extending TORMENT — add your own MCP tool
+
+TORMENT exposes its memory operations to Claude Desktop (and any other MCP client) through a small governed MCP server. If you want to add your own tool — a new memory query, a custom reinforcement signal, a domain-specific ingest — the recipe is short:
+
+1. **Register a Spine operation** in `torment_service/spine.py` so your new op gets trust-tier enforcement, audit trails, and a result code.
+2. **Expose it in `mcp_server.py`** as an MCP tool that forwards to `submit_task`.
+3. **Restart Claude Desktop** — the new tool appears in the tool picker automatically.
+
+Only memory and epistemology operations belong here. TORMENT remembers; it does not execute actions — the capability boundary is enforced by doctrine, not just code.
+
+**Where to go for the real details:**
+- `docs/MCP_EXPANSION_GUIDE.md` — full walkthrough, decision matrix, and a worked example of adding a new tool end-to-end
+- `docs/MCP_README.md` — Claude Desktop configuration, environment variables, and stdio transport setup
+- `docs/MCP_SMOKE_TEST.md` — how to verify a new tool end-to-end before shipping it
+- `docs/MCP_CAPABILITY_BOUNDARY.md` — what belongs in an MCP tool, what doesn't, and why
+
+---
+
+## What's New in v2.4.4 — Provenance Migration Closure (step 6)
+
+The provenance-migration subsystem is now operationally complete. Legacy memory rows can be walked through a two-gate admission policy (gate 1 epistemic recovery, gate 2 ancestry admission) and rewritten in place by a narrow append-only writer, and the recursion guard correctly refuses any descendant of an unrecoverable ancestor with `REASON_MIGRATION_REFUSED`.
+
+The full closure sequence — export bridge → dry-run → apply → guard re-verification — has been validated end-to-end against a live workspace with zero failures: refused rows carry the full refusal sentinel, admitted rows are untouched, and the writer's six-precondition narrowness invariant holds. `TORMENT_ARCHIVIST_WRITEBACK` remains off; flipping it is a separate later decision gate, not part of this closure.
+
+**Deeper notes:** see the step-6 doctrine and framing docs under `docs/` and the closure evidence bundles under `closure_runs/` for the dry-run reports, apply reports, guard re-verification reports, and the closure note.
 
 ---
 
