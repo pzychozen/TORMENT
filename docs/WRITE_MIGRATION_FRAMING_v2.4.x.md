@@ -2,6 +2,28 @@
 
 ## Status
 
+**Ratified 2026-04-11.** All six decisions were signed off and the
+implementation plan was written against them. **Commit A of step 6 has
+landed** on branch `v2.4.x-step6-commit-a` — the read-only surface
+(two-gate decision pipeline, cursor, review queue, dry-run report, CLI,
+recursion-guard refusal path, admission-policy drift check) is live
+and green. Commit B (the row-rewrite path) is the next unit of work
+under its own review. See `docs/WRITE_MIGRATION_IMPLEMENTATION_PLAN_v2.4.x.md`
+for the commit A / commit B split, and `docs/ADMISSION_POLICY_v2.4.x.md`
+for the live admission rule set.
+
+This framing document is preserved as the ratified source of truth for
+the six decisions and is not itself subject to change — subsequent
+doctrine revisions happen in `docs/ADMISSION_POLICY_v2.4.x.md` under
+its own version history table, not by editing this doc.
+
+---
+
+The sections below were written before ratification and are preserved
+verbatim.
+
+## Original framing-pass status (pre-ratification)
+
 Framing pass only. No code, no schema changes, no data touches, no greps
 against real stored data until this document is ratified. Implementation
 does not begin until the open decisions at the end of this doc have been

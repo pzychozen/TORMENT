@@ -199,6 +199,9 @@ This release closes the gap between "the hive mind works" and "the memory system
 | `docs/MCP_CAPABILITY_BOUNDARY.md` | MCP capability boundary — what TORMENT MCP does and does not do |
 | `docs/DOCTRINE_v2.4.x.md` | 12 architectural principles that govern v2.4.x change decisions |
 | `docs/RECURSION_SAFETY_POLICY_v2.4.x.md` | Six-rule policy (A–F) preventing archivist write-back recursion loops |
+| `docs/ADMISSION_POLICY_v2.4.x.md` | WRITE_MIGRATION two-gate admission rule set (step 6 commit A) — gate 1 recovery classes, gate 2 admission rules, re-run policy |
+| `docs/WRITE_MIGRATION_FRAMING_v2.4.x.md` | Ratified framing for the write-migration step — six decisions and the thesis |
+| `docs/WRITE_MIGRATION_IMPLEMENTATION_PLAN_v2.4.x.md` | Commit A / commit B split and the file-level change list for step 6 |
 | `docs/TOOL_RESULT_RETRIEVAL_SEMANTICS.md` | Audit of retrieval pipeline behavior for tool-result memories + policy rationale |
 | `docs/TOOL_RESULT_LIFECYCLE_POLICY.md` | Retention and decay policy for externally ingested tool-result memories |
 | `docs/MEMORY_HEALTH_REPORT.md` | Memory growth analysis and lifecycle tuning findings |

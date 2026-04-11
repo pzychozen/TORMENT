@@ -151,6 +151,15 @@ the strings.
 - `role_output_missing_source_role` — a `role_output` ancestor has no
   `source_role` set (malformed shape; ProvenanceV1 normally rejects this
   at construction, but an old corpus entry could still reach the guard)
+- `migration_admission_refused` — any ancestor carries
+  `admission_refused=True` from a ratified `WRITE_MIGRATION` pass, OR its
+  `source_type` is the storage sentinel `SOURCE_GATE1_UNRECOVERABLE`
+  (commit A of step 6). This reason fires **before** source_type or
+  source_role evaluation on each node, so a row that the migration has
+  already refused cannot be chain-admitted by later rules. See
+  `docs/ADMISSION_POLICY_v2.4.x.md` for the two-gate decision procedure
+  that produces this state, and `cognition/recursion_guard.py` for the
+  early-exit sequence in the walk loop.
 
 ## Enforcement Point
 
