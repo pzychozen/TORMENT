@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from torment_service.provenance_v1 import (
     SOURCE_GATE1_UNRECOVERABLE,

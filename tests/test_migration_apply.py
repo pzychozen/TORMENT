@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from torment_service.provenance_v1 import (
     SOURCE_COLLECTIVE_ECHO,
-    SOURCE_DERIVED,
     SOURCE_GATE1_UNRECOVERABLE,
     SOURCE_MEMORY,
     SOURCE_USER_INPUT,

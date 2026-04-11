@@ -31,7 +31,6 @@ cursor/review-queue files the writer itself manages.
 """
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from dataclasses import dataclass, field
@@ -45,7 +44,6 @@ from cognition.recursion_guard import (
 from torment_service.migration.apply import (
     APPLY_ACTION_APPLIED,
     APPLY_ACTION_BLOCKED_REVIEW,
-    APPLY_ACTION_SKIPPED_ALREADY_APPLIED,
     APPLY_ACTION_SKIPPED_BUMP_ONLY,
     APPLY_ACTION_SKIPPED_PRECONDITION,
 )
