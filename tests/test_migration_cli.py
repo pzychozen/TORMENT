@@ -2,13 +2,15 @@
 """
 Tests for ``torment_service.migration.cli``.
 
-Commit A ships a read-only CLI with three subcommands:
+Commit B ships a read/write CLI with three subcommands:
 
   - ``dry-run``  — classify rows from a JSONL file, emit the
                    four-section report
   - ``status``   — summarise cursor + review queue counts
-  - ``apply``    — present but BLOCKED; must exit non-zero with a
-                   clear error pointing at the implementation plan
+  - ``apply``    — run the wet-run orchestrator against the row
+                   source, rewrite admissible rows, and write the
+                   updated state back to a JSONL file. Gated behind
+                   ``--confirm-i-have-reviewed-dry-run``.
 
 These tests drive the CLI via its ``main(argv)`` entry point with
 synthetic JSONL input under tempdirs, so nothing touches the real
@@ -256,25 +258,107 @@ class CLIStatusTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
-class CLIApplyBlockedTests(unittest.TestCase):
+class CLIApplyTests(unittest.TestCase):
+    """Commit B writer path through the CLI."""
 
-    def test_apply_exits_nonzero_and_points_to_plan_doc(self) -> None:
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self.rows_path = os.path.join(self.root, "rows.jsonl")
+        self.out_path = os.path.join(self.root, "rows.out.jsonl")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_apply_without_confirmation_flag_exits_nonzero(self) -> None:
+        _write_jsonl(self.rows_path, [(1, "memory")])
         err = io.StringIO()
         with redirect_stderr(err):
-            rc = main(["apply"])
-        self.assertNotEqual(rc, 0)
-        msg = err.getvalue()
-        self.assertIn("not available in commit A", msg)
-        self.assertIn("WRITE_MIGRATION_IMPLEMENTATION_PLAN", msg)
-
-    def test_apply_with_extra_args_still_blocked(self) -> None:
-        # Commit A's blocked handler ignores any operand flags and
-        # exits non-zero regardless.
-        err = io.StringIO()
-        with redirect_stderr(err):
-            rc = main(["apply"])
+            rc = main(
+                [
+                    "apply",
+                    "--rows-from-jsonl", self.rows_path,
+                    "--workspace-root", self.root,
+                ]
+            )
         self.assertEqual(rc, 3)
-        self.assertIn("commit A", err.getvalue())
+        self.assertIn("--confirm-i-have-reviewed-dry-run", err.getvalue())
+
+    def test_apply_with_confirmation_writes_updated_rows(self) -> None:
+        # A class-3 truncated row that gate 1 RECOVERs and gate 2 admits.
+        _write_jsonl(
+            self.rows_path,
+            [
+                (1, {"source_type": "user_input"}),
+                (2, None),  # class-5 FAIL → refused sentinel
+            ],
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "apply",
+                    "--rows-from-jsonl", self.rows_path,
+                    "--workspace-root", self.root,
+                    "--output-jsonl", self.out_path,
+                    "--confirm-i-have-reviewed-dry-run",
+                ]
+            )
+        self.assertEqual(rc, 0)
+
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["policy_version"], ADMISSION_POLICY_VERSION)
+        self.assertEqual(report["counts"]["rows_scanned"], 2)
+        self.assertEqual(report["counts"]["applied"], 2)
+
+        # Rows-by-default are NOT included in the report.
+        self.assertNotIn("rows", report)
+
+        # Output JSONL contains both rows in their post-apply state.
+        with open(self.out_path, "r", encoding="utf-8") as f:
+            out_lines = [json.loads(l) for l in f if l.strip()]
+        self.assertEqual(len(out_lines), 2)
+        by_eid = {o["eid"]: o for o in out_lines}
+        self.assertEqual(by_eid[1]["provenance"]["source_type"], "user_input")
+        self.assertTrue(by_eid[2]["provenance"]["admission_refused"])
+
+        # Cursor file is populated.
+        cursor_path = os.path.join(
+            self.root, CURSOR_DIRNAME, CURSOR_FILENAME
+        )
+        self.assertTrue(os.path.exists(cursor_path))
+
+    def test_apply_without_workspace_root_is_argparse_error(self) -> None:
+        _write_jsonl(self.rows_path, [(1, "memory")])
+        err = io.StringIO()
+        with redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                main(
+                    [
+                        "apply",
+                        "--rows-from-jsonl", self.rows_path,
+                        "--confirm-i-have-reviewed-dry-run",
+                    ]
+                )
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_apply_report_include_rows_opt_in(self) -> None:
+        _write_jsonl(self.rows_path, [(1, "memory")])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "apply",
+                    "--rows-from-jsonl", self.rows_path,
+                    "--workspace-root", self.root,
+                    "--confirm-i-have-reviewed-dry-run",
+                    "--report-include-rows",
+                ]
+            )
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertIn("rows", report)
+        self.assertEqual(len(report["rows"]), 1)
 
 
 class CLIMissingCommandTests(unittest.TestCase):

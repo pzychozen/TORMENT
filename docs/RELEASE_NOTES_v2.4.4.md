@@ -170,6 +170,81 @@ under its own review.
 
 ---
 
+## Step 6 Commit B — writer path activation
+
+Commit B activates the row-rewrite path that commit A deliberately
+withheld. The decision pipeline ratified in commit A is reused
+unchanged; commit B adds (a) a writer primitive that rewrites a single
+row's provenance after six independent precondition re-checks, (b) a
+thin orchestrator that walks a row source and applies the writer, and
+(c) a live `apply` CLI subcommand gated behind an explicit
+`--confirm-i-have-reviewed-dry-run` flag.
+
+### What commit B ships
+
+- `torment_service/migration/apply.py` — writer primitive. The only
+  place in the migration package that calls
+  `MemoryGraph.update_payload`. Six preconditions, in order, each able
+  to return a `SKIPPED_*` result without touching the graph:
+  1. `stored_prov_not_dict` — refuse shapes the writer cannot safely
+     mutate.
+  2. Re-run policy re-check — `BUMP_ONLY` and `BLOCK_AND_REVIEW`
+     short-circuit before any write; unknown actions fail closed.
+     Class-1 `GATE1_OUTCOME_SKIP` rows are structurally untouchable.
+  3. Monotonicity — `refused → admitted` is rejected at the writer
+     even if the re-run policy upstream said otherwise.
+  4. Empty-reason / empty-policy-version guards — mirror the
+     `ProvenanceV1` `__post_init__` invariants so malformed refusals
+     never reach `update_payload`.
+  5. Class-6 / class-7 evidence gate — if gate 1 classifies into a
+     doctrinally-empty table, the writer refuses and logs a warning.
+     This keeps the empty-table stance from being bypassed even with a
+     live writer.
+  6. Cursor-vs-row cross-check — the cursor is a secondary resume aid,
+     the stored row is primary truth. If a prior cursor `APPLIED`
+     entry exists and the stored row matches the expected post-apply
+     admission triple → `SKIPPED_ALREADY_APPLIED`; if it does not →
+     `SKIPPED_ANOMALY` with a warning.
+- `torment_service/migration/wet_run.py` — thin orchestrator. No new
+  decision logic; walks rows in sorted-EID order through
+  `classify_row → decide_admission → decide_rerun → apply_row` and
+  accumulates a `WetRunReport` with per-action counters.
+- CLI `apply` subcommand — loads a JSONL row source into a
+  file-backed graph stub, runs the orchestrator, and dumps the
+  updated rows back to `--output-jsonl`. Requires
+  `--confirm-i-have-reviewed-dry-run`; without it the command exits
+  non-zero without touching any row.
+- Row-first-then-cursor ordering — every successful apply writes the
+  row before appending the cursor entry, so a crash between the two
+  produces a stored row in the new state with no cursor entry. The
+  next run's precondition 6 recognises the row and cleanly skips,
+  giving effectively-once semantics without a transaction.
+- Recursion-guard round-trip coverage — an end-to-end test in
+  `tests/test_migration_wet_run.py` runs the wet-run pipeline against
+  a refused row, hands the same EID into `recursion_guard_check`, and
+  asserts `REASON_MIGRATION_REFUSED`. This is the load-bearing
+  invariant that makes step-6 writes actually close the laundering
+  gap: the migration writes the refusal in the exact shape the guard
+  reads at writeback time.
+
+### What commit B does NOT ship
+
+- No `--from-workspace` CLI mode that plugs into a live `MemoryGraph`
+  iterator. Deliberately deferred so commit B's review surface stays
+  the file-backed JSONL path; a post-step-6 commit can add the live
+  mode once operators have exercised the writer against a sampled
+  corpus.
+- No `TORMENT_ARCHIVIST_WRITEBACK` flip. The archivist-writeback gate
+  remains off until the live guard has been verified against a
+  post-migration corpus.
+- No class-6 or class-7 table population. The empty-table discipline
+  stays in force; the writer's precondition 5 is the second line of
+  defence if an upstream bug ever populates them.
+- No schema changes, no doctrine-rule changes. All schema work lived
+  in commit A.
+
+---
+
 ## Upgrade notes
 
 TK *(filled in at tag time once commit B lands)*

@@ -2,11 +2,20 @@
 
 ## Status
 
-Plan-phase artifact. Produced after all six framing decisions in
-`docs/WRITE_MIGRATION_FRAMING_v2.4.x.md` were ratified. No `.py` changes,
-no schema edits, no doctrine-doc edits, and no corpus greps have been
-made against this plan yet. Commit A does not begin until this plan is
-explicitly ratified.
+**Commit A — shipped.** SHA `a2fb42c` on `v2.4.x-step6-commit-a`.
+Four follow-up CodeQL cleanup commits (`4f76a17`, `3911d46`, `92a5cb0`,
+`c6c4d5f`) landed on `v2.4.x-step6-commit-b` as prep for the writer.
+
+**Commit B — in progress, pending ratification.** The writer primitive
+(`apply.py`), thin orchestrator (`wet_run.py`), and CLI `apply`
+subcommand are implemented on `v2.4.x-step6-commit-b` and cover every
+item in the commit-B scope list below except (a) the
+``--from-workspace`` mode that plugs into a live ``MemoryGraph``,
+which is deliberately deferred, and (b) the ``TORMENT_ARCHIVIST_WRITEBACK``
+flip, which stays off per the ratified plan. Class 6 and class 7
+evidence gates stay structurally enforced in the writer (precondition
+5) so admitting rows under those classes still requires populated
+mapping/pattern tables upstream.
 
 This plan translates the ratified framing into concrete commit scope. It
 does not introduce new doctrinal choices — every load-bearing decision
