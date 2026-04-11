@@ -25,9 +25,11 @@ Claude Desktop config (`claude_desktop_config.json`):
   "mcpServers": {
     "torment-memory": {
       "command": "python",
-      "args": ["-m", "torment_service.mcp_server"],
+      "args": ["-u", "-m", "torment_service.mcp_server"],
       "cwd": "/path/to/torment_fabric",
       "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
         "TORMENT_MCP_DATA_DIR": "./smoke_data",
         "TORMENT_MCP_WORKSPACE_ID": "smoke_ws",
         "TORMENT_MCP_AGENT_ID": "smoke_agent",
@@ -40,6 +42,13 @@ Claude Desktop config (`claude_desktop_config.json`):
 }
 ```
 
+On Windows, also set `PYTHONPATH` to the `torment_fabric` subdirectory
+and use the full path to your Python interpreter (e.g., the conda
+environment's `python.exe`). See `docs/MCP_README.md` → Windows Setup
+for the full config shape and the "Windows stdio gotchas" callout that
+explains why `-u`, `PYTHONUNBUFFERED`, and `PYTHONIOENCODING` are not
+optional on Windows.
+
 ---
 
 ## 1. Connection & Discovery
@@ -51,6 +60,7 @@ Claude Desktop config (`claude_desktop_config.json`):
 | 1.3 | Resources visible in host | 4 resource templates appear with `torment://` URIs (including provenance) | |
 | 1.4 | No schema errors | Host does not report validation or schema errors on startup | |
 | 1.5 | Server name shows as "torment-memory" | Correct name in host server list | |
+| 1.6 | Clean stdio transport | No JSON parse errors, no "unexpected message" or transport-level warnings in the host's MCP log across boot and a subsequent `torment_ingest` call (catches stray stdout leaks that would corrupt the JSON-RPC stream) | |
 
 ---
 
@@ -202,10 +212,10 @@ Copy this for each issue found:
 
 | Category | Pass | Fail | Notes |
 |---|---|---|---|
-| Connection & Discovery | /5 | | |
+| Connection & Discovery | /6 | | |
 | Tool Sanity | /12 | | |
 | Error & Rejection | /4 | | |
 | Resource Sanity | /7 | | |
 | Context Behavior | /5 | | |
 | Decision/Result Codes | /8 | | |
-| **Total** | **/41** | | |
+| **Total** | **/42** | | |

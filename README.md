@@ -33,6 +33,10 @@ TORMENT can now remember externally obtained tool outputs as governed memory art
 
 **Docs** — `MCP_CAPABILITY_BOUNDARY.md` updated with tool-result ingest section and doctrine. `SPINE_CONTRACT.md` updated with operation table entry, exposure matrix row, result codes, and design rule 8. `TOOL_RESULT_RETRIEVAL_SEMANTICS.md` added with full audit of the retrieval pipeline and policy rationale.
 
+**MCP client-integration hardening** — `mcp>=1.27.0,<2.0.0` is now an explicit dependency in `requirements.txt` (previously relied on ambient install, which failed cold on fresh clones). Debug logging in the hivemind packet-emission path now writes to `stderr` instead of `stdout` so stray prints cannot corrupt the JSON-RPC framing used by the stdio MCP server. `docs/MCP_README.md` and `docs/MCP_SMOKE_TEST.md` refreshed to reflect the current Claude Desktop integration path.
+
+**Post-ship fix (2026-04-11)** — `tool_result_ingest` was returning `result_code="none"` on successful writes because it was registered in the fast-path operation list without a corresponding entry in the result-code mapping dict. Fixed in `spine.py` by adding the missing `"tool_result_ingest": RESULT_STORED` entry plus an import-time consistency check that raises if any fast-path operation is ever added in the future without a matching result code. Regression tests added in `tests/test_spine.py` covering both the positive path and the completeness invariant.
+
 **Doctrine line:** *"TORMENT may remember what tools returned before it is ever allowed to decide what tools to run."*
 
 ---
@@ -190,10 +194,17 @@ This release closes the gap between "the hive mind works" and "the memory system
 | `docs/SPINE_CONTRACT.md` | Spine invariants, trust tiers, decision codes, exposure tiers |
 | `docs/TORMENT_Architectural_Audit_Spirit_Return_Voice.docx` | Full architectural audit — spirit return, voice systems, identity persistence |
 | `docs/MCP_README.md` | MCP server setup, configuration, and Claude Desktop integration |
+| `docs/MCP_SMOKE_TEST.md` | Smoke-test procedure for MCP server on a fresh host |
 | `docs/MCP_EXPANSION_GUIDE.md` | Adding new MCP tools — worked example, decision matrix, checklist |
 | `docs/MCP_CAPABILITY_BOUNDARY.md` | MCP capability boundary — what TORMENT MCP does and does not do |
+| `docs/DOCTRINE_v2.4.x.md` | 12 architectural principles that govern v2.4.x change decisions |
+| `docs/RECURSION_SAFETY_POLICY_v2.4.x.md` | Six-rule policy (A–F) preventing archivist write-back recursion loops |
+| `docs/TOOL_RESULT_RETRIEVAL_SEMANTICS.md` | Audit of retrieval pipeline behavior for tool-result memories + policy rationale |
+| `docs/TOOL_RESULT_LIFECYCLE_POLICY.md` | Retention and decay policy for externally ingested tool-result memories |
 | `docs/MEMORY_HEALTH_REPORT.md` | Memory growth analysis and lifecycle tuning findings |
 | `docs/PROJECT_OVERVIEW.md` | Comprehensive architecture reference |
+| `docs/RELEASE_NOTES_v2.4.3.md` | v2.4.3 consolidated release notes — feature work, MCP hardening, post-ship fix, test coverage |
+| `tools/README.md` | Maintenance, migration, diagnostic, and visualization tools — usage and classification |
 
 ---
 
@@ -281,8 +292,8 @@ TORMENT has seven layers:
 - `GET /spine/operations` — list all registered operations with trust/tier metadata
 
 **MCP Server (v2.4):**
-- Run via `python -m torment_service.mcp_server` (stdio transport for Claude Desktop)
-- Tools: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`
+- Run via `python -m torment_service.mcp_server` (stdio transport for Claude Desktop; requires `mcp>=1.27.0`, pinned in `requirements.txt`)
+- Tools: `torment_submit_task`, `torment_ingest`, `torment_query_memory`, `torment_query_state`, `torment_feedback`, `torment_reinforce`, `torment_tool_result_ingest` (v2.4.3)
 - Resources: `torment://admin/status`, `torment://workspace/{ws}/agent/{ag}/state`, `torment://workspace/{ws}/agent/{ag}/memory-summary`, `torment://workspace/{ws}/collective/status`
 
 **Tool-result ingest (v2.4.3):**

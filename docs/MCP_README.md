@@ -31,9 +31,11 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "torment-memory": {
       "command": "python",
-      "args": ["-m", "torment_service.mcp_server"],
+      "args": ["-u", "-m", "torment_service.mcp_server"],
       "cwd": "/path/to/torment_fabric",
       "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
         "TORMENT_MCP_DATA_DIR": "./data",
         "TORMENT_MCP_WORKSPACE_ID": "default",
         "TORMENT_MCP_AGENT_ID": "default",
@@ -47,6 +49,12 @@ Add to your `claude_desktop_config.json`:
 
 Replace `TORMENT_EMBED_PROVIDER` with your embedding provider if using real embeddings.
 
+The `-u` flag, `PYTHONUNBUFFERED=1`, and `PYTHONIOENCODING=utf-8` are
+stdio hygiene: MCP stdio transport frames JSON-RPC messages over stdin
+and stdout, so the Python process must run unbuffered and in UTF-8
+regardless of the host terminal. These settings are harmless on
+Linux/macOS and load-bearing on Windows.
+
 ### Windows Setup
 
 On Windows (e.g., with conda), use the full path to your Python interpreter and set `PYTHONPATH` to the `torment_fabric` subdirectory:
@@ -56,8 +64,10 @@ On Windows (e.g., with conda), use the full path to your Python interpreter and 
   "mcpServers": {
     "torment-memory": {
       "command": "C:\\Users\\You\\miniconda3\\envs\\torment\\python.exe",
-      "args": ["-m", "torment_service.mcp_server"],
+      "args": ["-u", "-m", "torment_service.mcp_server"],
       "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
         "PYTHONPATH": "C:\\path\\to\\TORMENT-fabric_v2\\torment_fabric",
         "TORMENT_MCP_DATA_DIR": "C:\\path\\to\\TORMENT-fabric_v2\\torment_fabric\\data",
         "TORMENT_MCP_WORKSPACE_ID": "default",
@@ -71,6 +81,40 @@ On Windows (e.g., with conda), use the full path to your Python interpreter and 
 ```
 
 Key differences from Linux/Mac: use absolute paths everywhere (including `TORMENT_MCP_DATA_DIR`), set `PYTHONPATH` explicitly, and use the full path to the conda environment's `python.exe`.
+
+#### Windows stdio gotchas
+
+MCP stdio is strict about what goes on stdout: anything that is not a
+framed JSON-RPC message will corrupt the stream and disconnect the
+host. Windows exposes a handful of foot-guns that make this easier to
+trip into than on Linux/macOS. The config block above already sets
+the three that matter most; this is the "why" so you can recognize
+the symptoms if something still looks wrong.
+
+- **Unbuffered I/O.** Python on Windows can buffer stdout aggressively,
+  which delays or reorders JSON-RPC frames. The `-u` flag on `args` and
+  `PYTHONUNBUFFERED=1` in `env` both disable buffering. Keep both as
+  belt-and-suspenders — one without the other is still defensible, but
+  not worth the debugging cost if something regresses.
+- **UTF-8 on both directions.** Windows defaults to the system code
+  page (often cp1252), which will break any memory text containing
+  emoji, curly quotes, or non-Latin characters. `PYTHONIOENCODING=utf-8`
+  forces stdin and stdout to UTF-8 regardless of the host shell. Do not
+  rely on `chcp 65001` — it does not propagate into the launched
+  Python process from Claude Desktop.
+- **Stderr-only logging.** TORMENT's MCP server routes all diagnostic
+  output (including the hivemind packet trace and governance warnings)
+  to stderr. If you add your own `print()` or `logger` output to any
+  module that runs during MCP boot or tool handling, make sure it goes
+  to stderr — `print(..., file=sys.stderr)` or a logger whose handler
+  is bound to stderr. Anything that leaks to stdout will break the
+  transport.
+- **Abrupt stdin close on shutdown.** Claude Desktop closes the MCP
+  server's stdin when the host restarts or disconnects. On Windows
+  this often arrives as an immediate EOF rather than the graceful
+  SIGTERM you would see on Linux. The server tolerates this cleanly;
+  you should not see it as a crash or a hang in Claude Desktop's MCP
+  logs. If you do, that's a bug worth reporting.
 
 ## Environment Variables
 
