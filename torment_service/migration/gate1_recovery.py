@@ -21,7 +21,7 @@ Non-goals
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from torment_service.provenance_v1 import (
@@ -348,24 +348,28 @@ def _dict_matches_pattern(d: Dict[str, Any], pattern: Dict[str, Any]) -> bool:
 
 
 def _matches_zero_event_artifact(raw: Any) -> bool:
-    """Class 7 predicate — True iff ``raw`` matches any enumerated
-    zero-event artifact pattern in ``ZERO_EVENT_ARTIFACT_PATTERNS``.
+    """Return True iff raw matches an enumerated zero-event artifact pattern.
 
-    This is the single consumption site of ``ZERO_EVENT_ARTIFACT_PATTERNS``
-    in the gate 1 recovery module. The constant is doctrinal and stable,
-    shipped as an intentionally empty tuple in commit A — a deliberate
-    conservative default documented in ``docs/ADMISSION_POLICY_v2.4.x.md``.
-    Patterns are added only in response to dry-run evidence from a real
-    corpus and each addition requires a policy-version bump.
+    The empty tuple is a deliberate conservative default pending
+    dry-run evidence. ``ZERO_EVENT_ARTIFACT_PATTERNS`` is doctrinal and
+    stable, shipped empty in commit A and documented in
+    ``docs/ADMISSION_POLICY_v2.4.x.md``. Additions require real dry-run
+    evidence plus a policy-version bump.
 
-    When the tuple is empty (commit A state), the loop body never
-    executes and this function returns ``False`` for every input — which
-    is the correct evidence-first behavior: no patterns enumerated, no
-    rows classified as class 7.
+    Shape note: the constant is bound locally and explicitly tested for
+    emptiness before iteration. This makes ``ZERO_EVENT_ARTIFACT_PATTERNS``
+    a first-class read in the function body — not merely the iterable
+    on a for-loop whose body happens to be dead when the tuple is empty.
+    Static analysis should see it as live configuration, which it is.
     """
     if not isinstance(raw, dict):
         return False
-    for pattern in ZERO_EVENT_ARTIFACT_PATTERNS:
+
+    patterns = ZERO_EVENT_ARTIFACT_PATTERNS
+    if not patterns:
+        return False
+
+    for pattern in patterns:
         if _dict_matches_pattern(raw, pattern):
             return True
     return False
