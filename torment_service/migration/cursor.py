@@ -59,9 +59,9 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import IO, Iterator, List, Optional
+from typing import List, Optional
 
 from .constants import (
     ADMISSION_POLICY_VERSION,

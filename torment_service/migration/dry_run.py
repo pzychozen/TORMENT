@@ -42,7 +42,6 @@ from .constants import (
     GATE1_CLASS_NULL_OR_EMPTY,
     GATE1_CLASS_ZERO_EVENT_ARTIFACT,
     GATE1_OUTCOME_FAIL,
-    GATE1_OUTCOME_RECOVER,
     GATE1_OUTCOME_SKIP,
     ZERO_EVENT_ARTIFACT_PATTERNS,
 )
@@ -53,8 +52,8 @@ from .cursor import (
     append_entry,
     processed_eids,
 )
-from .gate1_recovery import Gate1Result, classify_row
-from .gate2_admission import Gate2Result, decide_admission
+from .gate1_recovery import classify_row
+from .gate2_admission import decide_admission
 
 
 # Class id → human name mapping used only for report rendering. The CI
