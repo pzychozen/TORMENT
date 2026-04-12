@@ -225,6 +225,28 @@ def _hit_to_block(hit: Dict[str, Any], block_type: str) -> ContextBlock:
         "confidence": float(hit.get("confidence", 0)),
     }
 
+    # Provenance classification (v2.4.4 read-surface audit).
+    # Preserve provenance_type so downstream consumers can distinguish
+    # collective echoes from organic autobiographical memory.
+    _prov_type = hit.get("provenance_type")
+    if _prov_type is None:
+        # Fallback: derive from raw provenance if the upstream query didn't
+        # badge the hit (e.g. lane-provider path).
+        _raw_prov = hit.get("provenance")
+        if isinstance(_raw_prov, dict):
+            _prov_type = _raw_prov.get("source_type")
+        elif isinstance(_raw_prov, str) and _raw_prov == "collective":
+            _prov_type = "collective_echo"
+    if _prov_type is not None:
+        meta["provenance_type"] = _prov_type
+    _prov_tool = hit.get("provenance_tool_name")
+    if _prov_tool is None:
+        _raw_prov2 = hit.get("provenance")
+        if isinstance(_raw_prov2, dict):
+            _prov_tool = _raw_prov2.get("tool_name")
+    if _prov_tool is not None:
+        meta["provenance_tool_name"] = _prov_tool
+
     # Spirit return enrichment
     is_spirit = bool(hit.get("from_spirit_return"))
     if is_spirit:

@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from torment_service.scoring import is_collective_provenance as _is_coll_prov
+
 
 # ============================================================================
 # Aperture configuration table
@@ -327,6 +329,14 @@ def build_memory_context(
         except Exception:
             drift_snapshot = None
 
+    # --- Provenance classification stamp (v2.4.4 read-surface audit) ---
+    # Lane functions return raw hits with payload-level 'provenance' but
+    # no extracted 'provenance_type' badge.  Stamp it here so roles can
+    # distinguish collective echoes from organic autobiographical memory.
+    private_memories = _stamp_provenance_type(private_memories)
+    shared_memories = _stamp_provenance_type(shared_memories)
+    deep_memories = _stamp_provenance_type(deep_memories)
+
     return MemoryContext(
         aperture_name=aperture_name,
         config=config,
@@ -338,6 +348,33 @@ def build_memory_context(
         domain_id=domain_id,
         query_text=query_text,
     )
+
+
+def _stamp_provenance_type(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Stamp a ``provenance_type`` badge on lane hits that lack one.
+
+    Lane functions return raw search results with a payload-level
+    ``provenance`` field but no extracted ``provenance_type``.  This
+    helper derives the compact badge so downstream consumers (roles,
+    assembler) can distinguish collective echoes from organic memory
+    without parsing the raw provenance dict.
+
+    Mutates hits in place for efficiency; also returns the list.
+    """
+    for h in hits:
+        if "provenance_type" in h:
+            continue  # already badged (e.g. came from fabric.query())
+        raw = h.get("provenance")
+        if isinstance(raw, dict):
+            h["provenance_type"] = raw.get("source_type")
+        elif isinstance(raw, str):
+            if raw == "collective":
+                h["provenance_type"] = "collective_echo"
+            else:
+                h["provenance_type"] = raw  # legacy string passthrough
+        else:
+            h["provenance_type"] = None
+    return hits
 
 
 def _extract_memories(query_result: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
