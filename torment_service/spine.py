@@ -1268,4 +1268,28 @@ def submit_task(
             spine_path=chosen_path,
             spine_op_class=spec.op_class,
             spine_escalated=escalated,
-            thinking_mode=advisory_th
+            thinking_mode=advisory_thinking_result.get("mode_decision", {}).get("chosen_mode", "unknown"),
+            thinking_action=advisory_thinking_result.get("action_decision", {}).get("action", "unknown"),
+        )
+        audit_dict["thinking_alignment"] = alignment
+
+    resp = SpineResponse(
+        ok=True,
+        path=chosen_path,
+        operation=req.operation,
+        allowed=True,
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+        trust_tier=ctx.trust_tier,
+        drift_status=drift_status,
+        decision_code=d_code,
+        result_code=r_code,
+        result=result if isinstance(result, dict) else {},
+        audit=audit_dict,
+        task_id=req.task_id,
+        escalated=escalated,
+        escalation_reasons=list(escalation_reasons) if escalated else [],
+        elapsed_ms=elapsed,
+    )
+    log_spine_decision(resp, req, ctx)
+    return resp
