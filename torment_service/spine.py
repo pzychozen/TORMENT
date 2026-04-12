@@ -936,6 +936,7 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
     """Full cognition path: delegates to the existing 4-role pipeline."""
     from cognition.task_models import TaskPacket
     from cognition.pipeline import run_cognition_pipeline
+    from cognition.drift import make_live_drift_check
 
     # Build TaskPacket from SpineRequest
     task = TaskPacket(
@@ -972,11 +973,20 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
     ws = fabric.get_workspace(req.workspace_id)
     primary_domains = list(ws.shared_graphs.keys()) if ws else None
 
+    # Drift enforcement: pass live drift checker so identity-sensitive
+    # cognition through Spine can observe drift and trigger Invariant E
+    # (drift hard-block).  Mirrors app.py /cognition/run.
+    # See docs/ISSUE_spine_drift_check_fn_gap.md for the original issue.
+    drift_check_fn = make_live_drift_check(fabric)
+
     # DOCTRINE QUESTION (flagged by contract audit, 2026-04-12):
     # This full-cognition path does NOT pass lookup_fn or ingest_fn to
     # the pipeline, which means archivist writeback is silently disabled
     # even when TORMENT_ARCHIVIST_WRITEBACK=1. The app.py /cognition/run
     # endpoint passes both. This is an undocumented path divergence.
+    #
+    # NOTE: drift_check_fn is now aligned (2026-04-12 fix).
+    # The lookup_fn / ingest_fn question is separate and lower priority.
     #
     # Before the writeback gate is flipped on, ratify one of:
     #   (a) Spine full-cognition is intentionally read-only — document it.
@@ -992,6 +1002,7 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
         query_fn=query_fn,
         character_fn=character_fn,
         primary_domains=primary_domains,
+        drift_check_fn=drift_check_fn,
     )
 
     return result
