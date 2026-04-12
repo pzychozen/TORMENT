@@ -281,6 +281,37 @@ def derive_provenance_type(provenance: Any) -> Optional[str]:
     return None
 
 
+def derive_query_provenance_type(provenance: Any) -> Optional[str]:
+    """Derive ``provenance_type`` for query/trace result surfaces.
+
+    Builds on :func:`derive_provenance_type` (canonical low-level rule) but
+    enforces the :data:`~torment_service.provenance_v1.VALID_SOURCE_TYPES`
+    vocabulary contract.  Any canonical result that falls outside the
+    vocabulary — typically a legacy bare string other than ``"collective"``
+    — is mapped to ``SOURCE_MEMORY`` (``"memory"``), matching the historical
+    inline behaviour of ``fabric.query()`` and ``fabric.trace()``.
+
+    This adapter exists so that:
+      1. ``derive_provenance_type`` remains the single canonical derivation
+         rule used by the index, apertures, and debug surfaces.
+      2. Query/trace surfaces additionally guarantee their output sits
+         inside ``VALID_SOURCE_TYPES``.
+
+    Returns:
+        A string from ``VALID_SOURCE_TYPES``, or ``None`` when provenance
+        is absent.
+    """
+    from .provenance_v1 import VALID_SOURCE_TYPES, SOURCE_MEMORY
+
+    base = derive_provenance_type(provenance)
+    if base is None:
+        return None
+    if base in VALID_SOURCE_TYPES:
+        return base
+    # Legacy bare string not in vocabulary → fallback to SOURCE_MEMORY.
+    return SOURCE_MEMORY
+
+
 def is_collective_provenance(provenance: Any) -> bool:
     """Return True if *provenance* marks a collective echo.
 

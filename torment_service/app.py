@@ -15,6 +15,7 @@ from .auth import (
     get_key_store,
 )
 from .thinking_controller import ThinkingController
+from .scoring import derive_provenance_type as _derive_prov_type
 
 _log = logging.getLogger("torment.app")
 
@@ -2835,6 +2836,10 @@ async def debug_provenance(
         for eid, entity in graph.entities.items():
             payload = entity.payload or {}
             prov = payload.get("provenance")
+            # Derive compact classification BEFORE legacy normalization
+            # so "collective" → "collective_echo" (canonical helper) rather
+            # than being overwritten by the display-only SOURCE_MEMORY mapping.
+            _prov_type = _derive_prov_type(prov)
             # Normalize legacy provenance strings to a synthetic dict for safe access.
             # Legacy bare string (e.g. "collective") is a pre-ProvenanceV1 artifact —
             # normalize to SOURCE_MEMORY and preserve the raw value in `notes` so the
@@ -2857,6 +2862,7 @@ async def debug_provenance(
                 "eid": eid,
                 "agent_id": aid,
                 "scope": "private",
+                "provenance_type": _prov_type,
                 "summary": (payload.get("summary") or str(payload.get("text", ""))[:120]) if payload else "",
                 "provenance": prov,
                 "has_provenance": prov is not None,

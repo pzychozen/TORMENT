@@ -428,6 +428,26 @@ for _spec in _ALWAYS_FAST + _ALWAYS_FULL:
     OPERATION_REGISTRY[_spec.name] = _spec
 
 
+_TIER_ORDER = {EXPOSURE_OPEN: 1, EXPOSURE_GUARDED: 2, EXPOSURE_INTERNAL: 3}
+
+
+def exposure_allows(required_tier: str, max_tier: str) -> bool:
+    """Return True if *max_tier* is high enough to include *required_tier*.
+
+    This is the **single canonical check** used by both tool registration
+    and resource gating.  For example::
+
+        exposure_allows("guarded", "open")     → False
+        exposure_allows("guarded", "guarded")  → True
+        exposure_allows("open",    "open")     → True
+
+    Args:
+        required_tier: Minimum tier the surface demands ("open" | "guarded" | "internal").
+        max_tier: The configured exposure ceiling.
+    """
+    return _TIER_ORDER.get(required_tier, 3) <= _TIER_ORDER.get(max_tier, 1)
+
+
 def get_exposed_operations(max_tier: str = EXPOSURE_OPEN) -> Dict[str, OperationSpec]:
     """Return operations eligible for MCP exposure at the given tier ceiling.
 
@@ -440,12 +460,10 @@ def get_exposed_operations(max_tier: str = EXPOSURE_OPEN) -> Dict[str, Operation
     Returns:
         Dict of operation name → OperationSpec for operations at or below the tier.
     """
-    tier_order = {EXPOSURE_OPEN: 1, EXPOSURE_GUARDED: 2, EXPOSURE_INTERNAL: 3}
-    ceiling = tier_order.get(max_tier, 1)
     return {
         name: spec
         for name, spec in OPERATION_REGISTRY.items()
-        if tier_order.get(spec.exposure_tier, 3) <= ceiling
+        if exposure_allows(spec.exposure_tier, max_tier)
     }
 
 

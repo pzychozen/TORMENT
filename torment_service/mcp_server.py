@@ -36,9 +36,12 @@ from .spine import (
     SpineRequest,
     submit_task,
     get_exposed_operations,
+    exposure_allows,
     EXPOSURE_OPEN,
+    EXPOSURE_GUARDED,
 )
 from .fabric import TormentFabric
+from .scoring import derive_provenance_type as _derive_prov_type
 
 logger = logging.getLogger("torment.mcp")
 
@@ -231,9 +234,14 @@ def create_mcp_server() -> FastMCP:
     max_tier = os.environ.get("TORMENT_MCP_EXPOSURE_TIER", "open")
     exposed_ops = get_exposed_operations(max_tier)
 
+    _guarded_ok = exposure_allows(EXPOSURE_GUARDED, max_tier)
     logger.info(
         "MCP server exposing %d operations (tier ceiling=%s): %s",
         len(exposed_ops), max_tier, sorted(exposed_ops.keys()),
+    )
+    logger.info(
+        "MCP resource gating: guarded resources %s (tier ceiling=%s)",
+        "enabled" if _guarded_ok else "hidden", max_tier,
     )
 
     # -----------------------------------------------------------------------
@@ -562,7 +570,13 @@ def create_mcp_server() -> FastMCP:
             return json.dumps(result, default=str)
 
     # -----------------------------------------------------------------------
-    # Resources — read-only Spine-backed views
+    # Resources — read-only views, gated by exposure tier
+    #
+    # Policy:
+    #   open    — basic telemetry (agent state, collective status, memory summary)
+    #   guarded — sensitive debug/admin (provenance inspection, cross-agent admin)
+    #
+    # Uses the same exposure_allows() helper that governs tool registration.
     # -----------------------------------------------------------------------
 
     @mcp.resource(
@@ -633,71 +647,73 @@ def create_mcp_server() -> FastMCP:
 
         return json.dumps(summary, indent=2, default=str)
 
-    @mcp.resource(
-        uri="torment://admin/status",
-        name="Spine Status",
-        description=(
-            "Lightweight pulse check: active agents, recent Spine decisions, "
-            "recent blocks and escalations, drift summary. "
-            "Answers 'what just happened?' without digging through logs."
-        ),
-        mime_type="application/json",
-    )
-    def resource_admin_status() -> str:
-        """Read Spine status through the incident log."""
-        from .incident_log import get_incident_log
+    # --- Guarded resource: admin/status (cross-agent aggregate, internal observability) ---
+    if exposure_allows(EXPOSURE_GUARDED, max_tier):
+        @mcp.resource(
+            uri="torment://admin/status",
+            name="Spine Admin Status",
+            description=(
+                "[Guarded] Cross-agent administrative view: active agents, "
+                "recent Spine decisions, blocks, escalations, and drift summary. "
+                "Exposes internal operational state — requires guarded exposure tier."
+            ),
+            mime_type="application/json",
+        )
+        def resource_admin_status() -> str:
+            """Cross-agent admin status — guarded exposure tier required."""
+            from .incident_log import get_incident_log
 
-        fabric = _get_fabric()
-        log = get_incident_log()
-        result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
+            fabric = _get_fabric()
+            log = get_incident_log()
+            result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
 
-        # Incident summary
-        result["incidents"] = log.summary()
+            # Incident summary
+            result["incidents"] = log.summary()
 
-        # Recent failures
-        recent_failures = log.query(failures_only=True, limit=10)
-        result["recent_failures"] = [f.to_dict() for f in recent_failures]
+            # Recent failures
+            recent_failures = log.query(failures_only=True, limit=10)
+            result["recent_failures"] = [f.to_dict() for f in recent_failures]
 
-        # Recent escalations
-        recent_all = log.query(limit=50)
-        escalations = [i.to_dict() for i in recent_all if i.escalated][:10]
-        result["recent_escalations"] = escalations
+            # Recent escalations
+            recent_all = log.query(limit=50)
+            escalations = [i.to_dict() for i in recent_all if i.escalated][:10]
+            result["recent_escalations"] = escalations
 
-        # Active agents
-        agents = []
-        for key in fabric.agent_states:
-            # Canonical format is "workspace/agent"; legacy ":" is fallback.
-            if "/" in key:
-                ws, ag = key.split("/", 1)
-            elif ":" in key:
-                ws, ag = key.split(":", 1)
-            else:
-                ws, ag = "unknown", key
-            drift_score = 0.0
-            try:
-                cstate = fabric.character_store.load_state(ws, ag)
-                if cstate:
-                    drift_score = float(cstate.drift_score)
-            except Exception as e:
-                logger.debug("Character state load skipped: %s", e)
-            mem_count = 0
-            try:
-                graph = fabric.private_graphs.get(key)
-                if graph:
-                    mem_count = len(graph.entities)
-            except Exception as e:
-                logger.debug("Graph entity count skipped: %s", e)
-            agents.append({
-                "workspace_id": ws, "agent_id": ag,
-                "memory_count": mem_count,
-                "drift_score": round(drift_score, 4),
-                "drift_status": "green" if abs(drift_score) < 0.10 else
-                               "yellow" if abs(drift_score) < 0.20 else "red",
-            })
-        result["agents"] = agents
-        result["agent_count"] = len(agents)
+            # Active agents
+            agents = []
+            for key in fabric.agent_states:
+                # Canonical format is "workspace/agent"; legacy ":" is fallback.
+                if "/" in key:
+                    ws, ag = key.split("/", 1)
+                elif ":" in key:
+                    ws, ag = key.split(":", 1)
+                else:
+                    ws, ag = "unknown", key
+                drift_score = 0.0
+                try:
+                    cstate = fabric.character_store.load_state(ws, ag)
+                    if cstate:
+                        drift_score = float(cstate.drift_score)
+                except Exception as e:
+                    logger.debug("Character state load skipped: %s", e)
+                mem_count = 0
+                try:
+                    graph = fabric.private_graphs.get(key)
+                    if graph:
+                        mem_count = len(graph.entities)
+                except Exception as e:
+                    logger.debug("Graph entity count skipped: %s", e)
+                agents.append({
+                    "workspace_id": ws, "agent_id": ag,
+                    "memory_count": mem_count,
+                    "drift_score": round(drift_score, 4),
+                    "drift_status": "green" if abs(drift_score) < 0.10 else
+                                   "yellow" if abs(drift_score) < 0.20 else "red",
+                })
+            result["agents"] = agents
+            result["agent_count"] = len(agents)
 
-        return json.dumps(result, indent=2, default=str)
+            return json.dumps(result, indent=2, default=str)
 
     @mcp.resource(
         uri="torment://workspace/{workspace_id}/collective/status",
@@ -757,85 +773,90 @@ def create_mcp_server() -> FastMCP:
 
         return json.dumps(status, indent=2, default=str)
 
-    # --- Resource: provenance (read-only) ---
-    @mcp.resource(
-        uri="torment://workspace/{workspace_id}/agent/{agent_id}/provenance",
-        name="Recent Provenance",
-        description=(
-            "Recent memory provenance metadata for verification. "
-            "Shows source_type, write_path, and source_role for each memory. "
-            "Use this to verify that tool-result ingest, user ingest, and "
-            "collective operations are tagged correctly."
-        ),
-        mime_type="application/json",
-    )
-    def resource_provenance(workspace_id: str, agent_id: str) -> str:
-        """Read-only provenance inspection — same logic as /debug/provenance."""
-        fabric = _get_fabric()
-        limit = 50
+    # --- Guarded resource: provenance (exposes memory text, debug/verification) ---
+    if exposure_allows(EXPOSURE_GUARDED, max_tier):
+        @mcp.resource(
+            uri="torment://workspace/{workspace_id}/agent/{agent_id}/provenance",
+            name="Provenance Inspector",
+            description=(
+                "[Guarded] Debug/verification view of recent memory provenance. "
+                "Exposes source_type, write_path, source_role, and truncated "
+                "memory text for each memory. Use to verify that tool-result "
+                "ingest, user ingest, and collective operations are tagged "
+                "correctly. Requires guarded exposure tier."
+            ),
+            mime_type="application/json",
+        )
+        def resource_provenance(workspace_id: str, agent_id: str) -> str:
+            """Read-only provenance inspection — guarded exposure tier required."""
+            fabric = _get_fabric()
+            limit = 50
 
-        memories: List[Dict[str, Any]] = []
-        ak = fabric._agent_key(workspace_id, agent_id)
-        graph = fabric.private_graphs.get(ak)
+            memories: List[Dict[str, Any]] = []
+            ak = fabric._agent_key(workspace_id, agent_id)
+            graph = fabric.private_graphs.get(ak)
 
-        if graph is not None and hasattr(graph, "entities"):
-            for eid, entity in graph.entities.items():
-                payload = entity.payload or {}
-                prov = payload.get("provenance")
-                # Normalize legacy string provenance for safe .get() access.
-                # Legacy bare string (e.g. "collective") is a pre-ProvenanceV1 artifact —
-                # normalize to SOURCE_MEMORY with the raw value preserved in `notes` so
-                # the read-path vocabulary stays inside VALID_SOURCE_TYPES
-                # (provenance_v1.py). Display-only; no writeback uses this dict.
-                if prov and not isinstance(prov, dict):
-                    _legacy_raw = str(prov)
-                    prov = {
-                        "source_type": "memory",  # SOURCE_MEMORY
-                        "notes": f"legacy_bare_string={_legacy_raw!r}",
-                    }
-                memories.append({
-                    "eid": eid,
-                    "agent_id": agent_id,
-                    "scope": "private",
-                    "summary": (
-                        (payload.get("summary") or str(payload.get("text", ""))[:120])
-                        if payload else ""
-                    ),
-                    "provenance": prov,
-                    "has_provenance": prov is not None,
-                    "created_step": payload.get("step"),
-                })
+            if graph is not None and hasattr(graph, "entities"):
+                for eid, entity in graph.entities.items():
+                    payload = entity.payload or {}
+                    prov = payload.get("provenance")
+                    # Derive compact classification BEFORE legacy normalization
+                    _prov_type = _derive_prov_type(prov)
+                    # Normalize legacy string provenance for safe .get() access.
+                    # Legacy bare string (e.g. "collective") is a pre-ProvenanceV1 artifact —
+                    # normalize to SOURCE_MEMORY with the raw value preserved in `notes` so
+                    # the read-path vocabulary stays inside VALID_SOURCE_TYPES
+                    # (provenance_v1.py). Display-only; no writeback uses this dict.
+                    if prov and not isinstance(prov, dict):
+                        _legacy_raw = str(prov)
+                        prov = {
+                            "source_type": "memory",  # SOURCE_MEMORY
+                            "notes": f"legacy_bare_string={_legacy_raw!r}",
+                        }
+                    memories.append({
+                        "eid": eid,
+                        "agent_id": agent_id,
+                        "scope": "private",
+                        "provenance_type": _prov_type,
+                        "summary": (
+                            (payload.get("summary") or str(payload.get("text", ""))[:120])
+                            if payload else ""
+                        ),
+                        "provenance": prov,
+                        "has_provenance": prov is not None,
+                        "created_step": payload.get("step"),
+                    })
 
-        # Most recent first
-        memories.sort(key=lambda m: m["eid"], reverse=True)
-        memories = memories[:limit]
+            # Most recent first
+            memories.sort(key=lambda m: m["eid"], reverse=True)
+            memories = memories[:limit]
 
-        # Summary stats
-        total = len(memories)
-        with_prov = sum(1 for m in memories if m["has_provenance"])
-        by_source_type: Dict[str, int] = {}
-        by_write_path: Dict[str, int] = {}
-        for m in memories:
-            p = m.get("provenance")
-            if p and isinstance(p, dict):
-                st = p.get("source_type", "unknown")
-                wp = p.get("write_path", "unknown")
-                by_source_type[st] = by_source_type.get(st, 0) + 1
-                by_write_path[wp] = by_write_path.get(wp, 0) + 1
+            # Summary stats
+            total = len(memories)
+            with_prov = sum(1 for m in memories if m["has_provenance"])
+            by_source_type: Dict[str, int] = {}
+            by_write_path: Dict[str, int] = {}
+            for m in memories:
+                p = m.get("provenance")
+                if p and isinstance(p, dict):
+                    st = p.get("source_type", "unknown")
+                    wp = p.get("write_path", "unknown")
+                    by_source_type[st] = by_source_type.get(st, 0) + 1
+                    by_write_path[wp] = by_write_path.get(wp, 0) + 1
 
-        result: Dict[str, Any] = {
-            "workspace_id": workspace_id,
-            "agent_id": agent_id,
-            "stats": {
-                "total_inspected": total,
-                "with_provenance": with_prov,
-                "without_provenance": total - with_prov,
-                "by_source_type": by_source_type,
-                "by_write_path": by_write_path,
-            },
-            "memories": memories,
-        }
-        return json.dumps(result, indent=2, default=str)
+            result: Dict[str, Any] = {
+                "workspace_id": workspace_id,
+                "agent_id": agent_id,
+                "stats": {
+                    "total_inspected": total,
+                    "with_provenance": with_prov,
+                    "without_provenance": total - with_prov,
+                    "by_source_type": by_source_type,
+                    "by_write_path": by_write_path,
+                },
+                "memories": memories,
+            }
+            return json.dumps(result, indent=2, default=str)
 
     return mcp
 

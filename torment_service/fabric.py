@@ -3609,7 +3609,7 @@ class TormentFabric:
 
             # Phase D3: collective-provenance retrieval discount
             # Uses shared helper from scoring.py (centralised contract).
-            from .scoring import apply_collective_discount as _apply_coll_disc, is_collective_provenance as _is_coll_prov
+            from .scoring import apply_collective_discount as _apply_coll_disc, is_collective_provenance as _is_coll_prov, derive_query_provenance_type as _derive_q_prov
             _h_is_collective = _is_coll_prov(_h_prov_raw)
             try:
                 _coll_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
@@ -3653,21 +3653,17 @@ class TormentFabric:
             hh["motifs"] = motifs
             hh["final_score"] = final
             # Provenance badge: surface source_type for downstream consumers.
-            # Legacy bare-string provenance (pre-ProvenanceV1 artifact) is
-            # normalized to SOURCE_MEMORY so the badge surface always carries
-            # a value from VALID_SOURCE_TYPES (or None). The neighboring
-            # semantic `"collective"` check at line ~3425 above is preserved
-            # untouched because it drives the collective retrieval discount
-            # and depends on matching the historical raw value.
+            # Uses derive_query_provenance_type() — the canonical derivation
+            # rule (derive_provenance_type) plus VALID_SOURCE_TYPES
+            # enforcement.  Legacy bare-string provenance maps to
+            # SOURCE_MEMORY when the raw value isn't in the vocabulary.
+            # The neighboring semantic `"collective"` check above is
+            # preserved untouched because it drives the collective retrieval
+            # discount and depends on matching the historical raw value.
             # See docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.2.
+            hh["provenance_type"] = _derive_q_prov(_h_prov_raw)
             if isinstance(_h_prov_raw, dict):
-                hh["provenance_type"] = _h_prov_raw.get("source_type")
                 hh["provenance_tool_name"] = _h_prov_raw.get("tool_name")
-            elif isinstance(_h_prov_raw, str):
-                # Legacy bare string → normalize to SOURCE_MEMORY.
-                hh["provenance_type"] = "memory"  # SOURCE_MEMORY
-            else:
-                hh["provenance_type"] = None
             if _cd_enable:
                 hh["_base_score"] = float(base_score)
                 hh["_bonus_components"] = _bon
@@ -4473,7 +4469,7 @@ class TormentFabric:
 
             # --- Provenance extraction (parity with query()) ---
             # Uses shared helper from scoring.py (centralised contract).
-            from .scoring import is_collective_provenance as _is_coll_prov_t, apply_collective_discount as _apply_coll_disc_t
+            from .scoring import is_collective_provenance as _is_coll_prov_t, apply_collective_discount as _apply_coll_disc_t, derive_query_provenance_type as _derive_q_prov_t
             _prov_raw = hit.get("provenance")
             _is_tool_result = (
                 isinstance(_prov_raw, dict)
@@ -4586,13 +4582,10 @@ class TormentFabric:
                     "conflict_penalty": conflict_penalty,
                     "conflict_status": conflict_status,
                     "conflict_ids": conflict_ids,
-                    # Legacy bare-string provenance normalized to SOURCE_MEMORY
-                    # so the explain surface stays inside VALID_SOURCE_TYPES.
+                    # Provenance badge via doctrinal adapter — canonical
+                    # derivation + VALID_SOURCE_TYPES enforcement.
                     # See docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.2.
-                    "provenance_type": (
-                        _prov_raw.get("source_type") if isinstance(_prov_raw, dict)
-                        else ("memory" if isinstance(_prov_raw, str) else None)
-                    ),
+                    "provenance_type": _derive_q_prov_t(_prov_raw),
                     "self_thread_bonus": _cont.self_thread_bonus,
                     "self_anchor_bonus": _cont.self_anchor_bonus,
                     "thread_window_bonus": _cont.thread_window_bonus,

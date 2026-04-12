@@ -20,6 +20,11 @@ forbidden by default." Applied to provenance, the analogous rule is:
 **write paths produce source types; source types influence writeback gates;
 writeback gates must not silently widen based on reader-side normalization.**
 
+**See also:** `PROVENANCE_DOCTRINE_v2.4.x.md` — compact derivation helpers,
+read-surface invariants, truth table, and surface map. That document covers
+*how provenance is derived and presented*; this registry covers *what each
+declared constant means and which write paths produce it*.
+
 ## 2. Doctrine and recursion-safety anchors
 
 This registry is governed by the following invariants. Every row below is
