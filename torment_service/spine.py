@@ -954,6 +954,21 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
     ws = fabric.get_workspace(req.workspace_id)
     primary_domains = list(ws.shared_graphs.keys()) if ws else None
 
+    # DOCTRINE QUESTION (flagged by contract audit, 2026-04-12):
+    # This full-cognition path does NOT pass lookup_fn or ingest_fn to
+    # the pipeline, which means archivist writeback is silently disabled
+    # even when TORMENT_ARCHIVIST_WRITEBACK=1. The app.py /cognition/run
+    # endpoint passes both. This is an undocumented path divergence.
+    #
+    # Before the writeback gate is flipped on, ratify one of:
+    #   (a) Spine full-cognition is intentionally read-only — document it.
+    #   (b) Spine full-cognition must mirror /cognition/run — add
+    #       lookup_fn and ingest_fn here (see app.py lines 2195-2213
+    #       for the correct _lookup_memory_payload pattern).
+    #
+    # Do not patch without ratifying. See RELEASE_NOTES_v2.4.4.md
+    # "Caller-side contract note" for the lookup_fn shape contract.
+
     result = run_cognition_pipeline(
         task=task,
         query_fn=query_fn,
@@ -1253,36 +1268,4 @@ def submit_task(
             spine_path=chosen_path,
             spine_op_class=spec.op_class,
             spine_escalated=escalated,
-            thinking_mode=advisory_thinking_result.get("mode_decision", {}).get("chosen_mode", ""),
-            thinking_action=advisory_thinking_result.get("action_decision", {}).get("action", ""),
-        )
-        audit_dict["thinking_alignment"] = alignment
-        # Attach stance to the raw alignment record for observability
-        # (does not affect alignment comparison logic)
-        stance_data = advisory_thinking_result.get("stance")
-        if stance_data is not None:
-            alignment["stance"] = stance_data.get("stance")
-            alignment["stance_reason"] = stance_data.get("reason")
-            alignment["stance_confidence"] = stance_data.get("confidence")
-        _record_alignment(alignment)
-
-    resp = SpineResponse(
-        ok=True,
-        path=chosen_path,
-        operation=req.operation,
-        allowed=True,
-        workspace_id=req.workspace_id,
-        agent_id=req.agent_id,
-        trust_tier=ctx.trust_tier,
-        drift_status=drift_status,
-        decision_code=d_code,
-        result_code=r_code,
-        result=result,
-        audit=audit_dict,
-        task_id=req.task_id,
-        escalated=escalated,
-        escalation_reasons=esc_reasons,
-        elapsed_ms=round(elapsed, 2),
-    )
-    log_spine_decision(resp, req, ctx)
-    return resp
+            thinking_mode=advisory_th
