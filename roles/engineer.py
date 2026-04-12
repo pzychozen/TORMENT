@@ -196,7 +196,7 @@ def _find_relevant_memories(
     user_words = set(user_text.lower().split())
     relevant = []
 
-    for mem in memory_context.private_memories + memory_context.shared_memories:
+    for mem in memory_context.private_memories + memory_context.shared_memories + memory_context.deep_memories:
         text = mem.get("text", mem.get("summary", ""))
         if not text:
             continue

@@ -2164,16 +2164,6 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
         _log.debug("cognition/run invalid task: %s", exc)
         raise HTTPException(status_code=422, detail="Invalid cognition task parameters")
 
-    # Build query function wrapping fabric.query()
-    def query_fn(workspace_id, agent_id, query_text, top_k, domain_id):
-        return fabric.query(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            query_text=query_text,
-            top_k=top_k,
-            domain_id=domain_id,
-        )
-
     # Build character context function
     def character_fn(workspace_id, agent_id):
         agent_ident = fabric.create_agent(workspace_id, agent_id)
@@ -2190,6 +2180,40 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     _raw_domains = getattr(ws, 'domains', [])
     primary_domains = list(_raw_domains.keys()) if isinstance(_raw_domains, dict) else list(_raw_domains)
 
+    # --- Lane-aware retrieval (v2.4.4) ---
+    # Build lane-specific query functions using the Phase 1 helpers
+    # from TormentFabric. Each lane returns truly scope-separated hits.
+    from cognition.apertures import LaneQueryProvider
+
+    def _private_lane(ws_id, ag_id, query_text, top_k):
+        ak = fabric._agent_key(ws_id, ag_id)
+        return fabric._query_private_lane(ak, query_text, ag_id, top_k=top_k)
+
+    def _shared_lane(ws_id, ag_id, query_text, top_k, domain_id):
+        _ws = fabric.get_workspace(ws_id)
+        qemb = fabric.kernel.embedder.embed(query_text)
+        dom_scores = _ws.router.rank_domains(qemb, top_k=2)
+        domains = [d.domain_id for d in dom_scores]
+        if domain_id:
+            domains = [domain_id] + [d for d in domains if d != domain_id]
+            domains = domains[:2]
+        return fabric._query_shared_lane(_ws, query_text, top_k=top_k, domains=domains)
+
+    def _deep_lane(ws_id, ag_id, query_text, top_k):
+        ak = fabric._agent_key(ws_id, ag_id)
+        qemb = fabric.kernel.embedder.embed(query_text)
+        canonical_step = fabric._get_canonical_step(ak)
+        return fabric._query_deep_lane(
+            ak, ws_id, ag_id, qemb, top_k=top_k,
+            canonical_step=canonical_step,
+        )
+
+    _lane_provider = LaneQueryProvider(
+        private_fn=_private_lane,
+        shared_fn=_shared_lane,
+        deep_fn=_deep_lane,
+    )
+
     # Lookup function for parent provenance inspection (Rules A-F).
     # Returns the payload dict for a memory entity, or None.
     def _lookup_memory_payload(ws_id: str, ag_id: str, eid: int):
@@ -2205,12 +2229,12 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     # Run pipeline (with write-back: approved proposals → fabric.ingest)
     result = run_cognition_pipeline(
         task=task,
-        query_fn=query_fn,
         character_fn=character_fn,
         drift_check_fn=drift_check_fn,
         primary_domains=primary_domains[:3],  # top 3 domains
         ingest_fn=fabric.ingest,
         lookup_fn=_lookup_memory_payload,
+        lane_provider=_lane_provider,
     )
 
     if not result.get("ok", False):

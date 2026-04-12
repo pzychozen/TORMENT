@@ -3,21 +3,21 @@
 Aperture Builder — determines what memory each role sees.
 
 The aperture controls the memory slice available to roles during execution.
-It calls fabric.query() with appropriate top_k and domain_id, then structures
-the results into a context dictionary roles can consume.
+Each memory lane (private, shared, deep) is retrieved independently so that
+roles receive truly scope-separated context.
 
 Aperture Configuration (from docs/archive/AGENT_SPINE_PLAN.md §8):
-  narrow    → private top_k=6,  shared top_k=3,  depth=1, character=seed_only
-  broad     → private top_k=12, shared top_k=8,  depth=2, character=full
-  protected → private top_k=4,  shared top_k=2,  depth=1, character=full+drift
+  narrow    → private top_k=6,  shared top_k=3,  deep top_k=2, character=seed_only
+  broad     → private top_k=12, shared top_k=8,  deep top_k=4, character=full
+  protected → private top_k=4,  shared top_k=2,  deep top_k=0, character=full+drift
 
-The aperture builder is decoupled from fabric — it receives a query function
-(or mock) so it can be tested without a running server.
+The aperture builder is decoupled from fabric — it receives a LaneQueryProvider
+(or legacy query_fn mock) so it can be tested without a running server.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 # ============================================================================
@@ -30,8 +30,9 @@ class ApertureConfig:
     name: str
     private_top_k: int
     shared_top_k: int
-    depth: int                  # memory retrieval depth (layer count)
-    character_mode: str         # "seed_only" | "full" | "full_drift"
+    deep_top_k: int = 0         # deep/spirit-return budget (v2.4.4)
+    depth: int = 1              # memory retrieval depth (layer count)
+    character_mode: str = "seed_only"  # "seed_only" | "full" | "full_drift"
 
     @property
     def include_drift(self) -> bool:
@@ -47,6 +48,7 @@ APERTURE_CONFIGS: Dict[str, ApertureConfig] = {
         name="narrow",
         private_top_k=6,
         shared_top_k=3,
+        deep_top_k=2,
         depth=1,
         character_mode="seed_only",
     ),
@@ -54,6 +56,7 @@ APERTURE_CONFIGS: Dict[str, ApertureConfig] = {
         name="broad",
         private_top_k=12,
         shared_top_k=8,
+        deep_top_k=4,
         depth=2,
         character_mode="full",
     ),
@@ -61,7 +64,8 @@ APERTURE_CONFIGS: Dict[str, ApertureConfig] = {
         name="protected",
         private_top_k=4,
         shared_top_k=2,
-        depth=1,
+        deep_top_k=0,       # conservative: no compressed/lossy memories
+        depth=1,             # for identity-sensitive routes
         character_mode="full_drift",
     ),
 }
@@ -78,11 +82,15 @@ class MemoryContext:
     This is what roles receive as their 'view' of memory.
     Roles cannot query memory directly — they only see what the aperture grants.
     (Invariant D: aperture is bounded.)
+
+    Since v2.4.4, private_memories, shared_memories, and deep_memories
+    are truly lane-separated when built via LaneQueryProvider.
     """
     aperture_name: str
     config: ApertureConfig
     private_memories: List[Dict[str, Any]] = field(default_factory=list)
     shared_memories: List[Dict[str, Any]] = field(default_factory=list)
+    deep_memories: List[Dict[str, Any]] = field(default_factory=list)
     character_context: Optional[Dict[str, Any]] = None  # seed or full
     drift_snapshot: Optional[Dict[str, Any]] = None     # only for protected
     domain_id: Optional[str] = None
@@ -90,7 +98,7 @@ class MemoryContext:
 
     @property
     def total_memories(self) -> int:
-        return len(self.private_memories) + len(self.shared_memories)
+        return len(self.private_memories) + len(self.shared_memories) + len(self.deep_memories)
 
     @property
     def has_character_context(self) -> bool:
@@ -106,6 +114,7 @@ class MemoryContext:
             "config": asdict(self.config),
             "private_memories": self.private_memories,
             "shared_memories": self.shared_memories,
+            "deep_memories": self.deep_memories,
             "character_context": self.character_context,
             "drift_snapshot": self.drift_snapshot,
             "domain_id": self.domain_id,
@@ -129,6 +138,7 @@ class MemoryContext:
             config=config,
             private_memories=d.get("private_memories", []),
             shared_memories=d.get("shared_memories", []),
+            deep_memories=d.get("deep_memories", []),
             character_context=d.get("character_context"),
             drift_snapshot=d.get("drift_snapshot"),
             domain_id=d.get("domain_id"),
@@ -137,11 +147,35 @@ class MemoryContext:
 
 
 # ============================================================================
-# Query function type
+# Lane query provider (v2.4.4)
 # ============================================================================
-# The aperture builder accepts an optional query function with this signature:
+
+@dataclass
+class LaneQueryProvider:
+    """Provides lane-specific memory retrieval for aperture building.
+
+    Each callable returns a list of hit dicts scoped to its lane.
+    If a callable is None, that lane returns empty results.
+
+    Signatures:
+        private_fn(workspace_id, agent_id, query_text, top_k) -> list[dict]
+        shared_fn(workspace_id, agent_id, query_text, top_k, domain_id) -> (list[dict], list[str])
+        deep_fn(workspace_id, agent_id, query_text, top_k) -> list[dict]
+
+    shared_fn returns a tuple of (hits, bridge_peek_domains).
+    """
+    private_fn: Optional[Callable] = None
+    shared_fn: Optional[Callable] = None
+    deep_fn: Optional[Callable] = None
+
+
+# ============================================================================
+# Legacy query function type (backward compat for tests)
+# ============================================================================
+# The aperture builder still accepts a legacy query function with this signature:
 #   query_fn(workspace_id, agent_id, query_text, top_k, domain_id) -> dict
-# In production this wraps fabric.query(). In tests it can be a mock/stub.
+# In production, use LaneQueryProvider instead. The legacy path calls
+# query_fn twice and returns mixed results (pre-v2.4.4 behavior).
 
 QueryFn = Callable[..., Dict[str, Any]]
 
@@ -166,6 +200,7 @@ def build_memory_context(
     agent_id: str,
     query_text: str,
     domain_id: Optional[str] = None,
+    lane_provider: Optional[LaneQueryProvider] = None,
     query_fn: Optional[QueryFn] = None,
     character_fn: Optional[Callable[..., Dict[str, Any]]] = None,
     drift_fn: Optional[Callable[..., Dict[str, Any]]] = None,
@@ -180,10 +215,16 @@ def build_memory_context(
         Required context for memory queries.
     domain_id : str, optional
         Target domain for queries. If None, fabric decides routing.
+    lane_provider : LaneQueryProvider, optional
+        Lane-specific query provider (v2.4.4). When provided, each
+        memory lane is retrieved independently — private_memories,
+        shared_memories, and deep_memories are truly scope-separated.
+        Takes precedence over query_fn.
     query_fn : callable, optional
-        Memory query function — wraps fabric.query() in production.
+        Legacy memory query function — wraps fabric.query() in older
+        callers. Both calls return mixed private+shared+deep results.
+        Only used if lane_provider is None.
         Signature: (workspace_id, agent_id, query_text, top_k, domain_id) -> dict
-        If None, returns empty memory lists (useful for testing pipeline structure).
     character_fn : callable, optional
         Character context retrieval function.
         Signature: (workspace_id, agent_id) -> dict
@@ -201,11 +242,51 @@ def build_memory_context(
 
     private_memories: List[Dict[str, Any]] = []
     shared_memories: List[Dict[str, Any]] = []
+    deep_memories: List[Dict[str, Any]] = []
     character_context: Optional[Dict[str, Any]] = None
     drift_snapshot: Optional[Dict[str, Any]] = None
 
-    # Query private memories
-    if query_fn is not None:
+    # --- Lane-aware retrieval (v2.4.4) ---
+    if lane_provider is not None:
+        # Private lane
+        if lane_provider.private_fn is not None:
+            try:
+                private_memories = lane_provider.private_fn(
+                    workspace_id, agent_id, query_text,
+                    config.private_top_k,
+                )
+                private_memories = private_memories[:config.private_top_k]
+            except Exception:
+                private_memories = []
+
+        # Shared lane
+        if lane_provider.shared_fn is not None:
+            try:
+                result = lane_provider.shared_fn(
+                    workspace_id, agent_id, query_text,
+                    config.shared_top_k, domain_id,
+                )
+                # shared_fn returns (hits, bridge_peek_domains)
+                if isinstance(result, tuple):
+                    shared_memories = result[0][:config.shared_top_k]
+                else:
+                    shared_memories = result[:config.shared_top_k]
+            except Exception:
+                shared_memories = []
+
+        # Deep lane
+        if lane_provider.deep_fn is not None and config.deep_top_k > 0:
+            try:
+                deep_memories = lane_provider.deep_fn(
+                    workspace_id, agent_id, query_text,
+                    config.deep_top_k,
+                )
+                deep_memories = deep_memories[:config.deep_top_k]
+            except Exception:
+                deep_memories = []
+
+    # --- Legacy path (pre-v2.4.4): query_fn returns mixed results ---
+    elif query_fn is not None:
         try:
             private_result = query_fn(
                 workspace_id, agent_id, query_text,
@@ -213,10 +294,8 @@ def build_memory_context(
             )
             private_memories = _extract_memories(private_result, config.private_top_k)
         except Exception:
-            # Query failure should not crash the pipeline — roles get empty context
             private_memories = []
 
-        # Query shared memories
         try:
             shared_result = query_fn(
                 workspace_id, agent_id, query_text,
@@ -253,6 +332,7 @@ def build_memory_context(
         config=config,
         private_memories=private_memories,
         shared_memories=shared_memories,
+        deep_memories=deep_memories,
         character_context=character_context,
         drift_snapshot=drift_snapshot,
         domain_id=domain_id,
@@ -265,6 +345,8 @@ def _extract_memories(query_result: Dict[str, Any], limit: int) -> List[Dict[str
 
     fabric.query() returns a dict with various keys. We look for
     'results' or 'memories' list and cap at `limit`.
+
+    Used by the legacy query_fn path only.
     """
     if not isinstance(query_result, dict):
         return []

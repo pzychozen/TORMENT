@@ -18,7 +18,7 @@ _log = logging.getLogger(__name__)
 
 from cognition.task_models import TaskPacket, RoutingDecision, ReintegrationResult
 from cognition.router import route
-from cognition.apertures import MemoryContext, build_memory_context
+from cognition.apertures import MemoryContext, LaneQueryProvider, build_memory_context
 from cognition.reintegration import reintegrate
 from cognition.drift import DriftCheckFn
 from schemas.role_output import RoleOutput
@@ -33,6 +33,7 @@ def run_cognition_pipeline(
     primary_domains: Optional[List[str]] = None,
     ingest_fn: Optional[Callable] = None,
     lookup_fn: Optional[Callable] = None,
+    lane_provider: Optional[LaneQueryProvider] = None,
 ) -> Dict[str, Any]:
     """Execute the full cognition pipeline and return a structured result.
 
@@ -41,9 +42,14 @@ def run_cognition_pipeline(
     task : TaskPacket
         The incoming request.
     query_fn : callable, optional
-        Memory query function for aperture building (wraps fabric.query).
+        Legacy memory query function for aperture building (wraps fabric.query).
+        Superseded by lane_provider for true lane-separated retrieval.
     character_fn : callable, optional
         Character context retrieval function.
+    lane_provider : LaneQueryProvider, optional
+        Lane-specific query provider (v2.4.4). When provided, aperture
+        builds truly scope-separated memory context. Takes precedence
+        over query_fn.
     drift_check_fn : callable, optional
         Drift measurement function (only called for identity routes).
     primary_domains : list[str], optional
@@ -75,6 +81,7 @@ def run_cognition_pipeline(
             agent_id=task.agent_id,
             query_text=task.user_input,
             domain_id=primary_domains[0] if primary_domains else None,
+            lane_provider=lane_provider,
             query_fn=query_fn,
             character_fn=character_fn,
             drift_fn=drift_fn_for_aperture,
@@ -217,20 +224,14 @@ def _write_back_approved(
         type(memory_context).__name__ if memory_context is not None else "N/A",
     )
     if memory_context is not None:
-        for mem in (getattr(memory_context, 'private_memories', []) or []):
-            _eid = mem.get("eid")
-            if _eid is not None:
-                try:
-                    _context_eids.append(int(_eid))
-                except (ValueError, TypeError) as e:
-                    _log.debug("Skipping non-integer private eid %r: %s", _eid, e)
-        for mem in (getattr(memory_context, 'shared_memories', []) or []):
-            _eid = mem.get("eid")
-            if _eid is not None:
-                try:
-                    _context_eids.append(int(_eid))
-                except (ValueError, TypeError) as e:
-                    _log.debug("Skipping non-integer shared eid %r: %s", _eid, e)
+        for _lane_name in ('private_memories', 'shared_memories', 'deep_memories'):
+            for mem in (getattr(memory_context, _lane_name, []) or []):
+                _eid = mem.get("eid")
+                if _eid is not None:
+                    try:
+                        _context_eids.append(int(_eid))
+                    except (ValueError, TypeError) as e:
+                        _log.debug("Skipping non-integer %s eid %r: %s", _lane_name, _eid, e)
     # Deduplicate, preserve order
     _seen_eids: set = set()
     _deduped_eids: List[int] = []
