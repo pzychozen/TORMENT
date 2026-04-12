@@ -6,7 +6,7 @@ Visualize TORMENT motif basins / gravity wells for one workspace+domain.
 
 What it does:
 - loads motifs.json
-- loads member embeddings from emb_<eid>.npy
+- loads member embeddings (shard storage first, legacy emb_<eid>.npy fallback)
 - projects embeddings + motif centroids to 2D with PCA (numpy SVD; no sklearn needed)
 - draws:
     * member memory points, colored by motif
@@ -20,6 +20,7 @@ Example:
 python tools/motif_field_viz.py ^
   --data-dir data ^
   --workspace ws_stress_gw1 ^
+  --agent stress_agent ^
   --domain research ^
   --out outputs
 """
@@ -27,94 +28,95 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
-from dataclasses import dataclass
+import sys
 from typing import Dict, List, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
 
+log = logging.getLogger(__name__)
 
-def _unit(v: np.ndarray) -> np.ndarray:
-    v = np.asarray(v, dtype=np.float32).reshape(-1)
-    n = float(np.linalg.norm(v) + 1e-12)
-    return (v / n).astype(np.float32)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from _viz_common import MotifInfo, _pca_2d, _unit, load_motifs, make_color_cycle
 
 
-def _pca_2d(X: np.ndarray) -> np.ndarray:
+def load_member_embeddings(
+    data_dir: str,
+    workspace: str,
+    agent: str,
+    motifs: Dict[str, MotifInfo],
+) -> Tuple[List[dict], int]:
+    """Load member embeddings — shard storage first, legacy emb_<eid>.npy fallback.
+
+    Returns (rows, max_dim) where each row is {eid, motif_id, label, emb}.
     """
-    Simple PCA via SVD; returns Nx2.
-    """
-    if X.ndim != 2:
-        raise ValueError("X must be 2D")
-    if X.shape[0] == 0:
-        return np.zeros((0, 2), dtype=np.float32)
-    Xc = X - X.mean(axis=0, keepdims=True)
-    if X.shape[0] == 1:
-        return np.concatenate([np.zeros((1, 1)), np.zeros((1, 1))], axis=1)
-    U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
-    Z = Xc @ Vt[:2].T
-    if Z.shape[1] == 1:
-        Z = np.concatenate([Z, np.zeros((Z.shape[0], 1), dtype=Z.dtype)], axis=1)
-    return Z[:, :2].astype(np.float32)
-
-
-@dataclass
-class MotifInfo:
-    motif_id: str
-    label: str
-    strength: float
-    stability_score: float
-    members: List[int]
-    centroid: np.ndarray
-
-    @property
-    def density(self) -> float:
-        # Same saturation shape as the gravity-well patch.
-        return float(min(1.0, np.log1p(max(0, len(self.members))) / np.log(33.0)))
-
-    @property
-    def gravity_bonus(self) -> float:
-        return float(
-            0.10 * np.clip(self.strength, 0.0, 1.0)
-            + 0.07 * self.density
-            + 0.05 * np.clip(self.stability_score, 0.0, 1.0)
-        )
-
-
-def load_motifs(data_dir: str, workspace: str, domain: str) -> Dict[str, MotifInfo]:
-    path = os.path.join(data_dir, "workspaces", workspace, "domains", domain, "motifs.json")
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"motifs.json not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        obj = json.load(f)
-    out: Dict[str, MotifInfo] = {}
-    for mid, md in obj.get("motifs", {}).items():
-        out[mid] = MotifInfo(
-            motif_id=mid,
-            label=str(md.get("label", mid)),
-            strength=float(md.get("strength", 0.0)),
-            stability_score=float(md.get("stability_score", 0.0)),
-            members=[int(x) for x in md.get("members", [])],
-            centroid=_unit(np.asarray(md.get("centroid", []), dtype=np.float32)),
-        )
-    return out
-
-
-def load_member_embeddings(data_dir: str, motifs: Dict[str, MotifInfo]) -> Tuple[List[dict], int]:
-    """
-    Returns list of rows:
-      {eid, motif_id, label, emb}
-    """
-    rows = []
+    rows: List[dict] = []
     dim = 0
+
+    private_dir = os.path.join(
+        data_dir, "workspaces", workspace, "agents", agent, "private"
+    )
+    emb_dir = os.path.join(private_dir, "embeddings")
+    shard_reader = None
+    nodes_by_eid: Dict[int, dict] = {}
+
+    try:
+        from torment_service.embedding_store import (
+            EmbeddingShardReader,
+            load_embedding,
+        )
+
+        if os.path.isdir(emb_dir):
+            shard_reader = EmbeddingShardReader(emb_dir)
+
+        # Load node payloads for embedding_ref lookup
+        nodes_path = os.path.join(private_dir, "nodes.jsonl")
+        if os.path.exists(nodes_path):
+            with open(nodes_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        eid = rec.get("eid")
+                        if eid is not None:
+                            nodes_by_eid[int(eid)] = rec.get("payload", {})
+                    except Exception as e:
+                        log.debug("Failed to parse node record: %s", e)
+                        continue
+    except ImportError as e:
+        log.debug("Could not load embedding_store; shard loading unavailable: %s", e)
+
     for mid, m in motifs.items():
         for eid in m.members:
-            p = os.path.join(data_dir, f"emb_{int(eid)}.npy")
-            if not os.path.exists(p):
-                continue
-            try:
-                emb = _unit(np.load(p))
+            emb = None
+
+            # Shard-first loading via canonical load_embedding
+            if shard_reader is not None or nodes_by_eid:
+                payload = nodes_by_eid.get(eid, {})
+                try:
+                    from torment_service.embedding_store import load_embedding
+
+                    emb_vec = load_embedding(eid, payload, shard_reader, private_dir)
+                    if emb_vec is not None:
+                        emb = _unit(emb_vec)
+                except Exception as e:
+                    log.debug("Shard load failed for eid %d: %s", eid, e)
+
+            # Legacy fallback: search data_dir root (original behavior)
+            if emb is None:
+                p = os.path.join(data_dir, f"emb_{int(eid)}.npy")
+                if os.path.exists(p):
+                    try:
+                        emb = _unit(np.load(p))
+                    except Exception:
+                        continue
+
+            if emb is not None:
                 dim = max(dim, int(emb.shape[0]))
                 rows.append({
                     "eid": int(eid),
@@ -122,26 +124,16 @@ def load_member_embeddings(data_dir: str, motifs: Dict[str, MotifInfo]) -> Tuple
                     "label": m.label,
                     "emb": emb,
                 })
-            except Exception:
-                continue
+
     return rows, dim
 
-
-def make_color_cycle(n: int) -> List[str]:
-    base = [
-        "tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple",
-        "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan"
-    ]
-    if n <= len(base):
-        return base[:n]
-    # repeat if more motifs than base colors
-    return [base[i % len(base)] for i in range(n)]
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", required=True, help="TORMENT data dir (e.g. data)")
     ap.add_argument("--workspace", required=True)
+    ap.add_argument("--agent", required=True, help="Agent name (for embedding shard lookup)")
     ap.add_argument("--domain", required=True)
     ap.add_argument("--out", default="outputs")
     ap.add_argument("--title", default="")
@@ -151,7 +143,7 @@ def main() -> None:
     os.makedirs(args.out, exist_ok=True)
 
     motifs = load_motifs(args.data_dir, args.workspace, args.domain)
-    rows, dim = load_member_embeddings(args.data_dir, motifs)
+    rows, dim = load_member_embeddings(args.data_dir, args.workspace, args.agent, motifs)
 
     if not motifs:
         raise RuntimeError("No motifs found.")
