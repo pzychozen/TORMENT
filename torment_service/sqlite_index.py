@@ -25,6 +25,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .embedding_store import _child_path
+from .scoring import derive_provenance_type
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS core_nodes (
     eid          INTEGER PRIMARY KEY,
     kind         TEXT,
     tier         TEXT,
+    provenance_type TEXT,
     memory_class TEXT DEFAULT 'core',
     step         INTEGER,
     created_at   TEXT,
@@ -155,9 +157,17 @@ class IndexManager:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_SCHEMA_DDL)
+            # --- Schema upgrade: add provenance_type if missing (v4.0→v4.1) ---
+            try:
+                self._conn.execute(
+                    "ALTER TABLE core_nodes ADD COLUMN provenance_type TEXT"
+                )
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists — expected on fresh schema
             self._conn.execute(
                 "INSERT OR REPLACE INTO index_meta (key, value) VALUES (?, ?)",
-                ("schema_version", "4.0"),
+                ("schema_version", "4.1"),
             )
             self._conn.commit()
         except Exception as e:
@@ -225,16 +235,19 @@ class IndexManager:
         Uses INSERT OR REPLACE so re-indexing the same eid is safe.
         """
         emb_ref = payload.get("embedding_ref") or {}
+        # Derive compact provenance classification from raw provenance
+        prov_type = derive_provenance_type(payload.get("provenance"))
         return self._safe_execute(
             """INSERT OR REPLACE INTO core_nodes
-               (eid, kind, tier, memory_class, step, created_at,
-                half_life_days, coherence, strength, confidence, summary,
-                shard, row_idx)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (eid, kind, tier, provenance_type, memory_class, step,
+                created_at, half_life_days, coherence, strength, confidence,
+                summary, shard, row_idx)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 int(eid),
                 str(payload.get("type") or payload.get("mtype") or ""),
                 str(payload.get("tier") or payload.get("character_tier") or ""),
+                prov_type,
                 str(payload.get("memory_class", "core")),
                 int(payload.get("created_at") or payload.get("born_step") or 0),
                 str(payload.get("created_ts") or _now_iso()),

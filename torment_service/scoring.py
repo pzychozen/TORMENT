@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet
+from typing import Any, Dict, FrozenSet, Optional
 
 
 def score_hit(
@@ -258,6 +258,27 @@ def compute_continuity_bonuses(
 # ---------------------------------------------------------------------------
 
 DEFAULT_COLLECTIVE_RETRIEVAL_DISCOUNT = 0.50
+
+
+def derive_provenance_type(provenance: Any) -> Optional[str]:
+    """Derive a compact ``provenance_type`` string from raw provenance.
+
+    This is the **single canonical rule** for converting the payload-level
+    ``provenance`` value (string or ProvenanceV1 dict) into the compact
+    classification badge used by the SQLite index, retrieval assembler,
+    and aperture builder.
+
+    Returns:
+        A compact string such as ``"collective_echo"``, ``"user_input"``,
+        ``"tool_result"``, or ``None`` if provenance is absent/unrecognised.
+    """
+    if isinstance(provenance, dict):
+        return provenance.get("source_type")  # may be None if malformed
+    if isinstance(provenance, str):
+        if provenance == "collective":
+            return "collective_echo"
+        return provenance  # legacy string passthrough (e.g. "user_input")
+    return None
 
 
 def is_collective_provenance(provenance: Any) -> bool:

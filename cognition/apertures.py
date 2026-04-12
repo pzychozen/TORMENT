@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from torment_service.scoring import derive_provenance_type as _derive_prov_type
 from torment_service.scoring import is_collective_provenance as _is_coll_prov
 
 
@@ -355,25 +356,17 @@ def _stamp_provenance_type(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     Lane functions return raw search results with a payload-level
     ``provenance`` field but no extracted ``provenance_type``.  This
-    helper derives the compact badge so downstream consumers (roles,
-    assembler) can distinguish collective echoes from organic memory
-    without parsing the raw provenance dict.
+    helper derives the compact badge via the canonical
+    ``derive_provenance_type`` rule in ``scoring.py`` so downstream
+    consumers (roles, assembler) can distinguish collective echoes
+    from organic memory without parsing the raw provenance dict.
 
     Mutates hits in place for efficiency; also returns the list.
     """
     for h in hits:
         if "provenance_type" in h:
             continue  # already badged (e.g. came from fabric.query())
-        raw = h.get("provenance")
-        if isinstance(raw, dict):
-            h["provenance_type"] = raw.get("source_type")
-        elif isinstance(raw, str):
-            if raw == "collective":
-                h["provenance_type"] = "collective_echo"
-            else:
-                h["provenance_type"] = raw  # legacy string passthrough
-        else:
-            h["provenance_type"] = None
+        h["provenance_type"] = _derive_prov_type(h.get("provenance"))
     return hits
 
 
