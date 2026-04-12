@@ -1,15 +1,16 @@
-# TORMENT Memory Fabric — v2.4.4 Release Notes (skeleton)
+# TORMENT Memory Fabric — v2.4.4 Release Notes
 
-**Tag:** `v2.4.4` *(not yet cut)*
-**Branch:** `v2.4.x-step6-commit-a` → rolls up into `v2.4.4` when
-commit B lands and the tag is cut.
-**Headline:** `WRITE_MIGRATION` activation — read-only commit A of
-step 6 in the v2.4.x tactical provenance pass.
+**Tag:** `v2.4.4`
+**Headline:** Provenance migration closure — step 6 operationally
+complete, `WRITE_MIGRATION` writer path validated end-to-end.
 
-This skeleton tracks the scope of commit A of step 6 so that when
-commit B lands and the v2.4.4 tag is cut, the release notes are
-already half-written. It is intentionally a skeleton, not a finished
-release notes file — gaps marked `TK` are filled in at tag time.
+v2.4.4 closes the step-6 provenance-migration subsystem. The full
+pipeline — export bridge, dry-run, apply, and guard re-verification —
+has been validated against a live workspace with zero failures. Legacy
+rows are migrated through a two-gate admission policy, rewritten by a
+narrow append-only writer, and the recursion guard correctly refuses
+descendants of unrecoverable ancestors. `TORMENT_ARCHIVIST_WRITEBACK`
+remains off; flipping it is a separate later decision gate.
 
 For the architectural context, see:
 - [`DOCTRINE_v2.4.x.md`](DOCTRINE_v2.4.x.md) — 12 principles
@@ -240,19 +241,55 @@ thin orchestrator that walks a row source and applies the writer, and
 - No class-6 or class-7 table population. The empty-table discipline
   stays in force; the writer's precondition 5 is the second line of
   defence if an upstream bug ever populates them.
-- No schema changes, no doctrine-rule changes. All schema work lived
-  in commit A.
+- No schema changes, no doctrine-rule changes. All schema and
+  doctrine decisions were ratified and landed in commit A.
 
 ---
 
-## Upgrade notes
+## Operational Closure (2026-04-11)
 
-TK *(filled in at tag time once commit B lands)*
+Step 6 was operationally validated on 2026-04-11 against the
+`ws_dimlock` workspace (82 unique EIDs, 79 with provenance, 3 without).
 
-## Operational notes
+**Closure sequence results:**
 
-TK *(filled in at tag time)*
+| Stage | Result |
+|---|---|
+| Export bridge | 82 rows extracted, 79 with provenance, 3 null |
+| Dry-run | class-5 refusals: 3, class-1 already-canonical: 79 |
+| Apply | applied: 3 (gate1_unrecoverable sentinel stamped), skipped_precondition: 79 (class-1 already canonical), 0 bumps, 0 blocks, 0 anomalies |
+| Guard re-verification | 82 checks, 0 failures, status PASS |
 
-## Migration runbook
+**Refused rows:** all refused rows correctly return
+`REASON_MIGRATION_REFUSED` through the recursion guard. The refusal
+sentinel path — writer stamps `admission_refused=True` with
+`source_type=gate1_unrecoverable`, guard reads it back and short-
+circuits before ancestry walking — is proven in practice.
 
-TK *(filled in at tag time after the first real-corpus dry-run)*
+**Class-1 rows:** already-canonical rows (valid provenance, no
+migration needed) are correctly skipped by the writer's first
+precondition. No false rewrites.
+
+**Caller-side contract note:** the `recursion_guard_check` lookup_fn
+contract requires the caller to return a **payload dict** where
+`payload["provenance"]` is the raw provenance. Returning the raw
+provenance directly (without wrapping) causes the guard to report
+`unknown_parent_provenance` instead of `migration_admission_refused`.
+This was diagnosed and fixed during the live validation run — it is a
+caller-side contract violation, not a guard or writer bug.
+
+### What v2.4.4 does NOT ship
+
+- **No `TORMENT_ARCHIVIST_WRITEBACK` flip.** The writeback gate
+  remains off. Flipping it is a separate decision that requires a
+  guard re-verification against the post-migration corpus and an
+  independent review of the archivist gate risks documented in the
+  step-5 closure trail.
+- **No class-6 or class-7 table population.** The empty-table
+  discipline stays in force. The writer's precondition 5 is the
+  second line of defence.
+- **No `WRITE_SYSTEM_IMPORT` activation.** That path is blocked on a
+  ratified adapter spec and is not part of step 6.
+- **No `--from-workspace` CLI mode.** The live MemoryGraph iterator
+  is deliberately deferred; the validated path is the file-backed
+  JSONL export bridge.

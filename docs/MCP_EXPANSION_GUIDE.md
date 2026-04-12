@@ -130,7 +130,7 @@ if "my_new_operation" in open_ops:
 
 **Tool rules:**
 - Naming: always `torment_` prefix, then operation name
-- Gate on `if "my_new_operation" in open_ops:` so exposure tier is respected
+- Gate on `if "my_new_operation" in exposed_ops:` so the operator's configured exposure tier is respected (for OPEN ops, `open_ops` also works — both sets include them)
 - Parameters: use typed Python args, not raw JSON (except for lists/dicts where JSON strings are acceptable)
 - Return: always `json.dumps(result, default=str)`
 - Always include `workspace_id` and `agent_id` as optional params with `""` default
@@ -236,10 +236,12 @@ FAST_DISPATCH["web_enrich"] = _fast_web_enrich
 **Step 3 — MCP tool (guarded tier):**
 
 ```python
-# Gate on guarded ops, not open_ops
-guarded_ops = get_exposed_operations(EXPOSURE_GUARDED)
+# Gate on exposed_ops — this set already respects the operator's
+# configured max tier (TORMENT_MCP_EXPOSURE_TIER env var).
+# A GUARDED op only appears in exposed_ops when the operator has
+# set TORMENT_MCP_EXPOSURE_TIER=guarded.
 
-if "web_enrich" in guarded_ops:
+if "web_enrich" in exposed_ops:
     @mcp.tool(
         name="torment_web_enrich",
         description=(
@@ -259,6 +261,13 @@ if "web_enrich" in guarded_ops:
                              agent_id=agent_id or None)
         return json.dumps(result, default=str)
 ```
+
+Note: `exposed_ops` (computed once at server startup from the
+`TORMENT_MCP_EXPOSURE_TIER` env var) is the single set that controls
+which convenience tools are registered. OPEN ops always appear;
+GUARDED ops appear only when the operator opts in; INTERNAL ops never
+appear. Do not create a separate `guarded_ops` variable — use
+`exposed_ops` for all gating.
 
 This pattern works for any external integration: the external API call
 happens in the handler, the governance wraps it, and the MCP tool is just
@@ -351,7 +360,7 @@ output must go to `stderr` (use `logger.info/warning/error`). The MCP stdio
 transport uses stdout exclusively for JSON-RPC.
 
 **Forgetting the exposure gate:** Always wrap your convenience tool in
-`if "operation_name" in open_ops:`. Without this, the tool appears even
+`if "operation_name" in exposed_ops:`. Without this, the tool appears even
 when the Spine says it shouldn't be exposed.
 
 **Defaulting workspace/agent to "default":** Don't. Use empty string `""` as
