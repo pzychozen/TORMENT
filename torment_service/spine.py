@@ -1317,7 +1317,9 @@ def submit_task(
         audit=audit_dict,
         task_id=req.task_id,
         escalated=escalated,
-        escalation_reasons=list(escalation_reasons) if escalated else [],
+        # NOTE: esc_reasons (the computed list from line ~1187), not
+        # escalation_reasons (the module-level function with the same name).
+        escalation_reasons=list(esc_reasons) if escalated else [],
         elapsed_ms=elapsed,
     )
     log_spine_decision(resp, req, ctx)
