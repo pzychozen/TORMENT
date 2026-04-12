@@ -167,6 +167,25 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+def random_chance(p: float) -> bool:
+    """Return True with probability *p*, clamped to [0, 1]."""
+    import random as _rng
+    return _rng.random() < max(0.0, min(1.0, float(p)))
+
+
+def dominant_thread(active_motifs: Dict[str, list]) -> Optional[Dict[str, Any]]:
+    """Return the single highest-scored active motif across all domains, or None."""
+    best: Optional[Dict[str, Any]] = None
+    best_score = -1.0
+    for _domain, motifs in active_motifs.items():
+        for m in motifs:
+            s = float(m.get("score", m.get("strength", 0.0)) if isinstance(m, dict) else 0.0)
+            if s > best_score:
+                best_score = s
+                best = m
+    return best
+
+
 def _embed_audit_path(data_dir: str, workspace_id: str) -> str:
     return _safe_child(_ws_root(data_dir, workspace_id), "embed_audit.json")
 
@@ -3043,6 +3062,217 @@ class TormentFabric:
             "debug": debug,
         }
 
+    # -----------------------------------------------------------------------
+    # Lane-specific retrieval helpers (Phase 1, v2.4.4)
+    #
+    # These extract the three retrieval lanes that fabric.query() uses
+    # internally.  In Phase 1 they are only called by query() itself;
+    # Phase 2 will let the aperture builder call them directly so that
+    # cognition roles receive truly scope-separated memory context.
+    # -----------------------------------------------------------------------
+
+    def _query_private_lane(
+        self,
+        ak: str,
+        query_text: str,
+        agent_id: str,
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """Return hits from the agent's private graph only.
+
+        Parameters
+        ----------
+        ak : str
+            Agent key (workspace_id/agent_id).
+        query_text : str
+            The search query.
+        agent_id : str
+            Used for user_id filtering inside graph.search().
+        top_k : int
+            Maximum number of private hits to return.
+
+        Returns
+        -------
+        list[dict]
+            Raw scored hits from private_graphs[ak].search().
+        """
+        if top_k <= 0:
+            return []
+        return self.private_graphs[ak].search(
+            query_text, top_k=top_k, user_id=agent_id,
+        )
+
+    def _query_shared_lane(
+        self,
+        ws: Any,
+        query_text: str,
+        top_k: int,
+        domains: List[str],
+        *,
+        peek_bridges: bool = False,
+        peek_top_k: int = 4,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Return hits from shared graphs (+ optional bridge peek).
+
+        Parameters
+        ----------
+        ws : Workspace
+            The workspace object (carries shared_graphs, bridges,
+            domain_policies).
+        query_text : str
+            The search query.
+        top_k : int
+            Maximum hits *per domain* from the primary domains.
+        domains : list[str]
+            Ranked domain IDs (usually top 2 from the domain router).
+        peek_bridges : bool
+            Whether to fan out into bridged domains.
+        peek_top_k : int
+            Per-domain hit cap for bridge-peek domains.
+
+        Returns
+        -------
+        (hits, bridge_peek_domains)
+            hits: list of scored hit dicts from shared graphs.
+            bridge_peek_domains: list of domain IDs reached via bridge.
+        """
+        shared_hits: List[Dict[str, Any]] = []
+        if top_k > 0:
+            for d in domains:
+                shared_hits.extend(
+                    ws.shared_graphs[d].search(query_text, top_k=top_k, user_id=None)
+                )
+
+        bridge_peek_domains: List[str] = []
+        if peek_bridges:
+            rel_br = ws.bridges.relevant_to_domains(domains, top_k=12)
+            strict = any(
+                bool(ws.domain_policies.get(d, {}).get("bridge_peek_requires_approval", False))
+                for d in domains
+            )
+            for b in rel_br:
+                if str(b.get("status", "suggested")) == "rejected":
+                    continue
+                if strict:
+                    if str(b.get("status", "suggested")) != "approved":
+                        continue
+                else:
+                    if str(b.get("status", "suggested")) != "approved" and float(b.get("confidence", 0.0)) < 0.65:
+                        continue
+                od = b["to_domain"] if b["from_domain"] in domains else b["from_domain"]
+                if od not in domains and od not in bridge_peek_domains:
+                    bridge_peek_domains.append(od)
+                if len(bridge_peek_domains) >= 2:
+                    break
+            for pd in bridge_peek_domains:
+                if pd in ws.shared_graphs:
+                    hits_pd = ws.shared_graphs[pd].search(query_text, top_k=peek_top_k, user_id=None)
+                    for h in hits_pd:
+                        hh = dict(h)
+                        hh["via_bridge"] = True
+                        hh["bridge_domain"] = pd
+                        shared_hits.append(hh)
+
+        return shared_hits, bridge_peek_domains
+
+    def _query_deep_lane(
+        self,
+        ak: str,
+        workspace_id: str,
+        agent_id: str,
+        qemb: Any,
+        top_k: int,
+        canonical_step: int,
+    ) -> List[Dict[str, Any]]:
+        """Return deep/spirit-return hits with explicit scope='deep'.
+
+        Parameters
+        ----------
+        ak : str
+            Agent key.
+        workspace_id, agent_id : str
+            For symbol state and warmup tracker paths.
+        qemb : array-like
+            Pre-computed query embedding.
+        top_k : int
+            Maximum deep hits to return.
+        canonical_step : int
+            Current kernel step for warmup tracking.
+
+        Returns
+        -------
+        list[dict]
+            Deep memory hits enriched with spirit-return metadata.
+            Each hit carries ``scope="deep"`` and
+            ``from_deep_memory=True``.
+        """
+        if not self._compress_enable or top_k <= 0:
+            return []
+        try:
+            from .spirit_return import enrich_deep_memory_hit, WarmupTracker, inject_spirit_return_into_hit
+
+            _deep_store = self._deep_stores.get(ak)
+            if not _deep_store:
+                return []
+
+            _deep_qv = np.asarray(qemb, dtype=np.float32).reshape(-1)
+            _deep_hits = _deep_store.query(
+                _deep_qv,
+                top_k=max(1, top_k),
+            )
+
+            # Current kernel symbol from persisted state
+            _sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
+            _current_sym = str(_sym_state.get("last_symbol", "◯") or "◯")
+
+            # Warmup tracker (lazy init per agent)
+            _warmup_dir = Path(self.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
+            _warmup = WarmupTracker(_warmup_dir, base_dir=self.data_dir)
+
+            # Check which deep EIDs also exist in core (short-path compressed)
+            _core_compressed: set = set()
+            _pg = self.private_graphs.get(ak)
+            if _pg:
+                for _eid_key, _ent in _pg.entities.items():
+                    if (_ent.payload or {}).get("compressed"):
+                        _core_compressed.add(int(_eid_key))
+
+            results: List[Dict[str, Any]] = []
+            for _dm in _deep_hits:
+                _ws = _warmup.get_or_create(_dm.eid, canonical_step)
+                _spirit = enrich_deep_memory_hit(
+                    _dm, _current_sym, _ws, int(_dm.eid) in _core_compressed
+                )
+                results.append(inject_spirit_return_into_hit(_spirit))
+
+            return results
+        except Exception:
+            return []  # Spirit return is non-fatal
+
+    # -----------------------------------------------------------------------
+    # Canonical step helper
+    # -----------------------------------------------------------------------
+
+    def _get_canonical_step(self, ak: str) -> int:
+        """Return the authoritative 'now' step for an agent.
+
+        Uses the agent's kernel ModelState.step. Falls back to
+        max(born_step) from the private graph.
+        """
+        _canonical_step: int = -1
+        try:
+            _agent_state = self.agent_states.get(ak)
+            if _agent_state is not None:
+                _canonical_step = int(getattr(_agent_state, "step", -1))
+        except Exception as _step_exc:
+            log.debug("Failed to read canonical step from agent state: %s", _step_exc)
+        if _canonical_step < 0:
+            _pg_fallback = self.private_graphs.get(ak)
+            if _pg_fallback:
+                for _ent_fb in _pg_fallback.entities.values():
+                    _canonical_step = max(_canonical_step, int(getattr(_ent_fb, "born_step", 0) or 0))
+        return _canonical_step
+
     def query(
         self,
         workspace_id: str,
@@ -3084,68 +3314,17 @@ class TormentFabric:
         _relational_k = min(max(0, int(_mp_topk.get("relational", top_k))), _topk_cap)
         _deep_k = min(max(0, int(_mp_topk.get("deep", 0))), _topk_cap)
 
-        # candidate hits from private store + each domain shared
-        # Skip searches when lane top_k is 0 (search() clamps to min 1 internally)
-        private_hits = self.private_graphs[ak].search(query_text, top_k=_core_k, user_id=agent_id) if _core_k > 0 else []
-        shared_hits: List[Dict[str, Any]] = []
-        if _relational_k > 0:
-            for d in domains:
-                shared_hits.extend(ws.shared_graphs[d].search(query_text, top_k=_relational_k, user_id=None))
+        # --- Lane retrieval (v2.4.4) ---
+        # Each lane is a separate helper; query() merges and rescores.
+        private_hits = self._query_private_lane(ak, query_text, agent_id, top_k=_core_k)
 
-
-        # optional bridge peek: bounded fan-out into bridged domains (approved by confidence threshold)
-        bridge_peek_domains: List[str] = []
-        if peek_bridges:
-            rel_br = ws.bridges.relevant_to_domains(domains, top_k=12)
-            # domain-aware governance: ops/meta require manual approval for peeks
-            strict = any(bool(ws.domain_policies.get(d, {}).get("bridge_peek_requires_approval", False)) for d in domains)
-            # approved if manually approved, else confidence heuristic (unless strict); rejected bridges ignored
-            for b in rel_br:
-                if str(b.get("status", "suggested")) == "rejected":
-                    continue
-                if strict:
-                    if str(b.get("status", "suggested")) != "approved":
-                        continue
-                else:
-                    if str(b.get("status", "suggested")) != "approved" and float(b.get("confidence", 0.0)) < 0.65:
-                        continue
-                od = b["to_domain"] if b["from_domain"] in domains else b["from_domain"]
-                if od not in domains and od not in bridge_peek_domains:
-                    bridge_peek_domains.append(od)
-                if len(bridge_peek_domains) >= 2:
-                    break
-            peek_k = max(2, top_k // 2)
-            for pd in bridge_peek_domains:
-                if pd in ws.shared_graphs:
-                    hits_pd = ws.shared_graphs[pd].search(query_text, top_k=peek_k, user_id=None)
-                    for h in hits_pd:
-                        hh = dict(h)
-                        hh["via_bridge"] = True
-                        hh["bridge_domain"] = pd
-                        shared_hits.append(hh)
-
+        shared_hits, bridge_peek_domains = self._query_shared_lane(
+            ws, query_text, top_k=_relational_k, domains=domains,
+            peek_bridges=peek_bridges, peek_top_k=max(2, top_k // 2),
+        )
 
         # --- Canonical current step (v2.4.x) ---
-        # Use the agent's kernel ModelState.step as the authoritative
-        # "now" for all step-relative scoring (thread-window bonus,
-        # mood-spiral penalty, deep-memory warmup).  Previous code
-        # inferred the current step from max(hit["step"]), which is
-        # circular — scoring bonuses should not depend on which
-        # memories happened to be retrieved.
-        _canonical_step: int = -1
-        try:
-            _agent_state = self.agent_states.get(ak)
-            if _agent_state is not None:
-                _canonical_step = int(getattr(_agent_state, "step", -1))
-        except Exception as _step_exc:
-            log.debug("Failed to read canonical step from agent state: %s", _step_exc)
-        # Fallback: max born_step from the private graph (still canonical,
-        # just slightly stale if kernel state is missing).
-        if _canonical_step < 0:
-            _pg_fallback = self.private_graphs.get(ak)
-            if _pg_fallback:
-                for _ent_fb in _pg_fallback.entities.values():
-                    _canonical_step = max(_canonical_step, int(getattr(_ent_fb, "born_step", 0) or 0))
+        _canonical_step = self._get_canonical_step(ak)
 
         # --- Deep memory fallback with spirit return (Phase 6) ---
         # Deep is primarily a gap-filler: only query when core+shared didn't
@@ -3154,45 +3333,18 @@ class TormentFabric:
         # core/relational results that already exist.
         _remaining = max(0, top_k - len(private_hits) - len(shared_hits))
         _deep_budget = min(_deep_k, _remaining) if _deep_k > 0 else _remaining
-        if self._compress_enable and _deep_budget > 0:
-            try:
-                from .spirit_return import enrich_deep_memory_hit, WarmupTracker, inject_spirit_return_into_hit
 
-                _deep_store = self._deep_stores.get(ak)
-                if _deep_store:
-                    _deep_qv = np.asarray(qemb, dtype=np.float32).reshape(-1)
-                    _deep_hits = _deep_store.query(
-                        _deep_qv,
-                        top_k=max(1, _deep_budget),
-                    )
-
-                    # Current kernel symbol from persisted state
-                    _sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
-                    _current_sym = str(_sym_state.get("last_symbol", "◯") or "◯")
-
-                    # Warmup tracker (lazy init per agent)
-                    _warmup_dir = Path(self.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
-                    _warmup = WarmupTracker(_warmup_dir, base_dir=self.data_dir)
-
-                    # Check which deep EIDs also exist in core (short-path compressed)
-                    _core_compressed: set = set()
-                    _pg = self.private_graphs.get(ak)
-                    if _pg:
-                        for _eid_key, _ent in _pg.entities.items():
-                            if (_ent.payload or {}).get("compressed"):
-                                _core_compressed.add(int(_eid_key))
-
-                    for _dm in _deep_hits:
-                        _ws = _warmup.get_or_create(_dm.eid, _canonical_step)
-                        _spirit = enrich_deep_memory_hit(
-                            _dm, _current_sym, _ws, int(_dm.eid) in _core_compressed
-                        )
-                        shared_hits.append(inject_spirit_return_into_hit(_spirit))
-            except Exception:
-                pass  # Spirit return is non-fatal; deep fallback already ran or skipped
+        deep_hits = self._query_deep_lane(
+            ak, workspace_id, agent_id, qemb,
+            top_k=_deep_budget, canonical_step=_canonical_step,
+        )
 
         # merge and rescore with motif alignment if available
-        all_hits = private_hits + shared_hits
+        # NOTE (v2.4.4): deep_hits are now a separate lane instead of
+        # being appended to shared_hits.  The merged pool is identical
+        # to the previous behavior — deep hits participate in the same
+        # unified rescore pass.
+        all_hits = private_hits + shared_hits + deep_hits
         rescored = []
         active_motifs = {}
         for d in domains:
@@ -4701,117 +4853,12 @@ class TormentFabric:
                 'graph_json': bjp,
                 'graph_dot': bdp,
                 'narrative_md': npath,
-            }
-        }
-        mpath = _safe_child(out_dir, 'manifest.json')
-        with open(mpath,'w',encoding='utf-8') as f:
-            json.dump(manifest, f, indent=2, ensure_ascii=False)
-        return {"bundle_dir": out_dir, "manifest": manifest}
-
-
-    def trace_view(self, workspace_id: str, eid: int, scope: str = "shared", domain_id: Optional[str] = None, agent_id: Optional[str] = None, depth: int = 2, explain: bool = False) -> Dict[str, Any]:
-        """Inline reader-mode trace: narrative + compact summaries."""
-        dom = domain_id or 'research'
-        graph = self.trace_full_graph(workspace_id, eid, scope=scope, domain_id=dom, agent_id=agent_id, depth=depth, explain=explain, export='none')
-        narrative = self._trace_narrative(workspace_id, eid=eid, scope=scope, domain_id=dom, agent_id=agent_id)
-        # summarize graph
-        type_counts = {}
-        for n in graph.get('nodes', []):
-            t = n.get('type','unknown')
-            type_counts[t] = type_counts.get(t,0)+1
-        return {
-            'workspace_id': workspace_id,
-            'eid': int(eid),
-            'scope': scope,
-            'domain_id': dom,
-            'narrative': narrative,
-            'graph_summary': {
-                'nodes': len(graph.get('nodes', [])),
-                'edges': len(graph.get('edges', [])),
-                'counts_by_type': type_counts,
-                'depth': int(depth),
             },
         }
-
-
-    def _trace_narrative(self, workspace_id: str, eid: int, scope: str, domain_id: str, agent_id: Optional[str] = None) -> str:
-        chain = self.memory_chain(workspace_id, eid=eid, scope=scope, domain_id=domain_id, agent_id=agent_id)
-        evs = chain.get('events', [])
-        lines = []
-        lines.append(f"# Trace Narrative\n\n")
-        lines.append(f"- Workspace: **{workspace_id}**\n")
-        lines.append(f"- Domain: **{domain_id}**\n")
-        lines.append(f"- Scope: **{scope}**\n")
-        lines.append(f"- EID: **{int(eid)}**\n\n")
-        if not evs:
-            lines.append("No events found for this memory.\n")
-            return ''.join(lines)
-        lines.append("## Event Timeline\n")
-        for evt in evs[-25:]:
-            ts = evt.get('ts')
-            et = evt.get('type')
-            aid = evt.get('agent_id')
-            lines.append(f"- {ts}: `{et}`" + (f" (agent `{aid}`)" if aid else "") + "\n")
-        return ''.join(lines)
-
-
-
-def dominant_thread(active: Dict[str, List[Dict[str, Any]]]) -> str:
-    labels = []
-    for dom, ms in active.items():
-        for m in ms[:2]:
-            labels.append(m.get("label", ""))
-    labels = [l for l in labels if l]
-    if not labels:
-        return ""
-    return " | ".join(labels[:4])
-
-
-def random_chance(p: float) -> bool:
-    import random
-    return random.random() < float(p)
-
-def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
-    _ag = _agent_dir(data_dir, workspace_id, agent_id)
-    # Sink-local guard for CodeQL at makedirs site.
-    _rp = os.path.realpath(_ag)
-    if not _rp.startswith(os.sep) and not os.path.isabs(_rp):
-        raise ValueError(f"Agent dir not absolute: {_rp!r}")
-    os.makedirs(_rp, exist_ok=True)
-    return _safe_child(_ag, "affect_state.json")
-
-def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
-    p = _affect_state_path(data_dir, workspace_id, agent_id)
-    base = {"last_tag": None, "last_conf": 0.0, "last_step": -10**9, "drift_hist": []}
-    if not os.path.exists(p):
-        return dict(base)
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            st = json.load(f) or {}
-    except Exception:
-        st = {}
-    # Backward-compatible fill
-    if not isinstance(st, dict):
-        st = {}
-    for k, v in base.items():
-        if k not in st:
-            st[k] = v
-    if not isinstance(st.get("drift_hist"), list):
-        st["drift_hist"] = []
-    # Trim history defensively
-    try:
-        st["drift_hist"] = list(st["drift_hist"])[-20:]
-    except Exception:
-        st["drift_hist"] = []
-    return st
-
-def _save_affect_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
-    p = _affect_state_path(data_dir, workspace_id, agent_id)
-    try:
-        # Keep payload small
-        if isinstance(state, dict) and isinstance(state.get("drift_hist"), list):
-            state["drift_hist"] = list(state["drift_hist"])[-50:]
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(state or {}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log.debug("failed to save affect state for agent=%s: %s", agent_id, e)
+        mpath = _safe_child(out_dir, 'manifest.json')
+        import json as _json_mod
+        with open(mpath, 'w', encoding='utf-8') as f:
+            _json_mod.dump(manifest, f, indent=2, default=str)
+        manifest['manifest_path'] = mpath
+        return manifest
+            

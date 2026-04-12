@@ -418,8 +418,13 @@ def inject_spirit_return_into_hit(spirit_mem: SpiritReturnMemory) -> Dict[str, A
         "confidence": spirit_mem.resonance_confidence,
         "step": dm.born_step,
         "memory_class": dm.memory_class,
+        # Explicit lane scope (v2.4.4) — deep hits are neither private
+        # nor shared; they are a third retrieval lane with distinct
+        # provenance (compressed, lossy, spirit-return enriched).
+        "scope": "deep",
         # Deep memory markers
         "from_deep_memory": True,
+        "deep_memory": True,
         # Spirit return markers
         "from_spirit_return": True,
         "spirit_return_mode": mode,
