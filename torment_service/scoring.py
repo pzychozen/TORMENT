@@ -251,3 +251,48 @@ def compute_continuity_bonuses(
                     r.mood_spiral_penalty = float(ctx.spiral_penalty_max) * _age_fac * _trend_fac
 
     return r
+
+
+# ---------------------------------------------------------------------------
+# Phase D3: collective provenance retrieval discount
+# ---------------------------------------------------------------------------
+
+DEFAULT_COLLECTIVE_RETRIEVAL_DISCOUNT = 0.50
+
+
+def is_collective_provenance(provenance: Any) -> bool:
+    """Return True if *provenance* marks a collective echo.
+
+    Recognises both the legacy bare string ``"collective"`` and the
+    structured ProvenanceV1 dict with ``source_type == "collective_echo"``.
+    """
+    if provenance == "collective":
+        return True
+    if isinstance(provenance, dict) and provenance.get("source_type") == "collective_echo":
+        return True
+    return False
+
+
+def apply_collective_discount(
+    score: float,
+    provenance: Any,
+    discount: float = DEFAULT_COLLECTIVE_RETRIEVAL_DISCOUNT,
+) -> float:
+    """Apply the collective-echo retrieval discount if applicable.
+
+    Collective echoes are influences, not autobiography — they must not
+    outrank organic private memories in retrieval.  The discount is applied
+    multiplicatively: ``score *= discount`` for collective provenance,
+    unchanged otherwise.
+
+    Args:
+        score: pre-discount final score.
+        provenance: raw provenance value from the hit payload (string or dict).
+        discount: multiplier to apply (default 0.50).
+
+    Returns:
+        Discounted score (collective) or original score (non-collective).
+    """
+    if is_collective_provenance(provenance):
+        return score * discount
+    return score

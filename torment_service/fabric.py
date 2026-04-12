@@ -2173,9 +2173,18 @@ class TormentFabric:
         if dominant_motifs:
             echo_summary += f" (motifs: {', '.join(dominant_motifs[:3])})"
 
-        # Ingest the echo as a low-amplitude memory
-        # We call ingest() directly but then immediately patch the stored memory
-        # with collective governance flags and provenance markers.
+        # Pre-stamp collective provenance so the echo is born with correct
+        # lineage. This is belt-and-suspenders — skip_packet_emission is the
+        # primary guard, but pre-stamping ensures the stored payload is correct
+        # from the moment of creation.
+        from .provenance_v1 import ProvenanceV1
+        _echo_prov = ProvenanceV1.for_collective_echo(
+            notes=f"event_id={event_id}",
+        ).to_dict()
+
+        # Ingest the echo as a low-amplitude memory.
+        # skip_packet_emission=True is the PRIMARY guard against the echo-
+        # packet-leak invariant violation: echoes must never emit packets.
         ingest_result = self.ingest(
             workspace_id=workspace_id,
             agent_id=target_agent_id,
@@ -2184,22 +2193,24 @@ class TormentFabric:
             domain_id=target_domain,
             supplied_summary=echo_summary,
             scope="private",
+            provenance=_echo_prov,
+            skip_packet_emission=True,
         )
 
         echo_eid = ingest_result.get("eid")
 
         if echo_eid is not None:
-            # Patch the stored memory with collective provenance + governance
+            # Patch the stored memory with remaining collective metadata +
+            # terminal governance flags. Entity lookup failure here means
+            # the echo exists but is ungoverned — treat as a hard failure.
+            _patch_ok = False
+            _patch_error = None
             try:
                 graph = self.private_graphs.get(self._agent_key(workspace_id, target_agent_id))
                 if graph:
                     ent = graph.entities.get(int(echo_eid))
                     if ent is not None:
-                        # Mark provenance (proper ProvenanceV1 dict)
-                        from .provenance_v1 import ProvenanceV1
-                        ent.payload["provenance"] = ProvenanceV1.for_collective_echo(
-                            notes=f"event_id={event_id}",
-                        ).to_dict()
+                        # Collective metadata
                         ent.payload["source_event_id"] = event_id
                         ent.payload["source_agents"] = source_agents
 
@@ -2214,12 +2225,27 @@ class TormentFabric:
                         }, actor="collective_policy", source="reingest")
 
                         # Flush the patched entity to disk
-                        try:
-                            graph.flush_node(int(echo_eid))
-                        except Exception as e:
-                            self._log.debug("Failed to flush node eid=%s: %s", echo_eid, e)
+                        graph.flush_node(int(echo_eid))
+                        _patch_ok = True
+                    else:
+                        _patch_error = f"Entity eid={echo_eid} not found after ingest"
+                else:
+                    _patch_error = f"Graph not found for agent {target_agent_id}"
             except Exception as e:
-                self._log.debug("Failed to process reingest for agent_id=%s event_id=%s: %s", target_agent_id, event_id, e)
+                _patch_error = f"Exception during echo governance patch: {e}"
+
+            if not _patch_ok:
+                self._log.warning(
+                    "reingest_convergence: echo eid=%s created but governance patch FAILED: %s. "
+                    "Echo may exist without terminal governance flags.",
+                    echo_eid, _patch_error,
+                )
+                return {
+                    "eligible": False,
+                    "reason": f"Echo created (eid={echo_eid}) but governance patch failed: {_patch_error}",
+                    "echo_eid": echo_eid,
+                    "partial_failure": True,
+                }
 
         # Record the reingest in the tracker (for dedup + rate limiting)
         policy.record_reingest(target_agent_id, event_id)
@@ -2246,6 +2272,8 @@ class TormentFabric:
         supplied_embedding: Optional[List[float]] = None,
         scope: str = "private",
         provenance: Optional[Dict[str, Any]] = None,
+        *,
+        skip_packet_emission: bool = False,
     ) -> Dict[str, Any]:
         # === BOUNDARY GUARD ===
         # Core ingest ALWAYS creates "core" memory. Archive documents use
@@ -2688,9 +2716,9 @@ class TormentFabric:
                 # --- Hivemind: emit ResonancePacket into collective field ---
                 # === TEMPORARY PACKET DEBUG (print to stdout — remove after diagnosis) ===
                 import sys as _hm_sys
-                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}", file=_hm_sys.stderr, flush=True)
+                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}, skip={skip_packet_emission}", file=_hm_sys.stderr, flush=True)
                 _hm_sys.stderr.flush()
-                if self._hivemind_enable and stored and eid is not None:
+                if self._hivemind_enable and stored and eid is not None and not skip_packet_emission:
                     try:
                         from .collective_models import ResonancePacket
                         from .governance import should_emit_packet as _gov_should_emit
@@ -3580,19 +3608,14 @@ class TormentFabric:
                         self._log.debug("failed to write srg payload to entity eid=%s: %s", _hit_eid, e)
 
             # Phase D3: collective-provenance retrieval discount
-            # Echoes are influences, not autobiography — discount so they don't
-            # outrank organic private memories in retrieval.
-            # NOTE: _h_prov_raw extracted at top of scoring loop.
-            _h_is_collective = (
-                _h_prov_raw == "collective"  # legacy bare string
-                or (isinstance(_h_prov_raw, dict) and _h_prov_raw.get("source_type") == "collective_echo")
-            )
-            if _h_is_collective:
-                try:
-                    _coll_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
-                except Exception:
-                    _coll_discount = 0.50
-                final *= _coll_discount
+            # Uses shared helper from scoring.py (centralised contract).
+            from .scoring import apply_collective_discount as _apply_coll_disc, is_collective_provenance as _is_coll_prov
+            _h_is_collective = _is_coll_prov(_h_prov_raw)
+            try:
+                _coll_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
+            except Exception:
+                _coll_discount = 0.50
+            final = _apply_coll_disc(final, _h_prov_raw, discount=_coll_discount)
 
             # Phase D3b: tool-result retrieval discount
             # Tool results are external observations, not self-knowledge —
@@ -4449,15 +4472,14 @@ class TormentFabric:
             type_bonus = 0.0
 
             # --- Provenance extraction (parity with query()) ---
+            # Uses shared helper from scoring.py (centralised contract).
+            from .scoring import is_collective_provenance as _is_coll_prov_t, apply_collective_discount as _apply_coll_disc_t
             _prov_raw = hit.get("provenance")
             _is_tool_result = (
                 isinstance(_prov_raw, dict)
                 and _prov_raw.get("source_type") == "tool_result"
             )
-            _is_collective = (
-                _prov_raw == "collective"
-                or (isinstance(_prov_raw, dict) and _prov_raw.get("source_type") == "collective_echo")
-            )
+            _is_collective = _is_coll_prov_t(_prov_raw)
 
             # --- Conflict penalty (parity with query()) ---
             _hit_eid = int(hit.get("eid", -1))
@@ -4502,15 +4524,18 @@ class TormentFabric:
                         final *= _srg_heartbeat
 
             # --- Post-score discounts (parity with query()) ---
-            collective_discount = 1.0
+            try:
+                collective_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
+            except Exception:
+                collective_discount = 0.50
+            _pre_coll = final
+            final = _apply_coll_disc_t(final, _prov_raw, discount=collective_discount)
+            # Record effective discount for explain surface
+            if final != _pre_coll:
+                pass  # collective_discount already set
+            else:
+                collective_discount = 1.0
             tool_result_discount = 1.0
-
-            if _is_collective:
-                try:
-                    collective_discount = float(os.getenv("TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT", "0.50"))
-                except Exception:
-                    collective_discount = 0.50
-                final *= collective_discount
 
             if _is_tool_result:
                 try:
