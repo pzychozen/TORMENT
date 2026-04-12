@@ -18,7 +18,6 @@ diagnosis.
 from __future__ import annotations
 
 import unittest
-from typing import Any, Dict, Optional
 
 from cognition.recursion_guard import (
     recursion_guard_check,
@@ -27,7 +26,6 @@ from cognition.recursion_guard import (
 )
 from torment_service.provenance_v1 import (
     SOURCE_GATE1_UNRECOVERABLE,
-    SOURCE_MEMORY,
 )
 
 
