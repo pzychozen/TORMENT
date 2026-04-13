@@ -26,6 +26,7 @@ data4/
 :memory:/
 smoke_data/
 outputs/
+roadmap_tests/
 
 # Simulation outputs
 sim_out/
