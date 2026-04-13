@@ -31,8 +31,10 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Add repo root to path for imports.  This file lives at
+# tests/diagnostics/test_memory_health_diagnostic.py, so two parents up is the
+# repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from fastapi.testclient import TestClient
 # NOTE: torment_service.app import is deferred to run_diagnostic() so that
@@ -367,6 +369,22 @@ def run_diagnostic(n_steps: int = 250, n_agents: int = 3, data_dir: Optional[str
     ws_root = os.path.join(tmp, "workspaces", workspace_id)
 
     # Private memory file sizes
+    # Echo detection: v2.4.x uses ProvenanceV1 (torment_service.provenance_v1).
+    # Collective-echo records carry a structured provenance object with
+    # `source_type == "collective_echo"`.  The legacy bare string
+    # `provenance == "collective"` is a pre-ProvenanceV1 artifact — still
+    # accepted for old data so this diagnostic keeps working across a mixed
+    # store, but new records won't match it.
+    def _is_collective_echo(payload: Dict[str, Any]) -> bool:
+        prov = payload.get("provenance")
+        if isinstance(prov, dict):
+            return prov.get("source_type") == "collective_echo"
+        if isinstance(prov, str):
+            # legacy form
+            return prov == "collective"
+        # Some v2.4.x writers surface provenance_type alongside/instead of provenance.
+        return payload.get("provenance_type") == "collective_echo"
+
     private_records: Dict[str, int] = {}
     echo_records: Dict[str, int] = {}
     for aid in agent_ids:
@@ -374,14 +392,14 @@ def run_diagnostic(n_steps: int = 250, n_agents: int = 3, data_dir: Optional[str
         count = 0
         echoes = 0
         if os.path.exists(nodes_path):
-            with open(nodes_path, "r") as f:
+            with open(nodes_path, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
                     count += 1
                     try:
                         rec = json.loads(line)
-                        if rec.get("payload", {}).get("provenance") == "collective":
+                        if _is_collective_echo(rec.get("payload", {})):
                             echoes += 1
                     except json.JSONDecodeError as e:
                         log.debug("Skipped malformed node record: %s", e)
@@ -410,26 +428,45 @@ def run_diagnostic(n_steps: int = 250, n_agents: int = 3, data_dir: Optional[str
     report.duplication["total_echoes"] = total_echoes
 
     # 5. Compression analysis
+    # v2.4.x: compression events are written to a dedicated per-agent file
+    # `compression_log.jsonl` by `torment_service.compression._log_compression_event`.
+    # They are NOT mixed into `memory_events.jsonl`, and the records have no
+    # "type" field — each line is a CompressionEvent dict with keys
+    # {step, trigger, candidates_evaluated, compressed, exported_deep, retained, timestamp}.
     compression_events: Dict[str, List[Dict]] = {}
     for aid in agent_ids:
-        events_path = os.path.join(ws_root, "agents", aid, "private", "memory_events.jsonl")
+        comp_path = os.path.join(ws_root, "agents", aid, "private", "compression_log.jsonl")
         comp_evts = []
-        if os.path.exists(events_path):
-            with open(events_path, "r") as f:
+        if os.path.exists(comp_path):
+            with open(comp_path, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue
                     try:
-                        evt = json.loads(line)
-                        if evt.get("type") in ("COMPRESSION", "COMPRESS_EVENT", "MEMORY_COMPRESS"):
-                            comp_evts.append(evt)
+                        comp_evts.append(json.loads(line))
                     except json.JSONDecodeError as e:
-                        log.debug("Skipped malformed event record: %s", e)
+                        log.debug("Skipped malformed compression record: %s", e)
         compression_events[aid] = comp_evts
+
+    # Aggregate useful counters so the warnings below can reason about real work.
+    total_compressed = sum(
+        int(e.get("compressed", 0)) for evts in compression_events.values() for e in evts
+    )
+    total_exported_deep = sum(
+        int(e.get("exported_deep", 0)) for evts in compression_events.values() for e in evts
+    )
+    trigger_counter: Counter = Counter()
+    for evts in compression_events.values():
+        for e in evts:
+            trig = e.get("trigger", "unknown")
+            trigger_counter[trig] += 1
 
     report.compression = {
         "per_agent": {aid: len(evts) for aid, evts in compression_events.items()},
         "total_events": sum(len(v) for v in compression_events.values()),
+        "total_compressed": total_compressed,
+        "total_exported_deep": total_exported_deep,
+        "triggers": dict(trigger_counter),
         "detail": {aid: evts[:3] for aid, evts in compression_events.items() if evts},  # sample
     }
 
