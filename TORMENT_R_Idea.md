@@ -34,11 +34,21 @@ It is strongest as:
 
 ## Outstanding small fixes
 
-All four items from the previous list are resolved. Remaining cosmetic items (not blocking):
+Status update (April 10, 2026):
 
-1. **AGENT_SPINE_PLAN.md references** — 30+ files reference docs/AGENT_SPINE_PLAN.md which is now in docs/archive/. Comments-only, not functional. Low priority.
+1. ~~**docs/archive/AGENT_SPINE_PLAN.md references**~~ — resolved; stale references were normalized to the archived path.
 
 2. **Unused provenance constants** — SOURCE_MEMORY, SOURCE_DERIVED.derive(), and 3 unused write_path values (reflection_writeback, migration, system_import) are defined but never used in production. Kept for future extensibility.
+
+### Next pick (recommended immediate task)
+
+Do a focused provenance-intent pass on the currently unconnected constants:
+- confirm intended semantic role for each constant/value
+- document where each should be produced and consumed
+- wire the missing paths where intended behavior already exists
+- keep constants that represent valid future/interop states (do not delete blindly)
+
+Goal: reduce ambiguity, preserve provenance intent, and connect intended states before broader security hardening.
 
 ---
 

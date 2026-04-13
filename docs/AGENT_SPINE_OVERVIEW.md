@@ -396,6 +396,6 @@ and deciding on the auth model (per-workspace tokens vs per-agent tokens).
 
 ## Reference
 
-- **Design specification**: `AGENT_SPINE_PLAN.md` (526 lines, §0-§16)
+- **Design specification**: `docs/archive/AGENT_SPINE_PLAN.md` (526 lines, §0-§16)
 - **Acceptance scenarios**: 5 scenarios tested in `test_acceptance_scenarios.py`
 - **Roadmap context**: `docs/ROADMAP_post_hivemind_milestone.md` Phase 5

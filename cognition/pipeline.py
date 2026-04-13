@@ -7,7 +7,7 @@ Pipeline Orchestrator — wires the single-pass cognition pipeline.
 This is the main entry point called by the /cognition/run endpoint.
 It composes all components without itself being a role or service.
 
-See AGENT_SPINE_PLAN.md §1 ("single-pass pipeline, request in → response out").
+See docs/archive/AGENT_SPINE_PLAN.md §1 ("single-pass pipeline, request in → response out").
 """
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
-from cognition.task_models import TaskPacket, RoutingDecision, ReintegrationResult
+from cognition.task_models import TaskPacket, ReintegrationResult
 from cognition.router import route
-from cognition.apertures import MemoryContext, build_memory_context
+from cognition.apertures import build_memory_context
 from cognition.reintegration import reintegrate
 from cognition.drift import DriftCheckFn
 from schemas.role_output import RoleOutput
@@ -127,7 +127,7 @@ def run_cognition_pipeline(
             resp["writeback"] = writeback_results
         return resp
 
-    except Exception as exc:
+    except Exception:
         _log.exception("Cognition pipeline failed for task %s", task.task_id)
         return {
             "ok": False,

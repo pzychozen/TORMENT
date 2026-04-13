@@ -7,7 +7,7 @@ Tests for:
     - Graceful degradation: missing query_fn, failing drift, bad inputs
     - Invalid input validation
 
-See AGENT_SPINE_PLAN.md §11 Patch 5.
+See docs/archive/AGENT_SPINE_PLAN.md §11 Patch 5.
 """
 from __future__ import annotations
 

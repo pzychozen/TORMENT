@@ -9,7 +9,7 @@ v0.1 roles are bounded deterministic transforms:
 No external model calls. No side effects except structured output emission.
 LLM-backed executors may be introduced later behind this same interface.
 
-See AGENT_SPINE_PLAN.md §7 for the design rationale.
+See docs/archive/AGENT_SPINE_PLAN.md §7 for the design rationale.
 """
 from __future__ import annotations
 

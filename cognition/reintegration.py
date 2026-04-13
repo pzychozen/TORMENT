@@ -21,7 +21,7 @@ Governance split:
   - Archivist: semantic review, policy intent, proposal quality assessment
   - Reintegration: final invariant enforcement, dedup, circuit-breaker safety
 
-See AGENT_SPINE_PLAN.md §9 for the design.
+See docs/archive/AGENT_SPINE_PLAN.md §9 for the design.
 """
 from __future__ import annotations
 

@@ -4,7 +4,7 @@
 #   TaskPacket → Router → Apertures → Roles → Reintegration → Archivist → Response
 #
 # It sits ABOVE the existing memory layer and does not replace it.
-# See AGENT_SPINE_PLAN.md for the full design rationale.
+# See docs/archive/AGENT_SPINE_PLAN.md for the full design rationale.
 
 from .task_models import TaskPacket, RoutingDecision, ReintegrationResult
 from .router import detect_mode, route
