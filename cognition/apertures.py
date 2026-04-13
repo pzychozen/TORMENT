@@ -17,10 +17,9 @@ The aperture builder is decoupled from fabric — it receives a LaneQueryProvide
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from torment_service.scoring import derive_provenance_type as _derive_prov_type
-from torment_service.scoring import is_collective_provenance as _is_coll_prov
 
 
 # ============================================================================

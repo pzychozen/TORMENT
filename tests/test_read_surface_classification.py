@@ -8,7 +8,7 @@ all the way into reasoning context.
 These are pure-Python tests that do not require a running TormentFabric.
 """
 import unittest
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 
 # ============================================================================

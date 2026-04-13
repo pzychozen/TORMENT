@@ -155,9 +155,6 @@ class TestReingestConvergenceEchoDoesNotEmitPacket(unittest.TestCase):
         )
         field.append_event(event)
 
-        # Count packets before reingest
-        packets_before = len(field.recent_packets(limit=1000))
-
         # Perform reingest
         result = self.fabric.reingest_convergence(ws, "agent_b", event.event_id)
         self.assertTrue(result.get("eligible"), f"Reingest should succeed: {result}")

@@ -20,7 +20,6 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cognition.apertures import (
-    ApertureConfig,
     APERTURE_CONFIGS,
     LaneQueryProvider,
     MemoryContext,

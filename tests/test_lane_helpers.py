@@ -85,7 +85,7 @@ class TestLaneHelpersShared(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.fabric = TormentFabric(data_dir=self.tmp)
-        ws = self.fabric.get_workspace("ws1")
+        self.fabric.get_workspace("ws1")  # ensure workspace exists
         self.fabric.create_agent("ws1", "atlas")
         # Ingest into shared graph
         self.fabric.ingest(

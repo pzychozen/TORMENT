@@ -18,7 +18,7 @@ _log = logging.getLogger(__name__)
 
 from cognition.task_models import TaskPacket, RoutingDecision, ReintegrationResult
 from cognition.router import route
-from cognition.apertures import MemoryContext, LaneQueryProvider, build_memory_context
+from cognition.apertures import LaneQueryProvider, build_memory_context
 from cognition.reintegration import reintegrate
 from cognition.drift import DriftCheckFn
 from schemas.role_output import RoleOutput

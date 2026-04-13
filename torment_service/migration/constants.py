@@ -112,7 +112,7 @@ GATE1_CLASSES = frozenset({
 # flags this constant as unused, the monkeypatch test is the
 # authoritative contradiction.
 
-ZERO_EVENT_ARTIFACT_PATTERNS: tuple = tuple()
+ZERO_EVENT_ARTIFACT_PATTERNS: tuple = tuple()  # noqa: used by gate1_recovery, dry_run, apply via import
 
 
 # ── Gate-2 admission reason vocabulary ───────────────────────────────
