@@ -248,6 +248,8 @@ class ClaudeClient:
             import anthropic
             self._sdk = anthropic.Anthropic(api_key=api_key)
         except ImportError:
+            # Optional dependency: `anthropic` SDK is not required to run this
+            # example — fall back to the HTTP path when it isn't installed.
             pass
 
     def message(self, system: str, messages: list[dict[str, str]], max_tokens: int = 1024) -> str:
@@ -385,6 +387,8 @@ def ensure_workspace_and_agent(
         if seed_id:
             print(f"    Seed: {seed_id}")
     except Exception:
+        # Best-effort identity peek for display only; a missing or errored
+        # identity endpoint should not break workspace bring-up.
         pass
 
 
@@ -676,6 +680,8 @@ def chat_loop(
                     print(f"    confidence={conf:.2f}  motifs={motifs}")
                     print(f"    Use '/reingest {eid}' to echo into {agent_id}.\n")
         except Exception:
+            # Best-effort collective convergence poll; failure here is a
+            # non-critical diagnostic path and must not interrupt the chat loop.
             pass
 
 
