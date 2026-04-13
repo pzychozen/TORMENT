@@ -7,7 +7,7 @@ docs/ISSUE_spine_drift_check_fn_gap.md.
 import os
 import sys
 import traceback
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

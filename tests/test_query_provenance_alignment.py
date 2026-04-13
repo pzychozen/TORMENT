@@ -23,8 +23,6 @@ from torment_service.provenance_v1 import (
     VALID_SOURCE_TYPES,
     SOURCE_MEMORY,
     SOURCE_COLLECTIVE_ECHO,
-    SOURCE_USER_INPUT,
-    SOURCE_TOOL_RESULT,
 )
 
 

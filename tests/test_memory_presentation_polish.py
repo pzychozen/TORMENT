@@ -7,7 +7,6 @@ Covers:
   - Retrieve context blocks retain provenance_type (regression guard)
   - All surfaces use the canonical derive_provenance_type helper
 """
-import json
 import os
 import shutil
 import sys

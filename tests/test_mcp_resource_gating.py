@@ -13,12 +13,7 @@ import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from torment_service.spine import (
-    exposure_allows,
-    EXPOSURE_OPEN,
-    EXPOSURE_GUARDED,
-    EXPOSURE_INTERNAL,
-)
+from torment_service.spine import exposure_allows
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +171,8 @@ class TestMCPSharedTierLogic:
         # Structural test: exposure_allows is the same function used by
         # get_exposed_operations and imported by mcp_server
         from torment_service.spine import exposure_allows as spine_fn
-        from torment_service.mcp_server import exposure_allows as mcp_fn
+        import torment_service.mcp_server as mcp_mod_local
+        mcp_fn = mcp_mod_local.exposure_allows
         assert spine_fn is mcp_fn, (
             "mcp_server.exposure_allows should be the same object as spine.exposure_allows"
         )

@@ -11,7 +11,7 @@ causing ``list(escalation_reasons)`` to throw
 import os
 import sys
 import traceback
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -97,16 +97,10 @@ class TestEscalationReasonsIsList:
         """When escalation fires, escalation_reasons must still be a
         concrete list of strings."""
         from torment_service.spine import submit_task, SpineRequest
-        import torment_service.spine as spine_mod
+        from unittest.mock import patch
 
         fabric = _make_mock_fabric()
         ctx = _make_ctx()
-
-        # Force escalation by making the escalation_reasons helper return
-        # a non-empty list for any input.
-        original_fn = spine_mod.escalation_reasons
-        def fake_escalation_reasons(*args, **kwargs):
-            return ["test_escalation_trigger"]
 
         req = SpineRequest(
             workspace_id="ws_test",
@@ -116,18 +110,14 @@ class TestEscalationReasonsIsList:
             mode="auto",
         )
 
-        try:
-            spine_mod.escalation_reasons = fake_escalation_reasons
-            # Also need should_escalate to use the patched version
-            spine_mod.should_escalate = lambda *a, **kw: True
+        def fake_escalation_reasons(*args, **kwargs):
+            return ["test_escalation_trigger"]
 
+        with patch("torment_service.spine.escalation_reasons",
+                    side_effect=fake_escalation_reasons), \
+             patch("torment_service.spine.should_escalate",
+                    return_value=True):
             resp = submit_task(req, fabric, ctx)
-        finally:
-            spine_mod.escalation_reasons = original_fn
-            # Restore should_escalate
-            spine_mod.should_escalate = lambda op, payload, ctx, ds, dd: (
-                len(original_fn(op, payload, ctx, ds, dd)) > 0
-            )
 
         assert isinstance(resp.escalation_reasons, list), (
             f"escalation_reasons must be a list even when escalated, "
