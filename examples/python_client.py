@@ -1,47 +1,122 @@
-﻿# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 examples/python_client.py
 
-Minimal Torment client (requests-based).
-- Creates a workspace + two agents
-- Ingests private memories
-- Proposes shared canon from both agents
-- Processes proposals (promotes to shared canon)
-- Runs a query with explainability
-- Pulls an inline trace view for one returned memory (if present)
+Low-level TORMENT API walkthrough (requests-based).
+
+What this example demonstrates:
+- health check
+- workspace creation
+- idempotent agent creation
+- private memory ingest
+- shared-canon proposal from two agents
+- proposal processing / promotion
+- query with explainability
+- optional trace view for a returned memory
+
+What this example is NOT:
+- not a chat client
+- not a full character runtime
+- not an MCP client
 
 Usage:
-  python examples/python_client.py
+    python examples/python_client.py
 
 Config via env:
-  TORMENT_URL=http://127.0.0.1:8787
-  TORMENT_WORKSPACE=my-ws
+    TORMENT_URL=http://127.0.0.1:8787
+    TORMENT_WORKSPACE=demo-ws
+    TORMENT_TOP_K=8
+
+Notes:
+- This is a low-level substrate/API example meant to be easy to run.
+- It is intentionally deterministic and does not require an LLM API key.
+- It uses two demo agents so shared-canon promotion can satisfy
+  min_distinct_agents=2.
+
+NEVER hardcode secrets in files.
 """
 
 from __future__ import annotations
 
-import os
 import json
+import os
+import sys
 from typing import Any, Dict, List, Optional
 
 import requests
 
 
+# ---------------------------------------------------------------------------
+# Env helpers / config
+# ---------------------------------------------------------------------------
+
 def _env(name: str, default: str) -> str:
-    v = os.environ.get(name, "").strip()
-    return v if v else default
+    value = os.environ.get(name, "").strip()
+    return value if value else default
 
 
 BASE_URL = _env("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
 WORKSPACE_ID = _env("TORMENT_WORKSPACE", "demo-ws")
+TOP_K = int(_env("TORMENT_TOP_K", "8"))
 
+DEFAULT_DOMAINS = ["research", "engineering", "operations", "creative", "meta"]
+
+
+# ---------------------------------------------------------------------------
+# Small UI helpers
+# ---------------------------------------------------------------------------
+
+def section(title: str) -> None:
+    print("\n" + "=" * 88)
+    print(title)
+    print("=" * 88)
+
+
+def info(msg: str) -> None:
+    print(f"  • {msg}")
+
+
+def success(msg: str) -> None:
+    print(f"  ✅ {msg}")
+
+
+def warning(msg: str) -> None:
+    print(f"  ⚠️  {msg}")
+
+
+def dump_json(label: str, obj: Any) -> None:
+    section(label)
+    print(json.dumps(obj, indent=2, ensure_ascii=False))
+
+
+def print_hits(result: Dict[str, Any]) -> None:
+    hits = result.get("hits") or result.get("results") or []
+    if not hits:
+        warning("No hits returned.")
+        return
+
+    info(f"{len(hits)} hit(s) returned:")
+    for i, hit in enumerate(hits[:TOP_K], 1):
+        eid = hit.get("eid", "?")
+        scope = hit.get("scope", "?")
+        domain = hit.get("domain_id", "?")
+        score = hit.get("final_score", hit.get("score", 0.0))
+        summary = hit.get("summary", "")
+        print(f"    {i}. eid={eid}  score={score:.2f}  scope={scope}  domain={domain}")
+        if summary:
+            print(f"       {summary[:140]}")
+
+
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
 
 class TormentClient:
     def __init__(self, base_url: str, timeout_s: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
-        self.s = requests.Session()
+        self.session = requests.Session()
 
     def _url(self, path: str) -> str:
         if not path.startswith("/"):
@@ -49,24 +124,35 @@ class TormentClient:
         return self.base_url + path
 
     def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        r = self.s.post(self._url(path), json=payload, timeout=self.timeout_s)
+        response = self.session.post(self._url(path), json=payload, timeout=self.timeout_s)
         try:
-            r.raise_for_status()
+            response.raise_for_status()
         except requests.HTTPError as e:
-            raise RuntimeError(f"POST {path} failed: {r.status_code} {r.text}") from e
-        return r.json()
+            raise RuntimeError(
+                f"POST {path} failed: {response.status_code} {response.text}"
+            ) from e
+        return response.json()
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        r = self.s.get(self._url(path), params=params or {}, timeout=self.timeout_s)
+        response = self.session.get(self._url(path), params=params or {}, timeout=self.timeout_s)
         try:
-            r.raise_for_status()
+            response.raise_for_status()
         except requests.HTTPError as e:
-            raise RuntimeError(f"GET {path} failed: {r.status_code} {r.text}") from e
-        return r.json()
+            raise RuntimeError(
+                f"GET {path} failed: {response.status_code} {response.text}"
+            ) from e
+        return response.json()
 
-    # --- Workspace / agent
+    # --- Health / workspace / agents -------------------------------------------------
 
-    def workspace_create(self, workspace_id: str, domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    def health(self) -> Dict[str, Any]:
+        return self._get("/health")
+
+    def workspace_create(
+        self,
+        workspace_id: str,
+        domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"workspace_id": workspace_id}
         if domains:
             payload["domains"] = domains
@@ -76,42 +162,43 @@ class TormentClient:
         self,
         workspace_id: str,
         agent_id: str,
-        coupling_mode: str = "read_only",
-        coupling_strength: float = 0.6,
-        domain_pref: Optional[Dict[str, float]] = None,
+        seed: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        payload = {
+        # Note: the real /agent/create request schema accepts only
+        # (workspace_id, agent_id, seed).  Coupling mode, coupling strength,
+        # and domain preferences are properties of the seed/overlay — if you
+        # want to set them, put them inside `seed`.
+        payload: Dict[str, Any] = {
             "workspace_id": workspace_id,
             "agent_id": agent_id,
-            "coupling_mode": coupling_mode,
-            "coupling_strength": coupling_strength,
-            "domain_pref": domain_pref
-            or {"research": 0.3, "engineering": 0.2, "operations": 0.2, "creative": 0.2, "meta": 0.1},
         }
+        if seed is not None:
+            payload["seed"] = seed
         return self._post("/agent/create", payload)
 
-    # --- Memory
+    # --- Memory ----------------------------------------------------------------------
 
     def ingest(
         self,
         workspace_id: str,
         agent_id: str,
         text: str,
+        step: int = 0,
         domain_id: Optional[str] = None,
-        mtype: str = "episode",
-        confidence: float = 0.7,
-        strength: float = 0.75,
-        scope: str = "private",  # "private" or "shared"
+        scope: str = "private",
         supplied_summary: Optional[str] = None,
         supplied_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
+        # Note: the real /agent/ingest request schema accepts
+        # (workspace_id, agent_id, text, step, domain_id, scope,
+        # supplied_summary, supplied_embedding).  `step` is the deterministic
+        # replay counter — pass a monotonic value per agent if you care about
+        # reproducible ordering.
         payload: Dict[str, Any] = {
             "workspace_id": workspace_id,
             "agent_id": agent_id,
             "text": text,
-            "mtype": mtype,
-            "confidence": confidence,
-            "strength": strength,
+            "step": step,
             "scope": scope,
         }
         if domain_id:
@@ -128,9 +215,9 @@ class TormentClient:
         agent_id: str,
         summary: str,
         domain_id: str,
-        mtype: str = "episode",
-        confidence: float = 0.7,
-        strength: float = 0.75,
+        mtype: str = "fact",
+        confidence: float = 0.6,
+        strength: float = 0.6,
         supplied_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -190,104 +277,229 @@ class TormentClient:
         workspace_id: str,
         eid: int,
         scope: str,
-        domain_id: str,
+        domain_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         depth: int = 2,
+        explain: bool = False,
     ) -> Dict[str, Any]:
-        return self._post(
-            "/memory/trace_view",
-            {
-                "workspace_id": workspace_id,
-                "eid": eid,
-                "scope": scope,
-                "domain_id": domain_id,
-                "depth": depth,
-                "export": "none",
-            },
+        # Note: for scope="private" the server needs `agent_id` to locate the
+        # memory.  For scope="shared" it needs `domain_id`.  Pass whichever is
+        # appropriate for the hit you are tracing.
+        payload: Dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "eid": eid,
+            "scope": scope,
+            "depth": depth,
+            "explain": explain,
+        }
+        if domain_id is not None:
+            payload["domain_id"] = domain_id
+        if agent_id is not None:
+            payload["agent_id"] = agent_id
+        return self._post("/memory/trace_view", payload)
+
+
+# ---------------------------------------------------------------------------
+# Idempotent setup helpers
+# ---------------------------------------------------------------------------
+
+def ensure_workspace(
+    client: TormentClient,
+    workspace_id: str,
+    domains: List[str],
+) -> None:
+    try:
+        client.workspace_create(workspace_id, domains=domains)
+        success(f"Workspace '{workspace_id}' created.")
+    except RuntimeError as e:
+        if " 409 " in str(e):
+            info(f"Workspace '{workspace_id}' already exists.")
+        else:
+            raise
+
+
+def ensure_agent(
+    client: TormentClient,
+    workspace_id: str,
+    agent_id: str,
+    seed: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        client.agent_create(
+            workspace_id,
+            agent_id,
+            seed=seed,
         )
+        success(f"Agent '{agent_id}' created.")
+    except RuntimeError as e:
+        if " 409 " in str(e):
+            info(f"Agent '{agent_id}' already exists.")
+        else:
+            raise
 
 
-def pp(title: str, obj: Any) -> None:
-    print("\n" + "=" * 88)
-    print(title)
-    print("=" * 88)
-    print(json.dumps(obj, indent=2, ensure_ascii=False))
-
+# ---------------------------------------------------------------------------
+# Main walkthrough
+# ---------------------------------------------------------------------------
 
 def main() -> int:
-    c = TormentClient(BASE_URL)
+    section("TORMENT low-level API walkthrough")
+    info(f"Base URL: {BASE_URL}")
+    info(f"Workspace: {WORKSPACE_ID}")
+    info(f"Top-K: {TOP_K}")
 
-    # 1) Workspace — multi-agent demo needs explicit hive-mind domains
-    ws = c.workspace_create(WORKSPACE_ID, domains=["research", "engineering", "operations", "creative", "meta"])
-    pp("workspace_create", ws)
+    client = TormentClient(BASE_URL)
 
-    # 2) Agents (two agents to satisfy min_distinct_agents=2 for canon promotion)
-    a1 = c.agent_create(WORKSPACE_ID, "atlas-01", coupling_mode="read_only")
-    a2 = c.agent_create(WORKSPACE_ID, "atlas-02", coupling_mode="read_only")
-    pp("agent_create atlas-01", a1)
-    pp("agent_create atlas-02", a2)
+    # 0) Preflight
+    section("0) Health check")
+    try:
+        health = client.health()
+        success("TORMENT server is reachable.")
+        print(json.dumps(health, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print(f"\n  TORMENT server not reachable at {BASE_URL}")
+        print(f"  Error: {e}")
+        print("\n  Start it first, for example:")
+        print("    python -m torment_service.app\n")
+        return 1
+
+    # 1) Workspace
+    section("1) Ensure workspace")
+    ensure_workspace(client, WORKSPACE_ID, DEFAULT_DOMAINS)
+
+    # 2) Agents
+    section("2) Ensure demo agents")
+    agent_a = "demo_researcher"
+    agent_b = "demo_operator"
+    ensure_agent(
+        client,
+        WORKSPACE_ID,
+        agent_a,
+        seed={
+            "seed_text": "Demo researcher agent — read-only coupling, exploring the substrate.",
+            "coupling_mode": "read_only",
+            "coupling_strength": 0.6,
+        },
+    )
+    ensure_agent(
+        client,
+        WORKSPACE_ID,
+        agent_b,
+        seed={
+            "seed_text": "Demo operator agent — read-only coupling, watching for drift and fragmentation.",
+            "coupling_mode": "read_only",
+            "coupling_strength": 0.6,
+        },
+    )
 
     # 3) Private ingests
-    c.ingest(
+    # `step` is the deterministic replay counter — pass a monotonic value per
+    # agent so the walkthrough is reproducible.
+    section("3) Private memory ingest")
+    ingest_a = client.ingest(
         WORKSPACE_ID,
-        "atlas-01",
-        text="We decided: default domains are research, engineering, operations, creative, meta.",
+        agent_a,
+        text="We decided that TORMENT uses fixed default domains: research, engineering, operations, creative, meta.",
         domain_id="meta",
+        step=1,
     )
-    c.ingest(
+    ingest_b = client.ingest(
         WORKSPACE_ID,
-        "atlas-02",
-        text="Entropy should be monitored; merge suggestions when fragmentation rises.",
+        agent_b,
+        text="Entropy should be monitored, and merge suggestions should be considered when fragmentation rises.",
         domain_id="research",
+        step=1,
     )
+    success("Private memories ingested.")
+    info(f"{agent_a} ingest status recorded.")
+    info(f"{agent_b} ingest status recorded.")
+    dump_json("ingest demo_researcher", ingest_a)
+    dump_json("ingest demo_operator", ingest_b)
 
-    # 4) Propose shared canon (same domain, two agents)
-    pr1 = c.propose_share(
+    # 4) Shared canon proposals
+    section("4) Propose shared canon")
+    shared_summary = (
+        "TORMENT uses fixed default domains: research, engineering, operations, creative, meta."
+    )
+    pr1 = client.propose_share(
         WORKSPACE_ID,
-        "atlas-01",
-        summary="Torment uses fixed default domains: research, engineering, operations, creative, meta.",
+        agent_a,
+        summary=shared_summary,
         domain_id="meta",
     )
-    pr2 = c.propose_share(
+    pr2 = client.propose_share(
         WORKSPACE_ID,
-        "atlas-02",
-        summary="Torment uses fixed default domains: research, engineering, operations, creative, meta.",
+        agent_b,
+        summary=shared_summary,
         domain_id="meta",
     )
-    pp("propose_share atlas-01", pr1)
-    pp("propose_share atlas-02", pr2)
+    success("Both agents proposed shared canon for the same summary.")
+    dump_json("propose_share demo_researcher", pr1)
+    dump_json("propose_share demo_operator", pr2)
 
-    # 5) Process proposals (promote to shared canon)
-    proc = c.process_proposals(WORKSPACE_ID, domain_id="meta", min_distinct_agents=2)
-    pp("process_proposals meta", proc)
-
-    # 6) Query (with explain)
-    q = c.query(
+    # 5) Process proposals
+    section("5) Process proposals")
+    proc = client.process_proposals(
         WORKSPACE_ID,
-        "atlas-01",
+        domain_id="meta",
+        min_distinct_agents=2,
+    )
+    success("Proposal processing completed.")
+    dump_json("process_proposals", proc)
+
+    # 6) Query with explainability
+    section("6) Query with explainability")
+    query_result = client.query(
+        WORKSPACE_ID,
+        agent_a,
         query="What are the default domains?",
         domain_hint="meta",
-        top_k=8,
+        top_k=TOP_K,
         explain=True,
         peek_bridges=False,
     )
-    pp("query explain", q)
+    success("Explain query completed.")
+    print_hits(query_result)
+    dump_json("query explain", query_result)
 
-    # 7) Trace view for first hit if available
-    hits = q.get("hits") or q.get("results") or []
-    if hits:
-        hit0 = hits[0]
-        eid = hit0.get("eid")
-        scope = hit0.get("scope", "private")
-        domain_id = hit0.get("domain_id", "meta")
-        if isinstance(eid, int):
-            tv = c.trace_view(WORKSPACE_ID, eid=eid, scope=scope, domain_id=domain_id, depth=2)
-            pp(f"trace_view eid={eid} scope={scope} domain={domain_id}", tv)
-        else:
-            print("\nNo integer eid on first hit; trace_view skipped.")
+    # 7) Optional trace view for first hit
+    section("7) Optional trace view")
+    hits = query_result.get("hits") or query_result.get("results") or []
+    if not hits:
+        warning("No hits returned, so trace_view is skipped.")
     else:
-        print("\nNo hits returned; trace_view skipped.")
+        first_hit = hits[0]
+        eid = first_hit.get("eid")
+        scope = first_hit.get("scope", "private")
+        domain_id = first_hit.get("domain_id", "meta")
 
-    print("\n✅ Done.")
+        if isinstance(eid, int):
+            # For private-scope hits, trace_view needs agent_id; for
+            # shared-scope hits, it needs domain_id.  Pass the right one.
+            if scope == "private":
+                trace = client.trace_view(
+                    WORKSPACE_ID,
+                    eid=eid,
+                    scope=scope,
+                    agent_id=agent_a,
+                    depth=2,
+                )
+            else:
+                trace = client.trace_view(
+                    WORKSPACE_ID,
+                    eid=eid,
+                    scope=scope,
+                    domain_id=domain_id,
+                    depth=2,
+                )
+            success(f"Trace view retrieved for eid={eid}.")
+            dump_json(f"trace_view eid={eid} scope={scope} domain={domain_id}", trace)
+        else:
+            warning("First hit does not expose an integer eid, so trace_view is skipped.")
+
+    section("Done")
+    success("Low-level API walkthrough completed.")
+    info("This example is a substrate smoke test, not a chat runtime.")
     return 0
 
 
