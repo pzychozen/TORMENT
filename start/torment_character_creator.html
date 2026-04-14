@@ -1628,6 +1628,14 @@
         <span class="output-title">STEP 4 — SYSTEM PROMPT WRAPPER</span>
         <button class="btn-copy" onclick="copyBlock('out-prompts',this)">copy</button>
       </div>
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg2);font-family:'Space Mono',monospace;font-size:11px;line-height:1.6;color:var(--text-dim)">
+        <div style="color:var(--text);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.1em;margin-bottom:6px">WHY THIS PROMPT LOOKS SHORT</div>
+        TORMENT characters are defined by <em>seed + accumulated memory + drift correction</em> — not by prompt scaffolding.
+        Seed traits surface through <code>{character_context}</code>, memory hits through <code>{memory_context}</code>,
+        drift state through <code>{drift_note}</code>. Duplicating traits in the prompt body makes memory decorative
+        rather than authoritative: you can no longer tell whether behaviour came from memory or from hardcoded instructions.
+        If the character feels flat, extend the seed — not this template.
+      </div>
       <div class="output-body" id="out-prompts"></div>
     </div>
 
@@ -2398,9 +2406,11 @@ function generateSolo() {
   document.getElementById('out-env').textContent = envOutput.trim();
 
   // ── STEP 4: System Prompt ──
-  const firstLine = seed.split(/[.!?]/)[0].trim();
+  // Minimal by design. Seed traits surface through {character_context}, memory hits through
+  // {memory_context}, drift state through {drift_note}. Duplicating traits in the prompt body
+  // makes memory decorative rather than authoritative. See UI note next to this pane.
   document.getElementById('out-prompts').textContent =
-    'You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are.\nLet memories and experience shape you naturally.\n\nWhen you remember something from the past, let it surface naturally in\nconversation \u2014 don\'t announce "I remember..." unless it fits your voice.';
+    'You are ' + name + '.\n\n{character_context}\n\n{memory_context}\n\n{drift_note}';
 
   // ── STEP 5: Integration Loop (curl) ──
   document.getElementById('out-loop-curl').textContent =
@@ -2416,8 +2426,10 @@ function generateSolo() {
     '    "query": "[current user message]",\n' +
     '    "top_k": 8\n' +
     '  }\'\n\n' +
-    '# Response includes "character_context" \u2014 inject that into your system prompt.\n' +
-    '# Also includes "results" (memory hits) and "identity_state" (kernel phase info).\n\n' +
+    '# Response includes "character_context" \u2014 inject seed_preamble / recommendations\n' +
+    '# into your system prompt. Also includes "hits" (memory results with summary/final_score)\n' +
+    '# and "identity_state" (kernel phase info). "drift_score" / "drift_summary" live in\n' +
+    '# character_context.\n\n' +
     '# \u2500\u2500 AFTER ' + name + ' responds: store the memory \u2500\u2500\n' +
     'curl -X POST ' + BASE + '/agent/ingest \\\n' +
     '  -H "Content-Type: application/json" \\\n' +
@@ -2439,166 +2451,312 @@ function generateSolo() {
   if (selectedModel === 'claude') {
     pyImport = 'import anthropic';
     pyClient =
-      '        # Call Claude with TORMENT memory context\n' +
-      '        client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.messages.create(\n' +
-      '            model="claude-sonnet-4-20250514",\n' +
-      '            max_tokens=1024,\n' +
-      '            system=system_prompt,\n' +
-      '            messages=messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.content[0].text';
+      '            client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
+      '            resp = client.messages.create(\n' +
+      '                model="claude-sonnet-4-20250514",\n' +
+      '                max_tokens=1024,\n' +
+      '                system=system_prompt,\n' +
+      '                messages=conversation,\n' +
+      '            )\n' +
+      '            reply = resp.content[0].text';
   } else if (selectedModel === 'openai') {
     pyImport = 'from openai import OpenAI';
     pyClient =
-      '        # Call OpenAI with TORMENT memory context\n' +
-      '        client = OpenAI()  # uses OPENAI_API_KEY\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '            client = OpenAI()  # uses OPENAI_API_KEY\n' +
+      '            resp = client.chat.completions.create(\n' +
+      '                model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
+      '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
+      '            )\n' +
+      '            reply = resp.choices[0].message.content';
   } else if (selectedModel === 'ollama') {
     const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
     pyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
     pyClient =
-      '        # Call Ollama with TORMENT memory context\n' +
-      '        client = OpenAI(\n' +
-      '            base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
-      '            api_key="ollama",  # ollama doesn\'t need a real key\n' +
-      '        )\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + olm + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '            temperature=0.85,\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '            client = OpenAI(\n' +
+      '                base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
+      '                api_key="ollama",  # ollama does not need a real key\n' +
+      '            )\n' +
+      '            resp = client.chat.completions.create(\n' +
+      '                model="' + olm + '",\n' +
+      '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
+      '                temperature=0.85,\n' +
+      '            )\n' +
+      '            reply = resp.choices[0].message.content';
   } else {
     const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
     const oModel = document.getElementById('other-model')?.value || 'your-model';
     pyImport = 'from openai import OpenAI  # most APIs are OpenAI-compatible';
     pyClient =
-      '        # Call your LLM with TORMENT memory context\n' +
-      '        client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
-      '        system_prompt = SYSTEM_PROMPT.replace("{character_context}", context)\n\n' +
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + oModel + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + messages + [{"role": "user", "content": user_input}],\n' +
-      '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '            client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
+      '            resp = client.chat.completions.create(\n' +
+      '                model="' + oModel + '",\n' +
+      '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
+      '            )\n' +
+      '            reply = resp.choices[0].message.content';
   }
 
   // Build seed dict as Python repr
   const pySeedDict = JSON.stringify(agentPayload.seed, null, 4);
 
   document.getElementById('out-loop-python').textContent =
-    '"""\nTORMENT Integration \u2014 ' + name + '\nRun: python chat_' + agentId + '.py\n\nFirst run creates workspace + agent automatically.\nServer must be running first (python -m torment_service).\n"""\nimport os\nimport sys\nimport json\nimport requests\n' + pyImport + '\n\n' +
-    'TORMENT = "' + BASE + '"\nWS = "' + wsId + '"\nAGENT = "' + agentId + '"\n\n' +
-    'SYSTEM_PROMPT = """You are ' + name + '.\n\n{character_context}\n\n' + firstLine + '.\nSpeak as ' + name + '. Stay true to who you are."""\n\n' +
-    '# \u2500\u2500 Auto-Setup \u2500\u2500\n' +
-    'def setup():\n' +
-    '    """Create workspace + agent if they don\'t exist yet. Safe to re-run."""\n' +
-    '    try:\n' +
-    '        r = requests.get(f"{TORMENT}/health", timeout=3)\n' +
-    '        r.raise_for_status()\n' +
-    '    except Exception:\n' +
-    '        print("ERROR: TORMENT server not reachable at", TORMENT)\n' +
-    '        print("Start it first:  python -m torment_service")\n' +
-    '        sys.exit(1)\n\n' +
-    '    r = requests.post(f"{TORMENT}/workspace/create", json={\n' +
-    '        "workspace_id": WS, "domains": ["personal"],\n' +
-    '    })\n' +
-    '    if r.status_code == 200:\n' +
-    '        print(f"Workspace \\"{WS}\\" ready.")\n\n' +
-    '    seed = ' + pySeedDict + '\n' +
-    '    r = requests.post(f"{TORMENT}/agent/create", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT, "seed": seed,\n' +
-    '    })\n' +
-    '    if r.status_code == 200:\n' +
-    '        print(f"Agent \\"{AGENT}\\" ready.")\n\n' +
-    '# \u2500\u2500 TORMENT Memory Functions \u2500\u2500\n' +
-    'def query(text, top_k=8):\n' +
-    '    r = requests.post(f"{TORMENT}/agent/query", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT,\n' +
-    '        "query": text, "top_k": top_k,\n' +
-    '    })\n' +
+    '"""\n' +
+    'TORMENT Integration \u2014 ' + name + '\n' +
+    'Run: python chat_' + agentId + '.py\n\n' +
+    'First run creates workspace + agent automatically.\n' +
+    'Server must be running first (python -m torment_service).\n' +
+    '"""\n' +
+    'from __future__ import annotations\n\n' +
+    'import json\n' +
+    'import os\n' +
+    'import sys\n' +
+    'import textwrap\n' +
+    'import time\n' +
+    'from typing import Any, Dict, List\n\n' +
+    'import requests\n' +
+    pyImport + '\n\n' +
+    'TORMENT_URL    = "' + BASE + '"\n' +
+    'WORKSPACE_ID   = "' + wsId + '"\n' +
+    'AGENT_ID       = "' + agentId + '"\n' +
+    'CHARACTER_NAME = "' + name + '"\n' +
+    'TOP_K          = 8\n\n' +
+    'SEED = ' + pySeedDict + '\n\n' +
+    '# \u2500\u2500 System prompt \u2500\u2500\n' +
+    '# Minimal by design. TORMENT characters are defined by their seed + accumulated memory\n' +
+    '# + drift correction. Do not hardcode personality traits here \u2014 they surface through\n' +
+    '# {character_context}. Duplicating them in the prompt makes memory decorative rather\n' +
+    '# than authoritative. If the character feels flat, extend the seed, not this template.\n' +
+    'SYSTEM_PROMPT_TEMPLATE = textwrap.dedent("""\\\n' +
+    '    You are {agent_name}.\n\n' +
+    '    {character_context}\n\n' +
+    '    {memory_context}\n\n' +
+    '    {drift_note}\n' +
+    '""")\n\n' +
+    '# \u2500\u2500 TORMENT HTTP helpers \u2500\u2500\n' +
+    'def t_post(path: str, data: Dict[str, Any]) -> Dict[str, Any]:\n' +
+    '    r = requests.post(f"{TORMENT_URL}{path}", json=data, timeout=30)\n' +
+    '    r.raise_for_status()\n' +
     '    return r.json()\n\n' +
-    'def ingest(summary, step):\n' +
-    '    requests.post(f"{TORMENT}/agent/ingest", json={\n' +
-    '        "workspace_id": WS, "agent_id": AGENT,\n' +
+    'def t_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:\n' +
+    '    r = requests.get(f"{TORMENT_URL}{path}", params=params or {}, timeout=30)\n' +
+    '    r.raise_for_status()\n' +
+    '    return r.json()\n\n' +
+    'def setup() -> None:\n' +
+    '    """Ensure server, workspace, and agent exist. Safe to re-run."""\n' +
+    '    try:\n' +
+    '        t_get("/health")\n' +
+    '    except Exception as e:\n' +
+    '        print(f"ERROR: TORMENT server not reachable at {TORMENT_URL}")\n' +
+    '        print(f"  {e}")\n' +
+    '        print("  Start it first:  python -m torment_service")\n' +
+    '        sys.exit(1)\n' +
+    '    try:\n' +
+    '        t_post("/workspace/create", {"workspace_id": WORKSPACE_ID, "domains": ["personal"]})\n' +
+    '    except requests.HTTPError as e:\n' +
+    '        if getattr(e.response, "status_code", None) != 409:\n' +
+    '            raise\n' +
+    '    try:\n' +
+    '        t_post("/agent/create", {"workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID, "seed": SEED})\n' +
+    '    except requests.HTTPError as e:\n' +
+    '        if getattr(e.response, "status_code", None) != 409:\n' +
+    '            raise\n\n' +
+    'def t_query(text: str, top_k: int = TOP_K) -> Dict[str, Any]:\n' +
+    '    return t_post("/agent/query", {\n' +
+    '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
+    '        "query": text, "top_k": top_k,\n' +
+    '    })\n\n' +
+    'def t_ingest(summary: str, step: int) -> Dict[str, Any]:\n' +
+    '    return t_post("/agent/ingest", {\n' +
+    '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
     '        "text": summary, "step": step,\n' +
     '    })\n\n' +
-    'def format_context(result):\n' +
-    '    parts = []\n' +
-    '    char = result.get("character_context")\n' +
-    '    if isinstance(char, dict):\n' +
-    '        preamble = char.get("seed_preamble", "")\n' +
-    '        if preamble: parts.append(preamble)\n' +
-    '        recs = char.get("recommendations", [])\n' +
-    '        if recs: parts.append("\\n".join(recs))\n' +
-    '    elif isinstance(char, str) and char:\n' +
-    '        parts.append(char)\n' +
-    '    hits = result.get("results", [])\n' +
-    '    if hits:\n' +
-    '        mem_lines = [f"- {h.get(\'text\', h.get(\'summary\', \'\'))}" for h in hits[:6] if h.get(\'text\') or h.get(\'summary\')]\n' +
-    '        if mem_lines: parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n' +
-    '    return "\\n\\n".join(parts) if parts else ""\n\n' +
-    '# \u2500\u2500 Chat Loop \u2500\u2500\n' +
-    'def main():\n' +
+    'def t_identity() -> Dict[str, Any]:\n' +
+    '    return t_get(f"/agent/{AGENT_ID}/identity", {"workspace_id": WORKSPACE_ID})\n\n' +
+    '# \u2500\u2500 Formatting helpers \u2500\u2500\n' +
+    'def format_memories(hits: List[Dict[str, Any]], top_k: int = TOP_K) -> str:\n' +
+    '    if not hits:\n' +
+    '        return ""\n' +
+    '    lines = ["[Retrieved memories]"]\n' +
+    '    for i, h in enumerate(hits[:top_k], 1):\n' +
+    '        summary = (h.get("summary") or "").strip().replace("\\n", " ")\n' +
+    '        score   = h.get("final_score", h.get("score", 0.0))\n' +
+    '        tier    = h.get("character_tier", "")\n' +
+    '        prov    = h.get("provenance_type", "")\n' +
+    '        tag     = " ".join(f"[{t}]" for t in [tier, prov] if t)\n' +
+    '        lines.append(f"  {i}. (score {score:.2f}{\' \' + tag if tag else \'\'}) {summary}")\n' +
+    '    return "\\n".join(lines)\n\n' +
+    'def format_character_context(char_ctx: Dict[str, Any]) -> str:\n' +
+    '    if not char_ctx:\n' +
+    '        return ""\n' +
+    '    parts: List[str] = []\n' +
+    '    preamble = char_ctx.get("seed_preamble", "")\n' +
+    '    if preamble:\n' +
+    '        parts.append(f"[Core identity]\\n{preamble}")\n' +
+    '    recs = char_ctx.get("recommendations", [])\n' +
+    '    if recs:\n' +
+    '        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))\n' +
+    '    return "\\n\\n".join(parts)\n\n' +
+    'def format_drift_note(char_ctx: Dict[str, Any]) -> str:\n' +
+    '    if not isinstance(char_ctx, dict):\n' +
+    '        return ""\n' +
+    '    ds      = char_ctx.get("drift_score", 0.0)\n' +
+    '    summary = char_ctx.get("drift_summary", "")\n' +
+    '    if abs(ds) < 0.1 and not summary:\n' +
+    '        return ""\n' +
+    '    return f"[Drift: {ds:+.2f}] {summary}"\n\n' +
+    'def build_summary(user_msg: str, reply: str) -> str:\n' +
+    '    u = user_msg[:200].strip()\n' +
+    '    r = reply[:300].strip().replace("\\n\\n", "\\n")\n' +
+    '    return f"User said: {u}\\n{CHARACTER_NAME} responded: {r}"\n\n' +
+    'def print_memory_hits(result: Dict[str, Any]) -> None:\n' +
+    '    hits = result.get("hits", result.get("results", []))\n' +
+    '    if not hits:\n' +
+    '        print("  No hits.")\n' +
+    '        return\n' +
+    '    print(f"\\n--- Memories ({len(hits)} hits) ---")\n' +
+    '    for h in hits:\n' +
+    '        summary = h.get("summary", "?")\n' +
+    '        score   = h.get("final_score", h.get("score", 0.0))\n' +
+    '        tier    = h.get("character_tier", "")\n' +
+    '        prov    = h.get("provenance_type", "")\n' +
+    '        tag     = " ".join(x for x in [tier, prov] if x)\n' +
+    '        print(f"  [{score:.2f}] {tag:20s} | {summary[:120]}")\n' +
+    '    char_ctx = result.get("character_context", {})\n' +
+    '    if char_ctx:\n' +
+    '        ds = char_ctx.get("drift_score", 0.0)\n' +
+    '        print(f"  Drift: {ds:+.2f}")\n' +
+    '    print("---\\n")\n\n' +
+    '# \u2500\u2500 Chat loop \u2500\u2500\n' +
+    'def main() -> None:\n' +
     '    setup()\n' +
-    '    step = 1\n' +
-    '    messages = []\n' +
-    '    print(f"\\n=== ' + name + ' is ready. Type \'quit\' to exit. ===\\n")\n\n' +
+    '    step = int(time.time())\n' +
+    '    conversation: List[Dict[str, str]] = []\n' +
+    '    last_result: Dict[str, Any] = {}\n\n' +
+    '    print("\\n" + "=" * 72)\n' +
+    '    print(f"  {CHARACTER_NAME} \u2014 TORMENT Chat")\n' +
+    '    print("=" * 72)\n' +
+    '    print(f"  Workspace: {WORKSPACE_ID}")\n' +
+    '    print(f"  Agent:     {AGENT_ID}")\n' +
+    '    print(f"  Top-K:     {TOP_K}")\n' +
+    '    print()\n' +
+    '    print("  Type your message. \'quit\' or \'exit\' to leave.")\n' +
+    '    print("  /status              \u2014 show runtime settings")\n' +
+    '    print("  /identity            \u2014 show current agent identity")\n' +
+    '    print("  /debug               \u2014 show last raw query result")\n' +
+    '    print("  /memories <query>    \u2014 peek at retrieved memories")\n' +
+    '    print("  /clear               \u2014 clear local chat history only")\n' +
+    '    print()\n' +
+    '    print("  Note: /clear does NOT erase TORMENT memories.")\n' +
+    '    print("=" * 72 + "\\n")\n\n' +
     '    while True:\n' +
-    '        user_input = input("You: ").strip()\n' +
-    '        if user_input.lower() in ("quit", "exit", "q"): break\n\n' +
-    '        result = query(user_input)\n' +
-    '        context = format_context(result)\n\n' +
-    pyClient + '\n\n' +
-    '        print(f"\\n' + name + ': {reply}\\n")\n\n' +
-    '        messages.append({"role": "user", "content": user_input})\n' +
-    '        messages.append({"role": "assistant", "content": reply})\n\n' +
-    '        summary = f"User: {user_input[:120]}. ' + name + ' responded about the topic."\n' +
-    '        ingest(summary, step)\n' +
-    '        step += 1\n\n' +
+    '        try:\n' +
+    '            user_input = input("You > ").strip()\n' +
+    '        except (EOFError, KeyboardInterrupt):\n' +
+    '            print()\n' +
+    '            break\n' +
+    '        if not user_input:\n' +
+    '            continue\n' +
+    '        lower = user_input.lower()\n\n' +
+    '        if lower in ("quit", "exit", "q"):\n' +
+    '            break\n' +
+    '        if lower == "/status":\n' +
+    '            print(f"  TORMENT_URL:  {TORMENT_URL}")\n' +
+    '            print(f"  WORKSPACE_ID: {WORKSPACE_ID}")\n' +
+    '            print(f"  AGENT_ID:     {AGENT_ID}")\n' +
+    '            print(f"  TOP_K:        {TOP_K}")\n' +
+    '            continue\n' +
+    '        if lower == "/identity":\n' +
+    '            try:\n' +
+    '                print(json.dumps(t_identity(), indent=2, ensure_ascii=False))\n' +
+    '            except Exception as e:\n' +
+    '                print(f"  Error: {e}")\n' +
+    '            continue\n' +
+    '        if lower == "/debug":\n' +
+    '            if last_result:\n' +
+    '                print(json.dumps(last_result, indent=2, default=str, ensure_ascii=False))\n' +
+    '            else:\n' +
+    '                print("  No query result yet.")\n' +
+    '            continue\n' +
+    '        if lower.startswith("/memories"):\n' +
+    '            q = user_input[len("/memories"):].strip() or "recent events"\n' +
+    '            try:\n' +
+    '                print_memory_hits(t_query(q))\n' +
+    '            except Exception as e:\n' +
+    '                print(f"  Error: {e}")\n' +
+    '            continue\n' +
+    '        if lower == "/clear":\n' +
+    '            conversation.clear()\n' +
+    '            print("  Local history cleared. TORMENT memories persist.")\n' +
+    '            continue\n\n' +
+    '        try:\n' +
+    '            result = t_query(user_input)\n' +
+    '            last_result = result\n' +
+    '        except Exception as e:\n' +
+    '            print(f"  [TORMENT query failed: {e}]")\n' +
+    '            result = {}\n\n' +
+    '        hits     = result.get("hits", result.get("results", []))\n' +
+    '        char_ctx = result.get("character_context", {})\n\n' +
+    '        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(\n' +
+    '            agent_name=CHARACTER_NAME,\n' +
+    '            character_context=format_character_context(char_ctx),\n' +
+    '            memory_context=format_memories(hits),\n' +
+    '            drift_note=format_drift_note(char_ctx),\n' +
+    '        ).strip()\n\n' +
+    '        conversation.append({"role": "user", "content": user_input})\n' +
+    '        if len(conversation) > 40:\n' +
+    '            conversation = conversation[-40:]\n\n' +
+    '        try:\n' +
+    pyClient + '\n' +
+    '        except Exception as e:\n' +
+    '            print(f"  [LLM error: {e}]")\n' +
+    '            conversation.pop()\n' +
+    '            continue\n\n' +
+    '        conversation.append({"role": "assistant", "content": reply})\n' +
+    '        print(f"\\n{CHARACTER_NAME} > {reply}\\n")\n\n' +
+    '        step += 1\n' +
+    '        try:\n' +
+    '            t_ingest(build_summary(user_input, reply), step)\n' +
+    '        except Exception as e:\n' +
+    '            print(f"  [TORMENT ingest failed: {e}]")\n\n' +
     'if __name__ == "__main__":\n' +
-    '    main()';
+    '    main()\n';
 
   // ── REFERENCE: Response shape ──
   document.getElementById('out-response').textContent =
     '// What you get back from /agent/query:\n' +
     '{\n' +
-    '  "results": [\n' +
+    '  "hits": [                              // <-- "hits" is the canonical key\n' +
+    '                                         //     ("results" accepted for legacy compatibility)\n' +
     '    {\n' +
-    '      "eid": 42,                           // memory ID\n' +
-    '      "text": "User talked about...",       // the stored memory text\n' +
-    '      "score": 0.87,                        // relevance score (0-1)\n' +
-    '      "motif": "vulnerability",             // detected theme\n' +
-    '      "age_steps": 150,                     // how old (in conversation turns)\n' +
-    '      "summary": "Fear of water talk"       // auto-generated summary\n' +
+    '      "eid": 42,                         // memory ID\n' +
+    '      "summary": "User talked about...", // primary text field (read this)\n' +
+    '      "final_score": 0.87,               // ranked relevance (final)\n' +
+    '      "score": 0.84,                     // raw retrieval score (fallback)\n' +
+    '      "character_tier": "core",          // memory tier: core | recent | archived\n' +
+    '      "provenance_type": "participant",  // where this memory came from\n' +
+    '      "motif": "vulnerability",          // detected theme\n' +
+    '      "age_steps": 150                   // how old (in conversation turns)\n' +
     '    }\n' +
-    '    // ... up to top_k results\n' +
+    '    // ... up to top_k hits\n' +
     '  ],\n\n' +
-    '  "character_context": {          // <-- dict, not a string!\n' +
-    '    "seed_preamble": "...",        //     The seed text / identity core\n' +
-    '    "character_name": "...",       //     Character name\n' +
-    '    "drift_score": 0.12,          //     How far from seed identity (-1 to 1)\n' +
-    '    "recommendations": ["..."],   //     Guidance for the LLM\n' +
-    '    "tier_breakdown": {}          //     Memory tier counts\n' +
+    '  "character_context": {                 // dict, not a string\n' +
+    '    "seed_preamble": "...",              //   inject into {character_context}\n' +
+    '    "character_name": "...",\n' +
+    '    "recommendations": ["..."],          //   injected after seed_preamble\n' +
+    '    "drift_score": 0.12,                 //   inject into {drift_note} (-1 to 1)\n' +
+    '    "drift_summary": "...",              //   human-readable drift note\n' +
+    '    "tier_breakdown": {}                 //   memory tier counts\n' +
     '  },\n' +
-    '  // Use format_context(result) to build a readable string from this.\n\n' +
+    '  // Use format_character_context / format_memories / format_drift_note\n' +
+    '  // to build the three prompt slots from this response.\n\n' +
     '  "identity_state": {\n' +
-    '    "cycle_stage": "S3",       // kernel phase (S0-S6)\n' +
-    '    "in_corridor": true,       // currently in a stability corridor\n' +
-    '    "phase": 7,                // phase counter\n' +
-    '    "z_magnitude": 0.42        // kernel Z field strength\n' +
+    '    "cycle_stage": "S3",                 // kernel phase (S0-S6)\n' +
+    '    "in_corridor": true,                 // currently in a stability corridor\n' +
+    '    "phase": 7,                          // phase counter\n' +
+    '    "z_magnitude": 0.42                  // kernel Z field strength\n' +
     '  },\n\n' +
     '  "step": 1,\n' +
     '  "meta": {\n' +
-    '    "query_ms": 12,            // how long the query took\n' +
+    '    "query_ms": 12,                      // how long the query took\n' +
     '    "candidates_evaluated": 156\n' +
     '  }\n' +
     '}';
