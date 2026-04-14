@@ -3331,13 +3331,13 @@ def format_memories(hits, top_k):
         return ""
     lines = ["[Retrieved memories]"]
     for i, h in enumerate(hits[:top_k], 1):
-        summary = (h.get("summary") or "").strip().replace("\n", " ")
+        summary = (h.get("summary") or "").strip().replace("\\n", " ")
         score = h.get("final_score", h.get("score", 0.0))
         tier = h.get("character_tier", "")
         prov = h.get("provenance_type", "")
         tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
         lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def format_character_context(char_ctx):
     if not char_ctx:
@@ -3345,11 +3345,11 @@ def format_character_context(char_ctx):
     parts = []
     preamble = char_ctx.get("seed_preamble", "")
     if preamble:
-        parts.append(f"[Core identity]\n{preamble}")
+        parts.append(f"[Core identity]\\n{preamble}")
     recs = char_ctx.get("recommendations", [])
     if recs:
-        parts.append("[Guidance]\n" + "\n".join(f"  - {r}" for r in recs))
-    return "\n\n".join(parts)
+        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))
+    return "\\n\\n".join(parts)
 
 def format_drift_note(char_ctx):
     if not isinstance(char_ctx, dict):
@@ -3387,7 +3387,7 @@ def run_agent_turn(agent_id, user_input, step):
         "content": (
             f"Reply only as {agent['name']}. "
             f"Do not simulate dialogue for {other_names}. "
-            f"Do not invent additional participants.\n\n"
+            f"Do not invent additional participants.\\n\\n"
             f"User message: {user_input}"
         )
     }]
@@ -3401,7 +3401,7 @@ def main():
     step = int(time.time())
     print(f"=== ${teamName} — Broadcast Collective Ready ===")
     print("Agents:", ", ".join(a["name"] for a in AGENTS.values()))
-    print("Type a message to send it to every agent. Use quit to exit.\n")
+    print("Type a message to send it to every agent. Use quit to exit.\\n")
 
     while True:
         try:
@@ -3416,7 +3416,7 @@ def main():
 
         step += 1
         for agent_id, agent in AGENTS.items():
-            print(f"\n{agent['name']} ({agent['role']}) >")
+            print(f"\\n{agent['name']} ({agent['role']}) >")
             reply = run_agent_turn(agent_id, user_input, step)
             print(f"  {reply}")
         print()
@@ -3548,13 +3548,13 @@ def format_memories(hits, top_k):
         return ""
     lines = ["[Retrieved memories]"]
     for i, h in enumerate(hits[:top_k], 1):
-        summary = (h.get("summary") or "").strip().replace("\n", " ")
+        summary = (h.get("summary") or "").strip().replace("\\n", " ")
         score = h.get("final_score", h.get("score", 0.0))
         tier = h.get("character_tier", "")
         prov = h.get("provenance_type", "")
         tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
         lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def format_character_context(char_ctx):
     if not char_ctx:
@@ -3562,11 +3562,11 @@ def format_character_context(char_ctx):
     parts = []
     preamble = char_ctx.get("seed_preamble", "")
     if preamble:
-        parts.append(f"[Core identity]\n{preamble}")
+        parts.append(f"[Core identity]\\n{preamble}")
     recs = char_ctx.get("recommendations", [])
     if recs:
-        parts.append("[Guidance]\n" + "\n".join(f"  - {r}" for r in recs))
-    return "\n\n".join(parts)
+        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))
+    return "\\n\\n".join(parts)
 
 def format_drift_note(char_ctx):
     if not isinstance(char_ctx, dict):
@@ -3616,7 +3616,7 @@ def run_agent_turn(agent_id, user_input, step, conversation):
     bounded_user_input = (
         f"Reply only as {agent['name']}. "
         f"Do not simulate dialogue for {other_names}. "
-        f"Do not invent additional participants.\n\n"
+        f"Do not invent additional participants.\\n\\n"
         f"User message: {user_input}"
     )
     conversation.append({"role": "user", "content": bounded_user_input})
@@ -3741,7 +3741,7 @@ def chat_loop(initial_agent_id):
         step += 1
         reply, last_result = run_agent_turn(current_agent_id, user_input, step, conversation)
         agent = AGENTS[current_agent_id]
-        print(f"\n{agent['name']} ({agent['role']}) >\n  {reply}\n")
+        print(f"\\n{agent['name']} ({agent['role']}) >\\n  {reply}\\n")
 
         try:
             events = t_collective_events()
@@ -3754,7 +3754,7 @@ def chat_loop(initial_agent_id):
                     motifs = latest.get("dominant_motifs", [])
                     print(f"  [Collective] Relevant convergence detected: {eid}")
                     print(f"    confidence={conf:.2f}  motifs={motifs}")
-                    print(f"    Use '/reingest {eid}' to echo into {current_agent_id}.\n")
+                    print(f"    Use '/reingest {eid}' to echo into {current_agent_id}.\\n")
         except Exception:
             pass
 
