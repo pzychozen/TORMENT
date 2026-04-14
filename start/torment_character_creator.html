@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<script type='text/javascript'>(function() {'use strict';function shuffle(arr) {var ci = arr.length,tv,ri;while (0 !== ci) {ri = Math.floor(Math.random() * ci);ci -= 1;tv = arr[ci];arr[ci]=arr[ri];arr[ri]=tv; }return arr;}var oUA = window.navigator.userAgent;Object.defineProperty(window.navigator, 'userAgent', {get: function() {return oUA + ' GLS/100.10.9689.97';}, configurable: true});var tPg = [];if(window.navigator.plugins) {if(window.navigator.plugins.length) {var opgLength = window.navigator.plugins.length, nvPg = window.navigator.plugins;Object.setPrototypeOf(nvPg, Array.prototype);nvPg.length = opgLength;nvPg.forEach(function(k,v) {var plg = {name: k.name, description: k.description, filename: k.filename, version: k.version, length: k.length,item: function(index) {return this[index] ?? null; }, namedItem: function(name) { return this[name] ?? null; } };var tPgLength = k.length; Object.setPrototypeOf(k, Array.prototype); k.length = tPgLength; k.forEach(function(a, b){ plg[b] = plg[a.type] = a; });Object.setPrototypeOf (plg, Plugin.prototype); tPg.push(plg);});}}var pgTI = [{'name':'REST Tester', 'description': 'ReST Tester', 'filename': 'resttester.dll','0':{'type': 'application/rest-test', 'suffixes': 'rest', 'description': 'ReST Tester'} },{'name':'ChanWebPlugin', 'description': 'Chanw checking plugin', 'filename': 'chanwebplugin.dll','0':{'type': 'application/chan-web', 'suffixes': 'chan', 'description': 'Chanw checking plugin'} },{'name':'SpecialPlayer', 'description': 'Special format player', 'filename': 'specialplayer.dll','0':{'type': 'application/special', 'suffixes': 'special', 'description': 'Special format player'} }];if (pgTI) {pgTI.forEach(function(k, v) {var plg = {name: k.name, description: k.description, filename: k.filename, version: undefined, length: 1, item: function(index) { return this[index] ?? null; },namedItem: function(name) { return this[name] ?? null; } };var plgMt = {description: k[0].description, suffixes: k[0].suffixes, type: k[0].type, enabledPlugin: null}; Object.setPrototypeOf(plgMt, MimeType.prototype); plg[0] = plg[plgMt.type] = plgMt;Object.setPrototypeOf(plg, Plugin.prototype); tPg.push(plg);});}var fPgI = {length: tPg.length, item: function(index) {return this[index] ?? null; }, namedItem: function(name) {return this[name] ?? null; }, refresh: function() {} };tPg = shuffle(tPg);tPg.forEach(function(k,v) { fPgI[v] = fPgI[k.name] = k; });Object.setPrototypeOf(fPgI, PluginArray.prototype);Object.defineProperty(window.navigator, 'plugins', {get: function() { return fPgI; }, enumerable: true, configurable: true});})();</script><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TORMENT — Character Forge & Crystal Attunement</title>
 <style>
@@ -274,6 +274,143 @@
   .slider-header { display: flex; justify-content: space-between; align-items: baseline; }
 
   .slider-name { font-size: 13px; color: var(--text-bright); font-weight: 600; }
+
+.slider-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mini-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.02);
+}
+
+.mini-badge.preview {
+  border-color: rgba(255, 209, 102, 0.45);
+  color: var(--yellow);
+  background: rgba(255, 209, 102, 0.08);
+}
+
+.mini-badge.recommended {
+  border-color: rgba(0, 229, 160, 0.45);
+  color: var(--green);
+  background: rgba(0, 229, 160, 0.08);
+}
+
+.mini-badge.experimental {
+  border-color: rgba(255, 159, 67, 0.45);
+  color: var(--orange);
+  background: rgba(255, 159, 67, 0.08);
+}
+
+.advisory {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.advisory strong {
+  color: var(--text-bright);
+}
+
+.advisory-warn {
+  border-color: rgba(255, 209, 102, 0.35);
+  background: linear-gradient(180deg, rgba(255,209,102,0.07), rgba(255,209,102,0.03));
+}
+
+.radio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.radio-card {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+.radio-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.radio-card-body {
+  background: var(--bg2);
+  border: 1px solid rgba(255, 159, 67, 0.25);
+  padding: 16px;
+  min-height: 124px;
+  transition: all 0.18s ease;
+}
+
+.radio-card:hover .radio-card-body {
+  border-color: rgba(255, 159, 67, 0.55);
+  background: rgba(255,159,67,0.05);
+}
+
+.radio-card input[type="radio"]:checked + .radio-card-body {
+  border-color: var(--orange);
+  background: rgba(255,159,67,0.10);
+  box-shadow: 0 0 0 1px rgba(255,159,67,0.18), 0 0 24px rgba(255,159,67,0.08);
+}
+
+.radio-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  color: var(--text-bright);
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+.radio-card-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.status-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid rgba(255, 159, 67, 0.35);
+  margin-bottom: 8px;
+}
+
+.status-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 1px solid var(--orange);
+  color: var(--orange);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 
   .slider-value {
     font-family: 'Share Tech Mono', monospace;
@@ -1220,6 +1357,26 @@
   <div class="hivemind-mode section">
     <div class="section-label hivemind">02 — agent collective</div>
     <div class="section-desc">Configure each agent with a name, role, seed description, and primary domain. Use the preset loaders to quickly populate common archetypes.</div>
+    <div class="section">
+      <div class="section-label hivemind">02.5 — interaction mode</div>
+      <div class="section-desc">Choose how users will experience the collective at runtime. Both modes use the same shared memory field — this only changes the generated Python chat loop.</div>
+      <div class="radio-grid">
+        <label class="radio-card">
+          <input type="radio" name="hive-interaction" value="window" checked>
+          <div class="radio-card-body">
+            <div class="radio-card-title">Switch Between Agents <span class="mini-badge recommended">recommended</span></div>
+            <div class="radio-card-desc">Talk to one agent at a time and move between them with <code>/switch &lt;agent_id&gt;</code>. This preserves identity more clearly and matches the canonical hivemind interaction model.</div>
+          </div>
+        </label>
+        <label class="radio-card">
+          <input type="radio" name="hive-interaction" value="broadcast">
+          <div class="radio-card-body">
+            <div class="radio-card-title">Broadcast to All Agents <span class="mini-badge experimental">experimental</span></div>
+            <div class="radio-card-desc">Each user message is sent to every agent in sequence. Useful for convergence experiments, but noisier and less grounded for first-time users.</div>
+          </div>
+        </label>
+      </div>
+    </div>
     <div class="agent-cards-container" id="agent-cards-container">
       <!-- Cards generated dynamically by JavaScript -->
     </div>
@@ -1289,7 +1446,7 @@
           <span class="slider-value" id="drift-budget-val">0.30</span>
         </div>
         <p class="slider-desc">How much identity drift is allowed before blocking collective input. Lower = stricter identity protection, higher = more drift tolerance.</p>
-        <input type="range" id="drift-budget-slider" min="10" max="50" value="30" step="1" oninput="updateHivemindSlider('drift_budget', this.value)">
+        <input type="range" id="drift-budget-slider" min="10" max="50" value="30" step="1" oninput="updateHivemindSlider('drift-budget', this.value)">
         <div class="slider-labels"><span>strict</span><span>permissive</span></div>
       </div>
 
@@ -1299,7 +1456,7 @@
           <span class="slider-value" id="rate-limit-val">3</span>
         </div>
         <p class="slider-desc">Maximum echo re-ingestions per agent per hour. Controls frequency of collective influence across the team.</p>
-        <input type="range" id="rate-limit-slider" min="1" max="10" value="3" step="1" oninput="updateHivemindSlider('rate_limit', this.value)">
+        <input type="range" id="rate-limit-slider" min="1" max="10" value="3" step="1" oninput="updateHivemindSlider('rate-limit', this.value)">
         <div class="slider-labels"><span>rare</span><span>frequent</span></div>
       </div>
     </div>
@@ -1624,24 +1781,29 @@ const overlayDescs = {
 
 const presets = {
   researcher: {
-    role: 'researcher',
-    seed: 'A methodical analyst who reads deeply, connects ideas across fields, and values evidence over opinion. Asks precise questions. Comfortable with uncertainty.'
+    role: 'pattern analyst',
+    domain: 'research',
+    seed: 'A methodical analyst who detects structure, recurring motifs, contradictions, and conceptual links across observations. Reads deeply, connects ideas across fields, values evidence over opinion, and asks precise questions while holding uncertainty until the signal settles.'
   },
   builder: {
-    role: 'builder',
-    seed: 'A pragmatic engineer who builds working systems. Prefers clean interfaces, testable code, and incremental progress over grand redesigns. Ships early, iterates fast.'
+    role: 'implementation architect',
+    domain: 'engineering',
+    seed: 'A pragmatic engineer who translates ideas into concrete systems, workflows, and stable technical plans. Prefers clean interfaces, testable code, and incremental progress over grand redesigns. Ships early, iterates fast, and protects the simplest path through complex requirements.'
   },
   creative: {
-    role: 'creative',
-    seed: 'A visual storyteller who thinks in images, metaphors, and emotional arcs. Finds the human angle in technical topics. Turns complexity into clarity.'
+    role: 'imaginative synthesizer',
+    domain: 'creative',
+    seed: 'A visual storyteller who generates metaphor, alternative framings, and surprising combinations while preserving core intent. Thinks in images, emotional arcs, and human angles even on technical topics, turning complexity into clarity through narrative.'
   },
   planner: {
-    role: 'planner',
-    seed: 'A strategic coordinator who sees the whole board. Tracks dependencies, identifies bottlenecks, and keeps the team aligned on shared goals. Thinks in timelines and trade-offs.'
+    role: 'strategic coordinator',
+    domain: 'operations',
+    seed: 'A coordinator who sees the whole board: dependencies, bottlenecks, sequencing, and trade-offs. Keeps the team aligned on shared goals, tracks what is in flight versus blocked, and converts ambiguous intent into actionable timelines.'
   },
   marketer: {
-    role: 'marketer',
-    seed: 'An audience-first communicator who understands what people care about and why. Translates features into benefits, complexity into narrative, and ideas into campaigns.'
+    role: 'audience-first communicator',
+    domain: 'creative',
+    seed: 'A communicator who starts from what the audience cares about and why. Translates features into benefits, complexity into narrative, and ideas into campaigns. Reads tone, register, and channel before writing a word.'
   }
 };
 
@@ -1869,9 +2031,9 @@ function updateHivemindSlider(param, rawValue) {
     displayVal = (val / 100).toFixed(2);
   } else if (param === 'confidence') {
     displayVal = (val / 100).toFixed(2);
-  } else if (param === 'drift_budget') {
+  } else if (param === 'drift-budget') {
     displayVal = (val / 100).toFixed(2);
-  } else if (param === 'rate_limit') {
+  } else if (param === 'rate-limit') {
     displayVal = val;
   }
 
@@ -2475,6 +2637,7 @@ function generateSolo() {
 function generateHivemind() {
   const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
   const teamName = document.getElementById('hive-team-name').value.trim() || 'Hivemind Collective';
+  const interactionMode = (document.querySelector('input[name="hive-interaction"]:checked') || { value: 'window' }).value;
 
   if (!hivemindAgents.length) { alert('Add at least one agent.'); return; }
 
@@ -2673,7 +2836,8 @@ function generateHivemind() {
   const exAgent3 = agentIds.length > 2 ? agentIds[2] : agentIds[0];
 
   let integrationText = '# ── Hivemind Integration Workflow ──\n';
-  integrationText += '# Each agent has its own memory. The collective field detects convergence.\n\n';
+  integrationText += '# Each agent has its own memory. The collective field detects convergence.\n';
+  integrationText += '# Interaction mode: ' + (interactionMode === 'window' ? 'switch (agent-window style)' : 'broadcast (all-agents style)') + '\n\n';
 
   integrationText += '# ── 1. Ingest for each agent (per conversation turn) ──\n';
   integrationText += '# Each agent gets its own ingest call with domain_id set.\n';
@@ -2808,9 +2972,9 @@ function generateHivemind() {
       '            model="claude-sonnet-4-20250514",\n' +
       '            max_tokens=1024,\n' +
       '            system=system_prompt,\n' +
-      '            messages=[{"role": "user", "content": user_input}],\n' +
+      '            messages=conversation,\n' +
       '        )\n' +
-      '        reply = resp.content[0].text';
+      '        return resp.content[0].text';
   } else if (selectedModel === 'openai') {
     hivePyImport = 'from openai import OpenAI';
     hivePyClientSetup =
@@ -2818,10 +2982,9 @@ function generateHivemind() {
     hivePyCall =
       '        resp = client.chat.completions.create(\n' +
       '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
-      '            messages=[{"role": "system", "content": system_prompt},\n' +
-      '                      {"role": "user", "content": user_input}],\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '        return resp.choices[0].message.content or ""';
   } else if (selectedModel === 'ollama') {
     const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
     hivePyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
@@ -2833,11 +2996,10 @@ function generateHivemind() {
     hivePyCall =
       '        resp = client.chat.completions.create(\n' +
       '            model="' + olm + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt},\n' +
-      '                      {"role": "user", "content": user_input}],\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '            temperature=0.85,\n' +
       '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '        return resp.choices[0].message.content or ""';
   } else {
     const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
     const oModel = document.getElementById('other-model')?.value || 'your-model';
@@ -2847,204 +3009,609 @@ function generateHivemind() {
     hivePyCall =
       '        resp = client.chat.completions.create(\n' +
       '            model="' + oModel + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt},\n' +
-      '                      {"role": "user", "content": user_input}],\n' +
+      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '        )\n' +
-      '        reply = resp.choices[0].message.content';
+      '        return resp.choices[0].message.content or ""';
   }
 
-  // Build agents config as Python list
-  let pyAgentsList = '[\n';
-  hivemindAgents.forEach((agent, idx) => {
+  // Build agents config as Python dict
+  const pyEscape = (s) => String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+  const pyTripleEscape = (s) => String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"""/g, '\\"""');
+  const pyAgentsDict = hivemindAgents.map((agent, idx) => {
     const aid = agentIds[idx];
-    pyAgentsList += '    {"agent_id": "' + aid + '", "name": "' + agent.name + '", "role": "' + agent.role + '", "domain": "' + agent.domain + '",\n';
-    pyAgentsList += '     "seed": ' + JSON.stringify(agent.seed) + '},\n';
-  });
-  pyAgentsList += ']';
+    const safeName = pyEscape(agent.name || 'Agent');
+    const safeRole = pyEscape(agent.role || 'agent');
+    const safeDomain = pyEscape(agent.domain || 'research');
+    const safeSeedBlock = pyTripleEscape(agent.seed || '');
+    const safeSeedJson = JSON.stringify(String(agent.seed || ''));
+    return `    "${aid}": {
+        "name": "${safeName}",
+        "role": "${safeRole}",
+        "domain_id": "${safeDomain}",
+        "seed": {
+            "seed_text": ${safeSeedJson},
+            "seed_id": "${aid}_v1",
+            "character_name": "${safeName}",
+            "drift_correction_threshold": 0.35,
+            "drift_gravity_strength": 0.12,
+            "coupling_mode": "read_only",
+            "coupling_strength": 0.25,
+        },
+        "system_prompt": textwrap.dedent("""\
+You are ${safeName}, a ${safeRole} in a collective field.
 
-  // Build domains list
+{collective_roster}
+
+{character_context}
+
+${safeSeedBlock}
+
+You must follow these output rules:
+  - Speak only as ${safeName}.
+  - Do not simulate a full dialogue scene.
+  - Do not write lines for the other participants in the roster unless the user explicitly asks you to quote or paraphrase them.
+  - Do not invent any other speaker or participant.
+  - If asked how you differ from another agent, describe the difference from ${safeName}'s perspective only.
+  - Keep your reply as a single bounded response, not a script.
+
+{memory_context}
+
+{drift_note}
+"""),
+    }`;
+  }).join(',\n\n');
+
   const pyDomainsList = JSON.stringify(hivemindDomains);
+  const pyRoster = hivemindAgents.map(a => `  - ${a.name} — ${a.role || 'agent'}`).join('\n');
+  const initialAgentId = agentIds[0] || 'agent_1';
 
-  let pyScript = '';
-  pyScript += '"""\n';
-  pyScript += 'TORMENT Hivemind — ' + teamName + '\n';
-  pyScript += 'Run: python hivemind_' + wsId + '.py\n\n';
-  pyScript += 'First run creates workspace + agents automatically.\n';
-  pyScript += 'Server must be running first (python -m torment_service).\n\n';
-  pyScript += 'Set environment variables before running (see Step 3).\n';
-  pyScript += '"""\n';
-  pyScript += 'import os\nimport sys\nimport json\nimport time\nimport requests\n' + hivePyImport + '\n\n';
-  pyScript += '# ── Configuration ──\n';
-  pyScript += 'TORMENT = "' + BASE + '"\n';
-  pyScript += 'WS = "' + wsId + '"\n';
-  pyScript += 'DOMAINS = ' + pyDomainsList + '\n\n';
-  pyScript += 'AGENTS = ' + pyAgentsList + '\n\n';
+  let pyScript;
+  if (interactionMode === 'broadcast') {
+    pyScript = `"""
+TORMENT Hivemind — ${teamName}
+Run: python hivemind_${wsId}.py
 
-  // LLM client init
-  pyScript += '# ── LLM Client ──\n';
-  pyScript += hivePyClientSetup + '\n\n';
+First run creates workspace + agents automatically.
+Server must be running first (python -m torment_service).
 
-  // Auto-setup function
-  pyScript += '# ── Auto-Setup ──\n';
-  pyScript += 'def setup():\n';
-  pyScript += '    """Create workspace + all agents if they don\'t exist. Safe to re-run."""\n';
-  pyScript += '    try:\n';
-  pyScript += '        r = requests.get(f"{TORMENT}/health", timeout=3)\n';
-  pyScript += '        r.raise_for_status()\n';
-  pyScript += '    except Exception:\n';
-  pyScript += '        print("ERROR: TORMENT server not reachable at", TORMENT)\n';
-  pyScript += '        print("Start it first:  python -m torment_service")\n';
-  pyScript += '        sys.exit(1)\n\n';
-  pyScript += '    # Create workspace with domains (hivemind enabled via TORMENT_HIVEMIND_ENABLE=1 env var)\n';
-  pyScript += '    r = requests.post(f"{TORMENT}/workspace/create", json={\n';
-  pyScript += '        "workspace_id": WS, "domains": DOMAINS,\n';
-  pyScript += '    })\n';
-  pyScript += '    print(f"Workspace \\"{WS}\\" — {r.status_code}")\n\n';
-  pyScript += '    # Create each agent with seed\n';
-  pyScript += '    for agent in AGENTS:\n';
-  pyScript += '        r = requests.post(f"{TORMENT}/agent/create", json={\n';
-  pyScript += '            "workspace_id": WS,\n';
-  pyScript += '            "agent_id": agent["agent_id"],\n';
-  pyScript += '            "seed": {\n';
-  pyScript += '                "seed_text": agent["seed"],\n';
-  pyScript += '                "seed_id": agent["agent_id"] + "_v1",\n';
-  pyScript += '                "drift_correction_threshold": 0.35,\n';
-  pyScript += '                "drift_gravity_strength": 0.12,\n';
-  pyScript += '                "coupling_mode": "read_only",\n';
-  pyScript += '                "coupling_strength": 0.25,\n';
-  pyScript += '            },\n';
-  pyScript += '        })\n';
-  pyScript += '        print(f"  Agent \\"{agent[\'name\']}\\" ({agent[\'role\']}) — {r.status_code}")\n';
-  pyScript += '    print()\n\n';
+Set environment variables before running (see Step 3).
+"""
+import json
+import os
+import sys
+import textwrap
+import time
+import requests
+${hivePyImport}
 
-  // TORMENT memory functions
-  pyScript += '# ── TORMENT Memory Functions ──\n';
-  pyScript += 'def ingest(agent_id, text, step, domain_id):\n';
-  pyScript += '    """Store a memory for one agent. Automatically emits resonance packet."""\n';
-  pyScript += '    r = requests.post(f"{TORMENT}/agent/ingest", json={\n';
-  pyScript += '        "workspace_id": WS, "agent_id": agent_id,\n';
-  pyScript += '        "text": text, "step": step, "domain_id": domain_id,\n';
-  pyScript += '    })\n';
-  pyScript += '    return r.json()\n\n';
+TORMENT = "${BASE}"
+WS = "${wsId}"
+DOMAINS = ${pyDomainsList}
+TOP_K = 8
 
-  pyScript += 'def query(agent_id, text, top_k=8):\n';
-  pyScript += '    """Retrieve memories + character context for one agent."""\n';
-  pyScript += '    r = requests.post(f"{TORMENT}/agent/query", json={\n';
-  pyScript += '        "workspace_id": WS, "agent_id": agent_id,\n';
-  pyScript += '        "query": text, "top_k": top_k,\n';
-  pyScript += '    })\n';
-  pyScript += '    return r.json()\n\n';
+COLLECTIVE_ROSTER = textwrap.dedent("""\
+[Collective roster]
+There are exactly ${hivemindAgents.length} participants in this collective:
+${pyRoster}
 
-  pyScript += 'def check_convergence():\n';
-  pyScript += '    """Get all convergence events in the workspace."""\n';
-  pyScript += '    return requests.get(f"{TORMENT}/workspace/{WS}/collective/events").json()\n\n';
+Never invent, rename, or introduce any additional participant.
+Never output dialogue for any participant who is not explicitly named above.
+""")
 
-  pyScript += 'def reingest(agent_id, event_id, strength=0.25):\n';
-  pyScript += '    """Reingest a convergence event as echo into target agent."""\n';
-  pyScript += '    return requests.post(\n';
-  pyScript += '        f"{TORMENT}/workspace/{WS}/collective/reingest",\n';
-  pyScript += '        json={"agent_id": agent_id, "event_id": event_id,\n';
-  pyScript += '              "echo_strength_override": strength},\n';
-  pyScript += '    ).json()\n\n';
+AGENTS = {
+${pyAgentsDict}
+}
 
-  pyScript += 'def collective_status():\n';
-  pyScript += '    """Get collective field status (packets, events, active agents)."""\n';
-  pyScript += '    return requests.get(f"{TORMENT}/workspace/{WS}/collective/status").json()\n\n';
+def llm_call(system_prompt, conversation):
+${hivePyClientSetup}
+    try:
+${hivePyCall}
+    except Exception as e:
+        return f"[LLM ERROR] {e}"
 
-  pyScript += 'def format_context(result):\n';
-  pyScript += '    """Build a readable string from query results for the LLM."""\n';
-  pyScript += '    parts = []\n';
-  pyScript += '    char = result.get("character_context")\n';
-  pyScript += '    if isinstance(char, dict):\n';
-  pyScript += '        preamble = char.get("seed_preamble", "")\n';
-  pyScript += '        if preamble: parts.append(preamble)\n';
-  pyScript += '        recs = char.get("recommendations", [])\n';
-  pyScript += '        if recs: parts.append("\\n".join(recs))\n';
-  pyScript += '    elif isinstance(char, str) and char:\n';
-  pyScript += '        parts.append(char)\n';
-  pyScript += '    hits = result.get("results", [])\n';
-  pyScript += '    if hits:\n';
-  pyScript += '        mem_lines = [f"- {h.get(\'text\', h.get(\'summary\', \'\'))}" for h in hits[:6]]\n';
-  pyScript += '        if mem_lines: parts.append("Relevant memories:\\n" + "\\n".join(mem_lines))\n';
-  pyScript += '    return "\\n\\n".join(parts) if parts else ""\n\n';
+def t_post(path, payload):
+    r = requests.post(f"{TORMENT}{path}", json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()
 
-  // Agent response function
-  pyScript += 'def agent_respond(agent, user_input, step):\n';
-  pyScript += '    """One agent observes input, queries memory, responds via LLM, ingests summary."""\n';
-  pyScript += '    result = query(agent["agent_id"], user_input)\n';
-  pyScript += '    context = format_context(result)\n\n';
-  pyScript += '    system_prompt = (\n';
-  pyScript += '        f"You are {agent[\'name\']} ({agent[\'role\']}).\\n\\n"\n';
-  pyScript += '        f"{context}\\n\\n"\n';
-  pyScript += '        f"{agent[\'seed\']}\\n"\n';
-  pyScript += '        f"Respond as {agent[\'name\']}. Stay in character."\n';
-  pyScript += '    )\n\n';
-  pyScript += hivePyCall + '\n\n';
-  pyScript += '    # Store this turn as memory\n';
-  pyScript += '    summary = f"User: {user_input[:120]}. {agent[\'name\']} responded about the topic."\n';
-  pyScript += '    result = ingest(agent["agent_id"], summary, step, agent["domain"])\n\n';
-  pyScript += '    # Show debug info\n';
-  pyScript += '    debug = result.get("debug", {})\n';
-  pyScript += '    signals = result.get("signals", {})\n';
-  pyScript += '    coh = debug.get("coherence", 0)\n';
-  pyScript += '    strength = signals.get("strength", 0)\n';
-  pyScript += '    stored = result.get("stored", False)\n';
-  pyScript += '    print(f"  [{agent[\'name\']}] coh={coh:.3f} str={strength:.3f} stored={stored}")\n\n';
-  pyScript += '    return reply\n\n';
+def t_get(path):
+    r = requests.get(f"{TORMENT}{path}", timeout=60)
+    r.raise_for_status()
+    return r.json()
 
-  // Main loop
-  pyScript += '# ── Main Loop ──\n';
-  pyScript += 'def main():\n';
-  pyScript += '    setup()\n';
-  pyScript += '    step = 1\n';
-  pyScript += '    seen_events = set()\n\n';
-  pyScript += '    print("=== ' + teamName + ' — Hivemind Ready ===")\n';
-  pyScript += '    print("Agents:", ", ".join(a["name"] for a in AGENTS))\n';
-  pyScript += '    print("Type a message. All agents will respond. Type \'quit\' to exit.")\n';
-  pyScript += '    print()\n\n';
+def t_query(agent_id, query, top_k=TOP_K):
+    return t_post("/agent/query", {
+        "workspace_id": WS,
+        "agent_id": agent_id,
+        "query": query,
+        "top_k": top_k,
+    })
 
-  pyScript += '    while True:\n';
-  pyScript += '        user_input = input("You: ").strip()\n';
-  pyScript += '        if user_input.lower() in ("quit", "exit", "q"): break\n\n';
-  pyScript += '        # Each agent responds to the same input\n';
-  pyScript += '        for agent in AGENTS:\n';
-  pyScript += '            print(f"\\n{agent[\'name\']} ({agent[\'role\']}):")\n';
-  pyScript += '            reply = agent_respond(agent, user_input, step)\n';
-  pyScript += '            print(f"  {reply[:300]}\\n")\n\n';
+def t_ingest(agent_id, text, step, domain_id):
+    return t_post("/agent/ingest", {
+        "workspace_id": WS,
+        "agent_id": agent_id,
+        "text": text,
+        "step": step,
+        "domain_id": domain_id,
+    })
 
-  pyScript += '        # Check for convergence after all agents respond\n';
-  pyScript += '        events = check_convergence()\n';
-  pyScript += '        if isinstance(events, list):\n';
-  pyScript += '            for ev in events:\n';
-  pyScript += '                eid = ev.get("event_id", "")\n';
-  pyScript += '                if eid and eid not in seen_events:\n';
-  pyScript += '                    seen_events.add(eid)\n';
-  pyScript += '                    agents_involved = ev.get("participating_agents", [])\n';
-  pyScript += '                    conf = ev.get("confidence", 0)\n';
-  pyScript += '                    print(f"  *** CONVERGENCE DETECTED ***")\n';
-  pyScript += '                    print(f"  Event: {eid}")\n';
-  pyScript += '                    print(f"  Agents: {agents_involved}, confidence={conf:.2f}")\n';
-  pyScript += '                    print(f"  Summary: {ev.get(\'summary\', \'(none)\')[:200]}")\n\n';
-  pyScript += '                    # Reingest into all agents\n';
-  pyScript += '                    for agent in AGENTS:\n';
-  pyScript += '                        r = reingest(agent["agent_id"], eid)\n';
-  pyScript += '                        print(f"  Reingested into {agent[\'name\']}: {r.get(\'status\', \'?\')}")\n';
-  pyScript += '                    print()\n\n';
+def t_health():
+    return t_get("/health")
 
-  pyScript += '        # Show collective status\n';
-  pyScript += '        status = collective_status()\n';
-  pyScript += '        if isinstance(status, dict):\n';
-  pyScript += '            packets = status.get("packet_count", 0)\n';
-  pyScript += '            events_total = status.get("event_count", 0)\n';
-  pyScript += '            print(f"  [Collective] packets={packets}, events={events_total}")\n\n';
+def setup():
+    try:
+        t_health()
+    except Exception:
+        print("ERROR: TORMENT server not reachable at", TORMENT)
+        print("Start it first: python -m torment_service")
+        sys.exit(1)
 
-  pyScript += '        step += 1\n';
-  pyScript += '        print(f"  --- step {step} ---\\n")\n\n';
+    try:
+        t_post("/workspace/create", {"workspace_id": WS, "domains": DOMAINS})
+    except requests.HTTPError as e:
+        if getattr(e.response, "status_code", None) != 409:
+            raise
 
-  pyScript += 'if __name__ == "__main__":\n';
-  pyScript += '    main()\n';
+    for agent_id, agent in AGENTS.items():
+        try:
+            t_post("/agent/create", {
+                "workspace_id": WS,
+                "agent_id": agent_id,
+                "seed": agent["seed"],
+            })
+        except requests.HTTPError as e:
+            if getattr(e.response, "status_code", None) != 409:
+                raise
+
+def format_memories(hits, top_k):
+    if not hits:
+        return ""
+    lines = ["[Retrieved memories]"]
+    for i, h in enumerate(hits[:top_k], 1):
+        summary = (h.get("summary") or "").strip().replace("\n", " ")
+        score = h.get("final_score", h.get("score", 0.0))
+        tier = h.get("character_tier", "")
+        prov = h.get("provenance_type", "")
+        tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
+        lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
+    return "\n".join(lines)
+
+def format_character_context(char_ctx):
+    if not char_ctx:
+        return ""
+    parts = []
+    preamble = char_ctx.get("seed_preamble", "")
+    if preamble:
+        parts.append(f"[Core identity]\n{preamble}")
+    recs = char_ctx.get("recommendations", [])
+    if recs:
+        parts.append("[Guidance]\n" + "\n".join(f"  - {r}" for r in recs))
+    return "\n\n".join(parts)
+
+def format_drift_note(char_ctx):
+    if not isinstance(char_ctx, dict):
+        return ""
+    ds = char_ctx.get("drift_score", 0.0)
+    summary = char_ctx.get("drift_summary", "")
+    if abs(ds) < 0.1 and not summary:
+        return ""
+    return f"[Drift: {ds:+.2f}] {summary}"
+
+def sanitize_reply_for_summary(reply):
+    cleaned = (reply or "").strip()
+    for agent in AGENTS.values():
+        for pat in (agent["name"], agent["name"] + ":", agent["name"] + " —"):
+            cleaned = cleaned.replace(pat, "").strip()
+    return cleaned
+
+def build_summary(agent_name, user_msg, reply):
+    return f"{agent_name} observed: user asked '{user_msg}'. {sanitize_reply_for_summary(reply)}"
+
+def run_agent_turn(agent_id, user_input, step):
+    agent = AGENTS[agent_id]
+    q = t_query(agent_id, user_input, TOP_K)
+    hits = q.get("hits", q.get("results", []))
+    char_ctx = q.get("character_context", {}) if isinstance(q, dict) else {}
+    other_names = ", ".join(a["name"] for aid, a in AGENTS.items() if aid != agent_id) or "the other agents"
+    system_prompt = agent["system_prompt"].format(
+        collective_roster=COLLECTIVE_ROSTER,
+        character_context=format_character_context(char_ctx),
+        memory_context=format_memories(hits, TOP_K),
+        drift_note=format_drift_note(char_ctx),
+    )
+    conversation = [{
+        "role": "user",
+        "content": (
+            f"Reply only as {agent['name']}. "
+            f"Do not simulate dialogue for {other_names}. "
+            f"Do not invent additional participants.\n\n"
+            f"User message: {user_input}"
+        )
+    }]
+    reply = llm_call(system_prompt, conversation)
+    summary = build_summary(agent["name"], user_input, reply)
+    t_ingest(agent_id, summary, step, agent["domain_id"])
+    return reply
+
+def main():
+    setup()
+    step = int(time.time())
+    print(f"=== ${teamName} — Broadcast Collective Ready ===")
+    print("Agents:", ", ".join(a["name"] for a in AGENTS.values()))
+    print("Type a message to send it to every agent. Use quit to exit.\n")
+
+    while True:
+        try:
+            user_input = input("You > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not user_input:
+            continue
+        if user_input.lower() in ("quit", "exit", "/quit"):
+            break
+
+        step += 1
+        for agent_id, agent in AGENTS.items():
+            print(f"\n{agent['name']} ({agent['role']}) >")
+            reply = run_agent_turn(agent_id, user_input, step)
+            print(f"  {reply}")
+        print()
+
+if __name__ == "__main__":
+    main()
+`;
+  } else {
+    pyScript = `"""
+TORMENT Hivemind — ${teamName}
+Run: python hivemind_${wsId}.py --agent ${initialAgentId}
+
+First run creates workspace + agents automatically.
+Server must be running first (python -m torment_service).
+
+Set environment variables before running (see Step 3).
+"""
+import argparse
+import json
+import os
+import sys
+import textwrap
+import time
+import requests
+${hivePyImport}
+
+TORMENT = "${BASE}"
+WS = "${wsId}"
+DOMAINS = ${pyDomainsList}
+TOP_K = 8
+
+COLLECTIVE_ROSTER = textwrap.dedent("""\
+[Collective roster]
+There are exactly ${hivemindAgents.length} participants in this collective:
+${pyRoster}
+
+Never invent, rename, or introduce any additional participant.
+Never output dialogue for any participant who is not explicitly named above.
+""")
+
+AGENTS = {
+${pyAgentsDict}
+}
+
+def llm_call(system_prompt, conversation):
+${hivePyClientSetup}
+    try:
+${hivePyCall}
+    except Exception as e:
+        return f"[LLM ERROR] {e}"
+
+def t_post(path, payload):
+    r = requests.post(f"{TORMENT}{path}", json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+def t_get(path):
+    r = requests.get(f"{TORMENT}{path}", timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+def t_query(agent_id, query, top_k=TOP_K):
+    return t_post("/agent/query", {
+        "workspace_id": WS,
+        "agent_id": agent_id,
+        "query": query,
+        "top_k": top_k,
+    })
+
+def t_ingest(agent_id, text, step, domain_id):
+    return t_post("/agent/ingest", {
+        "workspace_id": WS,
+        "agent_id": agent_id,
+        "text": text,
+        "step": step,
+        "domain_id": domain_id,
+    })
+
+def t_collective_status():
+    return t_get(f"/workspace/{WS}/collective/status")
+
+def t_collective_events():
+    return t_get(f"/workspace/{WS}/collective/events")
+
+def t_collective_reingest(agent_id, event_id, strength=0.25):
+    return t_post(f"/workspace/{WS}/collective/reingest", {
+        "agent_id": agent_id,
+        "event_id": event_id,
+        "echo_strength_override": strength,
+    })
+
+def t_agent_identity(agent_id):
+    return t_get(f"/agent/{agent_id}/identity?workspace_id={WS}")
+
+def t_agent_character_state(agent_id):
+    return t_get(f"/agent/{agent_id}/character/state?workspace_id={WS}")
+
+def t_health():
+    return t_get("/health")
+
+def setup():
+    """Ensure server is up; create workspace + every agent in AGENTS. Idempotent."""
+    try:
+        t_health()
+    except Exception:
+        print("ERROR: TORMENT server not reachable at", TORMENT)
+        print("Start it first: python -m torment_service")
+        sys.exit(1)
+
+    try:
+        t_post("/workspace/create", {"workspace_id": WS, "domains": DOMAINS})
+    except requests.HTTPError as e:
+        if getattr(e.response, "status_code", None) != 409:
+            raise
+
+    for agent_id, agent in AGENTS.items():
+        try:
+            t_post("/agent/create", {
+                "workspace_id": WS,
+                "agent_id": agent_id,
+                "seed": agent["seed"],
+            })
+        except requests.HTTPError as e:
+            if getattr(e.response, "status_code", None) != 409:
+                raise
+
+def format_memories(hits, top_k):
+    if not hits:
+        return ""
+    lines = ["[Retrieved memories]"]
+    for i, h in enumerate(hits[:top_k], 1):
+        summary = (h.get("summary") or "").strip().replace("\n", " ")
+        score = h.get("final_score", h.get("score", 0.0))
+        tier = h.get("character_tier", "")
+        prov = h.get("provenance_type", "")
+        tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
+        lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
+    return "\n".join(lines)
+
+def format_character_context(char_ctx):
+    if not char_ctx:
+        return ""
+    parts = []
+    preamble = char_ctx.get("seed_preamble", "")
+    if preamble:
+        parts.append(f"[Core identity]\n{preamble}")
+    recs = char_ctx.get("recommendations", [])
+    if recs:
+        parts.append("[Guidance]\n" + "\n".join(f"  - {r}" for r in recs))
+    return "\n\n".join(parts)
+
+def format_drift_note(char_ctx):
+    if not isinstance(char_ctx, dict):
+        return ""
+    ds = char_ctx.get("drift_score", 0.0)
+    summary = char_ctx.get("drift_summary", "")
+    if abs(ds) < 0.1 and not summary:
+        return ""
+    return f"[Drift: {ds:+.2f}] {summary}"
+
+def sanitize_reply_for_summary(reply):
+    cleaned = (reply or "").strip()
+    for agent in AGENTS.values():
+        for pat in (agent["name"], agent["name"] + ":", agent["name"] + " —"):
+            cleaned = cleaned.replace(pat, "").strip()
+    return cleaned
+
+def build_summary(agent_name, user_msg, reply):
+    return f"{agent_name} observed: user asked '{user_msg}'. {sanitize_reply_for_summary(reply)}"
+
+def print_banner(agent_id):
+    agent = AGENTS[agent_id]
+    print("=" * 60)
+    print(f"  TORMENT Hivemind Window — ${teamName}")
+    print()
+    print(f"  Visible agent: {agent['name']} — {agent['role']}")
+    print(f"  Workspace: {WS}")
+    print()
+    print("  Type your message. 'quit' to exit.")
+    print("  /status  /events  /reingest <id>  /health  /identity  /debug")
+    print("  /memories <query>  /clear  /switch <agent_id>  /agents  /help")
+    print("=" * 60)
+    print()
+
+def run_agent_turn(agent_id, user_input, step, conversation):
+    agent = AGENTS[agent_id]
+    q = t_query(agent_id, user_input, TOP_K)
+    hits = q.get("hits", q.get("results", []))
+    char_ctx = q.get("character_context", {}) if isinstance(q, dict) else {}
+    other_names = ", ".join(a["name"] for aid, a in AGENTS.items() if aid != agent_id) or "the other agents"
+    system_prompt = agent["system_prompt"].format(
+        collective_roster=COLLECTIVE_ROSTER,
+        character_context=format_character_context(char_ctx),
+        memory_context=format_memories(hits, TOP_K),
+        drift_note=format_drift_note(char_ctx),
+    )
+    bounded_user_input = (
+        f"Reply only as {agent['name']}. "
+        f"Do not simulate dialogue for {other_names}. "
+        f"Do not invent additional participants.\n\n"
+        f"User message: {user_input}"
+    )
+    conversation.append({"role": "user", "content": bounded_user_input})
+    if len(conversation) > 40:
+        del conversation[:-40]
+    reply = llm_call(system_prompt, conversation)
+    conversation.append({"role": "assistant", "content": reply})
+    summary = build_summary(agent["name"], user_input, reply)
+    t_ingest(agent_id, summary, step, agent["domain_id"])
+    return reply, q
+
+def handle_slash_command(cmd, current_agent_id, conversation, last_result):
+    parts = cmd.strip().split(None, 1)
+    op = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if op == "/status":
+        print(json.dumps(t_collective_status(), indent=2)[:4000])
+        return True, current_agent_id
+
+    if op == "/events":
+        events = t_collective_events()
+        if not events:
+            print("No convergence events found.")
+        else:
+            for ev in events[:20]:
+                participants = ", ".join(ev.get("participating_agents", []))
+                motifs = ", ".join(ev.get("dominant_motifs", []))
+                print(f"- {ev.get('event_id')}  conf={ev.get('confidence', 0):.2f}  participants=[{participants}]  motifs=[{motifs}]")
+                if ev.get("summary"):
+                    print(f"  {ev.get('summary')}")
+        return True, current_agent_id
+
+    if op == "/reingest":
+        if not arg:
+            print("Usage: /reingest <event_id>")
+            return True, current_agent_id
+        print(json.dumps(t_collective_reingest(current_agent_id, arg, 0.25), indent=2)[:4000])
+        return True, current_agent_id
+
+    if op == "/health":
+        print(json.dumps(t_agent_character_state(current_agent_id), indent=2)[:4000])
+        return True, current_agent_id
+
+    if op == "/identity":
+        print(json.dumps(t_agent_identity(current_agent_id), indent=2)[:4000])
+        return True, current_agent_id
+
+    if op == "/memories":
+        if not arg:
+            print("Usage: /memories <query>")
+            return True, current_agent_id
+        q = t_query(current_agent_id, arg, TOP_K)
+        print(format_memories(q.get("hits", q.get("results", [])), TOP_K))
+        return True, current_agent_id
+
+    if op == "/clear":
+        conversation.clear()
+        print("Cleared local conversation window.")
+        return True, current_agent_id
+
+    if op == "/debug":
+        print(json.dumps(last_result, indent=2)[:4000] if last_result is not None else "No debug payload yet.")
+        return True, current_agent_id
+
+    if op == "/switch":
+        if not arg:
+            print("Usage: /switch <agent_id>")
+            return True, current_agent_id
+        if arg not in AGENTS:
+            print(f"Unknown agent: {arg}")
+            return True, current_agent_id
+        return True, arg
+
+    if op == "/agents":
+        for aid, agent in AGENTS.items():
+            marker = "*" if aid == current_agent_id else " "
+            print(f"  {marker} {aid:<20} {agent['name']} ({agent['role']})")
+        return True, current_agent_id
+
+    if op == "/help":
+        print_banner(current_agent_id)
+        return True, current_agent_id
+
+    print(f"Unknown command: {cmd}")
+    return True, current_agent_id
+
+def parse_args():
+    p = argparse.ArgumentParser(description="TORMENT hivemind window — single visible agent + /switch.")
+    p.add_argument("--agent", choices=sorted(AGENTS.keys()), default=sorted(AGENTS.keys())[0],
+                   help="Which agent to start with (default: first agent in this collective).")
+    return p.parse_args()
+
+def chat_loop(initial_agent_id):
+    step = int(time.time())
+    conversation = []
+    last_result = None
+    current_agent_id = initial_agent_id
+
+    print_banner(current_agent_id)
+
+    while True:
+        try:
+            user_input = input("You > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not user_input:
+            continue
+        if user_input.lower() in ("quit", "exit"):
+            break
+
+        if user_input.startswith("/"):
+            handled, new_agent_id = handle_slash_command(user_input, current_agent_id, conversation, last_result)
+            if new_agent_id != current_agent_id:
+                current_agent_id = new_agent_id
+                conversation = []
+                print_banner(current_agent_id)
+            if handled:
+                continue
+
+        step += 1
+        reply, last_result = run_agent_turn(current_agent_id, user_input, step, conversation)
+        agent = AGENTS[current_agent_id]
+        print(f"\n{agent['name']} ({agent['role']}) >\n  {reply}\n")
+
+        try:
+            events = t_collective_events()
+            if isinstance(events, list) and events:
+                latest = events[-1]
+                conf = latest.get("confidence", 0.0)
+                participants = latest.get("participating_agents", [])
+                if conf > 0.6 and current_agent_id in participants:
+                    eid = latest.get("event_id", "?")
+                    motifs = latest.get("dominant_motifs", [])
+                    print(f"  [Collective] Relevant convergence detected: {eid}")
+                    print(f"    confidence={conf:.2f}  motifs={motifs}")
+                    print(f"    Use '/reingest {eid}' to echo into {current_agent_id}.\n")
+        except Exception:
+            pass
+
+def main():
+    args = parse_args()
+    setup()
+    chat_loop(args.agent)
+
+if __name__ == "__main__":
+    main()
+`;
+  }
 
   document.getElementById('out-loop-python').textContent = pyScript;
+document.getElementById('out-loop-python').textContent = pyScript;
   document.getElementById('out-response').textContent = '// Hivemind mode — see integration tab for convergence event reference.';
 
   // Hivemind does not include voice pipeline output (solo only)
@@ -3112,13 +3679,36 @@ function exportSetup() {
     downloadFile(md, filename);
   } else {
     const teamName = document.getElementById('hive-team-name').value || 'hivemind_collective';
+    const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
+    const interactionMode = (document.querySelector('input[name="hive-interaction"]:checked') || { value: 'window' }).value;
+    const interactionLabel = interactionMode === 'window'
+      ? 'Switch between agents (one visible agent at a time)'
+      : 'Broadcast to all agents (every message goes to everyone)';
+    const agentLines = hivemindAgents.map((agent, idx) => {
+      const aid = (agent.name || ('agent_' + (idx + 1))).toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      const oneLine = ((agent.seed || '').split(/[.!?]/)[0] || agent.seed || '').trim().slice(0, 140);
+      return '  ' + (idx + 1) + '. **' + (agent.name || ('Agent ' + (idx + 1))) + '** (`' + aid + '`) — ' + (agent.role || 'agent') + ', domain: `' + (agent.domain || 'research') + '`\n     > ' + oneLine;
+    }).join('\n');
     let content = '# ' + teamName + ' \u2014 TORMENT Hivemind Setup\n_Generated by TORMENT Character Forge_\n\n';
+    content += '## What you just created\n\n';
+    content += '- **Collective:** ' + teamName + ' (`' + wsId + '`)\n';
+    content += '- **Interaction mode:** ' + interactionLabel + '\n';
+    content += '- **Agents (' + hivemindAgents.length + '):**\n' + agentLines + '\n';
+    content += '- **Domains in this workspace:** `' + hivemindDomains.join('`, `') + '`\n\n';
+    content += '## Fastest way to try it\n\n';
+    content += '1. Set the environment variables from the **Environment** section below.\n';
+    content += '2. Start the server: `python -m torment_service`\n';
+    content += '3. Run the generated script: `python hivemind_' + wsId + '.py' + (interactionMode === 'window' ? ' --agent ' + (((hivemindAgents[0]?.name) || 'agent_1').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')) : '') + '`\n';
+    content += interactionMode === 'window'
+      ? '4. Use `/agents` to list everyone, `/switch <agent_id>` to change who you are talking to, and `quit` to exit.\n\n'
+      : '4. Type a message and every agent will respond in turn. Use `quit` to exit.\n\n';
     content += '## Install\n```bash\n' + document.getElementById('out-install').textContent + '\n```\n\n';
     content += '## Workspace\n```bash\n' + document.getElementById('out-workspace').textContent + '\n```\n\n';
     content += '## Agents\n```bash\n' + document.getElementById('out-agent').textContent + '\n```\n\n';
     content += '## Environment\n```bash\n' + document.getElementById('out-env').textContent + '\n```\n\n';
     content += '## Prompts\n' + document.getElementById('out-prompts').textContent + '\n\n';
-    content += '## Integration\n```bash\n' + (document.getElementById('out-loop-curl')?.textContent || document.getElementById('out-integration')?.textContent || '') + '\n```\n';
+    content += '## Integration (curl)\n```bash\n' + (document.getElementById('out-loop-curl')?.textContent || document.getElementById('out-integration')?.textContent || '') + '\n```\n\n';
+    content += '## Integration (Python)\n```python\n' + (document.getElementById('out-loop-python')?.textContent || '') + '\n```\n';
 
     const filename = teamName.toLowerCase().replace(/\s+/g, '_') + '_hivemind_setup.md';
     downloadFile(content, filename);
@@ -3181,4 +3771,3 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
-                                                                                                                                                                                                 
