@@ -3,11 +3,14 @@
 check_forge_output.py — Acceptance checker for start/torment_character_creator.html
 
 Validates that each emitted-Python template section in the forge satisfies the doctrinal
-and field-shape contracts defined in start/SOLO_ALIGNMENT_SPEC.md §4.
+and field-shape contracts defined in start/SOLO_ALIGNMENT_SPEC.md §4 and
+start/BASIC_HIVE_AGENT_SPEC.md §4.
 
-Approach: grep-by-line-range against the HTML source. Each "section" is the JS code inside
-a generator function that builds one of the output panes. Line ranges are determined
-dynamically by locating the function signatures.
+Section discovery:
+    - solo                  — function generateSolo(...)        [function signature]
+    - hivemind_window       — fence comments inside generateHivemind
+    - hivemind_basic_hive   — fence comments inside generateHivemind
+    - hivemind_broadcast    — fence comments inside generateHivemind
 
 Manual use only. No pre-commit wiring yet.
 
@@ -29,30 +32,25 @@ HTML_PATH = Path(__file__).resolve().parent.parent / "start" / "torment_characte
 # ---------------------------------------------------------------------------
 # Section discovery
 # ---------------------------------------------------------------------------
-#
-# Sections we care about:
-#   solo      — generateSolo()      (currently fails; being aligned)
-#   hivemind  — generateHivemind()  (already patched; window + broadcast both live here)
-#
-# Basic Hive Agent will add a third section later; the checker picks it up automatically
-# once the function exists.
 
-SECTION_SIGNATURES = [
+FUNCTION_SIGNATURES = [
     ("solo",     r"^function generateSolo\s*\("),
     ("hivemind", r"^function generateHivemind\s*\("),
-    # Future:
-    # ("basic_hive_agent", r"^function generateBasicHiveAgent\s*\("),
+]
+
+# Fence-comment sub-sections inside generateHivemind.
+# Each entry: (section_name, begin_fence_regex, end_fence_regex)
+HIVEMIND_FENCES = [
+    ("hivemind_window",     r"//\s*<<<\s*BEGIN\s+window\s*>>>",     r"//\s*<<<\s*END\s+window\s*>>>"),
+    ("hivemind_basic_hive", r"//\s*<<<\s*BEGIN\s+basic_hive\s*>>>", r"//\s*<<<\s*END\s+basic_hive\s*>>>"),
+    ("hivemind_broadcast",  r"//\s*<<<\s*BEGIN\s+broadcast\s*>>>",  r"//\s*<<<\s*END\s+broadcast\s*>>>"),
 ]
 
 
-def find_sections(lines: List[str]) -> Dict[str, Tuple[int, int]]:
-    """Return {section_name: (start_line, end_line)} using function signatures.
-
-    end_line is the line before the NEXT known section, or EOF for the last one.
-    Line numbers are 1-indexed to match editor/grep conventions.
-    """
+def find_function_sections(lines: List[str]) -> Dict[str, Tuple[int, int]]:
+    """Return {section_name: (start_line, end_line)} for top-level generator functions."""
     starts: List[Tuple[str, int]] = []
-    for name, pattern in SECTION_SIGNATURES:
+    for name, pattern in FUNCTION_SIGNATURES:
         pat = re.compile(pattern)
         for i, ln in enumerate(lines, 1):
             if pat.search(ln):
@@ -69,60 +67,146 @@ def find_sections(lines: List[str]) -> Dict[str, Tuple[int, int]]:
     return sections
 
 
+def find_fence_sections(
+    lines: List[str], outer: Tuple[int, int]
+) -> Dict[str, Tuple[int, int]]:
+    """Within outer (start_line, end_line), locate each fenced sub-section."""
+    outer_start, outer_end = outer
+    found: Dict[str, Tuple[int, int]] = {}
+    for name, begin_re, end_re in HIVEMIND_FENCES:
+        begin_pat = re.compile(begin_re)
+        end_pat = re.compile(end_re)
+        begin_ln: int | None = None
+        end_ln: int | None = None
+        for i in range(outer_start, outer_end + 1):
+            ln = lines[i - 1]
+            if begin_ln is None and begin_pat.search(ln):
+                begin_ln = i
+                continue
+            if begin_ln is not None and end_pat.search(ln):
+                end_ln = i
+                break
+        if begin_ln is not None and end_ln is not None:
+            found[name] = (begin_ln, end_ln)
+    return found
+
+
 # ---------------------------------------------------------------------------
-# Guards — §4 of SOLO_ALIGNMENT_SPEC.md
+# Guards
 # ---------------------------------------------------------------------------
 
-# Patterns that MUST NOT appear inside a compliant emitted-Python template.
-# Each entry: (label, regex, applies_to_sections)
+ALL_SECTIONS = ["solo", "hivemind_window", "hivemind_basic_hive", "hivemind_broadcast"]
+DOCTRINAL_SOLO_LIKE = ["solo", "hivemind_basic_hive"]  # no /switch laundering applies
+FIELD_SHAPE_ALL = ALL_SECTIONS  # all emitted Python must speak the TORMENT shapes
+
+# Patterns that MUST NOT appear.
+# Entry: (label, regex, applies_to_sections)
 FORBIDDEN: List[Tuple[str, str, List[str]]] = [
+    # ---- shared field-shape contracts (SOLO_ALIGNMENT_SPEC §4) ----
     ("wrong memory key `text` preferred",
      r"""h(?:it)?\.get\(\s*["']text["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("wrong char-ctx key `identity_mode`",
      r"""["']identity_mode["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("wrong drift key `drift` (must be drift_score/drift_summary)",
      r"""\.get\(\s*["']drift["']\s*\)""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("wrong identity path `/character/identity`",
      r"""/character/identity""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("doctrinal violation: firstLine seed-trait laundering",
      r"""\bfirstLine\b""",
-     ["solo", "basic_hive_agent"]),
+     DOCTRINAL_SOLO_LIKE),
     ("doctrinal violation: 'Stay true to who you are' scaffolding",
      r"""Stay true to who you are""",
-     ["solo", "basic_hive_agent"]),
+     DOCTRINAL_SOLO_LIKE),
     ("lazy ingest summary `responded about the topic`",
      r"""responded about the topic""",
-     ["solo", "basic_hive_agent"]),
+     DOCTRINAL_SOLO_LIKE),
+
+    # ---- basic_hive mode (BASIC_HIVE_AGENT_SPEC §4d) ----
+    ("basic_hive must not expose /switch slash command",
+     r'''if\s+op\s*==\s*["\']/switch["\']''',
+     ["hivemind_basic_hive"]),
+    ("basic_hive must not expose /agents slash command",
+     r'''if\s+op\s*==\s*["\']/agents["\']''',
+     ["hivemind_basic_hive"]),
+    ("basic_hive must not expose /help slash command",
+     r'''if\s+op\s*==\s*["\']/help["\']''',
+     ["hivemind_basic_hive"]),
+    ("basic_hive --agent must be required (no default=sorted(AGENTS.keys))",
+     r"""default=sorted\(AGENTS\.keys""",
+     ["hivemind_basic_hive"]),
+    ("basic_hive banner must not advertise /switch command",
+     r"""/switch\s+<agent_id>""",
+     ["hivemind_basic_hive"]),
+
+    # ---- broadcast mode (BASIC_HIVE_AGENT_SPEC §4c) ----
+    ("broadcast must not expose /switch slash command",
+     r'''if\s+op\s*==\s*["\']/switch["\']''',
+     ["hivemind_broadcast"]),
 ]
 
-# Patterns that MUST appear inside a compliant emitted-Python template.
+# Patterns that MUST appear.
 REQUIRED: List[Tuple[str, str, List[str]]] = [
+    # ---- shared field-shape contracts ----
     ("format_memories reads `summary` key",
      r"""h(?:it)?\.get\(\s*["']summary["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("format_character_context reads `seed_preamble`",
      r"""["']seed_preamble["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("format_character_context reads `recommendations`",
      r"""["']recommendations["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("format_drift_note reads `drift_score`",
      r"""["']drift_score["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("format_drift_note reads `drift_summary`",
      r"""["']drift_summary["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
     ("retrieval tries `hits` before `results`",
-     # `hits` must appear at least once in a .get(...) call
      r"""\.get\(\s*["']hits["']""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     FIELD_SHAPE_ALL),
+    # Identity endpoint: solo/window/basic_hive talk to one agent and call
+    # /agent/{id}/identity directly. Broadcast reads character_context from
+    # the per-query response instead — no identity endpoint needed there.
     ("identity endpoint uses `/agent/{id}/identity`",
      r"""/agent/[^/\s"']+/identity(?!\w)""",
-     ["solo", "hivemind", "basic_hive_agent"]),
+     ["solo", "hivemind_window", "hivemind_basic_hive"]),
+
+    # ---- hivemind shared (COLLECTIVE_ROSTER) ----
+    ("hivemind scripts include COLLECTIVE_ROSTER block",
+     r"""COLLECTIVE_ROSTER\s*=\s*textwrap\.dedent""",
+     ["hivemind_window", "hivemind_basic_hive", "hivemind_broadcast"]),
+
+    # ---- window mode (BASIC_HIVE_AGENT_SPEC §4b) ----
+    ("window mode exposes /switch slash command",
+     r'''if\s+op\s*==\s*["\']/switch["\']''',
+     ["hivemind_window"]),
+    ("window mode exposes /agents slash command",
+     r'''if\s+op\s*==\s*["\']/agents["\']''',
+     ["hivemind_window"]),
+    ("window mode --agent defaults to first agent",
+     r"""default=sorted\(AGENTS\.keys\(\)\)\[0\]""",
+     ["hivemind_window"]),
+
+    # ---- basic_hive mode (BASIC_HIVE_AGENT_SPEC §4d) ----
+    ("basic_hive --agent is required=True",
+     r"""required\s*=\s*True""",
+     ["hivemind_basic_hive"]),
+    ("basic_hive banner/docstring mentions 'one terminal per agent' or 'basic'",
+     r"""(?:one terminal per agent|Basic Hive Agent|basic mode)""",
+     ["hivemind_basic_hive"]),
+
+    # ---- broadcast mode (BASIC_HIVE_AGENT_SPEC §4c) ----
+    ("broadcast iterates AGENTS.items() for broadcast loop",
+     r"""for\s+\w+\s*,\s*\w+\s+in\s+AGENTS\.items\(\)""",
+     ["hivemind_broadcast"]),
+    ("broadcast banner mentions Broadcast or every agent",
+     r"""(?:Broadcast|every agent)""",
+     ["hivemind_broadcast"]),
 ]
 
 
@@ -131,7 +215,6 @@ REQUIRED: List[Tuple[str, str, List[str]]] = [
 # ---------------------------------------------------------------------------
 
 def check_section(name: str, source: str) -> List[str]:
-    """Return list of failure messages for this section (empty list == pass)."""
     failures: List[str] = []
 
     for label, pattern, applies in FORBIDDEN:
@@ -139,7 +222,6 @@ def check_section(name: str, source: str) -> List[str]:
             continue
         m = re.search(pattern, source)
         if m:
-            # Find line number within section for the hit
             prefix = source[: m.start()]
             rel_line = prefix.count("\n") + 1
             failures.append(
@@ -167,14 +249,29 @@ def main() -> int:
 
     text = HTML_PATH.read_text(encoding="utf-8")
     lines = text.splitlines()
-    sections = find_sections(lines)
 
-    if not sections:
-        print("error: no generator sections found — HTML shape changed?", file=sys.stderr)
+    fn_sections = find_function_sections(lines)
+    if "solo" not in fn_sections or "hivemind" not in fn_sections:
+        print("error: generateSolo or generateHivemind not found — HTML shape changed?",
+              file=sys.stderr)
         return 2
 
+    fence_sections = find_fence_sections(lines, fn_sections["hivemind"])
+    expected_fenced = {"hivemind_window", "hivemind_basic_hive", "hivemind_broadcast"}
+    missing_fences = expected_fenced - set(fence_sections.keys())
+    if missing_fences:
+        print(f"error: missing fence sub-sections inside generateHivemind: "
+              f"{sorted(missing_fences)}", file=sys.stderr)
+        return 2
+
+    sections: Dict[str, Tuple[int, int]] = {
+        "solo": fn_sections["solo"],
+        **fence_sections,
+    }
+
     print(f"Checking {HTML_PATH.name}")
-    print(f"Sections discovered: {', '.join(f'{n} [{s}-{e}]' for n, (s, e) in sections.items())}")
+    for n, (s, e) in sections.items():
+        print(f"  section {n}: lines {s}-{e}")
     print()
 
     all_pass = True
