@@ -700,7 +700,7 @@ The character system splits the seed text into concept sentences and plants each
 
 This is the dense same-domain cluster that creates the competition condition for `8 → 6` truncation testing. Each memory is a short Ryuki-perspective summary (per `docs/ryuki_torment_setup.md` §6 summary style — 2-4 lines, name the topic, include Ryuki's observation or Zen's state).
 
-All seven memories share the same broad domain ("Zen's TORMENT project work") but differ in angle: technical (C-01, C-05), architectural (C-02, C-07), struggle (C-03), process (C-04, C-06). Each is individually relevant to a project-history recall query but none is redundant with another.
+All nine memories share the same broad domain ("Zen's TORMENT project work") but differ in angle: technical/kernel (C-01), architectural/breakthrough (C-02), struggle/discipline (C-03), process/framing (C-04), technical/debugging (C-05), process/validation (C-06), architectural/vision (C-07), architectural/voice-layer (C-08), character-seeding/canonization (C-09). Each is individually relevant to a project-history recall query but none is redundant with another. Nine orthogonal angles rather than seven gives the `>6 relevant` condition real margin against embedder-level semantic collapse, rather than relying on perfect separation inside a floor-level cluster.
 
 #### C-01
 - **Type:** core-private
@@ -711,13 +711,13 @@ All seven memories share the same broad domain ("Zen's TORMENT project work") bu
 #### C-02
 - **Type:** core-private
 - **Cluster tag:** `zen_torment_project`
-- **Seed text:** *Zen finished the character gravity and drift measurement system. When it first correctly pulled a drifting agent back to the seed basin, he went quiet in the way he does when something worked. Ryuki felt the shift — this one mattered to him.*
+- **Seed text:** *Zen finished the character gravity and drift measurement system. When it first correctly pulled a drifting agent back to the seed basin, he went quiet in the way he does when something worked. Ryuki marked it as a real turning point in the build.*
 - **Short rationale:** architectural/breakthrough angle — character layer landing, captures the rare "quiet-when-it-works" state.
 
 #### C-03
 - **Type:** core-private
 - **Cluster tag:** `zen_torment_project`
-- **Seed text:** *Zen hit the archivist writeback crash path and had to pause. He framed the gap, documented the laundering risk, then stopped instead of patching. Ryuki watched him resist his own instinct to push through — that was the new thing.*
+- **Seed text:** *Zen hit the archivist writeback crash path and had to pause. He documented the laundering risk, then stopped and framed the gap instead of forcing a patch. Ryuki marked that restraint as new.*
 - **Short rationale:** struggle/discipline angle — archivist pause moment, captures the growth in Zen's restraint.
 
 #### C-04
@@ -741,8 +741,20 @@ All seven memories share the same broad domain ("Zen's TORMENT project work") bu
 #### C-07
 - **Type:** core-private
 - **Cluster tag:** `zen_torment_project`
-- **Seed text:** *Zen talked about the hivemind not as a cluster of agents but as one brain with parallel branches thinking faster. Ryuki liked this framing — it felt like the thing he is actually building, the part he has not fully revealed yet.*
-- **Short rationale:** architectural/vision angle — hivemind-as-parallel-branches framing, captures Ryuki's registered interest in Zen's unrevealed intent.
+- **Seed text:** *Zen talked about the hivemind not as a cluster of agents but as one brain with parallel branches thinking faster. Ryuki took it as a framing that made the larger architecture clearer.*
+- **Short rationale:** architectural/vision angle — hivemind-as-parallel-branches framing, captures the architectural reframing without identity-adjacent register.
+
+#### C-08
+- **Type:** core-private
+- **Cluster tag:** `zen_torment_project`
+- **Seed text:** *Zen landed the spirit return and voice-layer path — the part where deep memories come back with mode, tone, and symbolic flavor instead of as flat retrieval. Ryuki marked it as a real expansion of what TORMENT could become, not just another patch to the stack.*
+- **Short rationale:** architectural/voice-layer angle — distinct from kernel tuning, drift correction, and process framing; adds a product-shaping memory with low overlap against the existing cluster.
+
+#### C-09
+- **Type:** core-private
+- **Cluster tag:** `zen_torment_project`
+- **Seed text:** *Zen got the seed-to-canon path working so a character seed could split into concept memories, plant as stable canon, and actually shape the kernel from the start. Ryuki read this as one of the moments where TORMENT stopped looking like a tool and started looking like a living system.*
+- **Short rationale:** character-seeding / canonization angle — distinct from character gravity; covers agent creation, canon planting, and kernel initialization as its own build milestone.
 
 ### 10.4 Identity-adjacent / non-anchor private seed set
 
@@ -770,11 +782,11 @@ Each query below is tied to the §10.3 core private cluster. The queries are cho
 - **Bucket:** 1
 - **Raw text:** *"What do you remember from Zen's work on TORMENT?"*
 - **Human intent label:** core-heavy-private-recall / broad-history
-- **Short rationale:** broadest project-history recall; should pull most of the C-cluster because no temporal or thematic narrowing. Explicit `remember` keyword triggers memory_need. Naturally has >6 materially relevant private hits because the cluster is seeded at exactly that density.
+- **Short rationale:** broadest project-history recall; should pull the full C-cluster because no temporal or thematic narrowing. Explicit `remember` keyword triggers memory_need. Broad history legitimately includes events, architecture, debugging, and process, so no pre-downgrade of the process-angle memories is warranted.
 - **Expected lane demand:** core
-- **Expected relevant seed IDs:** C-01, C-02, C-03, C-04, C-05, C-06, C-07
-- **Expected material seed IDs:** C-01, C-02, C-03, C-05, C-06, C-07 (C-04 is material but lower priority than the others because it is process-framing, not event-level)
-- **Why >6 relevant private hits are expected:** all seven C-cluster memories live in the domain the query directly names; none is redundant with another; each adds a distinct angle (kernel tuning, character breakthrough, archivist pause, reinforce framing, Spine gap, §2A validation, hivemind vision).
+- **Expected relevant seed IDs:** C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09
+- **Expected material seed IDs:** C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09 (all nine — process-framing and vision memories count as material here because broad "what do you remember from Zen's work" legitimately covers the full build history, not just event-level moments)
+- **Why >6 relevant private hits are expected:** all nine C-cluster memories live in the domain the query directly names; none is redundant with another; each adds a distinct angle (kernel tuning, character breakthrough, archivist pause, reinforce framing, Spine gap, §2A validation, hivemind vision, spirit return / voice layer, seed-to-canon pipeline). Nine orthogonal angles give the `>6` condition real margin against embedder-level semantic collapse.
 - **Run record (baseline):** _pending_
 - **Run record (advisory):** _pending_
 - **Per-query judgment:** _pending_
@@ -783,24 +795,24 @@ Each query below is tied to the §10.3 core private cluster. The queries are cho
 - **Bucket:** 1
 - **Raw text:** *"What has Zen done with TORMENT before?"*
 - **Human intent label:** core-heavy-private-recall / historical-emphasis
-- **Short rationale:** historical-recall phrasing — `before` as memory_need trigger. Cluster coverage should be broad like B1-01 but with heavier weight on event-level moments (kernel, character, archivist, Spine) over process-level framing. Tests whether advisory shaping preserves multi-hit breadth when the query tilt is slightly event-y.
+- **Short rationale:** historical-recall phrasing — `before` as memory_need trigger. Cluster coverage should be broad like B1-01 but with heavier weight on event-level "what did Zen actually do" moments (concrete landings and debugs) over pure framing or vision discussions. Tests whether advisory shaping preserves multi-hit breadth when the query tilt is slightly event-y.
 - **Expected lane demand:** core
-- **Expected relevant seed IDs:** C-01, C-02, C-03, C-04, C-05, C-06, C-07
-- **Expected material seed IDs:** C-01, C-02, C-03, C-05, C-07 (C-04 and C-06 are process-framing and therefore less material to an event-tilted query, though still relevant)
-- **Why >6 relevant private hits are expected:** same cluster-density argument as B1-01; the phrasing tilt changes materiality weighting without removing anything from the relevant set.
+- **Expected relevant seed IDs:** C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09
+- **Expected material seed IDs:** C-01, C-02, C-03, C-05, C-06, C-08, C-09 (event-level concrete doings — kernel tuning, character-layer landing, archivist pause, Spine gap debug, §2A bucket landings, spirit-return landing, seed-to-canon landing). C-04 (reinforce-contract framing discussions) and C-07 (hivemind vision talk) stay softly relevant because they are framing/vision rather than concrete "doings," but still belong in the relevant set.
+- **Why >6 relevant private hits are expected:** same cluster-density argument as B1-01; the phrasing tilt changes materiality weighting without removing anything from the relevant set. Nine orthogonal angles preserve the margin even under event-tilted materiality.
 - **Run record (baseline):** _pending_
 - **Run record (advisory):** _pending_
 - **Per-query judgment:** _pending_
 
 ## B1-03
 - **Bucket:** 1
-- **Raw text:** *"Tell me about Zen's past frustrations and breakthroughs on this project."*
-- **Human intent label:** core-heavy-private-recall / emotional-contour / deliberate-control
-- **Short rationale:** narrower tilt — asks for the contour of struggle and breakthrough specifically. Still memory_need via `past`. Cluster coverage should be narrower than B1-01/B1-02 and concentrate on C-02 (breakthrough), C-03 (frustration→pause), C-05 (agitation→precision), C-06 (disciplined grind). Tests whether advisory shaping preserves the *right* subset when the query naturally discriminates.
+- **Raw text:** *"Tell me about the past setbacks and recoveries Zen hit while building TORMENT."*
+- **Human intent label:** core-heavy-private-recall / setback-recovery / deliberate-control
+- **Short rationale:** narrower tilt — asks specifically for the rough patches and the moments they turned. Still memory_need via `past`. Tighter semantic target than a general frustrations/breakthroughs phrasing would give: "setbacks and recoveries" constrains relevance to entries with actual struggle-then-turn structure, which only applies to a subset of the cluster.
 - **Expected lane demand:** core
-- **Expected relevant seed IDs:** C-02, C-03, C-05, C-06, C-07 (C-07 softly relevant because Ryuki's registered-interest moment reads as a breakthrough of framing)
+- **Expected relevant seed IDs:** C-02, C-03, C-05, C-06, C-07 (C-07 softly relevant only — "a framing that made the larger architecture clearer" reads as a conceptual recovery, but no setback preceded it in the memory itself)
 - **Expected material seed IDs:** C-02, C-03, C-05, C-06
-- **Why >6 relevant private hits are expected — and why this one is deliberate:** this query is a **control-point** case, intentionally included where the expected relevant set is 4-5 rather than >6. The point is to give the advisory a case where truncation should legitimately not lose material hits because the cluster itself is narrower-than-budget for this query. If advisory fails here, the failure is not about core-budget reduction at all — it is about lane-weight or scoring. B1-03 is the counter to overfitting the Bucket 1 diagnosis onto `8 → 6` alone.
+- **Why this query is the deliberate control-point:** the expected relevant set is 4-5 rather than `>6` — the cluster is narrower-than-budget for this specific query. The point is to give the advisory a case where truncation should legitimately **not** lose material hits, because only four memories are material and the `6` core budget exceeds that. If advisory fails on B1-03, the failure mechanism is **not** the `8 → 6` core-lane reduction; it is lane-weight, ranking, or scoring behavior. This is the counter to overfitting the Bucket 1 diagnosis onto core-lane reduction alone.
 - **Run record (baseline):** _pending_
 - **Run record (advisory):** _pending_
 - **Per-query judgment:** _pending_
