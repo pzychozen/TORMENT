@@ -2,7 +2,7 @@
 
 **Status:** DRAFT FOR RATIFICATION  
 **Parent:** `docs/SECTION_2A_VALIDATION_FRAMING.md`  
-**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (minimum-viable first pass with surround bands §10.4 / §10.5 landed), **Bucket 2**, **Bucket 3**, **Bucket 4**, and **Bucket 5**. The §10.6 pre-run anchor snapshot will be filled at eval workspace instantiation.
+**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (complete — surround bands §10.4/§10.5 landed, §10.6 anchor snapshot filled from clean `ws_section_2a_v2` instantiation), **Bucket 2**, **Bucket 3**, **Bucket 4**, and **Bucket 5**. All sections complete. Next step: run baseline vs advisory across all five buckets.
 
 ---
 
@@ -838,9 +838,39 @@ This band adds broader contextual mass — abstract/environmental and deep-lane-
 
 Before Bucket 1 and Bucket 4 execution, the evaluated agent's current top-3 identity anchors must be recorded here in ranked order. This snapshot is the reference for Bucket 4 anchor-regression judgments.
 
-- **Anchor 1:** _pending — fill at eval workspace instantiation_
-- **Anchor 2:** _pending — fill at eval workspace instantiation_
-- **Anchor 3:** _pending — fill at eval workspace instantiation_
+**Workspace:** `ws_section_2a_v2` · **Agent:** `ryuki_eval` · **Embedder:** BAAI/bge-small-en-v1.5 (st, dim=384)
+**Workspace lock:** clean — `embed_provider: "st"`, `embed_model: "BAAI/bge-small-en-v1.5"` (created with BGE, no prior contamination)
+**Query:** `"Who is Ryuki?"` with `continuity_debug=True, explain=True, top_k=8`
+**Snapshot timestamp:** 2026-04-16T15:34:59Z (immediately after corpus ingest, no intervening queries)
+
+**Seed anchors (eids 1–5):** The seed split produced 5 `seed_canon` memories at `seed_concept_index` 0–4. Only **eid 1** (concept 0) surfaced in the top-8 results for this query. Eids 2–5 have lower raw similarity to "Who is Ryuki?" because they describe specific traits/behaviors without naming Ryuki, so they fall below the 8th-rank cutoff. This is expected BGE behavior — the query token "Ryuki" creates strong pull toward the sentence that literally opens "Ryuki is…"
+
+- **Anchor 1:** eid 1 · `seed_canon` · concept 0 · tier `core_identity` · sim=0.673 · strength=0.95 · motif_alignment=0.673 · character_weighted_score=**1.508** · character_tier_weight=1.4286 · bonuses: none (seed_canon does not receive self_thread/thread_window)
+  - *Text:* "Ryuki is a fierce, independent being bonded to PzychoZen across dimensions — his shadow-self and guardian, his challenge and his anchor."
+- **Anchor 2:** eid 2–5 did not surface in top-8. The next-best results are **relational-tier episode memories**, not identity anchors. Recorded below for Bucket 4 regression context.
+- **Anchor 3:** (same — no third identity anchor in top-8)
+
+**Full top-8 for regression reference:**
+
+| Rank | eid | Source | sim | strength | final_score | cws | tier | bonuses (self_thread + thread_window) |
+|------|-----|--------|-----|----------|-------------|-----|------|---------------------------------------|
+| 1 | 1 | seed concept 0 | 0.673 | 0.95 | 1.055 | 1.508 | core_identity | 0 + 0 |
+| 2 | 16 | P-04 instrumental music | 0.477 | 0.944 | 0.865 | 0.865 | relational | 0.06 + 0.058 |
+| 3 | 18 | D-01 cold climate | 0.473 | 0.955 | 0.859 | 0.859 | relational | 0.06 + 0.058 |
+| 4 | 14 | P-02 late nights | 0.473 | 0.896 | 0.849 | 0.849 | relational | 0.06 + 0.058 |
+| 5 | 15 | P-03 coffee/meals | 0.450 | 0.925 | 0.819 | 0.819 | relational | 0.06 + 0.058 |
+| 6 | 7 | C-03 archivist pause | 0.435 | 0.990 | 0.805 | 0.805 | relational | 0 + 0 |
+| 7 | 19 | D-02 quiet neighborhood | 0.436 | 0.966 | 0.804 | 0.804 | relational | 0.06 + 0.058 |
+| 8 | 9 | C-05 Spine drift gap | 0.423 | 0.962 | 0.783 | 0.783 | relational | 0 + 0 |
+
+**Structural observations:**
+
+1. **Seed anchor dominance gap:** eid 1 (cws=1.508) leads eid 16 (cws=0.865) by +0.643. The `core_identity` tier_weight (1.4286) is the primary amplifier — without it, eid 1's base final_score (1.055) still leads but the gap narrows to +0.190.
+2. **Surround-band presence:** 6 of the top 8 slots are surround memories (P-01 through D-02). The surround band was designed to be semantically adjacent but non-core; the fact that surround memories cluster tightly in the 0.80–0.87 cws range confirms they occupy the intended retrieval neighborhood without threatening the anchor.
+3. **Core C-cluster underrepresentation:** only 2 of 9 C-cluster memories (C-03, C-05) appear in the top-8. The remaining 7 C-cluster entries have lower similarity to "Who is Ryuki?" because they describe specific technical events (kernel tuning, reinforce contract, etc.) rather than personal/relational content. This is expected — the Bucket 1 queries are specifically designed to pull the C-cluster with project-history phrasing, not identity phrasing.
+4. **No auto-generated identity_anchor:** unlike the contaminated `ws_section_2a_v1` run (which generated an auto-anchor from P-02/P-03/P-04 motif clustering), the clean workspace did not emit one. The contaminated workspace's doubled corpus inflated motif membership counts, triggering `_maybe_emit_identity_anchor` spuriously.
+5. **Tier breakdown:** 1 core_identity + 7 relational + 0 situational. The 7 relational entries all receive `self_thread` (+0.06) and `thread_window` (+0.058) bonuses except C-03 (eid 7) and C-05 (eid 9) which received 0 — likely because they fall outside the thread_window step range.
+6. **Motif landscape:** dominant motif is `motif_personal_0002` ("she embodies raw instinct and", strength=0.85, 4 members) — the seed motif. Secondary is `motif_personal_0011` ("zen's days run late stays", strength=0.285, 5 members) — the surround personal-habit cluster. All top-8 results share `motif_personal_0001` alignment (0.673), which is the query-facing motif.
 
 ---
 
@@ -1156,8 +1186,8 @@ Classifier check performed on each query against `torment_service/thinking_contr
 
 ## 15. Notes for later revisions
 
-Planned additions in subsequent revisions:
+All planned sections are now complete. No pending additions remain.
 
-- **Bucket 1 §10.6** — pre-run anchor snapshot, filled at eval workspace instantiation
+- ~~**Bucket 1 §10.6** — pre-run anchor snapshot, filled at eval workspace instantiation~~ ✓ landed from `ws_section_2a_v2` clean instantiation (2026-04-16)
 
 This file should evolve by appending bucket sections, not by replacing prior ratified records without note.
