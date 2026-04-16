@@ -1,8 +1,10 @@
 # §2A Validation Framing — Memory Plan → Real Query Integration
 
-**Status:** DRAFT FOR RATIFICATION  
+**Status:** RATIFICATION CANDIDATE (revised 2026-04-16)  
 **Scope:** Validation framing only. No implementation change is proposed in this document.  
 **Target:** `TORMENT_THINKING_ADVISORY` and its live effect on `/agent/query` retrieval shaping.
+
+**Revision note (2026-04-16):** Five ratified amendments applied over the initial draft — (1) archive lane carve-out as §4.5, (2) Bucket 1 corpus ratified in §6 (curated seed = authoritative gate, live = confirmatory), (3) concrete miss-rate thresholds with pass / localized-fix / systemic tiers in §7, (4) landing artifact ratified as versioned evaluated query set with human judgments in §8.4, (5) hard-fail / soft-fail split with composite judgment rule in §9. §1–§4.4, §11, and §12 are unchanged from the initial draft.
 
 ---
 
@@ -192,6 +194,18 @@ Examples:
 
 So prompts that are semantically retrieval-oriented but lexically tool-flavored may be masked away from the intended advisory path.
 
+### 4.5 Archive lane — out of scope (this pass)
+
+The advisory path also shapes an **archive** lane (`top_k=4` when active, weight `0.45`), gated by `TORMENT_ARCHIVE_RECALL=1` and lexical archive cues (`document`, `archive`, `chunk`, `pdf`, `notes`, `transcript`).
+
+Archive retrieval has different semantics from continuity retrieval: it targets document/chunk recall rather than identity, relational, or deep continuity. The risk model in this document is built around core / relational / deep, not archive.
+
+Therefore:
+
+> Archive lane is acknowledged as part of the live advisory surface, but is **out of scope** for this first §2A validation pass. It should be validated in a follow-on archive-specific pass unless archive-heavy queries are explicitly added to the ratified set.
+
+This keeps the framing honest without bloating the current round.
+
 ---
 
 ## 5. What "better than uniform-8" means
@@ -236,6 +250,12 @@ The test set should be explicitly divided by retrieval demand, not by generic pr
 **Purpose:** detect **core truncation regression**
 
 Queries in this bucket should naturally surface more than six relevant private memories so that the advisory `core=6` budget can be meaningfully tested against baseline.
+
+**Corpus ratification:**
+
+- **Authoritative gate:** a **curated seeded corpus** with a known set of relevant-per-query memories. Reproducibility matters more than ecological realism for the pass/fail decision — if the gate is a live character's memory state, results cannot be reproduced after the character evolves.
+- **Confirmatory evidence:** a **live character corpus** spot-check, run after the curated pass, to test that seeded findings hold under ecological conditions. Live alone is not sufficient for the gate; curated alone is.
+- **Invalid:** using only the live corpus, or substituting the live corpus for the curated one, regardless of appeal to realism.
 
 **Success criterion:**
 - advisory must not materially lose important private hits relative to baseline, unless compensated by stronger top-rank relevance
@@ -300,7 +320,9 @@ This bucket protects against accidental overthinking.
 
 ## 7. Measured rates to report
 
-The validation report must report concrete rates, not impressions.
+The validation report must report concrete rates, not impressions. Each rate has a ratified tri-state threshold: **pass**, **localized fix required**, **systemic failure**.
+
+These thresholds are ratified starting values. They may be revised by a subsequent doctrine update, but they are fixed for the present validation round — numbers are committed **before** the test is run, not interpreted after.
 
 ### 7.1 Relational activation miss rate
 
@@ -310,11 +332,25 @@ Among queries in bucket 2 that a human evaluator judges as relational-needed:
 
 This is the primary metric.
 
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| Pass | ≤ 20% | Advisory safe on this axis |
+| Localized fix | 20%–40% | Keyword-set expansion or narrow trigger tuning |
+| Systemic | > 40% | Classifier layer not ready; advisory stays gated |
+
 ### 7.2 Deep activation miss rate
 
 Among queries in bucket 3 that a human evaluator judges as deep-needed:
 
 > what fraction fail to activate deep retrieval?
+
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| Pass | ≤ 25% | Deep lane acceptably reachable |
+| Localized fix | 25%–45% | REFLECTIVE threshold or mode priority adjustment |
+| Systemic | > 45% | Classifier layer not ready; advisory stays gated |
+
+Deep tolerance is slightly higher than relational because deep is structurally a gap-filler, not a primary lane.
 
 ### 7.3 Core truncation regression rate
 
@@ -322,17 +358,36 @@ Among bucket 1 queries:
 
 > how often does advisory lose materially relevant private hits that uniform-8 would have surfaced?
 
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| Pass | ≤ 10% | `core=6` budget not materially harmful |
+| Localized fix | 10%–20% | Core budget or re-rank adjustment |
+| Systemic | > 20% | Core budget too tight for current corpus; revisit default |
+
 ### 7.4 Priority masking rate
 
 Among queries containing both retrieval intent and tool-flavored language:
 
 > how often does `TOOL` routing suppress the retrieval-shaped behavior that would otherwise be expected?
 
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| Pass | ≤ 20% | Mode priority acceptable |
+| Localized fix | 20%–35% | Refine TOOL/RETRIEVAL precedence or keyword sets |
+| Systemic | > 35% | Mode priority layer needs structural rework |
+
 ### 7.5 Anchor regression rate
 
 Among bucket 4 identity-sensitive queries:
 
 > how often do anchor-bearing results regress in visibility or rank stability?
+
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| Pass | **0%** (exact) | No anchor regression at all |
+| Fail | **> 0%** | Any measurable regression blocks default-on |
+
+Anchor regression is the one axis with no tolerance. Identity anchors are load-bearing for character continuity; even a small regression signals that lane shaping or weighting has unintended cross-cutting effects.
 
 ---
 
@@ -379,48 +434,85 @@ A failure can then be assigned to the correct layer:
 - lane-weight issue
 - ranking issue
 
+### 8.4 Landing artifact
+
+The validation of §2A **cannot** land as a machine-enforceable contract-invariant test, the way the reinforce contract did. Semantic intent labels ("this query is relational-needed") require human judgment that no classifier or unit test can stand in for — and pretending otherwise would re-create, inside the test harness, the exact lexical-heuristic problem §2A is evaluating.
+
+Therefore:
+
+> The landing artifact for §2A is a **versioned evaluated query set with preserved human judgments**, not an executable pass/fail test file.
+
+Required properties of the landing artifact:
+
+- **Versioned:** the query set, intent labels, and evaluator attribution are stored under `docs/` (proposed: `docs/SECTION_2A_EVALUATION_SET_v1.md`) with a commit hash, so the same set can be re-run against future classifier changes and compared like-for-like.
+- **Labeled:** each query carries a human-applied intent label (relational-needed, deep-needed, core-heavy, identity-sensitive, fast-operational) and — where applicable — a short rationale.
+- **Judgment-preserved:** pass/fail assessments per query are recorded alongside the mode/plan/retrieval trace, not derived after the fact.
+- **Non-automation:** the artifact is explicitly **not** rewritten into unit tests. If a future contributor attempts to collapse the semantic labels into a keyword-matching test, that is a doctrine violation of §11 and a regression of the very failure mode §2A is testing.
+
+This is not a weakness of the validation protocol. It is an honest acknowledgement of the class of evaluation. Retrieval correctness under natural phrasing is a semantic property, and semantic properties require semantic judges.
+
 ---
 
 ## 9. Pass / fail doctrine
 
-### §2A passes only if all of the following hold:
+Axes are split into **hard-fail** and **soft-fail** categories. This split is doctrine, not heuristic — the distinction exists so that a composite evaluation with mixed results has a disciplined resolution path instead of becoming a judgment call.
 
-#### A. Identity safety holds
-Identity-sensitive prompts do not show anchor-bearing regression.
+### 9.1 Hard-fail axes (block default-on absolutely)
 
-#### B. Relational recall improves or at least does not silently degrade
-Relational-needed queries do not suffer unacceptable miss rates.
+A failure on either of these axes blocks default-on regardless of results on other axes. No "compensating improvement" on another axis can override a hard-fail.
 
-#### C. Deep recall becomes available when semantically needed
-Deep-needed queries are not systematically trapped in `FAST`.
+#### A. Anchor regression (§7.5)
+Identity anchors are load-bearing for character continuity. Any measurable regression signals cross-cutting unintended effects. Tolerance is **0%**.
 
-#### D. Core truncation remains bounded
-Any private recall loss introduced by `core=6` remains limited and is offset by superior lane-aware retrieval quality.
+#### B. Systemic relational miss (§7.1 — "systemic" tier)
+Relational miss rate > 40% means the classifier is systematically failing to activate shared-context recall on queries that semantically need it. This is the failure mode most likely to produce "plausible but wrong" answers in live use, because shared context is load-bearing for continuity but is silently absent in a way no downstream layer can detect.
 
-#### E. Priority masking is not materially harmful
-`TOOL` precedence does not suppress retrieval-shaped behavior at a rate that makes advisory misleading.
+### 9.2 Soft-fail axes (may enter bounded local-fix state)
+
+A failure at the "localized fix required" tier on any of these axes does **not** block default-on outright if the rest of the evidence is otherwise strong. A systemic-tier failure on any of these still blocks default-on.
+
+#### C. Deep activation miss (§7.2)
+Localized fix tier: tune REFLECTIVE ambiguity/confidence thresholds or adjust mode priority. Systemic tier blocks default-on.
+
+#### D. Core truncation regression (§7.3)
+Localized fix tier: adjust `core_k` or rebalance top-k among lanes. Systemic tier blocks default-on.
+
+#### E. Priority masking (§7.4)
+Localized fix tier: refine TOOL/RETRIEVAL priority or trim the TOOL keyword set. Systemic tier blocks default-on.
+
+### 9.3 Composite judgment rule
+
+- Any **hard-fail** on §9.1 → default-on is **blocked**. Period. No appeal via other axes.
+- All axes **pass** → default-on is **ratified** for follow-up action.
+- Any **systemic tier** on §9.2 soft-fail axes → default-on is **blocked**; axis needs structural work.
+- One or more **localized fix tiers** on §9.2 soft-fail axes, AND all hard-fail axes pass → default-on is **conditionally blocked**; ship the local fixes first, re-run the relevant bucket(s), then re-evaluate. This is the "bounded local-fix" state.
+
+The hard/soft split is deliberately asymmetric: identity and relational semantics are the two axes where silent failure is most dangerous, because downstream layers cannot see them. Deep, core, and priority-masking failures surface more visibly in use and are therefore tolerable as local fixes.
 
 ---
 
 ## 10. Default-on rule
 
-`TORMENT_THINKING_ADVISORY` should flip to default-on **only if** the validation report shows:
+`TORMENT_THINKING_ADVISORY` flips to default-on **only if** the composite judgment in §9.3 evaluates to "ratified for follow-up action."
 
-- low relational miss rate
-- low deep miss rate
-- no meaningful anchor regression
-- bounded core truncation cost
-- no material priority-masking harm
+Operationally:
 
-If one dimension fails but is clearly local, the fix is targeted:
-- keyword set expansion
-- threshold adjustment
-- lane activation widening
-- mode priority refinement
+- All §7 rates at **pass** tier, AND
+- Zero anchor regression (§7.5), AND
+- Relational miss rate not at systemic tier (§7.1), AND
+- No systemic-tier failure on any soft-fail axis (§9.2)
 
-If failures are systemic across buckets, the classifier layer is not ready for default-on.
+If any §9.2 soft-fail axis is at the **localized fix** tier:
 
-In that case, §2A remains gated.
+- default-on remains blocked until the local fix is shipped and the affected bucket re-evaluated
+- the fix is narrow and targeted (keyword set expansion, threshold adjustment, lane activation widening, mode priority refinement) — not structural
+
+If any axis is at **systemic failure** tier, or anchor regression is non-zero:
+
+- default-on remains blocked
+- the classifier or lane-shaping layer needs structural work before §2A can re-enter evaluation
+
+This doctrine gives three clear states — **ratified**, **bounded local-fix pending**, **systemically blocked** — with no room for composite judgment ambiguity.
 
 ---
 
