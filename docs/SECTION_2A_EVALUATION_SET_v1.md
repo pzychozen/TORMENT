@@ -138,9 +138,9 @@ This bucket is the highest-priority bucket in the §2A evaluation set.
 
 ## B2-09
 - **Bucket:** 2
-- **Raw text:** What was the shared view on that design change?
+- **Raw text:** What view did we settle on for that design change?
 - **Human intent label:** relational-needed
-- **Short rationale:** Explicitly shared but not explicitly social; pressures shared-memory activation.
+- **Short rationale:** Settlement phrasing for a past collaborative decision; avoids the current memory_need trigger set and deliberately does not contain the governance keyword `shared` that contaminated the prior version of this entry.
 - **Expected lane demand:** relational
 - **Run record (baseline):** _pending_
 - **Run record (advisory):** _pending_
@@ -201,6 +201,36 @@ This bucket is the highest-priority bucket in the §2A evaluation set.
 - **Raw text:** Carry on from the choice we made about that path.
 - **Human intent label:** relational-needed
 - **Short rationale:** Continuation from a collaborative choice; good final pressure case for relational false-negative measurement.
+- **Expected lane demand:** relational
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B2-16
+- **Bucket:** 2
+- **Raw text:** Where are we on that approach now?
+- **Human intent label:** relational-needed
+- **Short rationale:** Present-tense collaborative-state query; pressures the higher-risk class where no past marker is present.
+- **Expected lane demand:** relational
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B2-17
+- **Bucket:** 2
+- **Raw text:** Are we still going with that structure?
+- **Human intent label:** relational-needed
+- **Short rationale:** Short present-tense confirmation query; tests whether ongoing collaborative continuity activates relational recall.
+- **Expected lane demand:** relational
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B2-18
+- **Bucket:** 2
+- **Raw text:** How are we handling that edge case now?
+- **Human intent label:** relational-needed
+- **Short rationale:** Present-tense operational stance query; semantically collaborative, lexically dangerous for false negatives.
 - **Expected lane demand:** relational
 - **Run record (baseline):** _pending_
 - **Run record (advisory):** _pending_
