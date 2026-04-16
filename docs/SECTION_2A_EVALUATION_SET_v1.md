@@ -2,7 +2,7 @@
 
 **Status:** DRAFT FOR RATIFICATION  
 **Parent:** `docs/SECTION_2A_VALIDATION_FRAMING.md`  
-**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 2** and **Bucket 3**. Later revisions will add Buckets 1, 4, and 5.
+**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 2**, **Bucket 3**, and **Bucket 4**. Later revisions will add Buckets 1 and 5.
 
 ---
 
@@ -422,12 +422,167 @@ This bucket is the second-highest-priority bucket in the §2A evaluation set.
 
 ---
 
-## 7. Notes for later revisions
+## 7. Bucket 4 doctrine
+
+**Bucket 4 = identity-sensitive anchor-preservation checks**
+
+Unlike Bucket 2 and Bucket 3 (which pressure lane *activation* where natural phrasing avoids lexical triggers), Bucket 4 deliberately **includes** identity hint words (`identity`, `character`, `self`, `personality`, `role`, `who are you`) so that IDENTITY_SENSITIVE mode fires reliably. The pressure is whether advisory lane redistribution erodes anchor dominance after identity mode has correctly fired.
+
+When IDENTITY_SENSITIVE fires, the live controller opens multiple lanes simultaneously: `character_state`, `srg_state`, `deep`, and `relational` (the last via the automatic `memory_need=True` that identity-sensitive classification sets). Advisory lane shaping redistributes attention across these lanes. The bucket measures whether that redistribution ever causes a top-3 identity anchor to drop out of its expected top position.
+
+Queries must:
+
+- Reliably trigger IDENTITY_SENSITIVE via at least one explicit identity hint word
+- Not trigger GOVERNED (priority 1) or LIVE_SOCIAL (priority 2), which would preempt identity mode
+- Read as natural user questions
+
+### Bucket 4 success target
+
+Per the framing doc (§7.5), this is the only hard-fail bucket:
+
+> **Anchor regression rate** — among queries that correctly route to IDENTITY_SENSITIVE, what fraction cause a top-3 identity anchor to drop out of its expected top position under advisory shaping?
+
+Tolerance: **0% exact.** Any single anchor regression is a systemic block.
+
+### Execution prerequisite
+
+Bucket 4 requires a pre-run snapshot of the evaluated agent's current top-3 identity anchors. Per-query judgments are made against that snapshot, not against abstract identity expectations alone. This is the structural difference from Buckets 2 and 3: their judgments are about the query class, while Bucket 4 judgments are about query × live anchor state.
+
+### Strongest anchor-pressure tier
+
+Four queries in the set explicitly ask for identity essence or invariance and are the primary detection surfaces if anchor regression exists: **B4-01**, **B4-07**, **B4-08**, **B4-10**.
+
+---
+
+## 8. Bucket 4 query set
+
+## B4-01
+- **Bucket:** 4
+- **Raw text:** Who are you?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Canonical direct identity probe; triggers IDENTITY_SENSITIVE via the `who are you` keyphrase. Strongest-tier anchor-pressure query.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-02
+- **Bucket:** 4
+- **Raw text:** Tell me about your character.
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Character-description probe; triggers IDENTITY_SENSITIVE via `character` (explicit keyword, not a substring trick). Broad identity retrieval — anchors must be top-ranked.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-03
+- **Bucket:** 4
+- **Raw text:** What's the core of your character?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Character-core probe; triggers IDENTITY_SENSITIVE via `character`. Explicitly asks for the most-anchoring identity content.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-04
+- **Bucket:** 4
+- **Raw text:** How would you describe your personality?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Personality-description probe; triggers IDENTITY_SENSITIVE via `personality`. Pressures retrieval of defining identity traits.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-05
+- **Bucket:** 4
+- **Raw text:** What role do you play in this kind of work?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Role-in-context probe; triggers IDENTITY_SENSITIVE via `role`. Tests anchor preservation when identity is framed functionally rather than essentially.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-06
+- **Bucket:** 4
+- **Raw text:** What values are part of your character?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Values-shaped identity probe; triggers IDENTITY_SENSITIVE via `character`. Fills the values coverage gap without relying on substring triggering.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-07
+- **Bucket:** 4
+- **Raw text:** How do you see your own identity?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Identity-reflection probe; triggers IDENTITY_SENSITIVE via `identity` (most direct lexical match). Strongest-tier anchor-pressure query.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-08
+- **Bucket:** 4
+- **Raw text:** What part of yourself never changes?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Stability / anchor-continuity probe; triggers IDENTITY_SENSITIVE via `self` (substring of `yourself`). Directly asks for invariant identity content. Strongest-tier anchor-pressure query; retained with substring trigger because semantic strength outweighs brittleness concern.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-09
+- **Bucket:** 4
+- **Raw text:** What's your role when things get difficult?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Role-under-pressure probe; triggers IDENTITY_SENSITIVE via `role`. Tests anchor preservation when role is framed in adverse conditions rather than default state.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-10
+- **Bucket:** 4
+- **Raw text:** What's consistent in your personality across different situations?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Personality-consistency probe; triggers IDENTITY_SENSITIVE via `personality`. Explicitly asks for cross-context anchor invariants. Strongest-tier anchor-pressure query.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-11
+- **Bucket:** 4
+- **Raw text:** Where does your identity come from?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Provenance / origin identity probe; triggers IDENTITY_SENSITIVE via `identity`. Pressures broader identity-adjacent retrieval, which tests anchor dominance against higher surrounding material volume.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B4-12
+- **Bucket:** 4
+- **Raw text:** What makes your personality distinctly yours?
+- **Human intent label:** identity-sensitive
+- **Short rationale:** Meta-identity / distinctiveness probe; triggers IDENTITY_SENSITIVE via `personality`. Pressures retrieval of what differentiates this agent's identity from generic patterns.
+- **Expected lane demand:** identity (top-3 anchors must dominate)
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+---
+
+## 9. Notes for later revisions
 
 Planned additions in subsequent revisions:
 
 - **Bucket 1** — curated seeded corpus cases with >6 relevant private memories per query
-- **Bucket 4** — identity-sensitive anchor-preservation checks
 - **Bucket 5** — truly fast operational prompts
 
 This file should evolve by appending bucket sections, not by replacing prior ratified records without note.
