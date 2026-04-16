@@ -92,8 +92,13 @@ class TestClassification:
         hit = _core_hit(1, "I am a dreamer", mtype="seed_canon")
         assert _classify_core_hit(hit) == BLOCK_IDENTITY
 
-    def test_identity_anchor_is_identity(self):
-        hit = _core_hit(2, "Anchor memory", mtype="identity_anchor")
+    def test_identity_anchor_canon_is_identity(self):
+        hit = _core_hit(2, "Anchor memory", mtype="identity_anchor", canon=True)
+        assert _classify_core_hit(hit) == BLOCK_IDENTITY
+
+    def test_identity_anchor_derived_with_tier_is_identity(self):
+        """Non-canon identity_anchor with derived_identity tier stays in identity block (§2A P3)."""
+        hit = _core_hit(2, "Anchor memory", mtype="identity_anchor", half_life=3650.0, tier="derived_identity")
         assert _classify_core_hit(hit) == BLOCK_IDENTITY
 
     def test_drift_correction_is_identity(self):

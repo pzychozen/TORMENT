@@ -144,8 +144,12 @@ def _classify_core_hit(hit: Dict[str, Any]) -> str:
     half_life = float(hit.get("half_life", 30.0))
     canon = bool(hit.get("canon", False))
 
-    # Seed canon and identity anchors are always identity
-    if mtype in ("seed_canon", "drift_correction", "identity_anchor"):
+    # Seed canon and drift corrections are always identity block
+    if mtype in ("seed_canon", "drift_correction"):
+        return BLOCK_IDENTITY
+    # Canon identity anchors stay in identity block; non-canon (derived)
+    # fall through to tier-based classification below (§2A P3)
+    if mtype == "identity_anchor" and canon:
         return BLOCK_IDENTITY
     if canon:
         return BLOCK_IDENTITY
@@ -161,7 +165,9 @@ def _classify_core_hit(hit: Dict[str, Any]) -> str:
         return BLOCK_SITUATIONAL
 
     # Tier-based (from character.py classify_tier logic)
-    if tier == "core_identity" or half_life >= 365.0:
+    # derived_identity stays in BLOCK_IDENTITY — the weight (1.2x vs 1.43x)
+    # is the meaningful correction, not block assignment (§2A P3)
+    if tier in ("core_identity", "derived_identity") or half_life >= 365.0:
         return BLOCK_IDENTITY
     if tier == "relational" or half_life >= 7.0:
         return BLOCK_RELATIONAL

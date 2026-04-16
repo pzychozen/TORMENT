@@ -130,6 +130,7 @@ class CharacterSeed:
 
     # Tier weights for context assembly
     core_weight: float = 0.50
+    derived_weight: float = 0.42           # auto-emitted identity anchors (D3)
     relational_weight: float = 0.35
     situational_weight: float = 0.15
 
@@ -252,9 +253,18 @@ RELATIONAL_HALF_LIFE_MIN = 7.0  # 7-364 days is relational
                                  # < 7 days is situational
 
 
-def classify_tier(half_life_days: float) -> str:
-    """Classify a memory into its tier based on half-life."""
+def classify_tier(half_life_days: float, *, mtype: str = "", canon: bool = False) -> str:
+    """Classify a memory into its tier based on half-life.
+
+    Auto-emitted identity anchors (mtype="identity_anchor", canon=False) are
+    classified as "derived_identity" rather than "core_identity" so they do not
+    compete at the same tier weight as seed canon memories.  See §2A anchor-
+    hygiene ratification (D1).
+    """
     if half_life_days >= CORE_HALF_LIFE_MIN:
+        # Auto-emitted (non-canon) identity anchors get their own tier
+        if mtype == "identity_anchor" and not canon:
+            return "derived_identity"
         return "core_identity"
     elif half_life_days >= RELATIONAL_HALF_LIFE_MIN:
         return "relational"
@@ -265,6 +275,7 @@ def tier_weight(tier: str, seed: CharacterSeed) -> float:
     """Return the context-assembly weight for a given tier."""
     return {
         "core_identity": seed.core_weight,
+        "derived_identity": seed.derived_weight,
         "relational": seed.relational_weight,
         "situational": seed.situational_weight,
     }.get(tier, seed.situational_weight)
@@ -394,7 +405,7 @@ def measure_drift(
 
     # --- Collect recent non-seed memories ---
     recent_embs: List[Tuple[float, np.ndarray]] = []  # (weight, embedding)
-    tier_counts = {"core_identity": 0, "relational": 0, "situational": 0}
+    tier_counts = {"core_identity": 0, "derived_identity": 0, "relational": 0, "situational": 0}
 
     for eid, ent in graph.entities.items():
         payload = ent.payload or {}
@@ -407,10 +418,16 @@ def measure_drift(
         if payload.get("user_id") != agent_id:
             continue
 
-        # Tier classification
+        # Tier classification — pass mtype/canon so derived anchors don't
+        # inflate core_count (§2A anchor-hygiene amendment P7)
         half_life = float(payload.get("half_life", 30.0))
-        tier = classify_tier(half_life)
-        tier_counts[tier] += 1
+        _mtype = str(payload.get("mtype") or payload.get("type", ""))
+        _canon = bool(payload.get("canon", False))
+        tier = classify_tier(half_life, mtype=_mtype, canon=_canon)
+        if tier in tier_counts:
+            tier_counts[tier] += 1
+        else:
+            tier_counts[tier] = 1
 
         # Recency filter for drift measurement
         born = int(payload.get("born_step", 0) or 0)
@@ -439,6 +456,7 @@ def measure_drift(
             "seed_basin_tension": 0.0,
             "seed_basin_role": "plateau",
             "core_count": tier_counts["core_identity"],
+            "derived_count": tier_counts.get("derived_identity", 0),
             "relational_count": tier_counts["relational"],
             "situational_count": tier_counts["situational"],
             "total_recent": 0,
@@ -527,6 +545,7 @@ def measure_drift(
         "seed_basin_tension": basin_tension,
         "seed_basin_role": basin_role,
         "core_count": tier_counts["core_identity"],
+        "derived_count": tier_counts.get("derived_identity", 0),
         "relational_count": tier_counts["relational"],
         "situational_count": tier_counts["situational"],
         "total_recent": len(recent_embs),
@@ -832,16 +851,21 @@ def assemble_character_context(
     """
     tier_hits: Dict[str, List[Dict[str, Any]]] = {
         "core_identity": [],
+        "derived_identity": [],
         "relational": [],
         "situational": [],
     }
 
     for h in hits:
         half_life = float(h.get("half_life", 30.0))
+        _payload = h.get("payload") or {}
         # Try payload if top-level half_life not available
-        if "payload" in h:
-            half_life = float(h["payload"].get("half_life", half_life))
-        tier = classify_tier(half_life)
+        if _payload:
+            half_life = float(_payload.get("half_life", half_life))
+        # Extract mtype and canon for tier discrimination (§2A D1)
+        _mtype = str(h.get("type") or h.get("mtype") or _payload.get("type", ""))
+        _canon = bool(h.get("canon") or _payload.get("canon", False))
+        tier = classify_tier(half_life, mtype=_mtype, canon=_canon)
         h["character_tier"] = tier
 
         # Apply tier weight as a multiplier on final_score

@@ -1383,6 +1383,19 @@ class TormentFabric:
             emb_model = str(getattr(self.kernel.embedder, "model", ""))
             emb_ck = embedding_checksum(anchor_summary, emb_provider, emb_model)
 
+            # §2A D2: compute seed overlap for provenance tagging.
+            # Can be cached later if emission volume becomes measurable (P4).
+            _seed_eids: set = set()
+            try:
+                _cstate = self.character_store.load_state(ws.workspace_id, agent_id)
+                if _cstate and _cstate.seed_id:
+                    _cseed = self.character_store.load_seed(ws.workspace_id, _cstate.seed_id)
+                    if _cseed:
+                        _seed_eids = set(int(e) for e in (_cseed.seed_eids or []))
+            except Exception:
+                pass
+            _seed_overlap = len(_seed_eids & set(int(e) for e in agent_member_eids))
+
             strength = float(min(1.0, 0.55 + 0.08 * float(agent_count)))
             eid = g.add_memory(
                 summary=anchor_summary,
@@ -1404,6 +1417,12 @@ class TormentFabric:
                     "anchor_member_count": int(agent_count),
                     "anchor_label": label,
                     "anchor_affect_sensitive": bool(affect_sensitive),
+                    # §2A D2: provenance metadata for derived identity anchors
+                    "anchor_origin": "derived",
+                    "anchor_source": "motif_cluster",
+                    "seed_overlap_count": int(_seed_overlap),
+                    "seed_aligned": bool(_seed_overlap > 0),
+                    "source_member_eids": [int(e) for e in agent_member_eids],
                     "embedding_provider": emb_provider,
                     "embedding_model": emb_model,
                     "embedding_dim": int(emb_dim),
@@ -3444,7 +3463,15 @@ class TormentFabric:
                 _acand: List[Tuple[int, float]] = []
                 for _hh in all_hits:
                     try:
-                        if str(_hh.get("type")) != "identity_anchor":
+                        _htype = str(_hh.get("type") or "")
+                        # §2A P7: only seed-canon and drift-correction anchors
+                        # qualify for the full continuity boost.  Derived
+                        # (non-canon) identity_anchors are excluded so they
+                        # cannot bypass the tier-weight separation.
+                        if _htype == "identity_anchor":
+                            if not bool(_hh.get("canon")):
+                                continue
+                        elif _htype not in ("seed_canon", "drift_correction"):
                             continue
                         if bool(_hh.get("anchor_retired")):
                             continue
@@ -4758,7 +4785,13 @@ class TormentFabric:
             try:
                 _t_acand = []
                 for _rh in _raw_hits:
-                    if str(_rh.get("type")) != "identity_anchor":
+                    # §2A P7: parity with query() — only seed-canon and
+                    # drift-correction anchors qualify for full boost.
+                    _rh_type = str(_rh.get("type") or "")
+                    if _rh_type == "identity_anchor":
+                        if not bool(_rh.get("canon")):
+                            continue
+                    elif _rh_type not in ("seed_canon", "drift_correction"):
                         continue
                     if bool(_rh.get("anchor_retired")):
                         continue
