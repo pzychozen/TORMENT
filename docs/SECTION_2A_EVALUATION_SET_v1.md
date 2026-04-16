@@ -825,14 +825,14 @@ This band adds broader contextual mass — abstract/environmental and deep-lane-
 #### D-03
 - **Type:** deep-adjacent
 - **Cluster tag:** `zen_earlier_work`
-- **Seed text:** *Years ago Zen wrote a small data-processing pipeline for non-agent work — batch scripts and simple scheduling, no live state. It predates any of his memory or agent projects and is unrelated to them.*
-- **Short rationale:** earlier-phase system context, explicitly distanced from agent/memory work so B1 queries do not pull it; available for deep/fast buckets later.
+- **Seed text:** *Years before any agent or memory-system work, Zen wrote a small batch data-processing pipeline with simple scheduling and no live state. It belonged to an earlier, unrelated line of engineering and was not part of any character or memory architecture.*
+- **Short rationale:** earlier-phase system context, temporally distanced from agent/memory work with explicit architectural separation. Token-sanitized — TORMENT not named, to avoid embedding-pull on B1 queries under BAAI/bge-small-en-v1.5.
 
 #### D-04
 - **Type:** deep-adjacent
 - **Cluster tag:** `zen_earlier_work`
-- **Seed text:** *Zen's earlier backend work used Go and Elixir as the main languages. Those have been set aside for Python in his current projects.*
-- **Short rationale:** earlier-phase language context; weak technical overlap but well outside TORMENT-specific B1 query range, useful for deeper retrieval realism.
+- **Seed text:** *Zen spent an earlier phase building backend services in Go and Elixir, then set that line of work aside before the Python-based memory-system build.*
+- **Short rationale:** earlier-phase language context; clear phase-transition framing, well outside TORMENT-specific B1 query vocabulary, useful for deeper retrieval realism.
 
 ### 10.6 Pre-run anchor snapshot
 
