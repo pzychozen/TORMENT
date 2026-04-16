@@ -2,7 +2,7 @@
 
 **Status:** DRAFT FOR RATIFICATION  
 **Parent:** `docs/SECTION_2A_VALIDATION_FRAMING.md`  
-**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (minimum-viable first pass with surround bands §10.4 / §10.5 landed), **Bucket 2**, **Bucket 3**, and **Bucket 4**. Later revisions will add Bucket 5 and the §10.6 pre-run anchor snapshot (filled at eval workspace instantiation).
+**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (minimum-viable first pass with surround bands §10.4 / §10.5 landed), **Bucket 2**, **Bucket 3**, **Bucket 4**, and **Bucket 5**. The §10.6 pre-run anchor snapshot will be filled at eval workspace instantiation.
 
 ---
 
@@ -899,11 +899,265 @@ Each query below is tied to the §10.3 core private cluster. The queries are cho
 
 ---
 
-## 13. Notes for later revisions
+## 13. Bucket 5 doctrine
+
+**Bucket 5 = truly fast operational prompts**
+
+Bucket 5 exists to verify **non-expansion discipline**.
+
+Unlike:
+
+- Bucket 1 (core-heavy private recall),
+- Bucket 2 (relational-needed),
+- Bucket 3 (deep-needed),
+- Bucket 4 (identity-sensitive),
+
+Bucket 5 is made of short, bounded, ordinary prompts that should remain in **FAST** mode with **no unnecessary lane expansion**.
+
+These prompts are intentionally:
+
+- short
+- operational
+- low-risk
+- low-context
+- non-retrieval-dependent
+
+They must **not** contain:
+
+- governance hints (`GOVERNANCE_HINT_WORDS`: delete, remove, governance, policy, security, private, shared, collective, canon, protected, reingest, approve, reject)
+- tool hints (`TOOL_HINT_WORDS`: search, find, lookup, inspect, open, read, fetch, scan, analyze, repair, rebuild, trace, debug, check)
+- identity hints (`IDENTITY_HINT_WORDS`: identity, character, drift, seed, self, personality, role, "who are you", "who am i")
+- live-social hints (`LIVE_SOCIAL_HINT_WORDS`: space, live, audio, speak, voice, "x space", "twitter space")
+- archive hints (`ARCHIVE_HINT_WORDS`: document, archive, chunk, pdf, notes, transcript)
+- memory-need lexical triggers (`remember`, `before`, `previous`, `past`)
+- REFLECTIVE ambiguity markers (`maybe`, `sort of`, `kind of`, `something`, `stuff`, `thing`)
+- action-need triggers (`create`, `delete`, `repair`, `build`, `run`)
+
+They should also remain below the long-input threshold (`token_count > 25`) that would activate `memory_need` by token count, and below the ambiguity threshold (`ambiguity_score >= 0.50`) or confidence threshold (`confidence_need >= 0.60`) that would escalate to REFLECTIVE mode.
+
+### Bucket 5 success target
+
+Per the framing doc, this bucket verifies:
+
+> **Non-expansion discipline** — fast, bounded prompts do not unnecessarily activate relational, deep, archive, collective, or identity-sensitive retrieval paths.
+
+The practical expectation is:
+
+- mode remains `FAST`
+- retrieval stays minimal (`retrieve_core` only; `retrieve_character_state`, `retrieve_srg_state`, `retrieve_relational`, `retrieve_archive` all False)
+- no unnecessary self-review expansion
+- no escalation into retrieval/deep/tool/governed behavior
+
+### Why this bucket exists
+
+Bucket 5 completes the evaluation set by testing the opposite edge of Buckets 2–4.
+
+Those buckets ask: does the system open more when it should?
+
+Bucket 5 asks: does the system **stay small when it should**?
+
+A system that expands correctly but cannot stay compact is still behaviorally wrong.
+
+### Corpus independence
+
+Bucket 5 is the only bucket that is **corpus-independent** in principle. Because non-expansion means retrieval stays minimal regardless of what is in memory, Bucket 5 does not depend on the §10 seeded corpus for its success criteria. For consistency, it should still be executed within the `ws_section_2a_v1` eval workspace alongside other buckets, but the non-expansion claim holds regardless of corpus density.
+
+### §10.6 anchor snapshot non-interaction
+
+Bucket 5 queries do not set `retrieve_character_state` (identity_sensitive is False, mode is not IDENTITY_SENSITIVE or LIVE_SOCIAL), so they cannot read or disturb the anchor state recorded in §10.6. This means Bucket 5 can safely execute between Bucket 4 baseline and advisory runs without invalidating the anchor snapshot.
+
+---
+
+## 14. Bucket 5 query set
+
+Classifier check performed on each query against `torment_service/thinking_controller.py`: no GOVERNANCE_HINT_WORDS, no TOOL_HINT_WORDS, no IDENTITY_HINT_WORDS, no LIVE_SOCIAL_HINT_WORDS, no ARCHIVE_HINT_WORDS substrings; no memory_need lexical triggers (`remember` / `before` / `previous` / `past`); no action_need triggers (`create` / `delete` / `repair` / `build` / `run`); all within the 25-token length bound; no REFLECTIVE ambiguity markers; ambiguity_score < 0.50 and confidence_need < 0.60 on every query. Expected routing: FAST fall-through in `choose_mode()`.
+
+## B5-01
+- **Bucket:** 5
+- **Raw text:** *"Keep this brief."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Minimal compression request; should stay in FAST mode with no retrieval expansion.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-02
+- **Bucket:** 5
+- **Raw text:** *"Just the main point."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Bounded summarization cue with no retrieval or identity content.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-03
+- **Bucket:** 5
+- **Raw text:** *"Say it plainly."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Simple style-shaping prompt; should not trigger extra cognition depth.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-04
+- **Bucket:** 5
+- **Raw text:** *"One sentence only."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Very short bounded-output request; useful pressure case for compact response discipline.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-05
+- **Bucket:** 5
+- **Raw text:** *"What's the main point here?"*
+- **Human intent label:** fast-operational
+- **Short rationale:** Direct question, but narrow enough that FAST mode should still hold without retrieval expansion.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-06
+- **Bucket:** 5
+- **Raw text:** *"What matters most here?"*
+- **Human intent label:** fast-operational
+- **Short rationale:** Short prioritization prompt; should remain operational rather than reflective. **Boundary case:** "matters most" has a faint priority/value semantic flavor that under a future semantic classifier could approach identity-adjacent territory; under the current strict-substring classifier it is clean. Preserved deliberately as an edge-pressure case — do not remove in later revisions without verifying it still serves this purpose.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-07
+- **Bucket:** 5
+- **Raw text:** *"Give me the direct answer."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Explicitly requests a straight answer without adding memory or tooling cues.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-08
+- **Bucket:** 5
+- **Raw text:** *"What's the simplest way to say it?"*
+- **Human intent label:** fast-operational
+- **Short rationale:** Bounded simplification prompt; pressures compact explanation without retrieval growth.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-09
+- **Bucket:** 5
+- **Raw text:** *"Boil that down."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Compression-style imperative; short enough to test low-depth handling without ambiguity leakage.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B5-10
+- **Bucket:** 5
+- **Raw text:** *"Keep it short and clear."*
+- **Human intent label:** fast-operational
+- **Short rationale:** Compact-output request; should remain a pure FAST-lane case and complete the bucket's operational coverage.
+- **Expected lane demand:**
+  - chosen_mode: FAST
+  - allowed_depth: 1
+  - may_escalate: false
+  - requires_self_review: false
+  - retrieve_character_state: false
+  - retrieve_srg_state: false
+  - retrieve_relational: false
+  - retrieve_archive: false
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+---
+
+## 15. Notes for later revisions
 
 Planned additions in subsequent revisions:
 
 - **Bucket 1 §10.6** — pre-run anchor snapshot, filled at eval workspace instantiation
-- **Bucket 5** — truly fast operational prompts
 
 This file should evolve by appending bucket sections, not by replacing prior ratified records without note.
