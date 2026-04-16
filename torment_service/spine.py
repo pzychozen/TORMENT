@@ -682,6 +682,36 @@ def _fast_feedback(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict
         )
 
 
+def _fast_reinforce(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fast-path reinforce: per-memory significance writer (reinforce contract v2.4.x).
+
+    Distinct from _fast_feedback by design (Framing Decision 4):
+      - feedback = operator/outcome signal → overlay mutation
+      - reinforce = per-memory/evidence signal → per-memory significance mutation
+
+    Preserves the used_successfully eid list (unlike _fast_feedback which
+    coerces it to a bool) so that fabric.reinforce() can increment
+    reinforcement_count per eid.
+    """
+    # Normalize eid lists: MCP may send strings or ints.
+    retrieved_ids = payload.get("retrieved_ids", [])
+    used_successfully = payload.get("used_successfully", [])
+    if isinstance(retrieved_ids, str):
+        import json as _json
+        retrieved_ids = _json.loads(retrieved_ids)
+    if isinstance(used_successfully, str):
+        import json as _json
+        used_successfully = _json.loads(used_successfully)
+
+    with fabric.locks.agent_lock(ctx.workspace_id, ctx.agent_id):
+        return fabric.reinforce(
+            workspace_id=ctx.workspace_id,
+            agent_id=ctx.agent_id,
+            retrieved_ids=[int(x) for x in retrieved_ids],
+            used_successfully=[int(x) for x in used_successfully],
+        )
+
+
 def _fast_collective_reingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Fast-path collective reingest: trust-checked, locked, dispatched to Fabric."""
     with fabric.locks.agent_lock(ctx.workspace_id, ctx.agent_id):
@@ -918,7 +948,7 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
 FAST_DISPATCH: Dict[str, Callable] = {
     "ingest": _fast_ingest,
     "feedback": _fast_feedback,
-    "reinforce": _fast_feedback,           # same handler (feedback = reinforce)
+    "reinforce": _fast_reinforce,           # dedicated handler (Framing Decision 4: asymmetry is doctrine)
     "collective_reingest": _fast_collective_reingest,
     "memory_governance_set": _fast_governance_set,
     "query_state": _fast_query_state,
@@ -1025,6 +1055,7 @@ DECISION_ERROR_TRUST = "error_trust"
 # Result codes — what happened to the data
 RESULT_STORED = "stored"
 RESULT_REINFORCED = "reinforced"
+RESULT_NO_OP = "no_op"
 RESULT_REINGESTED = "reingested"
 RESULT_QUERIED = "queried"
 RESULT_GOVERNED = "governed"
@@ -1042,11 +1073,15 @@ RESULT_NONE = "none"
 # where a successful guarded-tier write stamped result_code='none'
 # because the operation was registered in _ALWAYS_FAST but missing
 # from this dict.
-_OPERATION_RESULT_CODES: Dict[str, str] = {
+# Value of ``None`` means the result_code is handler-driven: the handler
+# returns a ``_reinforce_result_code`` key that the envelope builder reads.
+# This supports the reinforce contract (v2.4.x) where result_code must
+# truthfully reflect whether any per-memory state actually moved.
+_OPERATION_RESULT_CODES: Dict[str, Optional[str]] = {
     "ingest": RESULT_STORED,
     "tool_result_ingest": RESULT_STORED,
     "feedback": RESULT_REINFORCED,
-    "reinforce": RESULT_REINFORCED,
+    "reinforce": None,  # handler-driven: "reinforced" or "no_op" (reinforce contract v2.4.x)
     "collective_reingest": RESULT_REINGESTED,
     "memory_governance_set": RESULT_GOVERNED,
     "query_state": RESULT_STATE_READ,
@@ -1289,6 +1324,11 @@ def submit_task(
         r_code = RESULT_COGNITION
     else:
         r_code = _OPERATION_RESULT_CODES.get(req.operation, RESULT_NONE)
+        # Handler-driven result_code (reinforce contract v2.4.x):
+        # When the static map returns None, the handler's return dict
+        # carries the authoritative result_code under a private key.
+        if r_code is None:
+            r_code = (result or {}).get("_reinforce_result_code", RESULT_NONE)
 
     audit_dict = ctx.to_audit_dict()
     if advisory_thinking_result is not None:

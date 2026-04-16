@@ -30,7 +30,7 @@ Where `hl_mult` comes from survival/tearing modulation (range [0.85, 1.25]).
 
 ### 1.2 Reinforcement / Dedup (fabric.py lines 2288–2326)
 
-When a new memory is ≥0.92 similar to an existing private memory, instead of creating a new entity, the existing one is reinforced (strength asymptotically approaches 0.98, `reinforce_count` incremented).
+When a new memory is ≥0.92 similar to an existing private memory, instead of creating a new entity, the existing one is reinforced (strength asymptotically approaches 0.98, `reinforcement_count` incremented).
 
 Provenance rule on reinforcement: existing provenance is NEVER overwritten (Rule F: no laundering). New provenance is only backfilled if the existing entity has none AND the new write is `direct_ingest`.
 
@@ -119,12 +119,12 @@ Add a `"tool_result"` tier in the compression classifier, slotted between `echo`
 
 #### Change C: Reinforcement Guard for Tool Results
 
-When a tool-result memory is reinforced by a near-duplicate ingest, increment `reinforce_count` but do NOT boost strength. Instead, update a `last_tool_refresh_ts` timestamp.
+When a tool-result memory is reinforced by a near-duplicate ingest, increment `reinforcement_count` but do NOT boost strength. Instead, update a `last_tool_refresh_ts` timestamp.
 
 - **Location:** `fabric.py` reinforcement block (~line 2304)
 - **Condition:** Only when the *existing* entity has `provenance.source_type == "tool_result"`
-- **Behavior:** Update `reinforce_count` and `last_tool_refresh_ts`, but set `_new_str = _old_str` (no strength boost)
-- **Rationale:** Repeated tool output is a staleness signal, not an importance signal. The `reinforce_count` and timestamp are preserved for debugging and future policy decisions, but the memory doesn't become harder to compress.
+- **Behavior:** Update `reinforcement_count` and `last_tool_refresh_ts`, but set `_new_str = _old_str` (no strength boost)
+- **Rationale:** Repeated tool output is a staleness signal, not an importance signal. The `reinforcement_count` and timestamp are preserved for debugging and future policy decisions, but the memory doesn't become harder to compress.
 
 ### 3.3 What NOT to Change
 

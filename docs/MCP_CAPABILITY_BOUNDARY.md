@@ -70,7 +70,8 @@ Safe operations:
 - Memory ingest
 - Memory query
 - State inspection
-- Feedback / reinforcement
+- Feedback (operator/outcome signal → overlay mutation)
+- Reinforce (per-memory evidence signal → per-memory significance mutation; `result_code` is `"reinforced"` or `"no_op"`, never static)
 
 ### Tier 2 (guarded)
 

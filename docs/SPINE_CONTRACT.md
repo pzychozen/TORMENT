@@ -100,7 +100,8 @@ Every response wraps the Fabric result with governance metadata:
 | Code | Meaning |
 |---|---|
 | `stored` | New memory created (ingest, tool_result_ingest) |
-| `reinforced` | Feedback/reinforcement applied |
+| `reinforced` | Feedback applied (static); or reinforce moved at least one eid's per-memory significance (handler-driven, v2.4.x contract) |
+| `no_op` | Reinforce call admitted but no eid moved (all missing, out-of-scope, or shared). Callers may trust this: no per-memory state changed. |
 | `reingested` | Collective reingest completed |
 | `queried` | Read-only query returned results |
 | `governed` | Governance flags updated |
@@ -150,8 +151,8 @@ Use `get_exposed_operations(max_tier)` in code to query the registry:
 | `query_state` | read | open | fast | 0.0 | no | Read agent state / identity / character |
 | `query_memory` | read | open | fast | 0.0 | **yes** | Search agent memory |
 | `ingest` | write | open | fast | 0.6 | **yes** | Ingest text as new memory |
-| `feedback` | write | open | fast | 0.3 | no | Provide reinforcement feedback |
-| `reinforce` | write | open | fast | 0.3 | no | Directly reinforce a memory |
+| `feedback` | write | open | fast | 0.3 | no | Operator/outcome signal → overlay mutation |
+| `reinforce` | write | open | fast | 0.3 | no | Per-memory evidence signal → per-memory significance mutation (result_code: `reinforced` or `no_op`) |
 | `memory_governance_set` | write | guarded | fast | 1.0 | no | Update governance flags |
 | `compression_run` | write | guarded | fast | 1.0 | no | Trigger compression cycle |
 | `collective_reingest` | collective | guarded | fast | 0.9 | **yes** | Re-ingest convergence event as echo |

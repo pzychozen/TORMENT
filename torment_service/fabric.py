@@ -2491,7 +2491,7 @@ class TormentFabric:
                                     "strength": round(_new_str, 4),
                                     "last_reinforced": int(step),
                                     "last_reinforced_ts": _now_ts(),
-                                    "reinforce_count": int((_existing_ent.payload or {}).get("reinforce_count", 0)) + 1,
+                                    "reinforcement_count": int((_existing_ent.payload or {}).get("reinforcement_count", 0)) + 1,
                                 }
                                 if _existing_is_tool_result:
                                     _reinforce_updates["last_tool_refresh_ts"] = _now_ts()
@@ -3570,6 +3570,19 @@ class TormentFabric:
             base_score = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=0.0)
             final = score_hit(sim=sim, strength=strength, recency_days=recency_days, motif_alignment=motif_alignment, contradiction_risk=contradiction_risk, type_bonus=type_bonus)
 
+            # Reinforcement boost (reinforce contract v2.4.x, Plan-D3):
+            # Additive bounded boost at rank stage after lane-separated recall.
+            # Formula: final += TORMENT_REINFORCE_BOOST * ln(1 + reinforcement_count)
+            # Default 0.04 chosen via sanity-check against observed score distribution
+            # (single reinforcement ≈ 3-5% of typical semantic score).
+            _rc = int((h.get("payload") or h).get("reinforcement_count", 0))
+            if _rc > 0:
+                try:
+                    _reinforce_boost = float(os.getenv("TORMENT_REINFORCE_BOOST", "0.04"))
+                except Exception:
+                    _reinforce_boost = 0.04
+                final += _reinforce_boost * math.log(1 + _rc)
+
             # SRG scoring bonuses + breathing evolution (Phase 3)
             if self._srg_enable:
                 _srg_hit = (h.get("payload") or {}).get("srg")
@@ -3887,8 +3900,74 @@ class TormentFabric:
         return {"ok": True, "overlay": ident.overlay}
 
 
+    def reinforce(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        retrieved_ids: List[int],
+        used_successfully: List[int],
+    ) -> Dict[str, Any]:
+        """Per-memory reinforcement writer (reinforce contract v2.4.x).
 
-    
+        Increments ``reinforcement_count`` on each eid in *used_successfully*
+        that exists as a **private-scope** memory for this agent.  Each eid is
+        processed at most once per call (deduped).  Shared/collective eids are
+        governed skips with reason codes visible in the return envelope.
+
+        Returns a dict with:
+          - ``ok``: True
+          - ``_reinforce_result_code``: ``"reinforced"`` if at least one eid
+            moved, ``"no_op"`` otherwise.  Consumed by the Spine envelope.
+          - ``reinforced_eids``: list of eids that were actually incremented
+          - ``skipped``: list of ``{"eid": int, "reason": str}`` for eids that
+            were not incremented (missing, out-of-scope, shared, etc.)
+        """
+        ak = self._agent_key(workspace_id, agent_id)
+        g = self.private_graphs.get(ak)
+
+        reinforced_eids: List[int] = []
+        skipped: List[Dict[str, Any]] = []
+
+        # Dedupe: process each eid at most once per call (Plan-D2).
+        seen: set = set()
+        for eid in used_successfully:
+            eid = int(eid)
+            if eid in seen:
+                continue
+            seen.add(eid)
+
+            # Must exist in private graph
+            if g is None or eid not in g.entities:
+                skipped.append({"eid": eid, "reason": "not_found_in_private_graph"})
+                continue
+
+            ent = g.entities[eid]
+            payload = ent.payload or {}
+
+            # Plan-D7: private-scope only; shared/collective are governed skips.
+            scope = str(payload.get("scope", "private"))
+            if scope != "private":
+                skipped.append({"eid": eid, "reason": f"scope_skip:{scope}"})
+                continue
+
+            # Increment reinforcement_count (monotonic, Plan-D1 + D4).
+            old_count = int(payload.get("reinforcement_count", 0))
+            g.update_payload(eid, {
+                "reinforcement_count": old_count + 1,
+            })
+            reinforced_eids.append(eid)
+
+        # Plan-D5: "reinforced" if at least one eid moved; "no_op" otherwise.
+        result_code = "reinforced" if reinforced_eids else "no_op"
+
+        return {
+            "ok": True,
+            "_reinforce_result_code": result_code,
+            "reinforced_eids": reinforced_eids,
+            "skipped": skipped,
+        }
+
+
     def decide_bridge(self, workspace_id: str, from_domain: str, from_motif: str, to_domain: str, to_motif: str, decision: str) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)
         ok = ws.bridges.decide(from_domain, from_motif, to_domain, to_motif, decision)

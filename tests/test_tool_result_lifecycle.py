@@ -244,9 +244,9 @@ class TestToolResultReinforcementGuard(unittest.TestCase):
                 strength_after, strength_before, places=3,
                 msg="Tool-result reinforcement should NOT boost strength",
             )
-            # Verify reinforce_count was still incremented
-            rc = int((entity_after.payload or {}).get("reinforce_count", 0))
-            self.assertGreaterEqual(rc, 1, "reinforce_count should be incremented")
+            # Verify reinforcement_count was still incremented
+            rc = int((entity_after.payload or {}).get("reinforcement_count", 0))
+            self.assertGreaterEqual(rc, 1, "reinforcement_count should be incremented")
             # Verify last_tool_refresh_ts was set
             refresh_ts = (entity_after.payload or {}).get("last_tool_refresh_ts")
             self.assertIsNotNone(refresh_ts, "last_tool_refresh_ts should be set on tool-result reinforcement")

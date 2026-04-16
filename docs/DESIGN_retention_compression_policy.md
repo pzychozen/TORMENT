@@ -125,14 +125,14 @@ def _reinforce_existing(graph, eid, new_strength, step):
     graph.update_payload(eid, {
         "strength": reinforced,
         "last_reinforced": step,
-        "reinforce_count": ent.payload.get("reinforce_count", 0) + 1,
+        "reinforcement_count": ent.payload.get("reinforcement_count", 0) + 1,
     })
 ```
 
 ### Properties:
 - 0.92 similarity threshold is high enough to only catch near-exact duplicates, not "similar topics"
 - Reinforcement is asymptotic: 0.50 → 0.65 → 0.76 → 0.83 → ... never exceeds 0.98
-- `reinforce_count` tracks how many times a memory was reinforced (diagnostic value)
+- `reinforcement_count` tracks how many times a memory was reinforced (diagnostic value)
 - `last_reinforced` updates the decay clock (interacts with Proposal B)
 
 ### Questions for review:
