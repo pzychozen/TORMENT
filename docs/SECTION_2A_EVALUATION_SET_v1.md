@@ -2,7 +2,7 @@
 
 **Status:** DRAFT FOR RATIFICATION  
 **Parent:** `docs/SECTION_2A_VALIDATION_FRAMING.md`  
-**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 2** only. Later revisions will add Buckets 3, 1, 4, and 5.
+**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 2** and **Bucket 3**. Later revisions will add Buckets 1, 4, and 5.
 
 ---
 
@@ -238,11 +238,194 @@ This bucket is the highest-priority bucket in the §2A evaluation set.
 
 ---
 
-## 5. Notes for later revisions
+## 5. Bucket 3 doctrine
+
+**Bucket 3 = deep-needed, naturally phrased, no REFLECTIVE bait**
+
+These queries are designed to pressure a distinct silent-loss path in §2A:
+
+> distributed, indirect, or cross-context retrieval is semantically required, but the query avoids both the `memory_need` lexical triggers (`remember`, `before`, `previous`, `past`) AND the REFLECTIVE ambiguity markers (`maybe`, `sort of`, `stuff`) that would otherwise activate extra attention.
+
+Queries target shapes the deep lane exists to serve: recurrence across contexts, boundary conditions, latent causes, cross-case differentiation, structural tradeoffs, emergent patterns, analogy / same-structure-different-surface retrieval, and counterfactual / latent-structure retrieval. They must be ordinary question-shaped prompts and must not trigger governance, tool, identity, or archive classifiers.
+
+### Bucket 3 success target
+
+Per the framing doc, the primary metric here (framing §7.2) is:
+
+> **Deep activation miss rate** — among queries that human evaluators judge as deep-needed, what fraction fail to activate the deep lane?
+
+This bucket is the second-highest-priority bucket in the §2A evaluation set.
+
+---
+
+## 6. Bucket 3 query set
+
+## B3-01
+- **Bucket:** 3
+- **Raw text:** Why does that pattern keep reappearing in different contexts?
+- **Human intent label:** deep-needed
+- **Short rationale:** Recurrence-across-contexts question; requires distributed retrieval beyond direct core recall.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-02
+- **Bucket:** 3
+- **Raw text:** What tends to break the pattern when it fails to repeat?
+- **Human intent label:** deep-needed
+- **Short rationale:** Boundary-condition question; pressures cross-case retrieval of where a recurring pattern stops holding.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-03
+- **Bucket:** 3
+- **Raw text:** How does that tradeoff usually resolve over time?
+- **Human intent label:** deep-needed
+- **Short rationale:** Longitudinal pattern question; requires retrieval across temporally separated cases rather than a single direct memory.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-04
+- **Bucket:** 3
+- **Raw text:** What hidden assumption usually makes that move seem reasonable?
+- **Human intent label:** deep-needed
+- **Short rationale:** Latent-cause question; pressures indirect retrieval of underlying structure rather than surface explanation.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-05
+- **Bucket:** 3
+- **Raw text:** Why do systems like that tend to evolve in that direction?
+- **Human intent label:** deep-needed
+- **Short rationale:** Systemic tendency question; requires broad pattern continuity rather than specific event recall.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-06
+- **Bucket:** 3
+- **Raw text:** What keeps getting left out when that setup starts to slip?
+- **Human intent label:** deep-needed
+- **Short rationale:** Repeated-omission question; pressures retrieval of adjacent failure cases across contexts.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-07
+- **Bucket:** 3
+- **Raw text:** How do those two ideas interact when you combine them?
+- **Human intent label:** deep-needed
+- **Short rationale:** Cross-cluster synthesis question; pressures retrieval across memory regions that core alone may not surface.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-08
+- **Bucket:** 3
+- **Raw text:** Why does that argument keep coming up even when it doesn't hold?
+- **Human intent label:** deep-needed
+- **Short rationale:** Persistent-pattern-despite-refutation question; requires indirect retrieval of repeated recurrence across contexts.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-09
+- **Bucket:** 3
+- **Raw text:** What patterns tend to emerge in that kind of situation?
+- **Human intent label:** deep-needed
+- **Short rationale:** Emergent-pattern question; inherently pressures gap-filler retrieval across multiple similar situations.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-10
+- **Bucket:** 3
+- **Raw text:** What makes that bias show up there but not everywhere else?
+- **Human intent label:** deep-needed
+- **Short rationale:** Cross-case differentiation question; requires retrieval of where a tendency appears and where it fails.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-11
+- **Bucket:** 3
+- **Raw text:** What usually has to give for that tension to settle?
+- **Human intent label:** deep-needed
+- **Short rationale:** Structural-tradeoff question; pressures distributed retrieval of how competing forces resolve across cases.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-12
+- **Bucket:** 3
+- **Raw text:** What tends to shape that outcome behind the scenes?
+- **Human intent label:** deep-needed
+- **Short rationale:** Mechanism-level question; requires indirect retrieval of latent drivers rather than direct recall.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-13
+- **Bucket:** 3
+- **Raw text:** Why do those assumptions hold up in some cases and not others?
+- **Human intent label:** deep-needed
+- **Short rationale:** Conditional-validity question; pressures cross-case retrieval instead of specific relational or core memory.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-14
+- **Bucket:** 3
+- **Raw text:** What makes that approach robust in one domain but fragile in another?
+- **Human intent label:** deep-needed
+- **Short rationale:** Domain-transfer question; requires indirect retrieval across contexts and structural comparison.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-15
+- **Bucket:** 3
+- **Raw text:** What else follows the same pattern even when it gets described differently?
+- **Human intent label:** deep-needed
+- **Short rationale:** Analogy / same-structure-different-surface question; directly pressures deep retrieval across labeling variants.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+## B3-16
+- **Bucket:** 3
+- **Raw text:** What changes when that assumption is no longer carrying the result?
+- **Human intent label:** deep-needed
+- **Short rationale:** Counterfactual / latent-structure question; pressures retrieval of what shifts when a hidden supporting assumption stops doing the work.
+- **Expected lane demand:** deep
+- **Run record (baseline):** _pending_
+- **Run record (advisory):** _pending_
+- **Per-query judgment:** _pending_
+
+---
+
+## 7. Notes for later revisions
 
 Planned additions in subsequent revisions:
 
-- **Bucket 3** — deep-needed, naturally phrased, avoids ambiguity markers
 - **Bucket 1** — curated seeded corpus cases with >6 relevant private memories per query
 - **Bucket 4** — identity-sensitive anchor-preservation checks
 - **Bucket 5** — truly fast operational prompts
