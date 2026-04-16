@@ -101,6 +101,40 @@ ARCHIVE_HINT_WORDS = {
     "transcript",
 }
 
+# §2A D1: collaborative/relational language that implies shared context
+# and should trigger memory retrieval.  Space-padded pronouns avoid
+# false positives (e.g. " we " won't match "awesome").
+RELATIONAL_HINT_WORDS = {
+    " we ",
+    " our ",
+    " us ",
+    "agreed",
+    "decided",
+    "settled",
+    "concluded",
+    "stance",
+    "position",
+    "together",
+}
+
+# §2A D2: analytical-depth cues that indicate the query needs deeper
+# deliberation.  Bumps confidence_need to cross the REFLECTIVE threshold.
+ANALYTICAL_DEPTH_HINT_WORDS = {
+    "why does",
+    "pattern",
+    "tradeoff",
+    "assumption",
+    "bias",
+    "tension",
+    "interact",
+    "robust",
+    "fragile",
+    "usually",
+    "tend to",
+    "tends to",
+    "behind the scenes",
+}
+
 # ---------------------------------------------------------------------------
 # Cognition feature flags — default OFF (opt-in via environment)
 # When disabled, detection still runs for tagging/logging but the thinking
@@ -150,10 +184,16 @@ class ThinkingController:
         identity_sensitive = self._has_any(lower, IDENTITY_HINT_WORDS)
         live_social = self._has_any(lower, LIVE_SOCIAL_HINT_WORDS)
         archive_relevant = self._has_any(lower, ARCHIVE_HINT_WORDS)
+        # §2A D1: pad with spaces so " we " matches at string boundaries
+        _padded = " " + lower + " "
+        relational_cue = self._has_any(_padded, RELATIONAL_HINT_WORDS)
+        # §2A D2: analytical depth detection
+        analytical_depth = self._has_any(lower, ANALYTICAL_DEPTH_HINT_WORDS)
 
         memory_need = bool(
             archive_relevant
             or identity_sensitive
+            or relational_cue
             or "remember" in lower
             or "before" in lower
             or "previous" in lower
@@ -178,6 +218,8 @@ class ThinkingController:
             confidence_need += 0.3
         if identity_sensitive:
             confidence_need += 0.2
+        if analytical_depth:
+            confidence_need += 0.2   # §2A D2: crosses 0.60 REFLECTIVE threshold
         if ambiguity_score > 0.45:
             confidence_need += 0.2
 
