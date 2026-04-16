@@ -2,7 +2,7 @@
 
 **Status:** DRAFT FOR RATIFICATION  
 **Parent:** `docs/SECTION_2A_VALIDATION_FRAMING.md`  
-**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (minimum-viable first pass), **Bucket 2**, **Bucket 3**, and **Bucket 4**. Later revisions will add Bucket 5 and the Bucket 1 surround bands (§10.4, §10.5) plus anchor snapshot (§10.6).
+**Scope:** Initial query-set artifact for §2A validation. This version contains **Bucket 1** (minimum-viable first pass with surround bands §10.4 / §10.5 landed), **Bucket 2**, **Bucket 3**, and **Bucket 4**. Later revisions will add Bucket 5 and the §10.6 pre-run anchor snapshot (filled at eval workspace instantiation).
 
 ---
 
@@ -758,11 +758,81 @@ All nine memories share the same broad domain ("Zen's TORMENT project work") but
 
 ### 10.4 Identity-adjacent / non-anchor private seed set
 
-_pending — expanding after GPT pressure-test of §10.3 cluster density. The identity-adjacent band should add nearby but lower-priority private content (e.g., Ryuki's non-canonical reactions, observed Zen-state shifts not directly about project work) to create realistic competition around anchors and core memories._
+This band adds private Zen-context facts that are **orthogonal to TORMENT** — no project content, no kernel vocabulary, no Ryuki-voice register, no identity interpretation. Each memory is a plain observational note about recurring personal behavior or household context. Purpose: provide realistic private surround around the core cluster without competing with §10.3 on B1-01/B1-02/B1-03, and without reinforcing §10.2 anchors by osmosis.
+
+**Guardrails applied to every entry in this sub-section:**
+
+- no TORMENT reference
+- no kernel / memory-system / agent terminology
+- no Ryuki-seed echo (fierce / protective / instinctual / imaginative / direct)
+- no reinforcement of §10.2 anchor primitives (bond, stance, imagination, voice, care-mode)
+- no "Ryuki noted / marked" framing; no emotional reading of Zen
+- no project-adjacent vocabulary likely to semantically overlap with B1 queries under BAAI/bge-small-en-v1.5
+
+Four memories, one cluster tag (`zen_private_habits`), neutral register.
+
+#### P-01
+- **Type:** identity-adjacent
+- **Cluster tag:** `zen_private_habits`
+- **Seed text:** *Zen keeps his workspace spare — one desk, a lamp, a small set of tools within reach, and very little else. Clutter gets removed when he notices it.*
+- **Short rationale:** household rhythm / environment — non-project, non-identity, behavioral fact.
+
+#### P-02
+- **Type:** identity-adjacent
+- **Cluster tag:** `zen_private_habits`
+- **Seed text:** *Zen's days run late. He stays up well past midnight and starts the next morning later than most people do.*
+- **Short rationale:** sleep/routine pattern — behavioral regularity, no project or identity framing.
+
+#### P-03
+- **Type:** identity-adjacent
+- **Cluster tag:** `zen_private_habits`
+- **Seed text:** *Zen drinks coffee black, and drinks it through the day. He often skips regular meals and eats at odd hours instead.*
+- **Short rationale:** food/coffee habit — consumption pattern, neutral observational register.
+
+#### P-04
+- **Type:** identity-adjacent
+- **Cluster tag:** `zen_private_habits`
+- **Seed text:** *Zen prefers instrumental music. He does not usually listen to anything with lyrics or talking in the background.*
+- **Short rationale:** recurring personal preference — non-TORMENT, non-symbolic, non-identity.
 
 ### 10.5 Background / deep-adjacent seed set
 
-_pending — expanding after GPT pressure-test of §10.3 cluster density. The background band should add broader contextual memories so later buckets can run in the same environment without a synthetic empty surround, without diluting the core cluster enough to undercut >6-hit plausibility._
+This band adds broader contextual mass — abstract/environmental and deep-lane-distant earlier-phase context — so later buckets can run in a realistic environment rather than a synthetic empty surround. Four memories, split 2 + 2:
+
+- **§10.5.a Abstract / environmental** (D-01, D-02): ambient world/setting facts with no project overlap.
+- **§10.5.b Deep-lane-distant earlier-phase** (D-03, D-04): earlier technical context that predates current TORMENT work, intentionally distanced so B1-01/B1-02/B1-03 do not pull them but later deep/fast buckets (Bucket 3, Bucket 5) can.
+
+**Guardrails applied to every entry in this sub-section:**
+
+- not likely to appear in the top-k=8 for B1-01/B1-02/B1-03 under BAAI/bge-small-en-v1.5
+- no process-framing vocabulary that would duplicate C-04 / C-06
+- no identity-colored affect; no Ryuki-voice register
+- no theory-reading / substrate-philosophy content (avoids accidental soft project relevance)
+- still useful later for deep-retrieval realism (Bucket 3) and fast-operational realism (Bucket 5)
+
+#### D-01
+- **Type:** background
+- **Cluster tag:** `zen_environment`
+- **Seed text:** *Zen lives in a cold climate — long winters, short summers. Most of the year runs cold.*
+- **Short rationale:** abstract/environmental — climate context; ambient world-fact with no project overlap.
+
+#### D-02
+- **Type:** background
+- **Cluster tag:** `zen_environment`
+- **Seed text:** *Zen's home is in a quiet, mostly residential area. Traffic and noise stay low, and he prefers it that way.*
+- **Short rationale:** abstract/environmental — neighborhood context; ambient setting fact with no project overlap.
+
+#### D-03
+- **Type:** deep-adjacent
+- **Cluster tag:** `zen_earlier_work`
+- **Seed text:** *Years ago Zen wrote a small data-processing pipeline for non-agent work — batch scripts and simple scheduling, no live state. It predates any of his memory or agent projects and is unrelated to them.*
+- **Short rationale:** earlier-phase system context, explicitly distanced from agent/memory work so B1 queries do not pull it; available for deep/fast buckets later.
+
+#### D-04
+- **Type:** deep-adjacent
+- **Cluster tag:** `zen_earlier_work`
+- **Seed text:** *Zen's earlier backend work used Go and Elixir as the main languages. Those have been set aside for Python in his current projects.*
+- **Short rationale:** earlier-phase language context; weak technical overlap but well outside TORMENT-specific B1 query range, useful for deeper retrieval realism.
 
 ### 10.6 Pre-run anchor snapshot
 
@@ -833,7 +903,6 @@ Each query below is tied to the §10.3 core private cluster. The queries are cho
 
 Planned additions in subsequent revisions:
 
-- **Bucket 1 §10.4, §10.5** — identity-adjacent and background/deep-adjacent seed sets, added after GPT pressure-test of §10.3 cluster density
 - **Bucket 1 §10.6** — pre-run anchor snapshot, filled at eval workspace instantiation
 - **Bucket 5** — truly fast operational prompts
 
