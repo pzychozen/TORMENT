@@ -29,7 +29,7 @@ v0.1 incremental scope:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Protocol
 
 from .action_policy import (
@@ -40,6 +40,7 @@ from .action_policy import (
     apply_tool_narrowing,
     classify_drift,
 )
+from .behavior_packs import BehaviorPack
 from .tool_registry import ActionContract, EMPTY_CONTRACT
 from .thinking_models import (
     ActionDecision,
@@ -314,7 +315,7 @@ class AgentRunner:
         controller: Any,  # ThinkingController; avoiding a circular import
         fabric: FabricHandle,
         llm_client: Optional[LLMClient] = None,
-        pack: Optional[Any] = None,  # BehaviorPack (S4); None in S1
+        pack: Optional[BehaviorPack] = None,
         action_contract: ActionContract = EMPTY_CONTRACT,
         tool_executor: Optional[ToolExecutor] = None,
         drift_high_threshold: float = _DEFAULT_DRIFT_HIGH_THRESHOLD,
@@ -326,6 +327,25 @@ class AgentRunner:
         self.action_contract = action_contract
         self.tool_executor = tool_executor
         self.drift_high_threshold = drift_high_threshold
+
+    # ---------------- pack-derived effective settings ----------------
+    #
+    # S4: when a pack is active, pack-derived values override the
+    # runner's explicit constructor parameters. Computed per-turn
+    # rather than cached, so swapping `self.pack` between turns
+    # takes effect immediately without needing a rebuild. Per
+    # doctrine Part 5, pack overrides may only TIGHTEN; these
+    # helpers do not widen anything the base settings permit.
+
+    def _effective_action_contract(self) -> ActionContract:
+        if self.pack is not None:
+            return self.pack.action_contract
+        return self.action_contract
+
+    def _effective_drift_threshold(self) -> float:
+        if self.pack is not None:
+            return self.pack.stabilization_program.high_threshold
+        return self.drift_high_threshold
 
     def run_turn(
         self,
@@ -348,6 +368,16 @@ class AgentRunner:
             metadata=observation.metadata,
         )
 
+        # S4: if a behavior pack is active, its aperture recipe
+        # replaces the controller's default memory plan. The pack
+        # is the source of truth for context-specific retrieval
+        # shaping. (Doctrine Part 5 / slice plan S4.)
+        if self.pack is not None:
+            bundle = replace(
+                bundle,
+                memory_plan=self.pack.aperture_recipe.memory_plan,
+            )
+
         # Phase 5: Action Policy. Three-layer gate:
         # (a) mode legality + fallback chain (M2)
         # (b) drift-regime veto (S2)
@@ -364,7 +394,7 @@ class AgentRunner:
         except Exception:
             drift_info = None
         drift_regime = classify_drift(
-            drift_info, high_threshold=self.drift_high_threshold
+            drift_info, high_threshold=self._effective_drift_threshold()
         )
 
         policy_decision = apply_legality(
@@ -381,7 +411,7 @@ class AgentRunner:
         policy_decision = apply_tool_narrowing(
             policy_decision,
             bundle.mode_decision,
-            self.action_contract,
+            self._effective_action_contract(),
         )
         effective_action = policy_decision.action
 
