@@ -32,7 +32,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
 
-from .action_policy import ActionPolicyDecision, apply_legality
+from .action_policy import (
+    ActionPolicyDecision,
+    DriftRegime,
+    apply_drift_veto,
+    apply_legality,
+    classify_drift,
+)
 from .thinking_models import (
     ActionDecision,
     ActionType,
@@ -304,12 +310,34 @@ class AgentRunner:
             metadata=observation.metadata,
         )
 
-        # Phase 5: Action Policy — mode legality + Part 2.5 fallback
-        # chain. S2 drift veto and S3 tool narrowing will layer on top
-        # of this in later commits.
+        # Phase 5: Action Policy. Three-layer gate:
+        # (a) mode legality + fallback chain (M2)
+        # (b) drift-regime veto (S2)
+        # (c) tool-family narrowing for USE_TOOL (S3 — not yet wired)
+        #
+        # Drift is measured once here and reused in Phase 8 so the turn
+        # makes exactly one measure_drift call per turn.
+        drift_info: Optional[Dict[str, Any]] = None
+        try:
+            drift_info = self.fabric.measure_drift(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        except Exception:
+            drift_info = None
+        drift_regime = classify_drift(
+            drift_info, high_threshold=self.drift_high_threshold
+        )
+
         policy_decision = apply_legality(
             bundle.action_decision,
             bundle.mode_decision,
+            bundle.task_frame,
+        )
+        policy_decision = apply_drift_veto(
+            policy_decision,
+            bundle.mode_decision,
+            drift_regime,
             bundle.task_frame,
         )
         effective_action = policy_decision.action
@@ -374,35 +402,20 @@ class AgentRunner:
                     # turn. Phase 8 still runs.
                     pass
 
-        # Phase 8: Stabilize — measure drift and conditionally apply
-        # gravity correction. Best-effort: failures here are recorded
-        # but do not raise.
-        drift_info: Optional[Dict[str, Any]] = None
+        # Phase 8: Stabilize — reuse the Phase 5 drift measurement to
+        # decide gravity correction. One measure_drift call per turn.
+        # Best-effort: failures here are recorded but do not raise.
         gravity_applied = False
-        try:
-            drift_info = self.fabric.measure_drift(
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
-        except Exception:
-            drift_info = None
-
-        if drift_info is not None:
-            drift_score = float(drift_info.get("drift_score", 0.0))
-            direction = str(drift_info.get("drift_direction", ""))
-            if (
-                drift_score >= self.drift_high_threshold
-                and direction == "away_seed"
-            ):
-                try:
-                    self.fabric.gravity_correction(
-                        workspace_id=workspace_id,
-                        agent_id=agent_id,
-                        drift_info=drift_info,
-                    )
-                    gravity_applied = True
-                except Exception:
-                    pass
+        if drift_info is not None and drift_regime.vetoes_outward_action:
+            try:
+                self.fabric.gravity_correction(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    drift_info=drift_info,
+                )
+                gravity_applied = True
+            except Exception:
+                pass
 
         return TurnResult(
             workspace_id=workspace_id,

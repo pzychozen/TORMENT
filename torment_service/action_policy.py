@@ -124,12 +124,35 @@ class ActionPolicyDecision:
             will execute.
         original_action_type: if a fallback fired, the Phase-4 action
             type that was downgraded; None otherwise.
-        fallback_reason: named reason for the fallback; None if the
-            original action passed through unchanged.
+        fallback_reason: named reason for the last fallback applied;
+            None if the original action passed through unchanged.
+        drift_veto_applied: True if the S2 drift-regime veto further
+            downgraded the action beyond what mode-legality required.
     """
     action: ActionDecision
     original_action_type: Optional[ActionType] = None
     fallback_reason: Optional[str] = None
+    drift_veto_applied: bool = False
+
+
+@dataclass
+class DriftRegime:
+    """Classification of the current drift state against the v0.1
+    three-regime structure (doctrine Part 4).
+
+    Only the high regime gates action in v0.1 (S2); moderate-regime
+    intent promotion is deferred. Low regime shapes aperture only.
+    """
+    score: float
+    direction: str
+    is_high: bool
+    is_away_seed: bool
+
+    @property
+    def vetoes_outward_action(self) -> bool:
+        """True iff drift is high AND away from seed — the S2 veto
+        condition per the slice plan."""
+        return self.is_high and self.is_away_seed
 
 
 # ---------------------------------------------------------------------------
@@ -267,4 +290,164 @@ def apply_legality(
         ),
         original_action_type=original,
         fallback_reason="no_op_failclosed",
+    )
+
+
+# ---------------------------------------------------------------------------
+# S2 — Drift-regime veto
+# ---------------------------------------------------------------------------
+#
+# Doctrine Part 4, three-regime structure:
+#     - Low drift (< 0.15):       aperture shaping only, no action veto.
+#     - Moderate drift (0.15-0.35): intent promotion toward stabilization
+#       (deferred to later increment; v0.1/S2 does not enforce).
+#     - High drift (>= 0.35) AND direction == "away_seed": Action Policy
+#       blocks outward actions. USE_TOOL refused. Primary intent forced
+#       to DEFER (or NO_OP if DEFER not legal) unless GOVERNANCE_REVIEW
+#       is active.
+#
+# Override: if frame.governance_sensitive AND frame.urgency > 0.7, the
+# veto is bypassed; governance review takes precedence over drift. This
+# is the explicit doctrinal escape hatch (slice plan S2 / invariant 6).
+
+# Threshold mirrors doctrine Appendix A / TORMENT_CHARACTER_CORRECTION_THRESHOLD.
+_DEFAULT_HIGH_DRIFT_THRESHOLD = 0.35
+_OVERRIDE_URGENCY_THRESHOLD = 0.7
+
+
+def classify_drift(
+    drift_info: Optional[Dict[str, Any]],
+    high_threshold: float = _DEFAULT_HIGH_DRIFT_THRESHOLD,
+) -> DriftRegime:
+    """Extract a DriftRegime from raw drift state.
+
+    Accepts None or a dict from `character.measure_drift` / fabric.
+    None or missing keys degrade gracefully to a low-regime classification.
+    """
+    if drift_info is None:
+        return DriftRegime(
+            score=0.0,
+            direction="unknown",
+            is_high=False,
+            is_away_seed=False,
+        )
+    score = float(drift_info.get("drift_score", 0.0))
+    direction = str(drift_info.get("drift_direction", ""))
+    return DriftRegime(
+        score=score,
+        direction=direction,
+        is_high=score >= high_threshold,
+        is_away_seed=direction == "away_seed",
+    )
+
+
+def apply_drift_veto(
+    policy_decision: ActionPolicyDecision,
+    mode_decision: CognitiveModeDecision,
+    drift_regime: DriftRegime,
+    frame: TaskFrame,
+) -> ActionPolicyDecision:
+    """Apply Phase 5 drift-regime veto after apply_legality.
+
+    Runs AFTER `apply_legality`. Takes its output, the current mode
+    decision (for legality re-check after any veto downgrade), the
+    classified drift regime, and the frame (for the governance-urgency
+    override check).
+
+    Returns:
+        ActionPolicyDecision — the input passed through unchanged when
+        the veto is not applicable, or a further-downgraded decision
+        when the high regime vetoes outward action.
+
+    Veto conditions (all must hold):
+        1. `drift_regime.vetoes_outward_action` — high regime + away_seed.
+        2. Current action is NOT already GOVERNANCE_REVIEW (preserved).
+        3. NOT overridden by governance_sensitive + urgency > 0.7.
+
+    When the veto fires, the new action is:
+        - DEFER if DEFER is legal for the current mode, else
+        - NO_OP as the fail-closed terminus (invariant 9).
+
+    Preserves invariants:
+        - Invariant 3: high-regime drift vetoes outward action.
+        - Invariant 6: governance override narrows (bypass → keep
+          current GOVERNANCE_REVIEW or legality-derived action); never
+          widens.
+        - Invariant 9: veto output is always legal for the mode.
+    """
+    # Early exits — veto not applicable.
+    if not drift_regime.vetoes_outward_action:
+        # Low or moderate regime, or high-but-toward-seed — no action veto.
+        return policy_decision
+
+    current_action = policy_decision.action.action
+
+    # GOVERNANCE_REVIEW always preserved: governance is narrowing, not widening.
+    if current_action == ActionType.GOVERNANCE_REVIEW:
+        return policy_decision
+
+    # Override: governance_sensitive + urgency → bypass veto so governance
+    # path takes precedence. apply_legality already routed to governance
+    # where possible; drift does not second-guess that.
+    if (
+        frame.governance_sensitive
+        and frame.urgency > _OVERRIDE_URGENCY_THRESHOLD
+    ):
+        return policy_decision
+
+    # Apply veto: downgrade to DEFER if legal, else NO_OP.
+    mode = mode_decision.chosen_mode
+    legal_set = MODE_LEGAL_INTENTS.get(mode, set())
+    pre_veto_action_type = (
+        policy_decision.original_action_type
+        if policy_decision.original_action_type is not None
+        else current_action
+    )
+
+    if ActionType.DEFER in legal_set:
+        return ActionPolicyDecision(
+            action=ActionDecision(
+                action=ActionType.DEFER,
+                reason=(
+                    f"Drift-veto fallback: drift_score={drift_regime.score:.2f} "
+                    f">= high threshold with direction=away_seed; "
+                    f"{current_action.value!r} downgraded to DEFER for "
+                    f"stabilization."
+                ),
+                requires_execution=False,
+                payload={
+                    "original_action": pre_veto_action_type.value,
+                    "pre_drift_action": current_action.value,
+                    "drift_score": drift_regime.score,
+                    "drift_direction": drift_regime.direction,
+                    "fallback_reason": "drift_high_regime_veto",
+                },
+            ),
+            original_action_type=pre_veto_action_type,
+            fallback_reason="drift_high_regime_veto",
+            drift_veto_applied=True,
+        )
+
+    # DEFER not legal for this mode — NO_OP terminus (fail-closed).
+    return ActionPolicyDecision(
+        action=ActionDecision(
+            action=ActionType.NO_OP,
+            reason=(
+                f"Drift-veto fallback: drift high (score={drift_regime.score:.2f}, "
+                f"direction=away_seed); {current_action.value!r} not stabilizable "
+                f"via DEFER in mode {mode.value!r}; no-op terminus."
+            ),
+            requires_execution=False,
+            payload={
+                "original_action": pre_veto_action_type.value,
+                "pre_drift_action": current_action.value,
+                "drift_score": drift_regime.score,
+                "drift_direction": drift_regime.direction,
+                "fallback_reason": "drift_high_regime_veto_no_defer_legal",
+                "reason_code": "drift_veto_no_stabilization_path",
+            },
+        ),
+        original_action_type=pre_veto_action_type,
+        fallback_reason="drift_high_regime_veto_no_defer_legal",
+        drift_veto_applied=True,
     )
