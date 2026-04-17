@@ -37,8 +37,10 @@ from .action_policy import (
     DriftRegime,
     apply_drift_veto,
     apply_legality,
+    apply_tool_narrowing,
     classify_drift,
 )
+from .tool_registry import ActionContract, EMPTY_CONTRACT
 from .thinking_models import (
     ActionDecision,
     ActionType,
@@ -226,13 +228,45 @@ class LLMClient(Protocol):
     v0.1 (S1): implemented as fake in tests. Production client
     adapters can target Anthropic, OpenAI, Ollama, or any other
     LLM — that's agent-integrator territory, not doctrine.
+
+    `tools` (S3): when USE_TOOL has been narrowed at Phase 5, the
+    runner passes the single approved tool signature as a list of
+    length 1. Clients that do not support tool-calling may ignore
+    this parameter; the runner still records that narrowing
+    happened on `TurnResult.action_policy_decision.tool_family_narrowed`.
     """
 
     def complete(
         self,
         system_prompt: str,
         messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
+        ...
+
+
+class ToolExecutor(Protocol):
+    """Abstract interface for executing a narrowed tool family.
+
+    v0.1 (S3): implemented as a stub in tests. Real executors
+    (sandboxed Python subprocess, HTTP adapters, etc.) are integrator
+    concerns and land in post-slice increments. v0.1.0b is the
+    hardened code_exec sandbox.
+
+    The runner invokes `execute(family, arguments, defaults)` after
+    Phase 5 narrowing when a tool executor is wired. `family` is the
+    narrowed tool family name; `arguments` is whatever the LLM filled
+    into the signature's parameters; `defaults` carries the
+    controller-side constraints (language, timeout, sandbox scope)
+    from the ToolSignature.
+    """
+
+    def execute(
+        self,
+        family: str,
+        arguments: Dict[str, Any],
+        defaults: Dict[str, Any],
+    ) -> Dict[str, Any]:
         ...
 
 
@@ -281,12 +315,16 @@ class AgentRunner:
         fabric: FabricHandle,
         llm_client: Optional[LLMClient] = None,
         pack: Optional[Any] = None,  # BehaviorPack (S4); None in S1
+        action_contract: ActionContract = EMPTY_CONTRACT,
+        tool_executor: Optional[ToolExecutor] = None,
         drift_high_threshold: float = _DEFAULT_DRIFT_HIGH_THRESHOLD,
     ):
         self.controller = controller
         self.fabric = fabric
         self.llm_client = llm_client
         self.pack = pack
+        self.action_contract = action_contract
+        self.tool_executor = tool_executor
         self.drift_high_threshold = drift_high_threshold
 
     def run_turn(
@@ -339,6 +377,11 @@ class AgentRunner:
             bundle.mode_decision,
             drift_regime,
             bundle.task_frame,
+        )
+        policy_decision = apply_tool_narrowing(
+            policy_decision,
+            bundle.mode_decision,
+            self.action_contract,
         )
         effective_action = policy_decision.action
 
@@ -509,16 +552,70 @@ class AgentRunner:
             response = self.llm_client.complete(
                 system_prompt=self._build_system_prompt(frame, mode),
                 messages=[{"role": "user", "content": frame.raw_input}],
+                tools=None,
             )
             return ExecutionOutcome(response_text=response, llm_called=True)
 
         if at == ActionType.USE_TOOL:
-            # S3 will add tool registry + policy-approved narrowing +
-            # dispatch. v0.1 (S1) stub returns no-op — tool execution
-            # is not part of this increment.
+            # After S3 narrowing, the action payload carries exactly
+            # one tool signature (invariant 2). The runner passes it
+            # to the LLM as a single-element tools list.
+            signature_spec = action.payload.get("tool_signature")
+            tool_family = action.payload.get("tool_family")
+            tool_defaults = action.payload.get("tool_defaults", {})
+
+            if signature_spec is None or tool_family is None:
+                # Narrowing should have attached these; if they're
+                # absent, something upstream is misconfigured. Return
+                # no-op rather than invent a menu.
+                return ExecutionOutcome(
+                    response_text=(
+                        "[tool signature missing after narrowing — "
+                        "no execution]"
+                    ),
+                    tool_called=False,
+                )
+
+            if self.llm_client is None:
+                # Stub path — narrowing proved, but nothing to execute.
+                return ExecutionOutcome(
+                    response_text="[no llm client wired — v0.1 stub]",
+                    tool_called=False,
+                )
+
+            # Call LLM with the single narrowed signature. LLM fills
+            # arguments; tests may use a fake that ignores this.
+            llm_response = self.llm_client.complete(
+                system_prompt=self._build_system_prompt(frame, mode),
+                messages=[{"role": "user", "content": frame.raw_input}],
+                tools=[signature_spec],
+            )
+
+            if self.tool_executor is None:
+                # No executor wired — v0.1 path returns the LLM
+                # response as text. Real tool dispatch is v0.1.0b.
+                return ExecutionOutcome(
+                    response_text=llm_response,
+                    llm_called=True,
+                    tool_called=False,
+                )
+
+            # Executor wired: invoke with LLM-filled arguments. For
+            # v0.1 the runner does not parse tool_call structures out
+            # of the LLM response — fakes return canned results;
+            # production integrators will add the parse step.
+            tool_result = self.tool_executor.execute(
+                family=tool_family,
+                arguments={},  # production: parse from llm_response
+                defaults=tool_defaults,
+            )
             return ExecutionOutcome(
-                response_text="[tool execution not wired until S3]",
-                tool_called=False,
+                tool_result=tool_result,
+                response_text=str(
+                    tool_result.get("output", llm_response or "")
+                ),
+                llm_called=True,
+                tool_called=True,
             )
 
         # Unexpected action type (should not happen given Phase 5

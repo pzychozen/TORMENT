@@ -128,11 +128,16 @@ class ActionPolicyDecision:
             None if the original action passed through unchanged.
         drift_veto_applied: True if the S2 drift-regime veto further
             downgraded the action beyond what mode-legality required.
+        tool_family_narrowed: name of the tool family the S3 narrowing
+            step attached to the action; None if narrowing was not
+            performed (non-USE_TOOL action) or the contract permitted
+            no family (which falls through to the fallback chain).
     """
     action: ActionDecision
     original_action_type: Optional[ActionType] = None
     fallback_reason: Optional[str] = None
     drift_veto_applied: bool = False
+    tool_family_narrowed: Optional[str] = None
 
 
 @dataclass
@@ -450,4 +455,193 @@ def apply_drift_veto(
         original_action_type=pre_veto_action_type,
         fallback_reason="drift_high_regime_veto_no_defer_legal",
         drift_veto_applied=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# S3 — Tool-family narrowing
+# ---------------------------------------------------------------------------
+#
+# Doctrine Part 9 invariant 2: the model never receives an open
+# tool-choice menu. When the inner deliberation proposes USE_TOOL,
+# Phase 5 must narrow it to exactly one approved tool family before
+# the LLM ever sees a signature. If the active behavior pack's action
+# contract permits no family, USE_TOOL is refused and falls through
+# to the legality fallback chain (DEFER or NO_OP).
+#
+# This layer runs AFTER apply_legality (which admits USE_TOOL as
+# legal in TOOL mode) and AFTER apply_drift_veto (which may downgrade
+# USE_TOOL to DEFER in the high drift regime). When it runs, the
+# input action is guaranteed to be USE_TOOL that both the legality
+# table and the drift regime have permitted.
+
+from .tool_registry import (
+    ActionContract,
+    ToolSignature,
+    get_tool_signature,
+)
+
+
+def apply_tool_narrowing(
+    policy_decision: ActionPolicyDecision,
+    mode_decision: CognitiveModeDecision,
+    action_contract: ActionContract,
+) -> ActionPolicyDecision:
+    """Apply Phase 5 tool-family narrowing.
+
+    Runs AFTER `apply_legality` and `apply_drift_veto`. Only applies
+    when the current action is USE_TOOL. Contract:
+        - Exactly one permitted family → attach the tool signature
+          to the action's payload; ActionPolicyDecision records the
+          narrowed family name. The LLM will see this single signature
+          at Phase 6 — no menu, no alternatives (invariant 2).
+        - Zero permitted families → USE_TOOL is refused; fall through
+          to DEFER (if legal for the mode) or NO_OP terminus
+          (invariant 9).
+        - More than one permitted family → in v0.1, this is treated
+          as a narrowing failure and falls through to the same
+          zero-family path. Behavior packs are expected to declare
+          a single family per active contract (S4); this branch is
+          defensive against misconfiguration.
+
+    Invariants preserved:
+        - Invariant 1: no open-ended memory search tool is ever
+          attachable because TOOL_REGISTRY declares none.
+        - Invariant 2: exactly one signature is attached (or none,
+          and the action is downgraded).
+        - Invariant 9: failure-to-narrow falls through closed to
+          DEFER or NO_OP, never widens.
+    """
+    current_action = policy_decision.action.action
+
+    # Only USE_TOOL is narrowed. Everything else passes through.
+    if current_action != ActionType.USE_TOOL:
+        return policy_decision
+
+    allowed = action_contract.allowed_tool_families
+    mode = mode_decision.chosen_mode
+    legal_set = MODE_LEGAL_INTENTS.get(mode, set())
+    pre_narrow_action_type = (
+        policy_decision.original_action_type
+        if policy_decision.original_action_type is not None
+        else current_action
+    )
+
+    # Zero or more-than-one permitted families → refuse USE_TOOL.
+    if len(allowed) != 1:
+        fallback_reason = (
+            "tool_narrowing_no_permitted_family"
+            if len(allowed) == 0
+            else "tool_narrowing_ambiguous_contract"
+        )
+        if ActionType.DEFER in legal_set:
+            return ActionPolicyDecision(
+                action=ActionDecision(
+                    action=ActionType.DEFER,
+                    reason=(
+                        f"Tool-narrowing fallback: "
+                        f"contract permits {len(allowed)} families "
+                        f"(need exactly 1); deferring."
+                    ),
+                    requires_execution=False,
+                    payload={
+                        "original_action": pre_narrow_action_type.value,
+                        "pre_narrow_action": current_action.value,
+                        "fallback_reason": fallback_reason,
+                    },
+                ),
+                original_action_type=pre_narrow_action_type,
+                fallback_reason=fallback_reason,
+                drift_veto_applied=policy_decision.drift_veto_applied,
+                tool_family_narrowed=None,
+            )
+        # DEFER not legal → NO_OP terminus.
+        return ActionPolicyDecision(
+            action=ActionDecision(
+                action=ActionType.NO_OP,
+                reason=(
+                    f"Tool-narrowing fallback: contract permits "
+                    f"{len(allowed)} families in mode {mode.value!r}; "
+                    f"DEFER not legal, no-op terminus."
+                ),
+                requires_execution=False,
+                payload={
+                    "original_action": pre_narrow_action_type.value,
+                    "pre_narrow_action": current_action.value,
+                    "fallback_reason": f"{fallback_reason}_no_defer_legal",
+                    "reason_code": "tool_narrowing_no_stabilization_path",
+                },
+            ),
+            original_action_type=pre_narrow_action_type,
+            fallback_reason=f"{fallback_reason}_no_defer_legal",
+            drift_veto_applied=policy_decision.drift_veto_applied,
+            tool_family_narrowed=None,
+        )
+
+    # Exactly one permitted family — attach its signature.
+    family_name = next(iter(allowed))
+    signature: Optional[ToolSignature] = get_tool_signature(family_name)
+
+    if signature is None:
+        # Contract names a family that is not declared in the
+        # registry. Defensive: treat as ambiguous and fall through.
+        fallback_reason = "tool_narrowing_unknown_family"
+        if ActionType.DEFER in legal_set:
+            return ActionPolicyDecision(
+                action=ActionDecision(
+                    action=ActionType.DEFER,
+                    reason=(
+                        f"Tool-narrowing fallback: contract permits "
+                        f"{family_name!r} which is not in the tool "
+                        f"registry; deferring."
+                    ),
+                    requires_execution=False,
+                    payload={
+                        "original_action": pre_narrow_action_type.value,
+                        "unknown_family": family_name,
+                        "fallback_reason": fallback_reason,
+                    },
+                ),
+                original_action_type=pre_narrow_action_type,
+                fallback_reason=fallback_reason,
+                drift_veto_applied=policy_decision.drift_veto_applied,
+                tool_family_narrowed=None,
+            )
+        return ActionPolicyDecision(
+            action=ActionDecision(
+                action=ActionType.NO_OP,
+                reason=(
+                    f"Tool-narrowing fallback: unknown family "
+                    f"{family_name!r}; no-op terminus."
+                ),
+                requires_execution=False,
+                payload={
+                    "original_action": pre_narrow_action_type.value,
+                    "unknown_family": family_name,
+                    "fallback_reason": f"{fallback_reason}_no_defer_legal",
+                },
+            ),
+            original_action_type=pre_narrow_action_type,
+            fallback_reason=f"{fallback_reason}_no_defer_legal",
+            drift_veto_applied=policy_decision.drift_veto_applied,
+            tool_family_narrowed=None,
+        )
+
+    # Narrowing succeeded: attach the single signature.
+    new_payload = dict(policy_decision.action.payload)
+    new_payload["tool_family"] = signature.name
+    new_payload["tool_signature"] = signature.as_llm_tool_spec()
+    new_payload["tool_defaults"] = dict(signature.defaults)
+
+    return ActionPolicyDecision(
+        action=ActionDecision(
+            action=ActionType.USE_TOOL,
+            reason=policy_decision.action.reason,
+            requires_execution=True,
+            payload=new_payload,
+        ),
+        original_action_type=policy_decision.original_action_type,
+        fallback_reason=policy_decision.fallback_reason,
+        drift_veto_applied=policy_decision.drift_veto_applied,
+        tool_family_narrowed=signature.name,
     )

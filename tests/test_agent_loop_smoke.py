@@ -85,9 +85,13 @@ class FakeLLM:
     calls: List[Dict[str, Any]] = field(default_factory=list)
     canned_response: str = "Fake LLM response."
 
-    def complete(self, system_prompt, messages):
+    def complete(self, system_prompt, messages, tools=None):
         self.calls.append(
-            {"system_prompt": system_prompt, "messages": messages}
+            {
+                "system_prompt": system_prompt,
+                "messages": messages,
+                "tools": tools,
+            }
         )
         return self.canned_response
 

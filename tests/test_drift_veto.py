@@ -427,8 +427,8 @@ class FakeFabric:
 class FakeLLM:
     calls: List[Dict[str, Any]] = field(default_factory=list)
 
-    def complete(self, system_prompt, messages):
-        self.calls.append({})
+    def complete(self, system_prompt, messages, tools=None):
+        self.calls.append({"tools": tools})
         return "LLM response."
 
 
