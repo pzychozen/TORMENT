@@ -1009,23 +1009,23 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
     # See docs/ISSUE_spine_drift_check_fn_gap.md for the original issue.
     drift_check_fn = make_live_drift_check(fabric)
 
-    # DOCTRINE QUESTION (flagged by contract audit, 2026-04-12):
-    # This full-cognition path does NOT pass lookup_fn or ingest_fn to
-    # the pipeline, which means archivist writeback is silently disabled
-    # even when TORMENT_ARCHIVIST_WRITEBACK=1. The app.py /cognition/run
-    # endpoint passes both. This is an undocumented path divergence.
+    # DOCTRINE STANCE (ratified 2026-04-17, Decision D1):
+    # Spine full-cognition is intentionally read-only. This path does
+    # NOT pass lookup_fn or ingest_fn to run_cognition_pipeline(), so
+    # archivist writeback is structurally disabled here even when
+    # TORMENT_ARCHIVIST_WRITEBACK=1. Only the app.py /cognition/run
+    # endpoint passes both functions and can produce writeback.
     #
-    # NOTE: drift_check_fn is now aligned (2026-04-12 fix).
-    # The lookup_fn / ingest_fn question is separate and lower priority.
+    # This is by design: keeping the write surface narrow means fewer
+    # paths to audit and a smaller blast radius. MCP-surface cognition
+    # (Spine tools, /spine/submit_task, escalated operations) observes
+    # but does not self-write.
     #
-    # Before the writeback gate is flipped on, ratify one of:
-    #   (a) Spine full-cognition is intentionally read-only — document it.
-    #   (b) Spine full-cognition must mirror /cognition/run — add
-    #       lookup_fn and ingest_fn here (see app.py lines 2195-2213
-    #       for the correct _lookup_memory_payload pattern).
+    # drift_check_fn IS passed (aligned 2026-04-12).
     #
-    # Do not patch without ratifying. See RELEASE_NOTES_v2.4.4.md
-    # "Caller-side contract note" for the lookup_fn shape contract.
+    # If Spine writeback is ever wanted, that requires a separate
+    # ratification — do not add lookup_fn / ingest_fn here without it.
+    # See docs/ARCHIVIST_WRITEBACK_GATE_FRAMING_v2.4.x.md §7 D1.
 
     result = run_cognition_pipeline(
         task=task,
