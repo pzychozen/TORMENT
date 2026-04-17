@@ -1,5 +1,7 @@
 # Session Handoff Notes — Phase 2.5 Complete
 
+> **SUPERSEDED (2026-04-14).** This file is a Phase 2.5 snapshot from the pre-v2.4.3 era. The "immediate" items (test suite run, archive docs, clean local data, git commit) are long closed; Phase 2.6/2.7 framing has been absorbed into later work. The canonical handoff and "what's next" view now lives in `docs/TORMENT_ROADMAP_NOTES.md`. Retained here only for historical traceability; do not treat any item below as live state.
+
 ## What was done this session
 
 Phase 2.5 stabilization and observability:

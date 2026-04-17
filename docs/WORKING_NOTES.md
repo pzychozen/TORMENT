@@ -1,5 +1,7 @@
 # TORMENT Working Notes
 
+> **PARTIALLY SUPERSEDED (2026-04-14).** This file is anchored to the v2.4.3 milestone (2026-04-07). The core doctrine block below is still canonical and load-bearing. The v2.4.3 "Completed" and "Next phase: tool-result lifecycle policy" sections are historical — tool-result ingest, provenance v1, and the step-5/step-6 migration work have all since landed. For the current "what's next" view, see `docs/TORMENT_ROADMAP_NOTES.md`.
+
 **Core doctrine (do not lose this):**
 
 > Tool-result ingest is a memory feature, not a capability feature.

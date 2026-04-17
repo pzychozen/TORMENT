@@ -293,3 +293,59 @@ caller-side contract violation, not a guard or writer bug.
 - **No `--from-workspace` CLI mode.** The live MemoryGraph iterator
   is deliberately deferred; the validated path is the file-backed
   JSONL export bridge.
+
+---
+
+## Reinforce Contract (2026-04-16)
+
+Per-memory reinforcement state now mutates on successful reinforcement;
+envelope `result_code` is authoritative. Closes the contract gap where
+`torment_reinforce` returned a successful envelope while producing no
+observable mutation (documented 2026-04-14 in
+`docs/ISSUE_reinforce_contract_gap.md`).
+
+- **Writer:** `fabric.reinforce()` increments `reinforcement_count`
+  per eid in `used_successfully`. Dedupes eids. Shared/collective eids
+  are governed skips with operator-visible reason codes.
+- **Envelope:** `result_code` is handler-driven — `"reinforced"` if at
+  least one eid moved, `"no_op"` otherwise. Callers may trust the
+  envelope without reading downstream state.
+- **Retrieval boost:** additive log-scaled boost at rank stage:
+  `final += TORMENT_REINFORCE_BOOST * ln(1 + reinforcement_count)`.
+  Default `0.04`, env-configurable. Single reinforcement adds ~4% of
+  median semantic score (within the ratified 3–5% target band).
+- **Contract-invariant test:** forward + reverse invariant, dedup,
+  missing eid, shared scope skip, monotonic, overlay non-movement.
+
+Design records: `docs/REINFORCE_CONTRACT_FRAMING_v2.4.x.md` (6
+decisions), `docs/REINFORCE_CONTRACT_IMPLEMENTATION_PLAN_v2.4.x.md`
+(7 decisions).
+
+---
+
+## §2A Advisory Default-On (2026-04-16)
+
+`TORMENT_THINKING_ADVISORY` default flipped from `0` to `1`. The
+advisory retrieval-shaping path — ThinkingController → MemoryPlan →
+lane-specific top_k/weight — is now active by default on all queries.
+Set `TORMENT_THINKING_ADVISORY=0` to disable for debugging.
+
+**Validation basis:** six eval runs across three patch states on
+`ws_section_2a_v2`/`ryuki_eval` (BAAI/bge-small-en-v1.5):
+
+- B4 (anchor preservation): eid 17 CWS dropped 22%, rank-1 from
+  5/7 to 1/7 after anchor-hygiene patch.
+- B2 (collaborative escalation): 0/18 → 18/18 RETRIEVAL after
+  controller-surface widening.
+- B3 (analytical depth): 0/16 → 15/16 REFLECTIVE.
+- B5 (FAST guard): 10/10 FAST, zero false triggers.
+- Advisory shaping (8→6 hits): confirmed across all buckets.
+
+Upstream patches that unblocked the flip:
+
+- `a0fd7b4` — `derived_identity` tier, provenance tagging, boost
+  filtering (anchor hygiene).
+- `ea07744` — `RELATIONAL_HINT_WORDS`, `ANALYTICAL_DEPTH_HINT_WORDS`
+  (controller surface widening).
+
+Condition met per `docs/SECTION_2A_VALIDATION_FRAMING.md` §10.

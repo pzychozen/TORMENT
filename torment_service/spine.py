@@ -54,7 +54,7 @@ logger = logging.getLogger("torment.spine")
 # Advisory thinking layer (observation only — does not influence execution)
 # ---------------------------------------------------------------------------
 
-_THINKING_ADVISORY_ENABLE = os.environ.get("TORMENT_THINKING_ADVISORY", "0").strip() == "1"
+_THINKING_ADVISORY_ENABLE = os.environ.get("TORMENT_THINKING_ADVISORY", "1").strip() == "1"
 
 # Bounded ring buffer for alignment records (in-memory, not persisted)
 _ALIGNMENT_BUFFER_MAX = 200

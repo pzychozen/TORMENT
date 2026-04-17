@@ -495,6 +495,8 @@ The hard/soft split is deliberately asymmetric: identity and relational semantic
 
 `TORMENT_THINKING_ADVISORY` flips to default-on **only if** the composite judgment in §9.3 evaluates to "ratified for follow-up action."
 
+> **CONDITION MET (2026-04-16).** Six-run validation across three patch states confirmed all §7 rates at pass tier, zero anchor regression, B5 guard holding 10/10 FAST. Default flipped to `1` in `spine.py` and `app.py`. Env var retained for `=0` override.
+
 Operationally:
 
 - All §7 rates at **pass** tier, AND

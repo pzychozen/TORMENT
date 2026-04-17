@@ -215,7 +215,7 @@ git stash  # or git checkout -- .
 
 **Disable memory plan + geometric harvester:**
 ```bash
-export TORMENT_THINKING_ADVISORY=0  # already the default
+export TORMENT_THINKING_ADVISORY=0  # default is now 1 (flipped 2026-04-16); set =0 to disable
 ```
 
 **Disable archivist write-back:**

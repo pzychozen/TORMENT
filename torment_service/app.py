@@ -905,7 +905,7 @@ def query(req: QueryReq) -> Dict[str, Any]:
     # When thinking advisory is active, run the ThinkingController to
     # produce a MemoryPlan that influences lane-specific retrieval.
     _mp: Optional[Dict[str, Any]] = None
-    if os.environ.get("TORMENT_THINKING_ADVISORY", "0").strip() == "1":
+    if os.environ.get("TORMENT_THINKING_ADVISORY", "1").strip() == "1":
         try:
             from .thinking_controller import ThinkingController
             from .geometric_harvester import harvest_geometric_context

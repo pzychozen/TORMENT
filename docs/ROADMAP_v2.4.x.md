@@ -1,5 +1,7 @@
 # TORMENT 2.4.x Improvement Roadmap
 
+> **PARTIALLY SUPERSEDED (2026-04-14).** This framing roadmap (Safe Now / Gated Next / Blocked Until Provenance) remains the canonical architectural lens for 2.4.x-era decisions and should still be read before any capability-layer change. However, the "Practical Priorities" section below predates the step-5/step-6 provenance closure, the lane-separated recall foundation (2026-04-12), and the reinforce contract gap (documented 2026-04-14). For current post-step-6 state — completed work and recommended next picks — see `docs/TORMENT_ROADMAP_NOTES.md`. Notable shifts since this doc was written: provenance plumbing has matured substantially (step 6 operationally closed); §2A Memory Plan → Real Query integration has its lane infrastructure in place (advisory is now default-on after six-run validation, 2026-04-16); archivist write-back remains correctly blocked.
+
 This roadmap assumes the current direction is fundamentally correct:
 
 - Memory substrate is strong
@@ -76,7 +78,7 @@ Why it stays gated: it touches the core query path. Even correct logic can subtl
 
 Testing requirement before broader enablement: identity anchors should not disappear from top results on identity-sensitive queries, deep memory should remain appropriately bounded, lane weighting should improve relevance not just change it.
 
-Recommended state: `TORMENT_THINKING_ADVISORY=0` by default. Enable only for deliberate testing until query behavior is validated.
+Recommended state: `TORMENT_THINKING_ADVISORY=1` by default (flipped 2026-04-16 after §2A validation confirmed all buckets pass). Set `=0` to disable for debugging.
 
 ### B. MCP / Spine-Enabled Capability Usage
 

@@ -72,7 +72,7 @@ v2.4.4 closes the provenance-migration subsystem (step 6). Legacy memory rows ca
 
 Recent work in the v2.4.x line:
 
-- **v2.4.4** — reinforce contract close: `torment_reinforce` now moves per-memory `reinforcement_count` (significance state), truthfully reports `"reinforced"` or `"no_op"` in the envelope, and applies a log-scaled retrieval boost at rank stage. Feedback/reinforce asymmetry is doctrine: feedback → overlay, reinforce → per-memory. Contract-invariant test enforces the bound trio. Provenance migration closure (step 6), recursion guard and refusal sentinels validated end-to-end
+- **v2.4.4** — advisory retrieval shaping default-on (`TORMENT_THINKING_ADVISORY=1`): §2A validation confirmed across six eval runs — anchor preservation, collaborative escalation, analytical depth, and FAST guard all pass. Reinforce contract close: `torment_reinforce` now moves per-memory `reinforcement_count`, truthfully reports `"reinforced"` or `"no_op"`, and applies a log-scaled retrieval boost at rank stage. Provenance migration closure (step 6), recursion guard and refusal sentinels validated end-to-end
 - **v2.4.3** — tool-result memory lane, governed ingest of external tool outputs
 - **v2.4.2** — provenance system, recursion safety policy, MCP capability boundary
 - **v2.4.1** — thinking controller, stance policy, first live voice-agent deployment
