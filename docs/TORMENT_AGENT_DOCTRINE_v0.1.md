@@ -1,6 +1,6 @@
 # TORMENT Agent Doctrine v0.1
 
-**Status: DRAFT (revision 3) — not ratified. Final pressure-testing with GPT before committing to `docs/`.**
+**Status: RATIFIED 2026-04-17.** Committed to `main` (doctrine commit `6fc167f`, merged via PR #40 as `8ce3241`, tagged `v2.4.5`). Ratification sign-off by GPT (2026-04-17) and Claude (contradiction check pass: 0 hard, 2 soft migrations logged for v0.1 implementation, 1 clarification applied as CC-1).
 
 **Date:** 2026-04-17
 **Authors:** GPT (R1–R6 positions, two rounds of revision pushback), Claude (audit, consistency check, drafting)
@@ -430,30 +430,40 @@ The moderate-regime boundary (0.15) is provisional. Likely to move during calibr
 
 ---
 
-## Ratification checklist
+## Ratification record
 
-Before committing to `docs/TORMENT_AGENT_DOCTRINE_v0.1.md`:
+**Ratified 2026-04-17** after three revision rounds with GPT pressure-testing and one code-contradiction pass against the existing codebase (0 hard contradictions, 2 soft contradictions logged as v0.1 implementation migration items, 1 consistency clarification applied as CC-1 to invariant 1).
 
-- [ ] "Real shape of v0.1" inner/outer loop framing accepted.
-- [ ] Non-LLM outer-loop authority sentence accepted as doctrine.
-- [ ] "State-governed cognition" framing accepted as deeper thesis.
-- [ ] Load-bearing criterion (math veto or decorative) accepted as headline test.
-- [ ] Capability audit buckets (CE / LG / PC / AB) accepted; row 17 (turn runner absent) accepted.
-- [ ] R1–R6 positions, reasons, and boundaries accepted.
-- [ ] R3 hard line ("no open tool-choice problem") accepted.
-- [ ] R6.a `review` role (structured gate, declared grounds, no loop-back) accepted.
-- [ ] Refusal / escalation chain (Part 2.5) accepted — fail-closed rule accepted.
-- [ ] Runtime-decision vs assimilation-outcome criterion accepted.
-- [ ] Primary-intent vs assimilation-outcome split accepted.
-- [ ] Pre-execution Mode→intent table accepted; post-execution note accepted.
-- [ ] Three drift regimes accepted as doctrine; numeric thresholds accepted as Appendix A reference profile.
-- [ ] Behavior packs (five-object bundle) accepted as direction.
-- [ ] Behavior-pack composition boundary (one primary + narrow overlays) accepted.
-- [ ] Novelty test for packs/reflexes accepted.
-- [ ] Internal-reflex vs external-scheduling split accepted.
-- [ ] Reflex priority rule (governance > safety > convergence > identity > motif/phase) accepted as v0.1 default.
-- [ ] Doctrinal invariants (Part 9, nine rules) accepted as the implementation scorecard.
-- [ ] Part 7 v0.2 deferrals are the right ones.
-- [ ] Part 10 MVP runtime slice accepted as the first post-ratification implementation step.
+All twenty-one positions below were accepted without further revision:
 
-Twenty-one boxes. When all are green, this goes to `docs/TORMENT_AGENT_DOCTRINE_v0.1.md` and the MVP slice plan becomes the next draft.
+- [x] "Real shape of v0.1" inner/outer loop framing accepted.
+- [x] Non-LLM outer-loop authority sentence accepted as doctrine.
+- [x] "State-governed cognition" framing accepted as deeper thesis.
+- [x] Load-bearing criterion (math veto or decorative) accepted as headline test.
+- [x] Capability audit buckets (CE / LG / PC / AB) accepted; row 17 (turn runner absent) accepted.
+- [x] R1–R6 positions, reasons, and boundaries accepted.
+- [x] R3 hard line ("no open tool-choice problem") accepted.
+- [x] R6.a `review` role (structured gate, declared grounds, no loop-back) accepted.
+- [x] Refusal / escalation chain (Part 2.5) accepted — fail-closed rule accepted.
+- [x] Runtime-decision vs assimilation-outcome criterion accepted.
+- [x] Primary-intent vs assimilation-outcome split accepted.
+- [x] Pre-execution Mode→intent table accepted; post-execution note accepted.
+- [x] Three drift regimes accepted as doctrine; numeric thresholds accepted as Appendix A reference profile.
+- [x] Behavior packs (five-object bundle) accepted as direction.
+- [x] Behavior-pack composition boundary (one primary + narrow overlays) accepted.
+- [x] Novelty test for packs/reflexes accepted.
+- [x] Internal-reflex vs external-scheduling split accepted.
+- [x] Reflex priority rule (governance > safety > convergence > identity > motif/phase) accepted as v0.1 default.
+- [x] Doctrinal invariants (Part 9, nine rules) accepted as the implementation scorecard.
+- [x] Part 7 v0.2 deferrals are the right ones.
+- [x] Part 10 MVP runtime slice accepted as the first post-ratification implementation step.
+
+**Sign-off:**
+- GPT (via user, 2026-04-17): "This is a sign-off from me. Revision 3 is ratifiable."
+- Claude (contradiction check, 2026-04-17): "0 hard contradictions. 2 soft contradictions. 1 consistency clarification. Revision 3 is ratifiable."
+
+**Known migration items for v0.1 implementation (logged, not blocking):**
+- **SC-1** — `thinking_controller.choose_action` currently emits `PROPOSE_SHARE` and `CREATE_ARCHIVE_NOTE` as primary Phase 4 outputs. Doctrine Part 3 classifies these as assimilation outcomes. Migrate during v0.1: remove those branches, route into a Phase 7 dispatcher.
+- **SC-2** — `thinking_controller.choose_action` default branch returns `ANSWER` without mode-legality enforcement. Violates invariant 9 in `TOOL` / `GOVERNED` modes. Migrate during v0.1: wrap output with mode-legality check that applies the Part 2.5 fallback chain.
+
+**Next artifact:** `docs/TORMENT_AGENT_RUNTIME_SLICE_v0.1_PLAN.md` — ratification pending; covers SC-1, SC-2, and the five slice components (S1 outer-loop runner, S2 drift veto, S3 tool-policy gate, S4 behavior pack skeleton, S5 internal reflex). Current draft in the working outputs folder.
