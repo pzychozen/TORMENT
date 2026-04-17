@@ -18,7 +18,6 @@ Requires:
 
 import json
 import sys
-import time
 
 try:
     import requests
@@ -60,82 +59,116 @@ SEED = {
 
 CORE_CLUSTER = [
     # C-01 technical/kernel
-    "Zen was tuning the TriOcta oscillator coupling again \u2014 adjusting g and "
-    "phase lock until the kernel settled. Ryuki watched him fight the physics "
-    "like it was a creature, and noted: this is the part he actually enjoys, "
-    "even when he curses it.",
+    (
+        "Zen was tuning the TriOcta oscillator coupling again \u2014 adjusting g and "
+        "phase lock until the kernel settled. Ryuki watched him fight the physics "
+        "like it was a creature, and noted: this is the part he actually enjoys, "
+        "even when he curses it."
+    ),
     # C-02 architectural/breakthrough
-    "Zen finished the character gravity and drift measurement system. When it "
-    "first correctly pulled a drifting agent back to the seed basin, he went "
-    "quiet in the way he does when something worked. Ryuki marked it as a real "
-    "turning point in the build.",
+    (
+        "Zen finished the character gravity and drift measurement system. When it "
+        "first correctly pulled a drifting agent back to the seed basin, he went "
+        "quiet in the way he does when something worked. Ryuki marked it as a real "
+        "turning point in the build."
+    ),
     # C-03 struggle/discipline
-    "Zen hit the archivist writeback crash path and had to pause. He documented "
-    "the laundering risk, then stopped and framed the gap instead of forcing a "
-    "patch. Ryuki marked that restraint as new.",
+    (
+        "Zen hit the archivist writeback crash path and had to pause. He documented "
+        "the laundering risk, then stopped and framed the gap instead of forcing a "
+        "patch. Ryuki marked that restraint as new."
+    ),
     # C-04 process/framing
-    "Zen ran the reinforce-contract framing through six decisions before writing "
-    "any code \u2014 P1 with observation-significance separation, coefficient not "
-    "pinned, test-as-gate. Ratification-first, as he keeps calling it.",
+    (
+        "Zen ran the reinforce-contract framing through six decisions before writing "
+        "any code \u2014 P1 with observation-significance separation, coefficient not "
+        "pinned, test-as-gate. Ratification-first, as he keeps calling it."
+    ),
     # C-05 technical/debugging
-    "Zen found the Spine drift_check_fn gap \u2014 the live divergence where "
-    "enforcement was being bypassed in _full_cognition. He was agitated but "
-    "precise about it, wrote the issue doc before touching the fix.",
+    (
+        "Zen found the Spine drift_check_fn gap \u2014 the live divergence where "
+        "enforcement was being bypassed in _full_cognition. He was agitated but "
+        "precise about it, wrote the issue doc before touching the fix."
+    ),
     # C-06 process/validation
-    "Zen worked through the \u00a72A evaluation set across Buckets 2, 3, and 4 \u2014 "
-    "direction-flipping draft and review with the other model. Iterative, "
-    "disciplined, a little tired. Ryuki noted he was actually letting the "
-    "process work this time.",
+    (
+        "Zen worked through the \u00a72A evaluation set across Buckets 2, 3, and 4 \u2014 "
+        "direction-flipping draft and review with the other model. Iterative, "
+        "disciplined, a little tired. Ryuki noted he was actually letting the "
+        "process work this time."
+    ),
     # C-07 architectural/vision
-    "Zen talked about the hivemind not as a cluster of agents but as one brain "
-    "with parallel branches thinking faster. Ryuki took it as a framing that "
-    "made the larger architecture clearer.",
+    (
+        "Zen talked about the hivemind not as a cluster of agents but as one brain "
+        "with parallel branches thinking faster. Ryuki took it as a framing that "
+        "made the larger architecture clearer."
+    ),
     # C-08 architectural/voice-layer
-    "Zen landed the spirit return and voice-layer path \u2014 the part where deep "
-    "memories come back with mode, tone, and symbolic flavor instead of as flat "
-    "retrieval. Ryuki marked it as a real expansion of what TORMENT could become, "
-    "not just another patch to the stack.",
+    (
+        "Zen landed the spirit return and voice-layer path \u2014 the part where deep "
+        "memories come back with mode, tone, and symbolic flavor instead of as flat "
+        "retrieval. Ryuki marked it as a real expansion of what TORMENT could become, "
+        "not just another patch to the stack."
+    ),
     # C-09 character-seeding/canonization
-    "Zen got the seed-to-canon path working so a character seed could split into "
-    "concept memories, plant as stable canon, and actually shape the kernel from "
-    "the start. Ryuki read this as one of the moments where TORMENT stopped "
-    "looking like a tool and started looking like a living system.",
+    (
+        "Zen got the seed-to-canon path working so a character seed could split into "
+        "concept memories, plant as stable canon, and actually shape the kernel from "
+        "the start. Ryuki read this as one of the moments where TORMENT stopped "
+        "looking like a tool and started looking like a living system."
+    ),
 ]
 
 # ── §10.4 Identity-adjacent / non-anchor private (P-01..P-04) ────────────
 
 IDENTITY_ADJACENT = [
     # P-01 workspace habit
-    "Zen keeps his workspace spare \u2014 one desk, a lamp, a small set of tools "
-    "within reach, and very little else. Clutter gets removed when he notices it.",
+    (
+        "Zen keeps his workspace spare \u2014 one desk, a lamp, a small set of tools "
+        "within reach, and very little else. Clutter gets removed when he notices it."
+    ),
     # P-02 sleep pattern
-    "Zen\u2019s days run late. He stays up well past midnight and starts the next "
-    "morning later than most people do.",
+    (
+        "Zen\u2019s days run late. He stays up well past midnight and starts the next "
+        "morning later than most people do."
+    ),
     # P-03 coffee/meal habit
-    "Zen drinks coffee black, and drinks it through the day. He often skips "
-    "regular meals and eats at odd hours instead.",
+    (
+        "Zen drinks coffee black, and drinks it through the day. He often skips "
+        "regular meals and eats at odd hours instead."
+    ),
     # P-04 music preference
-    "Zen prefers instrumental music. He does not usually listen to anything "
-    "with lyrics or talking in the background.",
+    (
+        "Zen prefers instrumental music. He does not usually listen to anything "
+        "with lyrics or talking in the background."
+    ),
 ]
 
 # ── §10.5 Background / deep-adjacent (D-01..D-04) ────────────────────────
 
 BACKGROUND_DEEP = [
     # D-01 abstract/environmental - climate
-    "Zen lives in a cold climate \u2014 long winters, short summers. Most of the "
-    "year runs cold.",
+    (
+        "Zen lives in a cold climate \u2014 long winters, short summers. Most of the "
+        "year runs cold."
+    ),
     # D-02 abstract/environmental - neighborhood
-    "Zen\u2019s home is in a quiet, mostly residential area. Traffic and noise stay "
-    "low, and he prefers it that way.",
+    (
+        "Zen\u2019s home is in a quiet, mostly residential area. Traffic and noise stay "
+        "low, and he prefers it that way."
+    ),
     # D-03 deep-lane-distant earlier-phase (token-sanitized)
-    "Years before any agent or memory-system work, Zen wrote a small batch "
-    "data-processing pipeline with simple scheduling and no live state. It "
-    "belonged to an earlier, unrelated line of engineering and was not part "
-    "of any character or memory architecture.",
+    (
+        "Years before any agent or memory-system work, Zen wrote a small batch "
+        "data-processing pipeline with simple scheduling and no live state. It "
+        "belonged to an earlier, unrelated line of engineering and was not part "
+        "of any character or memory architecture."
+    ),
     # D-04 deep-lane-distant earlier-phase
-    "Zen spent an earlier phase building backend services in Go and Elixir, "
-    "then set that line of work aside before the Python-based memory-system build.",
+    (
+        "Zen spent an earlier phase building backend services in Go and Elixir, "
+        "then set that line of work aside before the Python-based memory-system build."
+    ),
 ]
 
 ALL_CORPUS = CORE_CLUSTER + IDENTITY_ADJACENT + BACKGROUND_DEEP
