@@ -425,21 +425,13 @@ class ThinkingController:
                 requires_execution=False,
             )
 
-        if "proposal" in lower or "share" in lower:
-            return ActionDecision(
-                action=ActionType.PROPOSE_SHARE,
-                reason="Input appears to concern proposal/share flow.",
-                requires_execution=True,
-                payload={"route": "proposal"},
-            )
-
-        if memory_plan.retrieve_archive and ("note" in lower or "archive" in lower):
-            return ActionDecision(
-                action=ActionType.CREATE_ARCHIVE_NOTE,
-                reason="Archive-oriented task suggests an archive note or archive-bound response.",
-                requires_execution=True,
-                payload={"route": "archive"},
-            )
+        # M1 (doctrine v0.1): PROPOSE_SHARE and CREATE_ARCHIVE_NOTE are
+        # assimilation outcomes, not primary runtime intents. Their
+        # emission has been moved to the Phase 7 dispatcher in
+        # agent_loop.assimilation_outcomes. The text-hint branches that
+        # previously emitted them from Phase 4 have been removed per
+        # docs/TORMENT_AGENT_DOCTRINE_v0.1.md Part 3 and the M1
+        # migration in docs/TORMENT_AGENT_RUNTIME_SLICE_v0.1_PLAN.md.
 
         return ActionDecision(
             action=ActionType.ANSWER,
