@@ -185,6 +185,15 @@ class ThinkingController:
         identity_sensitive = self._has_any(lower, IDENTITY_HINT_WORDS)
         live_social = self._has_any(lower, LIVE_SOCIAL_HINT_WORDS)
         archive_relevant = self._has_any(lower, ARCHIVE_HINT_WORDS)
+
+        # S5: reflex observations are identity-sensitive by definition.
+        # A reflex turn is fired because a kernel-state signal crossed
+        # a threshold that warrants stabilization — that IS identity
+        # preservation. Force identity_sensitive=True so the existing
+        # choose_mode branch routes to IDENTITY_SENSITIVE. Slice plan
+        # S5 / doctrine Part 4 high regime.
+        if source_type == "reflex":
+            identity_sensitive = True
         # §2A D1: pad with spaces so " we " matches at string boundaries
         _padded = " " + lower + " "
         relational_cue = self._has_any(_padded, RELATIONAL_HINT_WORDS)
