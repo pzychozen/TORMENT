@@ -411,7 +411,8 @@ class TestPackDriftThresholdAffectsRegime:
 
     def test_pack_threshold_triggers_veto(self):
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.40, "drift_direction": "away_seed"}
+            # Sign convention: negative = drifted; -0.40 is past pack's 0.35 high threshold.
+            drift_return={"drift_score": -0.40, "drift_direction": "away_seed"}
         )
         runner = AgentRunner(
             controller=ThinkingController(),
@@ -431,7 +432,8 @@ class TestPackDriftThresholdAffectsRegime:
 
     def test_pack_threshold_does_not_trigger_below(self):
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.20, "drift_direction": "away_seed"}
+            # Sign convention: -0.20 is within the moderate band, below the 0.35 high threshold.
+            drift_return={"drift_score": -0.20, "drift_direction": "away_seed"}
         )
         runner = AgentRunner(
             controller=ThinkingController(),

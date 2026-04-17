@@ -78,10 +78,15 @@ class RaisingLLM:
         )
 
 
-HIGH_DRIFT_AWAY = {"drift_score": 0.5, "drift_direction": "away_seed"}
-HIGH_DRIFT_TOWARD = {"drift_score": 0.5, "drift_direction": "toward_seed"}
-MODERATE_DRIFT = {"drift_score": 0.25, "drift_direction": "away_seed"}
-LOW_DRIFT = {"drift_score": 0.05, "drift_direction": "away_seed"}
+# Sign convention (matches character.py): drift_score is a signed
+# distance from seed basin (positive = close, negative = far).
+# drift_direction is a separate signal. The high-regime veto requires
+# BOTH score <= -0.35 AND direction == "away_seed". high_threshold is
+# a positive magnitude.
+HIGH_DRIFT_AWAY = {"drift_score": -0.5, "drift_direction": "away_seed"}
+HIGH_DRIFT_TOWARD = {"drift_score": -0.5, "drift_direction": "toward_seed"}
+MODERATE_DRIFT = {"drift_score": -0.25, "drift_direction": "away_seed"}
+LOW_DRIFT = {"drift_score": -0.05, "drift_direction": "away_seed"}
 
 
 def _make_reflex_runner(drift_return=HIGH_DRIFT_AWAY):

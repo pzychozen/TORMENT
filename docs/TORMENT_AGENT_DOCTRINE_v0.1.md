@@ -403,7 +403,7 @@ These nine are the scorecard for any future v0.1 implementation. If the code can
 Once v0.1 is ratified, the first implementation step is not a named agent. It is a **minimum runtime slice** that proves the doctrine is real in code. Proposed slice:
 
 - **One outer-loop runner** — the skeleton that runs phases 1–8 for one turn.
-- **One drift veto path** — Phase 5 gate that blocks `USE_TOOL` when drift ≥ high threshold (Appendix A).
+- **One drift veto path** — Phase 5 gate that blocks `USE_TOOL` when drift crosses the high threshold in the away-from-seed direction (see Appendix A for sign convention).
 - **One narrow tool-policy gate** — Phase 5 narrowing for one specific tool family (candidate: `code_exec` in sandboxed form, because it's the lowest-ambiguity action family to gate).
 - **One behavior-pack skeleton** — the five-object dataclass cluster plus a single reference pack (candidate: a minimal "debugging-session" pack, because its stabilization program and action contract are easiest to write concretely).
 - **One internal reflex** — one non-LLM reflex wired end-to-end (candidate: drift-threshold reflex that forces `self_correct`).
@@ -418,13 +418,17 @@ This preview is not part of the ratification checklist — the slice gets its ow
 
 **These numbers are a starting profile for v0.1, subject to calibration. They are not doctrinal constants. The three-regime structure in Part 4 is doctrine; the thresholds are tuning.**
 
+**Sign convention (amendment 2026-04-17):** `drift_score` follows the `torment_service.character.measure_drift` convention — it is a **signed distance from the seed basin** along a `[-1.0, +1.0]` axis: positive values mean close/centered, negative values indicate distance from seed. `drift_direction` is a **separate explicit signal** (`away_seed` / `toward_seed` / `stable`). The high-regime veto condition requires BOTH `drift_score <= -high_threshold` AND `direction == "away_seed"` — score sign alone is not sufficient. Threshold values are **positive magnitudes**. This matches `character.py`'s own `gravity_correction` trigger (fires only on `drift_score <= -drift_correction_threshold` AND `direction == "away_seed"`) and keeps the runner's Phase 5 veto consistent with the real fabric's semantics.
+
 | Signal | Low regime | Moderate regime | High regime |
 |--------|------------|-----------------|-------------|
-| `drift_score` | `< 0.15` | `0.15 ≤ drift_score < 0.35` | `≥ 0.35` |
+| `drift_score` | `> -0.15` (includes positive / healthy) | `-0.35 < drift_score ≤ -0.15` | `drift_score ≤ -0.35` AND `direction == "away_seed"` |
 | Action effect | aperture shaping only | intent promotion toward stabilization | outward action veto + forced stabilization |
 | Gravity correction | no | no (advisory) | yes (Phase 8 runs `character.gravity_correction`) |
 
-The high-regime threshold reuses the existing `TORMENT_CHARACTER_CORRECTION_THRESHOLD=0.35` on purpose — promoting the same threshold from "when to emit a correction memory" (current use) to "when to veto outward action" (v0.1 use). Same number, new semantics.
+The high-regime threshold magnitude (`0.35`) is the same value as the existing `TORMENT_CHARACTER_CORRECTION_THRESHOLD=0.35` — promoting the threshold from "when to emit a correction memory" (existing character.py use) to "when to veto outward action" (v0.1 runner use). Same threshold magnitude, same sign semantics, new application layer.
+
+**Why this is an amendment and not a structural change:** the ratified doctrine's Part 4 intent was always "high drift away from seed vetoes outward action." The original Appendix A wording used `>= 0.35` which expressed the sign incorrectly relative to the real system. The correction flips only the sign-expression; the doctrinal content (three regimes, threshold value, behavior) is unchanged.
 
 The moderate-regime boundary (0.15) is provisional. Likely to move during calibration once the outer loop is actually running and we can measure regime-firing frequencies.
 

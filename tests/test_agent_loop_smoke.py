@@ -308,7 +308,8 @@ class TestPhase8Stabilize:
     def test_gravity_correction_fires_when_drift_high_and_away_seed(self):
         runner, fabric, llm = _make_runner(
             drift_return={
-                "drift_score": 0.5,
+                # Negative = drifted away per character.py convention.
+                "drift_score": -0.5,
                 "drift_direction": "away_seed",
             },
         )
@@ -338,10 +339,11 @@ class TestPhase8Stabilize:
         assert len(fabric.gravity_correction_calls) == 0
 
     def test_gravity_correction_skipped_when_direction_not_away_seed(self):
-        """Invariant: correction only fires on away_seed direction."""
+        """Invariant: correction only fires on away_seed direction.
+        Score magnitude is high but direction says toward_seed → no fire."""
         runner, fabric, llm = _make_runner(
             drift_return={
-                "drift_score": 0.6,
+                "drift_score": -0.6,
                 "drift_direction": "toward_seed",
             },
         )

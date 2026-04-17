@@ -79,8 +79,10 @@ def _passthrough_policy(at: ActionType):
 
 
 def _high_away() -> DriftRegime:
+    # Sign convention: score is signed distance from seed basin
+    # (negative = far); veto also requires direction == "away_seed".
     return DriftRegime(
-        score=0.5,
+        score=-0.5,
         direction="away_seed",
         is_high=True,
         is_away_seed=True,
@@ -89,7 +91,7 @@ def _high_away() -> DriftRegime:
 
 def _high_toward() -> DriftRegime:
     return DriftRegime(
-        score=0.5,
+        score=-0.5,
         direction="toward_seed",
         is_high=True,
         is_away_seed=False,
@@ -98,7 +100,7 @@ def _high_toward() -> DriftRegime:
 
 def _moderate() -> DriftRegime:
     return DriftRegime(
-        score=0.25,
+        score=-0.25,
         direction="away_seed",
         is_high=False,
         is_away_seed=True,
@@ -107,7 +109,7 @@ def _moderate() -> DriftRegime:
 
 def _low() -> DriftRegime:
     return DriftRegime(
-        score=0.05,
+        score=-0.05,
         direction="away_seed",
         is_high=False,
         is_away_seed=True,
@@ -129,37 +131,47 @@ class TestClassifyDrift:
         assert r.vetoes_outward_action is False
 
     def test_high_away_seed(self):
+        # Sign convention: negative score = drifted.
         r = classify_drift(
-            {"drift_score": 0.5, "drift_direction": "away_seed"}
+            {"drift_score": -0.5, "drift_direction": "away_seed"}
         )
         assert r.is_high is True
         assert r.is_away_seed is True
         assert r.vetoes_outward_action is True
 
     def test_high_toward_seed(self):
+        # High magnitude but direction says toward_seed.
         r = classify_drift(
-            {"drift_score": 0.6, "drift_direction": "toward_seed"}
+            {"drift_score": -0.6, "drift_direction": "toward_seed"}
         )
         assert r.is_high is True
         assert r.is_away_seed is False
         assert r.vetoes_outward_action is False
 
     def test_at_threshold(self):
-        """Exactly 0.35 is high (>=)."""
+        """Exactly -0.35 is high (score <= -threshold)."""
         r = classify_drift(
-            {"drift_score": 0.35, "drift_direction": "away_seed"}
+            {"drift_score": -0.35, "drift_direction": "away_seed"}
         )
         assert r.is_high is True
 
-    def test_just_below_threshold(self):
+    def test_just_inside_threshold(self):
+        """-0.349 is NOT yet high (score > -0.35)."""
         r = classify_drift(
-            {"drift_score": 0.349, "drift_direction": "away_seed"}
+            {"drift_score": -0.349, "drift_direction": "away_seed"}
+        )
+        assert r.is_high is False
+
+    def test_positive_score_never_high(self):
+        """Positive drift_score means healthy/centered; never high."""
+        r = classify_drift(
+            {"drift_score": 0.5, "drift_direction": "away_seed"}
         )
         assert r.is_high is False
 
     def test_custom_threshold(self):
         r = classify_drift(
-            {"drift_score": 0.3, "drift_direction": "away_seed"},
+            {"drift_score": -0.3, "drift_direction": "away_seed"},
             high_threshold=0.2,
         )
         assert r.is_high is True
@@ -259,7 +271,7 @@ class TestDriftVetoHighRegime:
         result = apply_drift_veto(
             original, _mode(CognitiveMode.TOOL), _high_away(), _frame()
         )
-        assert result.action.payload.get("drift_score") == 0.5
+        assert result.action.payload.get("drift_score") == -0.5
         assert result.action.payload.get("drift_direction") == "away_seed"
         assert result.action.payload.get("pre_drift_action") == "use_tool"
 
@@ -437,7 +449,7 @@ class TestRunnerDriftVetoIntegration:
 
     def test_high_drift_veto_causes_defer_through_runner(self):
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.5, "drift_direction": "away_seed"}
+            drift_return={"drift_score": -0.5, "drift_direction": "away_seed"}
         )
         llm = FakeLLM()
         runner = AgentRunner(
@@ -457,7 +469,7 @@ class TestRunnerDriftVetoIntegration:
     def test_high_drift_no_llm_called(self):
         """When drift veto forces DEFER, the LLM is not called."""
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.5, "drift_direction": "away_seed"}
+            drift_return={"drift_score": -0.5, "drift_direction": "away_seed"}
         )
         llm = FakeLLM()
         runner = AgentRunner(
@@ -477,7 +489,7 @@ class TestRunnerDriftVetoIntegration:
     def test_high_drift_gravity_correction_still_fires(self):
         """Phase 8 gravity correction still runs when Phase 5 veto fires."""
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.5, "drift_direction": "away_seed"}
+            drift_return={"drift_score": -0.5, "drift_direction": "away_seed"}
         )
         llm = FakeLLM()
         runner = AgentRunner(
@@ -518,7 +530,7 @@ class TestRunnerDriftVetoIntegration:
     def test_measure_drift_called_exactly_once_per_turn(self):
         """Phase 5 measurement is reused in Phase 8; no double call."""
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.2, "drift_direction": "away_seed"}
+            drift_return={"drift_score": -0.2, "drift_direction": "away_seed"}
         )
         llm = FakeLLM()
         runner = AgentRunner(
@@ -537,7 +549,7 @@ class TestRunnerDriftVetoIntegration:
     def test_high_drift_turn_records_original_action_in_policy(self):
         """When veto fires, the pre-veto action type is preserved."""
         fabric = FakeFabric(
-            drift_return={"drift_score": 0.5, "drift_direction": "away_seed"}
+            drift_return={"drift_score": -0.5, "drift_direction": "away_seed"}
         )
         llm = FakeLLM()
         runner = AgentRunner(

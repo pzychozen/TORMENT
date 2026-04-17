@@ -145,6 +145,22 @@ class DriftRegime:
     """Classification of the current drift state against the v0.1
     three-regime structure (doctrine Part 4).
 
+    Sign convention (matches `torment_service.character.measure_drift`
+    and doctrine Appendix A as amended 2026-04-17):
+
+        * `score` indicates distance from seed basin along a signed
+          axis: positive values mean close/centered, negative values
+          indicate distance from seed. Range approximately -1.0 to +1.0.
+        * `direction` is a SEPARATE explicit signal — "away_seed",
+          "toward_seed", or "stable" — indicating whether the last
+          observed motion moved toward or away from the seed.
+
+    The high-regime veto condition requires BOTH: `score <= -high_threshold`
+    (drift magnitude past the threshold) AND `direction == "away_seed"`
+    (motion is outbound). Sign alone is insufficient; both signals
+    combine via `vetoes_outward_action`. This matches `character.py`'s
+    `gravity_correction` trigger, which also requires both conditions.
+
     Only the high regime gates action in v0.1 (S2); moderate-regime
     intent promotion is deferred. Low regime shapes aperture only.
     """
@@ -302,14 +318,21 @@ def apply_legality(
 # S2 — Drift-regime veto
 # ---------------------------------------------------------------------------
 #
-# Doctrine Part 4, three-regime structure:
-#     - Low drift (< 0.15):       aperture shaping only, no action veto.
-#     - Moderate drift (0.15-0.35): intent promotion toward stabilization
-#       (deferred to later increment; v0.1/S2 does not enforce).
-#     - High drift (>= 0.35) AND direction == "away_seed": Action Policy
-#       blocks outward actions. USE_TOOL refused. Primary intent forced
-#       to DEFER (or NO_OP if DEFER not legal) unless GOVERNANCE_REVIEW
-#       is active.
+# Doctrine Part 4, three-regime structure. Sign convention per
+# character.py: drift_score is a signed distance from seed basin
+# (positive = close, negative = far). The high-regime veto also
+# requires direction == "away_seed" — score sign alone is not
+# sufficient. Thresholds below are POSITIVE magnitudes.
+#
+#     - Low drift (score > -0.15):            aperture shaping only,
+#       no action veto.
+#     - Moderate drift (-0.35 < score <= -0.15): intent promotion
+#       toward stabilization (deferred to later increment; v0.1/S2
+#       does not enforce).
+#     - High drift (score <= -0.35) AND direction == "away_seed":
+#       Action Policy blocks outward actions. USE_TOOL refused.
+#       Primary intent forced to DEFER (or NO_OP if DEFER not legal)
+#       unless GOVERNANCE_REVIEW is active.
 #
 # Override: if frame.governance_sensitive AND frame.urgency > 0.7, the
 # veto is bypassed; governance review takes precedence over drift. This
@@ -326,6 +349,13 @@ def classify_drift(
 ) -> DriftRegime:
     """Extract a DriftRegime from raw drift state.
 
+    Sign convention (matches `torment_service.character.measure_drift`):
+    `drift_score` is a signed distance from the seed basin (positive =
+    close/centered, negative = far). The high-regime veto combines this
+    with an explicit `drift_direction == "away_seed"` signal; the score
+    sign alone is not sufficient. `high_threshold` is a positive
+    magnitude; `is_high = score <= -high_threshold`.
+
     Accepts None or a dict from `character.measure_drift` / fabric.
     None or missing keys degrade gracefully to a low-regime classification.
     """
@@ -341,7 +371,11 @@ def classify_drift(
     return DriftRegime(
         score=score,
         direction=direction,
-        is_high=score >= high_threshold,
+        # character.py convention: score <= -threshold means "drift
+        # has crossed the correction threshold in the away-from-seed
+        # direction." Combined with direction=="away_seed" this is
+        # the high-regime veto condition per doctrine Part 4.
+        is_high=score <= -high_threshold,
         is_away_seed=direction == "away_seed",
     )
 
@@ -415,9 +449,9 @@ def apply_drift_veto(
                 action=ActionType.DEFER,
                 reason=(
                     f"Drift-veto fallback: drift_score={drift_regime.score:.2f} "
-                    f">= high threshold with direction=away_seed; "
-                    f"{current_action.value!r} downgraded to DEFER for "
-                    f"stabilization."
+                    f"crossed high-drift threshold (score <= -{_DEFAULT_HIGH_DRIFT_THRESHOLD:.2f}) "
+                    f"with direction=away_seed; {current_action.value!r} "
+                    f"downgraded to DEFER for stabilization."
                 ),
                 requires_execution=False,
                 payload={
