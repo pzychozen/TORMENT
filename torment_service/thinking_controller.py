@@ -9,6 +9,7 @@ from .thinking_models import (
     ActionType,
     CognitiveMode,
     CognitiveModeDecision,
+    DeliberationBundle,
     GeometricStanceContext,
     MemoryPlan,
     ReviewResult,
@@ -483,6 +484,44 @@ class ThinkingController:
             notes=notes,
         )
 
+    def deliberate_only(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        raw_input: str,
+        *,
+        source_type: str = "user_text",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> DeliberationBundle:
+        """Run the inner deliberation loop (Phases 2-4) and return the bundle.
+
+        Does NOT run review (Phase 6 sub-gate, owned by the outer-loop
+        runner), draft (Phase 6 execute, owned by the runner), or stance.
+        This is the clean seam between the inner cognition scaffold and
+        the outer agent turn, per doctrine Part 2 R6 and R6.a.
+
+        Consumed by `torment_service.agent_loop.AgentRunner.run_turn`.
+        Also callable directly by any component that needs the pre-
+        policy/pre-execution deliberation bundle without the
+        backward-compat `think()` pipeline.
+        """
+        frame = self.frame_task(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            raw_input=raw_input,
+            source_type=source_type,
+            metadata=metadata,
+        )
+        mode = self.choose_mode(frame)
+        memory_plan = self.build_memory_plan(frame, mode)
+        action = self.choose_action(frame, mode, memory_plan)
+        return DeliberationBundle(
+            task_frame=frame,
+            mode_decision=mode,
+            memory_plan=memory_plan,
+            action_decision=action,
+        )
+
     def think(
         self,
         workspace_id: str,
@@ -494,16 +533,26 @@ class ThinkingController:
         capabilities: Optional[Dict[str, bool]] = None,
         geometric_context: Optional[GeometricStanceContext] = None,
     ) -> ThinkingResult:
-        frame = self.frame_task(
+        """Backward-compat single-shot deliberation pipeline.
+
+        Runs `deliberate_only()` followed by the Phase 6 sub-components
+        (draft + review + stance) in one call. New code should prefer
+        `deliberate_only()` + the outer-loop runner
+        (`agent_loop.AgentRunner.run_turn`) so that Phase 5 (action
+        policy), Phase 6 execution, Phase 7 assimilation, and Phase 8
+        stabilization are visibly runner-owned.
+        """
+        bundle = self.deliberate_only(
             workspace_id=workspace_id,
             agent_id=agent_id,
             raw_input=raw_input,
             source_type=source_type,
             metadata=metadata,
         )
-        mode = self.choose_mode(frame)
-        memory_plan = self.build_memory_plan(frame, mode)
-        action = self.choose_action(frame, mode, memory_plan)
+        frame = bundle.task_frame
+        mode = bundle.mode_decision
+        memory_plan = bundle.memory_plan
+        action = bundle.action_decision
 
         response_draft = self._draft_response(frame, mode, action)
         review = self.review(frame, mode, action, response_draft)

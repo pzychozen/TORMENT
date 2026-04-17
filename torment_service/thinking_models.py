@@ -198,6 +198,31 @@ class ReviewResult:
 
 
 @dataclass
+class DeliberationBundle:
+    """Output of `ThinkingController.deliberate_only()` — inner Phases 2-4.
+
+    Produced by the inner deliberation loop (frame_task → choose_mode
+    → build_memory_plan → choose_action). Consumed by the outer-loop
+    runner for Phases 5-8. Does NOT include review (Phase 6 sub-gate,
+    runner-owned), draft (Phase 6 execute, runner-owned), or stance.
+
+    Reference: docs/TORMENT_AGENT_DOCTRINE_v0.1.md Part 2 R6, R6.a.
+    """
+    task_frame: TaskFrame
+    mode_decision: CognitiveModeDecision
+    memory_plan: MemoryPlan
+    action_decision: ActionDecision
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task_frame": self.task_frame.to_dict(),
+            "mode_decision": self.mode_decision.to_dict(),
+            "memory_plan": self.memory_plan.to_dict(),
+            "action_decision": self.action_decision.to_dict(),
+        }
+
+
+@dataclass
 class ThinkingResult:
     task_frame: TaskFrame
     mode_decision: CognitiveModeDecision
