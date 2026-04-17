@@ -7,7 +7,6 @@ Ratified decisions: D1=(a) relational→memory_need, D2=(a) analytical→confide
 D3=(c) keep substring matcher with space-padded hints.
 """
 
-import pytest
 from torment_service.thinking_controller import ThinkingController
 
 

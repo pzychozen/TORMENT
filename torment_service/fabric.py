@@ -1393,7 +1393,13 @@ class TormentFabric:
                     if _cseed:
                         _seed_eids = set(int(e) for e in (_cseed.seed_eids or []))
             except Exception:
-                pass
+                # §2A D2: seed-overlap tag is best-effort provenance —
+                # falls through with _seed_overlap=0 / seed_aligned=False.
+                log.debug(
+                    "seed-overlap lookup failed for agent %s; emitting with seed_aligned=False",
+                    agent_id,
+                    exc_info=True,
+                )
             _seed_overlap = len(_seed_eids & set(int(e) for e in agent_member_eids))
 
             strength = float(min(1.0, 0.55 + 0.08 * float(agent_count)))
