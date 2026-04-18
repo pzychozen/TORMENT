@@ -46,7 +46,6 @@ Live pack-composability probe (v0.1.1):
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import textwrap
@@ -74,7 +73,6 @@ from torment_service.behavior_packs import (  # noqa: E402
     RESEARCH_ASSISTANT_PACK,
 )
 from torment_service.thinking_controller import ThinkingController  # noqa: E402
-from torment_service.thinking_models import ActionType  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
