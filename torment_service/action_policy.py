@@ -29,7 +29,7 @@ v0.1 incremental scope:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from .thinking_models import (
     ActionDecision,
@@ -678,4 +678,168 @@ def apply_tool_narrowing(
         fallback_reason=policy_decision.fallback_reason,
         drift_veto_applied=policy_decision.drift_veto_applied,
         tool_family_narrowed=signature.name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.1.0d — Pack intent-grammar tightening
+# ---------------------------------------------------------------------------
+#
+# Doctrine Part 5 + S4: behavior packs carry an IntentGrammar that
+# can narrow the doctrinal Mode→legal-intents table per pack. The
+# field `forbidden_intents_by_mode` was declared in S4 but not
+# wired to any enforcement — S4 shipped the declarative hook, and
+# v0.1.0d makes it live.
+#
+# `apply_pack_intent_tightening` runs as Phase 5 layer 2 (between
+# apply_legality and apply_drift_veto). If the active pack forbids
+# the current intent for the current mode, it applies the Part 2.5
+# fallback chain using a legal set narrowed by the pack's forbidden
+# intents. Invariant 6 preserved: this can only TIGHTEN legality,
+# never widen it. Invariant 9 preserved: fallback runs closed to
+# NO_OP when no legal narrower option remains.
+#
+# For v0.1.0d, the DEBUGGING_SESSION_PACK's forbidden_intents_by_mode
+# is empty by design — lexical tuning of TOOL_HINT_WORDS is the
+# primary fix for the observed mismatches; this function exists
+# to make the field enforceable when future packs use it.
+
+
+def apply_pack_intent_tightening(
+    policy_decision: ActionPolicyDecision,
+    mode_decision: CognitiveModeDecision,
+    pack: Optional[Any],  # BehaviorPack; Any to avoid circular import
+    frame: TaskFrame,
+) -> ActionPolicyDecision:
+    """Apply pack-specific intent grammar tightening at Phase 5.
+
+    No-op when `pack` is None, when `pack.intent_grammar` has no
+    forbidden_intents_by_mode entry for the current mode, or when
+    the current action is not in the pack's forbidden set for this
+    mode. Otherwise, applies the Part 2.5 fallback chain over
+    `legal_set - pack_forbidden_set` to downgrade.
+    """
+    if pack is None:
+        return policy_decision
+
+    grammar = pack.intent_grammar
+    mode = mode_decision.chosen_mode
+    forbidden_set = grammar.forbidden_intents_by_mode.get(mode, frozenset())
+
+    if not forbidden_set:
+        return policy_decision
+
+    current_action = policy_decision.action.action
+    if current_action not in forbidden_set:
+        return policy_decision
+
+    # Pack tightening applies. Compute the narrower legal set
+    # (legality-legal minus pack-forbidden) and apply Part 2.5
+    # fallback chain over that.
+    base_legal = MODE_LEGAL_INTENTS.get(mode, set())
+    pack_legal_set = base_legal - forbidden_set
+    pre_tighten_action = (
+        policy_decision.original_action_type
+        if policy_decision.original_action_type is not None
+        else current_action
+    )
+
+    def _build_downgrade(
+        new_action: ActionType,
+        reason: str,
+        fallback_reason: str,
+        requires_execution: bool,
+    ) -> ActionPolicyDecision:
+        return ActionPolicyDecision(
+            action=ActionDecision(
+                action=new_action,
+                reason=reason,
+                requires_execution=requires_execution,
+                payload={
+                    "pack": pack.name,
+                    "original_action": pre_tighten_action.value,
+                    "pre_tighten_action": current_action.value,
+                    "mode": mode.value,
+                    "fallback_reason": fallback_reason,
+                },
+            ),
+            original_action_type=pre_tighten_action,
+            fallback_reason=fallback_reason,
+            drift_veto_applied=policy_decision.drift_veto_applied,
+            tool_family_narrowed=policy_decision.tool_family_narrowed,
+        )
+
+    # Step 1: governance-sensitive → GOVERNANCE_REVIEW if legal
+    if (
+        frame.governance_sensitive
+        and ActionType.GOVERNANCE_REVIEW in pack_legal_set
+    ):
+        return _build_downgrade(
+            new_action=ActionType.GOVERNANCE_REVIEW,
+            reason=(
+                f"Pack tightening: {pack.name!r} forbids "
+                f"{current_action.value!r} in mode {mode.value!r}; "
+                f"routing governance-sensitive request to review."
+            ),
+            fallback_reason="pack_intent_tightening_governance",
+            requires_execution=True,
+        )
+
+    # Step 2: high ambiguity → ASK_CLARIFICATION if legal
+    if (
+        frame.ambiguity_score >= _AMBIGUITY_CLARIFY_THRESHOLD
+        and ActionType.ASK_CLARIFICATION in pack_legal_set
+    ):
+        return _build_downgrade(
+            new_action=ActionType.ASK_CLARIFICATION,
+            reason=(
+                f"Pack tightening: {pack.name!r} forbids "
+                f"{current_action.value!r} in mode {mode.value!r}; "
+                f"high ambiguity → asking for clarification."
+            ),
+            fallback_reason="pack_intent_tightening_ambiguity",
+            requires_execution=False,
+        )
+
+    # Step 3: DEFER if legal
+    if ActionType.DEFER in pack_legal_set:
+        return _build_downgrade(
+            new_action=ActionType.DEFER,
+            reason=(
+                f"Pack tightening: {pack.name!r} forbids "
+                f"{current_action.value!r} in mode {mode.value!r}; "
+                f"deferring."
+            ),
+            fallback_reason="pack_intent_tightening_defer",
+            requires_execution=False,
+        )
+
+    # Step 4: ANSWER if legal — unique to pack tightening (not in
+    # apply_legality's chain). Rationale: a pack might forbid
+    # USE_TOOL in a mode that still admits ANSWER; letting the LLM
+    # answer in text is the cleanest narrower fallback. Invariant 6
+    # preserved because ANSWER was already in the mode's legal set;
+    # we're just exercising it as a fallback.
+    if ActionType.ANSWER in pack_legal_set:
+        return _build_downgrade(
+            new_action=ActionType.ANSWER,
+            reason=(
+                f"Pack tightening: {pack.name!r} forbids "
+                f"{current_action.value!r} in mode {mode.value!r}; "
+                f"routing to direct text answer."
+            ),
+            fallback_reason="pack_intent_tightening_answer",
+            requires_execution=False,
+        )
+
+    # Step 5: NO_OP fail-closed terminus
+    return _build_downgrade(
+        new_action=ActionType.NO_OP,
+        reason=(
+            f"Pack tightening: {pack.name!r} forbids "
+            f"{current_action.value!r} in mode {mode.value!r}; "
+            f"no legal narrower fallback; no-op."
+        ),
+        fallback_reason="pack_intent_tightening_no_op_failclosed",
+        requires_execution=False,
     )

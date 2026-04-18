@@ -38,21 +38,56 @@ QUESTION_PREFIXES = (
     "am",
 )
 
+# v0.1.0d: tool-intent tuning.
+#
+# With `code_exec` as the only declared tool family in v0.1, the hint
+# words that should raise frame.tool_need are execution/computation
+# verbs. Analytical verbs (analyze/explain/debug/trace/inspect/check)
+# have been moved into ANALYTICAL_DEPTH_HINT_WORDS — they push
+# confidence_need toward REFLECTIVE mode, NOT tool_need. Retrieval
+# verbs (search/find/lookup/fetch/read/open/scan) have been moved into
+# RETRIEVAL_HINT_WORDS and are explicitly unmapped in v0.1 because
+# no retrieval tool family exists yet; they fall back to normal
+# non-tool routing.
 TOOL_HINT_WORDS = {
+    "calculate",
+    "compute",
+    "execute",
+    "evaluate",
+    "run",
+    "simulate",
+}
+
+# v0.1.0d: phrase-level triggers for tool_need. Substring-matched on
+# lowered text. A single matching phrase is as strong as a single
+# matching word in TOOL_HINT_WORDS. These override ambiguous single
+# words (like the retrieval verbs below) because their presence is
+# a much stronger signal that the user wants code execution.
+TOOL_HINT_PHRASES = (
+    "using python",
+    "using code",
+    "run code",
+    "python code",
+    "write and run",
+    "programmatically",
+)
+
+# v0.1.0d: retrieval verbs — DECLARED but NOT MAPPED to any tool
+# family in v0.1. Prompts containing these words fall back to normal
+# non-tool routing (RETRIEVAL mode via memory_need, or ANSWER,
+# depending on other signals). When a retrieval tool family like
+# `web_fetch` or `read_file` is added to tool_registry.py, this set
+# can be wired to raise tool_need for that family. Keeping the list
+# here gives the intent a truthful home instead of silently dropping
+# these words.
+RETRIEVAL_HINT_WORDS = {
     "search",
     "find",
     "lookup",
-    "inspect",
-    "open",
-    "read",
     "fetch",
+    "read",
+    "open",
     "scan",
-    "analyze",
-    "repair",
-    "rebuild",
-    "trace",
-    "debug",
-    "check",
 }
 
 GOVERNANCE_HINT_WORDS = {
@@ -118,9 +153,16 @@ RELATIONAL_HINT_WORDS = {
     "together",
 }
 
-# §2A D2: analytical-depth cues that indicate the query needs deeper
-# deliberation.  Bumps confidence_need to cross the REFLECTIVE threshold.
+# §2A D2 + v0.1.0d: analytical-depth cues that indicate the query
+# needs deeper deliberation. Bumps confidence_need to cross the
+# REFLECTIVE threshold.
+#
+# v0.1.0d additions: analytical verbs previously in TOOL_HINT_WORDS
+# have been moved here. They push REFLECTIVE mode via confidence_need,
+# which is what they actually mean semantically — a user saying
+# "analyze why" wants deliberation, not a subprocess.
 ANALYTICAL_DEPTH_HINT_WORDS = {
+    # §2A D2 originals
     "why does",
     "pattern",
     "tradeoff",
@@ -134,6 +176,13 @@ ANALYTICAL_DEPTH_HINT_WORDS = {
     "tend to",
     "tends to",
     "behind the scenes",
+    # v0.1.0d: analytical verbs relocated from TOOL_HINT_WORDS
+    "analyze",
+    "explain",
+    "debug",
+    "trace",
+    "inspect",
+    "check",
 }
 
 # ---------------------------------------------------------------------------
@@ -180,7 +229,15 @@ class ThinkingController:
         has_question = lower.endswith("?") or lower.startswith(QUESTION_PREFIXES)
         ambiguity_score = self._estimate_ambiguity(lower)
         urgency = self._estimate_urgency(lower)
-        tool_need = self._has_any(lower, TOOL_HINT_WORDS)
+        # v0.1.0d: tool_need fires when either a word-level trigger
+        # (TOOL_HINT_WORDS — execution verbs) OR a phrase-level trigger
+        # (TOOL_HINT_PHRASES — explicit execution phrases like
+        # "run code", "using python") is present. Phrase matches
+        # deliberately override ambiguous single-word context.
+        tool_need = (
+            self._has_any(lower, TOOL_HINT_WORDS)
+            or any(phrase in lower for phrase in TOOL_HINT_PHRASES)
+        )
         governance_sensitive = self._has_any(lower, GOVERNANCE_HINT_WORDS)
         identity_sensitive = self._has_any(lower, IDENTITY_HINT_WORDS)
         live_social = self._has_any(lower, LIVE_SOCIAL_HINT_WORDS)

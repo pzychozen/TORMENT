@@ -37,6 +37,7 @@ from .action_policy import (
     DriftRegime,
     apply_drift_veto,
     apply_legality,
+    apply_pack_intent_tightening,
     apply_tool_narrowing,
     classify_drift,
 )
@@ -342,11 +343,14 @@ class AgentRunner:
     the controller's `deliberate_only()` as a clean seam — per doctrine
     R6.a and the S1 seam fix in the ratified slice plan.
 
-    v0.1 scope:
-        - No behavior pack wiring (S4 will add that).
-        - No drift-regime veto in Phase 5 (S2 will add that).
-        - No tool narrowing in Phase 5 (S3 will add that).
-        - USE_TOOL execution is stubbed (S3).
+    v0.1 scope (post v0.1.0d):
+        - Phase 5 is a four-layer gate:
+            apply_legality
+            → apply_pack_intent_tightening (v0.1.0d)
+            → apply_drift_veto
+            → apply_tool_narrowing
+        - USE_TOOL execution is wired through the injected ToolExecutor
+          (v0.1.0b hardened SubprocessPythonExecutor for code_exec).
         - LLM synthesis goes through the injected LLMClient (tests
           pass fakes; production wiring is the integrator's job).
         - Fabric side-effects go through the injected FabricHandle.
@@ -420,10 +424,16 @@ class AgentRunner:
                 memory_plan=self.pack.aperture_recipe.memory_plan,
             )
 
-        # Phase 5: Action Policy. Three-layer gate:
+        # Phase 5: Action Policy. Four-layer gate:
         # (a) mode legality + fallback chain (M2)
-        # (b) drift-regime veto (S2)
-        # (c) tool-family narrowing for USE_TOOL (S3 — not yet wired)
+        # (b) pack intent-grammar tightening (v0.1.0d)
+        # (c) drift-regime veto (S2)
+        # (d) tool-family narrowing for USE_TOOL (S3)
+        #
+        # Order matters: legality runs first (broadest doctrinal rule),
+        # then pack-specific tightening narrows further, then kernel-state
+        # drift veto overlays, then tool-family narrowing attaches the
+        # single signature (only meaningful for surviving USE_TOOL).
         #
         # Drift is measured once here and reused in Phase 8 so the turn
         # makes exactly one measure_drift call per turn.
@@ -442,6 +452,12 @@ class AgentRunner:
         policy_decision = apply_legality(
             bundle.action_decision,
             bundle.mode_decision,
+            bundle.task_frame,
+        )
+        policy_decision = apply_pack_intent_tightening(
+            policy_decision,
+            bundle.mode_decision,
+            self.pack,
             bundle.task_frame,
         )
         policy_decision = apply_drift_veto(

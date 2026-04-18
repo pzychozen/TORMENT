@@ -25,12 +25,16 @@ def test_identity_sensitive_mode_beats_tool_and_retrieval():
     assert "identity_must_outrank_archive" in result.memory_plan.safety_constraints
 
 
-def test_tool_mode_selected_for_inspection_request():
+def test_tool_mode_selected_for_execution_request():
+    # v0.1.0d: tool-intent tuning relocated "inspect"/"debug" to
+    # ANALYTICAL_DEPTH_HINT_WORDS (they push REFLECTIVE, not TOOL).
+    # Use an explicit execution verb so the test still exercises
+    # TOOL routing.
     ctl = ThinkingController()
     result = ctl.think(
         "default",
         "ryuki",
-        "Please inspect and debug the archive retrieval pipeline.",
+        "Please calculate and compute the sum of the first 100 primes using code.",
     )
     assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
     assert result.action_decision.action == ActionType.USE_TOOL

@@ -328,11 +328,13 @@ class TestRunnerPassesSingleSignatureToLLM:
             tool_executor=StubToolExecutor(),
         )
         # Input that should trigger USE_TOOL via choose_action's
-        # tool_need branch (presence of "search"/"find"/etc.).
+        # tool_need branch. v0.1.0d: uses an execution verb + phrase
+        # trigger ("run code", "using python", "compute") — retrieval
+        # verbs like "search"/"find" are unmapped now.
         result = runner.run_turn(
             workspace_id="ws",
             agent_id="agent",
-            observation=Observation(text="search for recent entries about that"),
+            observation=Observation(text="run code to compute a quick sum using python"),
             step=1,
         )
         # If the runner actually dispatched USE_TOOL → the LLM
@@ -388,7 +390,7 @@ class TestRunnerFallsThroughWithEmptyContract:
         result = runner.run_turn(
             workspace_id="ws",
             agent_id="agent",
-            observation=Observation(text="search for recent entries about that"),
+            observation=Observation(text="run code to compute a quick sum using python"),
             step=1,
         )
         # If choose_action picked USE_TOOL, the empty contract must

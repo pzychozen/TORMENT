@@ -95,7 +95,12 @@ def test_no_capabilities_returns_none():
 # ── 7. Tool-routed → tool_redirect ──────────────────────────────────────
 
 def test_tool_input_redirects():
-    result = _think("Please inspect and debug the archive retrieval pipeline.")
+    # v0.1.0d: "inspect"/"debug" relocated to ANALYTICAL_DEPTH_HINT_WORDS
+    # so they no longer trigger TOOL mode. Use an execution verb + phrase
+    # to genuinely route to TOOL.
+    result = _think(
+        "Please calculate and compute the sum of the first 100 primes using code."
+    )
     assert result.stance is not None
     assert result.stance.stance == ResponseStance.TOOL_REDIRECT
 

@@ -17,8 +17,9 @@ Scenarios:
     1. Normal answer turn — expects ANSWER, LLM called once.
     2. Governance-sensitive turn — expects GOVERNANCE_REVIEW routing.
     3. High-drift reflex turn — expects drift veto + zero LLM calls.
-    4. USE_TOOL path (stubbed executor) — expects narrowing to code_exec.
-    5. Pack-enabled debugging turn — pack's aperture recipe active.
+    4. Retrieval probe — expects NON-tool (v0.1.0d unmapped retrieval).
+    5. Analytical probe — expects NON-tool, REFLECTIVE (v0.1.0d).
+    6. Execution probe — expects TOOL + code_exec narrowing (v0.1.0d).
 
 Requirements:
     - TORMENT service running at http://127.0.0.1:8787
@@ -447,25 +448,47 @@ SCENARIOS: List[Scenario] = [
     ),
     Scenario(
         number=4,
-        title="USE_TOOL path (narrowing + stub executor)",
+        title="Retrieval probe (unmapped verbs in v0.1)",
         observation_text="Find the relevant documentation for phase 5 narrowing.",
         expected_notes=(
-            "Expected: if Phase 4 picks USE_TOOL, Phase 5 narrows to "
-            "code_exec (one signature passed to LLM), StubToolExecutor "
-            "called with canned args/defaults. Ingest attempted."
+            "v0.1.0d contract: retrieval verbs (find/search/lookup/...) "
+            "are declared in RETRIEVAL_HINT_WORDS but UNMAPPED in v0.1 "
+            "because no retrieval tool family exists. Expected: NOT "
+            "TOOL mode, no tool narrowing. This is the retrieval-bucket "
+            "probe from GPT's v0.1.0d validation panel."
         ),
     ),
     Scenario(
         number=5,
-        title="Pack-enabled debugging turn",
+        title="Analytical probe (pack-enabled, REFLECTIVE)",
         observation_text=(
             "Analyze why this recursive pattern keeps appearing in the "
             "code. What could be causing it?"
         ),
         expected_notes=(
-            "Expected: memory_plan is the debugging pack's aperture "
-            "recipe (top_k_by_lane={core:8, relational:4, deep:3}). "
-            "Mode is likely REFLECTIVE. LLM called for ANSWER."
+            "v0.1.0d contract: analytical verbs (analyze/explain/debug/"
+            "trace/inspect/check) push REFLECTIVE via confidence_need, "
+            "NOT TOOL. Expected: mode != TOOL (REFLECTIVE likely given "
+            "'why' + 'pattern'). memory_plan is the debugging pack's "
+            "aperture recipe (top_k_by_lane={core:8, relational:4, "
+            "deep:3}). LLM called for ANSWER. This is the analytical-"
+            "bucket probe."
+        ),
+    ),
+    Scenario(
+        number=6,
+        title="Execution probe (USE_TOOL path + narrowing + executor)",
+        observation_text=(
+            "Calculate the sum of the first 100 primes using python code."
+        ),
+        expected_notes=(
+            "v0.1.0d contract: execution verbs (calculate/compute/run/"
+            "execute/evaluate/simulate) AND phrase triggers (using "
+            "python, run code, ...) raise tool_need. Expected: TOOL "
+            "mode, Phase 5 narrows to code_exec (one signature passed "
+            "to LLM), StubToolExecutor called with canned args/defaults. "
+            "This is the execution-bucket probe from GPT's v0.1.0d "
+            "validation panel."
         ),
     ),
 ]
@@ -638,7 +661,7 @@ def parse_args() -> argparse.Namespace:
         "--scenario",
         type=int,
         default=None,
-        choices=[1, 2, 3, 4, 5],
+        choices=[1, 2, 3, 4, 5, 6],
         help="Run only one scenario by number.",
     )
     p.add_argument(
@@ -677,10 +700,10 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Swap StubToolExecutor for the real SubprocessPythonExecutor "
             "(v0.1.0b). Best-effort bounded subprocess; NOT a hostile-"
-            "code containment boundary. Without LLM tool-call argument "
-            "plumbing, Scenarios 4 and 5 will show "
-            "'missing_required_argument: code' — this is the honest, "
-            "expected outcome until argument plumbing lands."
+            "code containment boundary. With v0.1.0c tool-call argument "
+            "plumbing landed, Scenario 6 (execution probe) will actually "
+            "execute user-intent code end-to-end when --real-executor "
+            "is set."
         ),
     )
     return p.parse_args()
@@ -713,11 +736,11 @@ def main() -> int:
     llm = AnthropicLLMAdapter(api_key=api_key, model=args.model)
 
     # v0.1.0b: opt-in real subprocess executor.
-    # Default is still the stub executor because the runner does not
-    # yet parse Anthropic tool_use blocks into the arguments dict;
-    # swapping to the real executor without argument plumbing means
-    # Scenarios 4 and 5 will surface 'missing_required_argument: code'.
-    # That's honest behavior — not a bug. Argument plumbing is v0.1.0c.
+    # v0.1.0c landed LLM tool-call argument plumbing, so --real-executor
+    # now actually receives the LLM-filled `code` argument instead of an
+    # empty payload. Default remains the stub executor for deterministic
+    # validation runs; opt in with --real-executor to exercise the real
+    # subprocess sandbox end-to-end via Scenario 6 (execution probe).
     if args.real_executor:
         from torment_service.tool_executors import SubprocessPythonExecutor
         executor = SubprocessPythonExecutor()

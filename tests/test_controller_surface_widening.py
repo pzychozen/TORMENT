@@ -167,7 +167,10 @@ class TestExistingModesUndisturbed:
         assert _mode("Delete that memory from the canon.") == "governed"
 
     def test_tool_still_works(self):
-        assert _mode("Search for recent entries about that topic.") == "tool"
+        # v0.1.0d: "search" moved from TOOL_HINT_WORDS to
+        # RETRIEVAL_HINT_WORDS (unmapped). Use an explicit execution
+        # verb so the test continues to validate TOOL routing.
+        assert _mode("Run code to tally recent entries about that topic.") == "tool"
 
     def test_archive_retrieval_still_works(self):
         assert _mode("What does the document say about that?") == "retrieval"
