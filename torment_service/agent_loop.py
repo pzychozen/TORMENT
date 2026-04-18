@@ -34,7 +34,6 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from .action_policy import (
     ActionPolicyDecision,
-    DriftRegime,
     apply_drift_veto,
     apply_legality,
     apply_pack_intent_tightening,
