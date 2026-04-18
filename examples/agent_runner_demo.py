@@ -645,6 +645,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run without DEBUGGING_SESSION_PACK active (bare runner).",
     )
+    p.add_argument(
+        "--real-executor",
+        action="store_true",
+        help=(
+            "Swap StubToolExecutor for the real SubprocessPythonExecutor "
+            "(v0.1.0b). Best-effort bounded subprocess; NOT a hostile-"
+            "code containment boundary. Without LLM tool-call argument "
+            "plumbing, Scenarios 4 and 5 will show "
+            "'missing_required_argument: code' — this is the honest, "
+            "expected outcome until argument plumbing lands."
+        ),
+    )
     return p.parse_args()
 
 
@@ -673,7 +685,22 @@ def main() -> int:
 
     fabric = HTTPFabricAdapter(base_url=args.url)
     llm = AnthropicLLMAdapter(api_key=api_key, model=args.model)
-    executor = StubToolExecutor()
+
+    # v0.1.0b: opt-in real subprocess executor.
+    # Default is still the stub executor because the runner does not
+    # yet parse Anthropic tool_use blocks into the arguments dict;
+    # swapping to the real executor without argument plumbing means
+    # Scenarios 4 and 5 will surface 'missing_required_argument: code'.
+    # That's honest behavior — not a bug. Argument plumbing is v0.1.0c.
+    if args.real_executor:
+        from torment_service.tool_executors import SubprocessPythonExecutor
+        executor = SubprocessPythonExecutor()
+        print(
+            "  Tool executor: SubprocessPythonExecutor (v0.1.0b, "
+            "best-effort bounded subprocess; not hostile-code containment)"
+        )
+    else:
+        executor = StubToolExecutor()
 
     runner = AgentRunner(
         controller=ThinkingController(),
