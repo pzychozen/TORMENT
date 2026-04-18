@@ -80,14 +80,14 @@ def test_mode_legal_intents_table_matches_doctrine_part_3():
 
 def test_every_cognitive_mode_has_legal_set():
     """Every mode has at least one legal intent."""
-    for mode in CognitiveMode:
+    for mode in tuple(CognitiveMode):
         assert mode in MODE_LEGAL_INTENTS
         assert len(MODE_LEGAL_INTENTS[mode]) > 0
 
 
 def test_no_op_is_legal_in_every_mode():
     """NO_OP is the terminal fail-closed option and must be legal everywhere."""
-    for mode in CognitiveMode:
+    for mode in tuple(CognitiveMode):
         assert ActionType.NO_OP in MODE_LEGAL_INTENTS[mode]
 
 
@@ -109,7 +109,7 @@ class TestIsLegal:
         assert not is_legal(CognitiveMode.GOVERNED, ActionType.ANSWER)
 
     def test_use_tool_legal_only_in_tool_mode(self):
-        for mode in CognitiveMode:
+        for mode in tuple(CognitiveMode):
             if mode == CognitiveMode.TOOL:
                 assert is_legal(mode, ActionType.USE_TOOL)
             else:
@@ -152,7 +152,7 @@ class TestAssimilationOutcomesNeverLegal:
 
     def test_no_assimilation_outcome_in_any_legal_set(self):
         """Assimilation outcomes never appear as pre-execution-legal."""
-        for mode in CognitiveMode:
+        for mode in tuple(CognitiveMode):
             for outcome in self.ASSIMILATION_OUTCOMES:
                 assert outcome not in MODE_LEGAL_INTENTS[mode], (
                     f"Assimilation outcome {outcome.value!r} in "
