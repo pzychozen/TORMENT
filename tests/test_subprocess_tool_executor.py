@@ -17,9 +17,6 @@ References:
     - torment_service/tool_executors/subprocess_python.py
     - docs/TORMENT_AGENT_RUNTIME_SLICE_v0.1_PLAN.md v0.1.0b
 """
-import os
-import sys
-
 import pytest
 
 from torment_service.tool_executors import SubprocessPythonExecutor

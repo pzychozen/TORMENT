@@ -25,8 +25,6 @@ References:
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import pytest
-
 from torment_service.action_policy import apply_tool_narrowing
 from torment_service.agent_loop import AgentRunner, Observation
 from torment_service.behavior_packs import (
