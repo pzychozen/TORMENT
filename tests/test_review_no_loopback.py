@@ -59,8 +59,9 @@ class FakeLLM:
     canned_response: str = "I am definitely going to help with that."
 
     def complete(self, system_prompt, messages, tools=None):
+        from torment_service.agent_loop import LLMResponse
         self.calls.append({"prompt": system_prompt, "tools": tools})
-        return self.canned_response
+        return LLMResponse(text=self.canned_response)
 
 
 # ---------------------------------------------------------------------------

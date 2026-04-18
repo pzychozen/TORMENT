@@ -284,15 +284,18 @@ class FakeFabric:
 
 @dataclass
 class ToolCapturingLLM:
-    """Captures the tools= argument on every call."""
+    """Captures the tools= argument on every call (v0.1.0c: returns LLMResponse)."""
     last_tools: Optional[List[Dict[str, Any]]] = None
     call_count: int = 0
     canned_response: str = "tool_call: code_exec"
+    canned_tool_call: Optional[Any] = None  # Optional[ToolCall]
 
     def complete(self, system_prompt, messages, tools=None):
+        from torment_service.agent_loop import LLMResponse
         self.call_count += 1
         self.last_tools = tools
-        return self.canned_response
+        tool_calls = [self.canned_tool_call] if self.canned_tool_call else []
+        return LLMResponse(text=self.canned_response, tool_calls=tool_calls)
 
 
 @dataclass

@@ -53,7 +53,9 @@ if _PROJECT_ROOT not in sys.path:
 
 from torment_service.agent_loop import (  # noqa: E402
     AgentRunner,
+    LLMResponse,
     Observation,
+    ToolCall,
     TurnResult,
 )
 from torment_service.behavior_packs import DEBUGGING_SESSION_PACK  # noqa: E402
@@ -193,7 +195,7 @@ class AnthropicLLMAdapter:
         system_prompt: str,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
+    ) -> LLMResponse:
         call_record = {
             "tools_count": len(tools) if tools else 0,
             "tool_names": [t.get("name") for t in tools] if tools else [],
@@ -214,20 +216,27 @@ class AnthropicLLMAdapter:
         try:
             resp = self._client.messages.create(**kwargs)
         except Exception as e:
-            return f"[LLM call failed: {e}]"
+            return LLMResponse(text=f"[LLM call failed: {e}]")
 
-        # Extract text content. Tool calls are recorded but not
-        # executed by the demo — the ToolExecutor stub handles that
-        # side.
-        text_parts = []
+        # v0.1.0c: separate text blocks from tool_use blocks so the
+        # runner can extract ToolCall objects cleanly.
+        text_parts: List[str] = []
+        tool_calls: List[ToolCall] = []
         for block in resp.content:
-            if getattr(block, "type", None) == "text":
+            btype = getattr(block, "type", None)
+            if btype == "text":
                 text_parts.append(block.text)
-            elif getattr(block, "type", None) == "tool_use":
-                text_parts.append(
-                    f"[tool_use: name={block.name} input={block.input}]"
-                )
-        return "\n".join(text_parts) if text_parts else ""
+            elif btype == "tool_use":
+                tool_calls.append(ToolCall(
+                    tool_name=block.name,
+                    arguments=dict(block.input) if block.input else {},
+                    tool_use_id=getattr(block, "id", None),
+                ))
+        return LLMResponse(
+            text="\n".join(text_parts),
+            tool_calls=tool_calls,
+            stop_reason=getattr(resp, "stop_reason", None),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +303,23 @@ def summarize_turn(result: TurnResult, llm: AnthropicLLMAdapter) -> str:
         f"tool_called={result.execution_outcome.tool_called} "
         f"no_op={result.execution_outcome.no_op}"
     )
+    # v0.1.0c: print tool_result details when present so post-0c
+    # validation can see executor failures / exit codes / output
+    # at a glance.
+    tool_result = result.execution_outcome.tool_result
+    if tool_result is not None:
+        err = tool_result.get("error")
+        if err is not None:
+            lines.append(f"  Tool result error: {err}")
+        exit_code = tool_result.get("exit_code")
+        if exit_code is not None:
+            lines.append(f"  Tool result exit_code: {exit_code}")
+        out = tool_result.get("output") or ""
+        if out:
+            lines.append(
+                f"  Tool result output (first 120 chars): "
+                f"{out[:120].replace(chr(10), ' ')}"
+            )
     if result.execution_outcome.response_text:
         snippet = result.execution_outcome.response_text[:200].replace("\n", " ")
         lines.append(f"  Response (first 200 chars): {snippet}")

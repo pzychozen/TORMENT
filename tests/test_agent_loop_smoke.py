@@ -81,11 +81,12 @@ class FakeFabric:
 
 @dataclass
 class FakeLLM:
-    """Test double for LLMClient."""
+    """Test double for LLMClient (v0.1.0c: returns LLMResponse)."""
     calls: List[Dict[str, Any]] = field(default_factory=list)
     canned_response: str = "Fake LLM response."
 
     def complete(self, system_prompt, messages, tools=None):
+        from torment_service.agent_loop import LLMResponse
         self.calls.append(
             {
                 "system_prompt": system_prompt,
@@ -93,7 +94,7 @@ class FakeLLM:
                 "tools": tools,
             }
         )
-        return self.canned_response
+        return LLMResponse(text=self.canned_response)
 
 
 # ---------------------------------------------------------------------------

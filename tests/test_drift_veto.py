@@ -440,8 +440,9 @@ class FakeLLM:
     calls: List[Dict[str, Any]] = field(default_factory=list)
 
     def complete(self, system_prompt, messages, tools=None):
+        from torment_service.agent_loop import LLMResponse
         self.calls.append({"tools": tools})
-        return "LLM response."
+        return LLMResponse(text="LLM response.")
 
 
 class TestRunnerDriftVetoIntegration:

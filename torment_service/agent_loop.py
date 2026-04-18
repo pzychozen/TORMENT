@@ -223,6 +223,43 @@ class FabricHandle(Protocol):
         ...
 
 
+@dataclass
+class ToolCall:
+    """A single tool-use block extracted from an LLM response.
+
+    v0.1.0c: produced by `LLMClient` implementations that parse
+    tool-calling responses (e.g. Anthropic `tool_use` blocks, OpenAI
+    `tool_calls`). Consumed by `AgentRunner._execute` in the USE_TOOL
+    path, which validates `tool_name` against the narrowed family
+    (invariant 2) and passes `arguments` to `tool_executor.execute`.
+    """
+    tool_name: str
+    arguments: Dict[str, Any]
+    tool_use_id: Optional[str] = None  # some APIs round-trip this
+
+
+@dataclass
+class LLMResponse:
+    """Structured response from an LLM complete() call.
+
+    v0.1.0c (clean-break protocol change): `LLMClient.complete`
+    returns this instead of a bare string. Old text-only responses
+    become `LLMResponse(text="...")`; tool-calling responses carry
+    `tool_calls` alongside.
+
+    Fields:
+        text: concatenated text content of the response.
+        tool_calls: parsed tool-use blocks, in order of appearance
+            in the response.
+        stop_reason: LLM-reported stop reason ("end_turn", "tool_use",
+            "max_tokens", etc.). Diagnostic only; runner does not
+            branch on this.
+    """
+    text: str = ""
+    tool_calls: List["ToolCall"] = field(default_factory=list)
+    stop_reason: Optional[str] = None
+
+
 class LLMClient(Protocol):
     """Abstract interface for Phase 6 LLM synthesis.
 
@@ -235,6 +272,11 @@ class LLMClient(Protocol):
     length 1. Clients that do not support tool-calling may ignore
     this parameter; the runner still records that narrowing
     happened on `TurnResult.action_policy_decision.tool_family_narrowed`.
+
+    Return shape (v0.1.0c clean break): `LLMResponse` with `text`
+    and `tool_calls`. Clients that don't support tool-calling return
+    `LLMResponse(text="...")` with an empty tool_calls list. See
+    `ToolCall` for the tool-use shape.
     """
 
     def complete(
@@ -242,7 +284,7 @@ class LLMClient(Protocol):
         system_prompt: str,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
+    ) -> LLMResponse:
         ...
 
 
@@ -584,7 +626,12 @@ class AgentRunner:
                 messages=[{"role": "user", "content": frame.raw_input}],
                 tools=None,
             )
-            return ExecutionOutcome(response_text=response, llm_called=True)
+            # v0.1.0c: LLMResponse clean-break — use .text. Any
+            # unexpected tool_calls on the ANSWER path are ignored
+            # (we didn't request tools; model returning some is odd
+            # but not a contract violation since we didn't narrow a
+            # family for this turn).
+            return ExecutionOutcome(response_text=response.text, llm_called=True)
 
         if at == ActionType.USE_TOOL:
             # After S3 narrowing, the action payload carries exactly
@@ -614,36 +661,95 @@ class AgentRunner:
                 )
 
             # Call LLM with the single narrowed signature. LLM fills
-            # arguments; tests may use a fake that ignores this.
+            # arguments via a tool_use block in its response; we parse
+            # that from LLMResponse.tool_calls.
             llm_response = self.llm_client.complete(
                 system_prompt=self._build_system_prompt(frame, mode),
                 messages=[{"role": "user", "content": frame.raw_input}],
                 tools=[signature_spec],
             )
 
-            if self.tool_executor is None:
-                # No executor wired — v0.1 path returns the LLM
-                # response as text. Real tool dispatch is v0.1.0b.
+            # v0.1.0c: three-path split based on response shape.
+            # Strict contract enforcement per doctrine invariant 2
+            # and GPT's design-pass sign-off.
+
+            # Path A: no tool_calls at all → model declined to use
+            # the narrowed tool and returned plain text. Legal —
+            # presenting one tool doesn't force calling it.
+            if not llm_response.tool_calls:
                 return ExecutionOutcome(
-                    response_text=llm_response,
+                    response_text=llm_response.text,
                     llm_called=True,
                     tool_called=False,
                 )
 
-            # Executor wired: invoke with LLM-filled arguments. For
-            # v0.1 the runner does not parse tool_call structures out
-            # of the LLM response — fakes return canned results;
-            # production integrators will add the parse step.
+            # Path B: more than one tool_call → strict contract
+            # failure. One narrowed family, one call permitted per
+            # turn. Tool NOT invoked.
+            if len(llm_response.tool_calls) > 1:
+                contract_error = (
+                    f"multiple_tool_calls_in_single_turn: "
+                    f"received {len(llm_response.tool_calls)} calls"
+                )
+                return ExecutionOutcome(
+                    response_text=(
+                        llm_response.text
+                        or f"[{contract_error}]"
+                    ),
+                    tool_result={"error": contract_error},
+                    llm_called=True,
+                    tool_called=False,
+                )
+
+            # Exactly one tool_call. Validate name against narrowed
+            # family (invariant 2 continuation).
+            tool_call = llm_response.tool_calls[0]
+            if tool_call.tool_name != tool_family:
+                contract_error = (
+                    f"tool_name_mismatch: "
+                    f"expected {tool_family!r}, got {tool_call.tool_name!r}"
+                )
+                return ExecutionOutcome(
+                    response_text=(
+                        llm_response.text
+                        or f"[{contract_error}]"
+                    ),
+                    tool_result={"error": contract_error},
+                    llm_called=True,
+                    tool_called=False,
+                )
+
+            # Path C: matching single tool_call. Invoke the executor
+            # with the LLM-filled arguments.
+            if self.tool_executor is None:
+                return ExecutionOutcome(
+                    response_text=(
+                        llm_response.text
+                        or "[tool_call received but no executor wired]"
+                    ),
+                    tool_result={"tool_call": {
+                        "tool_name": tool_call.tool_name,
+                        "arguments": tool_call.arguments,
+                    }},
+                    llm_called=True,
+                    tool_called=False,
+                )
+
             tool_result = self.tool_executor.execute(
                 family=tool_family,
-                arguments={},  # production: parse from llm_response
+                arguments=tool_call.arguments,
                 defaults=tool_defaults,
+            )
+            # response_text prefers tool output; falls back to LLM
+            # text if the executor returned none.
+            resp_text = (
+                str(tool_result.get("output") or "").strip()
+                or llm_response.text
+                or ""
             )
             return ExecutionOutcome(
                 tool_result=tool_result,
-                response_text=str(
-                    tool_result.get("output", llm_response or "")
-                ),
+                response_text=resp_text,
                 llm_called=True,
                 tool_called=True,
             )

@@ -244,8 +244,9 @@ class TestReflexObservationRoutesToIdentitySensitive:
                 self.calls = 0
 
             def complete(self, system_prompt, messages, tools=None):
+                from torment_service.agent_loop import LLMResponse
                 self.calls += 1
-                return "response"
+                return LLMResponse(text="response")
 
         llm = CountingLLM()
         runner = AgentRunner(
@@ -289,8 +290,9 @@ class TestReflexBehaviorUnderOtherDriftStates:
                 self.calls = 0
 
             def complete(self, system_prompt, messages, tools=None):
+                from torment_service.agent_loop import LLMResponse
                 self.calls += 1
-                return "response"
+                return LLMResponse(text="response")
 
         llm = CountingLLM()
         runner = AgentRunner(
@@ -319,8 +321,9 @@ class TestReflexBehaviorUnderOtherDriftStates:
                 self.calls = 0
 
             def complete(self, system_prompt, messages, tools=None):
+                from torment_service.agent_loop import LLMResponse
                 self.calls += 1
-                return "response"
+                return LLMResponse(text="response")
 
         llm = CountingLLM()
         runner = AgentRunner(
