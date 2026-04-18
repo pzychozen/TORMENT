@@ -405,6 +405,12 @@ class AgentRunner:
         # beyond acknowledging the observation; kept explicit so the
         # phase seam is visible.
 
+        # Per-turn observability bag. Best-effort swallow sites in
+        # phases 5/7/8 record their error string here and the dict is
+        # returned on TurnResult.metadata for debug visibility. Keeps
+        # the existing fallback control flow unchanged.
+        turn_metadata: Dict[str, Any] = {}
+
         # Phases 2-4: Frame → Aperture → Intent via the inner scaffold.
         bundle = self.controller.deliberate_only(
             workspace_id=workspace_id,
@@ -443,7 +449,8 @@ class AgentRunner:
                 workspace_id=workspace_id,
                 agent_id=agent_id,
             )
-        except Exception:
+        except Exception as e:
+            turn_metadata["phase5_drift_error"] = str(e)
             drift_info = None
         drift_regime = classify_drift(
             drift_info, high_threshold=self._effective_drift_threshold()
@@ -528,10 +535,10 @@ class AgentRunner:
                         step=step,
                     )
                     ingest_attempted = True
-                except Exception:
+                except Exception as e:
                     # Best-effort: ingest failure does not abort the
                     # turn. Phase 8 still runs.
-                    pass
+                    turn_metadata["phase7_ingest_error"] = str(e)
 
         # Phase 8: Stabilize — reuse the Phase 5 drift measurement to
         # decide gravity correction. One measure_drift call per turn.
@@ -545,8 +552,8 @@ class AgentRunner:
                     drift_info=drift_info,
                 )
                 gravity_applied = True
-            except Exception:
-                pass
+            except Exception as e:
+                turn_metadata["phase8_gravity_error"] = str(e)
 
         return TurnResult(
             workspace_id=workspace_id,
@@ -562,6 +569,7 @@ class AgentRunner:
             drift_after_stabilize=drift_info,
             gravity_correction_applied=gravity_applied,
             ingest_attempted=ingest_attempted,
+            metadata=turn_metadata,
         )
 
     def enter_reflex(
