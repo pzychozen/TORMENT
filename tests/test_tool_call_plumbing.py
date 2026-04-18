@@ -24,8 +24,6 @@ References:
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import pytest
-
 from torment_service.agent_loop import (
     AgentRunner,
     LLMResponse,
@@ -35,7 +33,6 @@ from torment_service.agent_loop import (
 from torment_service.behavior_packs import DEBUGGING_SESSION_PACK
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ActionType
-from torment_service.tool_registry import ActionContract, EMPTY_CONTRACT
 
 
 # ---------------------------------------------------------------------------

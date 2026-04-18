@@ -13,7 +13,6 @@ References:
 import pytest
 
 from torment_service.action_policy import (
-    MODE_LEGAL_INTENTS,
     apply_legality,
     is_legal,
 )

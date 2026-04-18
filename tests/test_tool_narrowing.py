@@ -18,7 +18,6 @@ import pytest
 
 from torment_service.action_policy import (
     ActionPolicyDecision,
-    MODE_LEGAL_INTENTS,
     apply_legality,
     apply_tool_narrowing,
     is_legal,
@@ -36,7 +35,6 @@ from torment_service.tool_registry import (
     CODE_EXEC,
     EMPTY_CONTRACT,
     ActionContract,
-    get_tool_signature,
 )
 
 

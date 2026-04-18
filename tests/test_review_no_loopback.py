@@ -21,12 +21,7 @@ import pytest
 from torment_service.agent_loop import AgentRunner, Observation
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import (
-    ActionDecision,
-    ActionType,
-    CognitiveModeDecision,
-    MemoryPlan,
     ReviewResult,
-    TaskFrame,
 )
 
 

@@ -23,13 +23,9 @@ References:
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import pytest
-
 from torment_service.agent_loop import (
     AgentRunner,
-    ExecutionOutcome,
     Observation,
-    TurnResult,
 )
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ActionType, CognitiveMode

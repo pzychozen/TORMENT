@@ -30,8 +30,6 @@ References:
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import pytest
-
 from torment_service.agent_loop import AgentRunner, Observation
 from torment_service.behavior_packs import DEBUGGING_SESSION_PACK
 from torment_service.thinking_controller import ThinkingController
