@@ -383,8 +383,10 @@ def ensure_workspace_and_agent(
             json={"workspace_id": workspace_id, "domains": ["personal"]},
             timeout=15,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Bootstrap is non-fatal (may already exist, startup race, etc.)
+        # — surface to stderr instead of swallowing silently.
+        print(f"  [workspace create: {e}; continuing]", file=sys.stderr)
 
     demo_seed = {
         "seed_id": "agent_demo_v1",
@@ -407,8 +409,10 @@ def ensure_workspace_and_agent(
             },
             timeout=15,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Bootstrap is non-fatal (may already exist, startup race, etc.)
+        # — surface to stderr instead of swallowing silently.
+        print(f"  [agent create: {e}; continuing]", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
