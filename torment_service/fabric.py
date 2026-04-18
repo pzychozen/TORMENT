@@ -1,7 +1,7 @@
 # fabric.py
 from __future__ import annotations
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import os, time, json, re, threading, uuid, logging, math
 import numpy as np
 
@@ -609,6 +609,19 @@ class TormentFabric:
         self.character_store = CharacterStore(data_dir=self.data_dir)
         self._character_enable = str(os.environ.get("TORMENT_CHARACTER_ENABLE", "1")).strip().lower() in ("1", "true", "yes", "on")
         self._character_drift_every = int(os.environ.get("TORMENT_CHARACTER_DRIFT_CHECK_EVERY", "25"))
+
+        # v0.1.0a: optional callback for automatic reflex triggering on
+        # drift transitioning from below-threshold to above-threshold.
+        # External consumers (typically an AgentRunner owner) set this
+        # attribute after construction. Signature:
+        #   (workspace_id: str, agent_id: str, drift_info: Dict) -> None
+        # The fabric fires the callback only on a below→above transition
+        # (tracked per-agent in `_last_drift_was_high`) to prevent
+        # recursive re-triggering when the reflex turn itself ingests
+        # and re-runs the drift check. If None, no reflex dispatch.
+        # See docs/TORMENT_AGENT_RUNTIME_SLICE_v0.1_PLAN.md v0.1.0a.
+        self.drift_reflex_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
+        self._last_drift_was_high: Dict[Tuple[str, str], bool] = {}
 
         self.workspaces: Dict[str, Workspace] = {}
         self.agent_states: Dict[str, Any] = {}  # _agent_key(ws, agent) -> TriOcta ModelState
@@ -2975,16 +2988,49 @@ class TormentFabric:
                         self.character_store.save_state(workspace_id, _cstate)
 
                         # Gravity correction if needed
-                        if float(_drift["drift_score"]) < -_cseed.drift_correction_threshold:
-                            if str(_drift["drift_direction"]) == "away_seed":
-                                gravity_correction(
-                                    graph=graph,
-                                    motif_registry=reg,
-                                    embedder=self.kernel.embedder,
-                                    seed=_cseed,
-                                    agent_id=agent_id,
-                                    step=int(step),
-                                    drift_info=_drift,
+                        _is_high_drift = (
+                            float(_drift["drift_score"]) < -_cseed.drift_correction_threshold
+                            and str(_drift["drift_direction"]) == "away_seed"
+                        )
+                        if _is_high_drift:
+                            gravity_correction(
+                                graph=graph,
+                                motif_registry=reg,
+                                embedder=self.kernel.embedder,
+                                seed=_cseed,
+                                agent_id=agent_id,
+                                step=int(step),
+                                drift_info=_drift,
+                            )
+
+                        # v0.1.0a: fire drift-reflex callback on below→above
+                        # transition only. Prevents recursive re-triggering
+                        # because the reflex turn's own ingest re-runs this
+                        # check — at that point _was_high is True, so no
+                        # re-fire. Also suppresses spammy firing when drift
+                        # sits above threshold across multiple checks.
+                        _reflex_key = (workspace_id, agent_id)
+                        _was_high = self._last_drift_was_high.get(_reflex_key, False)
+                        self._last_drift_was_high[_reflex_key] = _is_high_drift
+
+                        if (
+                            _is_high_drift
+                            and not _was_high
+                            and self.drift_reflex_callback is not None
+                        ):
+                            try:
+                                self.drift_reflex_callback(
+                                    workspace_id,
+                                    agent_id,
+                                    dict(_drift),
+                                )
+                            except Exception:
+                                # Callback failures must not abort the
+                                # ingest pipeline. Log and move on.
+                                self._log.exception(
+                                    "drift_reflex_callback raised for ws=%s agent=%s",
+                                    workspace_id,
+                                    agent_id,
                                 )
             except Exception:
                 pass  # Character drift is optional — never blocks ingest
