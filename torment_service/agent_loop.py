@@ -82,7 +82,7 @@ class TurnContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def assimilation_outcomes(ctx: TurnContext) -> List[ActionType]:
+def assimilation_outcomes(_ctx: TurnContext) -> List[ActionType]:
     """Emit Phase 7 assimilation outcomes based on controller-side
     turn state.
 
@@ -117,7 +117,6 @@ def assimilation_outcomes(ctx: TurnContext) -> List[ActionType]:
     # v0.1 stub — no outcomes emitted yet. Concrete rules will live
     # here when the relevant kernel/policy signals are threaded
     # through TurnContext by the S1 runner and later increments.
-    _ = ctx  # silence unused-arg lint until emission logic lands
     return []
 
 
