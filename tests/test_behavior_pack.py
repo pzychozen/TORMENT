@@ -37,7 +37,6 @@ from torment_service.behavior_packs import (
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import (
     ActionType,
-    CognitiveMode,
     MemoryPlan,
 )
 
