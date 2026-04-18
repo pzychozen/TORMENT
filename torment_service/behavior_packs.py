@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from typing import Dict, FrozenSet
 
 from .thinking_models import ActionType, CognitiveMode, MemoryPlan
-from .tool_registry import ActionContract
+from .tool_registry import ActionContract, EMPTY_CONTRACT
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +242,142 @@ DEBUGGING_SESSION_PACK = BehaviorPack(
             "DEFER via the Phase 5 drift veto and runs "
             "gravity_correction at Phase 8. Exercises invariant 5 "
             "(reflexes run without LLM) when combined with S5."
+        ),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# v0.1.1 pack: research-assistant
+# ---------------------------------------------------------------------------
+#
+# The second v0.1 pack. Chosen per GPT-ratified framing
+# (outputs/RESEARCH_ASSISTANT_PACK_FRAMING_v0.1.md) to probe the
+# load-bearing question:
+#
+#   Can a behavior pack validly represent a capability it does not
+#   yet operationally possess, as long as it degrades cleanly to
+#   answer-only behavior?
+#
+# Ratified answer: yes. Packs are identity declarations; operational
+# capability is a runtime concern layered on top. A pack that
+# privileges archive+deep lanes, forbids PROPOSE_SHARE, and ships
+# with EMPTY_CONTRACT is already meaningful before any retrieval
+# tool family exists.
+#
+# Design posture — "retrieval-ready, not retrieval-dependent":
+#
+#   - Aperture recipe: privileges archive + deep (citable source
+#     material) over core + relational (debugging's working-memory
+#     shape). De-weights core because research arrives cold more
+#     often than debugging. Relational off — research is substantive
+#     over collaborative-episodic; a collaborative-research variant
+#     can exist later as a separate pack.
+#
+#   - Intent grammar: empty forbidden_intents_by_mode — EMPTY_CONTRACT
+#     already downgrades USE_TOOL at apply_tool_narrowing, so a
+#     pack-level USE_TOOL forbid would be belt-and-suspenders.
+#     forbidden_assimilation_outcomes={PROPOSE_SHARE} matches
+#     debugging's stance (different motivation: "draft research
+#     hasn't earned a share yet"). CREATE_ARCHIVE_NOTE is documented
+#     as encouraged posture — declarative-only until the Phase 7
+#     dispatcher has concrete emission rules.
+#
+#   - Stabilization program: identical to debugging. Drift thresholds
+#     are doctrinal (character.py Appendix A), not task-shaped. No
+#     data argues for a research-specific drift profile.
+#
+#   - Action contract: EMPTY_CONTRACT. No retrieval tool family
+#     exists in v0.1.1; code_exec is execution, not retrieval, and
+#     would be the wrong tool to attach. When a retrieval family
+#     lands in a later increment, ONLY this field needs to change.
+#     No other pack field is retrieval-tool-dependent.
+#
+#   - Event reflex: same drift_stabilization rule as debugging.
+#     Kernel-level behavior, not pack-specific.
+#
+# The live proof of "declared-but-absent capability": run Scenario 6
+# (execution query) under both packs. Debugging narrows to code_exec
+# and executes. Research-assistant downgrades USE_TOOL to DEFER via
+# apply_tool_narrowing + EMPTY_CONTRACT. Same input, different
+# coherent behavior — the pack system holds.
+
+
+_RESEARCH_ASSISTANT_APERTURE_MEMORY_PLAN = MemoryPlan(
+    retrieve_core=True,
+    retrieve_relational=False,     # substantive over collaborative-episodic
+    retrieve_archive=True,         # privileged lane for source material
+    retrieve_deep=True,            # privileged lane for deeper context
+    retrieve_collective=False,
+    retrieve_character_state=True,
+    retrieve_srg_state=False,
+    top_k_by_lane={
+        "core": 4,
+        "archive": 10,
+        "deep": 8,
+    },
+    weight_by_lane={
+        "core": 0.80,              # de-weighted; research comes in cold
+        "archive": 1.00,            # privileged
+        "deep": 0.90,              # privileged, behind archive
+    },
+    max_token_budget=3600,         # bumped from debugging's 2400
+    safety_constraints=["identity_must_outrank_archive"],
+)
+
+
+RESEARCH_ASSISTANT_PACK = BehaviorPack(
+    name="research_assistant",
+    description=(
+        "Research-assistant behavior. Privileges archive + deep lanes "
+        "for substantive source-material work; core is de-weighted "
+        "(research comes in cold more often than debugging has a "
+        "rolling session context); relational is off (substantive "
+        "over collaborative-episodic — collaborative research is a "
+        "future pack variant, not this one). Retrieval-ready but "
+        "NOT retrieval-dependent: ships with EMPTY_CONTRACT in "
+        "v0.1.1 because no retrieval tool family exists yet. When a "
+        "read_file / web_fetch / equivalent family is declared, only "
+        "action_contract needs to change. Forbids PROPOSE_SHARE: "
+        "draft research should not auto-propose cross-domain sharing "
+        "until a review boundary is crossed. CREATE_ARCHIVE_NOTE is "
+        "intended posture (encouraged) — enforced when the Phase 7 "
+        "dispatcher has concrete emission rules; declarative-only "
+        "today. Drift stabilization identical to debugging: "
+        "thresholds are doctrinal, not task-shaped."
+    ),
+    aperture_recipe=ApertureRecipe(
+        name="research_assistant",
+        memory_plan=_RESEARCH_ASSISTANT_APERTURE_MEMORY_PLAN,
+    ),
+    intent_grammar=IntentGrammar(
+        forbidden_intents_by_mode={},
+        forbidden_assimilation_outcomes=frozenset({ActionType.PROPOSE_SHARE}),
+    ),
+    stabilization_program=StabilizationProgram(
+        low_threshold=0.15,
+        high_threshold=0.35,
+        high_regime_action=ActionType.DEFER,
+    ),
+    # Retrieval-ready, not retrieval-dependent: EMPTY_CONTRACT is the
+    # v0.1.1 posture. apply_tool_narrowing will downgrade any
+    # USE_TOOL that reaches Phase 5 under this pack. When a retrieval
+    # tool family lands, replace with:
+    #     action_contract=ActionContract(
+    #         allowed_tool_families=frozenset({"<retrieval_family>"}),
+    #     )
+    # No other pack field is retrieval-tool-dependent.
+    action_contract=EMPTY_CONTRACT,
+    event_reflex=EventReflex(
+        name="drift_stabilization",
+        trigger="drift_score <= -high_threshold and direction == away_seed",
+        forced_intent=ActionType.DEFER,
+        description=(
+            "Same drift-stabilization rule as DEBUGGING_SESSION_PACK. "
+            "Kernel-level behavior, not pack-specific. "
+            "Research-assistant does not declare task-specific "
+            "reflexes in v0.1.1; a future 'citation_drift' or similar "
+            "could be added as a separate pack-specific reflex."
         ),
     ),
 )

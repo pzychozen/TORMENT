@@ -32,6 +32,16 @@ Usage:
     py -3 examples/agent_runner_demo.py --interactive
     py -3 examples/agent_runner_demo.py --scenario 3
     py -3 examples/agent_runner_demo.py --workspace my_ws --agent my_agent
+    py -3 examples/agent_runner_demo.py --pack research --scenario 6
+    py -3 examples/agent_runner_demo.py --pack debugging --scenario 6
+
+Live pack-composability probe (v0.1.1):
+    Run Scenario 6 under both --pack debugging and --pack research.
+    Under 'debugging', the execution query narrows to code_exec and
+    executes. Under 'research', the same query downgrades cleanly to
+    DEFER because EMPTY_CONTRACT — no tool family exists yet, but the
+    runtime stays coherent. This contrast is the live proof of
+    "declared capability absent, system still behaves coherently."
 """
 from __future__ import annotations
 
@@ -59,7 +69,10 @@ from torment_service.agent_loop import (  # noqa: E402
     ToolCall,
     TurnResult,
 )
-from torment_service.behavior_packs import DEBUGGING_SESSION_PACK  # noqa: E402
+from torment_service.behavior_packs import (  # noqa: E402
+    DEBUGGING_SESSION_PACK,
+    RESEARCH_ASSISTANT_PACK,
+)
 from torment_service.thinking_controller import ThinkingController  # noqa: E402
 from torment_service.thinking_models import ActionType  # noqa: E402
 
@@ -692,7 +705,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-pack",
         action="store_true",
-        help="Run without DEBUGGING_SESSION_PACK active (bare runner).",
+        help=(
+            "Run with NO pack active (bare runner). Overrides --pack. "
+            "Kept for backward-compat; prefer `--pack none`."
+        ),
+    )
+    p.add_argument(
+        "--pack",
+        choices=["debugging", "research", "none"],
+        default="debugging",
+        help=(
+            "Select the active behavior pack. "
+            "'debugging' = DEBUGGING_SESSION_PACK (v0.1 original). "
+            "'research' = RESEARCH_ASSISTANT_PACK (v0.1.1, "
+            "retrieval-ready + EMPTY_CONTRACT — proves declared-but-"
+            "absent-capability). 'none' = no pack (bare runner). "
+            "Default: debugging."
+        ),
     )
     p.add_argument(
         "--real-executor",
@@ -717,13 +746,25 @@ def main() -> int:
         print("Error: ANTHROPIC_API_KEY environment variable not set.")
         return 1
 
+    # Pack resolution: --no-pack is backward-compat override;
+    # otherwise honor --pack; 'none' means bare runner.
+    if args.no_pack or args.pack == "none":
+        active_pack = None
+        pack_label = "none (bare runner)"
+    elif args.pack == "research":
+        active_pack = RESEARCH_ASSISTANT_PACK
+        pack_label = "research_assistant (v0.1.1, EMPTY_CONTRACT)"
+    else:  # default "debugging"
+        active_pack = DEBUGGING_SESSION_PACK
+        pack_label = "debugging_session (v0.1, code_exec)"
+
     print()
     print("TORMENT Agent Runner — Validation Pass")
     print(f"  TORMENT URL:  {args.url}")
     print(f"  Workspace:    {args.workspace}")
     print(f"  Agent:        {args.agent}")
     print(f"  LLM model:    {args.model}")
-    print(f"  Pack active:  {not args.no_pack}")
+    print(f"  Pack active:  {pack_label}")
     print()
 
     if not health_check(args.url):
@@ -755,7 +796,7 @@ def main() -> int:
         controller=ThinkingController(),
         fabric=fabric,
         llm_client=llm,
-        pack=None if args.no_pack else DEBUGGING_SESSION_PACK,
+        pack=active_pack,
         tool_executor=executor,
     )
 
