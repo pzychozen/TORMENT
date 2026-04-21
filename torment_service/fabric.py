@@ -2310,6 +2310,8 @@ class TormentFabric:
         supplied_embedding: Optional[List[float]] = None,
         scope: str = "private",
         provenance: Optional[Dict[str, Any]] = None,
+        memory_class: str = "core",
+        extra_payload: Optional[Dict[str, Any]] = None,
         *,
         skip_packet_emission: bool = False,
     ) -> Dict[str, Any]:
@@ -2334,6 +2336,33 @@ class TormentFabric:
         else:
             _prov = ProvenanceV1.for_user_ingest(step=step)
             _prov_dict = _prov.to_dict()
+
+        # --- Baton lifecycle validation (Block A, docs/BLOCK_A_DESIGN.md §6.1) ---
+        # When memory_class == "baton", the caller-supplied extra_payload
+        # MUST carry a baton_lifecycle dict with owner, expires_when, and
+        # resolution_condition. Missing any required field → reject with a
+        # specific error, no state mutation, no node written.
+        # Baton lifecycle fields live on extra_payload (mutable state over
+        # the baton's life), not on ProvenanceV1 (origin/lineage only).
+        if memory_class == "baton":
+            _bl = (extra_payload or {}).get("baton_lifecycle")
+            if not isinstance(_bl, dict):
+                raise ValueError(
+                    "memory_class='baton' requires extra_payload['baton_lifecycle'] dict "
+                    "with owner, expires_when, and resolution_condition"
+                )
+            for _req in ("owner", "expires_when", "resolution_condition"):
+                if not _bl.get(_req):
+                    raise ValueError(
+                        f"baton_lifecycle missing required field '{_req}'"
+                    )
+            _valid_owners = {"user", "next_ai", "system"}
+            if _bl.get("owner") not in _valid_owners:
+                raise ValueError(
+                    f"baton_lifecycle.owner must be one of "
+                    f"{sorted(_valid_owners)}, got {_bl.get('owner')!r}"
+                )
+            _bl.setdefault("status", "active")
 
         state = self.agent_states[ak]
         # process kernel (text only used for gating signals)
@@ -2506,6 +2535,32 @@ class TormentFabric:
                             _existing_eid = int(_rh["eid"])
                             _existing_ent = graph.entities.get(_existing_eid)
                             if _existing_ent is not None:
+                                # Block A cross-class guard (docs/BLOCK_A_DESIGN.md §6.1):
+                                # reinforce-in-place applies only when incoming and existing
+                                # memory_class match. A baton must not reinforce a core entry
+                                # and vice versa — they have different lifecycle semantics.
+                                _existing_class = str(
+                                    (_existing_ent.payload or {}).get("memory_class", "core")
+                                )
+                                if _existing_class != memory_class:
+                                    continue
+                                # Block A contradiction guard (docs/BLOCK_A_DESIGN.md §8):
+                                # if incoming content is similar-AND-contradictory to this
+                                # existing entry, do NOT reinforce. Fall through to the spawn
+                                # path so the contradiction is recorded in ConflictRegistry.
+                                # Applies to core writes only; baton is lifecycle, not claim.
+                                if memory_class == "core":
+                                    _old_sum_guard = str(
+                                        (_existing_ent.payload or {}).get("summary", "")
+                                    )
+                                    _sim_guard = float(
+                                        _rh.get("raw_score", _rh.get("score", 0))
+                                    )
+                                    _is_c, _cs, _r = _detect_canon_conflict(
+                                        summary, _old_sum_guard, _sim_guard
+                                    )
+                                    if _is_c:
+                                        continue
                                 _old_str = float((_existing_ent.payload or {}).get("strength", 0.5))
                                 # Check if the EXISTING entity is a tool-result memory.
                                 # Tool-result reinforcement: do NOT boost strength.
@@ -2555,18 +2610,12 @@ class TormentFabric:
                 # complete record.  This replaces the old add_memory +
                 # update_payload pattern that wrote 2 (or 3) records per memory.
 
-                eid = graph.spawn_memory(
-                summary=summary,
-                embedding=emb,
-                mtype=signals.memory_type,
-                strength=signals.strength,
-                confidence=signals.confidence,
-                half_life_days=half_life_days,
-                links=signals.links,
-                canon=(signals.promotion_score >= 0.78),
-                user_id=agent_id,
-                step=step,
-                extra_payload={
+                # Block A: merge caller-supplied extra_payload with internal
+                # fields. Internal keys win over caller keys to keep identity
+                # invariants (workspace_id, scope, provenance, etc.) trustworthy;
+                # caller's extras (e.g. baton_lifecycle) are preserved as long as
+                # they don't collide.
+                _internal_ep: Dict[str, Any] = {
                     "workspace_id": workspace_id,
                     "domain_id": chosen_domain,
                     "scope": scope,
@@ -2597,7 +2646,23 @@ class TormentFabric:
 
                     # Provenance (v2.4.x first-pass)
                     "provenance": _prov_dict,
-                },
+                }
+                _merged_ep: Dict[str, Any] = dict(extra_payload or {})
+                _merged_ep.update(_internal_ep)  # internal wins on collision
+
+                eid = graph.spawn_memory(
+                summary=summary,
+                embedding=emb,
+                mtype=signals.memory_type,
+                strength=signals.strength,
+                confidence=signals.confidence,
+                half_life_days=half_life_days,
+                links=signals.links,
+                canon=(signals.promotion_score >= 0.78),
+                user_id=agent_id,
+                step=step,
+                memory_class=memory_class,
+                extra_payload=_merged_ep,
                 )
                 stored = True
 
@@ -2701,6 +2766,56 @@ class TormentFabric:
                     graph.flush_node(int(eid))
                 except Exception as e:
                     self._log.debug("Failed to flush node eid=%s: %s", eid, e)
+
+                # --- Private-ingest contradiction surfacing (Block A, §8) ---
+                # When a private core ingest's content is similar-plus-
+                # contradictory to an existing same-agent entry, record a
+                # conflict in the existing ConflictRegistry. Does NOT block
+                # the write; does NOT auto-resolve.
+                #
+                # Scope (v0.1): private core only. Baton is explicitly
+                # excluded because it is lifecycle state, not claim state.
+                # Per docs/BLOCK_A_DESIGN.md §8 framing: "core" is NOT the
+                # eternal contradiction-bearing class — future memory
+                # classes must make an explicit design decision here
+                # rather than inheriting by accident.
+                if (scope == "private"
+                        and memory_class == "core"
+                        and eid is not None):
+                    try:
+                        _cs_hits = graph.search_by_embedding(
+                            np.asarray(emb, dtype=np.float32),
+                            top_k=3,
+                            user_id=agent_id,
+                        )
+                        for _csh in _cs_hits:
+                            _old_eid = int(_csh.get("eid", 0))
+                            if _old_eid <= 0 or _old_eid == eid:
+                                continue
+                            # Only compare against other core entries —
+                            # cross-class contradiction (core vs baton)
+                            # is a category mistake (§8 scope framing).
+                            if _csh.get("memory_class", "core") != "core":
+                                continue
+                            _sim = float(_csh.get("raw_score",
+                                                  _csh.get("score", 0)))
+                            _old_sum = str(_csh.get("summary", ""))
+                            is_conflict, cscore, reason = _detect_canon_conflict(
+                                summary, _old_sum, _sim
+                            )
+                            if is_conflict:
+                                ws.conflicts[chosen_domain].add(
+                                    eid_a=int(_old_eid),
+                                    eid_b=int(eid),
+                                    sim=float(_sim),
+                                    conflict_score=float(cscore),
+                                    reason=str(reason or "heuristic"),
+                                )
+                                break  # one conflict per new node is enough
+                    except Exception as e:
+                        self._log.debug(
+                            "private contradiction surface skipped: %s", e
+                        )
 
                 # --- SRG collision detection (Phase 3) ---
                 if self._srg_enable and _srg_dict and eid is not None:
@@ -3444,6 +3559,14 @@ class TormentFabric:
         # to the previous behavior — deep hits participate in the same
         # unified rescore pass.
         all_hits = private_hits + shared_hits + deep_hits
+
+        # Block A (docs/BLOCK_A_DESIGN.md §7.1): default lanes exclude
+        # baton entries. This is a HARD lifecycle filter, not a score
+        # de-weighting. Baton content is only reachable via
+        # fabric.list_active_batons (the explicit lifecycle-aware path).
+        # If this ever becomes a soft down-rank, re-check against the
+        # "baton is lifecycle, not ontology rank" invariant in §2.
+        all_hits = [h for h in all_hits if h.get("memory_class") != "baton"]
         rescored = []
         active_motifs = {}
         for d in domains:
@@ -4046,6 +4169,174 @@ class TormentFabric:
             "skipped": skipped,
         }
 
+
+    # -----------------------------------------------------------------
+    # Block A — baton lifecycle API
+    # (docs/BLOCK_A_DESIGN.md §6.2 / §6.3)
+    # -----------------------------------------------------------------
+
+    def list_active_batons(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        owner: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """List active baton entries for an agent.
+
+        Block A (docs/BLOCK_A_DESIGN.md §6.2). The explicit baton-aware
+        retrieval path — baton is NOT a MemoryPlan lane. This method is
+        the honest interface for lifecycle-aware baton lookup.
+
+        Filter semantics:
+            - agent-scoped (private only — baton is never shared)
+            - active only (baton_lifecycle.status == "active")
+            - optional owner filter ("user" | "next_ai" | "system")
+            - sorted by created_ts ascending (oldest first — aging bias)
+            - limit capped at 200 server-side
+
+        Returns:
+            {
+                "ok": True,
+                "result_code": "listed" | "no_active",
+                "batons": [
+                    {"eid": int, "summary": str, "baton_lifecycle": {...},
+                     "created_ts": int, "provenance": {...}},
+                    ...
+                ],
+            }
+        """
+        # Cap the server-side limit to prevent runaway large responses.
+        limit = max(1, min(int(limit), 200))
+
+        ak = self._agent_key(workspace_id, agent_id)
+        g = self.private_graphs.get(ak)
+        batons: List[Dict[str, Any]] = []
+        if g is not None:
+            for eid, ent in g.entities.items():
+                payload = ent.payload or {}
+                if payload.get("memory_class") != "baton":
+                    continue
+                lifecycle = payload.get("baton_lifecycle") or {}
+                if lifecycle.get("status") != "active":
+                    continue
+                if owner is not None and lifecycle.get("owner") != owner:
+                    continue
+                batons.append({
+                    "eid": int(eid),
+                    "summary": payload.get("summary", ""),
+                    "baton_lifecycle": dict(lifecycle),
+                    "created_ts": int(payload.get("created_ts", 0) or 0),
+                    "provenance": payload.get("provenance"),
+                })
+
+        # Sort oldest first (aging bias — oldest batons surface first).
+        batons.sort(key=lambda b: b.get("created_ts", 0))
+        if len(batons) > limit:
+            batons = batons[:limit]
+
+        return {
+            "ok": True,
+            "result_code": "listed" if batons else "no_active",
+            "batons": batons,
+        }
+
+    def resolve_baton(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        eid: int,
+        outcome: str,
+        resolver: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Mark a baton as consumed. Does NOT delete or auto-promote.
+
+        Block A (docs/BLOCK_A_DESIGN.md §6.3). Soft-consume semantics:
+            - payload["baton_lifecycle"]["status"] = "consumed"
+            - payload["baton_lifecycle"]["consumed_at"] = unix_ts
+            - payload["baton_lifecycle"]["consumed_by"] = resolver or agent_id
+            - payload["baton_lifecycle"]["consumed_outcome"] = outcome
+            - A BatonEvent(kind="consumed") is appended to the ledger
+              (audit trail; payload remains the source of truth).
+
+        The memory entry is NEVER deleted. Original content + provenance
+        preserved. Resolution NEVER creates a new core entry in a single
+        call — promoting baton content to durable is a separate, explicit
+        ingest with parent_eids pointing back to the baton.
+
+        Idempotent: resolving an already-consumed baton is a no-op
+        (result_code="already_consumed", no state change, no duplicate
+        ledger entry).
+
+        Returns:
+            {
+                "ok": True,
+                "result_code": "resolved" | "already_consumed"
+                              | "not_found" | "not_a_baton",
+                "eid": int,
+                "outcome": str,
+            }
+        """
+        eid = int(eid)
+        ak = self._agent_key(workspace_id, agent_id)
+        g = self.private_graphs.get(ak)
+
+        # Not-found: no agent graph or eid absent.
+        if g is None or eid not in g.entities:
+            return {"ok": True, "result_code": "not_found",
+                    "eid": eid, "outcome": outcome}
+
+        ent = g.entities[eid]
+        payload = ent.payload or {}
+
+        # Not-a-baton: present but wrong memory_class.
+        if payload.get("memory_class") != "baton":
+            return {"ok": True, "result_code": "not_a_baton",
+                    "eid": eid, "outcome": outcome}
+
+        lifecycle = dict(payload.get("baton_lifecycle") or {})
+        # Already-consumed: no-op (idempotent). No ledger re-entry.
+        if lifecycle.get("status") == "consumed":
+            return {"ok": True, "result_code": "already_consumed",
+                    "eid": eid, "outcome": outcome}
+
+        # Soft-consume: update lifecycle fields in place. memory_class
+        # does NOT change (resolution is lifecycle, not reclassification).
+        now_ts = int(time.time())
+        consumed_by = resolver or agent_id
+        owner_at_consume = lifecycle.get("owner")
+        lifecycle["status"] = "consumed"
+        lifecycle["consumed_at"] = now_ts
+        lifecycle["consumed_by"] = consumed_by
+        lifecycle["consumed_outcome"] = outcome
+        g.update_payload(eid, {"baton_lifecycle": lifecycle})
+
+        # Append to the audit ledger. Payload is source of truth;
+        # ledger is audit trail. Errors here are swallowed — a ledger
+        # write failure must not roll back the payload state change,
+        # because the ledger is derivable from payload events but the
+        # payload is not derivable from the ledger alone.
+        try:
+            from .baton_ledger import BatonLedger
+            ledger = BatonLedger(
+                data_dir=self.data_dir,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+            event = ledger.build_consumed_event(
+                eid=eid,
+                outcome=outcome,
+                resolver=consumed_by,
+                owner=owner_at_consume,
+            )
+            ledger.add_event(event)
+        except Exception as e:
+            self._log.debug(
+                "baton ledger write failed for eid=%s: %s", eid, e
+            )
+
+        return {"ok": True, "result_code": "resolved",
+                "eid": eid, "outcome": outcome}
 
     def decide_bridge(self, workspace_id: str, from_domain: str, from_motif: str, to_domain: str, to_motif: str, decision: str) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)

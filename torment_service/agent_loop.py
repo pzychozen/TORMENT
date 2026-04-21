@@ -287,6 +287,53 @@ class LLMClient(Protocol):
         ...
 
 
+class SessionLifecycleHook(Protocol):
+    """Hook interface for session-boundary events.
+
+    Block A (docs/BLOCK_A_DESIGN.md §9) declares this Protocol but does
+    NOT wire it into AgentRunner. Implementation is deferred to a
+    post-slice runtime increment (provisionally v0.1.0-sessions).
+    Activation will require a separately-ratified runtime-doctrine
+    amendment, since adding a session-lifecycle call path is a
+    runtime-surface change.
+
+    The Protocol lives here so that Block A's baton lifecycle design is
+    architecturally visible — the aging signal has a named home — without
+    requiring Block A to ship the runtime wiring.
+
+    References:
+        - docs/BLOCK_A_DESIGN.md §9 (declaration-only scope)
+        - docs/BLOCK_A_IMPLEMENTATION_ANALYSIS.md §3.4 (deferral rationale)
+    """
+
+    def on_session_start(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Called once at the start of a session.
+
+        Expected (post-activation) use: call fabric.list_active_batons,
+        emit an aging signal for any baton older than a declared
+        threshold, record a session-start timestamp for later aging
+        calculations. None of this is implemented in Block A.
+        """
+        ...
+
+    def on_session_end(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Called once at session close. Reserved for symmetry and for
+        future use by baton-expiry heuristics that depend on session
+        boundaries. Not implemented in Block A.
+        """
+        ...
+
+
 class ToolExecutor(Protocol):
     """Abstract interface for executing a narrowed tool family.
 
