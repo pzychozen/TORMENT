@@ -226,8 +226,16 @@ class ReferenceStore:
                 if os.path.isfile(source_link):
                     with open(source_link, "r", encoding="utf-8", errors="replace") as f:
                         return self._hash_content(f.read())
-            except Exception:
-                pass
+            except Exception as exc:
+                # Silent fallback was the original pattern, but GitHub's
+                # empty-except check (correctly) flagged it. Log at
+                # WARNING so re-read failures are discoverable without
+                # changing the conservative body-hash behavior below.
+                log.warning(
+                    "Failed to hash repo_file source_link=%r; "
+                    "falling back to body hash: %s",
+                    source_link, exc,
+                )
         # Fallback: hash the body as ingested. For v0.1 the body is
         # immutable once stored, so this returns the same value on
         # every load — giving stale=False. This is the conservative

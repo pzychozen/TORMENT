@@ -249,7 +249,9 @@ class TestRunnerDoesNotTouchBlockB(unittest.TestCase):
 
     def test_runner_turn_does_not_modify_reference_entries(self) -> None:
         runner, fabric, llm = _make_runner()
-        ref_id = fabric._seed_reference("ref", "body before")
+        # Seed a reference (return value intentionally discarded — we
+        # verify non-modification via fabric._reference_entries below).
+        fabric._seed_reference("ref", "body before")
         before = dict(fabric._reference_entries[0])
         runner.run_turn(
             workspace_id="ws", agent_id="atlas",
