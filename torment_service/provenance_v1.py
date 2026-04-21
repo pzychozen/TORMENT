@@ -33,6 +33,12 @@ SOURCE_MEMORY       = "memory"
 SOURCE_TOOL_RESULT      = "tool_result"
 SOURCE_COLLECTIVE_ECHO  = "collective_echo"
 
+# Block A — baton as a cross-session attention-bounded intent. Origin class
+# only; baton lifecycle state (owner, expires_when, resolution_condition,
+# status) lives on the memory entity's extra_payload["baton_lifecycle"],
+# not on ProvenanceV1. See docs/BLOCK_A_DESIGN.md §5.1.
+SOURCE_BATON_INTENT = "baton_intent"
+
 # Storage sentinel for rows that fail the WRITE_MIGRATION gate-1 recovery
 # predicate. NOT an admissible origin class — see
 # ``torment_service/migration/constants.py::SOURCE_GATE1_UNRECOVERABLE``
@@ -52,6 +58,7 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_TOOL_RESULT,
     SOURCE_COLLECTIVE_ECHO,
     SOURCE_GATE1_UNRECOVERABLE,
+    SOURCE_BATON_INTENT,   # Block A
 })
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
@@ -283,6 +290,34 @@ class ProvenanceV1:
             created_at_step=step,
             tool_name=tool_name,
             session_id=session_id,
+        )
+
+    @classmethod
+    def for_baton_ingest(
+        cls,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a baton — cross-session attention-bounded intent.
+
+        Block A (docs/BLOCK_A_DESIGN.md §5.1). Baton lifecycle fields
+        (owner, expires_when, resolution_condition, status) live on the
+        memory entity's extra_payload["baton_lifecycle"], NOT on
+        ProvenanceV1. Provenance records origin/lineage only; lifecycle
+        state mutates over the baton's life and belongs in payload.
+
+        The write_path remains WRITE_DIRECT_INGEST — baton is WHAT the
+        write is (source_type), not a new HOW (write_path).
+        """
+        return cls(
+            source_type=SOURCE_BATON_INTENT,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
         )
 
     @classmethod
