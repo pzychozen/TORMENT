@@ -39,6 +39,21 @@ SOURCE_COLLECTIVE_ECHO  = "collective_echo"
 # not on ProvenanceV1. See docs/BLOCK_A_DESIGN.md §5.1.
 SOURCE_BATON_INTENT = "baton_intent"
 
+# Block B — reference memory origin. Records that a reference object was
+# stored; the reference's source_link / source_kind live on ReferenceEntry
+# (not on provenance), per docs/BLOCK_B_DESIGN.md §3 carry-forward caution
+# (storage-vs-loading separation).
+SOURCE_REFERENCE_INGEST = "reference_ingest"
+
+# Block B — environment memory, three evidence classes per R+5
+# (docs/PRE_BLOCK_B_PRECONDITIONS.md §3). Every environment write MUST
+# declare exactly one. "inferred" additionally requires a ratified rule
+# name validated at fabric level against
+# environment_memory.VALID_INFERENCE_RULES (empty in v0.1).
+SOURCE_ENVIRONMENT_USER_ASSERTED = "environment_user_asserted"
+SOURCE_ENVIRONMENT_OBSERVED      = "environment_observed"
+SOURCE_ENVIRONMENT_INFERRED      = "environment_inferred"
+
 # Storage sentinel for rows that fail the WRITE_MIGRATION gate-1 recovery
 # predicate. NOT an admissible origin class — see
 # ``torment_service/migration/constants.py::SOURCE_GATE1_UNRECOVERABLE``
@@ -58,7 +73,11 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_TOOL_RESULT,
     SOURCE_COLLECTIVE_ECHO,
     SOURCE_GATE1_UNRECOVERABLE,
-    SOURCE_BATON_INTENT,   # Block A
+    SOURCE_BATON_INTENT,                # Block A
+    SOURCE_REFERENCE_INGEST,            # Block B — reference memory
+    SOURCE_ENVIRONMENT_USER_ASSERTED,   # Block B — environment (user-asserted)
+    SOURCE_ENVIRONMENT_OBSERVED,        # Block B — environment (observed)
+    SOURCE_ENVIRONMENT_INFERRED,        # Block B — environment (inferred)
 })
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
@@ -110,6 +129,16 @@ class ProvenanceV1:
     tool_name: Optional[str] = None
     session_id: Optional[str] = None
     notes: Optional[str] = None
+
+    # Block B — evidence-class-specific origin fields. Each maps to exactly
+    # one of the three SOURCE_ENVIRONMENT_* values; factory methods populate
+    # the appropriate field (the others stay None). These are origin/lineage
+    # metadata, not runtime-behavior: they record WHO asserted or WHAT
+    # probed or WHICH rule inferred, nothing more. See docs/BLOCK_B_DESIGN.md
+    # §5.1.
+    asserted_by: Optional[str] = None        # populated when source_type=user_asserted
+    observation_source: Optional[str] = None  # populated when source_type=observed
+    inference_rule: Optional[str] = None      # populated when source_type=inferred
 
     # ── WRITE_MIGRATION admission fields (v2.4.x step 6) ───────────
     #
@@ -212,8 +241,12 @@ class ProvenanceV1:
         correct reading for any row produced outside the migration.
         """
         d = asdict(self)
-        # Strip None optional fields to keep payloads compact
-        for k in ("tool_name", "session_id", "notes"):
+        # Strip None optional fields to keep payloads compact. Block B
+        # additions (asserted_by, observation_source, inference_rule)
+        # strip the same way so live ingest paths that don't use them
+        # serialize byte-compatibly with pre-Block-B rows.
+        for k in ("tool_name", "session_id", "notes",
+                  "asserted_by", "observation_source", "inference_rule"):
             if d.get(k) is None:
                 del d[k]
         # Strip default-valued admission fields so pre-step-6 rows and
@@ -290,6 +323,119 @@ class ProvenanceV1:
             created_at_step=step,
             tool_name=tool_name,
             session_id=session_id,
+        )
+
+    # ── Block B factories ──────────────────────────────────────────
+    #
+    # Four factories. for_reference_ingest records a plain storage
+    # event (reference identity lives on ReferenceEntry, not here).
+    # The three environment factories each populate exactly one
+    # evidence-specific field; the others stay None.
+    # See docs/BLOCK_B_DESIGN.md §5.1.
+
+    @classmethod
+    def for_reference_ingest(
+        cls,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a reference-object storage event.
+
+        The reference object's source_link and source_kind live on
+        the ReferenceEntry payload, not on provenance (per the
+        ratified carry-forward caution: storage identity is on the
+        entry; provenance records the storage EVENT only).
+        """
+        return cls(
+            source_type=SOURCE_REFERENCE_INGEST,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
+        )
+
+    @classmethod
+    def for_environment_user_asserted(
+        cls,
+        asserted_by: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for an environment fact supplied by the user.
+
+        `asserted_by` records the user identity who told the system
+        this operational fact.
+        """
+        return cls(
+            source_type=SOURCE_ENVIRONMENT_USER_ASSERTED,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
+            asserted_by=asserted_by,
+        )
+
+    @classmethod
+    def for_environment_observed(
+        cls,
+        observation_source: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for an environment fact produced by direct probe.
+
+        `observation_source` names the probe that produced the
+        observation (e.g., "python_version_probe",
+        "network_availability_probe"). The probe-on-fail path always
+        uses this factory; LLM guesswork must not reach environment
+        memory through it (R+5).
+        """
+        return cls(
+            source_type=SOURCE_ENVIRONMENT_OBSERVED,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
+            observation_source=observation_source,
+        )
+
+    @classmethod
+    def for_environment_inferred(
+        cls,
+        inference_rule: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for an environment fact produced by a ratified
+        inference rule.
+
+        `inference_rule` names the ratified rule that produced the
+        entry. v0.1 ships with zero rules in
+        environment_memory.VALID_INFERENCE_RULES, so any caller
+        attempting this factory will be rejected at the fabric layer
+        during write_environment validation. The factory itself does
+        not validate the rule — it records origin; validation is
+        fabric-level doctrine per R+5.
+        """
+        return cls(
+            source_type=SOURCE_ENVIRONMENT_INFERRED,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=notes,
+            inference_rule=inference_rule,
         )
 
     @classmethod
