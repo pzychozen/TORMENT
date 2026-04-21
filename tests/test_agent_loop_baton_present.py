@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -42,7 +41,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from torment_service.agent_loop import AgentRunner, Observation, LLMResponse
 from torment_service.thinking_controller import ThinkingController
-from torment_service.provenance_v1 import ProvenanceV1
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +182,9 @@ class TestRunTurnCompletesWithBatonEntriesPresent(unittest.TestCase):
     def test_baton_entries_not_modified_by_run_turn(self) -> None:
         """Runner does not touch baton state. Same entries before/after."""
         runner, fabric, llm = _make_runner()
-        baton_eid = fabric._seed_baton("Check the auth migration.")
+        # Seed a baton (return value intentionally discarded — we verify
+        # non-modification via fabric._baton_entries below).
+        fabric._seed_baton("Check the auth migration.")
         before = dict(fabric._baton_entries[0])
 
         runner.run_turn(

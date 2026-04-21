@@ -284,7 +284,7 @@ class LLMClient(Protocol):
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
-        ...
+        pass
 
 
 class SessionLifecycleHook(Protocol):
@@ -319,7 +319,6 @@ class SessionLifecycleHook(Protocol):
         threshold, record a session-start timestamp for later aging
         calculations. None of this is implemented in Block A.
         """
-        ...
 
     def on_session_end(
         self,
