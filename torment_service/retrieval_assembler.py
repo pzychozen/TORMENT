@@ -41,13 +41,18 @@ def _estimate_tokens(text: str) -> int:
 # ---------------------------------------------------------------------------
 
 BLOCK_IDENTITY = "identity_context"
+BLOCK_REFERENCE = "reference_context"     # Block B — pack-declared reference loads
 BLOCK_RELATIONAL = "relational_context"
 BLOCK_SITUATIONAL = "situational_context"
 BLOCK_ARCHIVE = "archive_context"
 
 # Fill order — this is the hard precedence. Archive is always last.
+# Reference sits between identity and relational per BLOCK_B_DESIGN §8.1:
+# loaded references are intentional reasoning material — more important
+# than archive chunks, less identity-defining than core canon.
 FILL_ORDER = [
     BLOCK_IDENTITY,
+    BLOCK_REFERENCE,
     BLOCK_RELATIONAL,
     BLOCK_SITUATIONAL,
     BLOCK_ARCHIVE,
@@ -98,28 +103,32 @@ class AssembledContext:
 
 PROFILES: Dict[str, Dict[str, float]] = {
     "companion": {
-        BLOCK_IDENTITY:    0.35,
+        BLOCK_IDENTITY:    0.30,
+        BLOCK_REFERENCE:   0.10,
         BLOCK_RELATIONAL:  0.30,
         BLOCK_SITUATIONAL: 0.20,
-        BLOCK_ARCHIVE:     0.15,
+        BLOCK_ARCHIVE:     0.10,
     },
     "research": {
-        BLOCK_IDENTITY:    0.15,
-        BLOCK_RELATIONAL:  0.10,
-        BLOCK_SITUATIONAL: 0.25,
-        BLOCK_ARCHIVE:     0.50,
+        BLOCK_IDENTITY:    0.12,
+        BLOCK_REFERENCE:   0.25,  # research-heavy; references matter
+        BLOCK_RELATIONAL:  0.08,
+        BLOCK_SITUATIONAL: 0.20,
+        BLOCK_ARCHIVE:     0.35,
     },
     "narrator": {
-        BLOCK_IDENTITY:    0.40,
+        BLOCK_IDENTITY:    0.35,
+        BLOCK_REFERENCE:   0.05,
         BLOCK_RELATIONAL:  0.25,
         BLOCK_SITUATIONAL: 0.25,
         BLOCK_ARCHIVE:     0.10,
     },
     "balanced": {
-        BLOCK_IDENTITY:    0.25,
-        BLOCK_RELATIONAL:  0.25,
-        BLOCK_SITUATIONAL: 0.25,
-        BLOCK_ARCHIVE:     0.25,
+        BLOCK_IDENTITY:    0.22,
+        BLOCK_REFERENCE:   0.12,
+        BLOCK_RELATIONAL:  0.22,
+        BLOCK_SITUATIONAL: 0.22,
+        BLOCK_ARCHIVE:     0.22,
     },
 }
 

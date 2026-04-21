@@ -3560,13 +3560,21 @@ class TormentFabric:
         # unified rescore pass.
         all_hits = private_hits + shared_hits + deep_hits
 
-        # Block A (docs/BLOCK_A_DESIGN.md §7.1): default lanes exclude
-        # baton entries. This is a HARD lifecycle filter, not a score
-        # de-weighting. Baton content is only reachable via
-        # fabric.list_active_batons (the explicit lifecycle-aware path).
-        # If this ever becomes a soft down-rank, re-check against the
-        # "baton is lifecycle, not ontology rank" invariant in §2.
-        all_hits = [h for h in all_hits if h.get("memory_class") != "baton"]
+        # Block A + B (docs/BLOCK_A_DESIGN.md §7.1, docs/BLOCK_B_DESIGN.md
+        # §6.5): default lanes exclude non-substrate memory classes.
+        # HARD lifecycle filter, not score de-weighting. Each class has
+        # its own explicit retrieval primitive:
+        #   - baton:       fabric.list_active_batons
+        #   - reference:   fabric.load_reference / fabric.list_active_loads
+        #   - environment: fabric.consult_environment
+        # Reference and environment never enter memory_graph in the first
+        # place (they live in their own per-workspace stores), so this
+        # filter is defensive — but the explicit exclusion is
+        # architectural signal against future drift where a new code path
+        # might accidentally surface them here.
+        _NON_DEFAULT_CLASSES = frozenset({"baton", "reference", "environment"})
+        all_hits = [h for h in all_hits
+                    if h.get("memory_class") not in _NON_DEFAULT_CLASSES]
         rescored = []
         active_motifs = {}
         for d in domains:
@@ -4337,6 +4345,813 @@ class TormentFabric:
 
         return {"ok": True, "result_code": "resolved",
                 "eid": eid, "outcome": outcome}
+
+    # -----------------------------------------------------------------
+    # Block B — reference memory API
+    # (docs/BLOCK_B_DESIGN.md §6.2, §6.3)
+    # -----------------------------------------------------------------
+    #
+    # Reference memory is per-workspace whole-object storage, separate
+    # from ArchiveStore (which chunks) and from core/baton substrate
+    # (which is kernel-governed). Loading is intentional, sustained,
+    # reasoning-oriented — NOT cosine retrieval.
+    #
+    # Two state surfaces managed here:
+    #   - self.reference_stores[workspace_id]: ReferenceStore per workspace
+    #   - self.reference_active_loads[agent_key]: {load_id: ActiveLoad}
+    #     in-memory per-agent state for active loads
+    #
+    # Carry-forward caution (ratified): ReferenceEntry identity is
+    # durable; ActiveLoad is lifecycle state on top. Load/unload events
+    # go to the ReferenceLoadLedger (audit); ActiveLoad is the current-
+    # state source of truth.
+
+    def _get_reference_store(self, workspace_id: str):
+        """Lazily create the per-workspace ReferenceStore."""
+        if not hasattr(self, "reference_stores"):
+            self.reference_stores = {}
+        if workspace_id not in self.reference_stores:
+            from .reference_memory import ReferenceStore
+            self.reference_stores[workspace_id] = ReferenceStore(
+                data_dir=self.data_dir,
+                workspace_id=workspace_id,
+            )
+        return self.reference_stores[workspace_id]
+
+    def _get_active_loads_map(self, workspace_id: str, agent_id: str):
+        """Lazily create the per-agent active-loads in-memory dict."""
+        if not hasattr(self, "reference_active_loads"):
+            self.reference_active_loads = {}
+        ak = self._agent_key(workspace_id, agent_id)
+        if ak not in self.reference_active_loads:
+            self.reference_active_loads[ak] = {}
+        return self.reference_active_loads[ak]
+
+    def _get_reference_load_ledger(self, workspace_id: str, agent_id: str):
+        from .reference_load_ledger import ReferenceLoadLedger
+        return ReferenceLoadLedger(
+            data_dir=self.data_dir,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+
+    # -----------------------------------------------------------------
+    # Block B — environment memory helpers
+    # (docs/BLOCK_B_DESIGN.md §7)
+    # -----------------------------------------------------------------
+
+    def _get_environment_store(self, workspace_id: str):
+        """Lazily create the per-workspace EnvironmentStore.
+
+        Also attaches the store to the Workspace instance as
+        `workspace.environment_store` for discoverability (test code
+        and admin tooling reach it via the workspace object).
+        """
+        if not hasattr(self, "environment_stores"):
+            self.environment_stores = {}
+        if workspace_id not in self.environment_stores:
+            from .environment_memory import EnvironmentStore
+            store = EnvironmentStore(
+                data_dir=self.data_dir,
+                workspace_id=workspace_id,
+            )
+            self.environment_stores[workspace_id] = store
+            try:
+                ws = self.get_workspace(workspace_id)
+                ws.environment_store = store
+            except Exception:
+                # If the workspace doesn't exist yet, the store is
+                # still cached on the fabric — the workspace attribute
+                # will be re-attached on next call once ws is created.
+                pass
+        return self.environment_stores[workspace_id]
+
+    def _get_environment_event_ledger(self, workspace_id: str):
+        from .environment_event_ledger import EnvironmentEventLedger
+        return EnvironmentEventLedger(
+            data_dir=self.data_dir,
+            workspace_id=workspace_id,
+        )
+
+    def ingest_reference(
+        self,
+        workspace_id: str,
+        title: str,
+        body: str,
+        source_link: str,
+        source_kind: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ingest a reference object (Block B §6.2).
+
+        Source linkage is REQUIRED (AC-1.1). Both fields must be
+        truthy; either missing → rejected without writing.
+
+        Returns:
+            {"ok": True, "result_code": "ingested", "ref_id": str}
+            or on missing source linkage:
+            {"ok": False, "result_code": "missing_source_linkage",
+             "ref_id": ""}
+        """
+        # AC-1.1 — source_link + source_kind both required
+        if not source_link or not source_kind:
+            return {
+                "ok": False,
+                "result_code": "missing_source_linkage",
+                "ref_id": "",
+            }
+
+        # Make sure the workspace exists (for consistency with other methods)
+        self.get_workspace(workspace_id)
+
+        from .provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_reference_ingest(
+            step=step, session_id=session_id,
+        ).to_dict()
+
+        store = self._get_reference_store(workspace_id)
+        entry = store.ingest(
+            title=title,
+            body=body,
+            source_link=source_link,
+            source_kind=source_kind,
+            provenance=prov,
+            metadata=metadata,
+        )
+        return {
+            "ok": True,
+            "result_code": "ingested",
+            "ref_id": entry.ref_id,
+        }
+
+    def load_reference(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        ref_id: str,
+        scope_tag: str,
+    ) -> Dict[str, Any]:
+        """Load a reference object into the agent's active context
+        (Block B §6.3).
+
+        Returns the whole body (AC-1.2) and computes staleness on load.
+        Idempotent at the call level in the sense of "repeated load
+        calls each produce a new load_id" (design decision — each
+        load is its own lifecycle event).
+
+        Envelope:
+            {"ok": True,
+             "result_code": "loaded" | "not_found" | "not_a_reference",
+             "load_id": str,
+             "ref_id": str,
+             "title": str,
+             "body": str,
+             "stale": bool,
+             "loaded_at_ts": int}
+        """
+        # Workspace existence is assumed; fetch store (lazy-creates if
+        # the workspace has no prior reference-memory state)
+        self.get_workspace(workspace_id)
+        store = self._get_reference_store(workspace_id)
+
+        entry = store.get(ref_id)
+        if entry is None:
+            return {
+                "ok": True,
+                "result_code": "not_found",
+                "ref_id": ref_id,
+            }
+
+        # Staleness = source hash at load time vs stored source_hash.
+        # For v0.1, the ReferenceStore's compute_source_hash uses a
+        # per-kind handler defaulting to the body-hash fallback
+        # (conservative stale=False when the source can't be re-read).
+        current_hash = store.compute_source_hash(
+            source_link=entry.source_link,
+            source_kind=entry.source_kind,
+            body=entry.body,
+        )
+        stale = (current_hash != entry.source_hash)
+
+        # Create a new ActiveLoad — note that load_id is a fresh uuid,
+        # structurally separate from ref_id. Loadedness is not identity.
+        load_id = f"load_{uuid.uuid4().hex[:16]}"
+        loaded_ts = int(time.time())
+        from .reference_memory import ActiveLoad
+        active = ActiveLoad(
+            load_id=load_id,
+            ref_id=ref_id,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            scope_tag=scope_tag,
+            loaded_at_ts=loaded_ts,
+            stale_at_load=stale,
+            status="active",
+        )
+        loads_map = self._get_active_loads_map(workspace_id, agent_id)
+        loads_map[load_id] = active
+
+        # Record the event in the ledger (audit only — ActiveLoad
+        # remains the state source of truth).
+        try:
+            ledger = self._get_reference_load_ledger(workspace_id, agent_id)
+            ledger.add_event(ledger.build_loaded_event(
+                ref_id=ref_id,
+                load_id=load_id,
+                scope_tag=scope_tag,
+                stale_at_load=stale,
+            ))
+        except Exception as e:
+            self._log.debug(
+                "reference load ledger write failed for load_id=%s: %s",
+                load_id, e,
+            )
+
+        return {
+            "ok": True,
+            "result_code": "loaded",
+            "load_id": load_id,
+            "ref_id": ref_id,
+            "title": entry.title,
+            "body": entry.body,
+            "stale": stale,
+            "loaded_at_ts": loaded_ts,
+        }
+
+    def unload_reference(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        load_id: str,
+    ) -> Dict[str, Any]:
+        """Mark an active load as unloaded. Soft-operation; idempotent
+        on already-unloaded loads.
+
+        Envelope:
+            {"ok": True,
+             "result_code": "unloaded" | "not_found" | "already_unloaded",
+             "load_id": str}
+        """
+        loads_map = self._get_active_loads_map(workspace_id, agent_id)
+        active = loads_map.get(load_id)
+        if active is None:
+            return {
+                "ok": True,
+                "result_code": "not_found",
+                "load_id": load_id,
+            }
+        if active.status != "active":
+            return {
+                "ok": True,
+                "result_code": "already_unloaded",
+                "load_id": load_id,
+            }
+
+        now_ts = int(time.time())
+        active.status = "unloaded"
+        active.unloaded_at_ts = now_ts
+
+        try:
+            ledger = self._get_reference_load_ledger(workspace_id, agent_id)
+            ledger.add_event(ledger.build_unloaded_event(
+                ref_id=active.ref_id,
+                load_id=load_id,
+                scope_tag=active.scope_tag,
+            ))
+        except Exception as e:
+            self._log.debug(
+                "reference unload ledger write failed for load_id=%s: %s",
+                load_id, e,
+            )
+
+        return {
+            "ok": True,
+            "result_code": "unloaded",
+            "load_id": load_id,
+        }
+
+    def list_active_loads(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        scope_tag: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List this agent's currently-active reference loads.
+
+        Optional scope_tag filter. Sorted by loaded_at_ts ascending
+        (oldest first).
+
+        Envelope:
+            {"ok": True,
+             "result_code": "listed" | "no_active",
+             "loads": [
+                 {"load_id": str, "ref_id": str, "scope_tag": str,
+                  "loaded_at_ts": int, "stale_at_load": bool,
+                  "body": str, "title": str},
+                 ...
+             ]}
+
+        Note: includes body + title so callers (e.g., a future
+        retrieval_assembler integration per §8.2) can use the loaded
+        state directly without a second fetch against ReferenceStore.
+        """
+        loads_map = self._get_active_loads_map(workspace_id, agent_id)
+        store = self._get_reference_store(workspace_id)
+
+        loads: List[Dict[str, Any]] = []
+        for load_id, active in loads_map.items():
+            if active.status != "active":
+                continue
+            if scope_tag is not None and active.scope_tag != scope_tag:
+                continue
+            entry = store.get(active.ref_id)
+            # If the entry was deleted under the load (edge case),
+            # skip this load rather than returning None-shaped data.
+            if entry is None:
+                continue
+            loads.append({
+                "load_id": active.load_id,
+                "ref_id": active.ref_id,
+                "scope_tag": active.scope_tag,
+                "loaded_at_ts": active.loaded_at_ts,
+                "stale_at_load": active.stale_at_load,
+                "title": entry.title,
+                "body": entry.body,
+            })
+
+        loads.sort(key=lambda l: l.get("loaded_at_ts", 0))
+
+        return {
+            "ok": True,
+            "result_code": "listed" if loads else "no_active",
+            "loads": loads,
+        }
+
+
+    # -----------------------------------------------------------------
+    # Block B — environment memory API
+    # (docs/BLOCK_B_DESIGN.md §7)
+    # -----------------------------------------------------------------
+    #
+    # Environment memory is per-workspace operational-facts storage
+    # with STRICT evidence-class discipline (R+5). Never flows through
+    # retrieval_assembler (R+4). Consult is return-only (D.3).
+    #
+    # v0.1 ships with VALID_INFERENCE_RULES empty — any inferred write
+    # is rejected at the fabric gate. Adding a rule requires explicit
+    # future ratification per docs/BLOCK_B_DESIGN.md §11 Q2.
+
+    def _get_environment_store(self, workspace_id: str):
+        """Lazily create the per-workspace EnvironmentStore."""
+        if not hasattr(self, "environment_stores"):
+            self.environment_stores = {}
+        if workspace_id not in self.environment_stores:
+            from .environment_memory import EnvironmentStore
+            self.environment_stores[workspace_id] = EnvironmentStore(
+                data_dir=self.data_dir,
+                workspace_id=workspace_id,
+            )
+        return self.environment_stores[workspace_id]
+
+    def _get_environment_event_ledger(self, workspace_id: str):
+        from .environment_event_ledger import EnvironmentEventLedger
+        return EnvironmentEventLedger(
+            data_dir=self.data_dir,
+            workspace_id=workspace_id,
+        )
+
+    def write_environment(
+        self,
+        workspace_id: str,
+        target_runtime: str,
+        scope_tag: str,
+        key: str,
+        value: Any,
+        evidence_class: str,
+        ownership: str,
+        observation_source: Optional[str] = None,
+        inference_rule: Optional[str] = None,
+        asserted_by: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Write an environment fact (Block B §7.2).
+
+        Evidence-class discipline is the load-bearing R+5 gate. Every
+        write MUST declare evidence_class in {user_asserted, observed,
+        inferred} AND supply the class-specific required field
+        (asserted_by / observation_source / inference_rule).
+
+        Inferred writes require inference_rule ∈ VALID_INFERENCE_RULES.
+        v0.1 ships with that frozenset empty, so inferred writes are
+        always rejected until a rule is explicitly ratified.
+
+        Returns envelope:
+            {"ok": bool, "result_code": str, "env_id": str}
+
+        Result codes:
+            "written"                  — entry created
+            "missing_evidence_class"   — evidence_class empty or unknown
+            "missing_evidence_field"   — class-specific required field missing
+                                         (or target_runtime/scope_tag/key empty,
+                                         or invalid ownership)
+            "inferred_requires_rule"   — inferred without inference_rule
+            "unknown_inference_rule"   — inference_rule not in VALID_INFERENCE_RULES
+        """
+        # Make sure the workspace exists
+        self.get_workspace(workspace_id)
+
+        # Build provenance via the evidence-class-specific factory so
+        # origin is recorded correctly. The store's validate_evidence
+        # runs during store.write and will reject if anything is wrong,
+        # but we do a quick pre-check here so we don't waste a factory
+        # call on an obviously-bad input.
+        from .environment_memory import EnvironmentStore as _ES
+        pre_ok, pre_code = _ES.validate_evidence(
+            evidence_class=evidence_class,
+            ownership=ownership,
+            observation_source=observation_source,
+            inference_rule=inference_rule,
+            asserted_by=asserted_by,
+        )
+        if not pre_ok:
+            return {"ok": False, "result_code": pre_code, "env_id": ""}
+
+        from .provenance_v1 import ProvenanceV1
+        if evidence_class == "user_asserted":
+            prov = ProvenanceV1.for_environment_user_asserted(
+                asserted_by=asserted_by or "",
+                step=step, session_id=session_id,
+            ).to_dict()
+        elif evidence_class == "observed":
+            prov = ProvenanceV1.for_environment_observed(
+                observation_source=observation_source or "",
+                step=step, session_id=session_id,
+            ).to_dict()
+        else:  # inferred
+            prov = ProvenanceV1.for_environment_inferred(
+                inference_rule=inference_rule or "",
+                step=step, session_id=session_id,
+            ).to_dict()
+
+        store = self._get_environment_store(workspace_id)
+        result = store.write(
+            target_runtime=target_runtime,
+            scope_tag=scope_tag,
+            key=key,
+            value=value,
+            evidence_class=evidence_class,
+            ownership=ownership,
+            provenance=prov,
+            observation_source=observation_source,
+            inference_rule=inference_rule,
+            asserted_by=asserted_by,
+            metadata=metadata,
+        )
+
+        # Only log the ledger event if the write succeeded
+        if result.get("ok") and result.get("env_id"):
+            try:
+                ledger = self._get_environment_event_ledger(workspace_id)
+                ledger.add_event(ledger.build_written_event(
+                    env_id=result["env_id"],
+                    evidence_class=evidence_class,
+                ))
+            except Exception as e:
+                self._log.debug(
+                    "environment event ledger write failed for env_id=%s: %s",
+                    result.get("env_id"), e,
+                )
+
+        return result
+
+    def consult_environment(
+        self,
+        workspace_id: str,
+        operation: str,
+        scope: str,
+        *,
+        relevance_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Consult environment memory for an operation at a scope (Block B §7.3).
+
+        Per D.3: this is RETURN-ONLY. This method does NOT modify state,
+        does NOT call any policy gate, does NOT inject into any prompt
+        context. The caller decides what to do with the returned facts.
+
+        CARRY-FORWARD CAUTION: the returned shape is
+        EnvironmentConsultResult (facts list of views) — NOT the
+        underlying EnvironmentEntry objects. Entry identity is
+        separate from consult result shape.
+
+        Returns serialized envelope:
+            {"ok": True,
+             "result_code": "consulted" | "no_relevant_facts",
+             "operation": str,
+             "scope": str,
+             "facts": [
+                 {"key": str, "value": Any, "evidence_class": str,
+                  "last_observed": int, "inferred": bool},
+                 ...
+             ]}
+        """
+        self.get_workspace(workspace_id)
+        store = self._get_environment_store(workspace_id)
+        result = store.consult(
+            operation=operation,
+            scope=scope,
+            relevance_fields=relevance_fields,
+        )
+
+        # Audit the consult in the ledger. Consult never modifies state,
+        # so this is purely for observability.
+        try:
+            ledger = self._get_environment_event_ledger(workspace_id)
+            ledger.add_event(ledger.build_consulted_event(
+                operation=operation, scope=scope,
+            ))
+        except Exception as e:
+            self._log.debug(
+                "environment consult ledger write failed: %s", e
+            )
+
+        return result.to_dict()
+
+    def probe_environment_on_fail(
+        self,
+        workspace_id: str,
+        target_runtime: str,
+        scope_tag: str,
+        key: str,
+        value: Any,
+        observation_source: str,
+        *,
+        ownership: str = "system",
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """System-initiated write triggered by an action failure (Block B §7.4).
+
+        ALWAYS writes with evidence_class="observed" and requires a
+        populated observation_source (AC-2.5). Cannot be used to smuggle
+        inferred content into observed provenance — evidence_class is
+        forced, not accepted from the caller.
+
+        Ownership defaults to "system" since the probe originates from
+        system-side recovery logic, not the agent.
+        """
+        # Direct call to write_environment forces observed — the caller
+        # cannot override the evidence class or bypass observation_source.
+        result = self.write_environment(
+            workspace_id=workspace_id,
+            target_runtime=target_runtime,
+            scope_tag=scope_tag,
+            key=key,
+            value=value,
+            evidence_class="observed",
+            ownership=ownership,
+            observation_source=observation_source,
+            step=step,
+            session_id=session_id,
+        )
+
+        # Re-log under the probed event kind (distinct from written) so
+        # audit tooling can tell probe-recovery writes apart from plain
+        # writes. The base written event was already logged inside
+        # write_environment; this is a second event recording the probe
+        # origin, not a duplicate state mutation.
+        if result.get("ok") and result.get("env_id"):
+            try:
+                ledger = self._get_environment_event_ledger(workspace_id)
+                ledger.add_event(ledger.build_probed_event(
+                    env_id=result["env_id"],
+                ))
+            except Exception as e:
+                self._log.debug(
+                    "environment probe ledger write failed for env_id=%s: %s",
+                    result.get("env_id"), e,
+                )
+
+        return result
+
+    # -----------------------------------------------------------------
+    # Block B — environment memory API
+    # (docs/BLOCK_B_DESIGN.md §7.2, §7.3, §7.4)
+    # -----------------------------------------------------------------
+    #
+    # Strict evidence-class discipline at write-time (R+5). Consult is
+    # RETURN-ONLY (D.3) — no wiring into action_policy, no runner hook,
+    # no prompt-context integration (R+4). Environment facts NEVER
+    # reach retrieval_assembler output. The caller (action-site code,
+    # policy gate, failure-recovery code) decides what to do with
+    # consult results.
+
+    def write_environment(
+        self,
+        workspace_id: str,
+        target_runtime: str,
+        scope_tag: str,
+        key: str,
+        value: Any,
+        evidence_class: str,
+        ownership: str,
+        observation_source: Optional[str] = None,
+        inference_rule: Optional[str] = None,
+        asserted_by: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Write an environment fact (Block B §7.2).
+
+        Validates evidence class first (R+5 gate) before building
+        provenance. Missing or invalid evidence class → rejected with
+        a specific result_code and no entry created.
+
+        Envelope:
+            {"ok": True, "result_code": "written", "env_id": str}
+            or on reject:
+            {"ok": False,
+             "result_code": "missing_evidence_class"
+                           | "missing_evidence_field"
+                           | "inferred_requires_rule"
+                           | "unknown_inference_rule",
+             "env_id": ""}
+        """
+        # Evidence-class validation FIRST. EnvironmentStore.validate_evidence
+        # is the single gate; rejecting here avoids constructing provenance
+        # for writes we'll refuse.
+        from .environment_memory import EnvironmentStore
+        ok, code = EnvironmentStore.validate_evidence(
+            evidence_class=evidence_class,
+            ownership=ownership,
+            observation_source=observation_source,
+            inference_rule=inference_rule,
+            asserted_by=asserted_by,
+        )
+        if not ok:
+            return {"ok": False, "result_code": code, "env_id": ""}
+
+        # Build provenance via the evidence-class-matched factory.
+        # Each factory populates exactly the field that corresponds to
+        # its class; no cross-class field pollution.
+        from .provenance_v1 import ProvenanceV1
+        if evidence_class == "user_asserted":
+            prov = ProvenanceV1.for_environment_user_asserted(
+                asserted_by=asserted_by,
+                step=step, session_id=session_id,
+            ).to_dict()
+        elif evidence_class == "observed":
+            prov = ProvenanceV1.for_environment_observed(
+                observation_source=observation_source,
+                step=step, session_id=session_id,
+            ).to_dict()
+        else:  # inferred — already validated that rule is in VALID_INFERENCE_RULES
+            prov = ProvenanceV1.for_environment_inferred(
+                inference_rule=inference_rule,
+                step=step, session_id=session_id,
+            ).to_dict()
+
+        # Make sure workspace exists, then delegate to store
+        self.get_workspace(workspace_id)
+        store = self._get_environment_store(workspace_id)
+        result = store.write(
+            target_runtime=target_runtime,
+            scope_tag=scope_tag,
+            key=key,
+            value=value,
+            evidence_class=evidence_class,
+            ownership=ownership,
+            provenance=prov,
+            observation_source=observation_source,
+            inference_rule=inference_rule,
+            asserted_by=asserted_by,
+            metadata=metadata,
+        )
+
+        # Record ledger event on success (audit only; store is source of truth)
+        if result.get("ok") and result.get("env_id"):
+            try:
+                ledger = self._get_environment_event_ledger(workspace_id)
+                ledger.add_event(ledger.build_written_event(
+                    env_id=result["env_id"],
+                    evidence_class=evidence_class,
+                ))
+            except Exception as e:
+                self._log.debug(
+                    "environment event ledger write failed "
+                    "for env_id=%s: %s",
+                    result.get("env_id"), e,
+                )
+        return result
+
+    def consult_environment(
+        self,
+        workspace_id: str,
+        operation: str,
+        scope: str,
+        *,
+        relevance_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Consult environment memory (Block B §7.3).
+
+        RETURN-ONLY per D.3. This method does NOT call any policy
+        gate, does NOT inject into prompt context, does NOT modify
+        state. Callers decide what to do with the facts.
+
+        Returns a serialized EnvironmentConsultResult:
+            {"ok": True,
+             "result_code": "consulted" | "no_relevant_facts",
+             "operation": str,
+             "scope": str,
+             "facts": [
+                 {"key": str, "value": Any, "evidence_class": str,
+                  "last_observed": int, "inferred": bool},
+                 ...
+             ]}
+
+        The `facts` list contains EnvironmentFactView dicts — a VIEW
+        over relevant entries, structurally distinct from the stored
+        EnvironmentEntry (no env_id, no workspace_id, no full
+        provenance dict). Carry-forward caution: entry identity is
+        separate from consult result shape.
+        """
+        self.get_workspace(workspace_id)
+        store = self._get_environment_store(workspace_id)
+        result = store.consult(
+            operation=operation,
+            scope=scope,
+            relevance_fields=relevance_fields,
+        )
+
+        # Log the consult for audit (no state change)
+        try:
+            ledger = self._get_environment_event_ledger(workspace_id)
+            ledger.add_event(ledger.build_consulted_event(
+                operation=operation,
+                scope=scope,
+            ))
+        except Exception as e:
+            self._log.debug(
+                "environment consult ledger write failed: %s", e,
+            )
+        return result.to_dict()
+
+    def probe_environment_on_fail(
+        self,
+        workspace_id: str,
+        target_runtime: str,
+        scope_tag: str,
+        key: str,
+        value: Any,
+        observation_source: str,
+        *,
+        ownership: str = "system",
+        metadata: Optional[Dict[str, Any]] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """System-initiated probe write after an action failure
+        (Block B §7.4).
+
+        ALWAYS writes with evidence_class="observed" — never accepts
+        "inferred" from this path (AC-2.5). The observation_source
+        is REQUIRED and names the probe that produced the observation.
+        This wrapper cannot be used to smuggle inferred content into
+        observed provenance.
+
+        Per D.3, this method is callable but not wired: no automatic
+        trigger from action_policy or the runner in v0.1. External
+        code (tests, HTTP endpoints, later runtime-doctrine
+        increments) invokes it explicitly.
+        """
+        if not observation_source:
+            return {
+                "ok": False,
+                "result_code": "missing_evidence_field",
+                "env_id": "",
+            }
+        # Delegate to write_environment with forced evidence_class.
+        # The write path records a "written" ledger event; the probe-
+        # specific "probed" event kind exists for callers that want to
+        # log separately, not for this wrapper's default path.
+        return self.write_environment(
+            workspace_id=workspace_id,
+            target_runtime=target_runtime,
+            scope_tag=scope_tag,
+            key=key,
+            value=value,
+            evidence_class="observed",
+            ownership=ownership,
+            observation_source=observation_source,
+            metadata=metadata,
+            step=step,
+            session_id=session_id,
+        )
+
 
     def decide_bridge(self, workspace_id: str, from_domain: str, from_motif: str, to_domain: str, to_motif: str, decision: str) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)
