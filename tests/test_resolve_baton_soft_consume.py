@@ -274,8 +274,12 @@ class TestBatonLedgerPresence(unittest.TestCase):
             from torment_service import baton_ledger as bl
         except ImportError:
             self.fail("torment_service.baton_ledger module must exist per §6.4")
-        self.assertTrue(hasattr(bl, "BatonLedger"))
-        self.assertTrue(hasattr(bl, "BatonEvent"))
+        else:
+            # `bl` is only bound when the import above succeeded. Using
+            # try/except/else makes that explicit so the static analyzer
+            # sees the ref point is reachable only on the success path.
+            self.assertTrue(hasattr(bl, "BatonLedger"))
+            self.assertTrue(hasattr(bl, "BatonEvent"))
 
     def test_resolve_appends_ledger_event(self) -> None:
         """After resolve_baton, the agent's ledger must contain a
