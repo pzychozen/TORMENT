@@ -3572,7 +3572,18 @@ class TormentFabric:
         # filter is defensive — but the explicit exclusion is
         # architectural signal against future drift where a new code path
         # might accidentally surface them here.
-        _NON_DEFAULT_CLASSES = frozenset({"baton", "reference", "environment"})
+        #
+        # Block C extension (2026-04-21): "closure" joins the exclusion
+        # set. Closure objects live in ClosureStore (torment_service/
+        # closure_memory.py) and do not enter memory_graph either — the
+        # filter is again defensive and signals that default retrieval
+        # lanes must not surface closure synthesis objects. This is a
+        # HARD FILTER (exclusion set), not a de-weighting, not a profile
+        # tweak. Per BLOCK_C_DESIGN.md §10 the query SIGNATURE is
+        # unchanged — only this internal frozenset is extended.
+        _NON_DEFAULT_CLASSES = frozenset({
+            "baton", "reference", "environment", "closure",
+        })
         all_hits = [h for h in all_hits
                     if h.get("memory_class") not in _NON_DEFAULT_CLASSES]
         rescored = []
@@ -4887,6 +4898,590 @@ class TormentFabric:
             session_id=session_id,
         )
 
+
+    # ==================================================================
+    # Block C — Closure lifecycle (docs/BLOCK_C_DESIGN.md §6)
+    # ==================================================================
+    #
+    # Four public methods + two administrative reads + two private
+    # helpers for the per-workspace ClosureStore and ClosureLedger.
+    #
+    # STRUCTURAL SEPARATION from writeback (§7 + handoff note 4):
+    #   - These methods NEVER call self.ingest or fabric.ingest.
+    #   - They NEVER use ProvenanceV1.for_cognition_writeback.
+    #   - They NEVER write to the archivist log or reuse any writeback
+    #     audit path.
+    #   - Closure storage uses ClosureStore (closures.jsonl) +
+    #     ClosureLedger (closure_events.jsonl); both live under
+    #     <ws>/closure_memory/ with no overlap on any other store's files.
+    #   - Closure commit/revision use WRITE_CLOSURE_COMMIT; ratification
+    #     uses WRITE_DIRECT_INGEST (lifecycle event only, not content).
+    #
+    # LIFECYCLE DERIVATION is literal event-kind lookup — no fuzzy
+    # inference, no heuristic state reconstruction. See
+    # closure_ledger.get_latest_event_kind (§12 handoff note 9).
+
+    def _get_closure_store(self, workspace_id: str):
+        """Lazily create the per-workspace ClosureStore."""
+        if not hasattr(self, "closure_stores"):
+            self.closure_stores = {}
+        if workspace_id not in self.closure_stores:
+            from .closure_memory import ClosureStore
+            self.closure_stores[workspace_id] = ClosureStore(
+                data_dir=self.data_dir,
+                workspace_id=workspace_id,
+            )
+        return self.closure_stores[workspace_id]
+
+    def _get_closure_ledger(self, workspace_id: str):
+        """Build a per-workspace ClosureLedger.
+
+        Not cached — the ledger reads the JSONL on every call, so a new
+        instance carries no state (matching BatonLedger / ReferenceLoadLedger
+        patterns where each call gets a fresh reader).
+        """
+        from .closure_ledger import ClosureLedger
+        return ClosureLedger(
+            data_dir=self.data_dir,
+            workspace_id=workspace_id,
+        )
+
+    # ---- Required-field validation helper ----
+
+    @staticmethod
+    def _closure_missing_required(
+        arc_name: str,
+        arc_kind: str,
+        scope: Any,
+        what_it_was: str,
+        what_worked: str,
+        what_surprised: str,
+        what_to_carry_forward: str,
+        deferred_or_open_items: Any,
+    ) -> Optional[str]:
+        """Return the first missing required field name, or None if all
+        present. Matches the validation list in §6.1:
+
+            - arc_name / arc_kind / what_it_was / what_worked /
+              what_surprised / what_to_carry_forward — non-empty strings
+            - scope — non-empty list
+            - deferred_or_open_items — must be a list (empty OK; None
+              or absent rejected per R+10)
+        """
+        # String fields
+        for field_name, value in (
+            ("arc_name", arc_name),
+            ("arc_kind", arc_kind),
+            ("what_it_was", what_it_was),
+            ("what_worked", what_worked),
+            ("what_surprised", what_surprised),
+            ("what_to_carry_forward", what_to_carry_forward),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                return field_name
+        # Scope: must be non-empty list of ints
+        if not isinstance(scope, list) or len(scope) == 0:
+            return "scope"
+        # deferred_or_open_items: REQUIRED (R+10) — empty list OK,
+        # None / missing rejected. Check list-ness explicitly.
+        if not isinstance(deferred_or_open_items, list):
+            return "deferred_or_open_items"
+        return None
+
+    # ---- 6.1 — propose_closure ----
+
+    def propose_closure(
+        self,
+        workspace_id: str,
+        arc_name: str,
+        arc_kind: str,
+        scope: List[int],
+        what_it_was: str,
+        what_worked: str,
+        what_surprised: str,
+        what_to_carry_forward: str,
+        deferred_or_open_items: List[str],
+        metadata: Optional[Dict[str, Any]] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a closure proposal (§6.1).
+
+        Validates the §5.2 required fields. Writes a ClosureEntry at
+        version 1. Appends a "proposed" event to the ledger. No
+        ratification, no commit — those are explicit follow-on calls
+        (R+7: no automatic enactment).
+        """
+        missing = self._closure_missing_required(
+            arc_name, arc_kind, scope,
+            what_it_was, what_worked, what_surprised, what_to_carry_forward,
+            deferred_or_open_items,
+        )
+        if missing is not None:
+            # Distinct code for absent-None deferred vs. other missing
+            # fields per AC-1 test contract (both acceptable).
+            code = (
+                "missing_deferred_or_open_items"
+                if missing == "deferred_or_open_items"
+                   and deferred_or_open_items is None
+                else "missing_required_field"
+            )
+            return {
+                "ok": False,
+                "result_code": code,
+                "missing_field": missing,
+                "closure_id": "",
+                "version_id": "",
+            }
+
+        store = self._get_closure_store(workspace_id)
+        ledger = self._get_closure_ledger(workspace_id)
+
+        # Build the entry. Authorship provenance for the initial
+        # proposal uses for_closure_commit as the authorship record on
+        # the entry — the entry carries its commit-style authorship
+        # provenance from day one (ratifier is filled in at ratify/
+        # commit time; this field records "who drafted this version").
+        #
+        # Note: a proposal is NOT yet committed; we still use
+        # for_closure_commit for authorship record because ClosureEntry
+        # is the SAME class across the lifecycle (one-class watch-item).
+        # The lifecycle-STATE distinction is carried by the ledger.
+        from .provenance_v1 import ProvenanceV1
+        closure_id = store.new_closure_id()
+        version_id = store.new_version_id()
+
+        authorship_provenance = ProvenanceV1.for_closure_commit(
+            arc_name=arc_name,
+            ratifier="(proposer-draft)",   # filled only once ratified/committed
+            step=step,
+            session_id=session_id,
+            notes="initial proposal draft",
+        ).to_dict()
+
+        from .closure_memory import ClosureEntry
+        entry = ClosureEntry(
+            closure_id=closure_id,
+            version_id=version_id,
+            workspace_id=workspace_id,
+            arc_name=arc_name,
+            arc_kind=arc_kind,
+            scope=list(int(e) for e in scope),
+            what_it_was=what_it_was,
+            what_worked=what_worked,
+            what_surprised=what_surprised,
+            what_to_carry_forward=what_to_carry_forward,
+            deferred_or_open_items=list(deferred_or_open_items),
+            authorship_provenance=authorship_provenance,
+            version_history=[],
+            created_ts=int(time.time()),
+            parent_version_id=None,
+            metadata=dict(metadata or {}),
+        )
+        store.add_version(entry)
+
+        # Ledger event — the proposed event's provenance is an
+        # authorship record too, not a lifecycle flag. Lifecycle
+        # stage is derived from the kind field, not this provenance.
+        proposed_prov = ProvenanceV1.for_closure_commit(
+            arc_name=arc_name,
+            ratifier="(proposer-draft)",
+            step=step,
+            session_id=session_id,
+        ).to_dict()
+        ledger.add_event(ledger.build_proposed_event(
+            closure_id=closure_id,
+            version_id=version_id,
+            provenance=proposed_prov,
+        ))
+
+        return {
+            "ok": True,
+            "result_code": "proposed",
+            "closure_id": closure_id,
+            "version_id": version_id,
+        }
+
+    # ---- 6.2 — ratify_closure ----
+
+    def ratify_closure(
+        self,
+        workspace_id: str,
+        closure_id: str,
+        ratifier: str,
+        notes: Optional[str] = None,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Record ratification of a closure proposal (§6.2).
+
+        Appends a "ratified" event to the ledger. Does NOT commit —
+        commit_closure is the separate explicit step (R+7 / AC-2).
+
+        R+9: empty ratifier is rejected. Model assistance in drafting
+        is legitimate; model-authored ratifications (ratifier = "" or
+        unset) are not.
+        """
+        if not isinstance(ratifier, str) or not ratifier.strip():
+            return {
+                "ok": False,
+                "result_code": "empty_ratifier",
+                "closure_id": closure_id or "",
+            }
+
+        store = self._get_closure_store(workspace_id)
+        ledger = self._get_closure_ledger(workspace_id)
+
+        entry = store.get_latest_version(closure_id)
+        if entry is None:
+            return {
+                "ok": False,
+                "result_code": "not_found",
+                "closure_id": closure_id,
+            }
+
+        # If already committed, ratifying again is a no-op error — the
+        # lifecycle state "committed" is terminal for the ratification
+        # gate. Revisions flow through revise_closure instead.
+        latest_kind = ledger.get_latest_event_kind(closure_id)
+        if latest_kind == "committed":
+            return {
+                "ok": False,
+                "result_code": "already_committed",
+                "closure_id": closure_id,
+            }
+
+        from .provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_closure_ratification(
+            arc_name=entry.arc_name,
+            ratifier=ratifier,
+            step=step,
+            session_id=session_id,
+            notes=notes,
+        ).to_dict()
+        ledger.add_event(ledger.build_ratified_event(
+            closure_id=closure_id,
+            ratifier=ratifier,
+            provenance=prov,
+            notes=notes,
+        ))
+
+        return {
+            "ok": True,
+            "result_code": "ratified",
+            "closure_id": closure_id,
+        }
+
+    # ---- 6.3 — commit_closure ----
+    #
+    # Phase 3: ratification-gate + already-committed guard. The
+    # open-items honesty check lands in Phase 4 per BLOCK_C_DESIGN §8
+    # (detect_open_items_mismatch + commit-time integration).
+
+    def commit_closure(
+        self,
+        workspace_id: str,
+        closure_id: str,
+        ratifier: str,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Commit a ratified closure — the transition to durable (§6.3).
+
+        Requires a prior "ratified" event per AC-2 (ratification is
+        structural). R+9: empty ratifier rejected.
+
+        Phase 3 wires the ratification-gate. The open-items honesty
+        check (AC-4) lands in Phase 4 with the
+        `detect_open_items_mismatch` helper — until then,
+        `open_items_mismatch` is a documented result code but is not
+        emitted by this method.
+        """
+        if not isinstance(ratifier, str) or not ratifier.strip():
+            return {
+                "ok": False,
+                "result_code": "empty_ratifier",
+                "closure_id": closure_id or "",
+            }
+
+        store = self._get_closure_store(workspace_id)
+        ledger = self._get_closure_ledger(workspace_id)
+
+        entry = store.get_latest_version(closure_id)
+        if entry is None:
+            return {
+                "ok": False,
+                "result_code": "not_found",
+                "closure_id": closure_id,
+            }
+
+        latest_kind = ledger.get_latest_event_kind(closure_id)
+        if latest_kind == "committed":
+            return {
+                "ok": False,
+                "result_code": "already_committed",
+                "closure_id": closure_id,
+            }
+
+        # AC-2: must have a ratified event. Literal event-kind lookup,
+        # not inference. Any state that isn't literally "ratified" in
+        # the last event is rejected — including "proposed" (never
+        # ratified) and anything unexpected.
+        if not ledger.has_ratification(closure_id):
+            return {
+                "ok": False,
+                "result_code": "not_ratified",
+                "closure_id": closure_id,
+            }
+
+        # AC-4: open-items honesty mismatch detection (Phase 4, §8.1-§8.2).
+        # Pure helper over the current entry's scope + deferred_or_open_items
+        # against v0.1 signals (open conflicts + active batons filtered to
+        # scope). Fires only when known-unresolved is non-empty AND
+        # declared_open_items is empty — anti-false-finality, not
+        # full-truth-check (§8.4).
+        from .closure_memory import detect_open_items_mismatch
+        check = detect_open_items_mismatch(
+            fabric=self,
+            workspace_id=workspace_id,
+            scope=entry.scope,
+            declared_open_items=entry.deferred_or_open_items,
+        )
+        if check.get("mismatch"):
+            return {
+                "ok": False,
+                "result_code": "open_items_mismatch",
+                "closure_id": closure_id,
+                "unresolved": {
+                    "unresolved_conflicts": check["unresolved_conflicts"],
+                    "unresolved_batons": check["unresolved_batons"],
+                    "reason": check["reason"],
+                },
+            }
+
+        from .provenance_v1 import ProvenanceV1
+        prov = ProvenanceV1.for_closure_commit(
+            arc_name=entry.arc_name,
+            ratifier=ratifier,
+            step=step,
+            session_id=session_id,
+        ).to_dict()
+        ledger.add_event(ledger.build_committed_event(
+            closure_id=closure_id,
+            version_id=entry.version_id,
+            ratifier=ratifier,
+            provenance=prov,
+        ))
+
+        return {
+            "ok": True,
+            "result_code": "committed",
+            "closure_id": closure_id,
+            "version_id": entry.version_id,
+        }
+
+    # ---- 6.4 — revise_closure ----
+
+    def revise_closure(
+        self,
+        workspace_id: str,
+        closure_id: str,
+        revised_fields: Dict[str, Any],
+        ratifier: str,
+        step: int = 0,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Produce a new version of a committed closure (§6.4).
+
+        R+8: creates a new version_id alongside the prior. The original
+        stays readable. version_history grows — never replaced.
+
+        Only committed closures can be revised (you revise an
+        unratified proposal by creating a new proposal, not by
+        revising).
+
+        Phase 3 wires the machinery. The open-items honesty check on
+        revisions that would reset `deferred_or_open_items` to []
+        lands in Phase 4.
+        """
+        if not isinstance(ratifier, str) or not ratifier.strip():
+            return {
+                "ok": False,
+                "result_code": "missing_ratifier",
+                "closure_id": closure_id or "",
+            }
+        if not isinstance(revised_fields, dict):
+            return {
+                "ok": False,
+                "result_code": "invalid_revised_fields",
+                "closure_id": closure_id or "",
+            }
+
+        store = self._get_closure_store(workspace_id)
+        ledger = self._get_closure_ledger(workspace_id)
+
+        latest = store.get_latest_version(closure_id)
+        if latest is None:
+            return {
+                "ok": False,
+                "result_code": "not_found",
+                "closure_id": closure_id,
+            }
+
+        # Must be committed to be revisable — literal event-kind
+        # lookup: has_ratification + a committed event ever recorded.
+        # We check "was ever committed" rather than "is currently
+        # committed" because a revision also creates a "revised"
+        # event; the lifecycle after commit goes committed → revised
+        # → revised → ... and all of those post-commit states are
+        # revisable.
+        events = ledger.list_events(closure_id=closure_id)
+        ever_committed = any(e.kind == "committed" for e in events)
+        if not ever_committed:
+            return {
+                "ok": False,
+                "result_code": "not_committed",
+                "closure_id": closure_id,
+            }
+
+        # Build the new version. Start from the latest entry, apply
+        # revised_fields to a mutable copy, assign new version_id,
+        # record parent_version_id linking to the prior version's id,
+        # and append a version_history entry.
+        from .provenance_v1 import ProvenanceV1
+        from .closure_memory import ClosureEntry
+
+        new_version_id = store.new_version_id()
+        parent_version_id = latest.version_id
+
+        # Fields that ARE revisable. Structural fields (closure_id,
+        # workspace_id, version_id, created_ts, parent_version_id,
+        # authorship_provenance, version_history) are NOT revisable
+        # via this path — they are either immutable or computed here.
+        REVISABLE_FIELDS = {
+            "arc_name", "arc_kind", "scope",
+            "what_it_was", "what_worked", "what_surprised",
+            "what_to_carry_forward", "deferred_or_open_items",
+            "metadata",
+        }
+
+        def _field(name: str) -> Any:
+            return (
+                revised_fields[name]
+                if name in revised_fields and name in REVISABLE_FIELDS
+                else getattr(latest, name)
+            )
+
+        # Emit a fresh authorship_provenance for this revision.
+        revision_authorship = ProvenanceV1.for_closure_revision(
+            arc_name=_field("arc_name"),
+            ratifier=ratifier,
+            parent_closure_id=closure_id,
+            step=step,
+            session_id=session_id,
+        ).to_dict()
+
+        # Preserve prior version_history and append this revision's
+        # linkage record. R+8: history grows, never replaces.
+        new_history = list(latest.version_history)
+        new_history.append({
+            "version_id": new_version_id,
+            "parent_version_id": parent_version_id,
+            "ratifier": ratifier,
+            "ts": int(time.time()),
+        })
+
+        # AC-4 (revision edition, per §8.2): run the open-items honesty
+        # mismatch check against the REVISED scope + deferred. A revision
+        # that would reset deferred_or_open_items to [] while the scope
+        # still has open conflicts / active batons is rejected with the
+        # same code commit_closure uses.
+        from .closure_memory import detect_open_items_mismatch
+        prospective_scope = list(int(e) for e in _field("scope"))
+        prospective_deferred = list(_field("deferred_or_open_items"))
+        check = detect_open_items_mismatch(
+            fabric=self,
+            workspace_id=workspace_id,
+            scope=prospective_scope,
+            declared_open_items=prospective_deferred,
+        )
+        if check.get("mismatch"):
+            return {
+                "ok": False,
+                "result_code": "open_items_mismatch",
+                "closure_id": closure_id,
+                "unresolved": {
+                    "unresolved_conflicts": check["unresolved_conflicts"],
+                    "unresolved_batons": check["unresolved_batons"],
+                    "reason": check["reason"],
+                },
+            }
+
+        new_entry = ClosureEntry(
+            closure_id=closure_id,
+            version_id=new_version_id,
+            workspace_id=workspace_id,
+            arc_name=_field("arc_name"),
+            arc_kind=_field("arc_kind"),
+            scope=prospective_scope,
+            what_it_was=_field("what_it_was"),
+            what_worked=_field("what_worked"),
+            what_surprised=_field("what_surprised"),
+            what_to_carry_forward=_field("what_to_carry_forward"),
+            deferred_or_open_items=prospective_deferred,
+            authorship_provenance=revision_authorship,
+            version_history=new_history,
+            created_ts=int(time.time()),
+            parent_version_id=parent_version_id,
+            metadata=dict(_field("metadata")),
+        )
+        store.add_version(new_entry)
+
+        # Append revised event to the ledger. Its provenance is the
+        # same revision authorship dict — origin/authorship, not
+        # lifecycle state.
+        ledger.add_event(ledger.build_revised_event(
+            closure_id=closure_id,
+            version_id=new_version_id,
+            ratifier=ratifier,
+            provenance=revision_authorship,
+        ))
+
+        return {
+            "ok": True,
+            "result_code": "revised",
+            "closure_id": closure_id,
+            "version_id": new_version_id,
+            "parent_version_id": parent_version_id,
+        }
+
+    # ---- Administrative reads (§6.5 tail) ----
+
+    def get_closure(
+        self,
+        workspace_id: str,
+        closure_id: str,
+        version_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return one closure version as a dict (or None if missing).
+
+        If `version_id` is None, returns the latest version. Admin/test
+        surface only; not wired into retrieval."""
+        store = self._get_closure_store(workspace_id)
+        from dataclasses import asdict
+        if version_id is None:
+            entry = store.get_latest_version(closure_id)
+        else:
+            entry = store.get_version(closure_id, version_id)
+        if entry is None:
+            return None
+        return asdict(entry)
+
+    def list_closures(self, workspace_id: str) -> List[str]:
+        """Return the list of closure_ids in the workspace's store."""
+        return list(self._get_closure_store(workspace_id).list_closures())
+
+    # ==================================================================
 
     def decide_bridge(self, workspace_id: str, from_domain: str, from_motif: str, to_domain: str, to_motif: str, decision: str) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)

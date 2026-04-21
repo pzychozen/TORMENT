@@ -54,6 +54,16 @@ SOURCE_ENVIRONMENT_USER_ASSERTED = "environment_user_asserted"
 SOURCE_ENVIRONMENT_OBSERVED      = "environment_observed"
 SOURCE_ENVIRONMENT_INFERRED      = "environment_inferred"
 
+# Block C — closure synthesis origin classes. Each names an EVENT origin,
+# not a lifecycle state. Lifecycle state is derived by literal event-kind
+# lookup in ClosureLedger — provenance does NOT carry lifecycle state.
+# See docs/BLOCK_C_DESIGN.md §5.1 + §7 (writeback-vs-closure structural
+# separation — these source_types are distinct from the archivist/writeback
+# origin classes; they never substitute SOURCE_ROLE_OUTPUT).
+SOURCE_CLOSURE_COMMIT       = "closure_commit"
+SOURCE_CLOSURE_RATIFICATION = "closure_ratification"
+SOURCE_CLOSURE_REVISION     = "closure_revision"
+
 # Storage sentinel for rows that fail the WRITE_MIGRATION gate-1 recovery
 # predicate. NOT an admissible origin class — see
 # ``torment_service/migration/constants.py::SOURCE_GATE1_UNRECOVERABLE``
@@ -78,6 +88,9 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_ENVIRONMENT_USER_ASSERTED,   # Block B — environment (user-asserted)
     SOURCE_ENVIRONMENT_OBSERVED,        # Block B — environment (observed)
     SOURCE_ENVIRONMENT_INFERRED,        # Block B — environment (inferred)
+    SOURCE_CLOSURE_COMMIT,              # Block C — closure commit event
+    SOURCE_CLOSURE_RATIFICATION,        # Block C — closure ratification event
+    SOURCE_CLOSURE_REVISION,            # Block C — closure revision event
 })
 
 WRITE_DIRECT_INGEST       = "direct_ingest"
@@ -90,6 +103,13 @@ WRITE_MIGRATION           = "migration"
 WRITE_SYSTEM_IMPORT       = "system_import"
 WRITE_COLLECTIVE_REINGEST = "collective_reingest"
 
+# Block C — closure commit/revision write path. STRUCTURALLY DISTINCT from
+# WRITE_COGNITION_WRITEBACK and WRITE_REFLECTION_WRITEBACK per the
+# writeback-vs-closure guardrail (docs/BLOCK_C_DESIGN.md §7.1). Closure
+# commits are author-ratified arc syntheses, NOT archivist writeback
+# products. The two must never share a write_path value.
+WRITE_CLOSURE_COMMIT      = "closure_commit"
+
 VALID_WRITE_PATHS = frozenset({
     WRITE_DIRECT_INGEST,
     WRITE_COGNITION_WRITEBACK,
@@ -98,6 +118,7 @@ VALID_WRITE_PATHS = frozenset({
     WRITE_MIGRATION,
     WRITE_SYSTEM_IMPORT,
     WRITE_COLLECTIVE_REINGEST,
+    WRITE_CLOSURE_COMMIT,               # Block C — closure commit / revision
 })
 
 SCHEMA_VERSION = "1.0"
@@ -482,6 +503,125 @@ class ProvenanceV1:
             created_at_step=step,
             session_id=session_id,
             notes=notes,
+        )
+
+    # ── Block C factories ──────────────────────────────────────────
+    #
+    # Three factories, one per closure lifecycle event kind (commit /
+    # ratification / revision). Each records event ORIGIN ONLY — never
+    # lifecycle state. Lifecycle state lives in ClosureLedger events and
+    # is derived by literal event-kind lookup (no inference layer).
+    #
+    # STRUCTURAL SEPARATION from writeback (docs/BLOCK_C_DESIGN.md §7 +
+    # handoff note 4):
+    #   - None of these factories calls or reuses for_cognition_writeback.
+    #   - They do NOT set write_path=WRITE_COGNITION_WRITEBACK.
+    #   - Their source_type values (SOURCE_CLOSURE_*) do NOT substitute
+    #     for SOURCE_ROLE_OUTPUT. Archivist authorship and closure
+    #     authorship are different authorship classes.
+    #   - commit / revision use the dedicated WRITE_CLOSURE_COMMIT path.
+    #   - ratification uses WRITE_DIRECT_INGEST because a ratification
+    #     event is just a lifecycle event (not a content commit).
+    #
+    # The `arc_name` + `ratifier` arguments are ORIGIN LINEAGE DATA
+    # stored in `notes` — the factory does not introduce new provenance
+    # fields for them (keeping ProvenanceV1 narrow; closure-specific
+    # fields live on ClosureEntry / ClosureEvent, not here).
+
+    @classmethod
+    def for_closure_commit(
+        cls,
+        arc_name: str,
+        ratifier: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a closure commit event.
+
+        `arc_name` names the arc being closed (free-form per D.4).
+        `ratifier` records who ratified the commit (agent_id, "user",
+        or a dual identifier). Distinct from archivist authorship —
+        a closure commit is NOT a cognition writeback (R+9).
+
+        Uses WRITE_CLOSURE_COMMIT write_path per §7.1 (structurally
+        distinct from WRITE_COGNITION_WRITEBACK).
+        """
+        origin = f"closure_commit(arc={arc_name!r}, ratifier={ratifier!r})"
+        return cls(
+            source_type=SOURCE_CLOSURE_COMMIT,
+            source_role=None,
+            write_path=WRITE_CLOSURE_COMMIT,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=f"{origin}" if notes is None else f"{origin}; {notes}",
+        )
+
+    @classmethod
+    def for_closure_ratification(
+        cls,
+        arc_name: str,
+        ratifier: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a closure ratification event.
+
+        A proposal can be ratified without being committed yet, so
+        ratification is a distinct event class from commit. `ratifier`
+        records who approved the proposal.
+
+        Uses WRITE_DIRECT_INGEST because the ratification record is a
+        lifecycle event, not a content commit — only commits and
+        revisions carry WRITE_CLOSURE_COMMIT.
+        """
+        origin = f"closure_ratification(arc={arc_name!r}, ratifier={ratifier!r})"
+        return cls(
+            source_type=SOURCE_CLOSURE_RATIFICATION,
+            source_role=None,
+            write_path=WRITE_DIRECT_INGEST,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=f"{origin}" if notes is None else f"{origin}; {notes}",
+        )
+
+    @classmethod
+    def for_closure_revision(
+        cls,
+        arc_name: str,
+        ratifier: str,
+        parent_closure_id: str,
+        step: Optional[int] = None,
+        session_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> "ProvenanceV1":
+        """Provenance for a closure revision event.
+
+        `parent_closure_id` records the closure being revised. The
+        prior version remains readable (R+8: no silent overwrite) —
+        revision produces a new `version_id` entry alongside the
+        original. Provenance does NOT carry lifecycle state; it only
+        records that this revision event was authored by `ratifier`
+        on top of `parent_closure_id`.
+
+        Uses WRITE_CLOSURE_COMMIT write_path like commit — both are
+        content-emitting closure events and share the dedicated path.
+        """
+        origin = (
+            f"closure_revision(arc={arc_name!r}, ratifier={ratifier!r}, "
+            f"parent_closure_id={parent_closure_id!r})"
+        )
+        return cls(
+            source_type=SOURCE_CLOSURE_REVISION,
+            source_role=None,
+            write_path=WRITE_CLOSURE_COMMIT,
+            parent_eids=[],
+            created_at_step=step,
+            session_id=session_id,
+            notes=f"{origin}" if notes is None else f"{origin}; {notes}",
         )
 
     # ── Normalization ───────────────────────────────────────────────
