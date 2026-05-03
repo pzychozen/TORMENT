@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import os, time, json, re, threading, uuid, logging, math
+import os, time, json, re, tempfile, threading, uuid, logging, math
 import numpy as np
 
 from fastapi import HTTPException
@@ -580,8 +580,17 @@ class TormentFabric:
         return f"{workspace_id}/{agent_id}"
 
     def __init__(self, data_dir: str) -> None:
+        # Block C1 (Windows): map data_dir=":memory:" to a real
+        # TemporaryDirectory so every sub-store's os.makedirs call
+        # works cross-platform. ':' is an illegal filename character
+        # on Windows. The TemporaryDirectory is held on self for this
+        # fabric's lifetime and released by close() / __exit__() / GC.
+        self._memory_tmpdir = None
         if data_dir == ":memory:":
-            self.data_dir = data_dir
+            self._memory_tmpdir = tempfile.TemporaryDirectory(
+                prefix="torment_memory_"
+            )
+            self.data_dir = self._memory_tmpdir.name
         else:
             _safe = _canonical_data_root(data_dir)
             # Sink-local guard for CodeQL at makedirs site.
@@ -6480,3 +6489,33 @@ class TormentFabric:
         manifest['manifest_path'] = mpath
         return manifest
             
+
+    # ------------------------------------------------------------------
+    # Lifecycle (Block C1 -- :memory: handling)
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release fabric-owned transient resources.
+
+        Currently: if this fabric was constructed with
+        data_dir=":memory:", the backing TemporaryDirectory is
+        cleaned up. Idempotent -- safe to call multiple times.
+        After close(), persistent state held only in the temp
+        directory is gone.
+        """
+        tmpdir = getattr(self, "_memory_tmpdir", None)
+        if tmpdir is not None:
+            try:
+                tmpdir.cleanup()
+            except Exception:
+                # Windows may hold open handles (numpy memmap, sqlite);
+                # cleanup is best-effort here. tempfile's own finalizer
+                # will retry at garbage collection.
+                pass
+            self._memory_tmpdir = None
+
+    def __enter__(self) -> "TormentFabric":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
