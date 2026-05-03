@@ -20,6 +20,7 @@ from torment_service.retrieval_assembler import (
     PROFILES,
     FILL_ORDER,
     BLOCK_IDENTITY,
+    BLOCK_REFERENCE,
     BLOCK_RELATIONAL,
     BLOCK_SITUATIONAL,
     BLOCK_ARCHIVE,
@@ -459,9 +460,16 @@ class TestEdgeCases:
         assert isinstance(result, AssembledContext)
 
     def test_fill_order_is_correct(self):
-        """Fill order must be identity → relational → situational → archive."""
+        """Fill order must be identity → reference → relational → situational → archive.
+
+        Reference (BLOCK_REFERENCE = "reference_context") slots between identity
+        and relational per the ratified BLOCK_B_DESIGN §8.1: loaded references
+        are intentional reasoning material — more important than archive chunks,
+        less identity-defining than core canon.
+        """
         assert FILL_ORDER == [
             BLOCK_IDENTITY,
+            BLOCK_REFERENCE,
             BLOCK_RELATIONAL,
             BLOCK_SITUATIONAL,
             BLOCK_ARCHIVE,

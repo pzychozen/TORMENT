@@ -411,6 +411,7 @@ def assemble_context(
     # Initialize block buckets
     block_candidates: Dict[str, List[ContextBlock]] = {
         BLOCK_IDENTITY: [],
+        BLOCK_REFERENCE: [],
         BLOCK_RELATIONAL: [],
         BLOCK_SITUATIONAL: [],
         BLOCK_ARCHIVE: [],
