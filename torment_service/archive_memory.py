@@ -530,3 +530,21 @@ class ArchiveStore:
     @property
     def chunk_count(self) -> int:
         return len(self._chunks)
+
+    def close(self) -> None:
+        """Release shard memmaps held by this archive. Idempotent.
+
+        Required on Windows before the data directory can be removed:
+        numpy memmap objects in the embedding shard writer/reader hold
+        OS file handles open until explicitly released.
+        """
+        if self._shard_writer is not None:
+            self._shard_writer.close()
+        if self._shard_reader is not None:
+            self._shard_reader.close()
+
+    def __enter__(self) -> "ArchiveStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()

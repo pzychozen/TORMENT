@@ -301,6 +301,7 @@ class TestGracefulDegradation:
             ent = g.entities[eid]
             assert ent.payload["summary"] == "test no sqlite"
         finally:
+            g.close()
             shutil.rmtree(tmp)
 
     def test_archive_works_without_sqlite(self):
@@ -314,6 +315,7 @@ class TestGracefulDegradation:
             result = store.ingest_document("Test content " * 20, title="Test")
             assert result["chunk_count"] > 0
         finally:
+            store.close()
             shutil.rmtree(tmp)
 
 
@@ -348,6 +350,7 @@ class TestIntegration:
 
             idx.close()
         finally:
+            g.close()
             shutil.rmtree(tmp)
 
     def test_archive_mirrors_to_sqlite(self):
@@ -388,6 +391,7 @@ class TestIntegration:
 
             idx.close()
         finally:
+            store.close()
             shutil.rmtree(tmp)
 
     def test_index_stats(self):

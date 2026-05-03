@@ -24,13 +24,20 @@ class TestDeepMemoryRootCanonicalization(unittest.TestCase):
     def test_root_is_absolute(self):
         with tempfile.TemporaryDirectory() as td:
             store = DeepMemoryStore(Path(td), dim=8)
-            self.assertTrue(os.path.isabs(str(store.base_dir)))
+            try:
+                self.assertTrue(os.path.isabs(str(store.base_dir)))
+            finally:
+                store.close()
 
     def test_root_is_stable(self):
         with tempfile.TemporaryDirectory() as td:
             s1 = DeepMemoryStore(Path(td), dim=8)
             s2 = DeepMemoryStore(Path(td), dim=8)
-            self.assertEqual(str(s1.base_dir), str(s2.base_dir))
+            try:
+                self.assertEqual(str(s1.base_dir), str(s2.base_dir))
+            finally:
+                s2.close()
+                s1.close()
 
     def test_root_resolves_symlinks(self):
         with tempfile.TemporaryDirectory() as td:
@@ -39,7 +46,10 @@ class TestDeepMemoryRootCanonicalization(unittest.TestCase):
             link_dir = os.path.join(td, "link")
             os.symlink(real_dir, link_dir)
             store = DeepMemoryStore(Path(link_dir), dim=8)
-            self.assertEqual(str(store.base_dir), os.path.realpath(real_dir))
+            try:
+                self.assertEqual(str(store.base_dir), os.path.realpath(real_dir))
+            finally:
+                store.close()
 
 
 class TestDeepMemoryChildPaths(unittest.TestCase):
@@ -153,7 +163,10 @@ class TestDeepMemoryTrustedRoot(unittest.TestCase):
             child = os.path.join(td, "agents", "a1", "deep_memory")
             os.makedirs(child)
             store = DeepMemoryStore(Path(child), dim=8, trusted_root=td)
-            self.assertTrue(str(store.base_dir).startswith(os.path.realpath(td)))
+            try:
+                self.assertTrue(str(store.base_dir).startswith(os.path.realpath(td)))
+            finally:
+                store.close()
 
     def test_traversal_escapes_trusted_root(self):
         """'../escape' under trusted root raises ValueError."""
@@ -179,9 +192,12 @@ class TestDeepMemoryTrustedRoot(unittest.TestCase):
         """trusted_root == base_dir is allowed (root itself)."""
         with tempfile.TemporaryDirectory() as td:
             store = DeepMemoryStore(Path(td), dim=8, trusted_root=td)
-            self.assertEqual(
-                str(store.base_dir), os.path.realpath(td),
-            )
+            try:
+                self.assertEqual(
+                    str(store.base_dir), os.path.realpath(td),
+                )
+            finally:
+                store.close()
 
     def test_nested_slash_in_component_rejected(self):
         """Paths with embedded slashes that resolve outside root are rejected."""

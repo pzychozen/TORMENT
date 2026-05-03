@@ -257,6 +257,33 @@ class EmbeddingShardWriter:
     def total_rows(self) -> int:
         return self.manifest.get("total_rows", 0)
 
+    def close(self) -> None:
+        """Release the active shard memmap. Idempotent.
+
+        Required on Windows before the storage directory can be
+        removed: numpy.memmap holds the underlying mmap.mmap (and
+        thus the OS file handle) until explicitly released.
+        """
+        arr = self._active_mmap
+        if arr is not None:
+            try:
+                arr.flush()  # r+ mode may have buffered writes
+            except Exception:
+                pass
+            underlying = getattr(arr, "_mmap", None)
+            if underlying is not None:
+                try:
+                    underlying.close()
+                except Exception:
+                    pass
+            self._active_mmap = None
+
+    def __enter__(self) -> "EmbeddingShardWriter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
 
 # ---------------------------------------------------------------------------
 # EmbeddingShardReader
@@ -413,9 +440,32 @@ class EmbeddingShardReader:
         return mapping
 
     def clear_cache(self) -> None:
-        """Release cached memmaps and map data."""
+        """Release cached memmaps and map data. Idempotent.
+
+        On Windows a numpy.memmap keeps the OS file handle open
+        until its underlying mmap.mmap is explicitly closed; we
+        release each cached shard before clearing the dict so
+        the storage directory becomes removable.
+        """
+        for arr in list(self._shard_cache.values()):
+            underlying = getattr(arr, "_mmap", None)
+            if underlying is not None:
+                try:
+                    underlying.close()
+                except Exception:
+                    pass
         self._shard_cache.clear()
         self._map_cache.clear()
+
+    def close(self) -> None:
+        """Alias for clear_cache(); idempotent."""
+        self.clear_cache()
+
+    def __enter__(self) -> "EmbeddingShardReader":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
 
 # ---------------------------------------------------------------------------

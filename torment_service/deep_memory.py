@@ -404,3 +404,21 @@ class DeepMemoryStore:
             "has_embeddings": has_emb,
             "memory_classes": list(set(m.memory_class for m in self._memories)),
         }
+
+    def close(self) -> None:
+        """Release shard memmaps held by this store. Idempotent.
+
+        Required on Windows before the backing directory can be
+        removed (rmtree / TemporaryDirectory cleanup): numpy memmap
+        objects hold the underlying file handles open until released.
+        """
+        if self._shard_writer is not None:
+            self._shard_writer.close()
+        if self._shard_reader is not None:
+            self._shard_reader.close()
+
+    def __enter__(self) -> "DeepMemoryStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
