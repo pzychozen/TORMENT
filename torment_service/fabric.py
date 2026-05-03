@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import os, time, json, re, tempfile, threading, uuid, logging, math
+import os, time, json, re, atexit, tempfile, threading, uuid, logging, math
 import numpy as np
 
 from fastapi import HTTPException
@@ -591,6 +591,11 @@ class TormentFabric:
                 prefix="torment_memory_"
             )
             self.data_dir = self._memory_tmpdir.name
+            # Register cleanup at interpreter exit so SQLite + tmpdir
+            # handles are released even when callers (e.g., module-global
+            # test fabrics) never explicitly call close(). Only for
+            # :memory: fabrics -- real-disk fabrics persist intentionally.
+            atexit.register(self.close)
         else:
             _safe = _canonical_data_root(data_dir)
             # Sink-local guard for CodeQL at makedirs site.
@@ -6589,12 +6594,25 @@ class TormentFabric:
     def close(self) -> None:
         """Release fabric-owned transient resources.
 
-        Currently: if this fabric was constructed with
-        data_dir=":memory:", the backing TemporaryDirectory is
-        cleaned up. Idempotent -- safe to call multiple times.
-        After close(), persistent state held only in the temp
-        directory is gone.
+        Closes per-agent SQLite indexes (Phase 4 sidecar) and, if
+        this fabric was constructed with data_dir=":memory:", the
+        backing TemporaryDirectory. Idempotent -- safe to call
+        multiple times. After close(), persistent state held only
+        in the temp directory is gone.
         """
+        # Close per-agent SQLite indexes BEFORE tmpdir cleanup so
+        # Windows can unlink memory_index.sqlite. IndexManager.close()
+        # is itself idempotent (handles already-closed connections).
+        sqlite_indexes = getattr(self, "_sqlite_indexes", None)
+        if sqlite_indexes:
+            for idx in list(sqlite_indexes.values()):
+                if idx is not None:
+                    try:
+                        idx.close()
+                    except Exception:
+                        pass
+            sqlite_indexes.clear()
+
         tmpdir = getattr(self, "_memory_tmpdir", None)
         if tmpdir is not None:
             try:
