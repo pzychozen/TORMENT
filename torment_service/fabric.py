@@ -6490,6 +6490,98 @@ class TormentFabric:
         return manifest
             
 
+    def _trace_narrative(
+        self,
+        workspace_id: str,
+        eid: int,
+        scope: str = "shared",
+        domain_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> str:
+        """Build a markdown narrative summarizing a memory's trace history.
+
+        Walks memory_chain events for the given eid and renders them as a
+        readable markdown block. Used by both trace_view (return-only HTTP
+        endpoint) and trace_bundle (writes the same string to narrative.md).
+        Pure function over memory_chain output -- no filesystem effects.
+        """
+        chain = self.memory_chain(
+            workspace_id, eid=eid, scope=scope,
+            domain_id=domain_id, agent_id=agent_id,
+        )
+        events = chain.get("events", []) or []
+        lines = []
+        lines.append(f"# Trace narrative for eid={int(eid)}")
+        lines.append("")
+        lines.append(f"- workspace: `{workspace_id}`")
+        lines.append(f"- scope: `{scope}`")
+        if domain_id:
+            lines.append(f"- domain: `{domain_id}`")
+        if agent_id:
+            lines.append(f"- agent: `{agent_id}`")
+        lines.append(f"- events: {len(events)}")
+        lines.append("")
+        if not events:
+            lines.append("_(no recorded events for this memory)_")
+        else:
+            lines.append("## Events")
+            for i, evt in enumerate(events):
+                etype = evt.get("type", "EVENT")
+                ts = evt.get("ts", "")
+                step = evt.get("step", "")
+                who = evt.get("agent_id", "")
+                lines.append(
+                    f"{i+1}. **{etype}** -- step={step} ts={ts} agent={who}"
+                )
+        return "\n".join(lines)
+
+    def trace_view(
+        self,
+        workspace_id: str,
+        eid: int,
+        scope: str = "shared",
+        domain_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        depth: int = 2,
+        explain: bool = False,
+    ) -> Dict[str, Any]:
+        """Return a trace narrative + graph summary without writing files.
+
+        Lightweight return-only counterpart to trace_bundle: the same source
+        data (memory_chain + trace graph) rendered into an in-memory response
+        for the /memory/trace_view HTTP endpoint. trace_bundle remains the
+        path that materializes the bundle on disk.
+        """
+        graph = self.trace_full_graph(
+            workspace_id, eid,
+            scope=scope, domain_id=domain_id, agent_id=agent_id,
+            depth=depth, explain=explain, export="none",
+        )
+        narrative = self._trace_narrative(
+            workspace_id, eid=eid, scope=scope,
+            domain_id=domain_id, agent_id=agent_id,
+        )
+        nodes = graph.get("nodes", []) or []
+        edges = graph.get("edges", []) or []
+        node_types: Dict[str, int] = {}
+        for n in nodes:
+            t = str(n.get("type", "unknown"))
+            node_types[t] = node_types.get(t, 0) + 1
+        graph_summary = {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "node_types": node_types,
+            "meta": graph.get("meta", {}),
+        }
+        return {
+            "workspace_id": workspace_id,
+            "eid": int(eid),
+            "scope": scope,
+            "domain_id": domain_id,
+            "narrative": narrative,
+            "graph_summary": graph_summary,
+        }
+
     # ------------------------------------------------------------------
     # Lifecycle (Block C1 -- :memory: handling)
     # ------------------------------------------------------------------
