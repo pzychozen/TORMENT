@@ -33,6 +33,7 @@ from .checkpoint import (
     save_checkpoint,
     build_motif_summary, build_shard_snapshot,
 )
+from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 
 log = logging.getLogger("torment.fabric")
 
@@ -3601,6 +3602,10 @@ class TormentFabric:
         all_hits = [h for h in all_hits
                     if h.get("memory_class") not in _NON_DEFAULT_CLASSES]
         rescored = []
+        # FILTER-A (Commit γ): defensive init so the return dict never references
+        # an unbound variable if future branch edits skip the filter call.
+        # Populated by filter_llm_facing() after top-k selection below.
+        _filter_excluded: List[Dict[str, Any]] = []
         active_motifs = {}
         for d in domains:
             active_motifs[d] = ws.motif_regs[d].active(top_k=6)
@@ -3938,6 +3943,17 @@ class TormentFabric:
         rescored.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
         rescored = rescored[:top_k]
 
+        # FILTER-A (Commit γ): apply non_shareable exclusion at the single
+        # chokepoint before any LLM-facing surface uses rescored. Surfaces
+        # consuming this list below: continuity_debug summary, collective
+        # discount loop, assemble_character_context(hits=rescored, ...),
+        # and the returned "results" key. One filter, four protected surfaces.
+        # See docs/FILTER_A_NON_SHAREABLE_EXCLUSION_DESIGN.md and
+        # torment_service/governance.py:filter_llm_facing.
+        _filtered = filter_llm_facing(rescored, surface=SURFACE_LLM_CONTEXT)
+        rescored = _filtered["results"]
+        _filter_excluded = _filtered["excluded"]
+
         continuity_dbg: Optional[Dict[str, Any]] = None
         if _cd_enable:
             # Compact summary of which continuity mechanisms fired.
@@ -4041,6 +4057,7 @@ class TormentFabric:
             "domain_used": domains,
             "bridge_peek_domains": bridge_peek_domains,
             "results": rescored,
+            "excluded": _filter_excluded,  # FILTER-A: governance exclusions
             "motifs": {
                 "active": [m for d in domains for m in active_motifs.get(d, [])],
                 "dominant_thread": dominant,
