@@ -349,3 +349,20 @@ Upstream patches that unblocked the flip:
   (controller surface widening).
 
 Condition met per `docs/SECTION_2A_VALIDATION_FRAMING.md` §10.
+
+### §2A memory ecology documentation anchors
+
+The §2A landing chain on 2026-04-16 was not a single eval pass — it built
+up a layered memory ecology around the validation frame. The full
+narrative, layer-by-layer, lives in
+[`MEMORY_ECOLOGY_AROUND_SECTION_2A.md`](MEMORY_ECOLOGY_AROUND_SECTION_2A.md).
+The eight commits in the build chain are: `c3c2252` (Bucket 1 minimum
+viable corpus), `cc4c3b1` (C-cluster density 7→9 + cooled phrasing),
+`3331a18` (identity-adjacent + environmental + deep-adjacent surround,
+22-memory total), `74ccba1` (D-03/D-04 surround hardening + embedder
+token-overlap lesson), `71368dd` (§10.6 anchor snapshot from clean
+`ws_section_2a_v2`), `a0fd7b4` (derived_identity anchor hygiene patch),
+`ea07744` (controller surface widening), `6dbd0e0` (final §2A eval
+validation, default-on flip). For tier semantics see
+[`CHARACTER_SYSTEM.md`](CHARACTER_SYSTEM.md) "Canon Anchors vs Derived
+Identity Anchors."

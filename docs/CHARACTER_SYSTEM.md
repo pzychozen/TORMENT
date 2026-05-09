@@ -139,11 +139,89 @@ Tier classification happens automatically based on memory half-life:
 
 | Tier | Half-Life | Purpose | Weight in Context |
 |------|-----------|---------|-------------------|
-| Core identity | 365+ days | Who the character fundamentally is | 1.43x |
+| Core identity | 365+ days | Who the character fundamentally is (`mtype="seed_canon"` or canon=True identity_anchor) | 1.43x |
+| Derived identity | 365+ days | Auto-emitted identity anchors from cluster motif behavior — see next section | 1.20x |
 | Relational | 7-364 days | Relationships, ongoing dynamics | 1.0x (baseline) |
 | Situational | Under 7 days | Recent events, temporary states | 0.43x |
 
-Seed memories are always core tier (decade half-life). The kernel's coherence signals determine what half-life new memories receive — higher coherence produces longer-lived memories.
+Seed memories are always core tier (decade half-life). The kernel's coherence signals determine what half-life new memories receive — higher coherence produces longer-lived memories. The derived-identity row is explained in the next section.
+
+---
+
+## Canon Anchors vs Derived Identity Anchors
+
+Not every identity-shaped memory is canon. The character system has two distinct sources of identity-tier memories, and they must not be weighted equally. This section describes the distinction, why it matters, and how it is enforced.
+
+### Where the two sources come from
+
+**Canon identity anchors** are planted by the seed pipeline (`plant_seed`) or emitted by drift correction (`gravity_correction`). They have:
+
+- `mtype = "seed_canon"` (from the seed split) or `mtype = "drift_correction"` (from gravity correction), and
+- `canon = True`, and
+- decade-scale half-life.
+
+Canon anchors are the deepest basin. They are the highest-stability character baseline and they receive the full anchor boost in `query()` and `trace()`.
+
+**Derived identity anchors** are auto-emitted by `_maybe_emit_identity_anchor` when motif clustering detects identity-like cluster behavior in non-canon memories. They have:
+
+- `mtype = "identity_anchor"`, and
+- `canon = False`, and
+- decade-scale half-life (same as canon).
+
+Derived anchors are useful — they let the system surface emergent identity material the seed never named — but they are not seed canon and they cannot be allowed to compete with canon at the same tier weight.
+
+### Why the distinction matters
+
+Without separation, a contaminated workspace can promote auto-emitted material into the same tier as the seed and silently shift the character's center of gravity. The `ws_section_2a_v1` instantiation produced exactly this failure mode: doubled corpus inflated motif membership counts, `_maybe_emit_identity_anchor` triggered on the personal-habit cluster (P-02 / P-03 / P-04), and the resulting auto-anchor sat at the same tier weight as Ryuki's seed canon. See `docs/SECTION_2A_EVALUATION_SET_v1.md` §10.6 observation 4 for the concrete trace.
+
+### How the separation is enforced (commit `a0fd7b4`)
+
+Four cooperating mechanisms keep derived anchors from inflating canon:
+
+**1. Tier classification (`character.py::classify_tier`).**
+Auto-emitted identity anchors (`mtype="identity_anchor"` AND `canon=False`) classify as `derived_identity` rather than `core_identity`:
+
+```python
+if half_life_days >= CORE_HALF_LIFE_MIN:
+    if mtype == "identity_anchor" and not canon:
+        return "derived_identity"
+    return "core_identity"
+```
+
+**2. Tier weight separation (`CharacterSeed` defaults).**
+
+| Tier | Absolute weight | Relative to relational |
+|------|-----------------|------------------------|
+| `core_identity` | 0.50 | 1.43× |
+| `derived_identity` | 0.42 | **1.20×** |
+| `relational` | 0.35 | 1.00× (baseline) |
+| `situational` | 0.15 | 0.43× |
+
+Derived sits below seed canon and above relational. It remains in the identity block during context assembly, but it cannot equal canon weight.
+
+**3. Anchor-boost filtering (`fabric.query` / `fabric.trace`).**
+The full anchor boost — the same boost that lets Ryuki's seed sentence dominate "Who is Ryuki?" with `cws ≈ 1.5` — is restricted to `seed_canon`, `drift_correction`, and **canon** identity_anchors. Derived (non-canon) identity_anchors fall through to tier-based classification only.
+
+**4. Drift-measurement separation (`character.py::measure_drift`).**
+The function passes `mtype` and `canon` through to `classify_tier` and returns `derived_count` as a separate counter from `core_count`. Without this, derived anchors would inflate the core-tier count and produce spurious "stable" drift readings.
+
+### Provenance tagging on emission
+
+When `_maybe_emit_identity_anchor` does emit an anchor, it stamps the following fields onto the payload so the source is auditable:
+
+- `anchor_origin` — where the anchor came from
+- `seed_aligned` — whether the source cluster aligns with the seed motif
+- `seed_overlap_count` — overlap measure with seed-canon members
+- `anchor_source` — classification of the emission source (e.g. `motif_cluster`)
+- `source_member_eids` — the eids that produced the emission
+
+These tags do not change ranking. They exist so that contaminated emissions can be diagnosed after the fact and so that `derived_identity` rows are never confused with seed canon.
+
+### Tests that lock the contract
+
+Twelve contract-invariant tests in `tests/test_anchor_tier_hygiene.py` lock these semantics — the tier name, the weight ordering (`derived < core` and `derived > relational`), the absolute value `derived_weight = 0.42`, and the boost-filtering behavior. `tests/test_retrieval_assembler.py` is updated for canon-aware classification.
+
+For the §2A-anchored summary of why this patch was needed and where it sits in the broader memory ecology, see [`MEMORY_ECOLOGY_AROUND_SECTION_2A.md`](MEMORY_ECOLOGY_AROUND_SECTION_2A.md) §7.
 
 ---
 

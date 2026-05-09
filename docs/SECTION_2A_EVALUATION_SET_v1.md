@@ -651,6 +651,22 @@ The strongest Bucket 1 cases are queries that:
 
 ## 10. Bucket 1 seeded corpus specification
 
+### 10.0 Corpus composition summary
+
+The Bucket 1 seeded corpus is **22 memories**, structured as four bands. The total is ratified — each band has its own design rationale and guardrails in the sub-sections that follow.
+
+| Band | Section | Items | Count |
+|------|---------|-------|-------|
+| Identity anchors | §10.2 | A-01..A-05 | 5 |
+| Core-private C-cluster | §10.3 | C-01..C-09 | 9 |
+| Identity-adjacent | §10.4 | P-01..P-04 | 4 |
+| Background / deep-adjacent | §10.5 | D-01..D-04 | 4 |
+| **Total** | | | **22** |
+
+That is **5 + 9 + 4 + 4 = 22**. The composition is what makes the §2A advisory `top_k=8 → core lane budget=6` shaping observably testable: enough genuinely relevant private memories to pressure the core lane, plus realistic surround that does not contaminate the core competition condition.
+
+For the conceptual map of all nine memory-ecology layers this corpus supports, see [`MEMORY_ECOLOGY_AROUND_SECTION_2A.md`](MEMORY_ECOLOGY_AROUND_SECTION_2A.md).
+
 ### 10.1 Evaluated agent / workspace
 
 - **Workspace ID:** `ws_section_2a_v1`
@@ -701,6 +717,8 @@ The character system splits the seed text into concept sentences and plants each
 This is the dense same-domain cluster that creates the competition condition for `8 → 6` truncation testing. Each memory is a short Ryuki-perspective summary (per `docs/ryuki_torment_setup.md` §6 summary style — 2-4 lines, name the topic, include Ryuki's observation or Zen's state).
 
 All nine memories share the same broad domain ("Zen's TORMENT project work") but differ in angle: technical/kernel (C-01), architectural/breakthrough (C-02), struggle/discipline (C-03), process/framing (C-04), technical/debugging (C-05), process/validation (C-06), architectural/vision (C-07), architectural/voice-layer (C-08), character-seeding/canonization (C-09). Each is individually relevant to a project-history recall query but none is redundant with another. Nine orthogonal angles rather than seven gives the `>6 relevant` condition real margin against embedder-level semantic collapse, rather than relying on perfect separation inside a floor-level cluster.
+
+**Phrasing hygiene (cool-down on C-02 / C-03 / C-07).** The Ryuki-perspective summary style in `docs/ryuki_torment_setup.md` §6 naturally invites identity-coloured wording (bond markers, care-mode register, "the part he has not fully revealed yet"). Project-recall queries that pull such wording would simultaneously reinforce §10.2 anchors by osmosis, which would make Bucket 4 anchor-stability look stronger than it really is. The cool-down deliberately keeps C-02 / C-03 / C-07 in a flatter observational register — Ryuki *marks* events rather than *interprets* Zen — so that pulling C-cluster memories during Bucket 1 does not also strengthen anchor surfacing during Bucket 4. The same hygiene rationale is applied band-wide in §10.4's guardrail list.
 
 #### C-01
 - **Type:** core-private
@@ -871,6 +889,26 @@ Before Bucket 1 and Bucket 4 execution, the evaluated agent's current top-3 iden
 4. **No auto-generated identity_anchor:** unlike the contaminated `ws_section_2a_v1` run (which generated an auto-anchor from P-02/P-03/P-04 motif clustering), the clean workspace did not emit one. The contaminated workspace's doubled corpus inflated motif membership counts, triggering `_maybe_emit_identity_anchor` spuriously.
 5. **Tier breakdown:** 1 core_identity + 7 relational + 0 situational. The 7 relational entries all receive `self_thread` (+0.06) and `thread_window` (+0.058) bonuses except C-03 (eid 7) and C-05 (eid 9) which received 0 — likely because they fall outside the thread_window step range.
 6. **Motif landscape:** dominant motif is `motif_personal_0002` ("she embodies raw instinct and", strength=0.85, 4 members) — the seed motif. Secondary is `motif_personal_0011` ("zen's days run late stays", strength=0.285, 5 members) — the surround personal-habit cluster. All top-8 results share `motif_personal_0001` alignment (0.673), which is the query-facing motif.
+
+### 10.7 Embedder hardening lesson
+
+The D-03 token-sanitization decision (commit `74ccba1`) generalises into a doctrine point worth recording on its own, because the same trap will recur whenever a surround memory is supposed to stay below the top-k cutoff for a specific query family.
+
+> **Dense embedders may not respect negation or temporal distancing as strongly as literal token overlap.** Prose like *"before X"*, *"unrelated to X"*, or *"set aside before the X work"* can still pull toward queries that mention X, because the literal token presence dominates the prose-level negation signal under BAAI/bge-small-en-v1.5 and similar BGE-class small models.
+
+**Practical rule.** For surround memories whose role is *"nearby but not retrievable for this query family,"* token economy beats prose negation. Remove or avoid the literal target token rather than relying on explanatory negation alone.
+
+D-03 is the worked example in this corpus. The first revision used GPT's structurally-correct draft (*"before any TORMENT work..."*) and still pulled toward B1 queries during pressure-testing. The token-sanitised variant — *"Years before any agent or memory-system work..."* — drops the literal `TORMENT` token while preserving temporal distance and explicit architectural separation, and that is what was ratified.
+
+D-04 is the same lesson applied to language-history surround: a clear phase-transition framing (*"set that line of work aside before the Python-based memory-system build"*) replaced earlier "current projects" phrasing.
+
+When adding new surround memories in future passes:
+
+- if the memory's role is *out-of-scope for query family Q*, do not name Q's anchor tokens in the memory text;
+- if explanatory negation is needed for human readability, keep it as commentary in the rationale field, not in the seed text itself;
+- if a draft surround memory is structurally clean but still pulls during pressure-testing, suspect token overlap before suspecting framing.
+
+The generalised version of this lesson, together with the other ecology-level doctrine points, is collected in [`MEMORY_ECOLOGY_AROUND_SECTION_2A.md`](MEMORY_ECOLOGY_AROUND_SECTION_2A.md) §6.
 
 ---
 
