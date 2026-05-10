@@ -6626,8 +6626,8 @@ class TormentFabric:
                 if idx is not None:
                     try:
                         idx.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self._log.debug("SQLite index close failed during fabric close: %s", e)
             sqlite_indexes.clear()
 
         tmpdir = getattr(self, "_memory_tmpdir", None)
