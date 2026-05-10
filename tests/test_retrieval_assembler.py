@@ -531,4 +531,4 @@ if __name__ == "__main__":
     p, f = run_phase3_tests()
     print(f"\nPhase 3: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)

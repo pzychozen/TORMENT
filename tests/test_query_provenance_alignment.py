@@ -188,4 +188,4 @@ if __name__ == "__main__":
     p, f = run_query_provenance_alignment_tests()
     print(f"\nQuery Provenance Alignment: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)

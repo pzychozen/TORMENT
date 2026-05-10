@@ -1048,8 +1048,8 @@ class TormentFabric:
         finally:
             try:
                 self._clone_mutex.release()
-            except Exception:
-                pass
+            except Exception as e:
+                self._log.debug("Mutex release failed: %s", e)
 
     def _repair_embeddings_impl(
         self,
@@ -1961,10 +1961,10 @@ class TormentFabric:
         finally:
             try:
                 self._clone_mutex.release()
-            except Exception:
-                pass
-    
-    
+            except Exception as e:
+                self._log.debug("Mutex release failed: %s", e)
+
+
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
         _validate_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)

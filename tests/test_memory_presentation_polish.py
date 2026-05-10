@@ -228,4 +228,4 @@ if __name__ == "__main__":
     p, f = run_presentation_polish_tests()
     print(f"\nPresentation Polish: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)

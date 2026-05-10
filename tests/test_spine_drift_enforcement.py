@@ -145,4 +145,4 @@ if __name__ == "__main__":
     p, f = run_spine_drift_tests()
     print(f"\nSpine Drift Enforcement: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)

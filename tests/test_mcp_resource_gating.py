@@ -226,4 +226,4 @@ if __name__ == "__main__":
     p, f = run_mcp_resource_gating_tests()
     print(f"\nMCP Resource Gating: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)

@@ -21,11 +21,14 @@ Databases do not define the ontology.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -269,13 +272,19 @@ class EmbeddingShardWriter:
             try:
                 arr.flush()  # r+ mode may have buffered writes
             except Exception:
-                pass
+                _log.debug(
+                    "Ignoring memmap flush failure during writer close",
+                    exc_info=True,
+                )
             underlying = getattr(arr, "_mmap", None)
             if underlying is not None:
                 try:
                     underlying.close()
                 except Exception:
-                    pass
+                    _log.debug(
+                        "Ignoring mmap close failure during writer close",
+                        exc_info=True,
+                    )
             self._active_mmap = None
 
     def __enter__(self) -> "EmbeddingShardWriter":
@@ -453,7 +462,10 @@ class EmbeddingShardReader:
                 try:
                     underlying.close()
                 except Exception:
-                    pass
+                    _log.debug(
+                        "Ignoring cached shard mmap close failure",
+                        exc_info=True,
+                    )
         self._shard_cache.clear()
         self._map_cache.clear()
 

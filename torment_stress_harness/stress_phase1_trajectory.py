@@ -387,7 +387,8 @@ def build_lane_b_system(static_frame: str,
         try:
             cc_str = json.dumps(char_ctx, separators=(",", ":"))
             parts.append(f"Character context (substrate): {cc_str[:600]}")
-        except Exception:
+        except (TypeError, ValueError):
+            # best-effort: char_ctx not JSON-serializable, skip it
             pass
 
     return "\n\n".join(parts)
@@ -1373,6 +1374,10 @@ def main() -> None:
     csv_path = os.path.join(args.outdir, f"{file_prefix}_{stamp}.csv")
     json_path = os.path.join(args.outdir, f"{file_prefix}_{stamp}.json")
     md_path = os.path.join(args.outdir, f"{file_prefix}_{stamp}.transcripts.md")
+
+    # Defaults so these names are bound on all paths (only populated for v3).
+    lt5_pre_path = None
+    lt5_post_path = None
 
     # v3-only LT-5 anchor snapshot files (named per PLAN §14).
     if args.schedule == "v3":

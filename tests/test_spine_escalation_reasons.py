@@ -200,4 +200,4 @@ if __name__ == "__main__":
     p, f = run_escalation_reasons_tests()
     print(f"\nSpine Escalation Reasons: {p} passed, {f} failed")
     if f > 0:
-        exit(1)
+        sys.exit(1)
