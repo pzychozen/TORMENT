@@ -8,11 +8,25 @@ TORMENT is a governed memory and identity engine for building persistent AI char
 
 - **Structured persistent memory** — geometric kernel, half-life decay, reinforcement, and event-gated compression
 - **Differentiated memory ontology** — semantic substrate, baton (cross-session continuity), reference (whole-object external material), environment (scoped operational facts), and closure (ratification-gated arc records)
-- **Identity that resists drift** — character basins, seed gravity, and drift monitoring
+- **Identity that resists drift** — character basins, seed gravity, lived continuity, and drift monitoring
 - **Provenance-aware by default** — memory writes carry structured provenance and can be audited by origin
 - **Governed decisions through the Agent Spine** — trust tiers, escalation, and structured result codes
 - **Multi-agent / collective support** — workspace-level resonance, convergence detection, and controlled echo flows
 - **MCP as a governed extension layer** — memory operations exposed through a narrow, audited interface
+
+---
+
+## Character identity in practice
+
+TORMENT is not just a prompt wrapper. The v1 character-truth bench found a simple pattern:
+
+> **Prompt creates the role; TORMENT gives it gravity.**
+
+A well-framed character prompt can create a convincing voice. TORMENT adds the memory-weight underneath it: continuity, seed gravity, and specific lived past. In matched tests, prompt-only characters could speak coherently in-role, but tended to stay abstract. With TORMENT's seed pipeline active, the same character produced more specific continuity — particular papers, named people, chapters, corrections, and remembered work.
+
+TORMENT does not magically guarantee every character behavior. It does not replace good prompting, and it does not force boundary behavior in every short test. Its strongest reproducible contribution is helping a character feel less like a performance and more like an identity with history.
+
+See [`docs/CHARACTER_TRUTH_BENCH_DESIGN.md`](docs/CHARACTER_TRUTH_BENCH_DESIGN.md) for the v1 findings and test doctrine.
 
 ---
 
@@ -141,6 +155,6 @@ Relevant docs:
 If TORMENT is useful to you, support is appreciated.
 
 - **Ko-fi** — [ko-fi.com/hilmirhalldorsson](https://ko-fi.com/hilmirhalldorsson)
-- **BTC** — `bc1p8g9dd2y4fgnshdsvyq5ecu22mdr5kjfw8zdcptfdhghh4a0837ssjqzgka`
-- **ETH** — `0x52a31b19bC79d412621aA898adCC2BDd3580fDf4`
-- **SOL** — `2AmeJwpE68FbytofrUgrNtYwwtzLnjfDi1ACzkBDxBUj`
+- **BTC (Bitcoin network / Native SegWit)** — `bc1qvc0cx36jdd2tr85mk7fuwsnxecdrwkn85tulyj`
+- **ETH (Ethereum network)** — `0x4e3EeD872a1242918691Aba1123ed80Eb25F40F2`
+- **SOL (Solana network)** — `BypcHG3aY8NUhYBw7jhNfPFCKafVPcfjbmnafa6cCUuo`
