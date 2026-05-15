@@ -2466,6 +2466,23 @@ class TormentFabric:
         routed = [d.domain_id for d in dom_scores]
         chosen_domain = domain_id or (routed[0] if routed else "research")
 
+        # Preflight: domain must exist in the workspace's motif registries
+        # before any state mutation. Failing here is cheap and clean;
+        # failing later at ws.motif_regs[chosen_domain] leaves orphan
+        # state — a MEMORY_CREATE event in memory_events.jsonl and an
+        # embedding shard row — without a matching nodes.jsonl row,
+        # because flush_node() is downstream of the motif lookup and is
+        # never reached. Ingest semantics are all-or-nothing.
+        if chosen_domain not in ws.motif_regs:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown domain_id={chosen_domain!r} for "
+                    f"workspace={workspace_id!r}. Valid domains: "
+                    f"{sorted(ws.motif_regs.keys())}"
+                ),
+            )
+
         stored = False
         eid = None
         motif_ids: List[str] = []
