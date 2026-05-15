@@ -46,3 +46,9 @@ Thumbs.db
 closure_runs/
 step6_guard_reverify_live.py
 step6_export_bridge.py
+
+# Bench output directory — large, regenerable, not part of the published repo
+out/
+
+# Internal-only doc — not part of the public TORMENT repo
+docs/MEMORY_DIGESTION_DOCTRINE_v0.1.md
