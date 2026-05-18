@@ -1,0 +1,494 @@
+"""
+tests/test_authority_lane_matrix.py — Tool-result authority-lane novel-gap tests
+
+Implements only the cases not already covered by surrounding tests, per
+the trio's 2026-05-18 ratification of Option B against
+TOOL_RESULT_AUTHORITY_LANE_MATRIX_PLAN_v0.1.1_DRAFT.md.
+
+Covered here:
+  Cases 1+2 (hard, merged): a default tool-result ingest does not trip
+    any governance flag, carries no canon/seed/identity markers, and
+    does not auto-emit to the collective.
+  Case 2 (observational, single snapshot): retrieval + drift behavior
+    recorded as characterization (not asserted).
+  Case 3: Spine `memory_governance_set` trust gate — low trust rejected,
+    operator trust succeeds with audit trail.
+  Case 4 (observational): roleplay-scope characterization after real
+    plant_seed + follow-on private ingest. Records the §10.5 gap
+    without asserting the candidate default.
+
+NOT covered (load-bearing proofs in existing tests):
+  Case 5 (non_shareable / FILTER-A):
+    tests/test_governance.py::TestShouldEmitPacket
+    tests/test_filter_llm_facing.py::TestFilterLLMFacing_NonShareable
+    tests/test_filter_llm_facing.py::TestFilterLLMFacing_RawHitsAuthorization
+  Case 6 (collective echo terminal):
+    tests/test_collective_reingest.py::TestEchoContainment
+    tests/test_collective_reingest.py::TestProvenanceMarking
+    tests/test_collective_reingest.py::TestRetrievalDiscount
+    tests/test_collective_reingest.py::TestFullCycleSimulation
+  Case 7 (seed outranks echo):
+    tests/test_collective_reingest.py::TestCharacterIntegrity
+  Case 8 (protected wins over decay_accelerated):
+    tests/test_governance.py::TestInvariant_ProtectedNeverWeakened
+
+Doctrine anchor: docs/TOOL_RESULT_RETRIEVAL_SEMANTICS.md §2.1.
+Bug policy: hard-assertion failures with non-obvious cause -> halt and
+report. No production patches without explicit authorization.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from torment_service.fabric import TormentFabric
+from torment_service.spine import SpineRequest, submit_task
+from torment_service.request_context import (
+    RequestContext,
+    TRUST_INGEST,
+    TRUST_OPERATOR,
+)
+from torment_service.governance import (
+    resolve_governance,
+    should_emit_packet,
+    GovernanceAuditLog,
+)
+from torment_service.character import (
+    CharacterSeed,
+    plant_seed,
+    classify_tier,
+    measure_drift,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_fabric(prefix: str = "torment_authority_"):
+    """Create a fresh in-memory fabric with workspace 'test-ws' and agent
+    'agent-1'. Returns (fabric, data_dir)."""
+    tmpdir = tempfile.mkdtemp(prefix=prefix)
+    fabric = TormentFabric(data_dir=tmpdir)
+    fabric.get_workspace("test-ws")
+    fabric.create_agent("test-ws", "agent-1")
+    return fabric, tmpdir
+
+
+def _make_ctx(
+    trust: float = TRUST_INGEST,
+    *,
+    workspace_id: str = "test-ws",
+    agent_id: str = "agent-1",
+    client_id: str = "test_client",
+) -> RequestContext:
+    return RequestContext(
+        client_id=client_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        trust_tier=trust,
+    )
+
+
+def _ingest_tool_result(fabric, ctx, **overrides) -> int:
+    """Submit a default tool_result_ingest via Spine; return the eid."""
+    payload = {
+        "tool_name": "weather_api",
+        "content": "Current weather in Reykjavik: 3C, partly cloudy",
+        "summary": "Weather: Reykjavik 3C cloudy",
+        "step": 1,
+        "domain_id": "personal",
+        "session_id": "sess_001",
+    }
+    payload.update(overrides)
+    req = SpineRequest(
+        workspace_id=ctx.workspace_id,
+        agent_id=ctx.agent_id,
+        operation="tool_result_ingest",
+        payload=payload,
+    )
+    resp = submit_task(req, fabric, ctx)
+    if not resp.ok or not resp.allowed:
+        raise RuntimeError(
+            "Helper _ingest_tool_result: Spine rejected ingest "
+            f"(ok={resp.ok}, allowed={resp.allowed})"
+        )
+    return int(resp.result["eid"])
+
+
+def _read_payload(
+    fabric, eid: int, *, ws: str = "test-ws", agent: str = "agent-1"
+) -> dict:
+    ak = fabric._agent_key(ws, agent)
+    return fabric.private_graphs[ak].entities[eid].payload
+
+
+def _count_private_entities(
+    fabric, *, ws: str = "test-ws", agent: str = "agent-1"
+) -> int:
+    ak = fabric._agent_key(ws, agent)
+    return len(fabric.private_graphs[ak].entities)
+
+
+def _has_collective_provenance_entity(
+    fabric, *, ws: str = "test-ws", agent: str = "agent-1"
+) -> bool:
+    """True if ANY entity in the agent's private graph has collective
+    provenance — either the legacy bare-string form 'collective' or the
+    ProvenanceV1 dict form with source_type == 'collective_echo'.
+    Matches the detection logic in fabric.py query()'s discount block."""
+    ak = fabric._agent_key(ws, agent)
+    for ent in fabric.private_graphs[ak].entities.values():
+        prov = (ent.payload or {}).get("provenance")
+        if prov == "collective":
+            return True
+        if isinstance(prov, dict) and prov.get("source_type") == "collective_echo":
+            return True
+    return False
+
+
+# ===========================================================================
+# Cases 1 + 2 (hard, merged) — authority-lane composition after default ingest
+# ===========================================================================
+
+class TestToolResultAuthorityLaneComposition(unittest.TestCase):
+    """A default tool-result ingest should produce a memory whose governance
+    flags are all default, whose payload carries no canon/seed/identity
+    markers, and which does not auto-emit to the collective.
+
+    This is the v0.2.1 §11.3 'not identity-shaping' default verified in
+    terms of the concrete fields TORMENT exposes today.
+    """
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        self.ctx = _make_ctx()
+        self._entity_count_before = _count_private_entities(self.fabric)
+        self.eid = _ingest_tool_result(self.fabric, self.ctx)
+        self.payload = _read_payload(self.fabric, self.eid)
+
+    def test_provenance_source_type_is_tool_result(self):
+        """Matrix re-assertion (sanity). Load-bearing proof:
+        tests/test_tool_result_ingest.py::TestToolResultProvenance.test_source_type
+        """
+        prov = self.payload.get("provenance", {})
+        self.assertEqual(prov.get("source_type"), "tool_result")
+        self.assertEqual(prov.get("write_path"), "tool_ingest")
+
+    def test_governance_flags_all_default_after_tool_ingest(self):
+        """NOVEL composition: a default tool-result ingest must not trip any
+        governance flag. Verifies the v0.2.1 §11.3 'not identity-shaping'
+        default in MemoryGovernanceFlags terms."""
+        gov = resolve_governance(self.payload)
+        self.assertFalse(
+            gov.protected,
+            "protected flipped on default tool ingest",
+        )
+        self.assertFalse(
+            gov.non_shareable,
+            "non_shareable flipped on default tool ingest",
+        )
+        self.assertFalse(
+            gov.decay_accelerated,
+            "decay_accelerated flipped on default tool ingest",
+        )
+        self.assertFalse(
+            gov.collective_export_blocked,
+            "collective_export_blocked flipped on default tool ingest",
+        )
+        self.assertFalse(
+            gov.collective_reingest_blocked,
+            "collective_reingest_blocked flipped on default tool ingest",
+        )
+
+    def test_no_seed_or_canon_markers_on_payload(self):
+        """Extends tests/test_tool_result_ingest.py::TestToolResultSemanticPolicy
+        with canon/tier dimensions from torment_service.character."""
+        self.assertNotIn("seed_id", self.payload)
+        self.assertNotIn("is_seed", self.payload)
+        self.assertFalse(self.payload.get("canon", False))
+        self.assertNotEqual(self.payload.get("mtype"), "seed_canon")
+
+        hl = float(self.payload.get("half_life", 0.0))
+        tier = classify_tier(
+            hl,
+            mtype=str(self.payload.get("mtype", "")),
+            canon=bool(self.payload.get("canon", False)),
+        )
+        self.assertNotEqual(
+            tier,
+            "core_identity",
+            f"tool-result memory classified as core_identity (half_life={hl})",
+        )
+
+    def test_no_automatic_collective_emission(self):
+        """NOVEL: a default tool-result ingest creates exactly one entity
+        and no collective echo entity. Emission is routable in principle
+        (no source-block flag set) but not triggered automatically."""
+        self.assertEqual(
+            _count_private_entities(self.fabric),
+            self._entity_count_before + 1,
+            "tool-result ingest produced more than one entity",
+        )
+        self.assertFalse(
+            _has_collective_provenance_entity(self.fabric),
+            "auto-emitted collective entity found after default tool ingest",
+        )
+        self.assertTrue(
+            should_emit_packet(self.payload),
+            "default tool-result ingest is source-blocked from emission",
+        )
+
+
+# ===========================================================================
+# Case 2 — observational: single before/after snapshot
+# ===========================================================================
+
+class TestToolResultBehavioralObservation(unittest.TestCase):
+    """OBSERVATIONAL ONLY. Per trio ratification 2026-05-18: single
+    before/after snapshot for v0.1. Records characterization for later
+    review; does not assert candidate-default invariants. Print-only,
+    no golden snapshot yet."""
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        self.ctx = _make_ctx()
+
+    def test_observe_tool_result_retrieval_and_drift_baseline(self):
+        # No character seed is planted in this scenario; character.measure_drift
+        # requires a seed, so drift is not applicable here. Recorded explicitly
+        # rather than swallowed (Case 4 is where real drift gets recorded).
+
+        # Ingest one tool-result with content the query can find
+        eid = _ingest_tool_result(
+            self.fabric,
+            self.ctx,
+            content="Current weather in Reykjavik: 3C, partly cloudy, winds from north",
+            summary="Weather: Reykjavik 3C cloudy",
+        )
+
+        # Retrieval check
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="weather in Reykjavik",
+            top_k=5,
+        )
+        hits = results.get("results", [])
+        tool_hits = [h for h in hits if h.get("provenance_type") == "tool_result"]
+
+        top_tool_hit = None
+        if tool_hits:
+            t = tool_hits[0]
+            top_tool_hit = {
+                k: t.get(k)
+                for k in (
+                    "eid",
+                    "provenance_type",
+                    "provenance_tool_name",
+                    "final_score",
+                )
+            }
+
+        record = {
+            "eid": eid,
+            "hit_count_total": len(hits),
+            "tool_hit_count": len(tool_hits),
+            "top_tool_hit": top_tool_hit,
+            "drift_observation": "not_applicable_no_seed_planted",
+        }
+        print("\n[authority_lane_case2_observation]")
+        print(json.dumps(record, indent=2, default=str))
+        self.assertTrue(True)
+
+
+# ===========================================================================
+# Case 3 — Spine memory_governance_set trust gate
+# ===========================================================================
+
+class TestOperatorPromotionTrustGate(unittest.TestCase):
+    """Verifies the OPERATION_TRUST_REQUIREMENTS contract for
+    'governance_set' (TRUST_OPERATOR) from request_context.py. Tool-result
+    memories cannot be promoted to protected/canon without operator trust."""
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        self.ingest_ctx = _make_ctx(trust=TRUST_INGEST)
+        self.eid = _ingest_tool_result(self.fabric, self.ingest_ctx)
+
+    def test_low_trust_governance_set_rejected(self):
+        """Trust below TRUST_OPERATOR must not promote any governance flag.
+        Spine should reject the request (allowed=False)."""
+        req = SpineRequest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            operation="memory_governance_set",
+            payload={"eid": self.eid, "flags": {"protected": True}},
+        )
+        low_ctx = _make_ctx(trust=0.3)
+        resp = submit_task(req, self.fabric, low_ctx)
+        self.assertFalse(
+            resp.allowed,
+            "Spine allowed memory_governance_set at trust=0.3 "
+            "(expected rejection at TRUST_OPERATOR boundary)",
+        )
+        gov = resolve_governance(_read_payload(self.fabric, self.eid))
+        self.assertFalse(
+            gov.protected,
+            "protected flag flipped despite low-trust rejection",
+        )
+
+    def test_operator_trust_governance_set_succeeds_with_audit(self):
+        """Operator trust (TRUST_OPERATOR = 1.0) flips the flag, returns
+        an audit record, and persists to the workspace audit log."""
+        req = SpineRequest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            operation="memory_governance_set",
+            payload={"eid": self.eid, "flags": {"protected": True}},
+        )
+        op_ctx = _make_ctx(trust=TRUST_OPERATOR)
+        resp = submit_task(req, self.fabric, op_ctx)
+
+        self.assertTrue(resp.ok, f"Spine response not ok: {resp}")
+        self.assertTrue(resp.allowed)
+        self.assertEqual(resp.result.get("eid"), self.eid)
+
+        changed = resp.result.get("audit", {}).get("changed", {})
+        self.assertIn("protected", changed)
+        self.assertEqual(changed["protected"].get("old"), False)
+        self.assertEqual(changed["protected"].get("new"), True)
+
+        # Memory state reflects the change
+        payload = _read_payload(self.fabric, self.eid)
+        self.assertTrue(resolve_governance(payload).protected)
+
+        # In-payload audit trail
+        trail = payload.get("governance_audit", [])
+        self.assertGreaterEqual(len(trail), 1)
+        self.assertTrue(trail[-1].get("actor"))
+        self.assertTrue(trail[-1].get("source"))
+
+        # Workspace-level audit log persists
+        audit_log = GovernanceAuditLog(self.data_dir, "test-ws")
+        records = audit_log.recent()
+        self.assertTrue(
+            any(r.get("eid") == self.eid for r in records),
+            "GovernanceAuditLog has no entry for promoted eid",
+        )
+
+
+# ===========================================================================
+# Case 4 — observational: roleplay scope characterization
+# ===========================================================================
+
+class TestRoleplayScopeCharacterization(unittest.TestCase):
+    """OBSERVATIONAL ONLY. Plants a real character seed via plant_seed(),
+    then ingests a follow-on private memory in-voice for that character.
+    Records whether the new memory carries any character-identifying
+    field (seed_id, character_name) or lands as a plain private memory.
+
+    The v0.2.1 §10.5 candidate-default ('roleplay-continuity events stay
+    character-scoped') is NOT enforced if the new memory carries no
+    character tag — the test records that fact; it does not fail on it.
+    """
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        self.ak = self.fabric._agent_key("test-ws", "agent-1")
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        self.mreg = ws.motif_regs.get(dom)
+        if self.mreg is None:
+            self.skipTest(
+                "No motif registry available for domain — halt-and-report "
+                "per plan §10. Not patching workaround."
+            )
+        self.seed = plant_seed(
+            graph=self.fabric.private_graphs[self.ak],
+            motif_registry=self.mreg,
+            coherence_field=None,
+            embedder=self.fabric.kernel.embedder,
+            seed=CharacterSeed(
+                seed_id="ryuki_v1",
+                character_name="Ryuki",
+                seed_text=(
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            ),
+            agent_id="agent-1",
+            step=0,
+        )
+
+    def test_characterize_post_seed_ingest_scope(self):
+        # In-voice follow-on ingest — regular fabric.ingest, NOT a seed
+        result = self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text=(
+                "I will protect what I am bonded to. Always. "
+                "The dark does not move me."
+            ),
+            step=10,
+            scope="private",
+            domain_id="personal",
+        )
+        new_eid = int(result["eid"])
+        new_payload = _read_payload(self.fabric, new_eid)
+
+        hl = float(new_payload.get("half_life", 0.0))
+        tier = classify_tier(
+            hl,
+            mtype=str(new_payload.get("mtype", "")),
+            canon=bool(new_payload.get("canon", False)),
+        )
+
+        # Real drift measurement using the same plumbing as plant_seed.
+        # Safety-net try/except — measure_drift may have edge cases at this
+        # scale (e.g. tiny windows), and the observational test records
+        # whatever it sees honestly.
+        try:
+            drift_after = measure_drift(
+                graph=self.fabric.private_graphs[self.ak],
+                motif_registry=self.mreg,
+                coherence_field=None,
+                seed=self.seed,
+                agent_id="agent-1",
+                current_step=11,
+            )
+        except Exception as e:
+            drift_after = {"error": str(e)}
+
+        record = {
+            "seed": {
+                "seed_id": self.seed.seed_id,
+                "seed_motif_id": self.seed.seed_motif_id,
+                "seed_eids": list(self.seed.seed_eids),
+                "character_name": self.seed.character_name,
+            },
+            "new_memory": {
+                "eid": new_eid,
+                "seed_id": new_payload.get("seed_id"),
+                "character_name": new_payload.get("character_name"),
+                "mtype": new_payload.get("mtype"),
+                "canon": new_payload.get("canon", False),
+                "half_life": hl,
+                "tier_via_classify": tier,
+                "provenance": new_payload.get("provenance"),
+            },
+            "drift_after_followon_ingest": drift_after,
+        }
+        print("\n[authority_lane_case4_observation]")
+        print(json.dumps(record, indent=2, default=str))
+        self.assertTrue(True)
+
+
+if __name__ == "__main__":
+    unittest.main()
