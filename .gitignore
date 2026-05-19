@@ -52,3 +52,6 @@ out/
 
 # Internal-only doc — not part of the public TORMENT repo
 docs/MEMORY_DIGESTION_DOCTRINE_v0.1.md
+# Internal brainstorm artifacts — not part of the published repo
+scratch/brainstorming/
+scratch/BRAINSTORMING_INVENTORY_*.md
