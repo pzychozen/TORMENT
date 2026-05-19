@@ -2044,6 +2044,24 @@ class TormentFabric:
                                     step=0,
                                 )
                                 self.character_store.save_seed(workspace_id, char_seed)
+                                # Activation bridge: write a minimal
+                                # CharacterState anchor so Path 3 character
+                                # provenance badges fire from the first
+                                # ingest, not only after the periodic drift
+                                # cycle. This is not canon, not identity,
+                                # and not drift measurement — only an
+                                # active-state anchor. The drift block at
+                                # fabric.py:3120+ remains the source of
+                                # drift evolution and will load-and-merge
+                                # over this anchor on its first tick.
+                                self.character_store.save_state(
+                                    workspace_id,
+                                    CharacterState(
+                                        workspace_id=workspace_id,
+                                        agent_id=agent_id,
+                                        seed_id=seed_id,
+                                    ),
+                                )
                     except Exception:
                         pass  # Character is optional — never blocks agent creation
 

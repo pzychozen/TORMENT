@@ -617,6 +617,98 @@ class TestCharacterProvenanceBadge(unittest.TestCase):
             self.assertEqual(prov.get("character_name"), "Ryuki")
             self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
 
+    def test_create_agent_with_seed_writes_minimal_character_state(self):
+        """Activation bridge: create_agent with a non-empty seed writes a
+        minimal CharacterState anchor immediately. No ingest required, no
+        drift cycle required.
+
+        Proves the production write-site exists. Companion to PR #53's
+        existing badge tests, which use the low-level _activate_character
+        helper to write state directly.
+        """
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        if ws.motif_regs.get(dom) is None:
+            self.skipTest("No motif registry available for domain")
+
+        self.fabric.create_agent(
+            "test-ws",
+            "agent-activation",
+            seed={
+                "seed_id": "ryuki_v1",
+                "character_name": "Ryuki",
+                "seed_text": (
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            },
+        )
+
+        cstate = self.fabric.character_store.load_state(
+            "test-ws", "agent-activation"
+        )
+        self.assertIsNotNone(
+            cstate,
+            "create_agent with seed did not write a minimal CharacterState",
+        )
+        self.assertEqual(cstate.workspace_id, "test-ws")
+        self.assertEqual(cstate.agent_id, "agent-activation")
+        self.assertEqual(cstate.seed_id, "ryuki_v1")
+        # Minimal anchor — drift fields default; the drift block has not run.
+        self.assertEqual(cstate.drift_score, 0.0)
+        self.assertEqual(cstate.drift_direction, "stable")
+        self.assertEqual(cstate.drift_history, [])
+
+    def test_badge_fires_on_first_ingest_after_create_agent_with_seed(self):
+        """Activation bridge: after create_agent with a seed, the very
+        first fabric.ingest() produces a memory whose provenance carries
+        character_id / character_name / character_scope — without any
+        manual save_state, without waiting for the drift interval.
+
+        Companion to test_no_badge_when_no_active_character_state, which
+        proves the badge stays silent when no seed is supplied.
+        """
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        if ws.motif_regs.get(dom) is None:
+            self.skipTest("No motif registry available for domain")
+
+        self.fabric.create_agent(
+            "test-ws",
+            "agent-activation",
+            seed={
+                "seed_id": "ryuki_v1",
+                "character_name": "Ryuki",
+                "seed_text": (
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            },
+        )
+
+        result = self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-activation",
+            text=(
+                "I will protect what I am bonded to. Always. "
+                "The dark does not move me."
+            ),
+            step=1,  # well before the default drift_every=25 cycle
+            scope="private",
+            domain_id="personal",
+        )
+        ak = self.fabric._agent_key("test-ws", "agent-activation")
+        prov = (
+            self.fabric.private_graphs[ak]
+            .entities[int(result["eid"])]
+            .payload.get("provenance", {})
+        )
+        self.assertEqual(prov.get("character_id"), "ryuki_v1")
+        self.assertEqual(prov.get("character_name"), "Ryuki")
+        self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
 
 # ===========================================================================
 # Case 4 — observational: roleplay scope characterization
