@@ -2343,7 +2343,7 @@ class TormentFabric:
         # Rule 1: every ingested memory must have provenance.
         # Rule 2: default for plain user ingest if caller did not supply one.
         # Rule 4: non-direct writes must supply explicit provenance.
-        from .provenance_v1 import ProvenanceV1
+        from .provenance_v1 import ProvenanceV1, CHARACTER_SCOPE_ACTIVE
         if provenance is not None:
             # Validate by round-tripping through the dataclass
             _prov = ProvenanceV1.from_dict(provenance)
@@ -2351,6 +2351,27 @@ class TormentFabric:
         else:
             _prov = ProvenanceV1.for_user_ingest(step=step)
             _prov_dict = _prov.to_dict()
+
+        # --- Path 3 (§10.5) character context badge ---
+        # If the agent has an active CharacterState pointing at a known
+        # CharacterSeed, stamp the resulting memory with descriptive
+        # character metadata. This is provenance, not canon: it records
+        # the context the memory was formed in without altering retrieval,
+        # governance, or collective emission. Caller-supplied character_id
+        # is honored — only stamps when the field is empty. Fail-closed:
+        # any error skips the badge and ingest continues normally.
+        if not _prov.character_id:
+            try:
+                _cstate = self.character_store.load_state(workspace_id, agent_id)
+                if _cstate and _cstate.seed_id:
+                    _cseed = self.character_store.load_seed(workspace_id, _cstate.seed_id)
+                    if _cseed and _cseed.seed_id:
+                        _prov.character_id = _cseed.seed_id
+                        _prov.character_name = _cseed.character_name
+                        _prov.character_scope = CHARACTER_SCOPE_ACTIVE
+                        _prov_dict = _prov.to_dict()
+            except Exception as _e:
+                log.debug("Path 3 character badge skipped: %s", _e)
 
         # --- Baton lifecycle validation (Block A, docs/BLOCK_A_DESIGN.md §6.1) ---
         # When memory_class == "baton", the caller-supplied extra_payload

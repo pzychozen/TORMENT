@@ -121,6 +121,22 @@ VALID_WRITE_PATHS = frozenset({
     WRITE_CLOSURE_COMMIT,               # Block C — closure commit / revision
 })
 
+
+# ── Character scope (Path 3 / v0.2.1 §10.5) ─────────────────────────
+#
+# Records the character context in which a memory was formed.
+# Descriptive metadata only — does NOT promote the memory to canon
+# and does NOT alter retrieval, governance, or collective emission.
+# Tagged at ingest when the agent has an active CharacterState.seed_id.
+#
+# Doctrine: "A character badge is provenance, not canon."
+
+CHARACTER_SCOPE_ACTIVE = "active_context"
+
+VALID_CHARACTER_SCOPES = frozenset({
+    CHARACTER_SCOPE_ACTIVE,
+})
+
 SCHEMA_VERSION = "1.0"
 
 
@@ -160,6 +176,21 @@ class ProvenanceV1:
     asserted_by: Optional[str] = None        # populated when source_type=user_asserted
     observation_source: Optional[str] = None  # populated when source_type=observed
     inference_rule: Optional[str] = None      # populated when source_type=inferred
+
+    # ── Character scope badge (Path 3 / v0.2.1 §10.5) ──────────────
+    #
+    # All three optional. Set at ingest by fabric.ingest() when the
+    # agent has an active CharacterState pointing at a CharacterSeed.
+    # `character_scope` is restricted to values in
+    # VALID_CHARACTER_SCOPES (currently only CHARACTER_SCOPE_ACTIVE).
+    #
+    # Stripped from to_dict() when None so legacy memories remain
+    # byte-compatible with the pre-§10.5 payload shape.
+    #
+    # Descriptive metadata only — never authoritative routing.
+    character_id: Optional[str] = None
+    character_name: Optional[str] = None
+    character_scope: Optional[str] = None
 
     # ── WRITE_MIGRATION admission fields (v2.4.x step 6) ───────────
     #
@@ -246,6 +277,17 @@ class ProvenanceV1:
                 "source_type=SOURCE_GATE1_UNRECOVERABLE requires admission_refused=True"
             )
 
+        # Path 3 (§10.5) character-scope vocabulary check.
+        # character_id and character_name are free-form (per CharacterSeed),
+        # but character_scope must be from the controlled vocabulary so a
+        # caller can't smuggle in a routing-style value.
+        if (self.character_scope is not None
+                and self.character_scope not in VALID_CHARACTER_SCOPES):
+            raise ValueError(
+                f"Invalid character_scope '{self.character_scope}'. "
+                f"Must be one of: {sorted(VALID_CHARACTER_SCOPES)}"
+            )
+
     # ── Serialization ───────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
@@ -267,7 +309,8 @@ class ProvenanceV1:
         # strip the same way so live ingest paths that don't use them
         # serialize byte-compatibly with pre-Block-B rows.
         for k in ("tool_name", "session_id", "notes",
-                  "asserted_by", "observation_source", "inference_rule"):
+                  "asserted_by", "observation_source", "inference_rule",
+                  "character_id", "character_name", "character_scope"):
             if d.get(k) is None:
                 del d[k]
         # Strip default-valued admission fields so pre-step-6 rows and

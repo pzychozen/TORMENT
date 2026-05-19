@@ -60,10 +60,12 @@ from torment_service.governance import (
 )
 from torment_service.character import (
     CharacterSeed,
+    CharacterState,
     plant_seed,
     classify_tier,
     measure_drift,
 )
+from torment_service.provenance_v1 import CHARACTER_SCOPE_ACTIVE
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +152,33 @@ def _has_collective_provenance_entity(
         if isinstance(prov, dict) and prov.get("source_type") == "collective_echo":
             return True
     return False
+
+
+def _activate_character(
+    fabric, seed, *, ws: str = "test-ws", agent: str = "agent-1"
+) -> None:
+    """Persist the seed AND mark `agent` as currently operating in this
+    character's space.
+
+    Path 3 badge stamping in fabric.ingest() reads BOTH the seed file
+    (via character_store.load_seed) and the state file (via load_state),
+    so tests that want the badge to fire must persist both. plant_seed()
+    mutates and returns the seed object but does NOT write seed.json to
+    disk; the caller is responsible. Mirrors production at
+    fabric.py:2037-2046:
+
+        char_seed = plant_seed(...)
+        character_store.save_seed(workspace_id, char_seed)
+    """
+    fabric.character_store.save_seed(ws, seed)
+    fabric.character_store.save_state(
+        ws,
+        CharacterState(
+            workspace_id=ws,
+            agent_id=agent,
+            seed_id=seed.seed_id,
+        ),
+    )
 
 
 # ===========================================================================
@@ -384,6 +413,212 @@ class TestOperatorPromotionTrustGate(unittest.TestCase):
 
 
 # ===========================================================================
+# Path 3 (§10.5) — character provenance badge composition
+# ===========================================================================
+
+class TestCharacterProvenanceBadge(unittest.TestCase):
+    """v0.2.1 §10.5 Path 3 — Hybrid character authority lane.
+
+    Verifies that roleplay-context memories carry an explicit character
+    badge on `provenance` when an active CharacterState exists, while
+    seed canon memories remain top-level-tagged and unaffected.
+
+    Doctrine: A character badge is provenance, not canon.
+    """
+
+    def _plant(self):
+        """Plant a Ryuki seed; return the seed."""
+        ak = self.fabric._agent_key("test-ws", "agent-1")
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        mreg = ws.motif_regs.get(dom)
+        if mreg is None:
+            self.skipTest("No motif registry available for domain")
+        return plant_seed(
+            graph=self.fabric.private_graphs[ak],
+            motif_registry=mreg,
+            coherence_field=None,
+            embedder=self.fabric.kernel.embedder,
+            seed=CharacterSeed(
+                seed_id="ryuki_v1",
+                character_name="Ryuki",
+                seed_text=(
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            ),
+            agent_id="agent-1",
+            step=0,
+        )
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        self.ctx = _make_ctx()
+
+    def test_followon_roleplay_memory_gets_character_provenance_badge(self):
+        """HARD. After plant_seed + save_state, an in-voice fabric.ingest()
+        produces a memory whose provenance dict carries character_id,
+        character_name, and character_scope."""
+        seed = self._plant()
+        _activate_character(self.fabric, seed)
+
+        result = self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text=(
+                "I will protect what I am bonded to. Always. "
+                "The dark does not move me."
+            ),
+            step=10,
+            scope="private",
+            domain_id="personal",
+        )
+        eid = int(result["eid"])
+        prov = _read_payload(self.fabric, eid).get("provenance", {})
+
+        self.assertEqual(prov.get("character_id"), "ryuki_v1")
+        self.assertEqual(prov.get("character_name"), "Ryuki")
+        self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
+    def test_seed_memories_keep_top_level_seed_id_and_seed_canon_mtype(self):
+        """HARD. Seed memories continue to carry top-level seed_id,
+        character_name, mtype=seed_canon, canon=True. They do NOT also
+        carry the provenance-level character badge."""
+        seed = self._plant()
+
+        self.assertTrue(seed.seed_eids)
+        ak = self.fabric._agent_key("test-ws", "agent-1")
+        seed_payload = self.fabric.private_graphs[ak].entities[seed.seed_eids[0]].payload
+
+        self.assertEqual(seed_payload.get("seed_id"), "ryuki_v1")
+        self.assertEqual(seed_payload.get("character_name"), "Ryuki")
+        self.assertEqual(
+            seed_payload.get("mtype") or seed_payload.get("type"),
+            "seed_canon",
+        )
+        self.assertTrue(seed_payload.get("canon"))
+
+        seed_prov = seed_payload.get("provenance") or {}
+        self.assertNotIn("character_id", seed_prov,
+                         "seed memory unexpectedly carries provenance.character_id")
+        self.assertNotIn("character_scope", seed_prov,
+                         "seed memory unexpectedly carries provenance.character_scope")
+
+    def test_no_badge_when_no_active_character_state(self):
+        """HARD. plant_seed alone is NOT enough to trigger the badge."""
+        self._plant()  # seed only; no save_state
+
+        result = self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="An in-voice utterance but with no active character context recorded.",
+            step=10,
+            scope="private",
+            domain_id="personal",
+        )
+        prov = _read_payload(self.fabric, int(result["eid"])).get("provenance", {})
+
+        self.assertNotIn("character_id", prov,
+                         "badge applied without an active CharacterState")
+        self.assertNotIn("character_name", prov)
+        self.assertNotIn("character_scope", prov)
+
+    def test_tool_result_during_character_active_gets_both_tags(self):
+        """HARD. tool_result_ingest under active CharacterState carries
+        BOTH source_type=tool_result (§11.3) AND character_id (§10.5)."""
+        seed = self._plant()
+        _activate_character(self.fabric, seed)
+
+        eid = _ingest_tool_result(self.fabric, self.ctx)
+        prov = _read_payload(self.fabric, eid).get("provenance", {})
+
+        self.assertEqual(prov.get("source_type"), "tool_result")
+        self.assertEqual(prov.get("write_path"), "tool_ingest")
+        self.assertEqual(prov.get("character_id"), "ryuki_v1")
+        self.assertEqual(prov.get("character_name"), "Ryuki")
+        self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
+    def test_character_badge_does_not_appear_in_top_level_hit_shape(self):
+        """HARD (Path B). v0.1 Path 3 discipline: the character badge
+        stays inside `payload.provenance` and MUST NOT be promoted to
+        the top-level retrieval hit shape. Retrieval consumers see
+        provenance_type / provenance_tool_name at the top level (the
+        existing v2.4.3 behavior); they must NOT also see character_id.
+
+        Invariant: "A character badge is provenance, not top-level
+        retrieval shape."
+        """
+        seed = self._plant()
+        _activate_character(self.fabric, seed)
+
+        self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text="Reykjavik weather is cold and clear today.",
+            step=1,
+            scope="private",
+            domain_id="personal",
+        )
+
+        results = self.fabric.query(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            query_text="Reykjavik weather",
+            top_k=10,
+        )
+        hits = results.get("results", [])
+        self.assertGreaterEqual(len(hits), 1, "no retrieval hits for the follow-on memory")
+
+        # Locate the follow-on (badged) memory among the hits by its
+        # payload.provenance.character_id; if hit shape doesn't carry
+        # payload, fall back to the top-ranked hit.
+        target = None
+        for h in hits:
+            payload = h.get("payload") or {}
+            prov = payload.get("provenance") or {}
+            if prov.get("character_id") == "ryuki_v1":
+                target = h
+                break
+        if target is None:
+            target = hits[0]
+
+        # Existing v2.4.3 hit-shape badges remain present.
+        self.assertIn("provenance_type", target,
+                      "provenance_type top-level badge missing (v2.4.3 regression)")
+
+        # Path 3 discipline: character_* MUST NOT appear at the top
+        # level of the hit. Any of these leaks would mean Path 3 has
+        # migrated to Path 1 (badge as routing field) — a doctrine
+        # violation in v0.1.
+        self.assertNotIn(
+            "character_id", target,
+            "character_id leaked to top-level hit shape — Path 3 violated",
+        )
+        self.assertNotIn(
+            "character_name", target,
+            "character_name leaked to top-level hit shape — Path 3 violated",
+        )
+        self.assertNotIn(
+            "character_scope", target,
+            "character_scope leaked to top-level hit shape — Path 3 violated",
+        )
+
+        # When payload is surfaced on the hit, the badge survives in
+        # payload.provenance — that's the descriptive-metadata layer
+        # the doctrine sentence "badge is provenance, not canon" names.
+        payload = target.get("payload")
+        if payload is not None:
+            prov = payload.get("provenance") or {}
+            self.assertEqual(
+                prov.get("character_id"), "ryuki_v1",
+                "character_id missing from payload.provenance (badge did not stamp)",
+            )
+            self.assertEqual(prov.get("character_name"), "Ryuki")
+            self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
+
+# ===========================================================================
 # Case 4 — observational: roleplay scope characterization
 # ===========================================================================
 
@@ -426,6 +661,10 @@ class TestRoleplayScopeCharacterization(unittest.TestCase):
             agent_id="agent-1",
             step=0,
         )
+        # Path 3 (§10.5): record active character state so the follow-on
+        # ingest receives the character provenance badge. Without this
+        # save_state, the agent has a planted seed but no active context.
+        _activate_character(self.fabric, self.seed)
 
     def test_characterize_post_seed_ingest_scope(self):
         # In-voice follow-on ingest — regular fabric.ingest, NOT a seed
@@ -487,7 +726,14 @@ class TestRoleplayScopeCharacterization(unittest.TestCase):
         }
         print("\n[authority_lane_case4_observation]")
         print(json.dumps(record, indent=2, default=str))
-        self.assertTrue(True)
+
+        # Path 3 (§10.5) HARD: badge present on the follow-on memory.
+        # Drift fields above remain observational only — see audit memo
+        # closed 2026-05-19 (HashEmbedding artifact, not a bug).
+        new_prov = new_payload.get("provenance", {})
+        self.assertEqual(new_prov.get("character_id"), "ryuki_v1")
+        self.assertEqual(new_prov.get("character_name"), "Ryuki")
+        self.assertEqual(new_prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
 
 
 if __name__ == "__main__":
