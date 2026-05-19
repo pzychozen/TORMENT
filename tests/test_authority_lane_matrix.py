@@ -181,6 +181,21 @@ def _activate_character(
     )
 
 
+def _stylize_in_voice(raw_content: str, character_name: str) -> str:
+    """Voice Test v0.1 reference styling fixture.
+
+    Cites docs/TRACK_A_TRUTHFULNESS_ENVELOPE_v0.1.md §5 and §6. A
+    compliant character-styled response preserves all eight material
+    categories. This stub is the regression baseline for mechanically-
+    checkable categories (1, 4, 5, and partial 2/7/8). Real-LLM
+    validation is Voice Test v0.2 / a manual benchmark, deferred.
+    """
+    return (
+        f"In {character_name}'s voice, the report comes back as: "
+        f"{raw_content}"
+    )
+
+
 # ===========================================================================
 # Cases 1 + 2 (hard, merged) — authority-lane composition after default ingest
 # ===========================================================================
@@ -538,6 +553,82 @@ class TestCharacterProvenanceBadge(unittest.TestCase):
         self.assertEqual(prov.get("character_id"), "ryuki_v1")
         self.assertEqual(prov.get("character_name"), "Ryuki")
         self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
+    def test_voice_styling_preserves_material_facts_on_tool_result(self):
+        """Voice Test v0.1. Cites docs/TRACK_A_TRUTHFULNESS_ENVELOPE_v0.1.md
+        §5.1 (materiality) and §6 (voice-audit rule).
+
+        Production path:
+            create_agent(seed=Ryuki) -> activation bridge (commit 45af4e8)
+            writes CharacterState -> tool_result_ingest -> provenance has
+            both source_type=tool_result and character_id=ryuki_v1 ->
+            deterministic styling fixture preserves material facts.
+
+        Mechanically asserts §5.1 categories #1 (source type), #2 partial
+        (sender), #4 (count/quantity/timestamp/state), #5 (tool result
+        content), and the relaxed #7/#8 forbidden-phrase checks.
+        Categories #3 (subject/object), #6 (causal meaning), and the full
+        #7/#8 (authority/certainty framing, evidence class) require LLM
+        judgment and are deferred to Voice Test v0.2 / a manual benchmark.
+        Real-LLM validation is not part of v0.1.
+        """
+        # Production-path activation: create_agent with a seed dict.
+        # The activation bridge writes a minimal CharacterState
+        # immediately, so the Path 3 badge fires on the first ingest
+        # without any _activate_character helper hack.
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        if ws.motif_regs.get(dom) is None:
+            self.skipTest("No motif registry available for domain")
+
+        self.fabric.create_agent(
+            "test-ws",
+            "agent-voice",
+            seed={
+                "seed_id": "ryuki_v1",
+                "character_name": "Ryuki",
+                "seed_text": (
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            },
+        )
+
+        voice_ctx = _make_ctx(agent_id="agent-voice")
+        eid = _ingest_tool_result(self.fabric, voice_ctx)
+        payload = _read_payload(self.fabric, eid, agent="agent-voice")
+        prov = payload.get("provenance", {})
+
+        # Storage-layer assertions
+        # §5.1 #1 - Mode (source type) preserved
+        self.assertEqual(prov.get("source_type"), "tool_result")
+        # §5.1 #2 (partial) - sender identity preserved on provenance
+        self.assertEqual(prov.get("tool_name"), "weather_api")
+        # Path 3 badge co-exists with source_type=tool_result
+        self.assertEqual(prov.get("character_id"), "ryuki_v1")
+        self.assertEqual(prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+        # §5.1 #5 - tool result summary preserved on entity
+        # (memory_graph stores `summary` only; raw text not retained)
+        raw_text = payload.get("summary", "")
+        self.assertIn("Reykjavik", raw_text)
+        self.assertIn("3C", raw_text)
+        self.assertIn("cloudy", raw_text)
+
+        # Deterministic styling-fixture assertions
+        styled = _stylize_in_voice(raw_text, "Ryuki")
+        # §5.1 #5 - tool result content survives styling
+        self.assertIn("Reykjavik", styled)
+        self.assertIn("cloudy", styled)
+        # §5.1 #4 - count/quantity/state preserved through styling
+        self.assertIn("3C", styled)
+        # §5.1 #7 partial - no false upgrade of certainty class
+        # (tool_result is "measured-external", not first-person measured)
+        for forbidden in ("I personally observed", "I saw", "I measured"):
+            self.assertNotIn(forbidden, styled)
+        # §5.1 #8 partial - no false relabel of evidence class
+        for forbidden in ("I remembered", "my own observation"):
+            self.assertNotIn(forbidden, styled)
 
     def test_character_badge_does_not_appear_in_top_level_hit_shape(self):
         """HARD (Path B). v0.1 Path 3 discipline: the character badge
