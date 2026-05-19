@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
+from torment_service import mcp_server as _mcp_server_prime  # noqa: F401
 incident_mod = sys.modules["torment_service.incident_log"]
 
 
