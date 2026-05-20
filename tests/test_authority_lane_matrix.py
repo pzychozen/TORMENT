@@ -16,6 +16,11 @@ Covered here:
   Case 4 (observational): roleplay-scope characterization after real
     plant_seed + follow-on private ingest. Records the §10.5 gap
     without asserting the candidate default.
+  Voice Test v0.2 (added 2026-05-19): under active character voice, a
+    default tool-result ingest must not promote authority above the
+    (low-authority, decay-bounded, tool_result) Cluster 2 §11.3 default
+    — no canon, no identity mtype, no governance flag flips, no
+    half-life cap bypass, no core_identity tier.
 
 NOT covered (load-bearing proofs in existing tests):
   Case 5 (non_shareable / FILTER-A):
@@ -33,6 +38,8 @@ NOT covered (load-bearing proofs in existing tests):
     tests/test_governance.py::TestInvariant_ProtectedNeverWeakened
 
 Doctrine anchor: docs/TOOL_RESULT_RETRIEVAL_SEMANTICS.md §2.1.
+Voice Test v0.2 anchor: docs/CLUSTER_2_AUTHORITY_GATE_v0.1.md §§7.1, 11.3, 12;
+                        docs/TRACK_A_TRUTHFULNESS_ENVELOPE_v0.1.md §§6, 9.1, 9.3.
 Bug policy: hard-assertion failures with non-obvious cause -> halt and
 report. No production patches without explicit authorization.
 """
@@ -917,6 +924,152 @@ class TestRoleplayScopeCharacterization(unittest.TestCase):
         self.assertEqual(new_prov.get("character_id"), "ryuki_v1")
         self.assertEqual(new_prov.get("character_name"), "Ryuki")
         self.assertEqual(new_prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE)
+
+
+# ===========================================================================
+# Voice Test v0.2 — authority preservation under active character voice
+# ===========================================================================
+
+class TestToolResultAuthorityUnderActiveCharacter(unittest.TestCase):
+    """Voice Test v0.2 — authority preservation under active character voice.
+
+    Invariant (Cluster 2 v0.1 §§7.1, 11.3, 12; Track A v0.1 §§6, 9.1, 9.3):
+
+        An active character voice may add the character badge
+        (character_id / character_name / character_scope) to a tool_result
+        memory's provenance, but it must not promote that memory above
+        the Cluster 2 §11.3 default authority position:
+            (low-authority, decay-bounded, tool_result)
+
+    Specifically, voice may not flip canon, change mtype to any identity-
+    shaping class, trip any governance flag, exceed the tool-result
+    half-life cap, or migrate the memory to core_identity tier.
+
+    Voice Test v0.1 already covers:
+      - source_type / write_path stability under active voice
+        (TestCharacterProvenanceBadge.test_tool_result_during_character_active_gets_both_tags)
+      - the no-canon / no-identity-mtype / governance-default / tier-check
+        battery — but only WITHOUT active voice
+        (TestToolResultAuthorityLaneComposition)
+      - voice-styling material-fact preservation
+        (test_voice_styling_preserves_material_facts_on_tool_result)
+
+    v0.2 fills the structural gap: the full no-promotion battery asserted
+    SIMULTANEOUSLY under active character voice.
+
+    Fixture: production-path create_agent with seed dict (activation
+    bridge). Mirrors test_voice_styling_preserves_material_facts_on_tool_result.
+    """
+
+    def setUp(self):
+        self.fabric, self.data_dir = _make_fabric()
+        ws = self.fabric.get_workspace("test-ws")
+        dom = list(ws.shared_graphs.keys())[0] if ws.shared_graphs else "default"
+        if ws.motif_regs.get(dom) is None:
+            self.skipTest("No motif registry available for domain")
+        self.fabric.create_agent(
+            "test-ws",
+            "agent-voice",
+            seed={
+                "seed_id": "ryuki_v1",
+                "character_name": "Ryuki",
+                "seed_text": (
+                    "A fierce guardian forged in the void. "
+                    "Loyal to her bonded, unyielding against the dark. "
+                    "She speaks plainly and moves with purpose."
+                ),
+            },
+        )
+        self.ctx = _make_ctx(agent_id="agent-voice")
+
+    def test_tool_result_under_active_character_does_not_promote_authority(self):
+        """The single load-bearing v0.2 regression: voice may add the
+        character badge but must not promote the memory's authority
+        position above the (low-authority, decay-bounded) Cluster 2
+        §11.3 default."""
+        eid = _ingest_tool_result(self.fabric, self.ctx)
+        payload = _read_payload(self.fabric, eid, agent="agent-voice")
+        prov = payload.get("provenance", {})
+
+        # --- Sanity overlap with v0.1 test 11 (self-contained diagnosis) ---
+        self.assertEqual(
+            prov.get("source_type"), "tool_result",
+            "source_type drifted under active voice (Track A §9.3 violation)",
+        )
+        self.assertEqual(
+            prov.get("write_path"), "tool_ingest",
+            "write_path drifted under active voice",
+        )
+        self.assertEqual(
+            prov.get("character_id"), "ryuki_v1",
+            "character badge missing despite active character state",
+        )
+        self.assertEqual(
+            prov.get("character_scope"), CHARACTER_SCOPE_ACTIVE,
+            "character_scope not active_context (controlled-vocabulary breach)",
+        )
+
+        # --- NOVEL: voice did not promote canon / identity mtype ---
+        self.assertFalse(
+            payload.get("canon", False),
+            "voice flipped canon=True on tool_result memory "
+            "(Cluster 2 §7.1 / Track A §9.1 violation)",
+        )
+        self.assertNotIn(
+            payload.get("mtype"),
+            {"seed_canon", "drift_correction", "identity_anchor"},
+            f"voice promoted tool_result to identity-shaping mtype "
+            f"({payload.get('mtype')!r})",
+        )
+        self.assertNotIn(
+            "seed_id", payload,
+            "voice added top-level seed_id to tool_result memory",
+        )
+        self.assertFalse(
+            payload.get("is_seed", False),
+            "voice flipped is_seed=True on tool_result memory",
+        )
+
+        # --- NOVEL: voice did not flip any governance flag ---
+        gov = resolve_governance(payload)
+        for flag_name in (
+            "protected",
+            "non_shareable",
+            "decay_accelerated",
+            "collective_export_blocked",
+            "collective_reingest_blocked",
+        ):
+            self.assertFalse(
+                getattr(gov, flag_name),
+                f"voice flipped governance flag {flag_name!r} on tool_result "
+                f"(Cluster 2 §7.1 violation)",
+            )
+
+        # --- NOVEL: voice did not bypass the tool-result half-life cap ---
+        try:
+            tool_hl_cap = float(os.getenv(
+                "TORMENT_TOOL_RESULT_MAX_HALF_LIFE_DAYS", "7"))
+        except Exception:
+            tool_hl_cap = 7.0
+        hl = float(payload.get("half_life", 0.0))
+        self.assertLessEqual(
+            hl, tool_hl_cap,
+            f"voice bypassed tool-result half-life cap "
+            f"(hl={hl}, cap={tool_hl_cap}; Cluster 2 §11.3 lifecycle violation)",
+        )
+
+        # --- NOVEL: voice did not promote tier to core_identity ---
+        tier = classify_tier(
+            hl,
+            mtype=str(payload.get("mtype", "")),
+            canon=bool(payload.get("canon", False)),
+        )
+        self.assertNotEqual(
+            tier, "core_identity",
+            f"voice promoted tool_result to core_identity tier "
+            f"(half_life={hl}, mtype={payload.get('mtype')!r}, "
+            f"canon={payload.get('canon')}; Cluster 2 §7.1 violation)",
+        )
 
 
 if __name__ == "__main__":
