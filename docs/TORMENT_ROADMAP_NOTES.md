@@ -58,6 +58,69 @@ The 2026-05-09 brainstorm closure named Track A (Truthfulness Envelope) and Clus
 
 **Cluster 2 v0.1 — Authority Gate — RATIFIED 2026-05-19.** Promoted at `e527562`. Advisory doctrine. Decomposes Track A's Authority axis into three sub-dimensions (Authority class / Lifecycle / Promotion rights); adds two top-level Cluster 2 axes (Scope, Lane) orthogonal to Track A; ratifies the `tool_result` default (`(low-authority, decay-bounded, tool_result)` with existing 7d half-life cap), the character-authority default (released-from-agent-scope for roleplay continuity), and the disagreement primitive (Option i-plus: Cluster 2 owns the doctrinal primitive, Track B may specialize the runtime mechanism later). Doctrine-only with a named runtime seam to a future Cluster 2 v0.2; no runtime enforcement, schema, or API changes authorized. Doc: `docs/CLUSTER_2_AUTHORITY_GATE_v0.1.md`.
 
+**Voice Test v0.2 — authority preservation under active character — LANDED 2026-05-20.** Test at `2bbf5f9`. Companion to Voice Test v0.1; asserts the full no-promotion battery for `tool_result` ingests under an active character voice (badge composition + canon=False + non-identity mtype + no top-level seed_id/is_seed + all governance flags False + half_life within the 7d cap + non-core-identity tier). Closes the structural gap identified by the v0.2 pre-test design note: v0.1 tested no-promotion without voice and badge composition with voice, but no single test asserted the full no-promotion battery *under* active voice. Test: `tests/test_authority_lane_matrix.py`.
+
+**Track B v0.1 — Disagreement Runtime doctrine — RATIFIED 2026-05-20.** Promoted at `bdbd1e0`. Advisory doctrine. Downstream specialization of the disagreement primitive named (but not implemented) in Cluster 2 v0.1 §12 (Option i-plus). Names `ContestRecord` as the contest-ledger primitive; ratifies Option C (separate contest ledger, not inlined into ProvenanceV1); ratifies the operational meanings of "true but not mine" (truth-to-provenance preserved + identity-authority denied) and character refusal (memory may exist in agent graph but does not enter character basin as canon/continuity/identity weight); requires `reason_class` (one of `identity_conflict` / `material_disagreement` / `scope_creep` / `audit_concern`) with optional freeform `contest_reason`; declares contest immutability with counter-contest reversal; restricts `refuse / no-persist` routing to operator-scope contests only and bars self-issued contests from that routing; rules out cognition-dissent auto-trigger (explicit-only); commits to the invariant that contest *increases* audit visibility (no hiding mechanism). Doctrine-only; no runtime implementation, schema change, or test wiring authorized. Doc: `docs/TRACK_B_DISAGREEMENT_RUNTIME_v0.1.md`.
+
+**Cluster 5 v0.1 — Storage / Survivability doctrine — RATIFIED 2026-05-21.** Promoted at `8affac7`. Advisory doctrine. Ratifies the storage-governance invariant — *a TORMENT memory is not recovered unless its governance meaning is recovered* — as the doctrine center. Establishes the canonical / derived / ephemeral vocabulary (with sub-types: append-ledger, event ledger, point-state, snapshot, binary, row-map; derived index/column/in-memory/diagnostic; ephemeral ring-buffer/per-step/session). §4.2 defines "governance meaning" with a five-tag storage-status legend (`[stored]` / `[composed]` / `[doctrine]` / `[future]` / `[derivable]`) so authority class / lifecycle / promotion rights are not implied to be literal stored fields. Names ten substrate fragilities with stable cross-reference handles (`JSONL-NO-FSYNC`, `JSONL-LOADER-NOT-FAIL-TOLERANT`, `IDENTITY-NON-ATOMIC-SAVE`, `INGEST-NOT-TRANSACTIONAL`, `EMBEDDING-SHARD-MEMMAP-NON-TRANSACTIONAL`, `SQLITE-SIDECAR-SILENT-DRIFT`, `EMBEDDING-MANIFEST-SINGLE-COPY`, `DERIVED-COLUMN-DRIFT`, `NO-MULTI-PROCESS-WRITE-COORDINATION`, `TWO-EMBEDDING-FORMATS-COEXIST`). Names 14 deferred brainstorm mechanisms (`BRAINSTORM-MANIFEST-LAYER`, `BRAINSTORM-VERIFY-CLI`, `BRAINSTORM-APPEND-JOURNAL`, `BRAINSTORM-CHECKSUMS`, `BRAINSTORM-DUCKDB-SIDECAR`, etc.) as explicitly NOT built and out-of-scope for v0.1. §7.0 framing line states storage readiness is a *necessary but not sufficient* gate — meeting storage preconditions does not authorize automation, offline reflection, Track B v0.2 contest ledger, Cluster 2 v0.2 runtime Authority Gate, or hivemind expansion. Doctrine-only with a named Cluster 5 v0.2 implementation seam; no runtime enforcement, schema change, fsync addition, atomic-write helper, journal, checksum, or verify CLI authorized. Doc: `docs/CLUSTER_5_STORAGE_SURVIVABILITY_v0.1.md`.
+
+Session-completion bookkeeping for the post-Cluster-2 chain (Voice Test v0.2 → Track B v0.1 → Cluster 5 v0.1) extends the May 19 checkpoint and is recorded in the 99_session_summary post-session addendum at `scratch/brainstorming/memory_roadmap_2026_05_09/99_session_summary.md`.
+
+### Post-Cluster-5 boundary (2026-05-21)
+
+The 2026-05-09 brainstorming roadmap remains an idea map. Larger speculative or future-facing concepts do not authorize implementation or automation. Any future track must follow the established pattern: read-only audit → scratch framing draft → review notes → revised draft → explicit trio ratification → only then implementation planning. Until then, the promoted pre-autonomy spine is Track A / Cluster 2 / Track B / Cluster 5.
+
+**The pre-autonomy spine (as of 2026-05-21):**
+
+- **Track A v0.1** — Truthfulness Envelope. Four-axis truthfulness (Mode / Voice / Certainty / Authority), voice-audit rule, materiality list, three-role ownership rule.
+- **Cluster 2 v0.1** — Authority Gate. Two top-level axes (Scope, Lane) + three Authority sub-dimensions (Authority class / Lifecycle / Promotion rights); `tool_result` default; disagreement primitive named.
+- **Track B v0.1** — Disagreement Runtime. `ContestRecord` + Option C separate contest ledger; reason_class required; immutability + counter-contest reversal; `refuse / no-persist` restricted to operator-scope; contest INCREASES audit visibility.
+- **Cluster 5 v0.1** — Storage / Survivability. Storage-governance invariant; canonical/derived/ephemeral vocabulary; ten named fragility handles; brainstorm mechanism list deferred; "necessary but not sufficient" pre-automation framing.
+
+**Brainstorm-level — NOT yet active doctrine, NOT implementation authority, NOT automation permission:**
+
+- **Cluster 3 — Significance & Affect.** User-side affect markers, behavioral-only stance, affect decay with pinning override. Not promoted.
+- **Cluster 4 — Offline / Reflective.** Dream / Continuation / Envelope Audit modes; offline reflection generates candidates only, never canon. Not promoted.
+- **Cluster 6 — Methodology / Research / Defer.** Rust components, custom neural modules, small evaluators (only if test data warrants). Classified, not promoted.
+- **Cluster 5 deferred mechanism list** (per Cluster 5 v0.1 §6.2): `BRAINSTORM-MANIFEST-LAYER`, `BRAINSTORM-VERIFY-CLI`, `BRAINSTORM-REPAIR-CLI`, `BRAINSTORM-APPEND-JOURNAL`, `BRAINSTORM-GEOMETRY-COMPRESSION` (governance-field preservation unverified), `BRAINSTORM-STORAGE-TIERS`, `BRAINSTORM-MOTIF-LOCAL-CACHE`, `BRAINSTORM-CHECKSUMS`, `BRAINSTORM-DUCKDB-SIDECAR`, `BRAINSTORM-STORAGE-BACKEND-EXPERIMENTS`, `BRAINSTORM-VISIBILITY-TIER`, `BRAINSTORM-USER-HAS-SEEN`, `BRAINSTORM-15-VERIFY-INVARIANTS`, `BRAINSTORM-3-TIER-COLUMNIZATION`. Named for stable cross-reference, not built, not scheduled.
+- **Cluster 2 v0.2 runtime Authority Gate.** Implementation-track planning; not yet started.
+- **Track B v0.2 runtime contest ledger.** Implementation-track planning; not yet started.
+- **Voice Test v0.3 / Phase 4b.** Next regression test layer; parallel-runnable; not yet started.
+- **Autonomous tool use, self-writing cognition loops.** Blocked per `ROADMAP_v2.4.x.md §3`.
+- **Cross-agent hivemind / collective memory expansion.** Requires `NO-MULTI-PROCESS-WRITE-COORDINATION` (Cluster 5 v0.1 §5.8) resolution among other gates.
+- **TriOcta / SRG memory dynamics.** Brainstorm Cluster 6 J — research-only.
+- **Custom neural modules, evaluator systems.** Brainstorm Cluster 6 L — deferred.
+
+These remain inspirational. They cannot silently guide implementation, automation, runtime behavior, memory authority, storage shape, or character identity. Activating any of them requires the full audit → scratch framing draft → review notes → revised draft → explicit trio ratification cycle that produced the promoted spine. The brainstorm roadmap is preserved as a map of possible directions, not as a hidden authority over current behavior.
+
+### Future engineering concerns recorded under Cluster 5 (2026-05-21)
+
+These are named-and-preserved future-track concerns. They are NOT active doctrine, NOT current implementation work, and they do NOT modify the promoted Cluster 5 v0.1. They exist so the concern stays visible across future sessions instead of being rediscovered each time.
+
+**FUTURE-CLUSTER-5-STORAGE-SYSTEM-CONCERN (pzychozen, 2026-05-21).** TORMENT memory volume can grow very large. The current JSONL-canonical + SQLite-sidecar substrate is fine for the doctrine/testing stages we are in now and is the correct shape for Cluster 5 v0.1 (storage preserves governance meaning, not just text and embeddings). But future autonomy / offline reflection / runtime contest ledger / hivemind work may exceed what the current substrate can carry without a TORMENT-purpose-built storage layer.
+
+A future Cluster 5 v0.2 (or sibling implementation track) should evaluate a **TORMENT-specific memory storage architecture** rather than reaching for generic database choices. Candidate components, named here for future trio reference — none authorized today:
+
+- Canonical append / event log (the JSONL canonical stays, but possibly with fsync / atomic-append discipline per `JSONL-NO-FSYNC` / `JSONL-LOADER-NOT-FAIL-TOLERANT` in Cluster 5 v0.1 §5).
+- Compacted memory snapshots (point-in-time snapshots so the canonical log doesn't grow without bound).
+- Derived query / index DB (likely still SQLite-shaped, possibly larger; stays non-authoritative per Cluster 5 v0.1 §3.2).
+- Embedding / vector shard management (already present at `embeddings/shard_*.npy` + `shard_*.map.jsonl` + `manifest.json`; future work would address `EMBEDDING-MANIFEST-SINGLE-COPY` and `EMBEDDING-SHARD-MEMMAP-NON-TRANSACTIONAL`).
+- Governance-preserving manifests at the *memory* level (the brainstorm's `BRAINSTORM-MANIFEST-LAYER`, deferred in Cluster 5 v0.1 §6.2).
+- Compression / archive tiers (the brainstorm's `BRAINSTORM-STORAGE-TIERS`, deferred in Cluster 5 v0.1 §6.2; coordinates with `compression.py` whose governance-field preservation is currently unverified per Cluster 5 v0.1 §7.6).
+- Verification / rebuild tooling (the brainstorm's `BRAINSTORM-VERIFY-CLI` and `BRAINSTORM-REPAIR-CLI`, deferred in Cluster 5 v0.1 §6.2).
+- Safe migration paths (preserve governance meaning across any storage-shape change, per Cluster 5 v0.1 §4 invariant).
+
+**Order of operations the concern explicitly does NOT override.** This concern is not a request to:
+
+- Build storage mechanisms now.
+- Make SQLite (or any other generic DB) authoritative.
+- Block autonomy-prep work (Voice Test v0.3 / Track B v0.2 / Cluster 2 v0.2 / deeper governance-preservation audit) on storage architecture.
+- Modify Cluster 5 v0.1 promoted doctrine.
+
+Cluster 5 v0.1 remains doctrine-only: *storage preserves governance meaning*. The choice of mechanism — TORMENT-purpose-built or otherwise — belongs to a future Cluster 5 v0.2 or implementation track. **TORMENT-governed memory first, database second.**
+
+This concern is logged so the next trio session that opens the Cluster 5 v0.2 implementation track has a starting reference for the storage-architecture conversation, not so the conversation has to happen today.
+
 ### Next candidates
 
 - **Forge per-agent single-terminal mode** — deferred to land with solo → `ryuki_chat.py` alignment, not as a third hivemind fork (see `project_per_agent_mode_deferred.md`). Window/broadcast shipped 2026-04-14.
@@ -65,12 +128,17 @@ The 2026-05-09 brainstorm closure named Track A (Truthfulness Envelope) and Clus
 - Broad MCP expansion (Continue, Cline, Cursor, etc.) — paused per the Claude Desktop first stance.
 - Autonomous tool use, self-writing cognition loops — still blocked per `ROADMAP_v2.4.x.md` §3.
 
-**Post-doctrine-chain candidates (from 2026-05-19 checkpoint):** fuller context in `scratch/CHECKPOINT_2026_05_19_TRACK_A_CLUSTER_2.md` §5.
+**Post-doctrine-chain candidates (updated 2026-05-21 after Cluster 5 v0.1 landed — pre-autonomy spine now complete).** May 19 checkpoint context still lives at `scratch/CHECKPOINT_2026_05_19_TRACK_A_CLUSTER_2.md` §5; Cluster 5 v0.1 context lives at `docs/CLUSTER_5_STORAGE_SURVIVABILITY_v0.1.md` §9.3.
 
-- **Voice Test v0.2 / Phase 4a** — *recommended next technical task.* Next runnable regression around Track A / Cluster 2 authority semantics: voice must not alter authority; `source_type=tool_result` stable under active character (Track A §9.3); no identity/canon promotion from `tool_result`. Small, regression-oriented, no doctrine redesign needed. Independent: can proceed without changing Cluster 2 doctrine.
-- **Track B disagreement runtime mechanism planning** — *recommended next doctrine task.* Design the runtime mechanism for contest / disagreement / no-persist vote. Doctrine-only planning first; no implementation until framing is ratified. Must preserve Track A §9.6 and distinguish agent contest from character-basin contest. Pre-promotion audit first, following the Track A / Cluster 2 pattern.
-- **Cluster 5 storage framing audit** — *recommended next audit task.* Reality-check storage / survivability claims before promoting storage doctrine. Audit first; no framing doc until code reality is mapped (current TORMENT has JSONL canonical with SQLite as non-canonical sidecar, not the SQLite-as-control-plane the 2026-05-09 brainstorm assumed).
-- **Cluster 2 v0.2 runtime Authority Gate** — *deferred unless trio explicitly chooses.* Future implementation-track planning for actual runtime authority enforcement. Explicitly deferred by Cluster 2 v0.1's doctrine-only posture; should not start unless the trio chooses this over Voice Test v0.2 / Track B / Cluster 5.
+The four candidates below correspond to the three named paths in Cluster 5 v0.1 §9.3 (Path A / B / C) plus the parallel-runnable test layer. The trio decides among them in a future session; all are governed by the boundary rule in the subsection above (no implementation activation without the full audit → draft → review → ratification cycle).
+
+- **Deeper governance-preservation audit (Cluster 5 §9.3 Path C)** — *recommended next read-only audit.* Resolve the three Cluster 5 §7.6 open questions: (1) whether `compression.py` preserves governance fields uncompressed; (2) whether released / scratch / protected / review-pending lifecycle markers are durably distinct in payloads; (3) whether affect markers' user-confirmation provenance is durable. Smaller scope than a v0.2 framing; produces a substrate-readiness report.
+- **Track B v0.2 — runtime contest ledger** (Cluster 5 §9.3 Path B). *Recommended next doctrine-to-implementation seam if the trio is ready for one.* Specifies atomic-append discipline for the contest ledger (per Track B v0.1 Invariant 14 + Cluster 5 §7.3), durable target-link integrity, operator-scope refuse audit visibility. Concrete choices made here become templates for Cluster 5 v0.2.
+- **Voice Test v0.3 / Phase 4b** — *parallel-runnable regression task.* Once Track B v0.2 specializes runtime, covers the Cluster 2/Track B seam (contest-ledger event presence under contested ingests, refusal-routing audit-visibility, lane-attribution durability across restart). Small and parallel-runnable.
+- **Cluster 5 v0.2 — storage survivability mechanisms** (Cluster 5 §9.3 Path A). *Implementation-track planning, deferred unless explicitly chosen.* Decides which §5 fragilities become fix-targets (likely starting with `JSONL-NO-FSYNC`, `JSONL-LOADER-NOT-FAIL-TOLERANT`, `IDENTITY-NON-ATOMIC-SAVE`, `INGEST-NOT-TRANSACTIONAL`); whether to introduce a journal mechanism or an atomic-write helper; the shape of governance-preservation verification.
+- **Cluster 2 v0.2 runtime Authority Gate** — *deferred unless trio explicitly chooses.* Future implementation-track planning for actual runtime authority enforcement. Explicitly deferred by Cluster 2 v0.1's doctrine-only posture; should not start unless the trio chooses this over Path C / Track B v0.2 / Voice Test v0.3 / Cluster 5 v0.2.
+
+Brainstorm-level candidates (Cluster 3 affect, Cluster 4 offline reflection, Cluster 6 deep research, BRAINSTORM-* mechanism list, autonomous tool use, hivemind expansion) are listed under the Post-Cluster-5 boundary subsection above and require the full ratification cycle before they can become active work.
 
 ---
 
