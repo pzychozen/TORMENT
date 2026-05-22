@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import os, time, json, re, atexit, tempfile, threading, uuid, logging, math
+from pathlib import Path
 import numpy as np
 
 from fastapi import HTTPException
@@ -3514,21 +3515,76 @@ class TormentFabric:
             _warmup_dir = Path(self.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
             _warmup = WarmupTracker(_warmup_dir, base_dir=self.data_dir)
 
-            # Check which deep EIDs also exist in core (short-path compressed)
-            _core_compressed: set = set()
+            # Source-row presence predicate for beta filtering and the
+            # short-path compressed-eid set. Per Cluster 5 Path C Q1
+            # implementation framing
+            # (docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md):
+            # orphaned deep hits -- those whose source row is absent from
+            # MemoryGraph.entities -- must NOT leave _query_deep_lane on
+            # the normal consumer path. If no private graph exists for
+            # this agent, every deep hit is orphaned by definition.
             _pg = self.private_graphs.get(ak)
-            if _pg:
-                for _eid_key, _ent in _pg.entities.items():
-                    if (_ent.payload or {}).get("compressed"):
-                        _core_compressed.add(int(_eid_key))
+            if _pg is None:
+                return []
+            _pg_entities = _pg.entities
+
+            # Identify short-path compressed eids for spirit-return
+            # enrichment.
+            _core_compressed: set = set()
+            for _eid_key, _ent in _pg_entities.items():
+                if (_ent.payload or {}).get("compressed"):
+                    _core_compressed.add(int(_eid_key))
+
+            # Wrapper used internally to emit the canonical
+            # authority_status marker per Step C. The wrapper does not
+            # flow downstream in H1; only its marker block is injected
+            # into the returned dict.
+            from .deep_hits import DeepRetrievalHit
 
             results: List[Dict[str, Any]] = []
             for _dm in _deep_hits:
+                # Beta filter: source row must be present in
+                # MemoryGraph.entities at access time. Defensive: tolerate
+                # both int and string keys in case any writer path leaves
+                # a JSON-roundtripped string key behind.
+                _eid = int(_dm.eid)
+                if _eid not in _pg_entities and str(_eid) not in _pg_entities:
+                    continue
+
                 _ws = _warmup.get_or_create(_dm.eid, canonical_step)
                 _spirit = enrich_deep_memory_hit(
-                    _dm, _current_sym, _ws, int(_dm.eid) in _core_compressed
+                    _dm, _current_sym, _ws, _eid in _core_compressed
                 )
-                results.append(inject_spirit_return_into_hit(_spirit))
+                _hit_dict = inject_spirit_return_into_hit(_spirit)
+
+                # Inject canonical authority_status marker (Path C 4.1).
+                # The wrapper is constructed for the marker block only;
+                # it does not flow downstream in H1.
+                _wrapper = DeepRetrievalHit(
+                    source_eid=_eid,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    compressed_step=int(getattr(_dm, "compressed_step", 0) or 0),
+                    similarity_score=float(
+                        getattr(_dm, "compression_score", 0.0) or 0.0
+                    ),
+                    embedding_ref=(
+                        dict(_dm.embedding_ref)
+                        if isinstance(getattr(_dm, "embedding_ref", None), dict)
+                        else None
+                    ),
+                    display_text=(
+                        str(_dm.summary)
+                        if getattr(_dm, "summary", None)
+                        else None
+                    ),
+                    derivative_metadata=dict(getattr(_dm, "metadata", {}) or {}),
+                )
+                _hit_dict["authority_status"] = (
+                    _wrapper.to_dict()["authority_status"]
+                )
+
+                results.append(_hit_dict)
 
             return results
         except Exception:
