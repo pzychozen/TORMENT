@@ -334,7 +334,23 @@ def update_governance(
 
     Raises:
         ValueError: If a change key is not a valid governance flag.
+        NonAuthoritativeMemoryError: If payload is a NonAuthoritativeDeepHit
+            subtype (DeepRetrievalHit, OrphanedDeepHit). The guard fires
+            before any mutation; see docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md
+            Step 4.
+
+    Path C Q1 enforcement: rejects any NonAuthoritativeDeepHit subtype
+    passed where a memory payload is expected. This is the mutation
+    surface for MemoryGovernanceFlags, so the guard must run BEFORE
+    any payload mutation; doing so produces a clean
+    NonAuthoritativeMemoryError instead of a confusing mid-function
+    failure downstream of resolve_governance.
     """
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(payload)
+
     valid_flags = {f.name for f in MemoryGovernanceFlags.__dataclass_fields__.values()}
     bad_keys = set(changes.keys()) - valid_flags
     if bad_keys:
