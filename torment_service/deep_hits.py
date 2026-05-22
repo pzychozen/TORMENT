@@ -226,3 +226,94 @@ class OrphanedDeepHit(NonAuthoritativeDeepHit):
             }
         )
         return base
+
+# ---------------------------------------------------------------------------
+# Authority guard (Shape B enforcement primitive)
+# ---------------------------------------------------------------------------
+#
+# The wrapper-type contract (Step B) says authority-bearing APIs must reject
+# any NonAuthoritativeDeepHit subtype. This guard is the standalone
+# enforcement primitive. Authority-bearing APIs call
+# ``assert_authoritative_memory(value)`` at entry; it raises
+# ``NonAuthoritativeMemoryError`` if the value announces non-authoritative
+# status.
+#
+# The guard is a NEGATIVE check: returning normally means the value is not
+# structurally non-authoritative. It does NOT certify the value is
+# authenticated authoritative memory -- that responsibility belongs to the
+# source-row read via MemoryGraph.
+
+
+class NonAuthoritativeMemoryError(TypeError):
+    """Raised when a non-authoritative deep hit is passed where
+    authoritative memory is required.
+
+    Inherits from ``TypeError`` because the failure is a type contract
+    violation: the caller passed a structurally non-authoritative value
+    into an authority-bearing API.
+
+    Diagnostic attributes carry the rejected value's identity so that
+    callers, telemetry, and audit logs can trace the offending input
+    without re-introspecting the wrapper:
+
+    Attributes
+    ----------
+    received_type : type
+        The concrete subtype of ``NonAuthoritativeDeepHit`` that was
+        rejected (e.g., ``DeepRetrievalHit``, ``OrphanedDeepHit``).
+    source_eid : int
+        The source EID the rejected wrapper points to.
+    role : str
+        The wrapper's ``authority_status.role`` value
+        (e.g., ``"retrieval_echo"``, ``"orphaned_echo"``). ``"unknown"``
+        if the role cannot be extracted.
+    """
+
+    def __init__(self, value: "NonAuthoritativeDeepHit") -> None:
+        self.received_type = type(value)
+        try:
+            self.source_eid = int(value.source_eid)
+        except Exception:
+            self.source_eid = -1
+        try:
+            self.role = str(value.to_dict()["authority_status"]["role"])
+        except Exception:
+            self.role = "unknown"
+        super().__init__(
+            f"Authoritative memory required, received "
+            f"{self.received_type.__name__} "
+            f"(role={self.role!r}, source_eid={self.source_eid}). "
+            f"Call .rehydrate() to obtain the authoritative source row."
+        )
+
+
+def assert_authoritative_memory(value: object) -> None:
+    """Raise ``NonAuthoritativeMemoryError`` if ``value`` is a
+    non-authoritative deep-hit wrapper.
+
+    Authority-bearing APIs call this at entry to reject any
+    ``NonAuthoritativeDeepHit`` subtype. The check uses ``isinstance``
+    against the abstract base class, so any current or future
+    non-authoritative subtype is rejected by the same call.
+
+    Note
+    ----
+    This is a **negative guard**. Returning normally means the value is
+    not structurally non-authoritative. It does NOT certify the value
+    is verified authoritative memory; authority verification is the
+    source row's responsibility (``MemoryGraph``), not this helper.
+
+    Parameters
+    ----------
+    value : object
+        Any object. The helper only inspects whether it is a
+        ``NonAuthoritativeDeepHit`` instance.
+
+    Raises
+    ------
+    NonAuthoritativeMemoryError
+        If ``value`` is an instance of ``NonAuthoritativeDeepHit``
+        (any subtype).
+    """
+    if isinstance(value, NonAuthoritativeDeepHit):
+        raise NonAuthoritativeMemoryError(value)
