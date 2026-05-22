@@ -75,7 +75,18 @@ def should_emit_packet(payload: Optional[Dict[str, Any]] = None) -> bool:
 
     Called at packet emission time in fabric.ingest(), BEFORE building
     the ResonancePacket. This is the earliest boundary.
+
+    Path C Q1 enforcement: rejects any NonAuthoritativeDeepHit subtype
+    (DeepRetrievalHit, OrphanedDeepHit) passed where a memory payload
+    is expected. The guard is a structural tripwire matching the
+    Shape B wrapper-type contract; see
+    docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md Step 4.
     """
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(payload)
+
     gov = resolve_governance(payload)
     if gov.non_shareable:
         return False
