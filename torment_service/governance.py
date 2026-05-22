@@ -104,7 +104,18 @@ def is_compression_protected(payload: Optional[Dict[str, Any]] = None) -> bool:
         - decay_accelerated is IGNORED when protected=True
 
     Does NOT block manual operator actions (future: explicit override path).
+
+    Path C Q1 enforcement: rejects any NonAuthoritativeDeepHit subtype
+    (DeepRetrievalHit, OrphanedDeepHit) passed where a memory payload
+    is expected. The guard is a structural tripwire matching the
+    Shape B wrapper-type contract; see
+    docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md Step 4.
     """
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(payload)
+
     gov = resolve_governance(payload)
     return gov.protected
 
@@ -115,7 +126,18 @@ def is_decay_accelerated(payload: Optional[Dict[str, Any]] = None) -> bool:
     Protected memories NEVER get accelerated decay, even if the flag is set.
     This prevents contradictory state where someone marks a memory as both
     protected and decay-accelerated.
+
+    Path C Q1 enforcement: rejects any NonAuthoritativeDeepHit subtype
+    (DeepRetrievalHit, OrphanedDeepHit) passed where a memory payload
+    is expected. The guard is a structural tripwire matching the
+    Shape B wrapper-type contract; see
+    docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md Step 4.
     """
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(payload)
+
     gov = resolve_governance(payload)
     if gov.protected:
         return False  # protected always wins
@@ -131,7 +153,18 @@ def allows_collective_reingest(payload: Optional[Dict[str, Any]] = None) -> bool
 
     When False, convergence events involving this memory's content will not
     produce echoes back into this agent. Used by the policy engine in Phase D.
+
+    Path C Q1 enforcement: rejects any NonAuthoritativeDeepHit subtype
+    (DeepRetrievalHit, OrphanedDeepHit) passed where a memory payload
+    is expected. The guard is a structural tripwire matching the
+    Shape B wrapper-type contract; see
+    docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md Step 4.
     """
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(payload)
+
     gov = resolve_governance(payload)
     return not gov.collective_reingest_blocked
 
