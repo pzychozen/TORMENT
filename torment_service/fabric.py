@@ -3591,6 +3591,83 @@ class TormentFabric:
             return []  # Spirit return is non-fatal
 
     # -----------------------------------------------------------------------
+    # Alpha diagnostic helper (Path C Step E)
+    # -----------------------------------------------------------------------
+
+    def list_orphaned_deep_hits(
+        self,
+        workspace_id: str,
+        agent_id: str,
+    ) -> List["OrphanedDeepHit"]:
+        """Return all orphaned deep records for an agent's deep store.
+
+        An orphaned deep record is one whose source EID is absent from
+        MemoryGraph.entities at access time. Per Cluster 5 Path C Q1
+        framing: orphan records must never reach normal cognition,
+        autonomy, character, sharing, lifecycle, affect-attribution,
+        or governance paths.
+
+        This method is the alpha diagnostic building block. Callers
+        must be operator/admin/diagnostic surfaces only. It is NOT
+        called by _query_deep_lane or any cognition consumer.
+
+        Parameters
+        ----------
+        workspace_id, agent_id : str
+            Identifies the agent whose deep store is enumerated.
+
+        Returns
+        -------
+        list of OrphanedDeepHit
+            Empty list if no deep store exists for the agent.
+            All deep records become orphans if no private graph
+            exists for the agent.
+        """
+        from .deep_hits import OrphanedDeepHit
+
+        ak = self._agent_key(workspace_id, agent_id)
+
+        deep_store = self._deep_stores.get(ak)
+        if deep_store is None:
+            return []
+
+        # Intentional internal access to the deep store's record list.
+        # The alpha diagnostic surface is the one legitimate caller for
+        # this enumeration; normal cognition consumers go through
+        # _query_deep_lane, not through enumeration. A future hardening
+        # may extract a public iter_all() method on DeepMemoryStore.
+        try:
+            deep_store._ensure_loaded()
+        except Exception:
+            pass
+        all_records = list(getattr(deep_store, "_memories", None) or [])
+
+        pg = self.private_graphs.get(ak)
+        pg_entities = pg.entities if pg is not None else {}
+
+        now_ts = int(time.time())
+        orphans: List["OrphanedDeepHit"] = []
+        for record in all_records:
+            eid = int(record.eid)
+            # Defensive: tolerate both int and string keys, matching the
+            # beta-filter robustness applied at _query_deep_lane.
+            if eid in pg_entities or str(eid) in pg_entities:
+                continue
+            orphans.append(
+                OrphanedDeepHit(
+                    source_eid=eid,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    compressed_step=int(
+                        getattr(record, "compressed_step", 0) or 0
+                    ),
+                    orphan_reason="source_eid_not_found",
+                    detected_at=now_ts,
+                )
+            )
+        return orphans
+
+    # -----------------------------------------------------------------------
     # Canonical step helper
     # -----------------------------------------------------------------------
 
