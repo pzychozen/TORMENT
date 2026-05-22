@@ -246,6 +246,19 @@ def filter_llm_facing(
 
     Raises:
         ValueError: if surface is missing or not in _VALID_SURFACES.
+        NonAuthoritativeMemoryError: if any item in ``hits`` is a
+            NonAuthoritativeDeepHit subtype (DeepRetrievalHit,
+            OrphanedDeepHit). Fail-loud at the LLM-facing context
+            boundary; see Path C Q1 enforcement note below and
+            docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md
+            Step 4.
+
+    Path C Q1 enforcement: every item in ``hits`` is checked by
+    ``assert_authoritative_memory(hit)`` before the existing defensive
+    non-dict pass-through branch. This closes the latent authority leak
+    where a wrapper item (which is not a dict) would otherwise pass
+    through to LLM context untouched. The guard raises on the first
+    wrapper encountered; the rest of the list is not processed.
 
     Notes:
         - Authorization for include_raw_hits=True is the helper's last line
@@ -264,10 +277,20 @@ def filter_llm_facing(
             f"{sorted(_VALID_SURFACES)}; got {surface!r}"
         )
 
+    # Path C Q1 enforcement: see docstring. Inline import keeps the
+    # diff narrow; future cleanup may move to module-level imports.
+    from .deep_hits import assert_authoritative_memory
+
     results: list = []
     excluded: list = []
 
     for hit in hits:
+        # Path C Q1 enforcement: per-item rejection of NonAuthoritativeDeepHit
+        # subtypes. Placed BEFORE the existing defensive non-dict
+        # pass-through so wrappers cannot leak to LLM context. Raises
+        # on first wrapper; remaining list is not processed.
+        assert_authoritative_memory(hit)
+
         if not isinstance(hit, dict):
             results.append(hit)
             continue
