@@ -253,25 +253,142 @@ class EventDetector:
 # CompressionScorer — J→Z ordered scoring of memory nodes
 # ---------------------------------------------------------------------------
 
+def _protected_via_lifecycle(payload: dict):
+    """Q2-D Slice 5-b: lifecycle-first protected check for
+    ``derive_retention_tier``. Mirrors
+    ``governance._is_protected_via_lifecycle`` with a site-specific
+    log message; deliberately duplicated rather than imported to
+    avoid cross-module coupling on a transitional helper.
+
+    Returns:
+        ``True``  -- lifecycle envelope decisively says state=PROTECTED
+                     and the envelope is safe to decide from (row-
+                     authoritative, no disagreement with legacy
+                     markers).
+        ``False`` -- lifecycle envelope is decisively in a non-PROTECTED
+                     row-authoritative state with no disagreement.
+        ``None``  -- the lifecycle path cannot safely decide; the
+                     caller should fall back to the legacy
+                     protected-marker branch (canon/kind/tier/
+                     srg.is_crystal).
+
+    Returns ``None`` (fall back to legacy) when:
+
+    * ``read_lifecycle_envelope(payload)`` raises ``LifecycleStateError``
+      (payload is not a dict, or carries a malformed
+      ``lifecycle_status``).
+    * ``assert_lifecycle_row_authoritative(env)`` raises
+      ``NonAuthoritativeLifecycleError`` (the envelope announces a
+      side-channel join is required; the row alone cannot decide).
+    * ``detect_lifecycle_legacy_marker_disagreement(payload)`` reports
+      a ``STATE_MISMATCH`` or ``AUTHORITY_MISMATCH``. The detector
+      itself raising ``LifecycleStateError`` (malformed) is also a
+      fall-back trigger -- belt and braces.
+
+    On disagreement, emits a ``WARNING`` log line so operators can
+    observe real-world incidence of explicit/legacy conflicts during
+    the soft-migration period. Future Q2-D Slice 6 will remove the
+    legacy fallback once disagreement incidence is acceptable.
+
+    Second production consumer of the Q2-F enforcement primitive
+    (``assert_lifecycle_row_authoritative``). The Q2-F guard's raise
+    is caught here and converted to "decline to decide" -- not
+    propagated. Soft-migration shape, mirroring Slice 5.
+    """
+    # Inline imports match the existing compression.py style (see
+    # ``CompressionScorer._is_protected``'s late import of
+    # ``governance.is_compression_protected``). Keeps the diff narrow.
+    from .lifecycle import (
+        LifecycleState,
+        LifecycleStateError,
+        NonAuthoritativeLifecycleError,
+        assert_lifecycle_row_authoritative,
+        detect_lifecycle_legacy_marker_disagreement,
+        read_lifecycle_envelope,
+    )
+    try:
+        env = read_lifecycle_envelope(payload)
+    except LifecycleStateError:
+        return None
+    try:
+        assert_lifecycle_row_authoritative(env)
+    except NonAuthoritativeLifecycleError:
+        return None
+    try:
+        disagreement = detect_lifecycle_legacy_marker_disagreement(payload)
+    except LifecycleStateError:
+        return None
+    if disagreement is not None:
+        logger.warning(
+            "Q2-D Slice 5-b: lifecycle/legacy-marker disagreement at "
+            "derive_retention_tier: kind=%s explicit_state=%s "
+            "explicit_via=%s derived_via=%s; falling back to legacy "
+            "protected-marker branch",
+            disagreement.kind.value,
+            disagreement.explicit_state.value,
+            disagreement.explicit_via.value,
+            disagreement.derived_via.value,
+        )
+        return None
+    return env.state is LifecycleState.PROTECTED
+
+
 def derive_retention_tier(payload: dict) -> str:
     """Derive retention tier from payload fields at scoring time (Proposal D).
 
     No migration needed — tier is computed from existing payload fields.
 
     Returns one of: "protected", "identity", "relational", "situational", "echo"
+
+    Q2-D Slice 5-b (soft migration): the protected branch is now
+    lifecycle-first. The Q2-D Slice 1 derivation helper (via the
+    Slice 2 read shim) provides a single canonical answer for "is
+    this row protected?" that uses the same five legacy markers
+    (canon, kind, tier, srg.is_crystal, governance.protected) as a
+    fallback when no explicit envelope is present.
+
+    Protected-branch behavior:
+
+    * lifecycle path decisively says PROTECTED -> return "protected"
+    * lifecycle path decisively says non-PROTECTED -> SKIP the legacy
+      protected-marker checks and fall through to identity/echo/
+      tool_result/relational/situational logic
+    * lifecycle path declines to decide (malformed envelope, join-
+      required envelope, or explicit-vs-legacy disagreement) ->
+      fall back to the legacy protected-marker checks (canon, kind,
+      tier, srg.is_crystal) verbatim, then continue to non-protected
+      tier logic if no legacy protected marker matched
+
+    The non-protected tier logic (identity, echo, tool_result,
+    relational, situational) is untouched by Slice 5-b. Branches 2-6
+    of this function remain byte-identical to pre-Slice-5-b behavior.
+
+    Future Slice 6 will remove the legacy fallback inside the
+    protected branch.
     """
-    # Protected: canon, seed/identity kinds, SRG crystal
-    if payload.get("canon") is True:
+    # Q2-D Slice 5-b: lifecycle-first protected check.
+    lifecycle_protected = _protected_via_lifecycle(payload)
+    if lifecycle_protected is True:
         return "protected"
-    kind = str(payload.get("kind", payload.get("type", "")) or "")
-    if kind in ("seed", "identity", "core_identity"):
-        return "protected"
-    tier_field = str(payload.get("tier", "") or "")
-    if tier_field == "core_identity":
-        return "protected"
-    srg = payload.get("srg")
-    if isinstance(srg, dict) and srg.get("is_crystal", False):
-        return "protected"
+    if lifecycle_protected is None:
+        # Legacy protected-marker fallback. Preserved verbatim from
+        # pre-Slice-5-b behavior; the 4 checks below run only when
+        # the lifecycle path cannot safely decide.
+        if payload.get("canon") is True:
+            return "protected"
+        kind = str(payload.get("kind", payload.get("type", "")) or "")
+        if kind in ("seed", "identity", "core_identity"):
+            return "protected"
+        tier_field = str(payload.get("tier", "") or "")
+        if tier_field == "core_identity":
+            return "protected"
+        srg = payload.get("srg")
+        if isinstance(srg, dict) and srg.get("is_crystal", False):
+            return "protected"
+    # When lifecycle_protected is False, we skip the legacy protected
+    # branch and fall through directly to the non-protected tier logic
+    # below. The lifecycle envelope decisively said this row is NOT
+    # protected; respect that even if no legacy marker disagreed.
 
     # Identity: half_life >= 365 days
     hl = float(payload.get("half_life", payload.get("half_life_days", 0)) or 0)
