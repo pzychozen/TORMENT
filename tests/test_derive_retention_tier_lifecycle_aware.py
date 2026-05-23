@@ -227,7 +227,10 @@ def test_disagreement_state_mismatch_falls_back_to_protected_with_warning(
     ]
     assert len(warning_records) >= 1
     combined = " ".join(r.getMessage() for r in warning_records)
-    assert "Q2-D Slice 5-b" in combined
+    # Slice 5-c generalized the log marker to slice-agnostic "Q2-D"
+    # so the same helper can serve multiple callers; site name still
+    # accurately names the function.
+    assert "Q2-D" in combined
     assert "derive_retention_tier" in combined
     assert "state_mismatch" in combined
 
@@ -325,7 +328,8 @@ def test_disagreement_log_includes_slice_marker_and_function_name(caplog):
     with caplog.at_level(logging.WARNING, logger="torment_service.compression"):
         derive_retention_tier(payload)
     assert any(
-        "Q2-D Slice 5-b" in r.getMessage()
+        # Slice 5-c generalized "Q2-D Slice 5-b" to "Q2-D".
+        "Q2-D" in r.getMessage()
         and "derive_retention_tier" in r.getMessage()
         for r in caplog.records
     )
@@ -345,7 +349,9 @@ def test_no_warning_on_join_required_fallback(caplog):
     # No warning records emitted -- Q2-F short-circuits before the
     # disagreement detector runs.
     assert all(
-        "Q2-D Slice 5-b" not in r.getMessage() for r in caplog.records
+        # Slice 5-c generalized the marker to "Q2-D"; check for that
+        # to confirm no disagreement warning was emitted at all.
+        "Q2-D" not in r.getMessage() for r in caplog.records
     )
 
 

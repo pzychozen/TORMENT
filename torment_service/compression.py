@@ -253,12 +253,24 @@ class EventDetector:
 # CompressionScorer — J→Z ordered scoring of memory nodes
 # ---------------------------------------------------------------------------
 
-def _protected_via_lifecycle(payload: dict):
-    """Q2-D Slice 5-b: lifecycle-first protected check for
-    ``derive_retention_tier``. Mirrors
-    ``governance._is_protected_via_lifecycle`` with a site-specific
-    log message; deliberately duplicated rather than imported to
-    avoid cross-module coupling on a transitional helper.
+def _protected_via_lifecycle(payload: dict, *, site: str):
+    """Q2-D shared protected check for compression.py readers
+    (``derive_retention_tier`` from Slice 5-b and
+    ``CompressionScorer._is_protected`` from Slice 5-c). Mirrors
+    ``governance._is_protected_via_lifecycle`` with a caller-supplied
+    site name in the disagreement log; deliberately duplicated from
+    governance rather than imported to avoid cross-module coupling
+    on a transitional helper.
+
+    Parameters
+    ----------
+    payload : dict
+        The memory row dict to consult.
+    site : str
+        Caller name to include in disagreement warning logs (e.g.,
+        ``"derive_retention_tier"`` or
+        ``"CompressionScorer._is_protected"``). Lets a single shared
+        helper produce accurate per-site audit messages.
 
     Returns:
         ``True``  -- lifecycle envelope decisively says state=PROTECTED
@@ -320,10 +332,10 @@ def _protected_via_lifecycle(payload: dict):
         return None
     if disagreement is not None:
         logger.warning(
-            "Q2-D Slice 5-b: lifecycle/legacy-marker disagreement at "
-            "derive_retention_tier: kind=%s explicit_state=%s "
-            "explicit_via=%s derived_via=%s; falling back to legacy "
-            "protected-marker branch",
+            "Q2-D lifecycle/legacy-marker disagreement at %s: kind=%s "
+            "explicit_state=%s explicit_via=%s derived_via=%s; falling "
+            "back to legacy protected-marker branch",
+            site,
             disagreement.kind.value,
             disagreement.explicit_state.value,
             disagreement.explicit_via.value,
@@ -367,7 +379,9 @@ def derive_retention_tier(payload: dict) -> str:
     protected branch.
     """
     # Q2-D Slice 5-b: lifecycle-first protected check.
-    lifecycle_protected = _protected_via_lifecycle(payload)
+    lifecycle_protected = _protected_via_lifecycle(
+        payload, site="derive_retention_tier",
+    )
     if lifecycle_protected is True:
         return "protected"
     if lifecycle_protected is None:
@@ -445,14 +459,45 @@ class CompressionScorer:
     def _is_protected(self, payload: dict) -> bool:
         """Return True if this node must never be compressed.
 
-        Checks (in order):
+        Legacy fallback checks (in order):
             1. Canon flag (existing)
             2. Protected kinds — seed, anchor, identity_anchor (existing)
             3. Protected tiers — core_identity (existing)
-            4. Governance 'protected' flag (Phase D addition)
+            4. Governance 'protected' flag (Phase D addition, via
+               ``governance.is_compression_protected``)
+
+        Q2-D Slice 5-c (soft migration): the scorer's protected check
+        is now lifecycle-first via :func:`_protected_via_lifecycle`,
+        the same helper used by Slice 5-b's
+        ``derive_retention_tier``. If the lifecycle path decisively
+        says protected/non-protected, that answer wins. If the
+        lifecycle path declines (malformed envelope, join-required
+        envelope, or explicit/legacy disagreement), the legacy
+        fallback above runs verbatim. A warning is logged on
+        disagreement so operators can observe explicit/legacy
+        conflicts during the soft-migration period; future Slice 6
+        will remove the fallback.
+
+        Behavior unification: after Slice 5-c, a payload with
+        ``srg.is_crystal=True`` and no other markers returns True
+        (was False pre-Slice-5-c). The other two protected readers
+        already treat ``srg.is_crystal`` as protected via the
+        lifecycle path; Slice 5-c brings the scorer into alignment.
 
         Invariant: protected memories are never weakened automatically.
         """
+        # Q2-D Slice 5-c: lifecycle-first protected check.
+        lifecycle_protected = _protected_via_lifecycle(
+            payload, site="CompressionScorer._is_protected",
+        )
+        if lifecycle_protected is True:
+            return True
+        if lifecycle_protected is False:
+            # Lifecycle decisively says non-PROTECTED. Skip legacy
+            # fallback and return False directly.
+            return False
+        # lifecycle_protected is None -> legacy fallback (existing
+        # inline + governance-delegation logic, preserved verbatim).
         if payload.get("canon") is True:
             return True
         kind = str(payload.get("kind", payload.get("type", "")) or "")
