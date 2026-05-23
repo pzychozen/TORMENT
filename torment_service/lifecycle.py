@@ -23,17 +23,21 @@ Public surface:
 - ``LifecycleSetVia``       -- closed write-mechanism vocabulary (str Enum)
 - ``LifecycleStateError``   -- validation failure exception
 - ``validate_lifecycle_envelope(d)`` -- canonical dict -> typed conversion
+- ``read_lifecycle_envelope(payload, *, now=None)`` -- read-side migration
+  shim; returns the validated envelope from a payload, or a canonical
+  UNSET envelope when the payload predates Q2.
 
 Q2 invariant: a consumer reading a memory row must be able to determine
 its lifecycle state -- including whether the row is authoritative for
 that state or whether a join to a named side channel is required --
 without guessing.
 
-Slice 0 commitment: this module is NOT yet load-bearing. No production
-caller in ``torment_service/`` constructs, reads, or persists a
-``LifecycleStatus``. The envelope vocabulary exists in code; subsequent
-slices wire it into write sites, read sites, the protected dual-source
-collapse, the review-queue join, and the migration shim.
+Slice 0 / H1a commitment: this module is NOT yet load-bearing. No
+production caller in ``torment_service/`` constructs, reads, or persists
+a ``LifecycleStatus``. The envelope vocabulary and the read-side
+migration shim exist in code; subsequent slices wire them into write
+sites, read sites, the protected dual-source collapse, and the
+review-queue join.
 
 Note on the ``ARCHIVED`` lifecycle state:
     ``LifecycleState.ARCHIVED`` is the **lifecycle stage** "this memory
@@ -43,6 +47,7 @@ Note on the ``ARCHIVED`` lifecycle state:
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -520,3 +525,87 @@ def validate_lifecycle_envelope(d: Any) -> LifecycleStatus:
         set_by=set_by,
         history_ref=history_ref,
     )
+
+
+# ---------------------------------------------------------------------------
+# Read-side migration shim (Q2-H1a)
+# ---------------------------------------------------------------------------
+
+
+def read_lifecycle_envelope(
+    payload: Dict[str, Any],
+    *,
+    now: Optional[int] = None,
+) -> LifecycleStatus:
+    """Read a lifecycle envelope from a memory payload, lazily deriving for legacy rows.
+
+    This is the Q2-H1a migration shim. It exists so that legacy payloads
+    written before the Q2 lifecycle vocabulary landed have a deterministic,
+    safe interpretation when consumers begin reading the envelope.
+
+    Behavior:
+
+    1. If ``payload["lifecycle_status"]`` is present and non-null, it is
+       passed through :func:`validate_lifecycle_envelope` and the typed
+       result is returned. A ``LifecycleStateError`` from the validator is
+       **not caught**: a malformed envelope is a real data-integrity signal
+       and must propagate, not be silently downgraded to ``UNSET``. Silent
+       downgrade would let a corrupt envelope masquerade as a legacy row
+       and violate the Q2 invariant on read.
+    2. If ``payload["lifecycle_status"]`` is absent or explicitly ``None``,
+       the helper returns the canonical legacy-default envelope:
+       ``state=UNSET``, ``is_authoritative_on_row=True``,
+       ``set_by.actor=MIGRATION``, ``set_by.via=UNSET_DEFAULT``,
+       ``requires_join=None``, ``history_ref=None``. Missing key and
+       explicit ``None`` are treated identically -- both mean "legacy row,
+       no lifecycle was ever written."
+    3. The helper **never mutates** ``payload``. The derived envelope is a
+       read-time interpretation, not persistence. Writeback is the job of
+       a later wiring slice.
+
+    Parameters
+    ----------
+    payload : dict
+        The memory row dict. Must be a dict; other types raise.
+    now : int, optional
+        Unix timestamp to record in the synthesized ``set_by.at`` of a
+        lazily-derived UNSET envelope. When omitted, defaults to
+        ``int(time.time())``. Tests should pass this explicitly for
+        deterministic results. Ignored when the payload already carries a
+        valid envelope (the embedded envelope's own ``set_by.at`` is
+        preserved).
+
+    Returns
+    -------
+    LifecycleStatus
+        Either the parsed envelope from the payload or the canonical
+        UNSET migration-shim envelope.
+
+    Raises
+    ------
+    LifecycleStateError
+        If ``payload`` is not a dict, or if a present, non-null
+        ``lifecycle_status`` fails validation.
+    """
+    if not isinstance(payload, dict):
+        raise LifecycleStateError(
+            "payload", "not_a_dict",
+            f"got {type(payload).__name__}",
+        )
+
+    raw = payload.get("lifecycle_status")
+    if raw is None:
+        at = now if now is not None else int(time.time())
+        return LifecycleStatus(
+            state=LifecycleState.UNSET,
+            is_authoritative_on_row=True,
+            requires_join=None,
+            set_by=LifecycleSetBy(
+                actor=LifecycleActor.MIGRATION,
+                via=LifecycleSetVia.UNSET_DEFAULT,
+                at=at,
+            ),
+            history_ref=None,
+        )
+
+    return validate_lifecycle_envelope(raw)
