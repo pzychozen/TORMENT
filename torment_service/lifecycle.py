@@ -33,6 +33,13 @@ Public surface:
   primitive; raises when the envelope announces a side-channel join is
   required, returns ``None`` when the row is authoritative for its own
   lifecycle answer.
+- ``derive_protected_lifecycle_from_legacy_markers(payload, *, now=None)``
+  -- Q2-D Slice 1 derivation: returns a row-authoritative PROTECTED
+  envelope when legacy protected markers (canon, kind, tier,
+  srg.is_crystal, governance.protected) are present; returns ``None``
+  otherwise. Helper-only -- production wiring into the H1a read shim,
+  the H1c write stamp, and existing protected readers is deferred to
+  later Q2-D slices.
 
 Q2 invariant: a consumer reading a memory row must be able to determine
 its lifecycle state -- including whether the row is authoritative for
@@ -751,3 +758,173 @@ def assert_lifecycle_row_authoritative(
         )
     if not typed.is_authoritative_on_row:
         raise NonAuthoritativeLifecycleError(typed)
+
+
+# ---------------------------------------------------------------------------
+# Q2-D Slice 1: protected dual-source derivation
+# ---------------------------------------------------------------------------
+#
+# Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md
+# §9 R1, the system carries five independent legacy markers that today
+# signal "this row is protected" in compression/governance code:
+#
+#     1. payload["canon"] is True                          -> CANON_SET
+#     2. payload["kind"] in {seed, identity, core_identity}-> SEED_PLANT *
+#        (or payload["type"] as fallback when "kind" absent)
+#     3. payload["tier"] == "core_identity"                -> TIER_SET
+#     4. payload["srg"]["is_crystal"] truthy               -> SRG_CRYSTAL
+#     5. payload["governance"]["protected"] truthy         -> GOVERNANCE_FLAG
+#
+# This helper defines the Q2-D derivation law: given those legacy markers,
+# what canonical Q2 LifecycleStatus envelope does the row "really" carry?
+# It is the analog of H1a for the protected dimension specifically.
+#
+# Production wiring is deliberately deferred. This slice defines the law;
+# later Q2-D slices apply it:
+#   Slice 2: H1a read shim consults this derivation for legacy rows
+#   Slice 3: H1c write stamp consults this derivation before defaulting
+#            to UNSET
+#   Slice 4: disagreement detection between supplied envelope and legacy
+#            markers
+#   Slice 5+: existing protected readers (is_compression_protected,
+#             derive_retention_tier) start consulting the envelope, with
+#             assert_lifecycle_row_authoritative at the boundary
+#
+# * Temporary legacy-marker mapping: SEED_PLANT is reused here for every
+#   kind-based protected marker (seed, identity, core_identity) because
+#   no clearer existing constant fits and the ratified Slice 1 scope
+#   avoids adding new vocabulary. This is a denormalization for audit
+#   purposes, not a semantic claim that every identity/core_identity row
+#   was literally seed-planted. A future slice may introduce a dedicated
+#   kind-based via if the audit story demands it.
+#
+# Precedence order matches ``compression.derive_retention_tier`` exactly,
+# so the eventual reader migration (Slice 5+) can swap the legacy
+# computation for the envelope-driven path without changing observable
+# retention-tier output.
+
+
+def derive_protected_lifecycle_from_legacy_markers(
+    payload: Dict[str, Any],
+    *,
+    now: Optional[int] = None,
+) -> Optional[LifecycleStatus]:
+    """Derive a Q2 PROTECTED envelope from a memory payload's legacy markers.
+
+    Q2-D Slice 1: defines the law for mapping pre-Q2 protected markers
+    onto the Q2 lifecycle envelope vocabulary, without applying that law
+    at any production read/write site.
+
+    Inspection precedence (mirrors ``compression.derive_retention_tier``):
+
+    1. ``payload["canon"] is True``                         -> CANON_SET
+    2. ``payload["kind"]`` (fallback ``payload["type"]``)
+       in ``{"seed", "identity", "core_identity"}``         -> SEED_PLANT
+    3. ``payload["tier"] == "core_identity"``               -> TIER_SET
+    4. ``payload["srg"]["is_crystal"]`` truthy              -> SRG_CRYSTAL
+    5. ``payload["governance"]["protected"]`` truthy        -> GOVERNANCE_FLAG
+
+    The first matching marker wins; remaining markers are not inspected.
+
+    Behavior:
+
+    * Returns ``None`` when NO legacy protected marker is present. Does
+      not fall back to UNSET -- distinguishing "no protected derivation
+      available" from "definitely unset" is structural and must remain
+      the H1a shim's responsibility, not this helper's. Callers that
+      want a non-None envelope for every payload should compose this
+      helper with ``read_lifecycle_envelope`` explicitly.
+    * Returns a row-authoritative ``LifecycleStatus`` with
+      ``state=PROTECTED``, ``set_by.actor=MIGRATION``, ``set_by.via``
+      set to the first matching marker's constant, and
+      ``set_by.at = now if now is not None else int(time.time())``.
+    * ``actor=MIGRATION`` records that the answer was interpreted from
+      pre-Q2 legacy markers, mirroring the H1a shim's actor choice.
+      A future write-time application of this derivation may use a
+      different actor; this helper itself is read/interpretation scoped.
+    * Does NOT consult ``payload["lifecycle_status"]``. Resolution of
+      any disagreement between an explicit envelope and legacy markers
+      is Q2-D Slice 4's concern.
+    * Does NOT mutate ``payload``.
+
+    On marker truth semantics:
+
+    * ``canon``: strict ``is True`` -- matches the existing
+      ``derive_retention_tier`` check. ``False``, ``None``, ``"yes"``,
+      ``1`` do not trigger.
+    * ``kind`` / ``type``: exact string membership in the protected
+      set. Coerced via ``str(... or "")`` for None-safety.
+    * ``tier``: exact string equality with ``"core_identity"``.
+    * ``srg.is_crystal``: truthy (matches existing
+      ``srg.get("is_crystal", False)``). ``srg`` must itself be a dict;
+      non-dict ``srg`` is silently ignored (defensive).
+    * ``governance.protected``: truthy (parallel to srg). ``governance``
+      must be a dict; non-dict is silently ignored.
+
+    Parameters
+    ----------
+    payload : dict
+        The memory row dict. Must be a dict; other types raise.
+    now : int, optional
+        Unix timestamp to record in the synthesized ``set_by.at``.
+        Defaults to ``int(time.time())``. Tests should pass this
+        explicitly for deterministic results.
+
+    Returns
+    -------
+    LifecycleStatus or None
+        A row-authoritative PROTECTED envelope when any marker matched;
+        otherwise ``None``.
+
+    Raises
+    ------
+    LifecycleStateError
+        If ``payload`` is not a dict.
+    """
+    if not isinstance(payload, dict):
+        raise LifecycleStateError(
+            "payload", "not_a_dict",
+            f"got {type(payload).__name__}",
+        )
+
+    via: Optional[LifecycleSetVia] = None
+
+    # 1. canon=True (strict)
+    if payload.get("canon") is True:
+        via = LifecycleSetVia.CANON_SET
+    else:
+        # 2. kind / type fallback (string membership)
+        kind = str(payload.get("kind", payload.get("type", "")) or "")
+        if kind in ("seed", "identity", "core_identity"):
+            via = LifecycleSetVia.SEED_PLANT
+        else:
+            # 3. tier (string equality)
+            tier = str(payload.get("tier", "") or "")
+            if tier == "core_identity":
+                via = LifecycleSetVia.TIER_SET
+            else:
+                # 4. srg.is_crystal (truthy; srg must be a dict)
+                srg = payload.get("srg")
+                if isinstance(srg, dict) and srg.get("is_crystal", False):
+                    via = LifecycleSetVia.SRG_CRYSTAL
+                else:
+                    # 5. governance.protected (truthy; gov must be a dict)
+                    gov = payload.get("governance")
+                    if isinstance(gov, dict) and gov.get("protected", False):
+                        via = LifecycleSetVia.GOVERNANCE_FLAG
+
+    if via is None:
+        return None
+
+    at = now if now is not None else int(time.time())
+    return LifecycleStatus(
+        state=LifecycleState.PROTECTED,
+        is_authoritative_on_row=True,
+        requires_join=None,
+        set_by=LifecycleSetBy(
+            actor=LifecycleActor.MIGRATION,
+            via=via,
+            at=at,
+        ),
+        history_ref=None,
+    )
