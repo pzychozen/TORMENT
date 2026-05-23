@@ -40,6 +40,21 @@ Public surface:
   otherwise. Helper-only -- production wiring into the H1a read shim,
   the H1c write stamp, and existing protected readers is deferred to
   later Q2-D slices.
+- ``LifecycleDisagreementKind``        -- closed set of legacy-marker
+  disagreement categories detected by Q2-D Slice 4
+  (``STATE_MISMATCH``, ``AUTHORITY_MISMATCH``). ``PROVENANCE_DRIFT``
+  is deliberately not in this slice's vocabulary.
+- ``LifecycleLegacyMarkerDisagreement`` -- structured report returned
+  by the Q2-D Slice 4 detector when an explicit lifecycle envelope
+  conflicts with what legacy protected markers would derive for the
+  same payload.
+- ``detect_lifecycle_legacy_marker_disagreement(payload)`` -- Q2-D
+  Slice 4 detection helper; returns a structured disagreement report
+  when a load-bearing conflict is present, or ``None`` otherwise.
+  Never mutates the payload, never raises on disagreement (returns
+  it). Helper-only -- production wiring into the H1b inspector,
+  write-side raising, or reader migration is deferred to later
+  separately-ratified slices.
 
 Q2 invariant: a consumer reading a memory row must be able to determine
 its lifecycle state -- including whether the row is authoritative for
@@ -989,4 +1004,245 @@ def derive_protected_lifecycle_from_legacy_markers(
             at=at,
         ),
         history_ref=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Q2-D Slice 4: explicit-envelope-vs-legacy-marker disagreement detection
+# ---------------------------------------------------------------------------
+#
+# Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md
+# §9 R1 / Hazard C: a payload can carry BOTH an explicit
+# ``lifecycle_status`` envelope AND legacy protected markers (canon,
+# kind, tier, srg.is_crystal, governance.protected). Slice 2 (read
+# shim) and Slice 3 (write stamp) both preserve the explicit envelope
+# verbatim in that case -- the explicit-wins contract. But the system
+# has had no way to even NOTICE when explicit and legacy disagree.
+#
+# This slice adds the detection law. It does NOT change any production
+# behavior; it returns a structured report so future slices can decide
+# whether to log, surface in observability (H1b inspector), warn at
+# write time, or gate at read time.
+#
+# Disagreement taxonomy (closed at this slice):
+#
+#   STATE_MISMATCH      -- explicit envelope state != PROTECTED, while
+#                          legacy markers derive PROTECTED. Both sides
+#                          disagree about what stage the row is in.
+#                          Strongest conflict. Example: explicit
+#                          ``state=unset + canon=True``.
+#
+#   AUTHORITY_MISMATCH  -- explicit envelope state == PROTECTED, but
+#                          the explicit envelope is NOT row-authoritative
+#                          (announces a side-channel join is required).
+#                          Legacy markers always derive a row-authoritative
+#                          PROTECTED. The two sides disagree about
+#                          whether the row alone can be trusted at face
+#                          value. Example: explicit ``state=protected,
+#                          is_authoritative_on_row=False`` + canon=True.
+#
+# Deliberately NOT a disagreement at this slice:
+#
+#   PROVENANCE_DRIFT    -- both sides agree on
+#                          ``state=PROTECTED, is_authoritative_on_row=True``
+#                          but record different ``set_by.via``. Audit-
+#                          interesting; not decision-bearing. A future
+#                          audit slice may surface drift if needed.
+#
+#   actor mismatch      -- Slice 3 deliberately introduced the
+#                          MIGRATION-vs-SYSTEM distinction as an
+#                          AUDIT FEATURE (read-side legacy interpretation
+#                          vs write-side runtime assertion). Treating
+#                          it as a disagreement would walk back Slice 3's
+#                          design. The detector ignores actor.
+# ---------------------------------------------------------------------------
+
+
+class LifecycleDisagreementKind(str, Enum):
+    """Closed set of legacy-marker disagreement categories detected by
+    :func:`detect_lifecycle_legacy_marker_disagreement`.
+
+    Q2-D Slice 4 vocabulary: two kinds, both load-bearing.
+
+    * ``STATE_MISMATCH`` -- explicit envelope state is NOT PROTECTED
+      while legacy markers derive PROTECTED. The two answers
+      structurally disagree about what stage the row is in.
+    * ``AUTHORITY_MISMATCH`` -- both sides agree state=PROTECTED but
+      the explicit envelope is not row-authoritative (announces a
+      side-channel join is required), while legacy markers always
+      derive a row-authoritative PROTECTED. The two answers disagree
+      about whether the row alone can be trusted.
+
+    PROVENANCE_DRIFT (both sides agree state=PROTECTED row-authoritative
+    but via differs) is deliberately NOT in this vocabulary at Slice 4.
+    Both sides agree on the load-bearing facts; via differences are
+    audit-interesting but not decision-bearing.
+    """
+
+    STATE_MISMATCH = "state_mismatch"
+    AUTHORITY_MISMATCH = "authority_mismatch"
+
+
+@dataclass(frozen=True, kw_only=True)
+class LifecycleLegacyMarkerDisagreement:
+    """Structured report of a conflict between an explicit lifecycle
+    envelope and what legacy protected markers would derive for the
+    same payload.
+
+    Returned (not raised) by
+    :func:`detect_lifecycle_legacy_marker_disagreement`. The helper
+    produces this so consumers -- future H1b inspector enrichment,
+    optional write-side warning, eventual protected-reader migration --
+    can decide independently whether to log, surface in observability,
+    raise, or short-circuit.
+
+    The ``derived_state`` field is NOT included at Slice 4 because the
+    Q2-D Slice 1 derivation helper currently only knows about PROTECTED.
+    Adding ``derived_state`` later (if derivation extends to other
+    states) is a non-breaking change.
+
+    Attributes
+    ----------
+    kind : LifecycleDisagreementKind
+        The category of disagreement detected.
+    explicit_state : LifecycleState
+        The state of the explicit envelope on the payload.
+    explicit_is_authoritative_on_row : bool
+        The ``is_authoritative_on_row`` flag of the explicit envelope.
+    explicit_via : LifecycleSetVia
+        The ``set_by.via`` of the explicit envelope (audit trail of
+        how the explicit envelope was originally assigned).
+    derived_via : LifecycleSetVia
+        Which legacy marker won under the canonical precedence order
+        (canon > kind/type > tier > srg.is_crystal > governance.protected).
+    """
+
+    kind: LifecycleDisagreementKind
+    explicit_state: LifecycleState
+    explicit_is_authoritative_on_row: bool
+    explicit_via: LifecycleSetVia
+    derived_via: LifecycleSetVia
+
+
+def detect_lifecycle_legacy_marker_disagreement(
+    payload: Dict[str, Any],
+) -> Optional[LifecycleLegacyMarkerDisagreement]:
+    """Detect a conflict between an explicit lifecycle envelope and
+    what legacy protected markers would derive for the same payload.
+
+    Q2-D Slice 4 detection law. The helper compares two answers about
+    the same row:
+
+    1. The explicit ``payload["lifecycle_status"]`` (if present and
+       non-null), validated through :func:`validate_lifecycle_envelope`.
+    2. The protected envelope derivable from legacy markers (canon,
+       kind, tier, srg.is_crystal, governance.protected) via
+       :func:`derive_protected_lifecycle_from_legacy_markers`.
+
+    Returns a structured ``LifecycleLegacyMarkerDisagreement`` when the
+    two answers conflict on a load-bearing fact, or ``None`` when no
+    actionable disagreement exists.
+
+    Returns ``None`` when:
+
+    * payload has no explicit ``lifecycle_status`` (missing or explicit
+      ``None``);
+    * payload has an explicit valid envelope but no legacy protected
+      markers;
+    * BOTH the explicit envelope and the legacy markers agree on
+      ``state=PROTECTED`` AND ``is_authoritative_on_row=True``, even if
+      ``set_by.via`` differs -- provenance drift is NOT surfaced as a
+      disagreement at this slice.
+
+    Returns ``LifecycleLegacyMarkerDisagreement(kind=STATE_MISMATCH, ...)``
+    when:
+
+    * the explicit envelope's state is NOT ``PROTECTED``, and
+    * legacy markers derive ``PROTECTED``.
+
+    Returns ``LifecycleLegacyMarkerDisagreement(kind=AUTHORITY_MISMATCH, ...)``
+    when:
+
+    * the explicit envelope's state IS ``PROTECTED``, and
+    * the explicit envelope is NOT row-authoritative (announces a
+      side-channel join), and
+    * legacy markers derive ``PROTECTED`` (which is always row-
+      authoritative).
+
+    Raises ``LifecycleStateError`` when:
+
+    * ``payload`` is not a dict;
+    * ``payload["lifecycle_status"]`` is present but malformed (the
+      detector does NOT swallow malformation into a disagreement;
+      corruption stays loud, same as everywhere else in Q2).
+
+    Never mutates ``payload``. Never raises on disagreement (returns
+    the report). The actor distinction between the read-side
+    derivation (``MIGRATION``) and the write-side stamp (``SYSTEM``)
+    is intentional and is NOT a disagreement; the detector ignores
+    actor entirely.
+
+    Parameters
+    ----------
+    payload : dict
+        The memory row dict. Must be a dict; other types raise.
+
+    Returns
+    -------
+    LifecycleLegacyMarkerDisagreement or None
+        A structured disagreement report if a load-bearing conflict is
+        detected, otherwise ``None``.
+
+    Raises
+    ------
+    LifecycleStateError
+        If ``payload`` is not a dict or if a present
+        ``lifecycle_status`` fails validation.
+    """
+    if not isinstance(payload, dict):
+        raise LifecycleStateError(
+            "payload", "not_a_dict",
+            f"got {type(payload).__name__}",
+        )
+
+    raw = payload.get("lifecycle_status")
+    if raw is None:
+        return None
+
+    # Validate the explicit envelope. Malformed propagates as
+    # LifecycleStateError -- we do NOT swallow corruption into a
+    # disagreement report.
+    explicit_env = validate_lifecycle_envelope(raw)
+
+    # Derive the protected envelope from legacy markers. Returns None
+    # when no marker is present; in that case there is nothing to
+    # disagree with.
+    derived_env = derive_protected_lifecycle_from_legacy_markers(payload)
+    if derived_env is None:
+        return None
+
+    # Three branches:
+    #   (a) explicit PROTECTED + row-authoritative -> agreement
+    #       (provenance drift NOT surfaced)
+    #   (b) explicit PROTECTED + NOT row-authoritative -> AUTHORITY_MISMATCH
+    #   (c) explicit state != PROTECTED -> STATE_MISMATCH
+    if explicit_env.state is LifecycleState.PROTECTED:
+        if explicit_env.is_authoritative_on_row:
+            # Both sides agree on the load-bearing facts. Any via
+            # difference is provenance drift, deliberately not surfaced.
+            return None
+        return LifecycleLegacyMarkerDisagreement(
+            kind=LifecycleDisagreementKind.AUTHORITY_MISMATCH,
+            explicit_state=explicit_env.state,
+            explicit_is_authoritative_on_row=False,
+            explicit_via=explicit_env.set_by.via,
+            derived_via=derived_env.set_by.via,
+        )
+
+    return LifecycleLegacyMarkerDisagreement(
+        kind=LifecycleDisagreementKind.STATE_MISMATCH,
+        explicit_state=explicit_env.state,
+        explicit_is_authoritative_on_row=explicit_env.is_authoritative_on_row,
+        explicit_via=explicit_env.set_by.via,
+        derived_via=derived_env.set_by.via,
     )
