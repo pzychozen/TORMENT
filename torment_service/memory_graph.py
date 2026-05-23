@@ -17,6 +17,14 @@ from .embedding_store import (
     _child_path,
     load_embedding as _load_embedding_universal,
 )
+from .lifecycle import (
+    LifecycleActor,
+    LifecycleSetBy,
+    LifecycleSetVia,
+    LifecycleState,
+    LifecycleStatus,
+    validate_lifecycle_envelope,
+)
 
 log = logging.getLogger("torment.memory_graph")
 
@@ -57,6 +65,79 @@ def _half_life_decay_factor(payload: Dict[str, Any], now_ts: Optional[int] = Non
 
     factor = float(2.0 ** (-age_days / hl))
     return max(_DECAY_RANKING_FLOOR, factor)
+
+
+# ---------------------------------------------------------------------------
+# Q2-H1c: write-site lifecycle envelope emission
+#
+# Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md, every
+# new memory row created via :meth:`MemoryGraph.spawn_memory` is, on return,
+# guaranteed to carry a ``lifecycle_status`` envelope on its payload. New
+# rows with no caller-supplied envelope receive the canonical
+# row-authoritative UNSET envelope (``actor=SYSTEM``, ``via=INGEST_UNMARKED``,
+# ``at=int(time.time())``). Caller-supplied envelopes are validated and
+# preserved verbatim. Malformed supplied envelopes raise
+# ``LifecycleStateError`` -- no silent downgrade.
+#
+# This is a Q2-H1 wiring slice. It does NOT:
+#   * enforce lifecycle-bearing read decisions (deferred to Q2-F)
+#   * perform protected dual-source collapse (Q2-D)
+#   * formalize the review-queue join (Q2-E)
+#   * resolve the baton-lifecycle / Q2-envelope overlap (R3)
+#   * stamp envelopes on the load/rehydrate path (legacy on-disk rows
+#     continue to derive UNSET via the H1a read-side shim)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_lifecycle_envelope(payload: Dict[str, Any]) -> None:
+    """Ensure the supplied new-row payload carries a lifecycle envelope.
+
+    Stamps the canonical row-authoritative UNSET envelope on payloads that
+    lack one; validates any caller-supplied envelope and leaves it
+    untouched. Mutates ``payload`` in place by adding a ``lifecycle_status``
+    key when one is absent or explicitly ``None``.
+
+    Behavior:
+
+    1. ``payload["lifecycle_status"]`` absent OR explicitly ``None`` ->
+       stamp the H1c default UNSET envelope:
+       ``state=UNSET``, ``is_authoritative_on_row=True``,
+       ``set_by.actor=SYSTEM``, ``set_by.via=INGEST_UNMARKED``,
+       ``set_by.at=int(time.time())``, ``requires_join=None``,
+       ``history_ref=None``. ``UNSET_DEFAULT`` is structurally reserved
+       for the H1a read-side lazy-derive path; H1c uses
+       ``INGEST_UNMARKED`` so the two origins remain distinguishable at
+       audit time.
+    2. ``payload["lifecycle_status"]`` present and non-null -> validated
+       via :func:`validate_lifecycle_envelope` and left intact. A
+       malformed envelope raises ``LifecycleStateError`` (loud failure,
+       no silent replacement, no downgrade to UNSET).
+
+    Intended caller: :meth:`MemoryGraph.spawn_memory`, which builds a
+    fresh payload dict and merges caller-supplied ``extra_payload`` into
+    it before invoking this helper. The caller's original
+    ``extra_payload`` dict is not mutated; only ``spawn_memory``'s local
+    payload dict (and hence the entity that will carry it) is affected.
+    """
+    supplied = payload.get("lifecycle_status")
+    if supplied is None:
+        env = LifecycleStatus(
+            state=LifecycleState.UNSET,
+            is_authoritative_on_row=True,
+            requires_join=None,
+            set_by=LifecycleSetBy(
+                actor=LifecycleActor.SYSTEM,
+                via=LifecycleSetVia.INGEST_UNMARKED,
+                at=int(time.time()),
+            ),
+            history_ref=None,
+        )
+        payload["lifecycle_status"] = env.to_dict()
+        return
+    # Present envelope: validate but do NOT replace. Malformed envelopes
+    # propagate ``LifecycleStateError`` -- the wiring contract is "no
+    # silent downgrade, ever".
+    validate_lifecycle_envelope(supplied)
 
 
 class MemoryGraph:
@@ -570,6 +651,13 @@ class MemoryGraph:
         }
         if extra_payload:
             payload.update(extra_payload)
+
+        # Q2-H1c: ensure every new memory row carries an explicit lifecycle
+        # envelope. See module-level ``_ensure_lifecycle_envelope`` for the
+        # full contract. Wiring-only slice: this does not introduce
+        # lifecycle enforcement, protected collapse, review-queue joins,
+        # or baton-lifecycle resolution.
+        _ensure_lifecycle_envelope(payload)
 
         pos0 = self._vec3(payload.get("seed_pos0", None))
         vel0 = self._vec3(payload.get("seed_v0", None))
