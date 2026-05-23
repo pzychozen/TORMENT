@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import threading
@@ -33,7 +34,18 @@ from typing import Any, Dict, Optional
 
 from .collective_models import MemoryGovernanceFlags
 from .embedding_store import _canonical_storage_root, _child_path
+from .lifecycle import (
+    LifecycleState,
+    LifecycleStateError,
+    NonAuthoritativeLifecycleError,
+    assert_lifecycle_row_authoritative,
+    detect_lifecycle_legacy_marker_disagreement,
+    read_lifecycle_envelope,
+)
 from .pathing import safe_slug
+
+
+log = logging.getLogger("torment.governance")
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +107,76 @@ def should_emit_packet(payload: Optional[Dict[str, Any]] = None) -> bool:
     return True
 
 
+def _is_protected_via_lifecycle(
+    payload: Optional[Dict[str, Any]] = None,
+) -> Optional[bool]:
+    """Q2-D Slice 5: lifecycle-first protected decision (soft migration).
+
+    Returns:
+        ``True``  -- lifecycle envelope decisively says the row is
+                     ``state=PROTECTED`` and the envelope is safe to
+                     decide from (row-authoritative, no disagreement
+                     with legacy markers).
+        ``False`` -- lifecycle envelope is decisively in a non-PROTECTED
+                     row-authoritative state with no disagreement.
+        ``None``  -- the lifecycle path cannot safely decide; the
+                     caller should fall back to the legacy
+                     ``resolve_governance(payload).protected`` path.
+
+    Returns ``None`` (fall back to legacy) when:
+
+    * ``read_lifecycle_envelope(payload)`` raises ``LifecycleStateError``
+      (payload is not a dict, or carries a malformed
+      ``lifecycle_status``).
+    * ``assert_lifecycle_row_authoritative(env)`` raises
+      ``NonAuthoritativeLifecycleError`` (the envelope announces a
+      side-channel join is required; the row alone cannot decide).
+    * ``detect_lifecycle_legacy_marker_disagreement(payload)`` reports
+      a ``STATE_MISMATCH`` or ``AUTHORITY_MISMATCH``. The detector
+      itself raising ``LifecycleStateError`` (malformed) is also a
+      fall-back trigger -- belt and braces in case anything has
+      slipped past the read-shim validation.
+
+    On disagreement, emits a ``WARNING`` log line so operators can
+    observe real-world incidence of explicit/legacy conflicts during
+    the soft-migration period. A future Q2-D Slice 6 will remove the
+    legacy fallback and let lifecycle win unconditionally; the
+    disagreement logs are what should give us confidence to ratify
+    that step.
+
+    First production consumer of the Q2-F enforcement primitive
+    (``assert_lifecycle_row_authoritative``). The Q2-F guard's raise
+    is caught here and converted to "decline to decide" -- not
+    propagated. This is the soft-migration shape; the hard migration
+    will be a separately ratified slice.
+    """
+    try:
+        env = read_lifecycle_envelope(payload)
+    except LifecycleStateError:
+        return None
+    try:
+        assert_lifecycle_row_authoritative(env)
+    except NonAuthoritativeLifecycleError:
+        return None
+    try:
+        disagreement = detect_lifecycle_legacy_marker_disagreement(payload)
+    except LifecycleStateError:
+        return None
+    if disagreement is not None:
+        log.warning(
+            "Q2-D Slice 5: lifecycle/legacy-marker disagreement at "
+            "is_compression_protected: kind=%s explicit_state=%s "
+            "explicit_via=%s derived_via=%s; falling back to legacy "
+            "resolve_governance().protected",
+            disagreement.kind.value,
+            disagreement.explicit_state.value,
+            disagreement.explicit_via.value,
+            disagreement.derived_via.value,
+        )
+        return None
+    return env.state is LifecycleState.PROTECTED
+
+
 def is_compression_protected(payload: Optional[Dict[str, Any]] = None) -> bool:
     """Return True if this memory must not be automatically compressed/decayed.
 
@@ -110,12 +192,46 @@ def is_compression_protected(payload: Optional[Dict[str, Any]] = None) -> bool:
     is expected. The guard is a structural tripwire matching the
     Shape B wrapper-type contract; see
     docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md Step 4.
+
+    Path C Q2-D Slice 5 (soft migration): tries a lifecycle-first
+    decision via :func:`_is_protected_via_lifecycle`, then falls back
+    to the legacy ``resolve_governance(payload).protected`` flag when
+    the lifecycle path cannot safely decide.
+
+    The lifecycle path returns the answer when the envelope is
+    row-authoritative AND no disagreement between envelope and legacy
+    markers exists. In those cases:
+
+        ``state=PROTECTED`` -> True
+        any other row-authoritative state -> False
+
+    The lifecycle path declines to decide (returns None, triggering
+    fallback) when:
+
+        * envelope is malformed
+        * envelope is join-required (Q2-F primitive raises)
+        * envelope disagrees with legacy markers (a warning is logged)
+
+    Soft migration preserves existing behavior for every payload in
+    the current test fixtures while enabling the new capability of
+    "protected via explicit lifecycle envelope" for payloads without
+    legacy markers. Future Slice 6 will remove the legacy fallback
+    once production disagreement incidence has been observed.
     """
     # Path C Q1 enforcement: see docstring. Inline import keeps the
     # diff narrow; future cleanup may move to module-level imports.
     from .deep_hits import assert_authoritative_memory
     assert_authoritative_memory(payload)
 
+    # Q2-D Slice 5: lifecycle-first decision.
+    lifecycle_answer = _is_protected_via_lifecycle(payload)
+    if lifecycle_answer is not None:
+        return lifecycle_answer
+
+    # Legacy fallback path. Preserved verbatim from pre-Slice-5
+    # behavior. A future Slice 6 will remove this fallback once the
+    # soft-migration warnings have established that disagreement
+    # incidence is acceptable.
     gov = resolve_governance(payload)
     return gov.protected
 
