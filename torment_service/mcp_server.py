@@ -41,7 +41,11 @@ from .spine import (
     EXPOSURE_GUARDED,
 )
 from .fabric import TormentFabric
-from .lifecycle import LifecycleStateError, read_lifecycle_envelope
+from .lifecycle import (
+    LifecycleStateError,
+    detect_lifecycle_legacy_marker_disagreement,
+    read_lifecycle_envelope,
+)
 from .scoring import derive_provenance_type as _derive_prov_type
 
 logger = logging.getLogger("torment.mcp")
@@ -87,6 +91,96 @@ def _lifecycle_field_for_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return read_lifecycle_envelope(payload).to_dict()
     except LifecycleStateError as exc:
         return {"error": f"{exc.field}: {exc.reason}"}
+
+
+# ---------------------------------------------------------------------------
+# Q2-D Slice 4-wiring-A: legacy-marker disagreement detector surfaced in the
+# resource_provenance inspector.
+#
+# Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md
+# §9 R1 / Hazard C: a payload can carry BOTH an explicit lifecycle envelope
+# AND legacy protected markers. Slice 2 and Slice 3 both preserve the
+# explicit envelope verbatim in that case (the explicit-wins contract).
+# The Q2-D Slice 4 detector
+# (``detect_lifecycle_legacy_marker_disagreement``) exposes the conflict
+# as a structured report; this wiring surfaces that report per row in the
+# guarded `resource_provenance` inspector so operators can SEE when a row
+# has a disagreement without changing any decision behavior.
+#
+# Observability-only:
+#   * never raises -- catches the detector's malformed-envelope
+#     ``LifecycleStateError`` and returns ``None``. The lifecycle_status
+#     field already carries the error sentinel for malformed envelopes;
+#     duplicating that signal here would double the noise without
+#     adding new operator-actionable information.
+#   * never mutates the payload
+#   * never affects any other row in the response (a malformed envelope
+#     on one row does not break the inspector for any other row)
+#
+# Out of scope at this slice:
+#   * no decision logic changes
+#   * no write-side disagreement logging (Slice 4-wiring-B)
+#   * no raising on disagreement
+#   * no reader migration (Q2-D Slice 5+)
+#   * no stats summary in the inspector's stats block
+#   * no new MCP resource
+#   * no tier-gate widening (the new field stays inside the existing
+#     guarded `resource_provenance` resource)
+# ---------------------------------------------------------------------------
+
+
+def _lifecycle_disagreement_field_for_payload(
+    payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Compute the ``lifecycle_disagreement`` field for one memory row in
+    the Q2-D Slice 4-wiring-A provenance inspector wiring.
+
+    Returns ``None`` when:
+
+    * no disagreement is reported by
+      :func:`detect_lifecycle_legacy_marker_disagreement` (no explicit
+      envelope on the payload, or no legacy protected marker, or both
+      sides agree on load-bearing facts -- full agreement or provenance
+      drift);
+    * the explicit envelope is malformed (the detector raises
+      ``LifecycleStateError`` and the helper swallows it; the
+      ``lifecycle_status`` field on the same row already carries the
+      error sentinel, so duplicating that signal here would force
+      operators to read two sentinels for the same underlying failure).
+
+    Returns a JSON-safe disagreement dict when the detector reports a
+    ``STATE_MISMATCH`` or ``AUTHORITY_MISMATCH``. Five fields mirror
+    the underlying dataclass exactly::
+
+        {
+            "kind": "state_mismatch" | "authority_mismatch",
+            "explicit_state": <LifecycleState value>,
+            "explicit_is_authoritative_on_row": <bool>,
+            "explicit_via": <LifecycleSetVia value>,
+            "derived_via": <LifecycleSetVia value>,
+        }
+
+    Observability-only. Never raises. Never mutates payload. Does not
+    consult any decision-bearing path.
+    """
+    try:
+        disagreement = detect_lifecycle_legacy_marker_disagreement(payload)
+    except LifecycleStateError:
+        # Envelope malformed or non-dict input. The lifecycle_status
+        # field already surfaces the error sentinel; we do NOT
+        # duplicate that signal here.
+        return None
+    if disagreement is None:
+        return None
+    return {
+        "kind": disagreement.kind.value,
+        "explicit_state": disagreement.explicit_state.value,
+        "explicit_is_authoritative_on_row": bool(
+            disagreement.explicit_is_authoritative_on_row
+        ),
+        "explicit_via": disagreement.explicit_via.value,
+        "derived_via": disagreement.derived_via.value,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +968,7 @@ def create_mcp_server() -> FastMCP:
                         "has_provenance": prov is not None,
                         "created_step": payload.get("step"),
                         "lifecycle_status": _lifecycle_field_for_payload(payload),
+                        "lifecycle_disagreement": _lifecycle_disagreement_field_for_payload(payload),
                     })
 
             # Most recent first
