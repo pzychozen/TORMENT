@@ -26,6 +26,13 @@ Public surface:
 - ``read_lifecycle_envelope(payload, *, now=None)`` -- read-side migration
   shim; returns the validated envelope from a payload, or a canonical
   UNSET envelope when the payload predates Q2.
+- ``NonAuthoritativeLifecycleError``  -- raised when a non-row-authoritative
+  envelope is passed to the Q2-F enforcement primitive at a decision
+  boundary.
+- ``assert_lifecycle_row_authoritative(envelope)`` -- Q2-F enforcement
+  primitive; raises when the envelope announces a side-channel join is
+  required, returns ``None`` when the row is authoritative for its own
+  lifecycle answer.
 
 Q2 invariant: a consumer reading a memory row must be able to determine
 its lifecycle state -- including whether the row is authoritative for
@@ -50,7 +57,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 
 # ---------------------------------------------------------------------------
@@ -609,3 +616,138 @@ def read_lifecycle_envelope(
         )
 
     return validate_lifecycle_envelope(raw)
+
+
+# ---------------------------------------------------------------------------
+# Q2-F enforcement primitive
+# ---------------------------------------------------------------------------
+#
+# Mirrors the Q1 ``assert_authoritative_memory`` pattern (see
+# ``torment_service/deep_hits.py``). Negative guard: the primitive enforces
+# only that the row's lifecycle answer can be trusted at face value. It
+# does NOT certify that the state itself is approved, released, safe, or
+# acceptable for any specific consumer use. State acceptance is consumer
+# policy and stays a separate, per-consumer concern.
+
+
+class NonAuthoritativeLifecycleError(TypeError):
+    """Raised when a non-row-authoritative lifecycle envelope is passed to a
+    decision-bearing consumer that requires a row-authoritative answer.
+
+    Inherits from ``TypeError`` because the failure is a contract
+    violation: the caller passed a structurally valid but
+    non-row-authoritative envelope into a decision boundary that demands a
+    row-authoritative answer. ``LifecycleStateError`` (subclass of
+    ``ValueError``) is reserved for malformed envelopes -- a data
+    problem; ``NonAuthoritativeLifecycleError`` is a contract problem
+    ("the envelope is well-formed but you cannot decide from it alone").
+
+    Diagnostic attributes carry the envelope's join target so callers,
+    telemetry, and audit logs can identify the required side-channel
+    pivot without re-inspecting the envelope:
+
+    Attributes
+    ----------
+    state : str
+        The envelope's ``state`` value (e.g., ``"review_pending"``).
+    side_channel : str
+        The name of the side channel that holds the authoritative
+        answer (e.g., ``"review_queue"``).
+    join_key : str
+        The join key the consumer must use against the side channel
+        (e.g., ``"eid"``).
+    """
+
+    def __init__(self, envelope: "LifecycleStatus") -> None:
+        self.state = str(envelope.state.value)
+        # ``requires_join`` is guaranteed populated when this error is
+        # raised (the primitive only constructs this error after
+        # confirming ``is_authoritative_on_row=False``, which the
+        # envelope's complementarity invariant pairs with a populated
+        # join target).
+        self.side_channel = str(envelope.requires_join.side_channel.value)
+        self.join_key = str(envelope.requires_join.join_key)
+        super().__init__(
+            f"Lifecycle row is not authoritative for state {self.state!r}; "
+            f"consumer must join side channel "
+            f"{self.side_channel!r} on key {self.join_key!r} before "
+            f"making an authoritative lifecycle decision."
+        )
+
+
+def assert_lifecycle_row_authoritative(
+    envelope: Union[LifecycleStatus, Dict[str, Any]],
+) -> None:
+    """Q2-F enforcement primitive: assert the lifecycle envelope can be used
+    at face value, without a side-channel join.
+
+    Mirrors the Q1 ``assert_authoritative_memory`` pattern. Decision-bearing
+    consumers call this at entry to reject any envelope whose
+    ``is_authoritative_on_row`` is ``False`` (the row announces that the
+    consumer must join a named side channel before deciding).
+
+    Negative guard. Returning normally means ONE thing:
+
+        the row's lifecycle answer can be trusted at face value
+        without a side-channel join.
+
+    Returning normally does NOT mean:
+
+        * the state is "released" or otherwise approved
+        * the row is safe or acceptable for any specific consumer use
+        * the state has been verified beyond what the envelope itself
+          announces
+
+    State acceptance ("is ``state=unset`` OK for my purpose?") is a
+    separate consumer-policy concern and must NOT be mixed into this
+    primitive. Consumers that require a particular state should write:
+
+        assert_lifecycle_row_authoritative(env)         # Q2-F
+        if env.state is not LifecycleState.RELEASED:    # consumer policy
+            raise MyConsumerPolicyError(...)
+
+    Parameters
+    ----------
+    envelope : LifecycleStatus or dict
+        Either a typed ``LifecycleStatus`` instance, or a canonical
+        envelope dict. Dicts are routed through
+        :func:`validate_lifecycle_envelope` first; malformed dicts raise
+        ``LifecycleStateError`` before any authoritativity check.
+        ``None`` and non-dict / non-``LifecycleStatus`` inputs are
+        programming errors and raise ``LifecycleStateError``. The
+        primitive does NOT accept a payload (caller with a payload
+        should run :func:`read_lifecycle_envelope` first).
+
+    Raises
+    ------
+    LifecycleStateError
+        If ``envelope`` is ``None``, is neither a ``LifecycleStatus`` nor
+        a dict, or is a malformed envelope dict.
+    NonAuthoritativeLifecycleError
+        If ``envelope`` is a well-formed envelope whose
+        ``is_authoritative_on_row`` is ``False`` (the row announces a
+        side-channel join is required).
+    """
+    if envelope is None:
+        raise LifecycleStateError(
+            "envelope", "must_not_be_none",
+            "pass a LifecycleStatus or envelope dict; for legacy "
+            "payloads, run read_lifecycle_envelope(payload) first",
+        )
+    if isinstance(envelope, LifecycleStatus):
+        typed = envelope
+    elif isinstance(envelope, dict):
+        # Validator raises LifecycleStateError on malformed dicts; we
+        # deliberately do NOT catch and re-raise as
+        # NonAuthoritativeLifecycleError. Malformed envelopes are a data
+        # problem; authoritativity is a contract problem; the two error
+        # paths must remain distinct.
+        typed = validate_lifecycle_envelope(envelope)
+    else:
+        raise LifecycleStateError(
+            "envelope", "invalid_type",
+            f"expected LifecycleStatus or dict, got "
+            f"{type(envelope).__name__}",
+        )
+    if not typed.is_authoritative_on_row:
+        raise NonAuthoritativeLifecycleError(typed)
