@@ -857,6 +857,7 @@ def derive_protected_lifecycle_from_legacy_markers(
     payload: Dict[str, Any],
     *,
     now: Optional[int] = None,
+    actor: LifecycleActor = LifecycleActor.MIGRATION,
 ) -> Optional[LifecycleStatus]:
     """Derive a Q2 PROTECTED envelope from a memory payload's legacy markers.
 
@@ -887,10 +888,16 @@ def derive_protected_lifecycle_from_legacy_markers(
       ``state=PROTECTED``, ``set_by.actor=MIGRATION``, ``set_by.via``
       set to the first matching marker's constant, and
       ``set_by.at = now if now is not None else int(time.time())``.
-    * ``actor=MIGRATION`` records that the answer was interpreted from
-      pre-Q2 legacy markers, mirroring the H1a shim's actor choice.
-      A future write-time application of this derivation may use a
-      different actor; this helper itself is read/interpretation scoped.
+    * The ``actor`` keyword parameter controls the stamped
+      ``set_by.actor``. Default ``LifecycleActor.MIGRATION`` reflects the
+      Q2-D Slice 1 / Slice 2 read-time legacy interpretation use case
+      (mirroring the H1a shim's actor choice). Q2-D Slice 3 write-side
+      callers (the H1c ``_ensure_lifecycle_envelope`` stamp) pass
+      ``LifecycleActor.SYSTEM`` to record that the envelope was assigned
+      by the runtime at row-creation time rather than derived from
+      legacy markers at read time. The two actors preserve a
+      load-bearing audit distinction: was this PROTECTED interpretation
+      inferred at read or asserted at write?
     * Does NOT consult ``payload["lifecycle_status"]``. Resolution of
       any disagreement between an explicit envelope and legacy markers
       is Q2-D Slice 4's concern.
@@ -918,6 +925,12 @@ def derive_protected_lifecycle_from_legacy_markers(
         Unix timestamp to record in the synthesized ``set_by.at``.
         Defaults to ``int(time.time())``. Tests should pass this
         explicitly for deterministic results.
+    actor : LifecycleActor, optional
+        The actor to record in ``set_by.actor`` on the derived envelope.
+        Defaults to ``LifecycleActor.MIGRATION`` (Q2-D Slice 1 / Slice 2
+        read-time legacy interpretation). Q2-D Slice 3 write-side
+        callers pass ``LifecycleActor.SYSTEM`` to mark the envelope as
+        runtime-assigned at write time.
 
     Returns
     -------
@@ -971,7 +984,7 @@ def derive_protected_lifecycle_from_legacy_markers(
         is_authoritative_on_row=True,
         requires_join=None,
         set_by=LifecycleSetBy(
-            actor=LifecycleActor.MIGRATION,
+            actor=actor,
             via=via,
             at=at,
         ),

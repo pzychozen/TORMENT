@@ -514,3 +514,56 @@ def test_non_dict_payload_raises_lifecycle_state_error(bad_payload):
         )
     assert exc_info.value.field == "payload"
     assert exc_info.value.reason == "not_a_dict"
+
+
+# ===========================================================================
+# Category 16 -- Q2-D Slice 3: actor= keyword parameter
+#
+# Slice 3 extends the helper to accept ``actor=`` so the same marker
+# precedence can serve both the read-side legacy interpretation
+# (MIGRATION, Slice 1/Slice 2 callers) and the write-side spawn stamping
+# (SYSTEM, Slice 3 callers). The default stays MIGRATION so all existing
+# call sites are unchanged.
+# ===========================================================================
+
+
+def test_actor_keyword_defaults_to_migration():
+    """Regression guard: calling without an explicit ``actor=`` kwarg
+    continues to produce ``actor=MIGRATION``. This locks in the default
+    so Slice 1 and Slice 2 callers remain unaffected by Slice 3.
+    """
+    env = derive_protected_lifecycle_from_legacy_markers(
+        {"canon": True}, now=FIXED_AT,
+    )
+    assert env is not None
+    assert env.set_by.actor is LifecycleActor.MIGRATION
+
+
+def test_actor_keyword_honored_when_explicit_system():
+    """Explicit ``actor=SYSTEM`` is plumbed through to the constructed
+    envelope's ``set_by.actor``. This is the Slice 3 write-side use case.
+    """
+    env = derive_protected_lifecycle_from_legacy_markers(
+        {"canon": True}, now=FIXED_AT, actor=LifecycleActor.SYSTEM,
+    )
+    assert env is not None
+    assert env.set_by.actor is LifecycleActor.SYSTEM
+    # via is still marker-determined; actor and via are independent.
+    assert env.set_by.via is LifecycleSetVia.CANON_SET
+
+
+@pytest.mark.parametrize("label,payload,expected_via", MARKER_CASES)
+def test_actor_system_honored_across_all_markers(
+    label, payload, expected_via,
+):
+    """Every marker path constructs the envelope through the same
+    ``LifecycleSetBy(actor=actor, ...)`` call, so the parameter must
+    apply uniformly. Catches any code path that accidentally hard-codes
+    MIGRATION inside the helper.
+    """
+    env = derive_protected_lifecycle_from_legacy_markers(
+        payload, now=FIXED_AT, actor=LifecycleActor.SYSTEM,
+    )
+    assert env is not None
+    assert env.set_by.actor is LifecycleActor.SYSTEM
+    assert env.set_by.via.value == expected_via

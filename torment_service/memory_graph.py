@@ -23,6 +23,7 @@ from .lifecycle import (
     LifecycleSetVia,
     LifecycleState,
     LifecycleStatus,
+    derive_protected_lifecycle_from_legacy_markers,
     validate_lifecycle_envelope,
 )
 
@@ -68,50 +69,88 @@ def _half_life_decay_factor(payload: Dict[str, Any], now_ts: Optional[int] = Non
 
 
 # ---------------------------------------------------------------------------
-# Q2-H1c: write-site lifecycle envelope emission
+# Q2-H1c + Q2-D Slice 3: write-site lifecycle envelope emission
 #
 # Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md, every
 # new memory row created via :meth:`MemoryGraph.spawn_memory` is, on return,
-# guaranteed to carry a ``lifecycle_status`` envelope on its payload. New
-# rows with no caller-supplied envelope receive the canonical
-# row-authoritative UNSET envelope (``actor=SYSTEM``, ``via=INGEST_UNMARKED``,
-# ``at=int(time.time())``). Caller-supplied envelopes are validated and
-# preserved verbatim. Malformed supplied envelopes raise
-# ``LifecycleStateError`` -- no silent downgrade.
+# guaranteed to carry a ``lifecycle_status`` envelope on its payload.
 #
-# This is a Q2-H1 wiring slice. It does NOT:
-#   * enforce lifecycle-bearing read decisions (deferred to Q2-F)
-#   * perform protected dual-source collapse (Q2-D)
-#   * formalize the review-queue join (Q2-E)
-#   * resolve the baton-lifecycle / Q2-envelope overlap (R3)
-#   * stamp envelopes on the load/rehydrate path (legacy on-disk rows
-#     continue to derive UNSET via the H1a read-side shim)
+# Q2-H1c (original): new rows with no caller-supplied envelope and no legacy
+# protected markers receive the canonical row-authoritative UNSET envelope
+# (``actor=SYSTEM``, ``via=INGEST_UNMARKED``, ``at=int(time.time())``).
+# Caller-supplied envelopes are validated and preserved verbatim. Malformed
+# supplied envelopes raise ``LifecycleStateError`` -- no silent downgrade.
+#
+# Q2-D Slice 3 extension: new rows with no caller-supplied envelope but WITH
+# legacy protected markers (canon, kind, tier, srg.is_crystal,
+# governance.protected) now stamp the derived PROTECTED envelope instead of
+# UNSET. The write-side call uses ``actor=SYSTEM`` -- distinct from the
+# read-side Slice 2 derivation which uses ``actor=MIGRATION``. The two
+# actors record whether the PROTECTED interpretation was inferred at read
+# (legacy origin) or asserted at write (Q2-era runtime).
+#
+# Still NOT in scope at this slice:
+#   * lifecycle enforcement primitive (Q2-F) at production decision sites
+#   * existing protected reader migration (``is_compression_protected``,
+#     ``derive_retention_tier``) -- deferred to Q2-D Slice 5+
+#   * disagreement detection between explicit envelope and legacy markers
+#     (Q2-D Slice 4)
+#   * review-queue join formalization (Q2-E)
+#   * baton-lifecycle / Q2-envelope overlap resolution (R3)
+#   * load/rehydrate path stamping (legacy on-disk rows continue to derive
+#     PROTECTED-or-UNSET via the Slice 2 read-side shim)
 # ---------------------------------------------------------------------------
 
 
 def _ensure_lifecycle_envelope(payload: Dict[str, Any]) -> None:
     """Ensure the supplied new-row payload carries a lifecycle envelope.
 
-    Stamps the canonical row-authoritative UNSET envelope on payloads that
-    lack one; validates any caller-supplied envelope and leaves it
-    untouched. Mutates ``payload`` in place by adding a ``lifecycle_status``
-    key when one is absent or explicitly ``None``.
+    H1c (Q2-H1c) original behavior with Q2-D Slice 3 extension: stamps a
+    canonical envelope on payloads that lack one (PROTECTED if legacy
+    protected markers are present, UNSET otherwise), validates any
+    caller-supplied envelope and leaves it untouched. Mutates ``payload``
+    in place by adding a ``lifecycle_status`` key when one is absent or
+    explicitly ``None``.
 
-    Behavior:
+    Behavior -- three branches:
 
-    1. ``payload["lifecycle_status"]`` absent OR explicitly ``None`` ->
-       stamp the H1c default UNSET envelope:
-       ``state=UNSET``, ``is_authoritative_on_row=True``,
-       ``set_by.actor=SYSTEM``, ``set_by.via=INGEST_UNMARKED``,
-       ``set_by.at=int(time.time())``, ``requires_join=None``,
-       ``history_ref=None``. ``UNSET_DEFAULT`` is structurally reserved
-       for the H1a read-side lazy-derive path; H1c uses
-       ``INGEST_UNMARKED`` so the two origins remain distinguishable at
-       audit time.
+    1. ``payload["lifecycle_status"]`` absent OR explicitly ``None``:
+
+       a. Q2-D Slice 3 -- first call
+          :func:`derive_protected_lifecycle_from_legacy_markers` with
+          ``actor=LifecycleActor.SYSTEM`` to see whether any legacy
+          protected marker (canon, kind, tier, srg.is_crystal,
+          governance.protected) is present. If so, stamp the derived
+          PROTECTED envelope. This prevents new rows with legacy
+          markers from being silently mis-stamped as UNSET (Hazard B
+          from the Q2-D plan).
+
+       b. Otherwise stamp the canonical H1c default UNSET envelope:
+          ``state=UNSET``, ``is_authoritative_on_row=True``,
+          ``set_by.actor=SYSTEM``, ``set_by.via=INGEST_UNMARKED``,
+          ``set_by.at=int(time.time())``, ``requires_join=None``,
+          ``history_ref=None``. ``UNSET_DEFAULT`` is structurally
+          reserved for the H1a read-side lazy-derive path; H1c uses
+          ``INGEST_UNMARKED`` so the two origins remain distinguishable
+          at audit time.
+
     2. ``payload["lifecycle_status"]`` present and non-null -> validated
        via :func:`validate_lifecycle_envelope` and left intact. A
        malformed envelope raises ``LifecycleStateError`` (loud failure,
-       no silent replacement, no downgrade to UNSET).
+       no silent replacement, no fallback to protected derivation).
+       **Explicit envelope wins**: legacy protected markers on the same
+       payload are NOT consulted in this branch, even if they would
+       derive a different state. Silent disagreement is acceptable for
+       Slice 3; detection is deferred to Q2-D Slice 4.
+
+    Actor distinction (audit-bearing):
+
+      read-side legacy derivation (Slice 2)  -> actor=MIGRATION
+      write-side stamping (this function)    -> actor=SYSTEM
+
+    The two actors record whether the PROTECTED interpretation was
+    inferred by the read shim at access time (legacy origin) or
+    asserted by the runtime at row creation time (Q2-era write).
 
     Intended caller: :meth:`MemoryGraph.spawn_memory`, which builds a
     fresh payload dict and merges caller-supplied ``extra_payload`` into
@@ -121,6 +160,19 @@ def _ensure_lifecycle_envelope(payload: Dict[str, Any]) -> None:
     """
     supplied = payload.get("lifecycle_status")
     if supplied is None:
+        # Q2-D Slice 3: try legacy protected derivation first (write-time
+        # actor=SYSTEM, distinct from Slice 2 read-side MIGRATION). If
+        # any of the five legacy protected markers is present, stamp
+        # the derived PROTECTED envelope so new rows with legacy
+        # markers are no longer mis-stamped as plain UNSET. Hazard B
+        # from the Q2-D plan.
+        derived = derive_protected_lifecycle_from_legacy_markers(
+            payload, actor=LifecycleActor.SYSTEM,
+        )
+        if derived is not None:
+            payload["lifecycle_status"] = derived.to_dict()
+            return
+        # Otherwise stamp the canonical H1c default UNSET envelope.
         env = LifecycleStatus(
             state=LifecycleState.UNSET,
             is_authoritative_on_row=True,
@@ -136,7 +188,9 @@ def _ensure_lifecycle_envelope(payload: Dict[str, Any]) -> None:
         return
     # Present envelope: validate but do NOT replace. Malformed envelopes
     # propagate ``LifecycleStateError`` -- the wiring contract is "no
-    # silent downgrade, ever".
+    # silent downgrade, ever". Explicit-wins is preserved; disagreement
+    # between an explicit envelope and legacy markers is silent at this
+    # slice (Q2-D Slice 4 will add detection).
     validate_lifecycle_envelope(supplied)
 
 
