@@ -41,9 +41,52 @@ from .spine import (
     EXPOSURE_GUARDED,
 )
 from .fabric import TormentFabric
+from .lifecycle import LifecycleStateError, read_lifecycle_envelope
 from .scoring import derive_provenance_type as _derive_prov_type
 
 logger = logging.getLogger("torment.mcp")
+
+
+# ---------------------------------------------------------------------------
+# Q2-H1b: lifecycle envelope read-side wiring helper.
+#
+# Per docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md, the
+# first production read-site for the Q2 lifecycle envelope is the guarded
+# `resource_provenance` MCP resource. This helper is the per-row computation:
+#
+#   * Legacy rows (no ``lifecycle_status`` on the payload) lazily resolve to
+#     the canonical row-authoritative UNSET envelope via the H1a shim
+#     ``read_lifecycle_envelope`` -- ``LifecycleActor.MIGRATION`` /
+#     ``LifecycleSetVia.UNSET_DEFAULT``.
+#   * Valid envelopes round-trip through ``.to_dict()``.
+#   * Malformed envelopes MUST NOT be silently downgraded to UNSET (that
+#     would let a corrupt envelope masquerade as a legacy row and violate
+#     the Q2 invariant). Instead, the validation failure is surfaced inline
+#     as an error sentinel for that row only, so a single corrupt envelope
+#     does not break the entire inspector view -- this is the appropriate
+#     UX for an operator/debug observability surface.
+#
+# The shim never mutates the payload. The helper is read-only and is not
+# wired into any decision-bearing path; lifecycle enforcement, protected
+# dual-source collapse, and review-queue join formalization are deferred
+# to later Q2 slices (Q2-F / Q2-D / Q2-E).
+# ---------------------------------------------------------------------------
+
+
+def _lifecycle_field_for_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute the ``lifecycle_status`` field for one memory row in the
+    Q2-H1b provenance inspector wiring.
+
+    Returns either the canonical lifecycle envelope dict (5 keys: ``state``,
+    ``is_authoritative_on_row``, ``requires_join``, ``set_by``,
+    ``history_ref``) or an inline error sentinel of shape
+    ``{"error": "<field>: <reason>"}`` if the row carries a malformed
+    envelope.
+    """
+    try:
+        return read_lifecycle_envelope(payload).to_dict()
+    except LifecycleStateError as exc:
+        return {"error": f"{exc.field}: {exc.reason}"}
 
 
 # ---------------------------------------------------------------------------
@@ -813,6 +856,11 @@ def create_mcp_server() -> FastMCP:
                             "source_type": "memory",  # SOURCE_MEMORY
                             "notes": f"legacy_bare_string={_legacy_raw!r}",
                         }
+                    # Q2-H1b: per-row lifecycle envelope. See module-level
+                    # ``_lifecycle_field_for_payload`` for the contract.
+                    # Surfaced as an additional read-only field; does not
+                    # affect any existing key, sort order, limit, or the
+                    # exposure tier gate.
                     memories.append({
                         "eid": eid,
                         "agent_id": agent_id,
@@ -825,6 +873,7 @@ def create_mcp_server() -> FastMCP:
                         "provenance": prov,
                         "has_provenance": prov is not None,
                         "created_step": payload.get("step"),
+                        "lifecycle_status": _lifecycle_field_for_payload(payload),
                     })
 
             # Most recent first
