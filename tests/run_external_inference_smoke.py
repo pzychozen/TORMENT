@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """tests/run_external_inference_smoke.py
 
-External inference smoke -- Phase 1 (print-only).
+External inference smoke -- Phase 1 (print-only) + Phase 2 (--ingest).
 
 THIS IS AN OPERATOR-RUN SCRIPT, NOT A PYTEST TEST.
 
@@ -17,47 +17,69 @@ Purpose
 -------
 Validate the external-inference operational path with the existing
 ``.env`` setup. One CLI invocation makes ONE provider call with ONE
-prompt and prints ONE response. No memory ingest, no TORMENT server
-dependency, no autonomy loop, no multi-turn conversation.
+prompt and prints ONE response. By default no memory ingest happens
+and no TORMENT server is required. With ``--ingest`` the response is
+forwarded through the sanctioned HTTP write path
+``POST /tool/ingest``, which routes through Spine to
+``_fast_tool_result_ingest`` -> ``fabric.ingest(...)`` with
+``ProvenanceV1.for_tool_result(...)``. No new write path is
+introduced; the script never calls ``spawn_memory`` or constructs a
+fabric in-process.
 
-What this proves when it passes:
+What this proves when Phase 1 passes:
 
 * ``.env`` loading works in a non-server context
 * the requested provider's SDK is installed
 * the API key in ``.env`` is valid for that provider
 * the requested model returns a coherent response to a minimal prompt
 
-What this does NOT do:
+What ``--ingest`` adds when Phase 2 passes:
 
-* does NOT ingest the response into TORMENT memory
-* does NOT require the TORMENT server to be running
+* the TORMENT server is reachable on the supplied base URL
+* the sanctioned ``/tool/ingest`` route accepts the response and
+  returns an ``eid`` for the new memory row
+
+What this does NOT do (both phases):
+
+* does NOT execute tools, only stores their output as memory
 * does NOT exercise any character / persona / authoring flow
-* does NOT create any writeback path
-* does NOT retry on rate limits
-
-Phase 2 (separate future slice -- not implemented here): may add an
-opt-in ``--ingest`` flag that routes the response through the
-existing sanctioned ``tool_result_ingest`` path and prints the
-resulting row's lifecycle envelope. Phase 2 would require the
-TORMENT server to be running and would be its own ratifiable slice.
+* does NOT create any writeback path beyond the existing
+  sanctioned ``/tool/ingest`` route
+* does NOT retry on rate limits or HTTP failures
+* does NOT support multi-turn or streaming
+* does NOT fetch the resulting row's lifecycle envelope. The
+  ``lifecycle_status`` and ``lifecycle_disagreement`` fields are
+  surfaced by the MCP ``resource_provenance`` resource, NOT by
+  the HTTP ``/debug/provenance`` endpoint. To inspect them after
+  ingest, query MCP separately. An HTTP parity slice may follow.
 
 Usage
 -----
-Anthropic (direct)::
+Phase 1 -- Anthropic (direct), print-only::
 
     python tests/run_external_inference_smoke.py \\
         --provider anthropic --model claude-sonnet-4-5
 
-OpenRouter (Gemini 2.5 Flash, typically the cheapest first smoke)::
+Phase 1 -- OpenRouter (Gemini 2.5 Flash, cheapest first smoke)::
 
     python tests/run_external_inference_smoke.py \\
         --provider openrouter --model google/gemini-2.5-flash
 
-With a custom prompt (capped at 500 chars)::
+Phase 1 -- custom prompt (capped at 500 chars)::
 
     python tests/run_external_inference_smoke.py \\
         --provider anthropic --model claude-haiku-4-5 \\
         --prompt "Say only the word: pong"
+
+Phase 2 -- forward the response into TORMENT memory through the
+sanctioned ingest route. Requires a running TORMENT server::
+
+    python tests/run_external_inference_smoke.py \\
+        --provider openrouter --model google/gemini-2.5-flash \\
+        --ingest \\
+        --base-url http://localhost:8000 \\
+        --workspace-id default \\
+        --agent-id external_inference_smoke
 
 Required environment (loaded from ``.env`` at the repo root if
 ``python-dotenv`` is available, or otherwise from the process env):
@@ -65,16 +87,28 @@ Required environment (loaded from ``.env`` at the repo root if
 * ``ANTHROPIC_API_KEY``  -- required for ``--provider anthropic``
 * ``OPENROUTER_API_KEY`` -- required for ``--provider openrouter``
 
+Server liveness probe (``--ingest`` only)
+-----------------------------------------
+The script GETs ``{base_url}/health`` before posting. Note: the
+ratified plan referenced ``/healthz`` as shorthand; the actual
+endpoint in ``torment_service/app.py`` is ``/health``. If the
+endpoint name ever changes, update ``HEALTH_PATH`` below.
+
 Exit codes
 ----------
 * 0 -- provider reachable, non-empty response received, no exceptions
+       (and with ``--ingest``: server reachable and ``/tool/ingest``
+       returned a row with an ``eid``)
 * 1 -- any failure: missing key, missing SDK, auth error, model error,
        timeout, empty response, prompt too long, pytest detected,
-       unknown provider, etc.
+       unknown provider, server unreachable on ``--ingest``,
+       ``/tool/ingest`` non-200, missing ``eid`` in ingest response,
+       etc.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -89,6 +123,16 @@ DEFAULT_MAX_TOKENS = 256
 DEFAULT_TIMEOUT_SECONDS = 30
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 SUPPORTED_PROVIDERS = ("anthropic", "openrouter")
+
+# --- Phase 2 (--ingest) constants ------------------------------------------
+DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_WORKSPACE_ID = "default"
+DEFAULT_AGENT_ID = "external_inference_smoke"
+HEALTH_PATH = "/health"
+INGEST_PATH = "/tool/ingest"
+SCRIPT_PHASE_INGEST = "phase_2_ingest"
+HEALTH_TIMEOUT_SECONDS = 5
+INGEST_TIMEOUT_SECONDS = 30
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +295,173 @@ def _call_openrouter(
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 -- sanctioned ingest path (HTTP only; no in-process fabric)
+# ---------------------------------------------------------------------------
+#
+# These helpers are exercised ONLY when --ingest is passed. They speak HTTP
+# to a running TORMENT server and never touch fabric / spawn_memory / any
+# write path other than POST /tool/ingest. stdlib urllib is used to avoid
+# adding a runtime dependency.
+
+
+def _default_tool_name(provider: str, model: str) -> str:
+    """Stable, filter-friendly identifier for the tool that produced the row.
+
+    Shape: ``external_inference_smoke:{provider}:{model}``. Operators can
+    grep ``nodes.jsonl`` or filter ``/debug/provenance`` on this prefix to
+    find smoke-produced rows.
+    """
+    return f"external_inference_smoke:{provider}:{model}"
+
+
+def _build_ingest_body(
+    *,
+    provider: str,
+    model: str,
+    prompt: str,
+    result: Dict[str, Any],
+    workspace_id: str,
+    agent_id: str,
+    tool_name: str,
+) -> Dict[str, Any]:
+    """Build the JSON body for ``POST /tool/ingest``.
+
+    PURE FUNCTION -- no I/O, no env reads, no SDK calls. Safe to unit-test
+    without a server. Mirrors the field shape accepted by
+    ``ToolResultIngestReq`` in ``torment_service/app.py`` and only sets
+    fields that model already accepts. The server constructs provenance;
+    we do not.
+    """
+    return {
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "tool_name": tool_name,
+        "content": result.get("text", ""),
+        "tool_metadata": {
+            "provider": provider,
+            "model": model,
+            "prompt": prompt,
+            "duration_ms": result.get("duration_ms"),
+            "input_tokens": result.get("input_tokens"),
+            "output_tokens": result.get("output_tokens"),
+            "finish_reason": result.get("finish_reason"),
+            "script_phase": SCRIPT_PHASE_INGEST,
+        },
+    }
+
+
+def _server_healthcheck(
+    base_url: str, timeout: int = HEALTH_TIMEOUT_SECONDS,
+) -> None:
+    """GET ``{base_url}/health``. Raise RuntimeError on any failure.
+
+    Caller is expected to translate the RuntimeError into a FAIL line and
+    exit 1, matching the rest of the script's error-handling shape.
+    """
+    import urllib.error
+    import urllib.request
+
+    url = base_url.rstrip("/") + HEALTH_PATH
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", resp.getcode())
+            if int(status) != 200:
+                raise RuntimeError(
+                    f"server health check at {url} returned status "
+                    f"{status}; start TORMENT server first"
+                )
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"server not reachable at {base_url}; start TORMENT server "
+            f"first (HTTP {exc.code} on {HEALTH_PATH})"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"server not reachable at {base_url}; start TORMENT server "
+            f"first ({exc.reason})"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"server not reachable at {base_url}; start TORMENT server "
+            f"first ({type(exc).__name__}: {exc})"
+        ) from exc
+
+
+def _post_ingest(
+    base_url: str, body: Dict[str, Any], timeout: int = INGEST_TIMEOUT_SECONDS,
+) -> Dict[str, Any]:
+    """POST ``body`` as JSON to ``{base_url}/tool/ingest``.
+
+    Returns the parsed response dict on HTTP 200. Raises RuntimeError on
+    anything else (non-200, malformed JSON, network failure). No retries.
+    """
+    import urllib.error
+    import urllib.request
+
+    url = base_url.rstrip("/") + INGEST_PATH
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", resp.getcode())
+            raw = resp.read().decode("utf-8", errors="replace")
+            if int(status) != 200:
+                raise RuntimeError(
+                    f"POST {url} returned status {status}: {raw[:500]}"
+                )
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"POST {url} returned non-JSON body: {raw[:500]}"
+                ) from exc
+    except urllib.error.HTTPError as exc:
+        body_text = ""
+        try:
+            if exc.fp is not None:
+                body_text = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body_text = ""
+        raise RuntimeError(
+            f"POST {url} returned HTTP {exc.code}: {body_text[:500]}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"POST {url} failed: {exc.reason}") from exc
+
+
+def _print_ingest_result(
+    workspace_id: str,
+    agent_id: str,
+    tool_name: str,
+    response: Any,
+) -> None:
+    """Print the Phase-2 ingest receipt block. Lifecycle envelope NOT fetched."""
+    eid = response.get("eid") if isinstance(response, dict) else None
+    print()
+    print("--- Ingest result ---")
+    print(f"  workspace_id:   {workspace_id}")
+    print(f"  agent_id:       {agent_id}")
+    print(f"  tool_name:      {tool_name}")
+    print(f"  eid:            "
+          f"{eid if eid is not None else '(not in response)'}")
+    print(f"  raw response:   {response!r}")
+    print("---------------------")
+    print()
+    print("Lifecycle envelope: not fetched in Phase 2.")
+    print(
+        "  Use MCP `resource_provenance` to inspect lifecycle_status and "
+        "lifecycle_disagreement for the resulting row."
+    )
+    print()
+
+
+# ---------------------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------------------
 
@@ -291,7 +502,8 @@ def _print_response(result: Dict[str, Any]) -> None:
 def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "External inference smoke -- Phase 1 (print-only). "
+            "External inference smoke -- Phase 1 (print-only) + Phase 2 "
+            "(--ingest, posts to TORMENT /tool/ingest). "
             "Operator-run only; not a pytest test."
         ),
     )
@@ -321,6 +533,47 @@ def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     parser.add_argument(
         "--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS,
         help=f"Per-request timeout in seconds. Default: {DEFAULT_TIMEOUT_SECONDS}.",
+    )
+
+    # --- Phase 2 (--ingest) options. Default off. -------------------------
+    parser.add_argument(
+        "--ingest", action="store_true",
+        help=(
+            "PHASE 2: after the provider call, POST the response to the "
+            "TORMENT server's sanctioned ingest route (/tool/ingest). "
+            "Requires a running server. Off by default; with this flag the "
+            "script becomes a write-path smoke."
+        ),
+    )
+    parser.add_argument(
+        "--base-url", default=DEFAULT_BASE_URL,
+        help=(
+            f"Base URL of the running TORMENT server. Only used with "
+            f"--ingest. Default: {DEFAULT_BASE_URL}."
+        ),
+    )
+    parser.add_argument(
+        "--workspace-id", default=DEFAULT_WORKSPACE_ID,
+        help=(
+            f"Workspace to ingest into. Only used with --ingest. "
+            f"Default: {DEFAULT_WORKSPACE_ID!r}."
+        ),
+    )
+    parser.add_argument(
+        "--agent-id", default=DEFAULT_AGENT_ID,
+        help=(
+            f"Agent to ingest under. Only used with --ingest. The server "
+            f"will defensively create the agent if it does not exist. "
+            f"Default: {DEFAULT_AGENT_ID!r}."
+        ),
+    )
+    parser.add_argument(
+        "--tool-name", default=None,
+        help=(
+            "Override the tool_name attached to the ingested row. Only "
+            "used with --ingest. Default: "
+            "'external_inference_smoke:{provider}:{model}'."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -388,6 +641,54 @@ def main(argv: Optional[list] = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.ingest:
+        tool_name = args.tool_name or _default_tool_name(
+            args.provider, args.model,
+        )
+        try:
+            _server_healthcheck(args.base_url)
+        except RuntimeError as exc:
+            print(f"FAIL  -- {exc}", file=sys.stderr)
+            return 1
+
+        body = _build_ingest_body(
+            provider=args.provider,
+            model=args.model,
+            prompt=args.prompt,
+            result=result,
+            workspace_id=args.workspace_id,
+            agent_id=args.agent_id,
+            tool_name=tool_name,
+        )
+        try:
+            ingest_response = _post_ingest(args.base_url, body)
+        except RuntimeError as exc:
+            print(f"FAIL  -- {exc}", file=sys.stderr)
+            return 1
+
+        _print_ingest_result(
+            workspace_id=args.workspace_id,
+            agent_id=args.agent_id,
+            tool_name=tool_name,
+            response=ingest_response,
+        )
+
+        if not isinstance(ingest_response, dict) or not ingest_response.get(
+            "eid"
+        ):
+            print(
+                "FAIL  -- ingest response missing 'eid'; the row may not "
+                "have been written. Raw response above.",
+                file=sys.stderr,
+            )
+            return 1
+
+        print(
+            "PASS  -- provider reachable, response received, ingested "
+            "via /tool/ingest, eid returned"
+        )
+        return 0
 
     print(
         "PASS  -- provider reachable, response received, no exceptions"
