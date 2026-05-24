@@ -1,11 +1,117 @@
 # Tool-Result Lifecycle Policy — Audit & Proposal
 
-**Version:** Draft 1.0
-**Date:** 2026-04-07
-**Phase:** Post v2.4.3 (tool-result memory lane complete)
+**Version:** 1.1 (canon-suppression doctrine ratified 2026-05-24)
+**Original draft date:** 2026-04-07
+**Phase:** Post v2.4.3 (tool-result memory lane complete); Q2-D doctrine
+ratified post-v2.4.4
 **Scope:** Memory lifecycle only — no capability boundary changes
 
 **Doctrine constraint:** Tool-result lifecycle policy must remain entirely inside the epistemic memory system. It must not imply freshness refresh, background re-query, scheduled updates, or any autonomous external action.
+
+---
+
+## 0. Ratified Doctrine — Tool-Result Rows Are Not Auto-Canon
+
+*Added 2026-05-24. Ratified and implemented. See
+`docs/CHECKPOINT_2026-05_Q2D_TOOL_RESULT_DOCTRINE.md` for the full
+audit trail and live evidence.*
+
+### 0.1 Statement
+
+External tool-result memory rows are **not identity-canonical by automatic
+promotion**. They are remembered and queryable through normal retrieval, but
+the kernel's coherence-driven `promotion_score` does not, on its own, cause
+a `tool_result` row to be stamped with `canon=True` or with the Q2-D
+lifecycle envelope `state = protected`.
+
+Canonical / protected status for a tool-result row can be reached only
+through an explicit later promotion or review path — never inferred
+automatically at ingest time from the text's coherence.
+
+### 0.2 Rationale
+
+The `source_type=tool_result` marker exists to distinguish external/advisory
+origin from first-party identity content. Allowing tool-result rows to be
+auto-canonized would make that distinction mostly cosmetic and would let
+external model output enter the agent's identity-canonical layer based on a
+single kernel score with no governance review.
+
+This is consistent with the broader doctrine that TORMENT remembers what
+tools returned but does not let tool output silently shape identity.
+
+### 0.3 Enforcement
+
+`fabric.ingest` accepts a keyword-only parameter:
+
+```python
+def ingest(
+    ...,
+    *,
+    skip_packet_emission: bool = False,
+    suppress_canon: bool = False,
+) -> Dict[str, Any]:
+```
+
+When `suppress_canon=True`, the auto-canon stamp is forced to `False`
+regardless of the kernel's `promotion_score`. The default (`False`)
+preserves the existing behavior for every other ingest caller.
+
+`_fast_tool_result_ingest` (in `torment_service/spine.py`) passes
+`suppress_canon=True` on every call. This is the enforcement site for the
+doctrine.
+
+Downstream consequence: the Q2-D H1c stamp in
+`memory_graph._ensure_lifecycle_envelope` correctly receives `canon=False`
+and stamps the ordinary envelope:
+
+| field | value |
+|---|---|
+| `state` | `unset` |
+| `is_authoritative_on_row` | `true` |
+| `requires_join` | `null` |
+| `set_by.actor` | `system` |
+| `set_by.via` | `ingest_unmarked` |
+| `set_by.at` | `<epoch>` |
+| `history_ref` | `null` |
+| `lifecycle_disagreement` | `null` |
+
+### 0.4 What this doctrine does NOT do
+
+- It does **not** prevent tool-result rows from being retrieved or scored.
+- It does **not** prevent reinforcement, motif attachment, or any other
+  non-canon lifecycle behavior.
+- It does **not** preclude a future explicit promotion path that could
+  canonize a specific tool-result row after operator/review intent.
+- It does **not** retroactively migrate pre-doctrine rows. Existing
+  `PROTECTED / CANON_SET` rows that were written before the patch landed
+  remain as historical artifacts; no cleanup script is provided or planned.
+- It does **not** change canon semantics for any other source type (user
+  ingest, collective re-ingest, archive, character seeds).
+
+### 0.5 Test coverage
+
+`tests/test_tool_result_ingest.py::TestToolResultCanonSuppression` locks
+the doctrine in with four tests:
+
+- `test_tool_result_via_submit_task_does_not_auto_canonize` — integration
+  through the full `submit_task` → Spine → `_fast_tool_result_ingest` path.
+- `test_tool_result_lifecycle_status_is_unset_ingest_unmarked` — verifies
+  the H1c stamp produces the ordinary envelope shape above.
+- `test_fabric_ingest_suppress_canon_forces_canon_false` — direct unit
+  test on the new kwarg at the `fabric.ingest` API layer.
+- `test_canon_branch_honors_suppress_canon_with_forced_high_promotion` —
+  deterministic branch-logic test that monkeypatches `kernel.process` to
+  force `promotion_score=1.0`, then proves the default arm canonizes and
+  the suppress arm overrides under the same forced condition.
+
+### 0.6 Relationship to the rest of this document
+
+Sections 1–6 below are the **original audit and proposal** authored
+2026-04-07 (Draft 1.0). They concern lifecycle properties of tool-result
+rows that are independent of the canon question: half-life duration,
+compression tier, and reinforcement-strength behavior. Those proposals were
+not implemented in the canon-suppression slice. They remain valid as a
+separate future work area, to be ratified on their own merits.
 
 ---
 
