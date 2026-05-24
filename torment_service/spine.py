@@ -902,9 +902,20 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
       - external-origin (source_type='tool_result', write_path='tool_ingest')
       - queryable in normal retrieval
       - visible in /debug/provenance
-      - NOT identity-canonical (stored as ordinary domain memory)
+      - NOT identity-canonical (stored as ordinary domain memory).
+        Enforced by passing ``suppress_canon=True`` to ``fabric.ingest``,
+        which keeps the auto-canon stamp off regardless of kernel
+        promotion_score. Any later canon promotion must come from an
+        explicit operator/review path, not this entry point.
       - safe parent for archivist writeback (admissible in the bounded
         ancestry walk in cognition/recursion_guard.py)
+
+    Doctrine note (ratified post-Q2-D Phase 2 live evidence): the
+    previous behavior auto-canonized any coherent tool-result row via
+    fabric.ingest's promotion_score >= 0.78 check. That contradicted
+    the source_type=tool_result contract -- external/advisory output
+    should not become identity-canonical without explicit promotion.
+    Suppression is now enforced here.
     """
     from .provenance_v1 import ProvenanceV1
 
@@ -941,6 +952,7 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
             supplied_embedding=payload.get("supplied_embedding"),
             scope=payload.get("scope", "private"),
             provenance=prov_dict,
+            suppress_canon=True,
         )
 
 

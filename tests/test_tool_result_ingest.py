@@ -612,5 +612,204 @@ class TestProvenanceBadgeOnHit(unittest.TestCase):
         self.assertGreaterEqual(len(coll_hits), 1, "Collective echo should appear as provenance_type='collective_echo'")
 
 
+# ===========================================================================
+# Tool-result canon suppression (doctrine ratification post-Q2-D Phase 2)
+# ===========================================================================
+#
+# Doctrine: external tool-result rows must NOT become identity-canonical
+# automatically. The previous behavior auto-canonized any coherent
+# tool-result row via fabric.ingest's kernel-driven promotion_score >= 0.78
+# check, which contradicted the source_type=tool_result contract.
+#
+# Patch shape: fabric.ingest gained ``suppress_canon: bool = False`` keyword;
+# _fast_tool_result_ingest now passes ``suppress_canon=True``.
+#
+# These tests lock the doctrine in:
+#   - the full tool-result submit_task pipeline yields canon=False
+#   - the resulting lifecycle envelope is UNSET / SYSTEM / INGEST_UNMARKED
+#   - fabric.ingest(..., suppress_canon=True) is honored at the API layer
+#   - fabric.ingest(..., suppress_canon=False) -- the default -- still
+#     auto-canonizes coherent text (regression guard; proves the patch is
+#     scoped to the explicit-suppression path)
+
+
+# Reasonably coherent English text. The live Phase 2 smoke confirmed
+# that text of this shape triggers auto-canon under the default
+# kernel.promotion_score >= 0.78 threshold (eid=1 and eid=2 in the
+# external_inference_smoke agent both ended up PROTECTED/CANON_SET).
+# Using equivalent text here is the closest in-test analog to that
+# live evidence.
+_COHERENT_INGEST_TEXT = (
+    "Right back at you. I acknowledge this test prompt with a complete "
+    "sentence that should score well on coherence metrics."
+)
+
+
+class TestToolResultCanonSuppression(unittest.TestCase):
+    """Q2-D doctrine ratification: tool-result rows are not auto-canon."""
+
+    def setUp(self):
+        self.fabric = _make_fabric()
+        self.ctx = _make_ctx()
+
+    def _payload_for_eid(self, eid):
+        ak = self.fabric._agent_key("test-ws", "agent-1")
+        graph = self.fabric.private_graphs[ak]
+        return graph.entities[eid].payload
+
+    # ----- Integration: full /tool/ingest pipeline -----
+
+    def test_tool_result_via_submit_task_does_not_auto_canonize(self):
+        """tool_result_ingest must produce a non-canon row, even for
+        text that would otherwise trip the kernel's canon threshold."""
+        req = _make_tool_ingest_request(content=_COHERENT_INGEST_TEXT)
+        resp = submit_task(req, self.fabric, self.ctx)
+        self.assertTrue(resp.ok, msg=f"submit_task failed: {resp.reason}")
+        eid = resp.result["eid"]
+        payload = self._payload_for_eid(eid)
+        self.assertFalse(
+            payload.get("canon"),
+            (
+                "tool_result row must not be canon; got "
+                f"canon={payload.get('canon')!r}. If this fires, the "
+                "suppress_canon wiring on _fast_tool_result_ingest "
+                "has regressed."
+            ),
+        )
+
+    def test_tool_result_lifecycle_status_is_unset_ingest_unmarked(self):
+        """The Q2-D envelope on a vanilla tool_result row is the
+        ordinary unset shape: state=unset, actor=system,
+        via=ingest_unmarked. This is the live-evidence expectation
+        the original Q2-D plan documented; it now holds because
+        suppress_canon prevents PROTECTED/CANON_SET stamping."""
+        req = _make_tool_ingest_request(content=_COHERENT_INGEST_TEXT)
+        resp = submit_task(req, self.fabric, self.ctx)
+        self.assertTrue(resp.ok)
+        eid = resp.result["eid"]
+        payload = self._payload_for_eid(eid)
+
+        ls = payload.get("lifecycle_status")
+        self.assertIsNotNone(
+            ls, "lifecycle_status must be stamped by H1c on every spawn",
+        )
+        self.assertEqual(ls.get("state"), "unset")
+        self.assertTrue(ls.get("is_authoritative_on_row"))
+        self.assertIsNone(ls.get("requires_join"))
+        self.assertIsNone(ls.get("history_ref"))
+        set_by = ls.get("set_by") or {}
+        self.assertEqual(set_by.get("actor"), "system")
+        self.assertEqual(set_by.get("via"), "ingest_unmarked")
+        # set_by.at must be a real epoch int (not None).
+        self.assertIsInstance(set_by.get("at"), int)
+        self.assertGreater(set_by.get("at"), 0)
+
+    # ----- Unit: fabric.ingest API contract for suppress_canon -----
+
+    def test_fabric_ingest_suppress_canon_forces_canon_false(self):
+        """fabric.ingest(..., suppress_canon=True) must produce a
+        non-canon row regardless of kernel promotion_score. This is
+        the API-level guarantee the new kwarg makes."""
+        result = self.fabric.ingest(
+            workspace_id="test-ws",
+            agent_id="agent-1",
+            text=_COHERENT_INGEST_TEXT,
+            step=10,
+            suppress_canon=True,
+        )
+        eid = result["eid"]
+        payload = self._payload_for_eid(eid)
+        self.assertFalse(
+            payload.get("canon"),
+            "suppress_canon=True must force canon=False",
+        )
+
+    def test_canon_branch_honors_suppress_canon_with_forced_high_promotion(self):
+        """Deterministic regression guard for both arms of the
+        ``canon=(False if suppress_canon else _auto_canon)`` ternary.
+
+        Approach: monkeypatch ``kernel.process`` so that signals come
+        back with ``promotion_score=1.0`` regardless of the input
+        text. That forces ``_auto_canon`` to True inside fabric.ingest.
+        Under that condition:
+
+        * default ``fabric.ingest`` (``suppress_canon=False``) MUST
+          stamp canon=True on the resulting row.
+        * ``fabric.ingest(..., suppress_canon=True)`` MUST stamp
+          canon=False on the resulting row.
+
+        Together these prove:
+
+        1. The default arm of the ternary still passes the kernel's
+           auto-canon decision through unchanged (no accidental
+           suppression leak).
+        2. The suppress_canon arm actually overrides the kernel's
+           decision -- this is the doctrine guarantee that
+           _fast_tool_result_ingest relies on.
+
+        This replaces an earlier test that asserted a specific text
+        fixture would canonize under the default kernel. That earlier
+        assumption was brittle: in this in-process fixture the chosen
+        text didn't actually cross the 0.78 threshold, so the test
+        failed without indicating any real regression. Forcing
+        promotion_score directly removes that dependency.
+        """
+        from unittest.mock import patch
+
+        real_process = self.fabric.kernel.process
+
+        def patched_process(state, text):
+            state_out, signals, debug = real_process(state, text)
+            # KernelSignals is a non-frozen @dataclass -- mutation is
+            # allowed. Forcing 1.0 deterministically pushes the value
+            # above the canon threshold (0.78) regardless of text.
+            signals.promotion_score = 1.0
+            return state_out, signals, debug
+
+        with patch.object(
+            self.fabric.kernel, "process", side_effect=patched_process,
+        ):
+            # Default (suppress_canon=False): kernel says canonize, and
+            # the default arm of the ternary must honor that.
+            default_result = self.fabric.ingest(
+                workspace_id="test-ws",
+                agent_id="agent-1",
+                text="forced-promotion default arm",
+                step=30,
+            )
+            default_payload = self._payload_for_eid(default_result["eid"])
+
+            # Suppress (suppress_canon=True): kernel still says canonize,
+            # but the suppress arm of the ternary must override.
+            suppress_result = self.fabric.ingest(
+                workspace_id="test-ws",
+                agent_id="agent-1",
+                text="forced-promotion suppress arm",
+                step=31,
+                suppress_canon=True,
+            )
+            suppress_payload = self._payload_for_eid(suppress_result["eid"])
+
+        self.assertTrue(
+            default_payload.get("canon"),
+            (
+                "default arm regression: with promotion_score=1.0, "
+                "fabric.ingest must auto-canonize when suppress_canon "
+                "is False. Either suppress_canon is leaking into the "
+                "default path, or the canon-branch logic in "
+                "fabric.ingest was reshaped without updating this test."
+            ),
+        )
+        self.assertFalse(
+            suppress_payload.get("canon"),
+            (
+                "suppress arm regression: with promotion_score=1.0, "
+                "fabric.ingest(..., suppress_canon=True) must still "
+                "force canon=False. The doctrine -- external tool "
+                "results are not auto-canon -- relies on this override."
+            ),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

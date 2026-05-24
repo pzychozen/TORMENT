@@ -2348,6 +2348,7 @@ class TormentFabric:
         extra_payload: Optional[Dict[str, Any]] = None,
         *,
         skip_packet_emission: bool = False,
+        suppress_canon: bool = False,
     ) -> Dict[str, Any]:
         # === BOUNDARY GUARD ===
         # Core ingest ALWAYS creates "core" memory. Archive documents use
@@ -2722,6 +2723,19 @@ class TormentFabric:
                 _merged_ep: Dict[str, Any] = dict(extra_payload or {})
                 _merged_ep.update(_internal_ep)  # internal wins on collision
 
+                # Auto-canon stamp: by default, rows whose kernel
+                # promotion_score crosses the canon threshold are
+                # written with canon=True (which Q2-D's H1c helper then
+                # stamps as PROTECTED / SYSTEM / CANON_SET).
+                # ``suppress_canon=True`` overrides this to keep canon
+                # False unconditionally. Used by ``_fast_tool_result_ingest``
+                # so external/advisory tool output does not become
+                # identity-canonical automatically -- it can be
+                # remembered and queried, but canon promotion (if any)
+                # must come from an explicit later path. See
+                # docs/TOOL_RESULT_LIFECYCLE_POLICY.md and the
+                # _fast_tool_result_ingest docstring.
+                _auto_canon = (signals.promotion_score >= 0.78)
                 eid = graph.spawn_memory(
                 summary=summary,
                 embedding=emb,
@@ -2730,7 +2744,7 @@ class TormentFabric:
                 confidence=signals.confidence,
                 half_life_days=half_life_days,
                 links=signals.links,
-                canon=(signals.promotion_score >= 0.78),
+                canon=(False if suppress_canon else _auto_canon),
                 user_id=agent_id,
                 step=step,
                 memory_class=memory_class,
