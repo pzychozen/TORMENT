@@ -77,7 +77,7 @@ sanctioned ingest route. Requires a running TORMENT server::
     python tests/run_external_inference_smoke.py \\
         --provider openrouter --model google/gemini-2.5-flash \\
         --ingest \\
-        --base-url http://localhost:8000 \\
+        --base-url http://127.0.0.1:8787 \\
         --workspace-id default \\
         --agent-id external_inference_smoke
 
@@ -89,10 +89,12 @@ Required environment (loaded from ``.env`` at the repo root if
 
 Server liveness probe (``--ingest`` only)
 -----------------------------------------
-The script GETs ``{base_url}/health`` before posting. Note: the
-ratified plan referenced ``/healthz`` as shorthand; the actual
-endpoint in ``torment_service/app.py`` is ``/health``. If the
-endpoint name ever changes, update ``HEALTH_PATH`` below.
+The script GETs ``{base_url}/health`` before posting. The health
+endpoint is defined in ``torment_service/app.py`` and the service
+binds to ``http://127.0.0.1:8787`` by default (see
+``torment_service/__main__.py``). ``--base-url`` defaults to that
+host:port; pass ``--base-url`` to override. If either changes,
+update ``DEFAULT_BASE_URL`` / ``HEALTH_PATH`` below.
 
 Exit codes
 ----------
@@ -125,7 +127,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 SUPPORTED_PROVIDERS = ("anthropic", "openrouter")
 
 # --- Phase 2 (--ingest) constants ------------------------------------------
-DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 DEFAULT_WORKSPACE_ID = "default"
 DEFAULT_AGENT_ID = "external_inference_smoke"
 HEALTH_PATH = "/health"
