@@ -309,11 +309,13 @@ def ingest_fixtures(
     print(f"  ingest 2 (user_input): stored={r.json().get('stored')}")
 
     # Fixture 3 — tool_result via /tool/ingest
+    # Note: /tool/ingest's ToolIngestReq uses `content` (not `text` like
+    # /agent/ingest); the field name diverges between the two endpoints.
     text3 = "Probe tool output: storage doctrine remains intact."
     r = _post(base_url, "/tool/ingest", {
         "workspace_id": workspace_id,
         "agent_id": agent_id,
-        "text": text3,
+        "content": text3,
         "tool_name": _TOOL_NAME,
         "scope": "private",
     })
