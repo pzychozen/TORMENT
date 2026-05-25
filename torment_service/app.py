@@ -1317,6 +1317,12 @@ class AssembleContextReq(BaseModel):
     archive_min_score: float = 0.0
     domain_id: Optional[str] = None
     custom_weights: Optional[Dict[str, float]] = None
+    # S5 (Memory-to-Prompt v0.2 §4.3) — opt-in character-memory
+    # observability. Default False preserves backward-compat for existing
+    # callers including live_agent/memory_bridge.py. When True, the
+    # /retrieve response gains a top-level `assembly_audit` key per v0.2
+    # §4.2; `results` / `blocks` / `assembled_text` are unchanged.
+    include_assembly_audit: bool = False
 
 
 @app.post("/retrieve")
@@ -1391,7 +1397,31 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
         custom_weights=req.custom_weights,
     )
 
-    return assembled.to_dict()
+    response = assembled.to_dict()
+
+    # 5. Optional character-memory observability (Memory-to-Prompt v0.2
+    # observability lane). Opt-in via req.include_assembly_audit; default
+    # False preserves backward-compat. When True, adds a top-level
+    # `assembly_audit` key per v0.2 §4.2; `results` / `blocks` /
+    # `assembled_text` are unchanged. No disk persistence (Option C per
+    # v0.2 S3 Decision 1).
+    if req.include_assembly_audit:
+        from .assembly_audit import build_assembly_audit
+        response["assembly_audit"] = build_assembly_audit(
+            request_meta={
+                "workspace_id": req.workspace_id,
+                "agent_id": req.agent_id,
+                "query": req.query,
+                "profile": req.profile,
+                "top_k": req.top_k,
+                "token_budget": req.token_budget,
+            },
+            core_query_result=core_result,
+            archive_hits=archive_hits,
+            assembled=assembled,
+        )
+
+    return response
 
 
 @app.get("/retrieve/profiles")

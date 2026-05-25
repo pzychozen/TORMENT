@@ -60,11 +60,18 @@ class MemoryBridge:
         profile: str = DEFAULT_PROFILE,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
         top_k: int = DEFAULT_TOP_K,
+        include_assembly_audit: bool = False,
     ) -> dict[str, Any]:
         """Call POST /retrieve for assembled context.
 
         Returns the full response dict with keys like:
           blocks, character_context, token_count, profile, ...
+
+        When ``include_assembly_audit=True``, the response additionally
+        contains an ``assembly_audit`` key per Memory-to-Prompt v0.2
+        §4.2 (character-memory observability: what memory shaped the
+        character's next response). Default False preserves backward
+        compatibility for existing callers.
         """
         payload = {
             "workspace_id": self.workspace_id,
@@ -73,6 +80,7 @@ class MemoryBridge:
             "profile": profile,
             "token_budget": token_budget,
             "top_k": top_k,
+            "include_assembly_audit": include_assembly_audit,
         }
         try:
             r = requests.post(

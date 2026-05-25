@@ -4261,6 +4261,21 @@ class TormentFabric:
             "bridge_peek_domains": bridge_peek_domains,
             "results": rescored,
             "excluded": _filter_excluded,  # FILTER-A: governance exclusions
+            # S5 additive observability surface (Memory-to-Prompt v0.2 §4.2).
+            # `filter_excluded` is the doctrinally-named alias the
+            # `build_assembly_audit` helper reads; `excluded` (above) is the
+            # historical name preserved for backward-compat. Both carry the
+            # same list. Future v0.2.x cleanup may pick one canonical name.
+            # `_core_hits_in_count` and `_authority_guard_rejected` are
+            # underscore-prefixed per the internal-observability convention:
+            # consumers should not rely on them for behavior. The latter is
+            # always 0 in normal operation because the H4d authority guard
+            # at governance.py is fail-loud (any wrapper rejection raises
+            # before reaching this return path); the key is present so a
+            # future revision can propagate a non-fail-loud count if needed.
+            "filter_excluded": _filter_excluded,
+            "_core_hits_in_count": len(rescored) + len(_filter_excluded),
+            "_authority_guard_rejected": 0,
             "motifs": {
                 "active": [m for d in domains for m in active_motifs.get(d, [])],
                 "dominant_thread": dominant,
