@@ -947,6 +947,15 @@ def assemble_character_context(
         "drift_score": float(drift_info.get("drift_score", 0.0)) if drift_info else 0.0,
         "drift_summary": str(drift_info.get("explanation", "")) if drift_info else "",
         "recommendations": recommendations,
+        # v0.2.2 Candidate A: pass-through additional drift_info fields so
+        # /retrieve can surface them under the stable character_context
+        # subset. These were previously consumed only by the recommendations
+        # logic above; v0.2.2 makes them observable to callers without
+        # changing prompt-text behavior. See
+        # docs/MEMORY_TO_PROMPT_AUTOMATION_v0.2.md §7.5 (v0.2.x extensions).
+        "drift_direction": str(drift_info.get("drift_direction", "stable")) if drift_info else "stable",
+        "seed_basin_role": str(drift_info.get("seed_basin_role", "")) if drift_info else "",
+        "relational_count": int(drift_info.get("relational_count", 0)) if drift_info else 0,
     }
     if spirit_summary is not None:
         result["spirit_return_summary"] = spirit_summary

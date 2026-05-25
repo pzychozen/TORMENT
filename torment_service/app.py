@@ -1399,7 +1399,37 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
 
     response = assembled.to_dict()
 
-    # 5. Optional character-memory observability (Memory-to-Prompt v0.2
+    # 5. v0.2.2 Candidate A — surface stable character_context subset on
+    # the /retrieve response so callers can see character-shaping
+    # information that was previously dropped at this boundary. Default-on
+    # (data is already computed in fabric.query; v0.2.2 just stops
+    # discarding it). Stable ten-field subset only; raw internal
+    # `assemble_character_context` dict is NOT exposed. Omitted entirely
+    # when fabric.query did not produce a character_context (no seed /
+    # character disabled). Does NOT modify `assembled_text`, `blocks`, or
+    # any other existing response key.
+    _char_ctx_full = core_result.get("character_context")
+    if _char_ctx_full is not None:
+        _surfaced_char_ctx: Dict[str, Any] = {
+            "seed_id": str(_char_ctx_full.get("seed_id", "")),
+            "character_name": str(_char_ctx_full.get("character_name", "")),
+            "tier_breakdown": dict(_char_ctx_full.get("tier_breakdown") or {}),
+            "drift_score": float(_char_ctx_full.get("drift_score", 0.0)),
+            "drift_direction": str(_char_ctx_full.get("drift_direction", "stable")),
+            "drift_summary": str(_char_ctx_full.get("drift_summary", "")),
+            "recommendations": list(_char_ctx_full.get("recommendations") or []),
+            "seed_basin_role": str(_char_ctx_full.get("seed_basin_role", "")),
+            "relational_count": int(_char_ctx_full.get("relational_count", 0)),
+        }
+        # spirit_return_summary is optional — only include the sub-key
+        # when fabric.query produced one (i.e., the query surfaced at
+        # least one spirit-return hit).
+        _spirit = _char_ctx_full.get("spirit_return_summary")
+        if _spirit is not None:
+            _surfaced_char_ctx["spirit_return_summary"] = dict(_spirit)
+        response["character_context"] = _surfaced_char_ctx
+
+    # 6. Optional character-memory observability (Memory-to-Prompt v0.2
     # observability lane). Opt-in via req.include_assembly_audit; default
     # False preserves backward-compat. When True, adds a top-level
     # `assembly_audit` key per v0.2 §4.2; `results` / `blocks` /
