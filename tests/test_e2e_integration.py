@@ -46,7 +46,55 @@ def _setenv():
 
 
 _ensure_fastapi_stub()
-_setenv()
+
+# Capture original env values at module IMPORT time, so we can restore
+# them after this module's tests finish. The actual mutation (via
+# _setenv()) is deferred to setUpModule() — which runs at EXECUTION
+# time, not collection time — to avoid contaminating other test modules
+# that are imported during pytest collection. Without that deferral,
+# TORMENT_CHARACTER_ENABLE=0 would be set during collection and persist
+# into the execution of alphabetically-earlier test modules
+# (test_authority_lane_matrix.py character-badge tests are the most
+# visible victims: their activation bridge in fabric.create_agent is
+# gated by TORMENT_CHARACTER_ENABLE).
+_E2E_ENV_KEYS = (
+    "TORMENT_EMBED_PROVIDER",
+    "TORMENT_COMPRESS_ENABLE",
+    "TORMENT_COMPRESS_MIN_STEP",
+    "TORMENT_COMPRESS_MIN_AGE",
+    "TORMENT_CHARACTER_ENABLE",
+    "TORMENT_CHECKPOINT_ENABLE",
+)
+_E2E_ENV_ORIG = {k: os.environ.get(k) for k in _E2E_ENV_KEYS}
+
+
+def setUpModule():
+    """Mutate os.environ for the e2e tests at EXECUTION time.
+
+    pytest calls this once before the first test in this module runs.
+    Deferring _setenv() here (rather than calling it at module import
+    time) prevents the env mutation from being visible during pytest's
+    collection of OTHER test modules, which would otherwise inherit
+    the e2e-specific env values for the entire session.
+    """
+    _setenv()
+
+
+def tearDownModule():
+    """Restore os.environ to its pre-setUpModule state.
+
+    pytest calls this once after the last test in this module
+    finishes. Combined with the deferral in setUpModule, this scopes
+    the env mutation to exactly the window where e2e tests are
+    executing — never during collection, never during other modules'
+    execution.
+    """
+    for k, orig in _E2E_ENV_ORIG.items():
+        if orig is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = orig
+
 
 from torment_service.fabric import TormentFabric
 from torment_service.compression import (

@@ -51,7 +51,48 @@ def _setenv():
 
 
 _ensure_fastapi_stub()
-_setenv()
+
+# Capture original env values at module IMPORT time so we can restore
+# them in tearDownModule(). The actual mutation (via _setenv()) is
+# deferred to setUpModule() — which runs at EXECUTION time, not
+# collection time — so we don't poison os.environ for other test
+# modules collected in the same pytest session. Without this,
+# TORMENT_CHARACTER_ENABLE=0 would be set during collection of this
+# file and persist into the execution of test_authority_lane_matrix.py
+# (whose character-badge tests depend on character mode being on) and
+# test_character_context_surfacing.py (whose v0.2.2 tests depend on
+# /retrieve producing character_context). Symmetric to the fix in
+# tests/test_e2e_integration.py.
+_WS_ISO_ENV_KEYS = (
+    "TORMENT_EMBED_PROVIDER",
+    "TORMENT_CHARACTER_ENABLE",
+    "TORMENT_CHECKPOINT_ENABLE",
+    "TORMENT_COMPRESS_ENABLE",
+    "TORMENT_SRG_ENABLE",
+    "TORMENT_HIVEMIND_ENABLE",
+)
+_WS_ISO_ENV_ORIG = {k: os.environ.get(k) for k in _WS_ISO_ENV_KEYS}
+
+
+def setUpModule():
+    """Mutate os.environ for the workspace-isolation tests at EXECUTION
+    time. pytest calls this once before the first test in this module
+    runs. Deferring _setenv() here (rather than calling it at module
+    import time) prevents the env mutation from being visible during
+    pytest's collection of OTHER test modules.
+    """
+    _setenv()
+
+
+def tearDownModule():
+    """Restore os.environ to its pre-setUpModule state. pytest calls
+    this once after the last test in this module finishes."""
+    for k, orig in _WS_ISO_ENV_ORIG.items():
+        if orig is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = orig
+
 
 from torment_service.fabric import TormentFabric
 
