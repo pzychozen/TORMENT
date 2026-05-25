@@ -109,9 +109,22 @@ the doctrine in with four tests:
 Sections 1–6 below are the **original audit and proposal** authored
 2026-04-07 (Draft 1.0). They concern lifecycle properties of tool-result
 rows that are independent of the canon question: half-life duration,
-compression tier, and reinforcement-strength behavior. Those proposals were
-not implemented in the canon-suppression slice. They remain valid as a
-separate future work area, to be ratified on their own merits.
+compression tier, and reinforcement-strength behavior.
+
+**Note (corrected 2026-05-24 post-survey):** §3.2 Changes A
+(half-life cap), B (compression tier), and C (reinforcement guard)
+were already implemented as part of the original v2.4.3 tool-result
+memory lane (commit `8fe343c feat(v2.4.3): tool-result memory lane —
+ingest, retrieval semantics, lifecycle policy`), alongside the test
+class structure described in §4 Patch 4. The canon-suppression slice
+(commit `8733662`, 2026-05-24) layered the Q2-D `suppress_canon=True`
+doctrine *on top of* that pre-existing lifecycle infrastructure, not
+in place of it. The §3.2 proposals are therefore **not deferred
+future work** — they shipped in v2.4.3 and are verified by
+`tests/test_tool_result_lifecycle.py` (12/12 tests passing on
+2026-05-24, current `main`). Sections 1–6 remain valid as the
+original 2026-04-07 audit and design record; see §3.4 below for
+current implementation status mapped to commit and tests.
 
 ---
 
@@ -243,6 +256,51 @@ When a tool-result memory is reinforced by a near-duplicate ingest, increment `r
 | **Freshness detection** | "Is this tool result still fresh?" implies external checking. Hard boundary violation. |
 | **Auto-refresh / re-query** | Capability boundary violation. Never. |
 | **Scheduled decay sweeps** | TORMENT decays on access (retrieval scoring) and compression events. Adding scheduled sweeps is a new execution pattern. Defer. |
+
+### 3.4 Implementation status — v2.4.3 shipped, verified 2026-05-24
+
+§3.2 Changes A, B, and C shipped as part of the original v2.4.3
+tool-result memory lane (commit `8fe343c feat(v2.4.3): tool-result
+memory lane — ingest, retrieval semantics, lifecycle policy`).
+Verified live on `main` on 2026-05-24 via `pytest
+tests/test_tool_result_lifecycle.py -v` — **12/12 tests passing**.
+
+| §3.2 Item | Code site (current main) | Test class | Status |
+|---|---|---|---|
+| A — Half-life cap | `torment_service/fabric.py:2583-2593` | `TestToolResultHalfLifeCap` (3 tests) | Shipped, verified |
+| B — Compression tier | `torment_service/compression.py:421-423` (classifier), `:75-76` (constants), `:647` (scorer), `:813` (short-path) | `TestToolResultCompressionTier`, `TestToolResultCompressionScoring`, `TestToolResultShortPathMultiplier` (7 tests total) | Shipped, verified |
+| C — Reinforcement guard | `torment_service/fabric.py:2638-2663` | `TestToolResultReinforcementGuard` (2 tests) | Shipped, verified |
+
+**Implementation notes — two minor divergences from the §4 Patch
+text, both safe:**
+
+- **Half-life cap guard simplification.** §4 Patch 1 proposed a
+  ternary `if _prov.source_type == "tool_result" if hasattr(_prov,
+  "source_type") else (dict path)`. The shipped code uses only the
+  dict branch (`isinstance(_prov_dict, dict) and
+  _prov_dict.get("source_type") == "tool_result"`). This is safe
+  because `_prov_dict` is populated at every `fabric.ingest` entry
+  point (`fabric.py:2370 / 2373 / 2392`) as `_prov.to_dict()` before
+  reaching the cap site at line 2587. Behaviorally equivalent to
+  the ternary.
+- **`COMPRESS_TOOL_RESULT_MULT` is env-overridable.** §4 Patch 2a
+  declared this as a fixed constant `0.45`. The shipped constant is
+  `_env_float("TORMENT_COMPRESS_TOOL_RESULT_MULT", 0.45)` — same
+  default value, with an env override for operational tuning. Not a
+  regression; a small improvement over the spec.
+
+No spec gap remains. The compression tier ordering claim
+(`COMPRESS_ECHO_MULT < COMPRESS_TOOL_RESULT_MULT <
+COMPRESS_SHORT_PATH_MULT`, i.e. 0.40 < 0.45 < 0.50) is explicitly
+verified by
+`TestToolResultCompressionScoring.test_tool_result_between_echo_and_default`.
+
+**Items still deferred:** the entries listed in §3.3 above (TTL,
+deep routing preference, spirit return exclusion, per-tool-name
+half-life, freshness detection, auto-refresh, scheduled decay
+sweeps) remain explicitly deferred. §3.3 was correctly labeled in
+2026-04-07 and remains correctly labeled. The §3.4 correction
+applies only to §3.2 A/B/C, not to §3.3.
 
 ---
 
