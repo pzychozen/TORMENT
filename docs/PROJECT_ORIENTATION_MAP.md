@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-05-24.
+**Date of last refresh:** 2026-05-25.
 
 ---
 
@@ -30,7 +30,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-05-24, the following arcs are closed on `main`. Each has a formal
+As of 2026-05-25, the following arcs are closed on `main`. Each has a formal
 checkpoint doc that is the source of truth for what shipped when:
 
 | Arc | Closed | Source of truth |
@@ -41,8 +41,9 @@ checkpoint doc that is the source of truth for what shipped when:
 | Tier 2 runtime evidence (5,400 turns / 3 pack regimes / 0 aborts) | 2026-05-24 | `docs/CHECKPOINT_2026-05_TIER_2_RUNTIME_EVIDENCE.md` |
 | Scratch-doc promotion (automation audit + long-iteration plan) | 2026-05-24 | `docs/AGENT_AUTOMATION_NEXT_STEP_AUDIT.md`, `docs/AGENT_RUNTIME_LONG_ITERATION_TEST_PLAN.md` |
 | Tool-result lifecycle policy implementation-status correction | 2026-05-24 | `docs/TOOL_RESULT_LIFECYCLE_POLICY.md` §0.6 + §3.4 |
+| Memory-to-Prompt Automation v0.2 — observability lane (first revision PASS) | 2026-05-25 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md` |
 
-Working tree was clean at the close of the 2026-05-24 session. The next gate
+Working tree was clean at the close of the 2026-05-25 session. The next gate
 is the user's call (see §7).
 
 ---
@@ -207,6 +208,13 @@ expected-by-design).
 ---
 
 ## 7. Current likely next technical direction
+
+> **Update note, 2026-05-25:** Memory-to-Prompt Automation v0.2 first revision
+> / observability lane closed PASS; see §2 and
+> `CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md`. The next gate
+> is now undecided and remains the operator/trio's call. The rest of this
+> section is preserved as the read at the time of the v0.2 gate-opening; it
+> describes the gate that has since closed.
 
 **Memory-to-prompt automation Phase 0, design-only.** This is the natural next
 gate given current closure trail: tool-result rows can be ingested (Q2-D),
