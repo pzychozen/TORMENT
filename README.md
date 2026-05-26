@@ -1,7 +1,8 @@
 # TORMENT Memory Fabric
 
----
-I built TORMENT because I wanted AI memory with character — memory that preserves flow, continuity, and identity without turning the AI into a brittle persona or an uncontrolled agent.
+
+> I built TORMENT because I wanted AI memory that could carry character, continuity, and emotional/behavioral shape without breaking the AI’s natural flow or trapping it inside brittle roleplay boundaries.
+
 ---
 
 TORMENT helps AI characters and agents build long-term memory without their identity dissolving into accumulated context.
