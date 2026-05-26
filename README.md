@@ -1,5 +1,9 @@
 # TORMENT Memory Fabric
 
+---
+I built TORMENT because I wanted AI memory with character — memory that preserves flow, continuity, and identity without turning the AI into a brittle persona or an uncontrolled agent.
+---
+
 TORMENT helps AI characters and agents build long-term memory without their identity dissolving into accumulated context.
 
 Many systems add memory by saving text and retrieving similar chunks later. TORMENT adds a governed memory lifecycle: memories carry origin, weight, decay, exposure rules, and audit trails.
