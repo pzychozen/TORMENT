@@ -1,4 +1,5 @@
 import importlib
+import os
 
 import numpy as np
 import pytest
@@ -6,17 +7,38 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    """Create an isolated app instance pointing at a temp data dir."""
+def client(tmp_path):
+    """Create an isolated app instance pointing at a temp data dir.
+
+    Manual env save/restore + post-yield reload — not monkeypatch.
+    torment_service.app reads TORMENT_DATA_DIR at module-import time and
+    binds both DATA_DIR and the module-level fabric to it. Reloading the
+    module with TORMENT_DATA_DIR=tmp rebinds both to the tmp dir.
+    monkeypatch.setenv would restore the env var at fixture teardown, but
+    its restoration runs AFTER this fixture's post-yield code — so any
+    reload-in-finally would re-bind to the still-tmp env. Saving the env
+    manually and reloading inside finally AFTER the manual restore is the
+    only shape that reverts appmod.DATA_DIR + appmod.fabric to their
+    pre-fixture values. Without that revert, alphabetically-later tests
+    that depend on the repo DATA_DIR (e.g. test_app_security_hardening.py)
+    see a leaked tmp path.
+    """
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("TORMENT_DATA_DIR", str(data_dir))
+
+    original_env = os.environ.get("TORMENT_DATA_DIR")
+    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
 
     import torment_service.app as appmod
-
-    # Reload to ensure DATA_DIR and fabric are initialized from env var.
     appmod = importlib.reload(appmod)
-    return TestClient(appmod.app)
+    try:
+        yield TestClient(appmod.app)
+    finally:
+        if original_env is None:
+            os.environ.pop("TORMENT_DATA_DIR", None)
+        else:
+            os.environ["TORMENT_DATA_DIR"] = original_env
+        importlib.reload(appmod)
 
 
 def _unit_vec(dim=384, seed=0):
