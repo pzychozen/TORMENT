@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-05-25.
+**Date of last refresh:** 2026-05-27.
 
 ---
 
@@ -30,7 +30,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-05-25, the following arcs are closed on `main`. Each has a formal
+As of 2026-05-27, the following arcs are closed on `main`. Each has a formal
 checkpoint doc that is the source of truth for what shipped when:
 
 | Arc | Closed | Source of truth |
@@ -43,9 +43,15 @@ checkpoint doc that is the source of truth for what shipped when:
 | Tool-result lifecycle policy implementation-status correction | 2026-05-24 | `docs/TOOL_RESULT_LIFECYCLE_POLICY.md` §0.6 + §3.4 |
 | Memory-to-Prompt Automation v0.2 — observability lane (first revision PASS) | 2026-05-25 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md` |
 | Memory-to-Prompt Automation v0.2.2 Candidate A — `character_context` surfacing on `/retrieve` (PASS) | 2026-05-25 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_2_CHARACTER_CONTEXT.md` |
+| Test isolation cleanup — FastAPI stub removal + DATA_DIR app-reload leak fix (class-of-bug parity across three fixtures) | 2026-05-27 | `docs/CHECKPOINT_2026-05_TEST_ISOLATION_FASTAPI_DATADIR.md` |
+| Visualize attractors suite restore — `_viz_common` import path fix + live Ryuki skip guards (full suite no longer needs `--ignore`) | 2026-05-27 | `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md` |
+| Memory-to-Prompt Automation v0.2.3 — spirit-return / voice-cue `/retrieve` surfacing verification (PASS) | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md` |
 
-Working tree was clean at the close of the 2026-05-25 session. The next gate
-is the user's call (see §7).
+Working tree was clean at the close of the 2026-05-27 session. Full suite
+runs cleanly without the historical `--ignore=tests\test_visualize_attractors.py`
+flag — the old convention is retired; current baseline is
+**3,535 passed / 5 skipped / 22 subtests passed** under `python -m pytest tests\ -q`.
+The next gate is the user's call (see §7).
 
 ---
 
@@ -199,6 +205,25 @@ Items that have been deferred from an active slice but are not lost:
   TTL / hard expiry, deep routing preference, spirit return exclusion,
   per-tool-name half-life, freshness detection, auto-refresh, scheduled
   decay sweeps. All still correctly deferred.
+- **archive-FILTER-A application** — named by v0.2 lane doctrine
+  (`docs/MEMORY_TO_PROMPT_AUTOMATION_v0.2.md` §S3 Decision 5) as the
+  slice that closes the honestly-reported archive-FILTER-A gap (archive
+  hits don't pass FILTER-A today). Working name v0.2.4 or v0.3. Likely
+  next memory-to-prompt gate; see §7.
+- **`/agent/query` doctrine-vs-reality correction** — parked from v0.2.2
+  closure. The v0.2.2 surfacing (Option A) wired only `/retrieve`;
+  doctrine names both `/retrieve` and `/agent/query`. Small docs-vs-code
+  reconciliation slice.
+- **Gap C — `spirit_return_summary` consistency check** — named in
+  `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md`
+  §A as the smallest possible follow-up to v0.2.3. Asserts that
+  `character_context.spirit_return_summary` and
+  `assembly_audit.spirit_return_summary` agree when both fire.
+- **Deterministic attractor visualization fixture / science validation**
+  — named in `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md`
+  §A as the path to turn the visualize-attractors tests from "not
+  broken" into "scientifically meaningful." Larger; not blocking;
+  deferred unless visualization correctness becomes load-bearing.
 
 Claude's local memory also keeps a broader parking lot at
 `future_lookat_issues.md` for findings that surfaced during scoped work and
@@ -210,43 +235,49 @@ expected-by-design).
 
 ## 7. Current likely next technical direction
 
-> **Update note, 2026-05-25:** Memory-to-Prompt Automation v0.2 first revision
-> / observability lane closed PASS; see §2 and
-> `CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md`. The next gate
-> is now undecided and remains the operator/trio's call. The rest of this
-> section is preserved as the read at the time of the v0.2 gate-opening; it
-> describes the gate that has since closed.
+> **Update note, 2026-05-27:** v0.2.2 `character_context` surfacing on
+> `/retrieve` and v0.2.3 spirit-return / voice-cue `/retrieve` surfacing
+> verification both closed PASS across the 2026-05-25 → 2026-05-27 chain.
+> The next memory-to-prompt extension slice in the v0.2.x deferred sequence
+> is **v0.2.4 archive-FILTER-A application** — likely-next, not auto-opened.
+> The 2026-05-25 update describing v0.2 Phase 0 is superseded; the v0.2
+> observability lane and its v0.2.x extensions have advanced beyond
+> Phase 0 framing.
 
-**Memory-to-prompt automation Phase 0, design-only.** This is the natural next
-gate given current closure trail: tool-result rows can be ingested (Q2-D),
-retrieved (Level 3), and the runtime envelope holds under iteration (Tier 2).
-The remaining open question is *how* retrieved memory may shape the prompt
-context of a later LLM call without becoming authority.
+**v0.2.4 — archive-FILTER-A application.** Named in the v0.2 lane
+doctrine (`docs/MEMORY_TO_PROMPT_AUTOMATION_v0.2.md` §S3 Decision 5) as
+the slice that closes the honestly-reported archive-FILTER-A gap. Today
+the v0.2 observability lane *reports* the gap via the
+`archive_filter_applied: false` field in the audit payload but does not
+*fix* it; v0.2.4 is the ratifiable slice that fixes it. Self-contained
+scope; doctrinal groundwork done; requires its own audit-first cycle
+per §5.
 
-Phase 0 deliverable shape: a design-only boundary doc covering what may
-automation observe, propose, never mutate, what requires explicit user
-approval, what must be logged, what must be reversible, what is forbidden.
-**Phase 0 does not authorize autonomous tool use** and does not include
-implementation. Implementation would be Phase 1+ as separate ratifiable
-arcs.
+The doctrinal kernel from §1 anchors this direction unchanged: *Memory
+may shape context. Memory may not seize authority.*
 
-The doctrinal kernel from §1 anchors this direction: *Memory may shape
-context. Memory may not seize authority.*
+**Alternative small slices the operator may choose instead:**
 
-**Alternative next slices the user may choose instead:**
-
-- Batch C accumulating workspace evidence (wrapper code change required;
-  per §6).
-- Full `do_not_touch_torment_test_rig/` audit, migration, or deletion plan
-  (per §4 — only if the rig becomes load-bearing).
-- Tier 3 endurance (per §6 — only if a specific question demands more
-  data).
-- Findings doc promotion (small docs slice; per §6).
+- **`/agent/query` doctrine-vs-reality correction** (per §6). Reconciles
+  v0.2.2's `/retrieve`-only Option A wiring with the doctrine that names
+  both endpoints. Small.
+- **Gap C — `spirit_return_summary` consistency check** (per §6 and the
+  v0.2.3 checkpoint). Smallest possible v0.2.x follow-up.
+- **Deterministic attractor visualization fixture** (per §6 and the
+  visualize-attractors checkpoint). Larger; only if visualization
+  science becomes a priority. Not blocking.
+- **Findings doc promotion** (small docs slice; per §6). The
+  `scratch/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` promotion is still
+  pending.
+- **Full `do_not_touch_torment_test_rig/` audit, migration, or deletion
+  plan** (per §4 — only if the rig becomes load-bearing).
+- **Tier 3 endurance** (per §6 — only if a specific question demands
+  more data than Tier 2 already provides).
 - Something else entirely — the next gate is not locked.
 
-None of these are sequenced ahead of memory-to-prompt Phase 0 by default;
-the user calls the next gate when ready. This section is *current likely*,
-not *permanently next*.
+None of these are sequenced ahead of v0.2.4 by default; the operator
+calls the next gate when ready. This section is *current likely*, not
+*permanently next*.
 
 ---
 
