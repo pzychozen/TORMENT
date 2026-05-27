@@ -46,12 +46,16 @@ checkpoint doc that is the source of truth for what shipped when:
 | Test isolation cleanup — FastAPI stub removal + DATA_DIR app-reload leak fix (class-of-bug parity across three fixtures) | 2026-05-27 | `docs/CHECKPOINT_2026-05_TEST_ISOLATION_FASTAPI_DATADIR.md` |
 | Visualize attractors suite restore — `_viz_common` import path fix + live Ryuki skip guards (full suite no longer needs `--ignore`) | 2026-05-27 | `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md` |
 | Memory-to-Prompt Automation v0.2.3 — spirit-return / voice-cue `/retrieve` surfacing verification (PASS) | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md` |
+| Memory-to-Prompt Automation v0.2.4 — archive-FILTER-A application (Option A, defense-in-depth) PASS | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md` |
 
-Working tree was clean at the close of the 2026-05-27 session. Full suite
-runs cleanly without the historical `--ignore=tests\test_visualize_attractors.py`
-flag — the old convention is retired; current baseline is
-**3,535 passed / 5 skipped / 22 subtests passed** under `python -m pytest tests\ -q`.
-The next gate is the user's call (see §7).
+Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
+Full suite runs cleanly without the historical
+`--ignore=tests\test_visualize_attractors.py` flag — the old
+convention is retired; current baseline is
+**3,570 passed / 5 skipped / 22 subtests passed** under
+`python -m pytest tests\ -q`. Live S6-style smoke for v0.2.4 archive
+FILTER-A (hash embedder, disposable workspace) closed at **32 GREEN
+/ 0 YELLOW / 0 RED**. The next gate is the user's call (see §7).
 
 ---
 
@@ -205,11 +209,6 @@ Items that have been deferred from an active slice but are not lost:
   TTL / hard expiry, deep routing preference, spirit return exclusion,
   per-tool-name half-life, freshness detection, auto-refresh, scheduled
   decay sweeps. All still correctly deferred.
-- **archive-FILTER-A application** — named by v0.2 lane doctrine
-  (`docs/MEMORY_TO_PROMPT_AUTOMATION_v0.2.md` §S3 Decision 5) as the
-  slice that closes the honestly-reported archive-FILTER-A gap (archive
-  hits don't pass FILTER-A today). Working name v0.2.4 or v0.3. Likely
-  next memory-to-prompt gate; see §7.
 - **`/agent/query` doctrine-vs-reality correction** — parked from v0.2.2
   closure. The v0.2.2 surfacing (Option A) wired only `/retrieve`;
   doctrine names both `/retrieve` and `/agent/query`. Small docs-vs-code
@@ -233,51 +232,64 @@ expected-by-design).
 
 ---
 
-## 7. Current likely next technical direction
+## 7. Candidate next gates (no auto-open)
 
-> **Update note, 2026-05-27:** v0.2.2 `character_context` surfacing on
-> `/retrieve` and v0.2.3 spirit-return / voice-cue `/retrieve` surfacing
-> verification both closed PASS across the 2026-05-25 → 2026-05-27 chain.
-> The next memory-to-prompt extension slice in the v0.2.x deferred sequence
-> is **v0.2.4 archive-FILTER-A application** — likely-next, not auto-opened.
-> The 2026-05-25 update describing v0.2 Phase 0 is superseded; the v0.2
-> observability lane and its v0.2.x extensions have advanced beyond
-> Phase 0 framing.
+> **Update note, 2026-05-27 (v0.2.4 closure):** v0.2.2
+> `character_context` surfacing, v0.2.3 spirit-return / voice-cue
+> verification, and **v0.2.4 archive-FILTER-A application** all closed
+> PASS across the 2026-05-25 → 2026-05-27 chain. The archive-FILTER-A
+> gap honestly named by v0.2 first revision (§S3 Decision 5) is now
+> closed by Option A. There is **no auto-next gate**; the trio decides
+> when the next slice opens. The 2026-05-25 update describing v0.2
+> Phase 0 is superseded; the v0.2 observability lane and its v0.2.x
+> extensions have advanced beyond Phase 0 framing.
 
-**v0.2.4 — archive-FILTER-A application.** Named in the v0.2 lane
-doctrine (`docs/MEMORY_TO_PROMPT_AUTOMATION_v0.2.md` §S3 Decision 5) as
-the slice that closes the honestly-reported archive-FILTER-A gap. Today
-the v0.2 observability lane *reports* the gap via the
-`archive_filter_applied: false` field in the audit payload but does not
-*fix* it; v0.2.4 is the ratifiable slice that fixes it. Self-contained
-scope; doctrinal groundwork done; requires its own audit-first cycle
-per §5.
-
-The doctrinal kernel from §1 anchors this direction unchanged: *Memory
+The doctrinal kernel from §1 anchors any direction unchanged: *Memory
 may shape context. Memory may not seize authority.*
 
-**Alternative small slices the operator may choose instead:**
+**Candidate next gates** (named, not sequenced; the trio picks when
+ready, and may choose something else entirely):
 
-- **`/agent/query` doctrine-vs-reality correction** (per §6). Reconciles
-  v0.2.2's `/retrieve`-only Option A wiring with the doctrine that names
-  both endpoints. Small.
-- **Gap C — `spirit_return_summary` consistency check** (per §6 and the
-  v0.2.3 checkpoint). Smallest possible v0.2.x follow-up.
+- **v0.2.4 sub-gate: `/archive/ingest_document` request-model
+  extension** — let the HTTP endpoint accept governance metadata so
+  live callers can ingest non_shareable archive content directly.
+  Pytest already covers the exclusion path through a direct
+  `_get_archive_store` helper; this slice would let the live smoke
+  exercise it too. Small.
+- **v0.2.4 sub-gate: per-document governance inheritance at ingest**
+  — natural shape: `ingest_document` accepts optional `doc_governance`
+  and fills each new chunk's governance from it unless explicitly
+  overridden. Named in v0.2.4 closure as deferred composition work.
+  Small.
+- **v0.2.4 verification under ST / BGE embedder** — live-smoke
+  re-run with `TORMENT_EMBED_PROVIDER=st` to confirm embedder-agnostic
+  behavior, paralleling the v0.2 S6 ST follow-up pattern. Small.
+- **Gap C — `spirit_return_summary` consistency check** (per §6 and
+  the v0.2.3 checkpoint). Smallest possible v0.2.x follow-up.
 - **Deterministic attractor visualization fixture** (per §6 and the
   visualize-attractors checkpoint). Larger; only if visualization
   science becomes a priority. Not blocking.
 - **Findings doc promotion** (small docs slice; per §6). The
   `scratch/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` promotion is still
   pending.
-- **Full `do_not_touch_torment_test_rig/` audit, migration, or deletion
-  plan** (per §4 — only if the rig becomes load-bearing).
+- **Ryuki / real character workspace live check** (inherited parked
+  item from v0.2 closure; still parked). Requires explicit trio
+  authorization.
+- **Full `do_not_touch_torment_test_rig/` audit, migration, or
+  deletion plan** (per §4 — only if the rig becomes load-bearing).
 - **Tier 3 endurance** (per §6 — only if a specific question demands
   more data than Tier 2 already provides).
-- Something else entirely — the next gate is not locked.
+- Broader pre-autonomy spine extensions (named in
+  `CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md`):
+  **Cluster 2 v0.2 runtime Authority Gate**, **Track B v0.2 runtime
+  contest ledger**, **Cluster 5 v0.2 storage survivability
+  mechanisms**, **v0.2.x ledger persistence** (Option A vs B from
+  v0.2 §5).
+- Something else entirely — the trio is not locked into this list.
 
-None of these are sequenced ahead of v0.2.4 by default; the operator
-calls the next gate when ready. This section is *current likely*, not
-*permanently next*.
+This section is *current candidate list*, not *prescription*. None of
+the above is opened by this v0.2.4 closure; the next gate is the
+user's call when ready.
 
 ---
 

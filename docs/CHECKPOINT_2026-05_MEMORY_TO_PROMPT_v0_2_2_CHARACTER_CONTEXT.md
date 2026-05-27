@@ -266,7 +266,7 @@ installed:
 1. v0.1 block-count cleanup (4-block → 5-block; `BLOCK_REFERENCE`).
 2. v0.2 §4.3 `/agent/query` doctrine-vs-reality correction (Option A wired only `/retrieve`).
 3. `excluded` vs `filter_excluded` naming duplication on `Workspace.query()` return shape.
-4. Archive-FILTER-A gap fix.
+4. Archive-FILTER-A gap fix. **(CLOSED 2026-05-27 by v0.2.4-A1 — no longer parked; see `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.)**
 5. `live_agent/` repo-root duplicate cleanup.
 6. Ledger persistence (Option A vs Option B vs stay Option C).
 7. Ryuki / real character workspace live check.

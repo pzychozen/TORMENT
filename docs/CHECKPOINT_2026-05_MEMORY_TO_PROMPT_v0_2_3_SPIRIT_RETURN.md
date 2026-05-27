@@ -307,6 +307,10 @@ per the v0.2 doctrine convention.
 - No `/agent/query` wiring (still parked from v0.2 closure;
   Option A surfacing remains `/retrieve`-only).
 - No archive-FILTER-A change (still parked as v0.2.4 / v0.3).
+  **(Note 2026-05-27: v0.2.4-A1 has since closed the archive-FILTER-A
+  gap. v0.2.3 itself did not touch it; the gap was closed by a
+  later separate slice. See
+  `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.)**
 - No live Ryuki workspace dependency (the new tests use synthetic
   mocks; no `data/workspaces/ryuki/...` reads).
 - No doctrine amendment. v0.2 lane doctrine, Track A, Cluster 2,

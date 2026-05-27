@@ -285,7 +285,7 @@ first revision closure does NOT resolve any of them.
 | 1 | v0.1 block-count cleanup (4-block → 5-block; `BLOCK_REFERENCE` is between identity and relational) | v0.1.1 cleanup pass (small docs slice; bundle candidate with #2) |
 | 2 | v0.2 §4.3 `/agent/query` doctrine-vs-reality correction (doctrine says both endpoints get audit; only `/retrieve` is wired per Option A) | v0.1.1 cleanup pass |
 | 3 | `excluded` vs `filter_excluded` naming duplication on `Workspace.query()` return shape (S5 added the alias for S4-helper compatibility; both carry the same list) | v0.2.x cleanup pass (pick canonical name and migrate the other) |
-| 4 | Archive-FILTER-A gap fix (archive hits bypass FILTER-A; chunks lack governance metadata) | v0.2.4 or v0.3 (one of: governance-on-chunks + filter; new surface enum; or operator-only doctrinal stance) |
+| 4 | Archive-FILTER-A gap fix (archive hits bypass FILTER-A; chunks lack governance metadata) | v0.2.4 or v0.3 (one of: governance-on-chunks + filter; new surface enum; or operator-only doctrinal stance). **CLOSED 2026-05-27 by v0.2.4-A1** (Option A — per-chunk governance + unconditional `/retrieve` filter). See `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`. |
 | 5 | `live_agent/` repo-root duplicate cleanup (canonical = `torment_fabric/live_agent/`) | Separate ratifiable slice |
 | 6 | Ledger persistence (Option A `memory_events.jsonl` extension vs Option B new `assembly_audit.jsonl`) | v0.2.x or v0.3 after live audit-shape verification accumulates |
 | 7 | Ryuki / real character workspace live check (S6 used disposable workspace only) | Separate explicit slice with explicit trio authorization |

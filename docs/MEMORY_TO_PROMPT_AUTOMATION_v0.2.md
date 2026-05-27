@@ -120,7 +120,13 @@ delta from scratch framing draft to ratified v0.2.
    honest `archive_filter_applied: false` field in the audit payload.
    v0.2 does NOT fix the gap. The fix is a separate ratifiable slice
    (working name v0.2.4 or v0.3) scheduled downstream of v0.2
-   observability evidence.
+   observability evidence. **Closure note (v0.2.4 — 2026-05-27):**
+   gap closed by v0.2.4-A1 (Option A — per-chunk governance metadata
+   on archive chunks + unconditional `filter_llm_facing` application
+   at `/retrieve` before `assemble_context()`). Production audits
+   now report `archive_filter_applied=True` and surface
+   `archive_excluded`. See
+   `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.
 6. **v0.1 block-count correction parked as future cleanup.** The
    `MEMORY_TO_PROMPT_AUTOMATION_v0.1.md` references to "four-block
    precedence" should read "five-block precedence" (the missing
@@ -199,6 +205,14 @@ The v0.1 doc has a small wording miscount (says "four-block
 precedence"; actual count is five — `BLOCK_REFERENCE` exists between
 identity and relational). Flagged in §8 for a future v0.1.1 cleanup
 pass; not amended by v0.2.
+
+> **Closure note (v0.2.4 — 2026-05-27):** the archive-FILTER-A gap
+> honestly reported by this v0.2 first revision (S3 Decision 5; §3.2)
+> has been closed by v0.2.4-A1 (Option A — per-chunk governance +
+> unconditional `/retrieve` filter). v0.2 doctrine remains
+> historically accurate for the first-revision posture; the v0.2.4
+> closure record is
+> `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.
 
 ---
 
@@ -306,9 +320,15 @@ existing code site or doctrine reference.
   normal operation; non-zero is a finding.
 - `archive_hits_count` — number of archive chunks that entered the
   assembly path.
-- `archive_filter_applied` — explicit boolean. **Today: false** (per
-  S1 finding §3.2). The field is present so future readers can see
-  whether the gap was closed by a later slice.
+- `archive_filter_applied` — explicit boolean. **Today (v0.2 first
+  revision): false** (per S1 finding §3.2). The field is present so
+  future readers can see whether the gap was closed by a later slice.
+  **Closure note (v0.2.4 — 2026-05-27):** v0.2.4-A1 wired
+  `filter_llm_facing` unconditionally at `/retrieve` between
+  `ArchiveStore.retrieve()` and `assemble_context()`; this field is
+  now `True` in every production `/retrieve` audit response, and
+  `filter_a` additionally carries `archive_excluded` (archive-shaped
+  exclusion records — see closure-note at §4.2).
 
 ### §2.3 Assembled context summary
 
@@ -471,6 +491,24 @@ declaring archive chunks operator-only content doctrinally. The
 choice is downstream of trio review of v0.2 telemetry findings under
 live use.
 
+**v0.2.4 status (closure annotation, 2026-05-27):** Option A landed
+in v0.2.4-A1. Per-chunk governance metadata was added to
+`ArchiveChunk` (additive, backward-compatible — legacy chunks
+default to governance-less default-pass); `filter_llm_facing` gained
+a keyword-only `id_field: str = "eid"` parameter so archive hits can
+be filtered through the same canonical helper with chunk_id-shaped
+exclusion records; `/retrieve` applies the filter unconditionally
+between `ArchiveStore.retrieve()` and `assemble_context()` (filter
+site preserves the canonical FILTER-A §5 "one canonical derivation"
+pattern; `_archive_hit_to_block` and `assemble_context()` are
+untouched). Option B was rejected as subsumed by A (the surface
+enum adds naming without behavior at the current flag set). Option
+C was rejected on the *"Memory may shape context. Memory may not
+seize authority"* anchor — archive content enters LLM-facing
+context once assembled, so defense-in-depth applies regardless of
+the operator-curated assumption. Closure record:
+`docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.
+
 ### §3.3 `selection_log` lacking structured classification rationale
 
 **Finding (S1):** `AssembledContext.selection_log` already records
@@ -632,6 +670,29 @@ def build_assembly_audit(
   }
 }
 ```
+
+**v0.2.4 extension (closure annotation, 2026-05-27):** when archive
+FILTER-A is wired in production (the default after v0.2.4-A1), the
+`filter_a` block additionally carries:
+
+```
+"archive_excluded": [
+  {"chunk_id": <str>, "doc_id": <str>, "excluded_reason": <str>},
+  ...
+]
+```
+
+and `archive_filter_applied` reports `true`. The `archive_excluded`
+key is present whenever the filter ran upstream (including when
+exclusions are zero — empty list is the structural signal). The key
+is **absent** when `build_assembly_audit` is called without the
+`archive_filter_excluded` parameter (legacy v0.2 first-revision
+shape, preserved for tests and any caller that has not yet wired
+the filter). Archive exclusions are NOT mixed into the core
+`excluded` list — archive hits key on `chunk_id` (string) while
+core hits key on `eid` (int); keeping the two surfaces separate
+avoids downstream type confusion. See closure record
+`docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.
 
 ### §4.3 Where the helper is called (ratified)
 
@@ -1023,6 +1084,9 @@ resolves five and leaves five for downstream consideration.
    ahead of v0.2.1/v0.2.2/v0.2.3 if live observability data shows
    archive chunks frequently entering prompt context. Decision
    deferred until v0.2 observability lands and produces evidence.
+   **Resolved 2026-05-27 by v0.2.4-A1** (Option A — per-chunk
+   governance + unconditional `/retrieve` filter). See
+   `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.
 7. **`live_agent/` cleanup sequencing.** S1 finding §5 recommends
    `torment_fabric/live_agent/` as canonical. Cleanup of the
    repo-root copy is a separate ratifiable slice; trio decides when
@@ -1062,6 +1126,8 @@ specifies a pure-additive way to surface each. It explicitly does NOT:
 - Apply FILTER-A to archive hits. v0.2 observability *reports* the
   archive-FILTER-A gap. The fix is a separate ratifiable slice
   (v0.2.4 or v0.3) per S3 Decision 5; v0.2 does not silently fix it.
+  **(Closed by v0.2.4-A1 in a later slice; see closure checkpoint
+  `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.)**
 - Resolve the `live_agent/` path duplication. v0.2 names
   `torment_fabric/live_agent/` as canonical; the cleanup is a
   separate slice.
