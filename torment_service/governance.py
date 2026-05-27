@@ -322,6 +322,7 @@ def filter_llm_facing(
     include_raw_hits: bool = False,
     actor: Optional[str] = None,
     trust_tier: Optional[float] = None,
+    id_field: str = "eid",
 ) -> Dict[str, Any]:
     """Apply governance-flag exclusion to a list of memory hits.
 
@@ -346,15 +347,26 @@ def filter_llm_facing(
         actor: Caller identity. Required for include_raw_hits=True.
         trust_tier: Caller trust tier in [0.0, 1.0]. Must be >=
             _RAW_HITS_MIN_TRUST (1.0) for include_raw_hits=True.
+        id_field: Key read from each hit to populate the identity slot
+            on excluded records. Default ``"eid"`` preserves the legacy
+            contract for core-memory call sites (memory hits carry
+            integer eids). v0.2.4-A1 call sites can pass
+            ``id_field="chunk_id"`` to filter archive hits, where the
+            canonical identity key is the chunk's string id rather than
+            an integer eid. The exclusion record's key name mirrors
+            ``id_field`` exactly, so downstream consumers can read
+            ``excluded[i][id_field]`` without per-surface branching.
 
     Returns:
         Dict with shape:
             {
                 "results":  [...],   # ALWAYS filtered per surface
-                "excluded": [{"eid": <int|None>, "excluded_reason": <str>}, ...],
+                "excluded": [{<id_field>: <value|None>, "excluded_reason": <str>}, ...],
                 "raw_hits": [...],   # ONLY present when include_raw_hits=True
                                      # AND authorization passes
             }
+        The key used for the identity slot in ``excluded`` records is the
+        value of the ``id_field`` parameter (default ``"eid"``).
 
         Per FILTER-A §5 invariant: "results" never contains a memory the
         surface excludes. Operator/debug raw access is exposed exclusively
@@ -412,12 +424,19 @@ def filter_llm_facing(
             continue
 
         gov = resolve_governance(hit)
-        eid = hit.get("eid")
+        # v0.2.4-A1: id_field parameterizes the identity key surfaced on
+        # excluded records so archive hits (which carry chunk_id rather
+        # than eid) can be filtered through this same canonical helper.
+        # Default "eid" preserves all existing core-memory call sites; the
+        # archive call site at /retrieve passes id_field="chunk_id".
+        _id_value = hit.get(id_field)
 
         # non_shareable is the universal LLM-facing exclusion; applies to
         # both surfaces (per FILTER-A §7 + HIVEMIND_GUIDE Invariant 2).
         if gov.non_shareable:
-            excluded.append({"eid": eid, "excluded_reason": "non_shareable"})
+            excluded.append(
+                {id_field: _id_value, "excluded_reason": "non_shareable"}
+            )
             continue
 
         # collective_export_blocked is surface-conditional. It excludes from
@@ -425,7 +444,7 @@ def filter_llm_facing(
         # does NOT apply (the memory IS shareable to its own agent).
         if surface == SURFACE_COLLECTIVE_EXPORT and gov.collective_export_blocked:
             excluded.append(
-                {"eid": eid, "excluded_reason": "collective_export_blocked"}
+                {id_field: _id_value, "excluded_reason": "collective_export_blocked"}
             )
             continue
 

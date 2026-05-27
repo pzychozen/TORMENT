@@ -287,5 +287,159 @@ class TestFilterLLMFacing_DefensiveInputs(unittest.TestCase):
         self.assertEqual(hits, original)
 
 
+# ---------------------------------------------------------------------------
+# v0.2.4-A1: id_field parameterizes the identity key on excluded records
+# so archive hits (chunk_id, not eid) can use the same canonical helper.
+# Default "eid" must preserve all legacy contracts; existing test classes
+# above implicitly cover that path because none pass id_field. Tests below
+# add the new mode and the regression that the default really is "eid".
+# ---------------------------------------------------------------------------
+
+def _archive_hit(chunk_id: str, governance: dict = None) -> dict:
+    """Build a minimal archive-hit-shaped dict for tests.
+
+    Archive hits carry chunk_id and doc_id rather than eid (matches the
+    shape returned by ArchiveStore.retrieve()).
+    """
+    h = {
+        "chunk_id": chunk_id,
+        "doc_id": f"doc_for_{chunk_id}",
+        "score": 0.5,
+        "text": f"archive chunk {chunk_id}",
+    }
+    if governance is not None:
+        h["governance"] = governance
+    return h
+
+
+class TestFilterLLMFacing_IdFieldParam(unittest.TestCase):
+    def test_default_id_field_is_eid(self):
+        """Regression: default id_field must remain "eid" so core-memory
+        call sites that already exist (e.g. fabric.query at
+        fabric.py:4156) keep emitting eid-shaped excluded records.
+        """
+        h = _hit(7, {"non_shareable": True})
+        out = filter_llm_facing([h], surface=SURFACE_LLM_CONTEXT)
+        self.assertEqual(len(out["excluded"]), 1)
+        self.assertIn("eid", out["excluded"][0])
+        self.assertEqual(out["excluded"][0]["eid"], 7)
+        self.assertNotIn("chunk_id", out["excluded"][0])
+
+    def test_chunk_id_mode_emits_chunk_id_key(self):
+        """With id_field="chunk_id", excluded records key on chunk_id."""
+        h = _archive_hit("abc123_chunk_0000", {"non_shareable": True})
+        out = filter_llm_facing(
+            [h], surface=SURFACE_LLM_CONTEXT, id_field="chunk_id"
+        )
+        self.assertEqual(len(out["excluded"]), 1)
+        self.assertIn("chunk_id", out["excluded"][0])
+        self.assertEqual(out["excluded"][0]["chunk_id"], "abc123_chunk_0000")
+        self.assertNotIn("eid", out["excluded"][0])
+        self.assertEqual(
+            out["excluded"][0]["excluded_reason"], "non_shareable"
+        )
+
+    def test_chunk_id_mode_with_collective_export_blocked(self):
+        """Surface-conditional rule still fires under chunk_id mode."""
+        h = _archive_hit(
+            "ch_xyz", {"collective_export_blocked": True}
+        )
+        out = filter_llm_facing(
+            [h],
+            surface=SURFACE_COLLECTIVE_EXPORT,
+            id_field="chunk_id",
+        )
+        self.assertEqual(out["results"], [])
+        self.assertEqual(len(out["excluded"]), 1)
+        self.assertEqual(out["excluded"][0]["chunk_id"], "ch_xyz")
+        self.assertEqual(
+            out["excluded"][0]["excluded_reason"],
+            "collective_export_blocked",
+        )
+
+    def test_chunk_id_mode_passes_governance_less_chunk(self):
+        """Default-pass behavior preserved under chunk_id mode: an
+        archive hit with no governance field surfaces in results, not
+        in excluded.
+        """
+        h = _archive_hit("ch_clean")
+        out = filter_llm_facing(
+            [h], surface=SURFACE_LLM_CONTEXT, id_field="chunk_id"
+        )
+        self.assertEqual(out["results"], [h])
+        self.assertEqual(out["excluded"], [])
+
+    def test_chunk_id_mode_mixed_batch_partitions_correctly(self):
+        """Realistic archive-batch shape: some chunks have governance,
+        some don't. Filter partitions by non_shareable cleanly.
+        """
+        hits = [
+            _archive_hit("ch_1"),  # no governance → pass
+            _archive_hit("ch_2", {"non_shareable": True}),  # excluded
+            _archive_hit("ch_3", {"non_shareable": False}),  # pass
+            _archive_hit("ch_4", {"non_shareable": True}),  # excluded
+        ]
+        out = filter_llm_facing(
+            hits, surface=SURFACE_LLM_CONTEXT, id_field="chunk_id"
+        )
+        self.assertEqual(
+            [h["chunk_id"] for h in out["results"]],
+            ["ch_1", "ch_3"],
+        )
+        self.assertEqual(
+            sorted(e["chunk_id"] for e in out["excluded"]),
+            ["ch_2", "ch_4"],
+        )
+
+    def test_chunk_id_mode_missing_id_returns_none_value(self):
+        """If the configured id_field is absent from the hit, the
+        excluded record's identity slot is None — same shape contract
+        as legacy missing-eid behavior (test_hit_without_eid above).
+        """
+        h = {
+            "doc_id": "doc_x",  # no chunk_id, no eid
+            "score": 0.5,
+            "governance": {"non_shareable": True},
+        }
+        out = filter_llm_facing(
+            [h], surface=SURFACE_LLM_CONTEXT, id_field="chunk_id"
+        )
+        self.assertEqual(len(out["excluded"]), 1)
+        self.assertIsNone(out["excluded"][0]["chunk_id"])
+
+    def test_arbitrary_id_field_works(self):
+        """Smoke test: id_field is generic, not chunk_id-specific.
+        Documents the contract — any string key on the hit dict can be
+        used as the identity slot for excluded records.
+        """
+        h = {
+            "custom_id": "anything-42",
+            "score": 0.5,
+            "governance": {"non_shareable": True},
+        }
+        out = filter_llm_facing(
+            [h], surface=SURFACE_LLM_CONTEXT, id_field="custom_id"
+        )
+        self.assertEqual(len(out["excluded"]), 1)
+        self.assertEqual(out["excluded"][0]["custom_id"], "anything-42")
+
+    def test_id_field_does_not_alter_results_shape(self):
+        """Load-bearing: id_field changes the EXCLUDED record key only.
+        It MUST NOT alter the hits surfaced in results — results are
+        the original hit dicts, unchanged.
+        """
+        h_pass = _archive_hit("ch_pass")
+        h_excl = _archive_hit("ch_excl", {"non_shareable": True})
+        out = filter_llm_facing(
+            [h_pass, h_excl],
+            surface=SURFACE_LLM_CONTEXT,
+            id_field="chunk_id",
+        )
+        # results is the original hit dict, unchanged.
+        self.assertEqual(out["results"], [h_pass])
+        # excluded record uses chunk_id key.
+        self.assertEqual(out["excluded"][0]["chunk_id"], "ch_excl")
+
+
 if __name__ == "__main__":
     unittest.main()
