@@ -244,13 +244,21 @@ class TestWiring_AuditOnReturnsAudit:
         assert req_block["profile"] == "companion"
         assert req_block["surface"] == "llm_context"
 
-    def test_audit_filter_a_archive_filter_applied_false(self, client):
-        """v0.2 §3.2 + S3 Decision 5: archive_filter_applied honestly
-        false (archive hits don't pass FILTER-A today)."""
+    def test_audit_filter_a_archive_filter_applied_true_in_production(self, client):
+        """v0.2.4-A1: production audits now report
+        ``archive_filter_applied=True``. Replaces the v0.2 first-revision
+        contract that honestly reported ``False`` while the gap was
+        deferred (per S3 Decision 5). The /retrieve handler runs the
+        archive filter unconditionally between ArchiveStore.retrieve()
+        and assemble_context() (app.py §3b), so the audit field is
+        always True in production after Commit 4 — including when
+        archive_hits is empty (filter posture is active even when there
+        is nothing to filter).
+        """
         ws, ag = _bootstrap(client)
         r = client.post("/retrieve", json=_retrieve_payload(ws, ag, include_audit=True))
         body = r.json()
-        assert body["assembly_audit"]["filter_a"]["archive_filter_applied"] is False
+        assert body["assembly_audit"]["filter_a"]["archive_filter_applied"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +407,237 @@ class TestWiring_MemoryBridgeKwarg:
         # And the bridge passes the response through (so audit reaches
         # the caller).
         assert "assembly_audit" in result
+
+
+# ---------------------------------------------------------------------------
+# 7. ArchiveFilterA — v0.2.4-A1 archive FILTER-A wiring (defense-in-depth)
+# ---------------------------------------------------------------------------
+
+def _ingest_archive_with_governance(workspace, agent, *, text, title, governance):
+    """Ingest an archive document with explicit governance metadata.
+
+    The /archive/ingest_document endpoint's request model does NOT
+    accept governance in v0.2.4-A1 (extending that API surface would
+    be a separate ratifiable slice). For tests we bypass the HTTP
+    layer and call ArchiveStore.ingest_document directly through
+    appmod._get_archive_store, which exercises the real storage +
+    retrieve path (Commit 1 — per-chunk governance) end-to-end.
+    """
+    import torment_service.app as appmod
+    store = appmod._get_archive_store(workspace, agent)
+    return store.ingest_document(
+        text=text, title=title, governance=governance,
+    )
+
+
+class TestWiring_ArchiveFilterA:
+    """v0.2.4-A1 — archive FILTER-A in production /retrieve.
+
+    Filter runs UNCONDITIONALLY between ArchiveStore.retrieve() and
+    assemble_context(). The ``include_assembly_audit`` flag controls
+    only whether the audit PAYLOAD is returned; it never controls
+    whether archive content is filtered. Non-shareable archive chunks
+    must be absent from ``blocks[BLOCK_ARCHIVE]`` and from
+    ``assembled_text`` regardless of audit flag state.
+    """
+
+    def test_archive_excluded_empty_list_when_no_archive_ingested(self, client):
+        """No archive chunks ingested → no exclusions → archive_excluded
+        is an empty list. Presence of the empty list (not absent key)
+        is the structural signal that the filter ran. v0.2.4-A1
+        production posture: filter always runs at /retrieve.
+        """
+        ws, ag = _bootstrap(client)
+        r = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=True),
+        )
+        body = r.json()
+        assert "archive_excluded" in body["assembly_audit"]["filter_a"]
+        assert body["assembly_audit"]["filter_a"]["archive_excluded"] == []
+
+    def test_archive_excluded_records_non_shareable_chunk(self, client):
+        """LOAD-BEARING: a non-shareable archive chunk surfaces in
+        ``filter_a.archive_excluded`` with the full v0.2.4-A0 shape:
+        ``{chunk_id, doc_id, excluded_reason}``.
+        """
+        ws, ag = _bootstrap(client)
+        result = _ingest_archive_with_governance(
+            ws, ag,
+            text=(
+                "Private memo about storage policy decisions. "
+                "Do not share this externally."
+            ),
+            title="private_storage_memo",
+            governance={"non_shareable": True},
+        )
+        doc_id = result["doc_id"]
+
+        r = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=True),
+        )
+        body = r.json()
+        archive_excluded = body["assembly_audit"]["filter_a"]["archive_excluded"]
+        # The hash embedder reliably matches our chunk against the
+        # storage-themed bootstrap query; assert at least one chunk
+        # from OUR doc was excluded with the expected shape.
+        ours = [e for e in archive_excluded if e["doc_id"] == doc_id]
+        assert len(ours) >= 1, (
+            f"expected at least one exclusion entry with doc_id={doc_id}; "
+            f"got archive_excluded={archive_excluded!r}"
+        )
+        for e in ours:
+            assert e["excluded_reason"] == "non_shareable"
+            assert e["chunk_id"].startswith(doc_id), (
+                f"chunk_id={e['chunk_id']!r} does not start with "
+                f"doc_id={doc_id!r}"
+            )
+
+    def test_non_shareable_archive_chunk_absent_from_blocks(self, client):
+        """LOAD-BEARING — the actual privacy invariant: non-shareable
+        archive chunks must NOT appear in ``blocks[BLOCK_ARCHIVE]``.
+        This is the reason the filter exists; the audit signal is
+        secondary observability.
+        """
+        ws, ag = _bootstrap(client)
+        result = _ingest_archive_with_governance(
+            ws, ag,
+            text=(
+                "Private memo about storage policy decisions. "
+                "Internal only — restricted distribution."
+            ),
+            title="private_blocks_check",
+            governance={"non_shareable": True},
+        )
+        doc_id = result["doc_id"]
+
+        r = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=False),
+        )
+        body = r.json()
+        archive_blocks = body.get("blocks", {}).get("archive_context", [])
+        for block in archive_blocks:
+            meta = block.get("metadata", {}) or {}
+            assert meta.get("doc_id") != doc_id, (
+                f"non-shareable chunk leaked into BLOCK_ARCHIVE: "
+                f"doc_id={doc_id} present in block metadata={meta!r}"
+            )
+
+    def test_non_shareable_archive_chunk_absent_from_assembled_text(
+        self, client
+    ):
+        """LOAD-BEARING companion: the non-shareable chunk's text
+        marker must not appear in ``assembled_text`` either. Tests
+        the text-level privacy invariant directly (not just metadata).
+        """
+        ws, ag = _bootstrap(client)
+        secret_phrase = "TOKEN_PRIVATE_STORAGE_MARKER_42_NOT_SHAREABLE"
+        _ingest_archive_with_governance(
+            ws, ag,
+            text=(
+                f"Private memo about storage. {secret_phrase}. "
+                "Restricted distribution."
+            ),
+            title="private_text_check",
+            governance={"non_shareable": True},
+        )
+
+        r = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=False),
+        )
+        body = r.json()
+        assert secret_phrase not in body.get("assembled_text", ""), (
+            f"non-shareable archive marker {secret_phrase!r} leaked "
+            f"into assembled_text"
+        )
+
+    def test_filter_runs_when_audit_off(self, client):
+        """CRITICAL: filter must be unconditional. ``include_assembly_audit``
+        controls audit PAYLOAD return only; it MUST NOT control whether
+        content is filtered. A non-shareable chunk must be absent from
+        blocks/text regardless of the audit flag.
+
+        This test is the single most load-bearing assertion in this
+        file: it proves that the privacy invariant (no non-shareable
+        archive content in LLM-facing surfaces) holds regardless of
+        observability surface state.
+        """
+        ws, ag = _bootstrap(client)
+        secret_marker = "TOKEN_UNCONDITIONAL_FILTER_INVARIANT_99"
+        _ingest_archive_with_governance(
+            ws, ag,
+            text=(
+                f"Private storage details. {secret_marker}. "
+                "Restricted distribution memo."
+            ),
+            title="unconditional_filter_check",
+            governance={"non_shareable": True},
+        )
+
+        # Audit-OFF call: the chunk MUST still be filtered.
+        r_off = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=False),
+        )
+        body_off = r_off.json()
+        assert "assembly_audit" not in body_off  # audit-off path confirmed
+        assert secret_marker not in body_off.get("assembled_text", ""), (
+            "audit-off response leaked non-shareable archive marker "
+            "into assembled_text — filter must run unconditionally"
+        )
+        for b in body_off.get("blocks", {}).get("archive_context", []):
+            assert secret_marker not in b.get("text", ""), (
+                f"audit-off response leaked non-shareable marker into "
+                f"archive_context block: {b!r}"
+            )
+
+        # Audit-ON call: same fixture, same filtering — chunk still
+        # excluded from blocks/text, and now ALSO surfaces in
+        # archive_excluded.
+        r_on = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=True),
+        )
+        body_on = r_on.json()
+        assert secret_marker not in body_on.get("assembled_text", "")
+        for b in body_on.get("blocks", {}).get("archive_context", []):
+            assert secret_marker not in b.get("text", "")
+        # The exclusion is honestly reported in the audit.
+        archive_excluded = body_on["assembly_audit"]["filter_a"][
+            "archive_excluded"
+        ]
+        assert len(archive_excluded) >= 1, (
+            "audit-on response missing expected archive_excluded entry "
+            "for the non-shareable chunk"
+        )
+
+    def test_audit_off_response_has_no_audit_only_keys(self, client):
+        """No audit-only keys leak into the audit-off response. The
+        archive filter runs in both paths, but only the audit-on path
+        materializes audit observability into the response shape.
+        """
+        ws, ag = _bootstrap(client)
+        _ingest_archive_with_governance(
+            ws, ag,
+            text="Private storage policy memo for internal use.",
+            title="leak_check",
+            governance={"non_shareable": True},
+        )
+        r_off = client.post(
+            "/retrieve",
+            json=_retrieve_payload(ws, ag, include_audit=False),
+        )
+        body_off = r_off.json()
+        # No top-level audit key.
+        assert "assembly_audit" not in body_off
+        # No archive-filter observability bleeds into the audit-off
+        # top-level shape.
+        assert "archive_excluded" not in body_off
+        assert "archive_filter_applied" not in body_off
+        assert "archive_filter_excluded" not in body_off
 
 
 if __name__ == "__main__":

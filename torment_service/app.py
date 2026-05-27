@@ -16,6 +16,10 @@ from .auth import (
 )
 from .thinking_controller import ThinkingController
 from .scoring import derive_provenance_type as _derive_prov_type
+# v0.2.4-A1: archive FILTER-A defense-in-depth at /retrieve. Used in
+# the archive-hits filter step inserted between ArchiveStore.retrieve()
+# and assemble_context().
+from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 
 _log = logging.getLogger("torment.app")
 
@@ -1385,6 +1389,53 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
             "explanation": str(char_ctx.get("drift_summary") or ""),
         }
 
+    # 3b. v0.2.4-A1 — apply FILTER-A to archive hits (defense-in-depth).
+    # Archive content enters BLOCK_ARCHIVE / assembled_text once
+    # assemble_context() runs below, which makes archive LLM-facing
+    # context per the v0.2.4-A1 ratified invariant. Filter site is here
+    # — between archive retrieval (§2) / Phase 5 tracking (§2b) /
+    # drift loading (§3) and assembly (§4) — to mirror the core-memory
+    # pattern at fabric.py:4156 and keep _archive_hit_to_block and
+    # assemble_context() untouched.
+    #
+    # IMPORTANT: this filter step runs UNCONDITIONALLY. It is
+    # independent of `req.include_assembly_audit`; the audit flag
+    # controls only whether the audit payload is returned in the
+    # response, never whether archive content is filtered. A
+    # non-shareable archive chunk must be absent from blocks and from
+    # assembled_text regardless of the audit flag state.
+    #
+    # We initialize archive_filter_excluded to [] so the audit payload
+    # consistently reports archive_filter_applied=True in the
+    # post-v0.2.4 era — even when archive_hits is empty (nothing to
+    # filter conceptually still means the filter posture is active).
+    archive_filter_excluded: List[Dict[str, Any]] = []
+    if archive_hits:
+        # Capture doc_id-by-chunk_id BEFORE filtering so we can augment
+        # the canonical helper's excluded records with archive-surface
+        # provenance (doc_id). filter_llm_facing only knows the
+        # id_field it was given; doc_id must be added here.
+        _arc_doc_id_by_chunk = {
+            str(h.get("chunk_id")): str(h.get("doc_id", ""))
+            for h in archive_hits
+        }
+        _arc_filtered = filter_llm_facing(
+            archive_hits,
+            surface=SURFACE_LLM_CONTEXT,
+            id_field="chunk_id",
+        )
+        archive_filter_excluded = [
+            {
+                "chunk_id": str(e.get("chunk_id", "")),
+                "doc_id": _arc_doc_id_by_chunk.get(
+                    str(e.get("chunk_id", "")), ""
+                ),
+                "excluded_reason": str(e.get("excluded_reason", "")),
+            }
+            for e in _arc_filtered["excluded"]
+        ]
+        archive_hits = _arc_filtered["results"]
+
     # 4. Assemble context with hard precedence
     assembled = assemble_context(
         core_hits=core_hits,
@@ -1449,6 +1500,13 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
             core_query_result=core_result,
             archive_hits=archive_hits,
             assembled=assembled,
+            # v0.2.4-A1: surface archive-filter exclusions in the audit.
+            # The filter ran unconditionally above (§3b); we just pass
+            # the captured excluded list through. Presence of this kwarg
+            # (even as []) signals to build_assembly_audit that the
+            # filter ran, so it reports archive_filter_applied=True and
+            # adds the archive_excluded key to filter_a.
+            archive_filter_excluded=archive_filter_excluded,
         )
 
     return response
