@@ -14,6 +14,7 @@ import tempfile
 import traceback
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -30,6 +31,32 @@ from tools.visualize_attractors import (
 # Helpers
 # ---------------------------------------------------------------------------
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+
+
+def _has_live_ryuki_workspace() -> bool:
+    """Detect whether a populated local Ryuki workspace exists.
+
+    The `_live` data-loader tests below require a real operator-curated
+    Ryuki workspace at `data/workspaces/ryuki/agents/ryuki_nox/`. That
+    directory is in `.gitignore`, so fresh checkouts have nothing there.
+    This helper guards them so a clean clone runs the portable tests
+    without spurious missing-data failures. The check uses
+    `character_state.json` + `index/memory_index.sqlite` as a coarse
+    presence proxy — operators with a meaningfully populated workspace
+    will have both; operators with neither are signaling no live data.
+    """
+    agent_dir = os.path.join(DATA_DIR, "workspaces", "ryuki", "agents", "ryuki_nox")
+    return (
+        os.path.exists(os.path.join(agent_dir, "character_state.json"))
+        and os.path.exists(os.path.join(agent_dir, "index", "memory_index.sqlite"))
+    )
+
+
+LIVE_RYUKI_REQUIRED = pytest.mark.skipif(
+    not _has_live_ryuki_workspace(),
+    reason="requires local live Ryuki workspace data at data/workspaces/ryuki/agents/ryuki_nox",
+)
+
 
 def _tmp():
     return tempfile.mkdtemp(prefix="torment_viz_test_")
@@ -97,6 +124,7 @@ class TestPCA:
 
 
 class TestDataLoading:
+    @LIVE_RYUKI_REQUIRED
     def test_load_motifs_live(self):
         motifs = load_motifs(DATA_DIR, "ryuki", "research")
         assert len(motifs) > 0
@@ -110,6 +138,7 @@ class TestDataLoading:
         motifs = load_motifs(DATA_DIR, "nonexistent", "research")
         assert motifs == {}
 
+    @LIVE_RYUKI_REQUIRED
     def test_load_character_state_live(self):
         state = load_character_state(DATA_DIR, "ryuki", "ryuki_nox")
         assert state is not None
@@ -121,6 +150,7 @@ class TestDataLoading:
         state = load_character_state(DATA_DIR, "nonexistent", "agent")
         assert state is None
 
+    @LIVE_RYUKI_REQUIRED
     def test_load_trajectory_index_live(self):
         rows = load_trajectory_index(DATA_DIR, "ryuki", "ryuki_nox")
         assert len(rows) > 0
@@ -136,6 +166,7 @@ class TestDataLoading:
             assert "event_type" in e
             assert "step" in e
 
+    @LIVE_RYUKI_REQUIRED
     def test_load_member_embeddings_live(self):
         motifs = load_motifs(DATA_DIR, "ryuki", "research")
         rows, dim = load_member_embeddings(DATA_DIR, "ryuki", "ryuki_nox", motifs)
