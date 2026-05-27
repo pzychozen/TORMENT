@@ -93,8 +93,9 @@ delta from scratch framing draft to ratified v0.2.
 
 1. **Ledger choice — Option C (response-only, no disk persistence).**
    v0.2 observability returns the `assembly_audit` payload in the
-   `/retrieve` and `/agent/query` responses only. No disk persistence
-   in this revision. Reason: keep Slice S4 and Slice S5 small;
+   `/retrieve` response only (closure-reality correction 2026-05-27;
+   `/agent/query` parity deferred per §4.3). No disk persistence in
+   this revision. Reason: keep Slice S4 and Slice S5 small;
    prove the audit payload shape in live use before any ledger
    persistence work begins. Disk-persistent ledger writes become
    v0.2.x (or v0.3) after the response-side audit shape is verified
@@ -184,9 +185,10 @@ without silently fixing it; the fix is a separate ratifiable slice
 The lane is pure-additive code (helper `build_assembly_audit` in new
 module `torment_service/assembly_audit.py` + opt-in
 `include_assembly_audit: bool = False` request parameter surfacing on
-`/retrieve` and `/agent/query`); no existing behavior changes. The
-telemetry shape mirrors FILTER-A's `excluded[]` pattern (one canonical
-helper, response shape never overloads existing keys).
+`/retrieve` in v0.2 first revision; `/agent/query` parity is a
+separate ratifiable slice — see §4.3); no existing behavior changes.
+The telemetry shape mirrors FILTER-A's `excluded[]` pattern (one
+canonical helper, response shape never overloads existing keys).
 
 **v0.2 first revision is response-only.** No disk persistence
 (ratified Option C; ledger persistence becomes v0.2.x after live
@@ -633,7 +635,14 @@ def build_assembly_audit(
 
 ### §4.3 Where the helper is called (ratified)
 
-Two endpoint integration points; both opt-in via the
+**Closure-reality correction (2026-05-27):** v0.2 first revision
+wires `assembly_audit` on `POST /retrieve` only. `POST /agent/query`
+remains unchanged and returns the raw `fabric.query()` shape; it does
+not accept an `include_assembly_audit` parameter in v0.2 first
+revision. The earlier framing language that named two integration
+points overstated what landed.
+
+One endpoint integration point; opt-in via the
 `include_assembly_audit: bool = False` request parameter (S3 Decision
 4 — default false preserves backward-compat for existing callers
 including `live_agent/memory_bridge.py`):
@@ -641,8 +650,16 @@ including `live_agent/memory_bridge.py`):
 - `POST /retrieve` — adds an `assembly_audit` key to the response when
   the parameter is true. `results` / `blocks` / `assembled_text`
   unchanged.
-- `POST /agent/query` — same pattern; adds `assembly_audit` when the
-  parameter is true.
+
+`POST /agent/query` parity is **not** in scope for v0.2 first
+revision. Extending the audit surface to `/agent/query` would require
+either (a) running `assemble_context()` inside the `/agent/query`
+handler so a full §4.2 payload can be produced (a behavior change at
+that surface, since `/agent/query` today returns raw `fabric.query()`
+results without assembly), or (b) defining a reduced query-level
+audit shape that omits the assembly fields. Either path is a separate
+ratifiable behavior-change slice; it is not authorized by this
+doctrine and was not landed by v0.2 first revision.
 
 No call sites are *changed* in v0.2 framing scope (this document).
 The wiring is Slice S5 (after Slice S4 helper lands and is
@@ -677,9 +694,10 @@ unit-tested).
 persistence in this revision.**
 
 v0.2 observability returns the `assembly_audit` payload in the
-`/retrieve` and `/agent/query` responses only. The audit payload
-exists in memory and in the HTTP response; nothing is written to disk
-by v0.2 first revision.
+`/retrieve` response only (closure-reality correction 2026-05-27;
+`/agent/query` parity deferred per §4.3). The audit payload exists in
+memory and in the HTTP response; nothing is written to disk by v0.2
+first revision.
 
 Reason for Option C:
 - Keep Slice S4 (helper) and Slice S5 (wiring) small.
@@ -829,7 +847,10 @@ closure.
   4) to `POST /retrieve` request shape. When true, response carries
   an `assembly_audit` top-level key per §4.2 alongside existing
   `results` / `blocks` / `assembled_text`.
-- Same pattern for `POST /agent/query`.
+- **Closure-reality note (2026-05-27):** v0.2 first revision landed
+  `/retrieve` wiring only. `POST /agent/query` parity was not wired
+  and is deferred to a separate ratifiable behavior-change slice per
+  §4.3.
 - Propagate `_filter_excluded` through the `fabric.query()` return
   shape (additive; new optional key on the existing response dict).
 - Update `live_agent/memory_bridge.py` to optionally request the
