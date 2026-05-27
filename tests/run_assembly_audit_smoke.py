@@ -437,12 +437,31 @@ def verify_audit(
     # filter_a block — hard
     fa = audit.get("filter_a") or {}
     findings.check(
-        fa.get("archive_filter_applied") is False,
-        "filter_a.archive_filter_applied is False (v0.2 §3.2 honest report)",
+        fa.get("archive_filter_applied") is True,
+        (
+            "filter_a.archive_filter_applied is True "
+            "(v0.2.4-A1 archive FILTER-A wired in production /retrieve)"
+        ),
         (
             f"filter_a.archive_filter_applied unexpected: "
-            f"{fa.get('archive_filter_applied')!r} (expected False; if True, "
-            f"archive-FILTER-A fix landed without v0.2 doctrine update)"
+            f"{fa.get('archive_filter_applied')!r} (expected True after "
+            f"v0.2.4-A1; if False, the /retrieve archive filter step at "
+            f"app.py §3b was reverted or bypassed — production is no "
+            f"longer in the post-v0.2.4 'filter-always-active' posture)"
+        ),
+    )
+    findings.check(
+        fa.get("archive_excluded") == [],
+        (
+            "filter_a.archive_excluded is [] (v0.2.4-A1 filter ran in "
+            "production; smoke fixture ingests only core memory, so no "
+            "archive exclusions are expected)"
+        ),
+        (
+            f"filter_a.archive_excluded unexpected: "
+            f"{fa.get('archive_excluded')!r} (expected []; key absent "
+            f"means v0.2.4-A1 wiring is reverted, non-empty list means "
+            f"the smoke fixture started ingesting archive content)"
         ),
     )
     findings.check(
