@@ -21,24 +21,7 @@ import os
 import shutil
 import sys
 import tempfile
-import types
 import unittest
-
-
-def _ensure_fastapi_stub():
-    """Create a minimal fastapi stub if the real package is unavailable."""
-    if "fastapi" not in sys.modules:
-        mod = types.ModuleType("fastapi")
-
-        class _HTTPException(Exception):
-            def __init__(self, status_code=500, detail=""):
-                self.status_code = status_code
-                self.detail = detail
-                super().__init__(detail)
-
-        mod.HTTPException = _HTTPException
-        sys.modules["fastapi"] = mod
-        sys.modules["fastapi.responses"] = types.ModuleType("fastapi.responses")
 
 
 def _setenv():
@@ -49,8 +32,6 @@ def _setenv():
     os.environ["TORMENT_SRG_ENABLE"] = "0"
     os.environ["TORMENT_HIVEMIND_ENABLE"] = "0"
 
-
-_ensure_fastapi_stub()
 
 # Capture original env values at module IMPORT time so we can restore
 # them in tearDownModule(). The actual mutation (via _setenv()) is

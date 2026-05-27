@@ -14,25 +14,8 @@ import os
 import shutil
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
-
-
-def _ensure_fastapi_stub():
-    """Create a minimal fastapi stub if the real package is unavailable."""
-    if "fastapi" not in sys.modules:
-        mod = types.ModuleType("fastapi")
-
-        class _HTTPException(Exception):
-            def __init__(self, status_code=500, detail=""):
-                self.status_code = status_code
-                self.detail = detail
-                super().__init__(detail)
-
-        mod.HTTPException = _HTTPException
-        sys.modules["fastapi"] = mod
-        sys.modules["fastapi.responses"] = types.ModuleType("fastapi.responses")
 
 
 def _setenv():
@@ -44,8 +27,6 @@ def _setenv():
     os.environ["TORMENT_CHARACTER_ENABLE"] = "0"        # disable drift (needs seeds)
     os.environ["TORMENT_CHECKPOINT_ENABLE"] = "0"       # skip checkpoints for speed
 
-
-_ensure_fastapi_stub()
 
 # Capture original env values at module IMPORT time, so we can restore
 # them after this module's tests finish. The actual mutation (via
