@@ -410,9 +410,164 @@ class TestBuildAssemblyAudit_GracefulDefaults(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestBuildAssemblyAudit_FilterARecord(unittest.TestCase):
-    def test_archive_filter_applied_is_false(self):
+    # -------- legacy path: archive_filter_excluded omitted --------
+    # The original v0.2 first-revision contract: archive_filter_applied
+    # reports False and archive_excluded is absent from filter_a. This
+    # preserves backward compat for every caller that has not yet wired
+    # the v0.2.4-A1 archive filter (i.e., test fixtures and any code
+    # that builds an audit without going through the /retrieve handler).
+    def test_archive_filter_applied_is_false_when_param_omitted(self):
         out = build_assembly_audit(**_minimal_kwargs())
         self.assertFalse(out["filter_a"]["archive_filter_applied"])
+
+    def test_archive_excluded_absent_when_param_omitted(self):
+        out = build_assembly_audit(**_minimal_kwargs())
+        self.assertNotIn("archive_excluded", out["filter_a"])
+
+    # -------- v0.2.4-A1 path: archive_filter_excluded is a list --------
+    # Presence of the param (even an empty list) is the signal that the
+    # upstream archive FILTER-A ran. archive_filter_applied flips to True
+    # and archive_excluded surfaces as a defensively-copied list.
+    def test_archive_filter_applied_is_true_when_empty_list_passed(self):
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=[],
+        )
+        self.assertTrue(out["filter_a"]["archive_filter_applied"])
+
+    def test_archive_filter_applied_is_true_when_nonempty_list_passed(self):
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=[
+                {
+                    "chunk_id": "ch_1",
+                    "doc_id": "doc_a",
+                    "excluded_reason": "non_shareable",
+                },
+            ],
+        )
+        self.assertTrue(out["filter_a"]["archive_filter_applied"])
+
+    def test_archive_excluded_present_as_empty_list_when_empty_list_passed(self):
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=[],
+        )
+        self.assertIn("archive_excluded", out["filter_a"])
+        self.assertEqual(out["filter_a"]["archive_excluded"], [])
+
+    def test_archive_excluded_propagates_records(self):
+        excl = [
+            {
+                "chunk_id": "ch_1",
+                "doc_id": "doc_a",
+                "excluded_reason": "non_shareable",
+            },
+            {
+                "chunk_id": "ch_2",
+                "doc_id": "doc_b",
+                "excluded_reason": "non_shareable",
+            },
+        ]
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=excl,
+        )
+        self.assertEqual(len(out["filter_a"]["archive_excluded"]), 2)
+        self.assertEqual(
+            out["filter_a"]["archive_excluded"][0]["chunk_id"],
+            "ch_1",
+        )
+
+    def test_archive_excluded_record_keys_preserved(self):
+        excl = [{
+            "chunk_id": "ch_x",
+            "doc_id": "doc_x",
+            "excluded_reason": "non_shareable",
+        }]
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=excl,
+        )
+        rec = out["filter_a"]["archive_excluded"][0]
+        self.assertEqual(rec["chunk_id"], "ch_x")
+        self.assertEqual(rec["doc_id"], "doc_x")
+        self.assertEqual(rec["excluded_reason"], "non_shareable")
+
+    def test_core_excluded_unaffected_by_archive_filter(self):
+        """LOAD-BEARING: archive exclusions must NOT bleed into the core
+        ``excluded`` list. Archive hits key on chunk_id; core hits key
+        on eid. Mixing would create type confusion downstream. The
+        v0.2.4-A1 ratified shape keeps the two surfaces separate.
+        """
+        cqr = _empty_core_query_result()
+        cqr["filter_excluded"] = [
+            {"eid": 7, "excluded_reason": "non_shareable"},
+        ]
+        archive_excl = [
+            {
+                "chunk_id": "ch_archive",
+                "doc_id": "doc_archive",
+                "excluded_reason": "non_shareable",
+            },
+        ]
+        out = build_assembly_audit(
+            request_meta=_minimal_request_meta(),
+            core_query_result=cqr,
+            archive_hits=[],
+            assembled=_empty_assembled(),
+            archive_filter_excluded=archive_excl,
+        )
+        # Core excluded carries only the eid-shaped record.
+        self.assertEqual(len(out["filter_a"]["excluded"]), 1)
+        self.assertEqual(out["filter_a"]["excluded"][0]["eid"], 7)
+        self.assertNotIn("chunk_id", out["filter_a"]["excluded"][0])
+        # Archive excluded carries only the chunk_id-shaped record.
+        self.assertEqual(len(out["filter_a"]["archive_excluded"]), 1)
+        self.assertEqual(
+            out["filter_a"]["archive_excluded"][0]["chunk_id"],
+            "ch_archive",
+        )
+        self.assertNotIn(
+            "eid", out["filter_a"]["archive_excluded"][0]
+        )
+
+    def test_archive_filter_excluded_input_mutation_does_not_affect_audit(self):
+        """Defensive copy invariant: mutating the input list AND its
+        record dicts after build_assembly_audit returns must not affect
+        the audit payload. Mirrors the existing filter_excluded copy
+        pattern.
+        """
+        excl_input = [{
+            "chunk_id": "ch_orig",
+            "doc_id": "doc_orig",
+            "excluded_reason": "non_shareable",
+        }]
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=excl_input,
+        )
+        # Mutate the input list (add an element) and the inner dict.
+        excl_input.append({
+            "chunk_id": "ch_extra",
+            "doc_id": "doc_extra",
+            "excluded_reason": "non_shareable",
+        })
+        excl_input[0]["chunk_id"] = "ch_leaked"
+        excl_input[0]["leaked_key"] = "should_not_appear"
+
+        # Audit payload must remain unchanged: one record with the
+        # original chunk_id, no leaked_key.
+        self.assertEqual(len(out["filter_a"]["archive_excluded"]), 1)
+        self.assertEqual(
+            out["filter_a"]["archive_excluded"][0]["chunk_id"],
+            "ch_orig",
+        )
+        self.assertNotIn(
+            "leaked_key", out["filter_a"]["archive_excluded"][0]
+        )
+
+    # -------- existing FilterARecord coverage (unchanged) --------
 
     def test_archive_hits_count_matches_len(self):
         ah = [
@@ -889,6 +1044,9 @@ class TestBuildAssemblyAudit_ResponseShape(unittest.TestCase):
             )
 
     def test_filter_a_block_keys_stable(self):
+        """Legacy path: archive_filter_excluded omitted → 6-key filter_a
+        shape per v0.2 first revision.
+        """
         out = build_assembly_audit(**_minimal_kwargs())
         expected = {
             "core_hits_in_count",
@@ -897,6 +1055,27 @@ class TestBuildAssemblyAudit_ResponseShape(unittest.TestCase):
             "authority_guard_rejected",
             "archive_hits_count",
             "archive_filter_applied",
+        }
+        self.assertEqual(set(out["filter_a"].keys()), expected)
+
+    def test_filter_a_block_keys_when_archive_param_passed(self):
+        """v0.2.4-A1 path: archive_filter_excluded supplied → 7-key
+        filter_a shape (legacy 6 + archive_excluded). The archive_excluded
+        key appears IFF the upstream filter ran, even when the list is
+        empty — its presence is the structural signal.
+        """
+        out = build_assembly_audit(
+            **_minimal_kwargs(),
+            archive_filter_excluded=[],
+        )
+        expected = {
+            "core_hits_in_count",
+            "core_hits_out_count",
+            "excluded",
+            "authority_guard_rejected",
+            "archive_hits_count",
+            "archive_filter_applied",
+            "archive_excluded",
         }
         self.assertEqual(set(out["filter_a"].keys()), expected)
 

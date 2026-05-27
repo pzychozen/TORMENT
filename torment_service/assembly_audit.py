@@ -64,6 +64,7 @@ def build_assembly_audit(
     core_query_result: Dict[str, Any],
     archive_hits: List[Dict[str, Any]],
     assembled: Any,  # AssembledContext or dict; both accepted gracefully
+    archive_filter_excluded: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build the assembly_audit dict per v0.2 doctrine §4.2.
 
@@ -80,6 +81,23 @@ def build_assembly_audit(
             Counted; not walked beyond len().
         assembled: AssembledContext dataclass instance, or a dict with
             the same fields. Both supported for test ergonomics.
+        archive_filter_excluded: Optional list of archive-shaped
+            exclusion records produced by the v0.2.4-A1 archive
+            FILTER-A wiring at /retrieve. Each record has shape
+            ``{"chunk_id": str, "doc_id": str, "excluded_reason": str}``.
+            Default ``None`` preserves the v0.2 first-revision contract:
+            ``filter_a.archive_filter_applied`` reports ``False`` and
+            ``filter_a.archive_excluded`` is omitted entirely from the
+            response (legacy callers continue to see the 6-key
+            filter_a shape). When a list is supplied — including an
+            empty list — the helper reports
+            ``archive_filter_applied=True`` and surfaces
+            ``archive_excluded`` as a defensively-copied list.
+            Archive exclusions are NEVER mixed into the core
+            ``filter_a.excluded`` list; archive hits key on chunk_id
+            (string) while core hits key on eid (int), and mixing
+            would create downstream type confusion. The v0.2.4-A1
+            ratified shape keeps them separate.
 
     Returns:
         dict per v0.2 §4.2 with top-level keys: lane_version,
@@ -123,7 +141,11 @@ def build_assembly_audit(
         "timestamp": int(time.time()),
         "request": _request_record(request_meta),
         "embedder": _embedder_snapshot(core_query_result),
-        "filter_a": _filter_a_record(core_query_result, archive_hits),
+        "filter_a": _filter_a_record(
+            core_query_result,
+            archive_hits,
+            archive_filter_excluded=archive_filter_excluded,
+        ),
         "assembly": _assembly_summary(
             profile=a_profile,
             token_budget=a_token_budget,
@@ -181,11 +203,23 @@ def _embedder_snapshot(
 def _filter_a_record(
     core_query_result: Optional[Dict[str, Any]],
     archive_hits: Optional[List[Dict[str, Any]]],
+    archive_filter_excluded: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Build the FILTER-A record (v0.2 §2.2).
+    """Build the FILTER-A record (v0.2 §2.2; v0.2.4-A1 extended).
 
-    Honestly reports archive_filter_applied=false until a future slice
-    closes that gap (S3 Decision 5).
+    Legacy path (``archive_filter_excluded`` is ``None``): honestly
+    reports ``archive_filter_applied=False`` and omits the
+    ``archive_excluded`` key from the response. Preserves the v0.2
+    first-revision contract for callers that have not yet wired the
+    archive filter (S3 Decision 5 honest-gap-reporting).
+
+    v0.2.4-A1 path (``archive_filter_excluded`` is a list, possibly
+    empty): reports ``archive_filter_applied=True`` and surfaces a
+    defensively-copied ``archive_excluded`` list. Archive exclusions
+    are NOT mixed into the core ``excluded`` list — archive hits key
+    on chunk_id (string) while core hits key on eid (int), and mixing
+    them would create downstream type confusion. The v0.2.4-A1
+    ratified shape keeps the two surfaces separate.
 
     Reads three S5-propagated keys with graceful fallbacks:
         - filter_excluded: list of {eid, excluded_reason}
@@ -207,7 +241,24 @@ def _filter_a_record(
     else:
         core_hits_in = _as_int(core_hits_in_raw, core_hits_out)
 
-    return {
+    # v0.2.4-A1: archive-filter reporting. Presence of the param (even
+    # an empty list) is the signal that the upstream filter ran. None
+    # preserves the legacy "gap honestly reported" contract from
+    # _ARCHIVE_FILTER_APPLIED_TODAY (kept as the fallback constant for
+    # any caller that wants the legacy shape without mocking the
+    # param).
+    if archive_filter_excluded is None:
+        archive_filter_applied = _ARCHIVE_FILTER_APPLIED_TODAY  # False
+        archive_excluded_out: Optional[List[Dict[str, Any]]] = None
+    else:
+        archive_filter_applied = True
+        # Defensive copy at both list and per-record level: mutating
+        # the caller's input after build_assembly_audit returns must
+        # not affect the audit payload. Matches the filter_excluded
+        # copy pattern above.
+        archive_excluded_out = [dict(e) for e in archive_filter_excluded]
+
+    record: Dict[str, Any] = {
         "core_hits_in_count": int(core_hits_in),
         "core_hits_out_count": int(core_hits_out),
         "excluded": filter_excluded,
@@ -215,8 +266,15 @@ def _filter_a_record(
             cqr.get("_authority_guard_rejected"), 0
         ),
         "archive_hits_count": len(archive_hits or []),
-        "archive_filter_applied": _ARCHIVE_FILTER_APPLIED_TODAY,
+        "archive_filter_applied": archive_filter_applied,
     }
+    # archive_excluded only appears when the upstream filter ran. This
+    # preserves the v0.2 first-revision response shape for legacy
+    # callers (the existing test_filter_a_block_keys_stable assertion
+    # still passes under the legacy path).
+    if archive_excluded_out is not None:
+        record["archive_excluded"] = archive_excluded_out
+    return record
 
 
 def _character_summary(
