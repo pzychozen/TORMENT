@@ -96,6 +96,13 @@ class ArchiveChunk:
     section_title: str
     embedding_ref: Optional[Dict[str, Any]] = None
     created_ts: int = 0
+    # v0.2.4-A1: per-chunk governance metadata (FILTER-A defense-in-depth).
+    # None for chunks ingested before v0.2.4 or without explicit governance;
+    # the /retrieve archive filter wiring (separate slice) treats None as
+    # default-pass per v0.2.4-A0 ratified default-policy. Per-document
+    # governance at ingest is copied into every chunk; per-chunk override
+    # is future scope.
+    governance: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +216,11 @@ class ArchiveStore:
                             section_title=obj.get("section_title", ""),
                             embedding_ref=obj.get("embedding_ref"),
                             created_ts=int(obj.get("created_ts", 0)),
+                            # v0.2.4-A1: defensive .get() returns None for
+                            # legacy chunks written before the field existed.
+                            # Load-bearing for backward compat with on-disk
+                            # chunks.jsonl files; no migration required.
+                            governance=obj.get("governance"),
                         )
                         self._chunks[chunk.chunk_id] = chunk
 
@@ -235,6 +247,7 @@ class ArchiveStore:
         target_tokens: int = 350,
         max_tokens: int = 500,
         overlap_tokens: int = 60,
+        governance: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Ingest a document into archive memory.
 
@@ -247,6 +260,16 @@ class ArchiveStore:
             source_type: "markdown", "text", "pdf", etc.
             doc_id: Optional explicit ID (auto-generated if None)
             metadata: Optional metadata dict
+            governance: Optional per-document governance dict applied to
+                every chunk produced from this document (v0.2.4-A1).
+                Keys are FILTER-A governance flags such as
+                ``non_shareable`` and ``collective_export_blocked``.
+                A shallow copy is stored on each ArchiveChunk so caller
+                mutations after ingest do not affect persisted chunks.
+                Default ``None`` matches legacy behavior: chunks load
+                with ``governance=None`` and the archive filter wiring
+                (separate slice) treats them as default-pass per
+                v0.2.4-A0.
 
         Returns:
             {"doc_id": str, "chunk_count": int, "token_count": int}
@@ -325,6 +348,11 @@ class ArchiveStore:
                 section_title=tc.section_title,
                 embedding_ref=emb_ref,
                 created_ts=_now_ts(),
+                # v0.2.4-A1: shallow-copy doc-wide governance into each
+                # chunk so caller mutation after ingest does not affect
+                # stored state. Governance flags are flat booleans;
+                # shallow copy is sufficient.
+                governance=dict(governance) if governance else None,
             )
             self._chunks[chunk_id] = chunk
             self._append_jsonl(self.chunks_path, asdict(chunk))
@@ -417,6 +445,10 @@ class ArchiveStore:
                 "section_title": chunk.section_title,
                 "score": float(sim),
                 "memory_class": ARCHIVE_MEMORY_CLASS,  # Always. Never "core".
+                # v0.2.4-A1: per-chunk governance surfaced at API boundary.
+                # None on the dataclass materializes as {} here so callers
+                # can use .get(...) safely without None-checking.
+                "governance": dict(chunk.governance or {}),
             })
 
         return results
@@ -457,6 +489,11 @@ class ArchiveStore:
                 "section_path": chunk.section_path,
                 "score": float(sim),
                 "memory_class": ARCHIVE_MEMORY_CLASS,
+                # v0.2.4-A1: per-chunk governance surfaced at API boundary.
+                # Mirrors retrieve() shape so callers get the same dict
+                # structure regardless of which retrieval entry point is
+                # used. None on dataclass materializes as {} here.
+                "governance": dict(chunk.governance or {}),
             })
 
         return results
