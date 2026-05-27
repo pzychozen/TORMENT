@@ -45,7 +45,18 @@ import matplotlib.gridspec as gridspec
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Path setup. `tools/` itself is added so the bare `from _viz_common`
+# sibling import below works under both direct-script execution
+# (`python tools/visualize_attractors.py ...`) and pytest collection
+# from `torment_fabric/`. `tools/..` is added so `torment_service.*`
+# imports resolve. Idempotent: skip entries already on sys.path so
+# repeated imports don't stack duplicates.
+TOOLS_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.join(TOOLS_DIR, "..")
+
+for path in (ROOT_DIR, TOOLS_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from torment_service.coherence_field import compute_coherence_field
 from _viz_common import MotifInfo, _pca_2d, _unit, load_motifs, make_color_cycle

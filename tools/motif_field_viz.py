@@ -38,7 +38,18 @@ import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Path setup. `tools/` itself is added so the bare `from _viz_common`
+# sibling import below works under both direct-script execution
+# (`python tools/motif_field_viz.py ...`) and pytest collection
+# from `torment_fabric/`. `tools/..` is added so any future
+# `torment_service.*` import (none today, but matches sibling
+# `visualize_attractors.py` for consistency) resolves. Idempotent.
+TOOLS_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.join(TOOLS_DIR, "..")
+
+for path in (ROOT_DIR, TOOLS_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from _viz_common import MotifInfo, _pca_2d, _unit, load_motifs, make_color_cycle
 
