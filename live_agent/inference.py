@@ -29,7 +29,7 @@ class ClaudeInference:
         character_name: str = "Agent",
     ):
         self.model = model or os.environ.get(
-            "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
+            "ANTHROPIC_MODEL", "claude-sonnet-4-6"
         )
         self.max_tokens = max_tokens
         self.character_name = character_name

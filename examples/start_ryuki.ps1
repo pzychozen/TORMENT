@@ -16,7 +16,7 @@
 #   $env:TORMENT_URL="http://127.0.0.1:8787"
 #   $env:TORMENT_WORKSPACE="ryuki"
 #   $env:TORMENT_AGENT="ryuki_nox"
-#   $env:CLAUDE_MODEL="claude-sonnet-4-20250514"
+#   $env:CLAUDE_MODEL="claude-sonnet-4-6"
 #
 # Notes:
 #   - This script does NOT install dependencies.
@@ -32,7 +32,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:TORMENT_URL)       { $env:TORMENT_URL = "http://127.0.0.1:8787" }
 if (-not $env:TORMENT_WORKSPACE) { $env:TORMENT_WORKSPACE = "ryuki" }
 if (-not $env:TORMENT_AGENT)     { $env:TORMENT_AGENT = "ryuki_nox" }
-if (-not $env:CLAUDE_MODEL)      { $env:CLAUDE_MODEL = "claude-sonnet-4-20250514" }
+if (-not $env:CLAUDE_MODEL)      { $env:CLAUDE_MODEL = "claude-sonnet-4-6" }
 
 if (-not $env:TORMENT_EMBED_PROVIDER)   { $env:TORMENT_EMBED_PROVIDER = "st" }
 if (-not $env:TORMENT_EMBED_MODEL)      { $env:TORMENT_EMBED_MODEL = "BAAI/bge-small-en-v1.5" }

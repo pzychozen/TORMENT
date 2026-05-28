@@ -43,7 +43,7 @@ Useful env overrides:
     TORMENT_WORKSPACE=ryuki
     TORMENT_AGENT=ryuki_nox
     TORMENT_TOP_K=8
-    CLAUDE_MODEL=claude-sonnet-4-20250514
+    CLAUDE_MODEL=claude-sonnet-4-6
 
 Commands:
     Type your message to talk with Ryuki.
@@ -82,7 +82,7 @@ def _env(name: str, default: str) -> str:
 TORMENT_URL = _env("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
 WORKSPACE_ID = _env("TORMENT_WORKSPACE", "ryuki")
 AGENT_ID = _env("TORMENT_AGENT", "ryuki_nox")
-CLAUDE_MODEL = _env("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = _env("CLAUDE_MODEL", "claude-sonnet-4-6")
 TOP_K = int(_env("TORMENT_TOP_K", "8"))
 
 # Ryuki-specific runtime domains.

@@ -17,7 +17,7 @@
 #   export TORMENT_URL=http://127.0.0.1:8787
 #   export TORMENT_WORKSPACE=ryuki
 #   export TORMENT_AGENT=ryuki_nox
-#   export CLAUDE_MODEL=claude-sonnet-4-20250514
+#   export CLAUDE_MODEL=claude-sonnet-4-6
 #
 # Notes:
 #   - This script does NOT install dependencies.
@@ -33,7 +33,7 @@ set -euo pipefail
 TORMENT_URL="${TORMENT_URL:-http://127.0.0.1:8787}"
 TORMENT_WORKSPACE="${TORMENT_WORKSPACE:-ryuki}"
 TORMENT_AGENT="${TORMENT_AGENT:-ryuki_nox}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
 
 SERVER_STARTED_BY_SCRIPT=0
 TORMENT_PID=""

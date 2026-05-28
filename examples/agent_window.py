@@ -20,7 +20,7 @@ import requests
 
 DEFAULT_TORMENT_URL = os.environ.get("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
 DEFAULT_WORKSPACE_ID = os.environ.get("TORMENT_WORKSPACE", "trinity_collective_a")
-DEFAULT_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 DEFAULT_TOP_K = int(os.environ.get("TORMENT_TOP_K", "8"))
 
 DOMAINS = ["research", "engineering", "creative", "operations", "meta"]

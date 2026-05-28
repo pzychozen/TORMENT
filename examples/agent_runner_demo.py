@@ -148,7 +148,7 @@ from torment_service.thinking_controller import ThinkingController  # noqa: E402
 DEFAULT_TORMENT_URL = os.environ.get("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
 DEFAULT_WORKSPACE = os.environ.get("TORMENT_WORKSPACE", "ws_agent_runner_demo")
 DEFAULT_AGENT = os.environ.get("TORMENT_AGENT", "agent_demo")
-DEFAULT_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 DEFAULT_OPENROUTER_MODEL = os.environ.get(
     "OPENROUTER_MODEL", "google/gemini-2.5-flash"
 )

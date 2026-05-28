@@ -167,7 +167,7 @@ PROVIDER = _env("TORMENT_CHAT_PROVIDER", "anthropic").lower()
 PROVIDER_MODEL_OVERRIDE = _env("TORMENT_CHAT_MODEL", "")
 
 # Per-provider defaults
-_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
 _OPENROUTER_DEFAULT_MODEL = "google/gemini-2.5-flash"
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 

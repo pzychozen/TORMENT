@@ -2464,7 +2464,7 @@ function generateSolo() {
     pyClient =
       '            client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY\n' +
       '            resp = client.messages.create(\n' +
-      '                model="claude-sonnet-4-20250514",\n' +
+      '                model="claude-sonnet-4-6",\n' +
       '                max_tokens=1024,\n' +
       '                system=system_prompt,\n' +
       '                messages=conversation,\n' +
@@ -3138,7 +3138,7 @@ function generateHivemind() {
       '    client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY env var';
     hivePyCall =
       '        resp = client.messages.create(\n' +
-      '            model="claude-sonnet-4-20250514",\n' +
+      '            model="claude-sonnet-4-6",\n' +
       '            max_tokens=1024,\n' +
       '            system=system_prompt,\n' +
       '            messages=conversation,\n' +

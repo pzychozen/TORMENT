@@ -78,7 +78,7 @@ import requests
 
 TORMENT_URL = os.environ.get("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
 WORKSPACE_ID = os.environ.get("TORMENT_WORKSPACE", "trinity_collective_a")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 TOP_K = int(os.environ.get("TORMENT_TOP_K", "8"))
 
 DOMAINS = ["research", "engineering", "creative", "operations", "meta"]
@@ -293,7 +293,7 @@ class TormentClient:
 class ClaudeClient:
     """Talks to the Anthropic Messages API."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
         self.api_key = api_key
         self.model = model
         self._sdk = None
