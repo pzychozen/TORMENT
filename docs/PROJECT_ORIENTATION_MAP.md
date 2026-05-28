@@ -35,7 +35,7 @@ checkpoint doc that is the source of truth for what shipped when:
 
 | Arc | Closed | Source of truth |
 |---|---|---|
-| Phase 1 / Tier 1 runtime envelope (Batch A no-pack, Batch B debugging pack) | 2026-05-17 | `scratch/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` (pending docs-promotion; see §6) |
+| Phase 1 / Tier 1 runtime envelope (Batch A no-pack, Batch B debugging pack) | 2026-05-17 | `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` (promoted from scratch 2026-05-28; scratch original preserved as lineage) |
 | Q2-D tool-result canon-suppression doctrine | 2026-05-24 | `docs/CHECKPOINT_2026-05_Q2D_TOOL_RESULT_DOCTRINE.md` |
 | Level 3 ST retrieval-quality smoke | 2026-05-24 | `docs/CHECKPOINT_2026-05_LEVEL_3_ST_RETRIEVAL.md` |
 | Tier 2 runtime evidence (5,400 turns / 3 pack regimes / 0 aborts) | 2026-05-24 | `docs/CHECKPOINT_2026-05_TIER_2_RUNTIME_EVIDENCE.md` |
@@ -190,9 +190,6 @@ Memory companion: this rule is also captured in Claude's local memory as
 
 Items that have been deferred from an active slice but are not lost:
 
-- **Findings doc promotion** — `scratch/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md`
-  is operationally functioning as ratified Phase-1 evidence but still labeled
-  SCRATCH. Next docs-promotion candidate; small tidy slice.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
@@ -269,9 +266,6 @@ ready, and may choose something else entirely):
 - **Deterministic attractor visualization fixture** (per §6 and the
   visualize-attractors checkpoint). Larger; only if visualization
   science becomes a priority. Not blocking.
-- **Findings doc promotion** (small docs slice; per §6). The
-  `scratch/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` promotion is still
-  pending.
 - **Ryuki / real character workspace live check** (inherited parked
   item from v0.2 closure; still parked). Requires explicit trio
   authorization.
