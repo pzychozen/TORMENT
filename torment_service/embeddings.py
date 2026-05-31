@@ -72,7 +72,7 @@ class CachedEmbedder:
         if hit is not None:
             # Refresh LRU position
             self._cache.move_to_end(text, last=True)
-            return hit
+            return hit.copy()
 
         v = self.inner.embed(text)
         v = np.asarray(v, dtype=np.float32).reshape(-1)
