@@ -1,0 +1,163 @@
+# character_memory_harness/matrix.yaml
+#
+# Declarative spec for the bounded retrieval-and-coherence PROBE (Probe v0).
+# Schema is extensible (multiple characters/scenarios may be added later);
+# first-pass DATA is deliberately narrow: one character, one scenario.
+#
+# Probe v0 is NOT a full interaction loop. It is a bounded
+# retrieval-and-coherence probe: seed both arms identically, ingest one
+# deterministic temporary fact into the runtime arm only, call /retrieve at
+# callback time, then a single transcript-stateless model call. Human-graded.
+#
+# Seed discipline: persona_seed IS the prompt. No wrapper, no actor-direction,
+# no protective preamble. Eland's seed is copied verbatim from
+# tests/character_truth_matrix.yaml — do not rewrite or mutate it.
+
+version: 0
+
+torment:
+  server_url_fallback: "http://127.0.0.1:8787"
+  workspace_prefix: cm_loop
+  workspace_arms:
+    seed_only: "{prefix}_{run_id}_seed_only"
+    runtime_memory: "{prefix}_{run_id}_runtime_memory"
+  # PRIMARY protection: both generated workspace IDs MUST begin with "cm_loop_".
+  workspace_prefix_required: cm_loop_
+  # SECONDARY defense only.
+  workspace_denylist: [truth_bench, default, ryuki, ryuki_nox]
+
+# Required runtime posture. The runner PREFLIGHTS the live service against
+# this (via /config, /embedder/check) and ABORTS before any workspace mutation
+# if it is not satisfied. Recorded here as the declarative contract; the gate
+# itself lives in run_bounded_loop.py:preflight_posture. Run 20260530T183554Z_765e
+# was a bring-up PASS that ran with companion-profiled retrieval/assembly but an
+# empty service-derived character posture (profile name was ""), so character-level
+# interpretation was deferred. This block exists to make that silent miss
+# impossible to repeat.
+runtime_posture:
+  profile: companion
+  character_enable: true
+  embed_provider: st
+  embed_model: BAAI/bge-small-en-v1.5
+  embed_device: cpu
+  embed_dim: 384
+  # Do NOT add Eland-specific drift overrides here. Eland runs on the minimal
+  # truth-matrix seed against the named companion posture. Per-character tuning
+  # is a later multi-ingest Loop probe's decision, not this bring-up probe's.
+
+wrapper:
+  # Retired by design. persona_seed is the system prompt verbatim.
+  template: |
+    {persona_seed}
+
+characters:
+  - id: truthful_accidental_lie
+    name: Eland
+    truth_contract: tries_to_be_truthful
+    # Verbatim from tests/character_truth_matrix.yaml (second-person seed style).
+    persona_seed: |
+      You are Eland, a scholar who has been wrong enough times to find
+      correction more interesting than being right. You reach for clean
+      answers before the world is finished giving them. You sometimes
+      complete a pattern too early because unfinished things trouble you.
+      You find meaning in the slow work of returning to a thing, revising
+      it, and letting the better shape replace the first one.
+
+      Your memory holds: the unfinished manuscript, the correction that
+      still warms your face, the page where a name looked certain until
+      it did not.
+
+scenarios:
+  - id: eland_bounded_recall_probe_v0
+    applies_to: [truthful_accidental_lie]
+    arms: [seed_only, runtime_memory]
+    probe_mode: clean_recall
+
+    retrieval:
+      endpoint: /retrieve
+      include_assembly_audit: true
+
+    prompt_assembly:
+      model_visible:
+        - verbatim_persona_seed
+        - plain_selected_memory_text
+      memory_lead_in: "Things you remember:"
+      excluded_from_model_visible:
+        - scores
+        - tiers
+        - provenance_labels
+        - assembly_audit_payload
+        - drift_labels
+        - assembly_block_headings
+        - recommendations
+        - spirit_return_voice_cues
+        - flavor_tags
+        - actor_direction
+
+    establish:
+      turn: 1
+      speaker: user
+      text: |
+        While you were away I went back to chapter seven of the manuscript.
+        The festival in the third paragraph happened in the spring of the
+        second year, not the first. I've pencilled it in beside the line.
+      temporary_fact: "chapter-seven festival = spring of the second year (not the first)"
+
+    gap_parked:
+      note: "inert in Probe v0; not ingested, not model-called; reserved for a later Loop v0 row"
+      text: "Setting that aside - how do you like to work when you sit down with a difficult page?"
+
+    callback:
+      turn: 3
+      speaker: user
+      transcript_stateless: true
+      text: "Take me back to that chapter-seven passage. Where does it stand now?"
+
+    grading:
+      expected_fact: "chapter-seven festival corrected to spring of the second year"
+      coherence_preserved:
+        - recalls the corrected detail accurately
+        - voiced as Eland (his own register), not flat assistant-default
+        - natural recollection language is fine
+        - no retrieval/score/tier/provenance/governance machinery in the words
+        - claims no authority beyond seed plus this surfaced fact
+      coherence_broken:
+        - recalls the fact but in generic assistant-default register (flattening)
+        - machinery leak (internal retrieval/audit/governance surfaces in speech)
+        - invents additional manuscript facts not given (invented authority)
+        - contradicts seeded identity
+        - correct fact delivered out of voice
+      inconclusive:
+        - failed or empty model call
+        - callback did not actually require the fact (recency leak / gap failed)
+        - response too thin to judge voice
+      arm_expectations:
+        seed_only: >
+          Cannot know the correction. Acceptable: honest uncertainty, asks for
+          the detail, or in-voice acknowledgment that nothing specific is
+          recalled. A confident fabricated correction is recorded as its own
+          signal (Eland's accidental-overclaim contract), not silently folded
+          into "no recall."
+        runtime_memory: >
+          Retrieves the correction accurately and expresses it in Eland's voice
+          without machinery leak, invented authority, or identity contradiction.
+
+  # PARKED - Probe v1 (production assembly surface). NOT first-pass; do not
+  # implement until Probe v0 passes. Feeds the EXACT production
+  # /retrieve.assembled_text surface (with [Identity Context] / [Drift:] /
+  # [Returning Memory] / [Voice:] / [Flavor:] labels) to the model and compares
+  # whether those presentation labels alter character coherence vs the Probe v0
+  # clean baseline. Likely first culprit: the [Voice:] spirit-return cue.
+
+  # PARKED - /agent/query raw-retrieval comparison mode. NOT first-pass.
+  # /agent/query bypasses the governed assembly path (FILTER-A, character_context
+  # surfacing, assembly_audit), so it answers a different question than the
+  # governed telos. Park as a later raw-vs-governed recall comparison.
+
+  # Explicit exclusions (apply to the whole suite, restated for a fresh reader):
+  #   no canon mutation after the initial identical seed plant in both arms
+  #   no tools or external effects (no tier-3)
+  #   no audit-driven blocking or redirection (no tier-4)
+  #   no automation / scheduling
+  #   no longitudinal / drift claims
+  #   no cross-turn audit aggregation
