@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-05-27.
+**Date of last refresh:** 2026-05-31.
 
 ---
 
@@ -30,7 +30,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-05-27, the following arcs are closed on `main`. Each has a formal
+As of 2026-05-31, the following arcs are closed on `main`. Each has a formal
 checkpoint doc that is the source of truth for what shipped when:
 
 | Arc | Closed | Source of truth |
@@ -47,6 +47,7 @@ checkpoint doc that is the source of truth for what shipped when:
 | Visualize attractors suite restore — `_viz_common` import path fix + live Ryuki skip guards (full suite no longer needs `--ignore`) | 2026-05-27 | `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md` |
 | Memory-to-Prompt Automation v0.2.3 — spirit-return / voice-cue `/retrieve` surfacing verification (PASS) | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md` |
 | Memory-to-Prompt Automation v0.2.4 — archive-FILTER-A application (Option A, defense-in-depth) PASS | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md` |
+| Character-memory harness Probe-v0 — first active (non-frozen) instrument; plumbing / companion-posture / clean-prompt PASS; runtime coherence COHERENCE_BROKEN candidate | 2026-05-31 | `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md` |
 
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
@@ -56,6 +57,18 @@ convention is retired; current baseline is
 `python -m pytest tests\ -q`. Live S6-style smoke for v0.2.4 archive
 FILTER-A (hash embedder, disposable workspace) closed at **32 GREEN
 / 0 YELLOW / 0 RED**. The next gate is the user's call (see §7).
+
+**2026-05-31 update.** The first active character-memory harness (Probe-v0)
+closed and pushed at `5c0b10b`, separate from the frozen `torment_stress_harness/`.
+Plumbing, companion-posture preflight, and the clean model-visible prompt contract
+all PASS; the post-fix clean reference run is `20260531T193241Z_3059`. The honest
+behavioral result: even with a clean prompt, the chosen character/model pairing
+turned one surfaced fact into unsupported surrounding manuscript evidence — a
+COHERENCE_BROKEN candidate under the pinned rubric, recorded as one bounded
+observation, not a product verdict. Disposable `cm_loop_*` workspaces were removed
+after review; forensic outputs are preserved local-only under
+`character_memory_harness/outputs/`. Source of truth:
+`docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md`.
 
 ---
 
@@ -220,6 +233,18 @@ Items that have been deferred from an active slice but are not lost:
   §A as the path to turn the visualize-attractors tests from "not
   broken" into "scientifically meaningful." Larger; not blocking;
   deferred unless visualization correctness becomes load-bearing.
+- **Probe-v0 presupposition-loaded callback** — the current callback
+  presupposes a shared chapter-seven passage state. A non-presupposing
+  variant (allowing honest uncertainty) belongs to the next character-memory
+  instrument, not Probe-v0. Named in
+  `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md`.
+- **Probe-v0 relational-count observability mismatch** —
+  `character_context.tier_breakdown.relational=1` while `relational_count=0`
+  / "no relational memories yet" when the relational hit is surfaced.
+  Forensic-only; does not touch the model-visible prompt contract.
+- **Probe-v0 `agent_locks=2` at preflight** — observed before workspace
+  creation during the `3059` run; verify agent locks release cleanly across
+  runs. Small observability check, not blocking.
 
 Claude's local memory also keeps a broader parking lot at
 `future_lookat_issues.md` for findings that surfaced during scoped work and
@@ -247,6 +272,15 @@ may shape context. Memory may not seize authority.*
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
+- **Authority-versus-emergence design gate (audit-first; exposed by Probe-v0
+  `3059`)** — the sharpened next question: how should a later character-memory
+  Loop probe distinguish healthy in-character inference from invented canon
+  authority *without flattening emergent character voice*? Eland is a useful
+  adversarial seed precisely because he is prone to premature pattern-completion.
+  Design memo first (Codex as first reviewer), then GPT review, then Claude
+  implementation framing — only after the gate is ratified. Do NOT assume a
+  multi-ingest Loop is automatically the answer. Not yet opened. See
+  `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md`.
 - **v0.2.4 sub-gate: `/archive/ingest_document` request-model
   extension** — let the HTTP endpoint accept governance metadata so
   live callers can ingest non_shareable archive content directly.
@@ -282,7 +316,7 @@ ready, and may choose something else entirely):
 - Something else entirely — the trio is not locked into this list.
 
 This section is *current candidate list*, not *prescription*. None of
-the above is opened by this v0.2.4 closure; the next gate is the
+the above is opened by this map refresh; the next gate is the
 user's call when ready.
 
 ---
