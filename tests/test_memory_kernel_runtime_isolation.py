@@ -24,7 +24,7 @@ def _isolated_character_step(
             "theta_lock_mod": theta_lock_mod,
         },
     )
-    state, _, _ = kernel.process(state, text)
+    state, _, _ = kernel.process(state, text, kernel.new_runtime_context())
     return np.asarray(state.Omega, dtype=np.complex128).copy()
 
 
@@ -70,6 +70,9 @@ def test_character_parameter_overrides_remain_local_during_forced_overlap() -> N
         )
         for label, mod in mod_by_label.items()
     }
+    runtime_ctx_by_label = {
+        label: kernel.new_runtime_context() for label in state_by_label
+    }
     label_by_state_id = {
         id(state): label for label, state in state_by_label.items()
     }
@@ -106,7 +109,11 @@ def test_character_parameter_overrides_remain_local_during_forced_overlap() -> N
 
     def run(label: str) -> None:
         try:
-            kernel.process(state_by_label[label], f"concurrent:{label}")
+            kernel.process(
+                state_by_label[label],
+                f"concurrent:{label}",
+                runtime_ctx_by_label[label],
+            )
         except BaseException as exc:  # pragma: no cover - asserted below
             errors[label] = exc
 

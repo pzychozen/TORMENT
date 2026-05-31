@@ -8,7 +8,7 @@ import numpy as np
 
 from fastapi import HTTPException
 
-from .memory_kernel import TriOctaMemoryKernel
+from .memory_kernel import KernelRuntimeContext, TriOctaMemoryKernel
 from .memory_graph import MemoryGraph
 from .identity import IdentityStore, AgentIdentity, DEFAULT_AGENT_SEED, DEFAULT_AGENT_OVERLAY
 from .motifs import MotifRegistry, cosine as cos_sim
@@ -641,6 +641,7 @@ class TormentFabric:
 
         self.workspaces: Dict[str, Workspace] = {}
         self.agent_states: Dict[str, Any] = {}  # _agent_key(ws, agent) -> TriOcta ModelState
+        self._kernel_contexts: Dict[str, KernelRuntimeContext] = {}
 
         # SQLite sidecar index (Phase 4) — optional, non-blocking
         self._sqlite_enable = str(os.environ.get("TORMENT_SQLITE_INDEX_ENABLE", "1")).strip().lower() in ("1", "true", "yes", "on")
@@ -700,6 +701,37 @@ class TormentFabric:
             self._load_jobs('clone')
             self._load_jobs('repair')
 
+
+
+    def get_kernel_runtime_context(
+        self, workspace_id: str, agent_id: str,
+    ) -> Optional[KernelRuntimeContext]:
+        """Return an existing per-agent kernel context without creating it."""
+        return self._kernel_contexts.get(self._agent_key(workspace_id, agent_id))
+
+    def _create_kernel_state_and_context(
+        self,
+        ak: str,
+        *,
+        seed_text: str,
+        character_modulation: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Create or retrieve structurally paired per-agent kernel state."""
+        has_state = ak in self.agent_states
+        has_context = ak in self._kernel_contexts
+        if has_state != has_context:
+            raise RuntimeError(
+                f"Kernel state/context lifecycle invariant violated for {ak!r}"
+            )
+        if not has_state:
+            state = self.kernel.init_state(
+                seed_text=seed_text,
+                character_modulation=character_modulation,
+            )
+            runtime_ctx = self.kernel.new_runtime_context()
+            self.agent_states[ak] = state
+            self._kernel_contexts[ak] = runtime_ctx
+        return self.agent_states[ak]
 
 
     def _get_sqlite_index(self, workspace_id: str, agent_id: str):
@@ -2001,10 +2033,19 @@ class TormentFabric:
                         except Exception:
                             char_mod = None
                 if char_mod:
-                    self.agent_states[ak] = self.kernel.init_state(
-                        seed_text=seed_text_val, character_modulation=char_mod)
+                    self._create_kernel_state_and_context(
+                        ak,
+                        seed_text=seed_text_val,
+                        character_modulation=char_mod,
+                    )
                 else:
-                    self.agent_states[ak] = self.kernel.init_state(seed_text=f"agent:{agent_id}")
+                    self._create_kernel_state_and_context(
+                        ak, seed_text=f"agent:{agent_id}",
+                    )
+            else:
+                self._create_kernel_state_and_context(
+                    ak, seed_text=f"agent:{agent_id}",
+                )
             # init private store
             if ak not in self.private_graphs:
                 pdir = _safe_child(_agent_dir(self.data_dir, workspace_id, agent_id), "private")
@@ -2421,8 +2462,13 @@ class TormentFabric:
             _bl.setdefault("status", "active")
 
         state = self.agent_states[ak]
+        runtime_ctx = self._kernel_contexts.get(ak)
+        if runtime_ctx is None:
+            raise RuntimeError(
+                f"KernelRuntimeContext missing for active agent {ak!r}"
+            )
         # process kernel (text only used for gating signals)
-        state, signals, debug = self.kernel.process(state, text)
+        state, signals, debug = self.kernel.process(state, text, runtime_ctx)
         self.agent_states[ak] = state
 
         summary = supplied_summary or debug.get("summary") or (text.strip()[:240] + ("…" if len(text.strip()) > 240 else ""))
@@ -3263,18 +3309,25 @@ class TormentFabric:
                         _char_state_dict = _da(_ckpt_cstate)
                 except Exception as e:
                     self._log.debug("checkpoint character state load failed: %s", e)
-                save_checkpoint(
-                    data_dir=self.data_dir,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    step=int(step),
-                    model_state=state,
-                    corridor_monitor=self.kernel.mon,
-                    character_state_dict=_char_state_dict,
-                    motif_summary=_motif_summary,
-                    shard_snapshot=_shard_snap,
-                    max_checkpoints=self._checkpoint_max_keep,
-                )
+                _checkpoint_ctx = self._kernel_contexts.get(ak)
+                if _checkpoint_ctx is None:
+                    self._log.debug(
+                        "checkpoint skipped: KernelRuntimeContext missing for %s",
+                        ak,
+                    )
+                else:
+                    save_checkpoint(
+                        data_dir=self.data_dir,
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        step=int(step),
+                        model_state=state,
+                        corridor_monitor=_checkpoint_ctx.mon,
+                        character_state_dict=_char_state_dict,
+                        motif_summary=_motif_summary,
+                        shard_snapshot=_shard_snap,
+                        max_checkpoints=self._checkpoint_max_keep,
+                    )
             except Exception as e:
                 self._log.debug("checkpoint save failed for step=%s: %s", step, e)
 
@@ -6847,6 +6900,13 @@ class TormentFabric:
                     except Exception as e:
                         self._log.debug("SQLite index close failed during fabric close: %s", e)
             sqlite_indexes.clear()
+
+        kernel_contexts = getattr(self, "_kernel_contexts", None)
+        if kernel_contexts is not None:
+            kernel_contexts.clear()
+        agent_states = getattr(self, "agent_states", None)
+        if agent_states is not None:
+            agent_states.clear()
 
         tmpdir = getattr(self, "_memory_tmpdir", None)
         if tmpdir is not None:

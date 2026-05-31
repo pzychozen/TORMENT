@@ -1,7 +1,7 @@
 # torment_service/memory_kernel.py
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -43,6 +43,15 @@ class CorridorMonitor:
     coh_ema: float = 0.0      # optional coherence smoothing
 
 
+@dataclass
+class KernelRuntimeContext:
+    """Per-agent observation history for one shared kernel template."""
+
+    mon: CorridorMonitor = field(default_factory=CorridorMonitor)
+    disp_buffer: List[float] = field(default_factory=list)
+    last_effective_scale: float = 1.50
+
+
 class TriOctaMemoryKernel:
     """
     Tri-Octa connected memory kernel (Option A mechanics):
@@ -56,7 +65,6 @@ class TriOctaMemoryKernel:
         self.params = params or ModelParams()
         self.model = TriOctaPhaseLockModel(self.params)
         self.embedder = embedder or HashEmbedding()
-        self.mon = CorridorMonitor()
 
         # Tunables (safe defaults)
         self.CORR_THR = 0.80          # |dot_align| threshold for corridor membership
@@ -79,8 +87,10 @@ class TriOctaMemoryKernel:
         self.ADAPTIVE_K = 2.0             # sensitivity multiplier
         self.ADAPTIVE_WINDOW = 50         # rolling window size
         self.ADAPTIVE_WARMUP = 10         # steps before fully adaptive
-        self._disp_buffer: List[float] = []
-        self._last_effective_scale = float(self.DISP_SCALE)
+
+    def new_runtime_context(self) -> KernelRuntimeContext:
+        """Create empty observation history for one agent."""
+        return KernelRuntimeContext(last_effective_scale=float(self.DISP_SCALE))
 
     # ----------------------------
     # Embedding -> Omega
@@ -142,7 +152,9 @@ class TriOctaMemoryKernel:
     # ----------------------------
     # Dispersion coherence (single source of truth)
     # ----------------------------
-    def _effective_disp_scale(self, disp: float) -> float:
+    def _effective_disp_scale(
+        self, disp: float, runtime_ctx: KernelRuntimeContext,
+    ) -> float:
         """Compute adaptive DISP_SCALE from the rolling dispersion window.
 
         During warmup (< ADAPTIVE_WARMUP steps), blends linearly from the
@@ -153,14 +165,14 @@ class TriOctaMemoryKernel:
         if not self.ADAPTIVE_DISP:
             return float(self.DISP_SCALE)
 
-        buf = self._disp_buffer
+        buf = runtime_ctx.disp_buffer
         buf.append(disp)
         if len(buf) > self.ADAPTIVE_WINDOW:
             buf.pop(0)
 
         n = len(buf)
         if n < 2:
-            self._last_effective_scale = float(self.DISP_SCALE)
+            runtime_ctx.last_effective_scale = float(self.DISP_SCALE)
             return float(self.DISP_SCALE)
 
         mu = float(np.mean(buf))
@@ -173,23 +185,33 @@ class TriOctaMemoryKernel:
 
         # Clamp to sane range
         effective = float(np.clip(effective, 1e-6, 10.0))
-        self._last_effective_scale = effective
+        runtime_ctx.last_effective_scale = effective
         return effective
 
-    def _dispersion_coherence(self, Omega: np.ndarray) -> Tuple[float, float]:
+    def _dispersion_coherence(
+        self, Omega: np.ndarray, runtime_ctx: KernelRuntimeContext,
+    ) -> Tuple[float, float]:
         ph = np.angle(Omega)
         d01 = _wrap_pi(float(ph[0] - ph[1]))
         d12 = _wrap_pi(float(ph[1] - ph[2]))
         d20 = _wrap_pi(float(ph[2] - ph[0]))
         disp = float(np.sqrt(np.mean(np.square([d01, d12, d20]))))
-        scale = self._effective_disp_scale(disp)
+        scale = self._effective_disp_scale(disp, runtime_ctx)
         coh_phase = float(np.exp(-((disp / max(scale, 1e-12)) ** 2)))
         return disp, coh_phase
 
     # ----------------------------
     # Main step
     # ----------------------------
-    def process(self, state: ModelState, observation: str) -> Tuple[ModelState, KernelSignals, Dict[str, Any]]:
+    def process(
+        self,
+        state: ModelState,
+        observation: str,
+        runtime_ctx: KernelRuntimeContext,
+    ) -> Tuple[ModelState, KernelSignals, Dict[str, Any]]:
+        if runtime_ctx is None:
+            raise RuntimeError("KernelRuntimeContext is required for kernel processing")
+        mon = runtime_ctx.mon
         summary = summarize(observation)
         emb = self.embedder.embed(summary)
 
@@ -227,18 +249,18 @@ class TriOctaMemoryKernel:
             S_mag, Phi_coll, S = 0.0, 0.0, 0.0
 
         # mechanics coherence
-        disp, coh_phase = self._dispersion_coherence(state.Omega)
+        disp, coh_phase = self._dispersion_coherence(state.Omega, runtime_ctx)
         coh_raw = float(self.COH_FLOOR + (1.0 - self.COH_FLOOR) * np.clip(coh_phase, 0.0, 0.9999))
         coh = coh_raw
 
         # optional smoothing (ONE block only)
         a = float(self.COH_SMOOTH) if self.COH_SMOOTH else 0.0
         if a > 0.0:
-            if float(self.mon.coh_ema) <= 0.0:
-                self.mon.coh_ema = float(coh)
+            if float(mon.coh_ema) <= 0.0:
+                mon.coh_ema = float(coh)
             else:
-                self.mon.coh_ema = a * float(self.mon.coh_ema) + (1.0 - a) * float(coh)
-            coh = float(self.mon.coh_ema)
+                mon.coh_ema = a * float(mon.coh_ema) + (1.0 - a) * float(coh)
+            coh = float(mon.coh_ema)
 
         # labels
         cycle_stage = int(getattr(state, "cycle_stage", 0))
@@ -282,13 +304,13 @@ class TriOctaMemoryKernel:
         valid_align = False
         in_corridor = False
 
-        if self.mon.prev_xy is not None and self.mon.prev_uxy is not None:
-            diff_xy = xy - self.mon.prev_xy
+        if mon.prev_xy is not None and mon.prev_uxy is not None:
+            diff_xy = xy - mon.prev_xy
             n_xy = float(np.linalg.norm(diff_xy))
             if n_xy > 1e-12:
                 tangent = diff_xy / n_xy
 
-                jump = (uxy - self.mon.prev_uxy)[:2]
+                jump = (uxy - mon.prev_uxy)[:2]
                 n_jump = float(np.linalg.norm(jump))
                 if n_jump > 1e-12:
                     jump_dir = jump / n_jump
@@ -299,13 +321,13 @@ class TriOctaMemoryKernel:
         # tearing proxy: EMA of misalignment
         if valid_align:
             tear_raw = 1.0 - abs(dot_align)
-            self.mon.tear_score_ema = 0.95 * self.mon.tear_score_ema + 0.05 * tear_raw
-            self.mon.align_ema = 0.95 * self.mon.align_ema + 0.05 * abs(dot_align)
+            mon.tear_score_ema = 0.95 * mon.tear_score_ema + 0.05 * tear_raw
+            mon.align_ema = 0.95 * mon.align_ema + 0.05 * abs(dot_align)
         else:
-            self.mon.tear_score_ema = 0.99 * self.mon.tear_score_ema
-            self.mon.align_ema = 0.99 * self.mon.align_ema
+            mon.tear_score_ema = 0.99 * mon.tear_score_ema
+            mon.align_ema = 0.99 * mon.align_ema
 
-        tearing_risk = float(np.clip(self.mon.tear_score_ema, 0.0, 1.0))
+        tearing_risk = float(np.clip(mon.tear_score_ema, 0.0, 1.0))
 
         # corridor proximity
         if valid_align:
@@ -314,17 +336,17 @@ class TriOctaMemoryKernel:
         else:
             prox = 0.0
 
-        self.mon.prox_ema = (1.0 - float(self.PROX_ALPHA)) * float(self.mon.prox_ema) + float(self.PROX_ALPHA) * prox
+        mon.prox_ema = (1.0 - float(self.PROX_ALPHA)) * float(mon.prox_ema) + float(self.PROX_ALPHA) * prox
 
         # ✅ survival memory (decaying trace)
-        self.mon.surv_ema *= float(self.SURV_DECAY)
+        mon.surv_ema *= float(self.SURV_DECAY)
         if in_corridor:
-            self.mon.surv_ema += float(self.SURV_GAIN) * (1.0 + 0.25 * float(self.mon.prox_ema))
-        self.mon.surv_ema = float(np.clip(self.mon.surv_ema, 0.0, 3.0))
-        surv_soft = float(self.mon.surv_ema)
+            mon.surv_ema += float(self.SURV_GAIN) * (1.0 + 0.25 * float(mon.prox_ema))
+        mon.surv_ema = float(np.clip(mon.surv_ema, 0.0, 3.0))
+        surv_soft = float(mon.surv_ema)
 
         # corridor nudges
-        corr_bonus = 1.0 + 0.06 * np.tanh(1.25 * surv_soft) + 0.03 * float(self.mon.prox_ema)
+        corr_bonus = 1.0 + 0.06 * np.tanh(1.25 * surv_soft) + 0.03 * float(mon.prox_ema)
         tear_pen = 1.0 - 0.06 * tearing_risk
         corr_mult = float(np.clip(corr_bonus * tear_pen, 0.90, 1.10))
 
@@ -332,19 +354,19 @@ class TriOctaMemoryKernel:
         tri_mod["proposal_mult"] = float(np.clip(tri_mod["proposal_mult"] * corr_mult, 0.90, 1.10))
 
         bp = float(tri_mod["bridge_p"])
-        bp *= float(np.clip(1.0 + 0.25 * float(self.mon.prox_ema) - 0.20 * tearing_risk, 0.6, 1.4))
+        bp *= float(np.clip(1.0 + 0.25 * float(mon.prox_ema) - 0.20 * tearing_risk, 0.6, 1.4))
         tri_mod["bridge_p"] = float(np.clip(bp, 0.03, 0.20))
 
         # update prevs
-        self.mon.prev_xy = xy
-        self.mon.prev_uxy = uxy
+        mon.prev_xy = xy
+        mon.prev_uxy = uxy
 
         # telemetry for sim scripts
         tri_mod["in_corridor"] = 1.0 if in_corridor else 0.0
-        tri_mod["survival_steps"] = float(self.mon.surv_ema)
+        tri_mod["survival_steps"] = float(mon.surv_ema)
         tri_mod["tearing_risk"] = float(tearing_risk)
         tri_mod["tangent_align"] = float(dot_align)
-        tri_mod["align_ema"] = float(self.mon.align_ema)
+        tri_mod["align_ema"] = float(mon.align_ema)
         tri_mod["disp"] = float(disp)
         tri_mod["coh_phase"] = float(coh_phase)
 
@@ -399,7 +421,7 @@ class TriOctaMemoryKernel:
             "id_label": id_label,
             "S_mag": float(S_mag),
             "phi_coll": float(Phi_coll),
-            "effective_disp_scale": float(self._last_effective_scale),
+            "effective_disp_scale": float(runtime_ctx.last_effective_scale),
         }
 
         return state, signals, debug

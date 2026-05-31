@@ -87,8 +87,9 @@ def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
 
         # Kernel state: corridor monitor has persistent EMAs
         tri_mod = None
-        if hasattr(fabric, "kernel") and hasattr(fabric.kernel, "mon"):
-            mon = fabric.kernel.mon
+        runtime_ctx = fabric.get_kernel_runtime_context(workspace_id, agent_id)
+        if runtime_ctx is not None:
+            mon = runtime_ctx.mon
             tri_mod = {
                 "coh_phase": getattr(mon, "coh_ema", 0.5),
                 "tearing_risk": getattr(mon, "tear_score_ema", 0.35),

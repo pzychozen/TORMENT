@@ -758,8 +758,8 @@ class TestToolResultCanonSuppression(unittest.TestCase):
 
         real_process = self.fabric.kernel.process
 
-        def patched_process(state, text):
-            state_out, signals, debug = real_process(state, text)
+        def patched_process(state, text, runtime_ctx):
+            state_out, signals, debug = real_process(state, text, runtime_ctx)
             # KernelSignals is a non-frozen @dataclass -- mutation is
             # allowed. Forcing 1.0 deterministically pushes the value
             # above the canon threshold (0.78) regardless of text.

@@ -918,8 +918,11 @@ def query(req: QueryReq) -> Dict[str, Any]:
             _geo = None
             try:
                 _tri_mod = None
-                if hasattr(fabric, "kernel") and hasattr(fabric.kernel, "mon"):
-                    mon = fabric.kernel.mon
+                runtime_ctx = fabric.get_kernel_runtime_context(
+                    req.workspace_id, req.agent_id,
+                )
+                if runtime_ctx is not None:
+                    mon = runtime_ctx.mon
                     _tri_mod = {
                         "coh_phase": getattr(mon, "coh_ema", 0.5),
                         "tearing_risk": getattr(mon, "tear_score_ema", 0.35),
@@ -1643,6 +1646,9 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
     state = fabric.agent_states.get(_ak)
     if state is None:
         raise HTTPException(404, f"Agent '{req.agent_id}' has no active state")
+    runtime_ctx = fabric.get_kernel_runtime_context(req.workspace_id, req.agent_id)
+    if runtime_ctx is None:
+        raise HTTPException(409, f"Agent '{req.agent_id}' has no active kernel context")
 
     step = int(getattr(state, "step", 0))
 
@@ -1680,7 +1686,7 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         agent_id=req.agent_id,
         step=step,
         model_state=state,
-        corridor_monitor=fabric.kernel.mon,
+        corridor_monitor=runtime_ctx.mon,
         character_state_dict=char_state_dict,
         motif_summary=motif_summary,
         shard_snapshot=shard_snap,
