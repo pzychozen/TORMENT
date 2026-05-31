@@ -73,6 +73,13 @@ The governance and orchestration layer. Wires together kernel signals, routing, 
 | `consolidator.py` | Cold archive builder |
 | `router.py` | Domain routing |
 
+**Kernel runtime ownership (Track J):** `TriOctaMemoryKernel` remains a shared
+math and configuration template. Observation-dependent runtime history is
+per-agent through `KernelRuntimeContext`: `mon`, `disp_buffer`, and
+`last_effective_scale`. Checkpoint schema v2 dual-writes the legacy
+`corridor_monitor` field and the complete `kernel_runtime_context` field. G1
+auto-canon governance and R1 live restore remain deferred.
+
 **Core execution flows:**
 
 1. **Ingest**: app.py -> fabric.ingest() -> kernel.process() (with character modulation) -> PhaseTimer.update() (duration tracking) -> router ranks domains -> motifs update -> memory_graph stores node (with phase/corridor durations in payload) -> optional drift check + gravity correction -> optional auto-proposal -> event-gated compression check (v2.1)

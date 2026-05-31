@@ -134,9 +134,9 @@ Reads real kernel state (`coh_ema`, `tear_score_ema`, `surv_ema`) and character 
 
 - **Fallback chain:** If kernel has no state (coh_ema=0.0): coherence=0.0 (very conservative). If character store has no state: identity_lock=0.5, ambiguity_tolerance depends on coherence. If both missing: returns None, stance policy uses pure deterministic scaffold. All fallbacks are safe and explicit. ✓
 - **Clamping:** All values pass through `_clamp(v, 0.0, 1.0)`. No out-of-range risk. ✓
-- **Read-only:** `_harvest_geometric_context` only reads from `fabric.kernel.mon` (persistent attributes) and `character_store.load_state()`. No mutations. ✓
+- **Track-J supersession:** the earlier shared `fabric.kernel.mon` read was removed. `_harvest_geometric_context` now reads the requested agent's explicit `runtime_ctx.mon` and `character_store.load_state()`. Missing requested-agent context skips advisory harvesting safely.
 - **Gate:** Only runs when `TORMENT_THINKING_ADVISORY=1`. ✓
-- **Thread safety:** `kernel.mon` attributes are simple floats. `character_store.load_state()` does a file read. No locks needed for read-only access.
+- **Thread safety:** observation-dependent monitor state is per-agent through `KernelRuntimeContext`; there is no shared-kernel monitor fallback. `character_store.load_state()` remains a file read.
 
 ### How to disable
 Set `TORMENT_THINKING_ADVISORY=0`. Harvester only runs inside `_advisory_thinking` and `/agent/query` advisory path, both gated.
