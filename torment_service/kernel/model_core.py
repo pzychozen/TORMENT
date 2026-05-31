@@ -130,11 +130,13 @@ class TriOctaPhaseLockModel:
         )
 
     # -------- local dynamics --------
-    def phase_lock_step(self, state: ModelState) -> None:
+    def phase_lock_step(
+        self, state: ModelState, *, g_override: float | None = None,
+    ) -> None:
         """One discrete step of the 3-node Mexican-hat + coupling."""
         Omega = state.Omega
         eps = self.p.eps
-        g = self.p.g
+        g = self.p.g if g_override is None else float(g_override)
         k_vals = self.p.k_vals
         delta = self.p.delta_vals
 
@@ -164,7 +166,9 @@ class TriOctaPhaseLockModel:
         state.phi_index = (state.phi_index + self.p.phi_step_per_iter) % self.p.d24_steps
 
     # -------- emergent Z / cycle --------
-    def update_z(self, state: ModelState) -> None:
+    def update_z(
+        self, state: ModelState, *, theta_lock_override: float | None = None,
+    ) -> None:
         """
         Stable bounded Z:
         - macro scaffold: lam * rho * cos(3*(theta-theta_lock))
@@ -178,7 +182,11 @@ class TriOctaPhaseLockModel:
 
         theta = (2.0 * np.pi * state.phi_index) / float(self.p.d24_steps)
         lam = float(self.p.lambda_vp)
-        theta_lock = float(self.p.theta_lock)
+        theta_lock = float(
+            self.p.theta_lock
+            if theta_lock_override is None
+            else theta_lock_override
+        )
 
         z_inst = lam * rho * np.cos(3.0 * (theta - theta_lock))  # bounded in [-lam*rho, +lam*rho]
 
@@ -228,17 +236,24 @@ class TriOctaPhaseLockModel:
         )
 
     # -------- master step + runner --------
-    def step(self, state: ModelState, dt: float = 0.1) -> None:
+    def step(
+        self,
+        state: ModelState,
+        dt: float = 0.1,
+        *,
+        g_override: float | None = None,
+        theta_lock_override: float | None = None,
+    ) -> None:
         """One full model update step."""
         # 1) local phase-lock dynamics on tri-octa modes
-        self.phase_lock_step(state)
+        self.phase_lock_step(state, g_override=g_override)
         # 2) D24 phase progression
         self.advance_phi(state)
         # 3) time update
         state.t += dt
         state.step += 1
         # 4) emergent Z update from (kappa, phi, t)
-        self.update_z(state)
+        self.update_z(state, theta_lock_override=theta_lock_override)
         # 5) cycle stage & identity update
         self.update_cycle_stage(state)
         self.update_identity_state(state)

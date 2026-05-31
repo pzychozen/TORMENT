@@ -203,18 +203,22 @@ class TriOctaMemoryKernel:
 
         # advance TriOcta dynamics — apply character modulation if present
         char_mod = getattr(state, '_char_mod', {})
-        if char_mod and ('g_mod' in char_mod or 'theta_lock_mod' in char_mod):
-            orig_g = self.params.g
-            orig_theta = self.params.theta_lock
-            self.params.g = float(char_mod.get('g_mod', orig_g))
-            self.params.theta_lock = float(char_mod.get('theta_lock_mod', orig_theta))
-            try:
-                self.model.step(state, dt=self.params.eps)
-            finally:
-                self.params.g = orig_g
-                self.params.theta_lock = orig_theta
-        else:
-            self.model.step(state, dt=self.params.eps)
+        g_override = (
+            float(char_mod['g_mod'])
+            if char_mod and 'g_mod' in char_mod
+            else None
+        )
+        theta_lock_override = (
+            float(char_mod['theta_lock_mod'])
+            if char_mod and 'theta_lock_mod' in char_mod
+            else None
+        )
+        self.model.step(
+            state,
+            dt=self.params.eps,
+            g_override=g_override,
+            theta_lock_override=theta_lock_override,
+        )
 
         # debug-only triad coherence (NOT mechanics)
         try:
