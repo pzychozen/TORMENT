@@ -2769,19 +2769,11 @@ class TormentFabric:
                 _merged_ep: Dict[str, Any] = dict(extra_payload or {})
                 _merged_ep.update(_internal_ep)  # internal wins on collision
 
-                # Auto-canon stamp: by default, rows whose kernel
-                # promotion_score crosses the canon threshold are
-                # written with canon=True (which Q2-D's H1c helper then
-                # stamps as PROTECTED / SYSTEM / CANON_SET).
-                # ``suppress_canon=True`` overrides this to keep canon
-                # False unconditionally. Used by ``_fast_tool_result_ingest``
-                # so external/advisory tool output does not become
-                # identity-canonical automatically -- it can be
-                # remembered and queried, but canon promotion (if any)
-                # must come from an explicit later path. See
-                # docs/TOOL_RESULT_LIFECYCLE_POLICY.md and the
-                # _fast_tool_result_ingest docstring.
-                _auto_canon = (signals.promotion_score >= 0.78)
+                # Ordinary ingest fails closed for canon authority.
+                # Kernel promotion_score remains advisory telemetry for
+                # memory mechanics, but canon promotion must come from an
+                # explicit governed path.
+                _auto_canon = False
                 eid = graph.spawn_memory(
                 summary=summary,
                 embedding=emb,

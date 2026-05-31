@@ -166,13 +166,16 @@ class TestContinuityCentralization(unittest.TestCase):
                 )
                 eid = r["eid"]
                 eids.append(eid)
-                # Patch as identity_anchor
+                # Patch as explicitly-canon identity_anchor. The top-k
+                # dominance cap applies only to canon anchors; derived
+                # non-canon anchors are intentionally excluded.
                 ak = self.fabric._agent_key("ws", "agent")
                 pg = self.fabric.private_graphs.get(ak)
                 if pg:
                     ent = pg.entities.get(int(eid))
                     if ent and ent.payload is not None:
                         ent.payload["type"] = "identity_anchor"
+                        ent.payload["canon"] = True
 
             query_text = "What defines my personality?"
 

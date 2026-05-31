@@ -904,10 +904,10 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
       - queryable in normal retrieval
       - visible in /debug/provenance
       - NOT identity-canonical (stored as ordinary domain memory).
-        Enforced by passing ``suppress_canon=True`` to ``fabric.ingest``,
-        which keeps the auto-canon stamp off regardless of kernel
-        promotion_score. Any later canon promotion must come from an
-        explicit operator/review path, not this entry point.
+        ``fabric.ingest`` fails closed for ordinary canon authority;
+        this path also passes ``suppress_canon=True`` defensively.
+        Any later canon promotion must come from an explicit
+        operator/review path, not this entry point.
       - safe parent for archivist writeback (admissible in the bounded
         ancestry walk in cognition/recursion_guard.py)
 
@@ -916,7 +916,8 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
     fabric.ingest's promotion_score >= 0.78 check. That contradicted
     the source_type=tool_result contract -- external/advisory output
     should not become identity-canonical without explicit promotion.
-    Suppression is now enforced here.
+    G1 now fails closed for ordinary ingest; this explicit suppression
+    remains as defense in depth.
     """
     from .provenance_v1 import ProvenanceV1
 

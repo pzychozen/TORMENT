@@ -621,16 +621,15 @@ class TestProvenanceBadgeOnHit(unittest.TestCase):
 # tool-result row via fabric.ingest's kernel-driven promotion_score >= 0.78
 # check, which contradicted the source_type=tool_result contract.
 #
-# Patch shape: fabric.ingest gained ``suppress_canon: bool = False`` keyword;
-# _fast_tool_result_ingest now passes ``suppress_canon=True``.
+# Patch shape: ordinary fabric.ingest now fails closed for canon authority;
+# _fast_tool_result_ingest still passes ``suppress_canon=True`` defensively.
 #
 # These tests lock the doctrine in:
 #   - the full tool-result submit_task pipeline yields canon=False
 #   - the resulting lifecycle envelope is UNSET / SYSTEM / INGEST_UNMARKED
 #   - fabric.ingest(..., suppress_canon=True) is honored at the API layer
-#   - fabric.ingest(..., suppress_canon=False) -- the default -- still
-#     auto-canonizes coherent text (regression guard; proves the patch is
-#     scoped to the explicit-suppression path)
+#   - fabric.ingest(..., suppress_canon=False) -- the default -- also
+#     remains non-canon even when kernel promotion telemetry is high
 
 
 # Reasonably coherent English text. The live Phase 2 smoke confirmed
@@ -724,35 +723,23 @@ class TestToolResultCanonSuppression(unittest.TestCase):
             "suppress_canon=True must force canon=False",
         )
 
-    def test_canon_branch_honors_suppress_canon_with_forced_high_promotion(self):
-        """Deterministic regression guard for both arms of the
+    def test_forced_high_promotion_cannot_grant_canon_authority(self):
+        """Deterministic G1 regression guard for both arms of the
         ``canon=(False if suppress_canon else _auto_canon)`` ternary.
 
         Approach: monkeypatch ``kernel.process`` so that signals come
         back with ``promotion_score=1.0`` regardless of the input
-        text. That forces ``_auto_canon`` to True inside fabric.ingest.
-        Under that condition:
+        text. Under the fail-closed G1 posture:
 
         * default ``fabric.ingest`` (``suppress_canon=False``) MUST
-          stamp canon=True on the resulting row.
+          stamp canon=False on the resulting row.
         * ``fabric.ingest(..., suppress_canon=True)`` MUST stamp
           canon=False on the resulting row.
 
         Together these prove:
 
-        1. The default arm of the ternary still passes the kernel's
-           auto-canon decision through unchanged (no accidental
-           suppression leak).
-        2. The suppress_canon arm actually overrides the kernel's
-           decision -- this is the doctrine guarantee that
-           _fast_tool_result_ingest relies on.
-
-        This replaces an earlier test that asserted a specific text
-        fixture would canonize under the default kernel. That earlier
-        assumption was brittle: in this in-process fixture the chosen
-        text didn't actually cross the 0.78 threshold, so the test
-        failed without indicating any real regression. Forcing
-        promotion_score directly removes that dependency.
+        1. promotion_score remains observable without granting canon.
+        2. The explicit suppress_canon caller posture remains valid.
         """
         from unittest.mock import patch
 
@@ -762,15 +749,15 @@ class TestToolResultCanonSuppression(unittest.TestCase):
             state_out, signals, debug = real_process(state, text, runtime_ctx)
             # KernelSignals is a non-frozen @dataclass -- mutation is
             # allowed. Forcing 1.0 deterministically pushes the value
-            # above the canon threshold (0.78) regardless of text.
+            # above the historical canon threshold regardless of text.
             signals.promotion_score = 1.0
             return state_out, signals, debug
 
         with patch.object(
             self.fabric.kernel, "process", side_effect=patched_process,
         ):
-            # Default (suppress_canon=False): kernel says canonize, and
-            # the default arm of the ternary must honor that.
+            # Default (suppress_canon=False): high kernel telemetry must
+            # remain advisory and fail closed for canon authority.
             default_result = self.fabric.ingest(
                 workspace_id="test-ws",
                 agent_id="agent-1",
@@ -779,8 +766,8 @@ class TestToolResultCanonSuppression(unittest.TestCase):
             )
             default_payload = self._payload_for_eid(default_result["eid"])
 
-            # Suppress (suppress_canon=True): kernel still says canonize,
-            # but the suppress arm of the ternary must override.
+            # Suppress (suppress_canon=True): explicit defensive caller
+            # posture remains fail closed as well.
             suppress_result = self.fabric.ingest(
                 workspace_id="test-ws",
                 agent_id="agent-1",
@@ -790,14 +777,11 @@ class TestToolResultCanonSuppression(unittest.TestCase):
             )
             suppress_payload = self._payload_for_eid(suppress_result["eid"])
 
-        self.assertTrue(
+        self.assertFalse(
             default_payload.get("canon"),
             (
-                "default arm regression: with promotion_score=1.0, "
-                "fabric.ingest must auto-canonize when suppress_canon "
-                "is False. Either suppress_canon is leaking into the "
-                "default path, or the canon-branch logic in "
-                "fabric.ingest was reshaped without updating this test."
+                "G1 regression: promotion_score=1.0 must remain advisory "
+                "during ordinary ingest and cannot grant canon authority."
             ),
         )
         self.assertFalse(
