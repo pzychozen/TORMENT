@@ -191,6 +191,26 @@ def deserialize_corridor_monitor(data: Dict[str, Any]):
     return mon
 
 
+def serialize_kernel_runtime_context(runtime_ctx) -> Dict[str, Any]:
+    """Serialize per-agent kernel observation history."""
+    return {
+        "mon": serialize_corridor_monitor(runtime_ctx.mon),
+        "disp_buffer": [float(x) for x in runtime_ctx.disp_buffer],
+        "last_effective_scale": float(runtime_ctx.last_effective_scale),
+    }
+
+
+def deserialize_kernel_runtime_context(data: Dict[str, Any]):
+    """Restore per-agent kernel observation history with safe defaults."""
+    from .memory_kernel import DEFAULT_DISP_SCALE, KernelRuntimeContext
+
+    return KernelRuntimeContext(
+        mon=deserialize_corridor_monitor(data["mon"]),
+        disp_buffer=[float(x) for x in data.get("disp_buffer", [])],
+        last_effective_scale=float(data.get("last_effective_scale", DEFAULT_DISP_SCALE)),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Motif summary (lightweight — not the full registry)
 # ---------------------------------------------------------------------------
@@ -295,6 +315,7 @@ def save_checkpoint(
     motif_summary: Optional[Dict[str, Any]] = None,
     shard_snapshot: Optional[Dict[str, Any]] = None,
     max_checkpoints: int = 10,
+    kernel_runtime_context=None,
 ) -> Optional[str]:
     """Save a checkpoint to disk.  Returns the file path on success, None on failure.
 
@@ -308,17 +329,22 @@ def save_checkpoint(
         safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
         os.makedirs(safe_dir, exist_ok=True)
 
+        mon = kernel_runtime_context.mon if kernel_runtime_context is not None else corridor_monitor
         payload: Dict[str, Any] = {
-            "version": 1,
+            "version": 2,
             "step": int(step),
             "timestamp": time.time(),
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "model_state": serialize_model_state(model_state),
-            "corridor_monitor": serialize_corridor_monitor(corridor_monitor),
+            "corridor_monitor": serialize_corridor_monitor(mon),
             "character_state": character_state_dict,
             "motif_summary": motif_summary,
             "shard_snapshot": shard_snapshot,
         }
+        if kernel_runtime_context is not None:
+            payload["kernel_runtime_context"] = serialize_kernel_runtime_context(
+                kernel_runtime_context,
+            )
 
         ckpt_name = _checkpoint_filename(step)
         path = _child_path(safe_dir, ckpt_name)
@@ -415,14 +441,31 @@ def restore_from_checkpoint(
       - step: int
       - model_state: ModelState
       - corridor_monitor: CorridorMonitor
+      - kernel_runtime_context: KernelRuntimeContext
       - character_state: dict or None
       - motif_summary: dict or None
       - shard_snapshot: dict or None
     """
+    if "kernel_runtime_context" in checkpoint_data:
+        runtime_ctx = deserialize_kernel_runtime_context(
+            checkpoint_data["kernel_runtime_context"],
+        )
+        mon = runtime_ctx.mon
+    else:
+        from .memory_kernel import DEFAULT_DISP_SCALE, KernelRuntimeContext
+
+        mon = deserialize_corridor_monitor(checkpoint_data["corridor_monitor"])
+        runtime_ctx = KernelRuntimeContext(
+            mon=mon,
+            disp_buffer=[],
+            last_effective_scale=DEFAULT_DISP_SCALE,
+        )
+
     return {
         "step": int(checkpoint_data["step"]),
         "model_state": deserialize_model_state(checkpoint_data["model_state"]),
-        "corridor_monitor": deserialize_corridor_monitor(checkpoint_data["corridor_monitor"]),
+        "corridor_monitor": mon,
+        "kernel_runtime_context": runtime_ctx,
         "character_state": checkpoint_data.get("character_state"),
         "motif_summary": checkpoint_data.get("motif_summary"),
         "shard_snapshot": checkpoint_data.get("shard_snapshot"),

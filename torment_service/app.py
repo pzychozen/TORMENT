@@ -1687,6 +1687,7 @@ def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
         step=step,
         model_state=state,
         corridor_monitor=runtime_ctx.mon,
+        kernel_runtime_context=runtime_ctx,
         character_state_dict=char_state_dict,
         motif_summary=motif_summary,
         shard_snapshot=shard_snap,

@@ -3323,6 +3323,7 @@ class TormentFabric:
                         step=int(step),
                         model_state=state,
                         corridor_monitor=_checkpoint_ctx.mon,
+                        kernel_runtime_context=_checkpoint_ctx,
                         character_state_dict=_char_state_dict,
                         motif_summary=_motif_summary,
                         shard_snapshot=_shard_snap,

@@ -16,6 +16,9 @@ from .kernel.identity_rules import label_for_identity
 from .kernel.su3_basis import project_to_uxy
 
 
+DEFAULT_DISP_SCALE = 1.50
+
+
 def _wrap_pi(a: float) -> float:
     return float((a + np.pi) % (2 * np.pi) - np.pi)
 
@@ -49,7 +52,7 @@ class KernelRuntimeContext:
 
     mon: CorridorMonitor = field(default_factory=CorridorMonitor)
     disp_buffer: List[float] = field(default_factory=list)
-    last_effective_scale: float = 1.50
+    last_effective_scale: float = DEFAULT_DISP_SCALE
 
 
 class TriOctaMemoryKernel:
@@ -69,7 +72,7 @@ class TriOctaMemoryKernel:
         # Tunables (safe defaults)
         self.CORR_THR = 0.80          # |dot_align| threshold for corridor membership
         self.COH_FLOOR = 0.05         # keep a low-end signal
-        self.DISP_SCALE = 1.50        # fallback scale (used during adaptive warmup)
+        self.DISP_SCALE = DEFAULT_DISP_SCALE  # fallback scale (used during adaptive warmup)
         self.PROX_ALPHA = 0.10        # EMA for proximity
         self.SURV_DECAY = 0.985       # per-step decay of survival memory
         self.SURV_GAIN = 0.06         # add when in corridor (scaled by proximity)

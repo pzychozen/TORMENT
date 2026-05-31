@@ -157,6 +157,8 @@ def test_periodic_checkpoint_routes_requested_agent_monitor(
         fabric.ingest("audit", "b", B_TEXT, step=1, domain_id="research")
         assert captured["corridor_monitor"] is ctx_b.mon
         assert captured["corridor_monitor"] is not ctx_a.mon
+        assert captured["kernel_runtime_context"] is ctx_b
+        assert captured["kernel_runtime_context"] is not ctx_a
     finally:
         fabric.close()
 
@@ -189,6 +191,8 @@ def test_manual_checkpoint_routes_requested_agent_monitor(
         assert result["ok"] is True
         assert captured["corridor_monitor"] is ctx_b.mon
         assert captured["corridor_monitor"] is not ctx_a.mon
+        assert captured["kernel_runtime_context"] is ctx_b
+        assert captured["kernel_runtime_context"] is not ctx_a
     finally:
         fabric.close()
 
