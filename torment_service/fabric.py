@@ -253,6 +253,54 @@ def _mark_embed_audit_dirty(data_dir: str, workspace_id: str) -> None:
         return
 
 
+def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
+    _ag = _agent_dir(data_dir, workspace_id, agent_id)
+    # Sink-local guard for CodeQL at makedirs site.
+    _rp = os.path.realpath(_ag)
+    if not _rp.startswith(os.sep) and not os.path.isabs(_rp):
+        raise ValueError(f"Agent dir not absolute: {_rp!r}")
+    os.makedirs(_rp, exist_ok=True)
+    return _safe_child(_ag, "affect_state.json")
+
+
+def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
+    p = _affect_state_path(data_dir, workspace_id, agent_id)
+    base = {"last_tag": None, "last_conf": 0.0, "last_step": -10**9, "drift_hist": []}
+    if not os.path.exists(p):
+        return dict(base)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            st = json.load(f) or {}
+    except Exception:
+        st = {}
+    # Backward-compatible fill
+    if not isinstance(st, dict):
+        st = {}
+    for k, v in base.items():
+        if k not in st:
+            st[k] = v
+    if not isinstance(st.get("drift_hist"), list):
+        st["drift_hist"] = []
+    # Trim history defensively
+    try:
+        st["drift_hist"] = list(st["drift_hist"])[-20:]
+    except Exception:
+        st["drift_hist"] = []
+    return st
+
+
+def _save_affect_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
+    p = _affect_state_path(data_dir, workspace_id, agent_id)
+    try:
+        # Keep payload small
+        if isinstance(state, dict) and isinstance(state.get("drift_hist"), list):
+            state["drift_hist"] = list(state["drift_hist"])[-50:]
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(state or {}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.debug("failed to save affect state for agent=%s: %s", agent_id, e)
+
+
 def _anchor_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
     return _safe_child(_agent_dir(data_dir, workspace_id, agent_id), "anchors.json")
 
