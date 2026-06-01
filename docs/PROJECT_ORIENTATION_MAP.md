@@ -313,6 +313,17 @@ Items that have been deferred from an active slice but are not lost:
   (`do_not_touch_torment_test_rig/harness/tier0_smoke.py`) before any patch;
   distinct from the W6 denylist item; explicitly NOT closed by the 2026-06-01
   maintenance slice. Source: `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` item 1.
+- **Q3-D1 affect-attribution contract** — tracked framing **promoted**
+  (`docs/CLUSTER_5_PATH_C_Q3_D1_AFFECT_ATTRIBUTION_CONTRACT_v0.1.md`, 2026-06-01);
+  implementation **not yet opened**. Ordering is explicit: D1 contract framing →
+  trio review → commit and push → only then consider D1-S1 implementation
+  authorization. No runtime/scoring/reinforcement/promotion behavior changes by
+  the contract.
+- **Q3-D2 duplicate changed-affect handling** — closed / parked (options named,
+  no position taken; depends on D1 attribution).
+- **Q3-D3 archive emotional-promotion authority** — closed / parked (promotion
+  independently classifies raw chunk text; inferred affect must not alone elevate
+  archive→core; emotional criterion inert since `f462b31`).
 
 Claude's local memory also keeps a broader parking lot at
 `future_lookat_issues.md` for findings that surfaced during scoped work and
