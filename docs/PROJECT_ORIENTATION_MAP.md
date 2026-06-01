@@ -181,7 +181,9 @@ This folder is the source of repeated mid-session confusion through 2026-05-24
 and deserves an explicit boundary statement.
 
 **What it is:** a historical / local runtime test harness, living inside the
-repo with the warning prefix `do_not_touch_`. It produced the Tier 0, Tier 1,
+Git repo with the warning prefix `do_not_touch_` — **repo-root; a sibling of
+`torment_fabric/`, not nested inside it** (`TORMENT-fabric_v2/do_not_touch_torment_test_rig/`,
+alongside `TORMENT-fabric_v2/torment_fabric/`). It produced the Tier 0, Tier 1,
 and Tier 2 evidence on disk under `torment_fabric/scratch/iteration_runs/`.
 The canonical long-iteration wrapper is
 `do_not_touch_torment_test_rig/harness/tier0_smoke.py` — parameterized via
@@ -304,6 +306,13 @@ Items that have been deferred from an active slice but are not lost:
 - **Probe-v0 `agent_locks=2` at preflight** — observed before workspace
   creation during the `3059` run; verify agent locks release cleanly across
   runs. Small observability check, not blocking.
+- **Predicate #7 logic upgrade (Tier-1 harness)** — the Tier-1 predicate is
+  `pass: True` unconditional; manual verification has borne the load through
+  Tier 2 (shipped 2026-05-24). Open only if Tier 3 or programmatic Tier-gating
+  is opened; requires Windows-local inspection of the sibling rig wrapper
+  (`do_not_touch_torment_test_rig/harness/tier0_smoke.py`) before any patch;
+  distinct from the W6 denylist item; explicitly NOT closed by the 2026-06-01
+  maintenance slice. Source: `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` item 1.
 
 Claude's local memory also keeps a broader parking lot at
 `future_lookat_issues.md` for findings that surfaced during scoped work and

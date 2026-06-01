@@ -865,7 +865,7 @@ def _select_model_for(provider: str) -> str:
             if p.strip().lower() == provider.lower():
                 return m.strip()
     defaults = {
-        "anthropic": "claude-sonnet-4-5",
+        "anthropic": "claude-sonnet-4-6",
         "openrouter": "google/gemini-2.5-flash",
         "openai": "gpt-4o-mini",
     }

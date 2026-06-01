@@ -439,7 +439,7 @@ def _select_model_for(provider: str) -> str:
     # OpenRouter model slugs are namespaced (provider/model); pick from
     # https://openrouter.ai/models. The default below is a small, cheap one.
     defaults = {
-        "anthropic": "claude-sonnet-4-5",
+        "anthropic": "claude-sonnet-4-6",
         "openrouter": "google/gemini-2.5-flash",
         "openai": "gpt-4o-mini",
     }

@@ -88,7 +88,7 @@ def _env(name: str, default: str) -> str:
 
 
 TORMENT_URL = _env("TORMENT_URL", "http://127.0.0.1:8787").rstrip("/")
-CLAUDE_MODEL = _env("CLAUDE_MODEL", "claude-sonnet-4-5")
+CLAUDE_MODEL = _env("CLAUDE_MODEL", "claude-sonnet-4-6")
 TOP_K = int(_env("TORMENT_TOP_K", "8"))
 
 # Per-character workspaces persist between sessions so the character
