@@ -13,29 +13,41 @@ to start a new gate without re-litigating work that already exists.
 
 ## 1. Current main project thread
 
-TORMENT is preparing for controlled automation — specifically, **memory-to-prompt
-automation** in which retrieved memory may shape the context of a later LLM
-call. The constraint that anchors all work in this direction is doctrinal:
+Controlled **memory-to-prompt automation** has landed through the v0.2.x chain
+(observability lane → `character_context` → spirit-return → archive-FILTER-A),
+followed by the Ledger Persistence Decision (Option C, response-only).
+Retrieved memory may shape the context of a later LLM call; it does not gain
+authority by doing so. The constraint that anchors all work remains doctrinal:
 
 > *Memory may shape context. Memory may not seize authority.*
 
-Consistent with the existing MCP capability boundary doctrine
-(`docs/MCP_CAPABILITY_BOUNDARY.md`): **Automatic is allowed. Autonomous is not.**
+Reinforced by the Ledger Observational-Boundary Doctrine v0.1: *audit observes
+authority; audit does not become authority.* Consistent with the MCP capability
+boundary doctrine (`docs/MCP_CAPABILITY_BOUNDARY.md`): **automatic remains
+allowed; autonomous remains not authorized.** Autonomy has not opened.
 
-Any future slice that pushes against this boundary needs its own ratification.
-Any slice that respects this boundary can proceed under the gate-start survey
+The next primary lane is intentionally **unselected** — pending this
+orientation-map curation and a small maintenance re-verification (see §7). Any
+slice that pushes against the automatic/autonomous boundary needs its own
+ratification; any slice that respects it proceeds under the gate-start survey
 rule in §5.
 
 ---
 
 ## 2. Where main currently stands
 
-As of 2026-05-31, the following arcs are closed on `main`. Each has a formal
-checkpoint doc that is the source of truth for what shipped when:
+As of 2026-05-31, the following arcs are closed on `main`. Each row points to
+the tracked source of truth for what shipped or was ratified. (Not every arc has
+a dedicated checkpoint doc — some point to a doctrine/framing doc, and a few
+recent hardening items are commit-level only.)
 
 | Arc | Closed | Source of truth |
 |---|---|---|
 | Phase 1 / Tier 1 runtime envelope (Batch A no-pack, Batch B debugging pack) | 2026-05-17 | `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` (promoted from scratch 2026-05-28; scratch original preserved as lineage) |
+| Track A v0.1 — Truthfulness Envelope (Mode / Voice / Certainty / Authority; voice-audit; materiality; three-role ownership) | 2026-05-19 | `docs/TRACK_A_TRUTHFULNESS_ENVELOPE_v0.1.md` |
+| Cluster 2 v0.1 — Authority Gate (Scope + Lane axes; Authority class / lifecycle / promotion-rights; disagreement primitive) | 2026-05-19 | `docs/CLUSTER_2_AUTHORITY_GATE_v0.1.md` |
+| Track B v0.1 — Disagreement Runtime (`ContestRecord`; separate contest ledger; contest increases audit visibility) | 2026-05-20 | `docs/TRACK_B_DISAGREEMENT_RUNTIME_v0.1.md` |
+| Cluster 5 v0.1 — Storage / Survivability (storage preserves governance meaning; ten fragility handles; "necessary but not sufficient") | 2026-05-21 | `docs/CLUSTER_5_STORAGE_SURVIVABILITY_v0.1.md` |
 | Q2-D tool-result canon-suppression doctrine | 2026-05-24 | `docs/CHECKPOINT_2026-05_Q2D_TOOL_RESULT_DOCTRINE.md` |
 | Level 3 ST retrieval-quality smoke | 2026-05-24 | `docs/CHECKPOINT_2026-05_LEVEL_3_ST_RETRIEVAL.md` |
 | Tier 2 runtime evidence (5,400 turns / 3 pack regimes / 0 aborts) | 2026-05-24 | `docs/CHECKPOINT_2026-05_TIER_2_RUNTIME_EVIDENCE.md` |
@@ -47,16 +59,22 @@ checkpoint doc that is the source of truth for what shipped when:
 | Visualize attractors suite restore — `_viz_common` import path fix + live Ryuki skip guards (full suite no longer needs `--ignore`) | 2026-05-27 | `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md` |
 | Memory-to-Prompt Automation v0.2.3 — spirit-return / voice-cue `/retrieve` surfacing verification (PASS) | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md` |
 | Memory-to-Prompt Automation v0.2.4 — archive-FILTER-A application (Option A, defense-in-depth) PASS | 2026-05-27 | `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md` |
+| Cluster 5 Path C — governance-preservation chain (Q1 deep-hit handling, Q2 lifecycle) | 2026-05 | `docs/CLUSTER_5_PATH_C_GOVERNANCE_PRESERVATION_FRAMING_v0.1.md`, `docs/CLUSTER_5_PATH_C_Q1_IMPLEMENTATION_FRAMING_v0.1.md`, `docs/CLUSTER_5_PATH_C_Q2_LIFECYCLE_IMPLEMENTATION_FRAMING_v0.1.md` |
+| Ledger Observational-Boundary Doctrine v0.1 — "Audit observes authority. Audit does not become authority." | 2026-05-29 | `docs/LEDGER_OBSERVATIONAL_BOUNDARY_DOCTRINE_v0.1.md` |
+| Ledger Persistence Decision — Option C (response-only observability; A foreclosed, B parked); closes Memory-to-Prompt v0.2.x | 2026-05-30 | `docs/CHECKPOINT_2026-05_LEDGER_PERSISTENCE_DECISION_OPTION_C.md` |
+| Track J — runtime-context ownership isolation; additive per-agent runtime-context serialization | 2026-05 | commits `bdb3bd5`, `b57451d` |
+| Ordinary-ingest auto-canon fail-closed correction | 2026-05-31 | commit `fe69c1e` |
 | Character-memory harness Probe-v0 — first active (non-frozen) instrument; plumbing / companion-posture / clean-prompt PASS; runtime coherence COHERENCE_BROKEN candidate | 2026-05-31 | `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md` |
 
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
 `--ignore=tests\test_visualize_attractors.py` flag — the old
-convention is retired; current baseline is
-**3,570 passed / 5 skipped / 22 subtests passed** under
-`python -m pytest tests\ -q`. Live S6-style smoke for v0.2.4 archive
-FILTER-A (hash embedder, disposable workspace) closed at **32 GREEN
-/ 0 YELLOW / 0 RED**. The next gate is the user's call (see §7).
+convention is retired. **Dated 2026-05-27 baseline: 3,570 passed /
+5 skipped / 22 subtests passed** under `python -m pytest tests\ -q`
+(historical — re-establish before/during the next code-bearing slice;
+do not treat as a current count). Live S6-style smoke for v0.2.4
+archive FILTER-A (hash embedder, disposable workspace) closed at
+**32 GREEN / 0 YELLOW / 0 RED**. The next gate is the user's call (see §7).
 
 **2026-05-31 update.** The first active character-memory harness (Probe-v0)
 closed and pushed at `5c0b10b`, separate from the frozen `torment_stress_harness/`.
@@ -69,6 +87,18 @@ observation, not a product verdict. Disposable `cm_loop_*` workspaces were remov
 after review; forensic outputs are preserved local-only under
 `character_memory_harness/outputs/`. Source of truth:
 `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md`.
+
+**Strategic roadmap & long-range ordering.** Current *gate state* comes from this
+orientation map plus the tracked checkpoints/doctrine above — not from any single
+roadmap file. `docs/TORMENT_ROADMAP_NOTES.md` is the tracked long-range strategic
+roadmap: it preserves the larger ordering, the ranked post-spine candidates, and
+the future storage direction, which remains load-bearing — *TORMENT-governed
+memory first, database second* (the FUTURE-CLUSTER-5 custom-storage concern). The
+external `ROADMAP_13042026.md` (outside the git repo) is historical Phase A→H
+context, **not** current implementation authority; its surviving arc in one line:
+*validate → ratify contracts → narrowly authorized automation → substrate/
+orchestration boundary → Hermes evaluation → governed operational agents →
+Clawbot triage → writeback-readiness gate.*
 
 ---
 
@@ -121,6 +151,27 @@ session start if present; don't commit unless explicitly chosen.
 parked items, feedback rules (e.g. the gate-start survey discipline lives
 in `feedback_gate_orientation_survey`). Loaded automatically at session
 start. Update when new patterns or closures emerge.
+
+### Strategic source-of-truth layers (for planning / prioritization)
+
+Distinct from the seven runtime-truth layers above, three tiers in descending
+authority:
+
+1. **Tracked doctrine / checkpoints** (`docs/`) — the only planning *authority*.
+2. **Local-only curated planning artifacts** — optional orientation for local
+   (Windows) reviewers; never authority on their own.
+3. **Raw brainstorming / review traces** — archaeology only; never authority.
+
+**Local-only planning index** (non-load-bearing; gitignored or outside the repo —
+GPT/Codex cannot see these and must not depend on them):
+
+- `scratch/brainstorming/2026-05-30_phase_preparation_handoff.md`
+- `scratch/BRAINSTORMING_INVENTORY_2026_05_18.md`
+- external `ROADMAP_13042026.md`
+
+Local reviewers may inspect these and relay durable findings into tracked docs or
+handoffs; until a finding is summarized into a tracked doc it is not load-bearing
+for a decision. Raw brainstorming stays ignored.
 
 ---
 
@@ -197,6 +248,14 @@ systematic instead of luck-dependent.
 Memory companion: this rule is also captured in Claude's local memory as
 `feedback_gate_orientation_survey`.
 
+**Role-awareness.** The numbered survey is for Windows-local reviewers (Claude),
+who can inspect `scratch/` and the local-only planning traces when relevant. GPT
+and Codex survey only the tracked layers (1, 3–5, 7) and must not pretend to
+inspect local-only material they cannot see. Any durable finding from a local-only
+artifact must be summarized into a tracked doc or handoff before it can be
+load-bearing for a decision. Claude's local memory is collaboration context, not
+project authority.
+
 ---
 
 ## 6. Parked items index
@@ -269,10 +328,22 @@ expected-by-design).
 The doctrinal kernel from §1 anchors any direction unchanged: *Memory
 may shape context. Memory may not seize authority.*
 
+**Ordering discipline (2026-05-31).** No narrow local finding automatically
+becomes the next implementation thread. Sequence: (1) this orientation-map
+curation, then pause; (2) small maintenance re-verification — re-survey before
+acting (do not assume the old checklist is still current): remaining model
+defaults in bench tools, the `.env.example` URL naming inconsistency
+(`TORMENT_SERVER_URL` vs `TORMENT_URL`), and the Predicate #7 hardening item;
+(3) re-rank substantive work afterward. **Authority-versus-emergence stays a
+small audit-first design-memo side lane — not an auto-opened Loop probe and not
+a primary implementation lane.** If maintenance closes cleanly and the trio wants
+an implementation lane, Track B v0.2 (runtime contest ledger) is a strong existing
+candidate — but it is not opened by this map.
+
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
-- **Authority-versus-emergence design gate (audit-first; exposed by Probe-v0
+- **Authority-versus-emergence — small audit-first design-memo side lane (exposed by Probe-v0
   `3059`)** — the sharpened next question: how should a later character-memory
   Loop probe distinguish healthy in-character inference from invented canon
   authority *without flattening emergent character voice*? Eland is a useful
@@ -307,12 +378,14 @@ ready, and may choose something else entirely):
   deletion plan** (per §4 — only if the rig becomes load-bearing).
 - **Tier 3 endurance** (per §6 — only if a specific question demands
   more data than Tier 2 already provides).
-- Broader pre-autonomy spine extensions (named in
-  `CHECKPOINT_2026-05_MEMORY_TO_PROMPT_OBSERVABILITY_v0.2.md`):
-  **Cluster 2 v0.2 runtime Authority Gate**, **Track B v0.2 runtime
-  contest ledger**, **Cluster 5 v0.2 storage survivability
-  mechanisms**, **v0.2.x ledger persistence** (Option A vs B from
-  v0.2 §5).
+- Broader pre-autonomy spine extensions: **Cluster 2 v0.2 runtime
+  Authority Gate**, **Track B v0.2 runtime contest ledger**, **Cluster 5
+  v0.2 storage survivability mechanisms** (see `docs/TORMENT_ROADMAP_NOTES.md`
+  for the ranked Path A/B/C framing). The v0.2.x **ledger persistence**
+  question is **closed** — Option C (response-only observability) ratified,
+  Option A foreclosed, Option B parked
+  (`docs/CHECKPOINT_2026-05_LEDGER_PERSISTENCE_DECISION_OPTION_C.md`); it is no
+  longer an open candidate.
 - Something else entirely — the trio is not locked into this list.
 
 This section is *current candidate list*, not *prescription*. None of
