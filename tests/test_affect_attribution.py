@@ -162,6 +162,46 @@ class TestStrictValidation(unittest.TestCase):
         with self.assertRaises(AffectAttributionError):
             self._read_with(origin_kind="measured")
 
+    # --- follow-up hardening: reference semantics ---
+    def test_confirmed_actor_not_a_valid_class_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(
+                confirmation="confirmed",
+                confirmation_actor="buddy",  # not an ACTORS class
+                confirmation_actor_reference="buddy:1",
+            )
+
+    def test_confirmed_reference_non_string_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(
+                confirmation="confirmed",
+                confirmation_actor="user",
+                confirmation_actor_reference=123,  # truthy non-string
+            )
+
+    def test_actor_reference_non_string_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(actor_reference=123)  # truthy non-string
+
+    def test_actor_reference_empty_string_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(actor_reference="")
+
+    def test_asserted_with_non_assertion_actor_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(origin_kind="asserted", actor="system", actor_reference="x")
+
+    def test_asserted_requires_reference_raises(self):
+        with self.assertRaises(AffectAttributionError):
+            self._read_with(origin_kind="asserted", actor="agent", actor_reference=None)
+
+    def test_asserted_valid_ok(self):
+        env = self._read_with(
+            origin_kind="asserted", actor="user", actor_reference="user:stable-1"
+        )
+        self.assertEqual(env["origin_kind"], "asserted")
+        self.assertEqual(env["actor_reference"], "user:stable-1")
+
     # positive: a fully-bound confirmed envelope validates
     def test_confirmed_complete_binding_ok(self):
         env = self._read_with(

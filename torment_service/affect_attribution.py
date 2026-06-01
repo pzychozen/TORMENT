@@ -155,19 +155,37 @@ def validate_affect_attribution(envelope: Dict[str, Any], *, affect_tag: Any) ->
     if value_state == "unset" and affect_tag is not None:
         raise AffectAttributionError("value_state=unset must not carry a stored affect_tag")
 
-    # Assertion auditability: user / agent / operator actors require a reference.
-    if actor in ASSERTION_ACTORS and not actor_reference:
+    # actor_reference, when present, must be a non-empty string.
+    if actor_reference is not None and not (
+        isinstance(actor_reference, str) and actor_reference
+    ):
         raise AffectAttributionError(
-            f"actor={actor!r} requires a non-empty actor_reference"
+            "actor_reference, when present, must be a non-empty string"
         )
+
+    # Assertion posture: origin_kind=asserted is a future auditable-assertion
+    # posture. It requires an assertion actor (user/agent/operator) AND a
+    # non-empty string actor_reference. `asserted` never implies `confirmed` —
+    # confirmation is a separate axis, validated below.
+    if origin_kind == "asserted":
+        if actor not in ASSERTION_ACTORS:
+            raise AffectAttributionError(
+                "origin_kind=asserted requires an assertion actor (user/agent/operator)"
+            )
+        if not (isinstance(actor_reference, str) and actor_reference):
+            raise AffectAttributionError(
+                "origin_kind=asserted requires a non-empty string actor_reference"
+            )
 
     # Confirmation binding.
     if confirmation == "confirmed":
-        if not confirmation_actor:
-            raise AffectAttributionError("confirmation=confirmed requires confirmation_actor")
-        if not confirmation_actor_reference:
+        if confirmation_actor not in ACTORS:
             raise AffectAttributionError(
-                "confirmation=confirmed requires confirmation_actor_reference"
+                "confirmation=confirmed requires confirmation_actor to be a valid actor class"
+            )
+        if not (isinstance(confirmation_actor_reference, str) and confirmation_actor_reference):
+            raise AffectAttributionError(
+                "confirmation=confirmed requires a non-empty string confirmation_actor_reference"
             )
     else:  # unconfirmed
         if confirmation_actor is not None or confirmation_actor_reference is not None:
