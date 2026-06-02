@@ -11,7 +11,9 @@ import unittest
 from torment_service.affect_attribution import (
     AffectAttributionError,
     SCHEMA_VERSION,
+    build_ingest_classifier_attribution,
     read_affect_attribution,
+    validate_affect_attribution,
 )
 
 
@@ -211,6 +213,45 @@ class TestStrictValidation(unittest.TestCase):
         )
         self.assertEqual(env["confirmation"], "confirmed")
         self.assertEqual(env["confirmation_actor_reference"], "user:stable-1")
+
+
+class TestIngestClassifierConstructor(unittest.TestCase):
+    """D1-S2: the pure ingest-classifier attribution constructor."""
+
+    def test_affect_present_yields_set_envelope(self):
+        env = build_ingest_classifier_attribution(affect_tag="sad")
+        self.assertEqual(env["value_state"], "set")
+        self.assertEqual(env["origin_kind"], "inferred")
+        self.assertEqual(env["actor"], "system")
+        self.assertIsNone(env["actor_reference"])
+        self.assertEqual(env["subject"], "unknown")
+        self.assertEqual(env["confirmation"], "unconfirmed")
+        self.assertIsNone(env["confirmation_actor"])
+        self.assertIsNone(env["confirmation_actor_reference"])
+        self.assertEqual(env["via"], "ingest_affect_classifier")
+        self.assertEqual(env["schema_version"], SCHEMA_VERSION)
+
+    def test_no_affect_yields_unset_envelope(self):
+        env = build_ingest_classifier_attribution(affect_tag=None)
+        self.assertEqual(env["value_state"], "unset")
+        self.assertEqual(env["via"], "ingest_affect_classifier")
+
+    def test_output_passes_strict_validation(self):
+        # The constructor's own output must round-trip through the validator for
+        # both value_state branches (defense in depth).
+        for tag in ("sad", None):
+            env = build_ingest_classifier_attribution(affect_tag=tag)
+            self.assertEqual(validate_affect_attribution(env, affect_tag=tag), env)
+
+    def test_read_shim_does_not_relabel_a_produced_envelope(self):
+        # A row stamped by the producer must NOT fall through to legacy fallback.
+        payload = {
+            "affect_tag": "angry",
+            "affect_attribution": build_ingest_classifier_attribution(affect_tag="angry"),
+        }
+        env = read_affect_attribution(payload)
+        self.assertEqual(env["origin_kind"], "inferred")
+        self.assertEqual(env["via"], "ingest_affect_classifier")
 
 
 if __name__ == "__main__":

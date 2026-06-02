@@ -23,6 +23,7 @@ from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
 from .symbols import assign_symbol_state
 from .affect import classify_affect, looks_personal
+from .affect_attribution import build_ingest_classifier_attribution
 from .roles import RoleStore, dominant_role, role_multipliers
 from .character import (
     CharacterSeed, CharacterState, CharacterStore,
@@ -2567,6 +2568,13 @@ class TormentFabric:
         # This is a guidance signal only; it must not dominate or rewrite persona.
         affect_tag = None
         affect_conf = None
+        # D1-S2: the ingest affect-attribution stamp is emitted iff classification
+        # COMPLETED SUCCESSFULLY. "enabled" != "ran": classify_affect is fail-soft,
+        # so a raise must NOT be recorded as an evaluated `unset`. This boolean is
+        # set True only after the classifier returns without raising; it stays
+        # False when affect is disabled or when classification raises.
+        # unset != not evaluated.
+        affect_classification_completed = False
         try:
             affect_enable = str(os.getenv("TORMENT_AFFECT_ENABLE", "1")).strip().lower() not in ("0", "false", "no")
         except Exception:
@@ -2577,8 +2585,10 @@ class TormentFabric:
                 if a.tag and a.tag != "neutral" and float(a.conf) > 0.0:
                     affect_tag = str(a.tag)
                     affect_conf = float(a.conf)
+                affect_classification_completed = True
             except Exception:
                 affect_tag, affect_conf = None, None
+                # classification did not complete -> not evaluated -> no stamp
         if supplied_embedding is not None:
             emb = np.asarray(supplied_embedding, dtype=np.float32)
         else:
@@ -2793,6 +2803,17 @@ class TormentFabric:
                     "embedding_checksum": emb_ck,
                     "affect_tag": affect_tag,
                     "affect_conf": affect_conf,
+                    # D1-S2: affect-value production lineage. Sibling of affect_tag/
+                    # affect_conf, deliberately OUTSIDE ProvenanceV1 (which records
+                    # row lineage, not affect lineage). Emitted iff the ingest affect
+                    # classification completed successfully; the not-evaluated states
+                    # (disabled / raised) are left unstamped. The internal-wins merge
+                    # below (_merged_ep.update(_internal_ep)) also guarantees a caller
+                    # cannot smuggle a forged envelope via extra_payload.
+                    **(
+                        {"affect_attribution": build_ingest_classifier_attribution(affect_tag=affect_tag)}
+                        if affect_classification_completed else {}
+                    ),
 
                     # metastability telemetry
                     "in_corridor": in_corr,

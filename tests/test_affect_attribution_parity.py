@@ -234,5 +234,87 @@ class TestBaselineFullSurfaceParity(unittest.TestCase):
         self.assertEqual(tags_after, tags_before)
 
 
+class TestProducedEnvelopeParity(unittest.TestCase):
+    """D1-S2: envelopes PRODUCED by the real ingest writer are scoring-inert.
+
+    Complements — does NOT replace — TestBaselineFullSurfaceParity above, which
+    injects an unwired envelope to prove the *consumer* ignores attribution. Here
+    the envelope is produced by the actual S2 ingest writer, and stripping it must
+    not change any §10 trace surface. Together: injected proves consumer
+    invariance; produced proves the new writer preserves it.
+    """
+
+    def setUp(self):
+        self._saved = {}
+        for k, v in {**_PINNED_ENV, **_INGEST_ENV}.items():
+            self._saved[k] = os.environ.get(k)
+            os.environ[k] = v
+        self.tmpdir = tempfile.mkdtemp(prefix="torment_d1s2_produced_parity_")
+        self.fabric = TormentFabric(data_dir=self.tmpdir)
+        self.fabric.get_workspace("ws")
+        self.fabric.create_agent("ws", "agent")
+        self.ak = self.fabric._agent_key("ws", "agent")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _ingest_old_negative_with_drifts(self):
+        r = self.fabric.ingest(workspace_id="ws", agent_id="agent", text=SAD_TEXT, step=10)
+        eid = r["eid"]
+        self.fabric.ingest(workspace_id="ws", agent_id="agent", text=ANGRY_TEXT, step=200)
+        self.fabric.ingest(workspace_id="ws", agent_id="agent", text=SAD_TEXT_2, step=400)
+        self.fabric.agent_states[self.ak].step = 800
+        return eid
+
+    def _strip_envelopes(self):
+        for ent in self.fabric.private_graphs[self.ak].entities.values():
+            p = getattr(ent, "payload", None)
+            if isinstance(p, dict):
+                p.pop("affect_attribution", None)
+
+    def _trace_one(self, eid):
+        res = self.fabric.trace(
+            workspace_id="ws", agent_id="agent", query_text=SPIRAL_QUERY, eids=[eid]
+        )
+        items = res.get("items", [])
+        self.assertTrue(items, "trace should return the requested eid")
+        return items[0]
+
+    def test_produced_envelope_is_scoring_inert(self):
+        eid = self._ingest_old_negative_with_drifts()
+        # The S2 writer must actually have produced at least one envelope.
+        produced = [
+            (getattr(ent, "payload", {}) or {}).get("affect_attribution")
+            for ent in self.fabric.private_graphs[self.ak].entities.values()
+        ]
+        self.assertTrue(
+            any(e is not None for e in produced),
+            "S2 ingest writer should have produced an affect_attribution envelope",
+        )
+
+        with_env = self._trace_one(eid)
+        self.assertGreater(with_env["explain"]["mood_spiral_penalty"], 0.0)
+
+        self._strip_envelopes()
+        without_env = self._trace_one(eid)
+
+        self.assertEqual(with_env["final_score"], without_env["final_score"])
+        for key in (
+            "affect_match_bonus",
+            "mood_drift_bonus",
+            "mood_spiral_penalty",
+            "continuity_total_adjustment",
+        ):
+            self.assertEqual(
+                with_env["explain"][key], without_env["explain"][key],
+                f"{key} drifted between produced-envelope and stripped runs",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

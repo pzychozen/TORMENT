@@ -9,9 +9,18 @@ payloads or envelopes. This module defines and validates the row-local
 the memory payload, deliberately *outside* ``ProvenanceV1``) and provides a
 read-time legacy fallback for rows that predate the contract.
 
-D1-S1 scope: guardrails only. No producer stamps an envelope yet (that is D1-S2 /
-D1-S3) and nothing here influences scoring. Absent/null envelopes route to a
-synthetic fallback; a present, non-null, malformed envelope fails loud.
+D1-S2 scope: this module now also provides the ordinary-ingest producer
+constructor (:func:`build_ingest_classifier_attribution`). The
+``TormentFabric.ingest()`` fresh-spawn branch stamps the canonical
+``system / inferred / unconfirmed / subject=unknown / via=ingest_affect_classifier``
+envelope iff affect classification *completed successfully* (``set`` when it found
+an affect value, ``unset`` when it ran but found none). The not-evaluated states
+(classifier disabled, or raised under fail-soft) are deliberately left unstamped —
+``unset != not evaluated`` — and that gating lives at the call site, since a
+constructor cannot observe whether it was invoked. Still no scoring influence; the
+mood_drift producer (D1-S3) and others remain unstamped. Absent/null envelopes
+still route to a synthetic read-time fallback; a present, non-null, malformed
+envelope fails loud.
 """
 
 from __future__ import annotations
@@ -194,6 +203,43 @@ def validate_affect_attribution(envelope: Dict[str, Any], *, affect_tag: Any) ->
             )
 
     return dict(envelope)
+
+
+def build_ingest_classifier_attribution(*, affect_tag: Any) -> Dict[str, Any]:
+    """Canonical D1-S2 attribution envelope for an ordinary-ingest fresh row.
+
+    Returns the producer-default envelope for affect produced by the ingest affect
+    classifier: ``system / inferred / unconfirmed / subject=unknown /
+    via=ingest_affect_classifier``. ``value_state`` is derived from the stored
+    ``affect_tag``:
+
+    - ``set``   -> classifier completed and produced an affect value
+    - ``unset`` -> classifier completed and produced no affect value
+
+    This producer must be called ONLY when affect classification completed
+    successfully. It never expresses the *not-evaluated* states (classifier
+    disabled or raised); that gating lives at the call site, because a constructor
+    cannot observe whether it was invoked. ``unset != not evaluated``.
+
+    Pure: no I/O, no mutation of any input. Returns a validated dict (a shallow
+    copy from :func:`validate_affect_attribution`), and raises
+    :class:`AffectAttributionError` if the produced envelope is somehow
+    inconsistent — defense in depth so a producer bug cannot emit a malformed
+    envelope.
+    """
+    envelope = {
+        "schema_version": SCHEMA_VERSION,
+        "value_state": "set" if affect_tag is not None else "unset",
+        "origin_kind": "inferred",
+        "actor": "system",
+        "actor_reference": None,
+        "subject": "unknown",
+        "confirmation": "unconfirmed",
+        "confirmation_actor": None,
+        "confirmation_actor_reference": None,
+        "via": "ingest_affect_classifier",
+    }
+    return validate_affect_attribution(envelope, affect_tag=affect_tag)
 
 
 def read_affect_attribution(payload: Dict[str, Any]) -> Dict[str, Any]:
