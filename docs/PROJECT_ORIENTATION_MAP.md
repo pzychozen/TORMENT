@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-02.
+**Date of last refresh:** 2026-06-03.
 
 ---
 
@@ -36,7 +36,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-06-02, the following arcs are closed on `main`. Each row points to
+As of 2026-06-03, the following arcs are closed on `main`. Each row points to
 the tracked source of truth for what shipped or was ratified. (Not every arc has
 a dedicated checkpoint doc — some point to a doctrine/framing doc, and a few
 recent hardening items are commit-level only.)
@@ -67,6 +67,7 @@ recent hardening items are commit-level only.)
 | Character-memory harness Probe-v0 — first active (non-frozen) instrument; plumbing / companion-posture / clean-prompt PASS; runtime coherence COHERENCE_BROKEN candidate | 2026-05-31 | `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md` |
 | Cluster 5 Path C — Q3-D1-S1 affect-attribution validator + legacy read shim + scoring-invariance baseline | 2026-06 | commits `8505678`, `6e728e8` |
 | Cluster 5 Path C — Q3-D1-S2 ordinary-ingest affect-attribution stamping (completion-guarded; `unset != not evaluated`) | 2026-06-02 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S2_ORDINARY_INGEST_ATTRIBUTION.md` (commit `8b2c1f3`) |
+| Cluster 5 Path C — Q3-D1-H1 caller-envelope survival hardening (`affect_attribution` reserved internal field at the `TormentFabric.ingest()` merge seam; anti-forgery promoted from stamped-rows-only to global) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md` (commit `7066b57`; checkpoint `64d796e`) |
 
 D1-S3 (mood_drift stamping) is the next candidate gate — **audit-first only, not
 authorized**.
@@ -322,10 +323,16 @@ Items that have been deferred from an active slice but are not lost:
   (`docs/CLUSTER_5_PATH_C_Q3_D1_AFFECT_ATTRIBUTION_CONTRACT_v0.1.md`, 2026-06-01).
   **D1-S1 closed** (validator + read shim + scoring-invariance baseline);
   **D1-S2 closed** (ordinary-ingest stamping, `8b2c1f3`; closure checkpoint
-  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S2_ORDINARY_INGEST_ATTRIBUTION.md`).
+  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S2_ORDINARY_INGEST_ATTRIBUTION.md`);
+  **D1-H1 closed** (caller-envelope survival hardening — `affect_attribution`
+  treated as a reserved internal field at the `TormentFabric.ingest()` merge
+  seam, promoting anti-forgery from stamped-rows-only to global; `7066b57`;
+  closure checkpoint
+  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md`, `64d796e`).
   **D1-S3 (mood_drift stamping) is the next candidate gate, audit-first only —
   not yet authorized.** Attribution is recorded/audit-visible only; no
-  scoring/reinforcement/promotion behavior changed.
+  scoring/reinforcement/promotion behavior changed. The not-evaluated fallback
+  vocabulary mismatch remains parked (not solved by H1).
 - **Q3-D2 duplicate changed-affect handling** — closed / parked (options named,
   no position taken; depends on D1 attribution).
 - **Q3-D3 archive emotional-promotion authority** — closed / parked (promotion
