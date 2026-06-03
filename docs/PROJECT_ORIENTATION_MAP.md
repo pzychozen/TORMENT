@@ -68,9 +68,10 @@ recent hardening items are commit-level only.)
 | Cluster 5 Path C — Q3-D1-S1 affect-attribution validator + legacy read shim + scoring-invariance baseline | 2026-06 | commits `8505678`, `6e728e8` |
 | Cluster 5 Path C — Q3-D1-S2 ordinary-ingest affect-attribution stamping (completion-guarded; `unset != not evaluated`) | 2026-06-02 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S2_ORDINARY_INGEST_ATTRIBUTION.md` (commit `8b2c1f3`) |
 | Cluster 5 Path C — Q3-D1-H1 caller-envelope survival hardening (`affect_attribution` reserved internal field at the `TormentFabric.ingest()` merge seam; anti-forgery promoted from stamped-rows-only to global) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md` (commit `7066b57`; checkpoint `64d796e`) |
+| Cluster 5 Path C — Q3-D1-S3 mood_drift affect-attribution stamping (`origin_kind=derived` / `via=mood_drift_transition`; dedicated `build_mood_drift_attribution`; D1-S2 T10 unstamped-boundary consciously inverted) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S3_MOOD_DRIFT_ATTRIBUTION.md` (commit `dcead02`; checkpoint `37dc5bb`) |
 
-D1-S3 (mood_drift stamping) is the next candidate gate — **audit-first only, not
-authorized**.
+D1-S4 (deep-rehydrate conformance) is the next candidate gate — **audit-first
+only, not authorized**.
 
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
@@ -328,11 +329,17 @@ Items that have been deferred from an active slice but are not lost:
   treated as a reserved internal field at the `TormentFabric.ingest()` merge
   seam, promoting anti-forgery from stamped-rows-only to global; `7066b57`;
   closure checkpoint
-  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md`, `64d796e`).
-  **D1-S3 (mood_drift stamping) is the next candidate gate, audit-first only —
-  not yet authorized.** Attribution is recorded/audit-visible only; no
-  scoring/reinforcement/promotion behavior changed. The not-evaluated fallback
-  vocabulary mismatch remains parked (not solved by H1).
+  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md`, `64d796e`);
+  **D1-S3 closed** (mood_drift stamping — `origin_kind=derived` /
+  `via=mood_drift_transition` via dedicated `build_mood_drift_attribution`; the
+  D1-S2 T10 unstamped-boundary was consciously inverted; `dcead02`; closure
+  checkpoint `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S3_MOOD_DRIFT_ATTRIBUTION.md`,
+  `37dc5bb`).
+  **D1-S4 (deep-rehydrate conformance) is the next candidate gate, audit-first
+  only — not yet authorized**; D1-S5 (cross-surface conformance + generic
+  `user_confirmed` isolation) remains later. Attribution is recorded/audit-visible
+  only; no scoring/reinforcement/promotion behavior changed. The not-evaluated
+  fallback vocabulary mismatch remains parked (not solved by S3).
 - **Q3-D2 duplicate changed-affect handling** — closed / parked (options named,
   no position taken; depends on D1 attribution).
 - **Q3-D3 archive emotional-promotion authority** — closed / parked (promotion
