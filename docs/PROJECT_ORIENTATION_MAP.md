@@ -70,9 +70,12 @@ recent hardening items are commit-level only.)
 | Cluster 5 Path C — Q3-D1-H1 caller-envelope survival hardening (`affect_attribution` reserved internal field at the `TormentFabric.ingest()` merge seam; anti-forgery promoted from stamped-rows-only to global) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_H1_CALLER_ENVELOPE_STRIP.md` (commit `7066b57`; checkpoint `64d796e`) |
 | Cluster 5 Path C — Q3-D1-S3 mood_drift affect-attribution stamping (`origin_kind=derived` / `via=mood_drift_transition`; dedicated `build_mood_drift_attribution`; D1-S2 T10 unstamped-boundary consciously inverted) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S3_MOOD_DRIFT_ATTRIBUTION.md` (commit `dcead02`; checkpoint `37dc5bb`) |
 | Cluster 5 Path C — Q3-D1-S4 deep-rehydrate conformance (S4a durable `DeepMemory.metadata` snapshot preservation + S4b runtime `_query_deep_lane` echo surfacing of `affect_tag` + `affect_attribution`; external/API cross-surface deferred to D1-S5) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S4_DEEP_REHYDRATE_CONFORMANCE.md` (commit `b602fc7`; checkpoint `55cd6d5`) |
+| Cluster 5 Path C — Q3-D1-S5b generic `user_confirmed` isolation lock (test-only regression barrier; `generic user_confirmed != affect confirmation`; production already conformant) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5B_GENERIC_USER_CONFIRMED_ISOLATION.md` (commit `3e25be7`; checkpoint `fbced7e`) |
 
-D1-S5 (cross-surface conformance + generic `user_confirmed` isolation) is the
-next candidate gate — **audit-first only, not authorized**.
+D1-S5a (cross-surface characterization) is the next candidate gate — **audit-first
+only, not authorized**; test-only unless characterization reveals a real
+violation. Per Codex-resolved §10 reading, no new public/API/MCP or
+`character_context` exposure is required.
 
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
@@ -341,13 +344,21 @@ Items that have been deferred from an active slice but are not lost:
   echo surfacing of `affect_tag` + `affect_attribution`, kept orthogonal to
   `authority_status`; `b602fc7`; closure checkpoint
   `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S4_DEEP_REHYDRATE_CONFORMANCE.md`,
-  `55cd6d5`).
-  **D1-S5 (cross-surface conformance + generic `user_confirmed` isolation) is the
-  next candidate gate, audit-first only — not yet authorized**; external/API
-  cross-surface presentation remains deferred to it. Attribution is
-  recorded/audit-visible only; no scoring/reinforcement/promotion behavior
-  changed. The not-evaluated fallback vocabulary mismatch remains parked (not
-  solved by S4).
+  `55cd6d5`);
+  **D1-S5b closed** (generic `user_confirmed` isolation lock — test-only
+  regression barrier proving `generic user_confirmed != affect confirmation`;
+  production already conformant, no production change; `3e25be7`; closure
+  checkpoint
+  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5B_GENERIC_USER_CONFIRMED_ISOLATION.md`,
+  `fbced7e`).
+  **D1-S5a (cross-surface characterization) is the next candidate gate,
+  audit-first only — not yet authorized**; test-only unless characterization
+  reveals a real violation. Per the Codex-resolved §10 reading, no new
+  public/API/MCP or `character_context` exposure is required (`character_context`
+  != affect-attribution audit surface; internal preservation != public exposure
+  requirement). Attribution is recorded/audit-visible only; no
+  scoring/reinforcement/promotion behavior changed. The not-evaluated fallback
+  vocabulary mismatch remains parked (not solved by S5b).
 - **Q3-D2 duplicate changed-affect handling** — closed / parked (options named,
   no position taken; depends on D1 attribution).
 - **Q3-D3 archive emotional-promotion authority** — closed / parked (promotion
