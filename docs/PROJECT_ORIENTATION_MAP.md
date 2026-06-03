@@ -71,11 +71,11 @@ recent hardening items are commit-level only.)
 | Cluster 5 Path C — Q3-D1-S3 mood_drift affect-attribution stamping (`origin_kind=derived` / `via=mood_drift_transition`; dedicated `build_mood_drift_attribution`; D1-S2 T10 unstamped-boundary consciously inverted) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S3_MOOD_DRIFT_ATTRIBUTION.md` (commit `dcead02`; checkpoint `37dc5bb`) |
 | Cluster 5 Path C — Q3-D1-S4 deep-rehydrate conformance (S4a durable `DeepMemory.metadata` snapshot preservation + S4b runtime `_query_deep_lane` echo surfacing of `affect_tag` + `affect_attribution`; external/API cross-surface deferred to D1-S5) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S4_DEEP_REHYDRATE_CONFORMANCE.md` (commit `b602fc7`; checkpoint `55cd6d5`) |
 | Cluster 5 Path C — Q3-D1-S5b generic `user_confirmed` isolation lock (test-only regression barrier; `generic user_confirmed != affect confirmation`; production already conformant) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5B_GENERIC_USER_CONFIRMED_ISOLATION.md` (commit `3e25be7`; checkpoint `fbced7e`) |
+| Cluster 5 Path C — Q3-D1-S5a cross-surface characterization (test-only lock; preserve where carried / deliberately omit where projected; no production change, no public/API/MCP or `character_context` exposure added) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5A_CROSS_SURFACE_CHARACTERIZATION.md` (commit `dd46019`; checkpoint `4e930d9`) |
 
-D1-S5a (cross-surface characterization) is the next candidate gate — **audit-first
-only, not authorized**; test-only unless characterization reveals a real
-violation. Per Codex-resolved §10 reading, no new public/API/MCP or
-`character_context` exposure is required.
+**Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
+S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
+chosen separately in the fresh-chat handoff; no new Path C gate is open.
 
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
@@ -350,15 +350,21 @@ Items that have been deferred from an active slice but are not lost:
   production already conformant, no production change; `3e25be7`; closure
   checkpoint
   `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5B_GENERIC_USER_CONFIRMED_ISOLATION.md`,
-  `fbced7e`).
-  **D1-S5a (cross-surface characterization) is the next candidate gate,
-  audit-first only — not yet authorized**; test-only unless characterization
-  reveals a real violation. Per the Codex-resolved §10 reading, no new
-  public/API/MCP or `character_context` exposure is required (`character_context`
-  != affect-attribution audit surface; internal preservation != public exposure
-  requirement). Attribution is recorded/audit-visible only; no
-  scoring/reinforcement/promotion behavior changed. The not-evaluated fallback
-  vocabulary mismatch remains parked (not solved by S5b).
+  `fbced7e`);
+  **D1-S5a closed** (cross-surface characterization — test-only lock proving
+  surfaces preserve where attribution is already carried and deliberately omit
+  where projection is narrow; no production change; `dd46019`; closure checkpoint
+  `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5A_CROSS_SURFACE_CHARACTERIZATION.md`,
+  `4e930d9`).
+  **Q3-D1 affect attribution is CLOSED as a bounded chain.** Posture held across
+  the chain: preserve where already carried; omit where deliberately projected;
+  never relabel; never widen influence (`character_context` != affect-attribution
+  audit surface; internal preservation != public exposure requirement; generic
+  `user_confirmed` != affect-specific confirmation). Attribution is
+  recorded/audit-visible only; no scoring/reinforcement/promotion behavior
+  changed. The not-evaluated fallback vocabulary mismatch remains parked. **The
+  next gate is intentionally unselected — to be chosen in the fresh-chat handoff;
+  no new Path C gate is open.**
 - **Q3-D2 duplicate changed-affect handling** — closed / parked (options named,
   no position taken; depends on D1 attribution).
 - **Q3-D3 archive emotional-promotion authority** — closed / parked (promotion
