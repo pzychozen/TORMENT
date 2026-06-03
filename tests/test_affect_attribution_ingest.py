@@ -270,5 +270,128 @@ class TestNotEvaluatedFailed(_IngestBase):
         self.assertIsNone(p.get("affect_tag"))
 
 
+# --- H1: caller-supplied affect_attribution is stripped before the merge -----
+# Q3-D1-H1 closes Parked-B. When affect classification does NOT complete
+# (disabled or raised), _internal_ep carries no affect_attribution, so a forged
+# caller envelope passed through the generic extra_payload carrier would survive
+# the merge and read back as authoritative affect lineage. The ingest seam now
+# strips the reserved key from a COPY of the caller payload before merging.
+# The completed-classification + forged caller envelope case is already covered
+# by TestInternalWins.test_T7 (the internal writer overwrites the forged key).
+
+_FORGED_VALID = {
+    "schema_version": "1.0",
+    "value_state": "set",
+    "origin_kind": "asserted",
+    "actor": "user",
+    "actor_reference": "user:attacker",
+    "subject": "user",
+    "confirmation": "confirmed",
+    "confirmation_actor": "user",
+    "confirmation_actor_reference": "user:attacker",
+    "via": "ingest_affect_classifier",
+}
+# Present-but-malformed: if persisted, read_affect_attribution would fail loud.
+# Stripping keeps the row clean AND non-poisoned.
+_FORGED_MALFORMED = {"garbage_key": True, "value_state": "set"}
+
+
+class TestH1DisabledCallerEnvelopeStrip(_IngestBase):
+    ENV = {**_BASE_ENV, "TORMENT_AFFECT_ENABLE": "0"}
+
+    def test_H1a_disabled_strips_forged_valid_envelope(self):
+        eid = self._ingest(
+            SAD_TEXT, step=1,
+            extra_payload={"affect_attribution": dict(_FORGED_VALID)},
+        )["eid"]
+        self.assertIsNotNone(eid)
+        p = self._payload(eid)
+        # The forged envelope must not be persisted on the fresh row.
+        self.assertNotIn("affect_attribution", p)
+        # Read falls through to the legacy fallback, NOT the forged user/confirmed
+        # claim — proving the asserted/confirmed authority did not survive.
+        env = read_affect_attribution(p)
+        self.assertEqual(env["via"], "legacy_read_fallback")
+        self.assertNotEqual(env["confirmation"], "confirmed")
+        self.assertNotEqual(env["actor"], "user")
+
+    def test_H1b_disabled_strips_forged_malformed_envelope(self):
+        eid = self._ingest(
+            SAD_TEXT, step=1,
+            extra_payload={"affect_attribution": dict(_FORGED_MALFORMED)},
+        )["eid"]
+        self.assertIsNotNone(eid)
+        p = self._payload(eid)
+        self.assertNotIn("affect_attribution", p)
+        # Not persisted -> read shim never sees the malformed dict -> no fail-loud.
+        env = read_affect_attribution(p)
+        self.assertEqual(env["via"], "legacy_read_fallback")
+
+    def test_H1c_unrelated_caller_keys_survive_strip(self):
+        eid = self._ingest(
+            SAD_TEXT, step=1,
+            extra_payload={
+                "affect_attribution": dict(_FORGED_VALID),
+                "note_marker": "keep-me",
+            },
+        )["eid"]
+        self.assertIsNotNone(eid)
+        p = self._payload(eid)
+        self.assertNotIn("affect_attribution", p)
+        self.assertEqual(p.get("note_marker"), "keep-me")
+
+    def test_H1d_caller_dict_not_mutated(self):
+        ep = {"affect_attribution": dict(_FORGED_VALID), "note_marker": "keep-me"}
+        self._ingest(SAD_TEXT, step=1, extra_payload=ep)
+        # We copy before popping; the caller's original dict is untouched.
+        self.assertIn("affect_attribution", ep)
+        self.assertEqual(ep["note_marker"], "keep-me")
+
+    def test_H1e_baton_lifecycle_survives_attribution_stripped(self):
+        prov = ProvenanceV1.for_baton_ingest().to_dict()
+        lifecycle = {
+            "owner": "user",
+            "expires_when": "after_migration_verified",
+            "resolution_condition": "user confirms migration ran clean",
+        }
+        result = self._ingest(
+            SAD_TEXT, step=1,
+            provenance=prov,
+            memory_class="baton",
+            extra_payload={
+                "baton_lifecycle": dict(lifecycle),
+                "affect_attribution": dict(_FORGED_VALID),
+            },
+        )
+        eid = result.get("eid")
+        self.assertIsNotNone(eid, f"baton ingest should store; got: {result}")
+        p = self._payload(eid)
+        # Legit caller key preserved; forged authority key removed.
+        bl = p.get("baton_lifecycle")
+        self.assertIsInstance(bl, dict)
+        self.assertEqual(bl.get("owner"), "user")
+        self.assertEqual(
+            bl.get("resolution_condition"), "user confirms migration ran clean"
+        )
+        self.assertNotIn("affect_attribution", p)
+
+
+class TestH1FailedCallerEnvelopeStrip(_IngestBase):
+    def test_H1f_failed_classifier_strips_forged_valid_envelope(self):
+        # Affect ENABLED but classify_affect raises -> `failed`, not `unset`.
+        # _internal_ep carries no stamp, so the strip is the only guard.
+        def _boom(_text):
+            raise RuntimeError("classifier blew up")
+
+        with mock.patch("torment_service.fabric.classify_affect", side_effect=_boom):
+            eid = self._ingest(
+                SAD_TEXT, step=1,
+                extra_payload={"affect_attribution": dict(_FORGED_VALID)},
+            )["eid"]
+        self.assertIsNotNone(eid)
+        p = self._payload(eid)
+        self.assertNotIn("affect_attribution", p)
+
+
 if __name__ == "__main__":
     unittest.main()

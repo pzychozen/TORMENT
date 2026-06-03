@@ -2835,7 +2835,21 @@ class TormentFabric:
                     # Provenance (v2.4.x first-pass)
                     "provenance": _prov_dict,
                 }
-                _merged_ep: Dict[str, Any] = dict(extra_payload or {})
+                # Q3-D1-H1: affect_attribution is an internal authority-bearing
+                # field (affect-VALUE lineage). Ordinary callers must never set it
+                # through the generic extra_payload carrier. Strip it from a COPY of
+                # the caller payload before the merge; the internal writer above adds
+                # a truthful envelope back iff classification completed. This makes
+                # anti-forgery GLOBAL rather than stamped-row-only: when classification
+                # is disabled or raised, _internal_ep carries no affect_attribution, so
+                # without this strip a forged caller envelope would survive the merge.
+                # The caller's original dict is never mutated (we copy first).
+                # Scope is deliberately narrow: only this one reserved key is stripped;
+                # the not-evaluated fallback vocabulary and all other producers stay
+                # untouched. unset != not evaluated.
+                _caller_ep: Dict[str, Any] = dict(extra_payload or {})
+                _caller_ep.pop("affect_attribution", None)
+                _merged_ep: Dict[str, Any] = _caller_ep
                 _merged_ep.update(_internal_ep)  # internal wins on collision
 
                 # Ordinary ingest fails closed for canon authority.
