@@ -3742,6 +3742,26 @@ class TormentFabric:
                     _wrapper.to_dict()["authority_status"]
                 )
 
+                # Q3-D1-S4b: surface the preserved source affect-attribution
+                # snapshot onto the runtime echo — the same object that carries
+                # the Q1 authority markers — so a reader sees the original
+                # producer envelope (inferred / derived) instead of synthesizing
+                # recovered/migration/legacy_read_fallback. Copied verbatim from
+                # the durable DeepMemory.metadata (D1-S4a) only when a snapshot
+                # exists; absent -> legacy source stays legacy (parked vocabulary).
+                # affect_tag MUST be copied beside the envelope: read_affect_
+                # attribution validates a `set` envelope against affect_tag and
+                # fails loud if it is missing. affect_conf is deliberately NOT
+                # surfaced here (not needed for validation; held for D1-S5). This
+                # is affect-VALUE lineage and stays orthogonal to authority_status
+                # (the echo's authority posture), which is unchanged.
+                _dm_metadata = getattr(_dm, "metadata", {}) or {}
+                if "affect_attribution" in _dm_metadata:
+                    _hit_dict["affect_tag"] = _dm_metadata.get("affect_tag")
+                    _hit_dict["affect_attribution"] = dict(
+                        _dm_metadata["affect_attribution"]
+                    )
+
                 results.append(_hit_dict)
 
             return results

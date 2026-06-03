@@ -229,6 +229,15 @@ class DeepMemoryStore:
             "symbol_confidence", "symbol_reason", "half_life",
             # Phase-cycle duration for spirit return warmth boost
             "phase_duration_steps", "corridor_duration_steps",
+            # Q3-D1-S4: preserve the source row's affect-VALUE lineage snapshot
+            # (affect_attribution) verbatim, so a retrieval echo carries the
+            # original producer envelope (inferred / derived) instead of
+            # synthesizing a recovered/migration/legacy_read_fallback on read.
+            # Copied unchanged; never re-synthesized, validated-rewritten, or
+            # overwritten here. The echo's non-authoritative posture lives in
+            # authority_status (authoritative=false / requires_rehydration=true /
+            # role=retrieval_echo), an orthogonal axis — not in this field.
+            "affect_attribution",
         ]
         metadata = {k: original_payload[k] for k in metadata_keys if k in original_payload}
 
