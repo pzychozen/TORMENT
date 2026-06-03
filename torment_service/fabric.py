@@ -23,7 +23,10 @@ from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
 from .symbols import assign_symbol_state
 from .affect import classify_affect, looks_personal
-from .affect_attribution import build_ingest_classifier_attribution
+from .affect_attribution import (
+    build_ingest_classifier_attribution,
+    build_mood_drift_attribution,
+)
 from .roles import RoleStore, dominant_role, role_multipliers
 from .character import (
     CharacterSeed, CharacterState, CharacterStore,
@@ -1658,6 +1661,18 @@ class TormentFabric:
                     "agent_id": agent_id,
                     "affect_tag": str(affect_tag),
                     "affect_conf": float(conf),
+                    # D1-S3: affect-VALUE lineage for the mood_drift row. A
+                    # mood_drift row is an affect-bearing derived transition signal
+                    # (prior tag + current classifier result + qualified transition),
+                    # so its ratified posture is system/derived/unconfirmed/
+                    # via=mood_drift_transition — distinct from the ordinary-ingest
+                    # classifier producer. Internally constructed (no caller surface
+                    # on this add_memory path), always value_state=set because this
+                    # producer emits no row when affect is absent/neutral/below-conf/
+                    # unchanged/in-gap. Row lineage stays in mtype/mood_from/mood_to.
+                    "affect_attribution": build_mood_drift_attribution(
+                        affect_tag=str(affect_tag),
+                    ),
                     "mood_from": str(last_tag),
                     "mood_to": str(affect_tag),
                     "embedding_provider": emb_provider,

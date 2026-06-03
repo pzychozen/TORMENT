@@ -199,9 +199,16 @@ class TestReadRoundTrip(_IngestBase):
         self.assertEqual(env["via"], "ingest_affect_classifier")
 
 
-# --- T10: mood_drift stays unstamped (scope boundary; D1-S3 territory) ------
+# --- T10 (INVERTED) + D1-S3: mood_drift rows ARE stamped --------------------
+# D1-S2 locked mood_drift as unstamped (the original test_T10). D1-S3 is the
+# separately authorized slice that opens and flips that boundary: mood_drift
+# rows now carry an affect_attribution envelope with the ratified
+# derived / mood_drift_transition posture (contract §4 table / §7). Row lineage
+# stays in mtype / mood_from / mood_to; this envelope is affect-VALUE lineage
+# only. The not-evaluated states still produce NO mood_drift row at all (so no
+# stamp), preserved by the two no-row tests below.
 
-class TestScopeBoundaryMoodDrift(_IngestBase):
+class TestMoodDriftStampedS3(_IngestBase):
     ENV = {
         **_BASE_ENV,
         "TORMENT_MOOD_DRIFT_ENABLE": "1",
@@ -209,8 +216,73 @@ class TestScopeBoundaryMoodDrift(_IngestBase):
         "TORMENT_MOOD_DRIFT_MIN_GAP_STEPS": "1",
     }
 
-    def test_T10_mood_drift_rows_are_not_stamped(self):
-        # Alternating tags with a step gap drive mood_drift emission.
+    def _mood_rows(self):
+        ents = self.fabric.private_graphs[self.ak].entities
+        return [
+            e for e in ents.values()
+            if (getattr(e, "payload", {}) or {}).get("type") == "mood_drift"
+        ]
+
+    def test_T10_inverted_mood_drift_rows_are_stamped_derived(self):
+        # Alternating non-neutral tags with a step gap drive mood_drift emission.
+        self._ingest(SAD_TEXT, step=10)
+        self._ingest(ANGRY_TEXT, step=200)
+        self._ingest(SAD_TEXT_2, step=400)
+        mood = self._mood_rows()
+        self.assertTrue(mood, "expected at least one mood_drift row to be emitted")
+        for e in mood:
+            p = e.payload
+            env = p.get("affect_attribution")
+            self.assertIsNotNone(env, "D1-S3: mood_drift rows must now be stamped")
+            self.assertEqual(env["value_state"], "set")
+            self.assertEqual(env["origin_kind"], "derived")
+            self.assertEqual(env["actor"], "system")
+            self.assertIsNone(env["actor_reference"])
+            self.assertEqual(env["subject"], "unknown")
+            self.assertEqual(env["confirmation"], "unconfirmed")
+            self.assertIsNone(env["confirmation_actor"])
+            self.assertIsNone(env["confirmation_actor_reference"])
+            self.assertEqual(env["via"], "mood_drift_transition")
+            # Read shim returns the persisted derived envelope, NOT legacy fallback.
+            read = read_affect_attribution(p)
+            self.assertEqual(read["origin_kind"], "derived")
+            self.assertEqual(read["via"], "mood_drift_transition")
+            # Row lineage + scoring inputs intact (unchanged by the stamp):
+            # scoring.py applies mood_drift_bonus on type=="mood_drift" rows.
+            self.assertEqual(p.get("type"), "mood_drift")
+            self.assertIn("mood_from", p)
+            self.assertIn("mood_to", p)
+            self.assertIsNotNone(p.get("affect_tag"))
+            self.assertIsNotNone(p.get("affect_conf"))
+
+
+class TestMoodDriftConstructorUnit(unittest.TestCase):
+    def test_constructor_emits_ratified_posture_and_validates(self):
+        # Pure constructor unit: proves the envelope is built AND passes the
+        # validator path (build_* returns a validated copy, raising on malformed).
+        from torment_service.affect_attribution import build_mood_drift_attribution
+        env = build_mood_drift_attribution(affect_tag="sad")
+        self.assertEqual(env["schema_version"], "1.0")
+        self.assertEqual(env["value_state"], "set")
+        self.assertEqual(env["origin_kind"], "derived")
+        self.assertEqual(env["actor"], "system")
+        self.assertIsNone(env["actor_reference"])
+        self.assertEqual(env["subject"], "unknown")
+        self.assertEqual(env["confirmation"], "unconfirmed")
+        self.assertEqual(env["via"], "mood_drift_transition")
+
+
+class TestMoodDriftDisabledNoRow(_IngestBase):
+    # Affect disabled -> no affect_tag -> producer emits no mood_drift row at all.
+    ENV = {
+        **_BASE_ENV,
+        "TORMENT_AFFECT_ENABLE": "0",
+        "TORMENT_MOOD_DRIFT_ENABLE": "1",
+        "TORMENT_MOOD_DRIFT_MIN_CONF": "0.0",
+        "TORMENT_MOOD_DRIFT_MIN_GAP_STEPS": "1",
+    }
+
+    def test_S3_disabled_classifier_emits_no_mood_drift_row(self):
         self._ingest(SAD_TEXT, step=10)
         self._ingest(ANGRY_TEXT, step=200)
         self._ingest(SAD_TEXT_2, step=400)
@@ -219,12 +291,36 @@ class TestScopeBoundaryMoodDrift(_IngestBase):
             e for e in ents.values()
             if (getattr(e, "payload", {}) or {}).get("type") == "mood_drift"
         ]
-        self.assertTrue(mood, "expected at least one mood_drift row to be emitted")
-        for e in mood:
-            self.assertNotIn(
-                "affect_attribution", e.payload,
-                "mood_drift is D1-S3 scope and must remain unstamped in S2",
-            )
+        self.assertFalse(
+            mood, "disabled classifier must emit no mood_drift row (so no stamp)"
+        )
+
+
+class TestMoodDriftFailedNoRow(_IngestBase):
+    # Affect ENABLED but classify_affect raises -> no affect_tag -> no mood_drift row.
+    ENV = {
+        **_BASE_ENV,
+        "TORMENT_MOOD_DRIFT_ENABLE": "1",
+        "TORMENT_MOOD_DRIFT_MIN_CONF": "0.0",
+        "TORMENT_MOOD_DRIFT_MIN_GAP_STEPS": "1",
+    }
+
+    def test_S3_failed_classifier_emits_no_mood_drift_row(self):
+        def _boom(_text):
+            raise RuntimeError("classifier blew up")
+
+        with mock.patch("torment_service.fabric.classify_affect", side_effect=_boom):
+            self._ingest(SAD_TEXT, step=10)
+            self._ingest(ANGRY_TEXT, step=200)
+            self._ingest(SAD_TEXT_2, step=400)
+        ents = self.fabric.private_graphs[self.ak].entities
+        mood = [
+            e for e in ents.values()
+            if (getattr(e, "payload", {}) or {}).get("type") == "mood_drift"
+        ]
+        self.assertFalse(
+            mood, "failed classifier must emit no mood_drift row (so no stamp)"
+        )
 
 
 # --- T12a / T12b / T12c: NOT-EVALUATED states earn no stamp -----------------

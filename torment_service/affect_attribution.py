@@ -242,6 +242,50 @@ def build_ingest_classifier_attribution(*, affect_tag: Any) -> Dict[str, Any]:
     return validate_affect_attribution(envelope, affect_tag=affect_tag)
 
 
+def build_mood_drift_attribution(*, affect_tag: Any) -> Dict[str, Any]:
+    """Canonical D1-S3 attribution envelope for a mood_drift transition row.
+
+    Returns the ratified mood_drift producer posture (contract §4 table / §7):
+    ``system / derived / unconfirmed / subject=unknown / via=mood_drift_transition``.
+
+    A mood_drift row is an affect-bearing **derived** signal — prior affect state
+    + current classifier result + a qualified transition event — not merely a
+    copied endpoint tag. Its affect-VALUE lineage is therefore distinct from the
+    ordinary-ingest classifier producer (`origin_kind=derived` /
+    `via=mood_drift_transition`), even though the stored ``affect_tag`` originates
+    from the same ``classify_affect`` call. Row lineage (the transition itself)
+    lives in ``mtype="mood_drift"`` / ``mood_from`` / ``mood_to`` / ProvenanceV1;
+    this field records affect-value lineage only. ``affect_attribution`` records
+    HOW the affect value was produced, not WHERE the row came from.
+
+    ``value_state`` is always ``set``: the mapped producer
+    (``TormentFabric._maybe_emit_mood_drift``) emits no row at all when affect
+    classification is disabled, failed, absent, neutral, below the confidence
+    threshold, unchanged, or inside the minimum-gap window — so there is no unset
+    or not-evaluated mood_drift row. ``affect_tag`` must therefore be non-None;
+    the validator enforces ``value_state=set`` ⇒ stored ``affect_tag``.
+
+    Pure: no I/O, no mutation of any input. Returns a validated dict (a shallow
+    copy from :func:`validate_affect_attribution`), and raises
+    :class:`AffectAttributionError` if the produced envelope is somehow
+    inconsistent — defense in depth so a producer bug cannot emit a malformed
+    envelope.
+    """
+    envelope = {
+        "schema_version": SCHEMA_VERSION,
+        "value_state": "set",
+        "origin_kind": "derived",
+        "actor": "system",
+        "actor_reference": None,
+        "subject": "unknown",
+        "confirmation": "unconfirmed",
+        "confirmation_actor": None,
+        "confirmation_actor_reference": None,
+        "via": "mood_drift_transition",
+    }
+    return validate_affect_attribution(envelope, affect_tag=affect_tag)
+
+
 def read_affect_attribution(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Return the affect-attribution envelope for a memory payload (read-time).
 
