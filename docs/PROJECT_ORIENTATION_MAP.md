@@ -73,6 +73,7 @@ recent hardening items are commit-level only.)
 | Cluster 5 Path C — Q3-D1-S5b generic `user_confirmed` isolation lock (test-only regression barrier; `generic user_confirmed != affect confirmation`; production already conformant) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5B_GENERIC_USER_CONFIRMED_ISOLATION.md` (commit `3e25be7`; checkpoint `fbced7e`) |
 | Cluster 5 Path C — Q3-D1-S5a cross-surface characterization (test-only lock; preserve where carried / deliberately omit where projected; no production change, no public/API/MCP or `character_context` exposure added) | 2026-06-03 | `docs/CHECKPOINT_2026-06_PATH_C_Q3_D1_S5A_CROSS_SURFACE_CHARACTERIZATION.md` (commit `dd46019`; checkpoint `4e930d9`) |
 | Track B v0.2 — B2-S1 contest-ledger runtime boundary framing (ratified framing artifact; **not** doctrine / implementation / schema / automation authorization; B2-S2 vocabulary + validator + pure serialization tests is candidate-only, not auto-open) | 2026-06-03 | `docs/TRACK_B_V0_2_CONTEST_LEDGER_RUNTIME_BOUNDARY_FRAMING_v0.1.md` (commit `c64417e`) |
+| Track B v0.2 — B2-S2 isolated ContestRecord vocabulary (frozen immutable record + deterministic fail-closed validator + pure dict/JSON/JSONL serialization + mandatory importer-free AST guard; **no production wiring**; nested ProvenanceV1 canonicalized, no `SOURCE_CONTEST` added; B2-S3 append-only writer/reader remains parked, not auto-open) | 2026-06-04 | `docs/CHECKPOINT_2026-06_TRACK_B_V0_2_B2_S2_CONTEST_RECORD_VOCABULARY.md` (commit `f42b6ee`) |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
@@ -81,10 +82,12 @@ chosen separately in the fresh-chat handoff; no new Path C gate is open.
 Working tree was clean at the close of the 2026-05-27 v0.2.4 session.
 Full suite runs cleanly without the historical
 `--ignore=tests\test_visualize_attractors.py` flag — the old
-convention is retired. **Dated 2026-05-27 baseline: 3,570 passed /
-5 skipped / 22 subtests passed** under `python -m pytest tests\ -q`
-(historical — re-establish before/during the next code-bearing slice;
-do not treat as a current count). Live S6-style smoke for v0.2.4
+convention is retired. **Dated 2026-06-04 baseline (post B2-S2, `f42b6ee`): 3,727 passed /
+5 skipped / 22 subtests passed in 89.38s** under `python -m pytest tests\ -q`
+(authoritative Windows run; supersedes the 2026-05-27 baseline of 3,570
+passed — re-establish before/during the next code-bearing slice; do not
+treat as a permanent count). The focused B2-S2 suite ran **44 passed in
+0.57s**. Live S6-style smoke for v0.2.4
 archive FILTER-A (hash embedder, disposable workspace) closed at
 **32 GREEN / 0 YELLOW / 0 RED**. The next gate is the user's call (see §7).
 
@@ -405,10 +408,11 @@ defaults in bench tools, the `.env.example` URL naming inconsistency
 small audit-first design-memo side lane — not an auto-opened Loop probe and not
 a primary implementation lane.** If maintenance closes cleanly and the trio wants
 an implementation lane, Track B v0.2 (runtime contest ledger) is a strong existing
-candidate — its **B2-S1 contest-ledger runtime boundary framing closed 2026-06-03
-at `c64417e`** (ratified framing artifact, not implementation authorization), so the
-candidate next slice is **B2-S2 (vocabulary + validator + pure serialization tests)**
-— but B2-S2 is candidate-only and is not opened by this map.
+candidate — its **B2-S1 framing closed 2026-06-03 at `c64417e`** and its **B2-S2
+isolated ContestRecord vocabulary closed 2026-06-04 at `f42b6ee`** (non-load-bearing;
+no production wiring), so the candidate next slice is **B2-S3 (append-only
+separate-ledger writer/reader + replay tests)** — but B2-S3 is candidate-only,
+parked, and is not opened by this map.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
@@ -450,9 +454,10 @@ ready, and may choose something else entirely):
   more data than Tier 2 already provides).
 - Broader pre-autonomy spine extensions: **Cluster 2 v0.2 runtime
   Authority Gate**, **Track B v0.2 runtime contest ledger** (B2-S1 framing
-  closed 2026-06-03, `c64417e`; next slice B2-S2 — vocabulary + validator +
-  pure serialization tests — is candidate-only, not auto-open), **Cluster 5
-  v0.2 storage survivability mechanisms** (see `docs/TORMENT_ROADMAP_NOTES.md`
+  closed 2026-06-03 `c64417e`; B2-S2 isolated ContestRecord vocabulary closed
+  2026-06-04 `f42b6ee`, no production wiring; next slice B2-S3 — append-only
+  writer/reader + replay tests — is candidate-only, parked, not auto-open),
+  **Cluster 5 v0.2 storage survivability mechanisms** (see `docs/TORMENT_ROADMAP_NOTES.md`
   for the ranked Path A/B/C framing). The v0.2.x **ledger persistence**
   question is **closed** — Option C (response-only observability) ratified,
   Option A foreclosed, Option B parked
