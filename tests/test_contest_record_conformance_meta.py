@@ -5,8 +5,12 @@ Slice-0. These make the "NOT load-bearing" commitment executable, mirroring
 the lifecycle Slice-0 posture.
 
 Guard 1 (the key requirement): no production module under ``torment_service/``
-imports ``torment_service.contest_record``. The runtime must not know about
-it. AST-based — not text/substring matching.
+imports ``torment_service.contest_record`` — with a single explicit
+path allowlist: ``torment_service/contest_ledger.py`` (the B2-S3 isolated
+persistence module) is permitted to import it. Every other production module
+is forbidden. The allowlist is an exact path set (no ``contest_*`` prefix
+exemption): any future importer requires an explicit guard edit and a new
+ratified gate. AST-based — not text/substring matching.
 
 Guard 2: ``contest_record.py`` itself performs no filesystem / path-
 construction behavior (no os/io/pathlib/etc. imports, no ``open()`` call).
@@ -25,6 +29,14 @@ _REPO_ROOT = _TESTS_DIR.parent
 _SERVICE_DIR = _REPO_ROOT / "torment_service"
 _CONTEST_MODULE = (_SERVICE_DIR / "contest_record.py").resolve()
 
+# Explicit, exact-path allowlist of production modules permitted to import
+# contest_record. Exactly one entry: the B2-S3 isolated persistence ledger.
+# NOT a contest_* prefix exemption — a new importer requires editing this set
+# (an intentional, reviewable guard change) plus a ratified gate.
+_ALLOWED_CONTEST_RECORD_IMPORTERS = {
+    (_SERVICE_DIR / "contest_ledger.py").resolve(),
+}
+
 # Filesystem / path-construction modules that the pure Slice-0 module must
 # not pull in. ``json`` is intentionally absent — it is not a filesystem
 # dependency and serialization here returns dicts (callers do the I/O).
@@ -35,7 +47,10 @@ _FS_MODULE_ROOTS = {
 
 def _iter_service_py_files():
     for path in sorted(_SERVICE_DIR.rglob("*.py")):
-        if path.resolve() == _CONTEST_MODULE:
+        resolved = path.resolve()
+        if resolved == _CONTEST_MODULE:
+            continue
+        if resolved in _ALLOWED_CONTEST_RECORD_IMPORTERS:
             continue
         yield path
 
