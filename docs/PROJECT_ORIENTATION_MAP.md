@@ -439,6 +439,17 @@ and leaves five operator decisions open. Parked concerns **P1–P6 remain parked
 production-prompt doctrine-compliance question is flagged, not opened). The next
 action is an **operator-level architecture discussion**, not a slice.
 
+**Guidance Without Coercion — retrieval influence surface map (2026-06-05, committed `3c5c137`).**
+`docs/GUIDANCE_WITHOUT_COERCION_RETRIEVAL_INFLUENCE_SURFACE_MAP_v0.1.md` is a
+**descriptive existing-behavior map only** — not doctrine, not an audit verdict,
+not a remedy. It records the live retrieval/assembler influence surfaces
+(symbol watermark → spirit-return deep-memory echo → candidate-appearance warmth
+recursion → strength/classification → warmth-based within-bucket ordering →
+model-visible voice/flavor cues; plus the broader scoring stack). It names two
+scopes — an **immediate spirit-return audit** and a **broader retrieval-stack
+audit** — and **opens neither**. **Track B remains parked. No next gate
+selected.**
+
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
