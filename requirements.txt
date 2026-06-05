@@ -2,7 +2,7 @@
 # Python >= 3.10 required (MCP SDK floor)
 fastapi>=0.115.0,<1.0.0
 uvicorn>=0.24.0,<1.0.0
-starlette>=0.47.2,<1.0.0
+starlette>=1.0.1,<2.0.0
 numpy>=1.24.0
 pandas>=2.0.0
 pydantic>=2.0.0,<3.0.0
