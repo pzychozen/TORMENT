@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-03.
+**Date of last refresh:** 2026-06-05.
 
 ---
 
@@ -423,6 +423,21 @@ audit-first framing cycle and explicit operator authorization. `candidate_handle
 → eid` durable binding, target-existence integrity policy, counter-contest
 result routing, and the effective-authority resolver-boundary audit remain
 **separately parked**; none is opened by this map.
+
+**Cognition-coupling architecture fork memo (2026-06-05).** Track B remains
+paused after B2-S4. The question of whether/how remembered disagreement could
+ever become cognition-visible was framed as a docs-only artifact,
+`docs/TRACK_B_V0_2_COGNITION_COUPLING_ARCHITECTURE_FORK_MEMO_v0.1.md`
+(Claude draft → GPT review → two Codex adversarial rounds → P5 trace closed →
+Codex ACCEPT WITH CORRECTIONS → operator promotion). It is **framing-only: no
+fork selected, no implementation authorized, no probe authorized, no B2-S5
+inferred, no repair lane opened.** It names three forks (A token-bounded prompt
+conditioning / B deterministic cognition visibility / C new deliberation phase),
+records that *no live service path implements a separate LLM deliberation room*,
+and leaves five operator decisions open. Parked concerns **P1–P6 remain parked**
+(P5 resolved: the clean-prompt discipline is harness-only; P6: the labeled
+production-prompt doctrine-compliance question is flagged, not opened). The next
+action is an **operator-level architecture discussion**, not a slice.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
