@@ -30,11 +30,18 @@ _SERVICE_DIR = _REPO_ROOT / "torment_service"
 _CONTEST_MODULE = (_SERVICE_DIR / "contest_record.py").resolve()
 
 # Explicit, exact-path allowlist of production modules permitted to import
-# contest_record. Exactly one entry: the B2-S3 isolated persistence ledger.
+# contest_record. Two entries:
+#   - contest_ledger.py        — B2-S3 isolated persistence ledger.
+#   - counter_contest_event.py — B2-S4 isolated counter-contest event
+#                                vocabulary, which reuses the closed
+#                                ContestActor / ContestReasonClass vocabulary
+#                                unchanged (single source of truth, no
+#                                duplicated vocabulary layer).
 # NOT a contest_* prefix exemption — a new importer requires editing this set
 # (an intentional, reviewable guard change) plus a ratified gate.
 _ALLOWED_CONTEST_RECORD_IMPORTERS = {
     (_SERVICE_DIR / "contest_ledger.py").resolve(),
+    (_SERVICE_DIR / "counter_contest_event.py").resolve(),
 }
 
 # Filesystem / path-construction modules that the pure Slice-0 module must
