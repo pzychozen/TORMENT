@@ -413,8 +413,13 @@ candidate — its **B2-S1 framing closed 2026-06-03 at `c64417e`**, its **B2-S2
 isolated ContestRecord vocabulary closed 2026-06-04 at `f42b6ee`**, and its **B2-S3
 isolated ContestLedger persistence closed 2026-06-04 at `9c027a0`** (all
 non-load-bearing; no production wiring), so the candidate next slice is **B2-S4
-(counter-contest linkage / event semantics)** — but B2-S4 is candidate-only,
-parked, and is not opened by this map.
+(counter-contest event vocabulary + isolated append-only persistence)**. A
+**narrowed B2-S4 candidate framing artifact is prepared**
+(`docs/TRACK_B_V0_2_B2_S4_COUNTER_CONTEST_EVENT_FRAMING_v0.1.md`): it narrows
+B2-S4 to counter-contest events only and explicitly excludes
+`candidate_handle → eid` durable binding, which remains **separately parked**
+(parent framing §13 #3). B2-S4 remains candidate-only, **not authorized**, and
+is not opened by this map.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
@@ -458,8 +463,11 @@ ready, and may choose something else entirely):
   Authority Gate**, **Track B v0.2 runtime contest ledger** (B2-S1 framing
   closed 2026-06-03 `c64417e`; B2-S2 vocabulary closed 2026-06-04 `f42b6ee`;
   B2-S3 isolated ContestLedger persistence closed 2026-06-04 `9c027a0`, no
-  production wiring; next slice B2-S4 — counter-contest linkage / event
-  semantics — is candidate-only, parked, not auto-open), **Cluster 5
+  production wiring; next slice B2-S4 — counter-contest event vocabulary
+  + isolated append-only persistence — has a narrowed candidate framing prepared
+  (`docs/TRACK_B_V0_2_B2_S4_COUNTER_CONTEST_EVENT_FRAMING_v0.1.md`);
+  `candidate_handle → eid` binding is separately parked; B2-S4 is
+  candidate-only, not authorized, not auto-open), **Cluster 5
   v0.2 storage survivability mechanisms** (see `docs/TORMENT_ROADMAP_NOTES.md`
   for the ranked Path A/B/C framing). The v0.2.x **ledger persistence**
   question is **closed** — Option C (response-only observability) ratified,
