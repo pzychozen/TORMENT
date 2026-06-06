@@ -15,7 +15,11 @@ mcp>=1.27.0,<2.0.0
 
 # Testing
 pytest>=7.0.0
+# starlette>=1.x testclient prefers the httpx2 successor package and emits a
+# StarletteDeprecationWarning when only classic httpx is present. Keep classic
+# httpx (mcp client paths still import it); add httpx2 for the testclient path.
 httpx>=0.24.0
+httpx2>=2.3.0
 
 # Real embeddings (recommended — install one)
 # pip install sentence-transformers   # SentenceTransformers provider
