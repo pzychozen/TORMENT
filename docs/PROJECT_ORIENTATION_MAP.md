@@ -133,11 +133,15 @@ points back to the authoritative section; none opens a gate.
 2. **Spirit-return disambiguation.** Two distinct items share the name and must
    not be conflated. The **immediate spirit-return influence audit** is a larger
    *read-only audit scope* over the deep-memory-echo influence path (surface map
-   Bucket I: surfaces 1, 3, 4, 5, 6, 7, 9, 10, 11). **Gap C** (see §6 and §7) is
-   only the tiny `spirit_return_summary` consistency-check *candidate* (asserts
-   `character_context.spirit_return_summary` and
-   `assembly_audit.spirit_return_summary` agree when both fire). Different size,
-   different kind; do not collapse one into the other.
+   Bucket I: surfaces 1, 3, 4, 5, 6, 7, 9, 10, 11). **Gap C** (see §6 and §7)
+   was only the tiny `spirit_return_summary` relationship lock — **CLOSED
+   2026-06-06 as a test-only slice** (`aab9f5d`): retrieval-stage character
+   summary and entered-prompt-stage assembly-audit summary have conditional
+   parity under ample budget, audit-side subset semantics, and designed
+   token-budget divergence — **not unconditional equality**. See
+   `docs/CHECKPOINT_2026-06_MEMORY_TO_PROMPT_GAP_C_SPIRIT_RETURN_SUMMARY_RELATIONSHIP.md`.
+   Different size, different kind; do not collapse one into the other, and Gap
+   C's closure does not open the influence audit.
 
 3. **Track B rests after B2-S4 — no B2-S5 is inferred.** B2-S4 (isolated
    counter-contest event persistence, `1a17d6f`) is closed; the cognition-coupling
@@ -368,11 +372,18 @@ Items that have been deferred from an active slice but are not lost:
   closure. The v0.2.2 surfacing (Option A) wired only `/retrieve`;
   doctrine names both `/retrieve` and `/agent/query`. Small docs-vs-code
   reconciliation slice.
-- **Gap C — `spirit_return_summary` consistency check** — named in
-  `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_3_SPIRIT_RETURN.md`
-  §A as the smallest possible follow-up to v0.2.3. Asserts that
-  `character_context.spirit_return_summary` and
-  `assembly_audit.spirit_return_summary` agree when both fire.
+- **Gap C — spirit-return summary relationship lock — CLOSED 2026-06-06**
+  (test-only, commit `aab9f5d`; checkpoint
+  `docs/CHECKPOINT_2026-06_MEMORY_TO_PROMPT_GAP_C_SPIRIT_RETURN_SUMMARY_RELATIONSHIP.md`).
+  The v0.2.3 §A shorthand ("the two summaries agree when both fire") was
+  sharpened by audit-first tracing: the character summary is retrieval-stage
+  observability (post-query-filter hits); the audit summary is
+  entered-prompt-stage observability (post-token-budget blocks). Locked
+  relationship: conditional parity under ample budget; audit-side subset
+  semantics; designed divergence under token pressure; audit-only
+  `any_entered_prompt` truthfulness. No production change. Unknown-mode
+  vocabulary asymmetry and synthetic warmth-fallback asymmetry are observed
+  and parked, not widened into validation.
 - **Deterministic attractor visualization fixture / science validation**
   — named in `docs/CHECKPOINT_2026-05_VISUALIZE_ATTRACTORS_SUITE_RESTORE.md`
   §A as the path to turn the visualize-attractors tests from "not
@@ -550,8 +561,10 @@ ready, and may choose something else entirely):
 - **v0.2.4 verification under ST / BGE embedder** — live-smoke
   re-run with `TORMENT_EMBED_PROVIDER=st` to confirm embedder-agnostic
   behavior, paralleling the v0.2 S6 ST follow-up pattern. Small.
-- **Gap C — `spirit_return_summary` consistency check** (per §6 and
-  the v0.2.3 checkpoint). Smallest possible v0.2.x follow-up.
+- **Gap C — spirit-return summary relationship lock** — **CLOSED 2026-06-06**
+  as a test-only slice (`aab9f5d`); see §6 and
+  `docs/CHECKPOINT_2026-06_MEMORY_TO_PROMPT_GAP_C_SPIRIT_RETURN_SUMMARY_RELATIONSHIP.md`.
+  No longer a candidate.
 - **Deterministic attractor visualization fixture** (per §6 and the
   visualize-attractors checkpoint). Larger; only if visualization
   science becomes a priority. Not blocking.
