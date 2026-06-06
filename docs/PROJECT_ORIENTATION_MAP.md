@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-05.
+**Date of last refresh:** 2026-06-06.
 
 ---
 
@@ -117,6 +117,59 @@ context, **not** current implementation authority; its surviving arc in one line
 *validate → ratify contracts → narrowly authorized automation → substrate/
 orchestration boundary → Hermes evaluation → governed operational agents →
 Clawbot triage → writeback-readiness gate.*
+
+### Fresh-chat anti-drift clarifications (2026-06-06)
+
+Added after a fresh-chat reconstruction surfaced recurring drift risks. Each
+points back to the authoritative section; none opens a gate.
+
+1. **Named scope ≠ opened gate.** The Guidance-Without-Coercion surface map
+   (§7, `docs/GUIDANCE_WITHOUT_COERCION_RETRIEVAL_INFLUENCE_SURFACE_MAP_v0.1.md`)
+   *names* two audit scopes — the **immediate spirit-return audit** and the
+   **broader retrieval-stack audit** — and **opens neither**. Neither is
+   automatically next. A descriptive map authorizes no audit, no remedy, no
+   patch.
+
+2. **Spirit-return disambiguation.** Two distinct items share the name and must
+   not be conflated. The **immediate spirit-return influence audit** is a larger
+   *read-only audit scope* over the deep-memory-echo influence path (surface map
+   Bucket I: surfaces 1, 3, 4, 5, 6, 7, 9, 10, 11). **Gap C** (see §6 and §7) is
+   only the tiny `spirit_return_summary` consistency-check *candidate* (asserts
+   `character_context.spirit_return_summary` and
+   `assembly_audit.spirit_return_summary` agree when both fire). Different size,
+   different kind; do not collapse one into the other.
+
+3. **Track B rests after B2-S4 — no B2-S5 is inferred.** B2-S4 (isolated
+   counter-contest event persistence, `1a17d6f`) is closed; the cognition-coupling
+   fork memo §12 explicitly disclaims a B2-S5. `candidate_handle → eid` binding,
+   target-existence integrity policy, counter-contest result routing, and the
+   effective-authority resolver-boundary audit remain **separately parked**. Any
+   Track B continuation requires a fresh audit-first cycle and explicit operator
+   authorization.
+
+4. **Operator-input status — values-layer provided, architecture-layer
+   conditional.** Hilmir's values-layer input is **provided and must not be
+   reopened as missing**: guidance is allowed; influence is not automatically
+   coercion; control means absolute or coercive control; the option-to-ignore is
+   load-bearing; memory must not block an AI from changing direction. The
+   cognition-coupling fork memo §11's five *architecture* decisions remain open
+   but are **conditional on the trio deliberately reopening the cognition-coupling
+   lane** — they block nothing at rest and are not pending homework.
+
+5. **Starlette maintenance — closed.** Two bounded maintenance items, both
+   Windows-verified, no runtime code touched:
+   - *Starlette 1.x security admission* (`fc7d9c8`) — fastapi 0.136.1 /
+     starlette 1.2.1 / mcp 1.27.1.
+   - *Starlette TestClient httpx deprecation* (`282fbe9`) — **closed by adding
+     `httpx2` alongside classic `httpx`** (classic httpx remains because mcp
+     still imports it). Root cause: Starlette 1.x's testclient prefers the
+     `httpx2` successor package and warns on classic httpx; TORMENT owns no
+     direct httpx call. Test-only dependency; the application runtime is
+     unchanged.
+
+   Windows-authoritative full suite at `282fbe9`: **3,812 passed / 5 skipped /
+   22 subtests passed, 0 deprecation warnings** (agrees with the 2026-06-04
+   count at `1a17d6f`). This re-establishes the resting baseline at HEAD.
 
 ---
 
