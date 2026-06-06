@@ -535,6 +535,16 @@ scopes — an **immediate spirit-return audit** and a **broader retrieval-stack
 audit** — and **opens neither**. **Track B remains parked. No next gate
 selected.**
 
+**TORMENT Memory Engine P0 — Decision Registry promoted (2026-06-06).**
+`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md` is promoted as the
+anti-drift reference for the database-design programme. P0 records verified
+facts, provisional postures, carried doctrine, operator intent, parked
+questions, research hypotheses, controlled vocabulary, the revised phase
+graph (P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 →
+P11, with P5b / P8b / maintenance side lanes), and evidence-versus-
+maintenance routing. **P1 remains closed and requires a separate trio
+decision.**
+
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
