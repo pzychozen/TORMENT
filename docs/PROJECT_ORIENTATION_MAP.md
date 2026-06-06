@@ -171,6 +171,19 @@ points back to the authoritative section; none opens a gate.
    22 subtests passed, 0 deprecation warnings** (agrees with the 2026-06-04
    count at `1a17d6f`). This re-establishes the resting baseline at HEAD.
 
+6. **Maintenance re-survey closed (2026-06-06, no code patch).** The small
+   maintenance checklist named in §7 was re-surveyed read-only and found
+   already resolved: live model defaults are already harmonized to
+   `claude-sonnet-4-6` (the 2026-06-01 slice landed; remaining
+   `claude-sonnet-4-5` strings are help-text examples of an active model,
+   deliberately left untouched); `TORMENT_SERVER_URL` and `TORMENT_URL` are
+   **both intentionally real** — consumed by the bench family and the
+   examples/live-agent family respectively — and `.env.example` already
+   documents both (name unification stays a separately parked, code-bearing
+   slice); the Predicate #7 entry in §6 was corrected to its accurate
+   exercise-gated posture. **No functional maintenance patch was required.**
+   Do not reopen this checklist without new evidence.
+
 ---
 
 ## 3. Where project truth lives
@@ -377,13 +390,21 @@ Items that have been deferred from an active slice but are not lost:
 - **Probe-v0 `agent_locks=2` at preflight** — observed before workspace
   creation during the `3059` run; verify agent locks release cleanly across
   runs. Small observability check, not blocking.
-- **Predicate #7 logic upgrade (Tier-1 harness)** — the Tier-1 predicate is
-  `pass: True` unconditional; manual verification has borne the load through
-  Tier 2 (shipped 2026-05-24). Open only if Tier 3 or programmatic Tier-gating
-  is opened; requires Windows-local inspection of the sibling rig wrapper
-  (`do_not_touch_torment_test_rig/harness/tier0_smoke.py`) before any patch;
-  distinct from the W6 denylist item; explicitly NOT closed by the 2026-06-01
-  maintenance slice. Source: `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` item 1.
+- **Predicate #7 hardening (Tier-1 harness)** — wording corrected 2026-06-06
+  after a read-only re-survey: the predicate is **not** an unconditional pass.
+  `tier0_smoke.py` inv7 already contains real exercise-gated assertions — when
+  scen-6 narrows to `code_exec` under a permitting pack, it verifies
+  `tool_called == True`, `executor_calls == 1`, and review notes containing
+  `self_review_required`. The remaining parked gap is narrower: when the
+  exercise gate is never met, inv7 reports `exercised=False` but `pass=True`,
+  and aggregation ANDs only `pass` — so a never-exercised run can still render
+  an overall PASS, with only the "NOT EXERCISED" report note distinguishing it.
+  Manual report-reading currently bears that load (held through Tier 2). Open a
+  separate ratifiable harness slice only if Tier 3 or programmatic Tier-gating
+  becomes load-bearing; requires Windows-local inspection of the sibling rig
+  wrapper (`do_not_touch_torment_test_rig/harness/tier0_smoke.py`) before any
+  patch; distinct from the W6 denylist item. Source:
+  `docs/AGENT_RUNTIME_PHASE1_TIER1_FINDINGS.md` item 1.
 - **Q3-D1 affect-attribution contract** — tracked framing **promoted**
   (`docs/CLUSTER_5_PATH_C_Q3_D1_AFFECT_ATTRIBUTION_CONTRACT_v0.1.md`, 2026-06-01).
   **D1-S1 closed** (validator + read shim + scoring-invariance baseline);
