@@ -545,6 +545,9 @@ P11, with P5b / P8b / maintenance side lanes), and evidence-versus-
 maintenance routing. **P1 remains closed and requires a separate trio
 decision.**
 
+**TORMENT Memory Engine P1 — Era and Schema Minimum Contract closed (2026-06-07).**
+`docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md` is promoted as the ratified P1 contract: one unified append-only era ledger per workspace (EraEvent minimum vocabulary, `event_ordinal` primary order, fail-closed integrity posture); era attribution as interpretation context — never ratification, protection, truth, or authority; `era_genesis` / `legacy_precontract` handling for the pre-contract corpus with the hard rule that unattributable post-genesis objects never fall back to legacy; schema-version minimums with one canonical shim per family; the nested-schema verbatim-or-omit rule; family-bound ReaderPolicy outcomes with the diagnostic fencing clause; the SRG disable-honesty contract; and the Hilmir-ratified crystal recommendation/contestability posture (no automatic re-homing; auditable, contestable, reversible recommendations only). Windows deep-store scan: `metadata.srg` 0 matches (local corpus evidence only). Implementation, migration mechanics, recovery, projection instantiation, and storage primitives remain parked to P2/P3/P4/P5a/P6/P9 per the memo §9; `TORMENT_SRG_COGNITION` default reconciliation is a separately ratifiable maintenance candidate. **The next gate is unselected; P2 opens only by explicit trio decision.**
+
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
