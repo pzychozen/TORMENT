@@ -1,9 +1,9 @@
 # TORMENT Memory Engine — P1: Era and Schema Minimum Contract v0.1
 
-**Status:** RATIFIED P1 CONTRACT — promoted by trio decision 2026-06-07 (docs-only Slice A); decision-registry amendment pending (Slice B).
+**Status:** RATIFIED P1 CONTRACT — promoted by trio decision 2026-06-07; decision-registry amendment completed in docs-only Slice B.
 **Gate:** P1 — Era and Schema Minimum Contract. Design-only · audit-first · bounded · no implementation · no automatic widening.
 **Date:** 2026-06-07
-**Lineage:** P0 decision registry (`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`, closed at `2742949`) → Claude read-only archaeology + minimum-contract draft (2026-06-07) → Codex adversarial review → Windows historical deep-store scan (`metadata.srg` matches: 0) → GPT/Hilmir ratification of contract posture → wording-only closure pass → final steering micro-corrections → trio closure decision and this promotion.
+**Lineage:** P0 decision registry (`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`, closed at `2742949`) → Claude read-only archaeology + minimum-contract draft (2026-06-07) → Codex adversarial review → Windows historical deep-store scan (`metadata.srg` matches: 0) → GPT/Hilmir ratification of contract posture → wording-only closure pass → final steering micro-corrections → trio closure decision and this promotion → decision-registry amendment Slice B.
 **Class discipline:** every load-bearing statement below is tagged **[FACT]** (code- or scan-grounded, line-cited), **[CONTRACT]** (ratified P1 clause), **[PARKED]** (later-phase question), **[MAINT]** (maintenance-lane candidate), or **[NON-DECISION]**. No silent promotion between classes.
 **Authority note:** this memo defines interpretation vocabulary and reader discipline. It authorizes no code change, no schema edit, no migration, no storage product, and no phase opening. The registry changes only by amendment slice.
 
@@ -273,11 +273,11 @@ P1 closes when all of the following hold:
 2. ☑ Codex adversarial review complete (hidden authority, migration traps, feature-disable honesty); corrections incorporated into the ratified posture.
 3. ☑ Operator evidence: Windows historical deep-store scan complete (`metadata.srg`: 0, recorded as local-corpus-only evidence).
 4. ☑ Values-layer decisions resolved by Hilmir: SRG disable honesty (§5); crystal recommendation + contestability (§6).
-5. ☐ GPT final review of this closure memo's wording.
-6. ☐ Trio closure decision: confirm the closure test is answered — *a future reader can examine an old durable object and truthfully determine how it may be interpreted, without silently reviving disabled feature influence, silently discarding meaningful history, or granting a storage artifact authority it never possessed* — and confirm no clause answers a P2/P4/P5a/P6 question.
-7. ☐ Hilmir commits the promoted doc (filename §11) on Windows; one-line orientation-map pointer added (§12).
-8. ☐ Small registry amendment slice (trio sign-off) recording: P1 closed; D8/D10 resolved per §5–§6; D13 satisfied by the era ledger; C7's owed provenance decision answered; EraEvent/ReaderPolicy vocabulary ratified at contract level; parked routings of §9. (Per registry §A, class changes are themselves an amendment — this memo does not perform them.)
-9. ☐ Next gate remains **unselected**: P2 opens only by explicit trio decision. Not implied, not auto-opened.
+5. ☑ GPT final wording review complete.
+6. ☑ Trio closure decision complete: closure test answered; no P2/P4/P5a/P6 question silently resolved.
+7. ☑ Hilmir promoted the P1 contract and orientation-map pointer in docs-only Slice A (`88174fc`).
+8. ☑ Small registry amendment Slice B completed: P1 closure and listed classification changes recorded explicitly.
+9. ☑ Next gate remains unselected: P2 opens only by explicit trio decision. Not implied, not auto-opened.
 
 ---
 
@@ -298,4 +298,4 @@ Proposed one-block insertion for `docs/PROJECT_ORIENTATION_MAP.md` §7 (to be co
 
 ---
 
-**Stop condition reached.** This memo is the full deliverable of the final P1 design pass. No files edited, no patch produced, no implementation requested, no phase opened.
+**P1 closure finalized.** This contract and its registry amendment are docs-only. No runtime code, schema implementation, migration, storage product, or subsequent phase is authorized. P2 remains closed and unselected.

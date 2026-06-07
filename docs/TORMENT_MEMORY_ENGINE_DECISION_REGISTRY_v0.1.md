@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -16,12 +16,12 @@ plus tracked docs by path.
 
 | | |
 |---|---|
-| **Active gate** | P0 only |
-| **Next gate** | P1 — only after separate trio authorization |
+| **Active gate** | none — P0 and P1 closed |
+| **Next gate** | unselected — P2 opens only after separate trio authorization (next in the recorded graph, not thereby selected) |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
-| **Three hard non-goals** | no schema design · no implementation · no P1 auto-open |
+| **Three hard non-goals** | no implementation · no storage-product selection · no P2 auto-open |
 
 ---
 
@@ -108,11 +108,26 @@ protection lineage is admitted-but-unresolved · **do not treat a raw
 experimental `srg.is_crystal` claim as legitimate durable protection
 without the P1 provenance decision** · evidence-only · P1 · reader-policy
 and provenance decision.
+**P1 disposition (2026-06-07, amendment):** the verified fact stands —
+ungated canonical-payload SRG readers exist. The ratified contract
+disposition: raw historical `srg.is_crystal` remains visible for
+provenance but inert as a direct behavior input when SRG is disabled;
+historical `srg.is_crystal` must not automatically become active
+lifecycle protection; a future separately authorized migration may stage
+an auditable protection recommendation; recommendation != lifecycle
+truth; recommendation != automatic ratification. See
+`docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md`
+§5–§6. Migration mechanics remain parked.
 
 C8. **The cognition SRG gate defaults ON** (`TORMENT_SRG_COGNITION=1`),
 contradicting the main gate · FACT · *[SRG-A]; thinking_controller.py:196,
 410* · gate semantics are inconsistent · do not add further SRG gates
 pre-P1 · evidence-only · P1; maintenance candidate §J · default change.
+**P1 refinement (2026-06-07, amendment):** `TORMENT_SRG_COGNITION`
+currently gates `plan.retrieve_srg_state`; repo-wide archaeology found
+zero read sites for `retrieve_srg_state`; the contradiction is presently
+semantic and drives a dormant flag. Default reconciliation remains a
+separately ratifiable maintenance candidate (§J). No patch authorized.
 
 C9. **RSB exists with no ordinary-runtime coupling** (migrated, dormant;
 zero imports outside kernel/) · FACT · *[KP §C][KA §F]* · tail engine is
@@ -137,6 +152,11 @@ evidence** · FACT · *[DP-A §F]* · narrows C7 to payload-direct readers ·
 do not describe spirit-return SRG as an active leak, and do not declare it
 historically clean, before the §J scan · evidence-only · P1,P4 ·
 historical scan result (§J).
+**Scan evidence (2026-06-07, amendment):** Windows historical deep-store
+scan: `metadata.srg` matches: 0. Classification: local authoritative
+corpus evidence only. Negative constraint: do not claim global absence;
+copied workspaces, external archives, and future imports remain
+uncharacterized.
 
 C13. **Normal deep retrieval requires source-row presence** (beta filter,
 fabric.py:3679–3712) · FACT · *[DP-A §C]* · non-authority is structurally
@@ -202,19 +222,33 @@ visible. D6. Safety fallback: fresh awakening. · Negative constraint
 (shared): no durable shell record may become an invisible influence
 surface; P3 must address the Bucket-I adjacency explicitly.
 
-**SRG** (owning phase P1, ethics decisions with Hilmir; trigger: P1 gate)
-D7. SRG remains a valid optional guidance layer. D8. Disable must
-truthfully disable influence lanes. D9. Historical stamps remain auditable.
-D10. **Crystal protection may survive only through explicit lifecycle /
-governance provenance, pending the P1 decision on valid provenance and
-re-homing mechanics.** D11. Forced resonance becomes a bounded bias —
-recorded as a **mechanism-shaping satisfaction of operator intent (E10),
-not doctrine**. D12. **Query-time mutation must become either derived
-non-authoritative state or explicit locked event-sourced evolution; P1
-owns reader policy; P5a owns recovery / integrity semantics.** D13.
-Feature-era bookkeeping is required. · Negative constraint (shared): none
-of D7–D13 authorizes touching SRG code before its owning phase ratifies
-reader policy.
+**SRG** (owning phase P1 — gate ratified 2026-06-07; dispositions per the
+P1 contract `docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md`)
+D7. SRG remains a valid optional guidance layer — carried forward.
+D8. **Resolved at contract level by P1.** When SRG is disabled: audit
+visibility allowed; diagnostic visibility allowed; historical provenance
+allowed; direct raw-SRG protection disabled; direct raw-SRG influence
+disabled; query-time mutation from raw SRG disabled.
+D9. Historical stamps remain auditable — carried forward and satisfied by
+the P1 contract.
+D10. **Resolved at contract level by P1.** Raw historical
+`srg.is_crystal` does not automatically become active lifecycle
+protection; a future separately authorized migration may stage an
+auditable recommendation only; recommendations remain inspectable,
+contestable, acceptable, revisable, and revocable; no invisible automatic
+finalizer.
+D11. **Non-decision** — the enabled-state forced-resonance mechanism
+remains unresolved (mechanism-shaping satisfaction of operator intent
+E10, not doctrine).
+D12. **Split explicitly.** Disabled-state raw-SRG mutation is resolved:
+disabled. The enabled-state question remains unresolved — derived
+non-authoritative evolution versus explicit locked event-sourced
+evolution; P5a owns recovery / integrity semantics.
+D13. **Satisfied at contract level by P1.** One unified append-only era
+ledger per workspace; EraEvent vocabulary ratified; implementation
+remains parked.
+· Negative constraint (shared): **No SRG runtime edit is authorized by
+this registry amendment.**
 
 **Deep projection** (owning phase P4; trigger: P4 gate)
 D14. DeepMemoryEcho is persistent but non-authoritative. D15. Source
@@ -270,18 +304,21 @@ doctrine per their own class.
 F1. Durability bar (operator intent) → P5a. F2. Inspectability permanence →
 P5a/P9. F3. Retention policy for superseded versions → P2. F4. Record-
 identity scope (per-agent vs global) → P2/P5a. F5. Read-discipline
-unification + quarantine shape → P5a. F6. SRG disable option (C vs
-D-with-re-homing) + crystal provenance and re-homing mechanics → P1
-(+Hilmir). F7. Shell transition-event vocabulary + resume UX → P3. F8.
+unification + quarantine shape → P5a. F6. **Contract-level decision resolved by P1 (2026-06-07):** raw
+historical crystal stamps do not auto-promote into lifecycle protection;
+recommendation vocabulary ratified. Migration, acceptance, rollback, and
+recovery mechanics remain parked to P5a / P9. F7. Shell transition-event vocabulary + resume UX → P3. F8.
 Engine boundary depth + custom-substrate trigger evaluation → P6 (see §K).
 F9. Journal vs per-family ledgers → P6. F10. Snapshot/compaction format →
 P6/P7. F11. Orphan-visibility mechanism → P4. F12. Benchmark suite
 definition → P8a. F13. **Migration and rollback — staged**: era/migration
-vocabulary → P1; rollback and recovery semantics → P5a; complete
-architecture-level migration strategy → P9. F14. Noun-cut final
+vocabulary portion **completed by P1 (2026-06-07)**; rollback and
+recovery semantics remain P5a; complete architecture-level migration
+strategy remains P9. F14. Noun-cut final
 ratification → P2/P9. F15. Maintenance-lane cadence (concurrent vs serial)
-→ trio, any time. F16. Whether historical srg-bearing deep records exist in
-real workspaces → operator scan, routed §J, feeds P1/P4.
+→ trio, any time. F16. **Answered for the authoritative local corpus (2026-06-07):**
+`metadata.srg` matches: 0. Copied / external / imported workspace
+characterization remains open where relevant.
 
 ## G. Research hypotheses registry
 
@@ -308,9 +345,19 @@ IntegrityManifest — accepted (6/8 used; headroom deliberate). The cap is a
 discipline tool, not doctrine-grade numerology: a later phase may justify
 an additional noun if it prevents ambiguity or invalid states.
 
-**Provisional contract nouns:** EraEvent (renamed from FeatureEraEvent —
-P1 decides whether one unified era ledger exists and which event kinds it
-contains) · ReaderPolicy · DeepProjectionContract ·
+**Ratified P1 contract nouns (2026-06-07 amendment):**
+EraEvent — one unified append-only per-workspace era-ledger event
+vocabulary, including `event_schema_version`, `event_id`,
+`event_ordinal`, `kind`, `subject`, `at_ts`, `declared_by`,
+`writer_version`, conditional `precontract_anchor_ref`, conditional
+`run_ref` (renamed from FeatureEraEvent in P0; ledger-unification and
+event-kind decisions made by P1) · ReaderPolicy — family-bound
+interpretation discipline, not a hidden central authority engine.
+Both are contract-level nouns only: distinct from the first-class
+canonical storage nouns above, and NOT promoted into runtime
+implementation by this amendment.
+
+**Provisional contract nouns:** DeepProjectionContract ·
 ShellContinuityContract · QuarantineRecord · **ShellState** ·
 **CorridorTransition** (the latter two added in P0: P3's postures D2–D5
 presuppose them; both remain provisional contract/event nouns only — NOT
@@ -341,10 +388,13 @@ authorized; never silently opens an architecture phase).
 
 ## J. Maintenance-versus-evidence routing table
 
-**Evidence for P1:** historical workspace scan for `metadata.srg` in deep
-stores (operator-run, Windows); SRG reader-policy inventory ([SRG-A §C] as
-base); main-gate vs cognition-gate reconciliation evidence; era/migration
-vocabulary inputs (per staged F13).
+**Evidence for P1 — COMPLETE (2026-06-07 amendment):** historical
+workspace scan for `metadata.srg` in deep stores: complete — 0 local
+matches (local corpus evidence only); SRG reader-policy inventory:
+complete; main-gate vs cognition-gate reconciliation evidence: complete
+(dormant `retrieve_srg_state` flag finding, C8 refinement);
+era/migration vocabulary inputs: complete (per staged F13, P1 portion
+closed).
 **Evidence for P3:** checkpoint restore round-trip characterization
 (operator-run; verification evidence only, no production wiring).
 **Evidence for P4:** literal 25-key allowlist characterization ([DP-A §B]);
@@ -355,9 +405,12 @@ artifact-class crash-window matrix (on paper); quarantine semantics
 options; rollback and recovery semantics inputs (per staged F13).
 **Independent maintenance candidates (separately ratifiable, never silently
 opening a phase):** identity/character-state atomic-save fix; literal
-25-key regression-lock test; orphan observability counter; SRG cognition
-default reconciliation; interim SRG reader gating **only after** P1 reader
-policy is chosen.
+25-key regression-lock test; orphan observability counter;
+`TORMENT_SRG_COGNITION` default reconciliation (remains separately
+ratifiable; no patch authorized by the P1 amendment); interim SRG reader
+gating **only after** P1 reader policy — P1 reader policy is now ratified,
+so this candidate is policy-unblocked; each slice remains separately
+authorized.
 
 ## K. Custom low-level substrate trigger
 
@@ -385,5 +438,23 @@ amended as needed, committed by Hilmir as
 map gains a one-line pointer to it. The next gate (P1) is then a separate
 trio decision — not implied, not auto-opened.
 
+## N. Amendment record
+
+**N1. P1 closure amendment (2026-06-07, docs-only Slice B).**
+
+P1 — Era and Schema Minimum Contract: closed by promoted contract
+`docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md`.
+Closure date: 2026-06-07. P2: not opened. Next gate: unselected.
+
+This amendment changes registry classification **only** where listed:
+quick-reference gate state (§ quick reference); C7 / C8 / C12 disposition
+and evidence additions (§C); D7–D13 SRG posture dispositions (§D); F6 /
+F13 / F16 parked-question updates (§F); EraEvent / ReaderPolicy promotion
+to ratified P1 contract nouns (§H); P1 evidence-set completion and
+maintenance-candidate status (§J); and this record (§N). It confers **no
+implementation authority**: no runtime code, schema implementation,
+migration, storage product, SRG edit, or subsequent phase is authorized.
+
 ---
-*End v0.1. Amendments are small docs slices with trio sign-off.*
+*End v0.1 as amended 2026-06-07. Amendments are small docs slices with
+trio sign-off.*

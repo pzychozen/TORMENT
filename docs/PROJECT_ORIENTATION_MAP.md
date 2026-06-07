@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-06.
+**Date of last refresh:** 2026-06-07.
 
 ---
 
