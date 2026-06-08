@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -16,12 +16,12 @@ plus tracked docs by path.
 
 | | |
 |---|---|
-| **Active gate** | none — P0, P1, and P2 closed |
-| **Next gate** | unselected — P2.5 opens only after separate trio authorization (next in the recorded graph, not thereby selected) |
+| **Active gate** | none — P0, P1, P2, and P2.5 closed |
+| **Next gate** | unselected — P4 is next in the recorded graph, not opened and not thereby selected; opens only after separate trio authorization |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
-| **Three hard non-goals** | no implementation · no storage-product selection · no P2.5 auto-open |
+| **Three hard non-goals** | no implementation · no storage-product selection · no P4 auto-open |
 
 ---
 
@@ -480,16 +480,22 @@ durable-family identity survey: complete; Codex adversarial H-1 static
 review: complete; operator-run Windows disposable H-1 characterization:
 complete (verdict `H1_CONFIRMED`); P2 contract promotion: complete at
 `950c5a9`.
-**P2.5 — P1/P2 reconciliation check:** not opened · not selected. If
-separately authorized, P2.5 owns cross-contract write-site conformance
-review — inventory writers, confirm required `era_ref` / lineage /
-revision / fingerprint obligations, identify gaps, assign later
-implementation owners. **Headline known gap:** memory-lineage identity has
-no current substrate carrier — today same-memory-across-update continuity
-rides only on the reused `eid`; this remains visible and is not silently
-solved by P2. Layering: P2 states abstract obligations · P2.5 conformance
-review only if separately opened · later per-family slices implement · P4
-reader/projection enforcement · P6 substrate mechanics.
+**P2.5 — P1/P2 reconciliation check: COMPLETE and CLOSED (2026-06-07
+closure registration).** Cross-contract write-site conformance review
+completed and was distilled into `docs/TORMENT_MEMORY_ENGINE_P2_5_CROSS_
+CONTRACT_RECONCILIATION_v0.1.md` (promoted at `093f73a`).
+Recorded findings: canonical P1/P2 carrier field vocabulary was absent
+across the inspected current `torment_service` code surfaces; several
+durable families contain semantic identity analogues; none is automatically
+proven contract-conformant; `embedding_checksum` is adjacent content-derived
+prior art only and must not be silently promoted into the P2
+revision-fingerprint role.
+Later routing remains parked: family-specific slices implement only after
+carrier design; P4 owns reader/projection enforcement and the
+reader-dependency trace; P5a owns recovery/reconciliation; P6 owns substrate
+mechanics; P9 owns migration execution. Active gate: none. Next gate:
+unselected. P4 is next in the recorded graph, not opened and not
+auto-selected.
 **Evidence for P3:** checkpoint restore round-trip characterization
 (operator-run; verification evidence only, no production wiring).
 **Evidence for P4:** literal 25-key allowlist characterization ([DP-A §B]);
@@ -569,6 +575,55 @@ selection, no fingerprint-algorithm selection, no manifest mechanics, no
 migration, no storage-product selection, no P2.5 opening, no adjacent phase
 opening.
 
+**N3. P2.5 closure registration (2026-06-07, docs-only).**
+
+P2.5 — P1/P2 Cross-Contract Reconciliation and Write-Site Conformance
+Review: **CLOSED**. Closure artifact: `docs/TORMENT_MEMORY_ENGINE_P2_5_
+CROSS_CONTRACT_RECONCILIATION_v0.1.md` (promoted at `093f73a`). Active
+gate: none. Next gate: unselected — P4 is next in the recorded graph, not
+opened and not auto-selected.
+
+**Stable center.** Canonical P1/P2 carrier field vocabulary was absent
+across the inspected current `torment_service` code surfaces; several
+durable families contain semantic identity analogues; none of those
+analogues is automatically proven contract-conformant; analogue ≠ canonical
+carrier.
+
+**Anti-drift safeguard.** `embedding_checksum` is adjacent content-derived
+prior art only — not a P2 revision-fingerprint carrier — and must not be
+silently promoted into that role.
+
+**Separated eid concerns.** Allocator reconstruction (`max_eid + 1`) =
+allocator-state survivability weakness; DeepMemoryEcho borrowed eid +
+presence-only validation = confirmed durable-sameness overload; migration
+cursor eid ordinal = derived-substrate migration hazard; edge `src`/`tgt`
+eid = correct local linkage today, future reassociation risk only, no
+current reader harm proven; `update_payload` same-eid re-append = lineage
+gap, suspected overload only, reader trace required before a stronger claim.
+
+**Parked questions.** Q-2: are `closure_id` / `version_id` merely prior
+art, or a later reference shape? Q-3: which operational ledgers are
+P2-governed records, and which are audit evidence? Q-4: does any reader
+beyond DeepMemoryEcho rely on eid sameness across reload for cognition or
+governance behavior?
+
+**Later routing (no work opened).** Family-specific slices: write-site
+stamping after carrier design. P4: reader and projection enforcement; echo
+evidence-based joins; diagnostic fencing; orphan observability;
+reader-dependency trace. P5a: recovery and reconciliation. P6:
+identity-token mechanics; allocator-state persistence; revision-fingerprint
+mechanics; canonical serialization; IntegrityManifest mechanics; durability
+mechanics; relationship, if any, to `embedding_checksum`. P9: migration
+execution; cursor-semantics transition.
+
+This registration changes registry classification **only** where listed:
+quick-reference gate state (§ quick reference) and this record (§N). It
+confers **no implementation authority**: no carrier designed, no analogue
+promoted, no fingerprint-algorithm / identity-token / serialization /
+allocator / manifest selection, no storage product, no migration, no H-1
+patch, no adjacent gate opened.
+
 ---
-*End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure). Amendments
-are small docs slices with trio sign-off.*
+*End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
+closure registration). Amendments are small docs slices with trio
+sign-off.*
