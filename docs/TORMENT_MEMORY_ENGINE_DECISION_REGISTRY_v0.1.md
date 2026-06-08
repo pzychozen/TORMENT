@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -16,12 +16,12 @@ plus tracked docs by path.
 
 | | |
 |---|---|
-| **Active gate** | none — P0 and P1 closed |
-| **Next gate** | unselected — P2 opens only after separate trio authorization (next in the recorded graph, not thereby selected) |
+| **Active gate** | none — P0, P1, and P2 closed |
+| **Next gate** | unselected — P2.5 opens only after separate trio authorization (next in the recorded graph, not thereby selected) |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
-| **Three hard non-goals** | no implementation · no storage-product selection · no P2 auto-open |
+| **Three hard non-goals** | no implementation · no storage-product selection · no P2.5 auto-open |
 
 ---
 
@@ -207,6 +207,26 @@ weakened) and **reclaims no storage in the live path** · FACT · *[R2 §A
 Findings 2–3]; compression.py:795–862* · baseline for P7 · do not describe
 current compression as volume relief · evidence-only · P7 · executor change.
 
+C20. **H-1: MemoryNode `eid` is a reusable local handle, not durable
+identity — mechanically confirmed** by operator-run Windows disposable
+characterization (2026-06-07, verdict `H1_CONFIRMED`). Clean *complete*
+trailing-row loss from `nodes.jsonl` can reduce surviving `max_eid`;
+`MemoryGraph` reload derives `world._next_id = max surviving eid + 1`
+(memory_graph.py:535,553,599), so a new unrelated memory can receive a
+previously used local `eid`. `DeepMemoryEcho` borrows the integer `eid`
+without source-sameness evidence, and the presence-only deep beta filter
+(fabric.py:3708–3710) can re-admit the stale echo once an unrelated new
+node reuses that `eid` · FACT (bounded) · *P2 opening survey 2026-06-07;
+H-1 characterization 2026-06-07; memory_graph.py:535,553,599;
+fabric.py:3708–3710; migration/cursor.py:40–54* · grounds the P2 identity
+contract · **does not prove historical corruption in the real corpus; does
+not authorize an H-1 runtime patch; does not select UUIDs/ULIDs/allocators/
+fingerprint algorithms/manifests-on-disk/fsync/transactions/storage
+product** · evidence-only · P2 (closed at contract level), P4 (echo
+source-sameness, diagnostic fencing, projection filtering), P5a (recovery
+adjacency), P6 (durability mechanics), P9 (migration execution adjacency) ·
+contradicting code change.
+
 ## D. Provisional design postures registry
 
 (All rows: CLASS = POSTURE · *Source: trio workshop conclusions recorded in
@@ -302,8 +322,19 @@ doctrine per their own class.
 (CLASS = PARKED; answering outside the owning phase is drift.)
 
 F1. Durability bar (operator intent) → P5a. F2. Inspectability permanence →
-P5a/P9. F3. Retention policy for superseded versions → P2. F4. Record-
-identity scope (per-agent vs global) → P2/P5a. F5. Read-discipline
+P5a/P9. F3. Retention policy for superseded versions → P2. **P2 disposition
+(2026-06-07): the record-vs-object distinction is ratified — `record` = one
+immutable authored appended revision; `object`/memory lineage = the evolving
+memory represented by multiple revisions. Retention mechanics for superseded
+revisions remain parked.** F4. Record-
+identity scope (per-agent vs global) → P2/P5a. **P2 partial resolution
+(2026-06-07, vocabulary layer): `eid` retained as load-bearing local graph
+handle, never sufficient durable identity; memory-lineage identity stable
+across legitimate updates; record-revision identity binds one immutable
+authored revision; revision fingerprint = checkable revision evidence (not
+truth, not authority); workspace membership distinct from identity; clone
+lineage must be representable. Mechanics remain parked to P2.5 / P5a / P6 /
+P9 as routed.** F5. Read-discipline
 unification + quarantine shape → P5a. F6. **Contract-level decision resolved by P1 (2026-06-07):** raw
 historical crystal stamps do not auto-promote into lifecycle protection;
 recommendation vocabulary ratified. Migration, acceptance, rollback, and
@@ -315,7 +346,12 @@ definition → P8a. F13. **Migration and rollback — staged**: era/migration
 vocabulary portion **completed by P1 (2026-06-07)**; rollback and
 recovery semantics remain P5a; complete architecture-level migration
 strategy remains P9. F14. Noun-cut final
-ratification → P2/P9. F15. Maintenance-lane cadence (concurrent vs serial)
+ratification → P2/P9. **P2 outcome (2026-06-07): no new first-class noun
+added; IntegrityManifest's first profiled use is ratified as the Genesis
+Baseline profile of IntegrityManifest; the three-axis identity vocabulary
+is ratified as contract vocabulary. Remaining noun-cut work belongs to
+later phases only where justified by ambiguity or invalid-state
+prevention.** F15. Maintenance-lane cadence (concurrent vs serial)
 → trio, any time. F16. **Answered for the authoritative local corpus (2026-06-07):**
 `metadata.srg` matches: 0. Copied / external / imported workspace
 characterization remains open where relevant.
@@ -357,6 +393,50 @@ Both are contract-level nouns only: distinct from the first-class
 canonical storage nouns above, and NOT promoted into runtime
 implementation by this amendment.
 
+**Ratified P2 contract vocabulary (2026-06-07 amendment):**
+Contract-level vocabulary only; NOT promoted into runtime implementation by
+this amendment. No new first-class noun is added.
+
+- **local graph handle (`eid`)** — retained · load-bearing · reusable ·
+  operational join key · never sufficient sameness or era-membership
+  evidence.
+- **memory-lineage identity** — stable across legitimate updates to one
+  evolving memory lineage.
+- **record-revision identity** — binds one immutable authored appended
+  revision.
+- **revision fingerprint** — checkable evidence binding authored revision
+  meaning; not evolving-object state · not truth · not authority.
+- **record vs object distinction** — `record` = immutable authored
+  revision; `object`/lineage = evolving memory represented by revisions.
+- **Genesis Baseline profile of IntegrityManifest** — a *profiled use* of
+  the existing first-class noun IntegrityManifest, NOT a new noun. Special
+  interpretation role: derive `legacy_precontract` membership · bind the
+  pre-contract baseline · make handle reuse detectable · fail visibly when
+  unverifiable.
+- **serialization-era validity** — a revision fingerprint is valid only
+  relative to a declared serialization era/profile; unknown, mismatched, or
+  unverifiable context must never silently validate an identity-dependent
+  claim.
+- **DeepMemoryEcho source-evidence requirement** — an echo must preserve:
+  source local handle · source family · source memory-lineage identity ·
+  source record-revision identity or revision fingerprint · source
+  `era_ref`.
+- **edges** — own durable assertion · own attribution route · endpoint
+  evidence validates linkage only · endpoint eras do not silently determine
+  edge era.
+
+**Hilmir-ratified lost-anchor posture (2026-06-07, values-layer):** if the
+Genesis Baseline IntegrityManifest profile is missing, unreadable, or
+unverifiable — legacy records remain readable, inspectable, operator-visible,
+and recoverable; they are not deleted and not silently suppressed; but their
+unverifiable `legacy_precontract` claim does not silently remain
+cognition-eligible (default `diagnostic_only`); a later explicit recovery or
+governance action may restore classification. Standing distinctions:
+`diagnostic_only` ≠ deletion · `diagnostic_only` ≠ invisible suppression ·
+fingerprint ≠ truth · inventory ≠ authority · era attribution ≠ lifecycle
+protection. Source: `docs/TORMENT_MEMORY_ENGINE_P2_FAMILY_IDENTITY_ERA_
+ATTRIBUTION_CONTRACT_v0.1.md` §11.
+
 **Provisional contract nouns:** DeepProjectionContract ·
 ShellContinuityContract · QuarantineRecord · **ShellState** ·
 **CorridorTransition** (the latter two added in P0: P3's postures D2–D5
@@ -395,6 +475,21 @@ complete; main-gate vs cognition-gate reconciliation evidence: complete
 (dormant `retrieve_srg_state` flag finding, C8 refinement);
 era/migration vocabulary inputs: complete (per staged F13, P1 portion
 closed).
+**Evidence for P2 — COMPLETE (2026-06-07 amendment):** read-only
+durable-family identity survey: complete; Codex adversarial H-1 static
+review: complete; operator-run Windows disposable H-1 characterization:
+complete (verdict `H1_CONFIRMED`); P2 contract promotion: complete at
+`950c5a9`.
+**P2.5 — P1/P2 reconciliation check:** not opened · not selected. If
+separately authorized, P2.5 owns cross-contract write-site conformance
+review — inventory writers, confirm required `era_ref` / lineage /
+revision / fingerprint obligations, identify gaps, assign later
+implementation owners. **Headline known gap:** memory-lineage identity has
+no current substrate carrier — today same-memory-across-update continuity
+rides only on the reused `eid`; this remains visible and is not silently
+solved by P2. Layering: P2 states abstract obligations · P2.5 conformance
+review only if separately opened · later per-family slices implement · P4
+reader/projection enforcement · P6 substrate mechanics.
 **Evidence for P3:** checkpoint restore round-trip characterization
 (operator-run; verification evidence only, no production wiring).
 **Evidence for P4:** literal 25-key allowlist characterization ([DP-A §B]);
@@ -455,6 +550,25 @@ maintenance-candidate status (§J); and this record (§N). It confers **no
 implementation authority**: no runtime code, schema implementation,
 migration, storage product, SRG edit, or subsequent phase is authorized.
 
+**N2. P2 closure amendment (2026-06-07, docs-only Slice B).**
+
+P2 — Family Identity and Era Attribution Contract: closed by promoted
+contract `docs/TORMENT_MEMORY_ENGINE_P2_FAMILY_IDENTITY_ERA_ATTRIBUTION_
+CONTRACT_v0.1.md` (promotion commit `950c5a9`). P2.5: not opened. Next
+gate: unselected.
+
+This amendment changes registry classification **only** where listed:
+quick-reference gate state (§ quick reference); H-1 verified FACT row C20
+(§C); F3 / F4 / F14 dispositions (§F); ratified P2 contract vocabulary,
+IntegrityManifest Genesis Baseline profiled-use note, serialization-era
+validity clause, and Hilmir-ratified lost-anchor posture (§H); P2
+evidence-set completion and P2.5 write-site-conformance responsibility
+(§J); and this record (§N). It confers **no implementation authority**: no
+runtime code, no schema instantiation, no H-1 patch, no identity-token
+selection, no fingerprint-algorithm selection, no manifest mechanics, no
+migration, no storage-product selection, no P2.5 opening, no adjacent phase
+opening.
+
 ---
-*End v0.1 as amended 2026-06-07. Amendments are small docs slices with
-trio sign-off.*
+*End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure). Amendments
+are small docs slices with trio sign-off.*
