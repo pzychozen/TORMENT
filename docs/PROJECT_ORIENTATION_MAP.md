@@ -558,6 +558,22 @@ a separate trio decision. P1 later closed as recorded below.**
 **TORMENT Memory Engine P4 — Reader and Projection Safety Contract promoted and closed (2026-06-09, `dbdbc30`).**
 `docs/TORMENT_MEMORY_ENGINE_P4_READER_PROJECTION_SAFETY_CONTRACT_v0.1.md` is the promoted requirement-level design contract (full P4 framing report stays working-folder evidence only, **not** promoted). It fixes **five obligations** — (O1) echo source-sameness before ordinary cognition admission; (O2) motif-member source-membership sameness before derived identity-anchor emission, under the applicable family-bound source-sameness adequacy standard; (O3) surface classification by both intent and re-entry capability; (O4) explicit surface-classified projection gating, never accidental payload spread; (O5) orphan/mismatch observability (no silent cognition admission, no invisible disappearance, operator-auditable inspectability) — plus one **contract-wide non-coercion invariant** governing all five (memory may shape but not seize authority; audit observes but does not become authority; no silent output blocking / invisible deletion / covert unauditable suppression / authority seizure / personality lock). **Ratified Hilmir values-layer posture:** unprovable runtime source-sameness defaults to `diagnostic_only` cognition eligibility until an explicit audited governance action restores it, while staying operator-auditable, inspectable, and recoverable; no default model-facing notice — and `diagnostic_only` is an *eligibility posture*, not a *projection instruction*. **P4 authorizes no mechanics** (no implementation/patch/tests/probe; no identity-token, fingerprint, serialization, allocator, manifest, database/SQL, substrate, packaging, motif redesign, stored-edge repair, migration, quarantine, recovery UX, orphan-counter, disclosure-channel default, allowlist edit, FILTER-A change, endpoint removal, MCP-resource rerouting, ReaderPolicy implementation, maintenance, or CodeQL work). Later-owner routing stays parked: P5a recovery/reconciliation/quarantine/orphan-UX/stored-edge-repair; P5b portability/durability; P6 identity carriers/fingerprints/serialization/allocator/IntegrityManifest/substrate/packaging-boundary; P9 migration/architecture-wide promotion; maintenance lane for the named small items. **Memory Engine phase state: P0, P1, P2, P2.5 closed; P4 contract closed; active gate none; no next gate auto-opened — P3 is next in the recorded graph but selecting the next active slice requires deliberate steering.** Registry companion: §N5 of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
+**TORMENT Memory Engine — post-P4 substrate-readiness logistics note (2026-06-09).**
+`docs/TORMENT_MEMORY_ENGINE_SUBSTRATE_READINESS_PHASE_CONSOLIDATION_MEMO_v0.1.md`
+records that the remaining phase graph is a dependency map, not a
+mandatory conveyor belt. Active gate: none. P3 is real but dormant.
+Substrate-design consideration is eligible under registry §K at minimum
+through the documented unmet-transactional-guarantees trigger, but the
+TORMENT Governed-Memory Substrate Programme remains unopened. Its future
+shape is one umbrella with two distinct internal stages: P5a-shaped
+recovery/reconciliation semantics and P6-shaped carrier/substrate
+mechanics. Cluster 5 v0.2 fragility work contributes inputs; Track B
+durability contributes requirements without absorbing Track B
+authority semantics. P7/P8a/P8b/P9 remain conditional or later; P10/P11
+are unspecified placeholders. No implementation, mechanics selection,
+graph amendment, registry amendment, maintenance, or CodeQL work is
+authorized.
+
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
 
