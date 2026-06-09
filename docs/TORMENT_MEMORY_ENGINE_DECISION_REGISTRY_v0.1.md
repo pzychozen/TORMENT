@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -16,8 +16,8 @@ plus tracked docs by path.
 
 | | |
 |---|---|
-| **Active gate** | none — P0, P1, P2, and P2.5 closed |
-| **Next gate** | unselected — P4 is next in the recorded graph, not opened and not thereby selected; opens only after separate trio authorization |
+| **Active gate** | none — P0, P1, P2, P2.5 closed; P4 contract promoted and closed at `dbdbc30` |
+| **Next gate** | unselected — P3 is next in the recorded graph after P4, not opened and not thereby selected; selecting the next active slice requires deliberate trio steering |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
@@ -661,7 +661,69 @@ P4, and confers **no implementation authority**: no carrier, no identity-token
 generic database promoted, no migration, no edge or motif redesign, no
 diagnostic-fence or disclosure-channel mechanics.
 
+**N5. P4 contract promotion and closure registration (2026-06-09, docs-only).**
+
+P4 — Reader and Projection Safety Contract: **promoted and closed** at commit
+`dbdbc30`. Promoted artifact:
+`docs/TORMENT_MEMORY_ENGINE_P4_READER_PROJECTION_SAFETY_CONTRACT_v0.1.md`
+(requirement-level design contract; full P4 framing report remains
+working-folder evidence only and is **not** promoted). Active gate: none. Next
+gate: unselected — P3 is next in the recorded graph, not opened and not
+auto-selected.
+
+**Contract shape (do not reproduce full text here; cite the artifact).** Five
+requirement-level obligations: (O1) echo source-sameness before ordinary
+cognition admission; (O2) motif-member source-membership sameness before derived
+identity-anchor emission, under the applicable family-bound source-sameness
+adequacy standard; (O3) surface classification by both intent and re-entry
+capability; (O4) explicit surface-classified projection gating, never accidental
+payload spread; (O5) orphan/mismatch observability — no silent cognition
+admission, no invisible disappearance, operator-auditable inspectability. Plus
+one **contract-wide non-coercion invariant** governing O1–O5 (not a sixth
+feature): memory may shape context but may not seize authority; audit observes
+authority but does not become authority; no silent output blocking, no invisible
+deletion, no covert unauditable suppression of evidence or eligibility state, no
+authority seizure, no personality lock.
+
+**Ratified Hilmir values-layer posture (records E10-class operator intent).**
+When runtime source-sameness cannot be proven, the reference defaults to
+`diagnostic_only` cognition eligibility until an explicit audited governance
+action restores eligibility; it remains operator-auditable, inspectable, and
+recoverable; ordinary model-facing notice is not required by default.
+**Anti-drift:** `diagnostic_only` is an *eligibility posture*, not a *projection
+instruction* — diagnostic projection stays governed by O3/O4 and does not by
+itself confer cognition eligibility. This extends the P2 lost-anchor posture (§H)
+to the runtime sameness-failure case.
+
+**No mechanics authorized by P4.** no implementation · no runtime patch · no
+tests · no executable probe · no identity-token / UUID / ULID selection · no
+fingerprint algorithm · no serialization · no allocator mechanics · no manifest
+mechanics · no database/SQL selection · no substrate mechanics · no packaging
+decision · no motif redesign · no stored-edge repair · no migration · no
+quarantine design · no recovery UX · no orphan-counter implementation · no
+disclosure-channel default · no allowlist edit · no FILTER-A change · no endpoint
+removal · no MCP-resource rerouting · no ReaderPolicy implementation · no
+maintenance · no CodeQL work.
+
+**Later-owner routing stays parked (unchanged from §J / the contract):** P5a
+recovery/reconciliation/quarantine-semantics/orphan-recovery-UX/stored-edge-repair
+adjacency; P5b portability and durability mechanics; P6 identity carriers /
+fingerprints / serialization / allocator durability / IntegrityManifest mechanics
+/ TORMENT-specific governed-memory substrate mechanics / packaging-boundary
+evaluation; P9 migration execution and architecture-wide promotion; maintenance
+lane CodeQL complaints / orphan-observability counter / allowlist regression lock
+/ identity-character-state atomic-save fix.
+
+**Next-gate posture.** P4 is closed; **no next gate is auto-opened.** The
+dependency graph still places P3 after P4, but selecting the next active slice
+requires deliberate steering review (gate-start survey rule).
+
+This amendment changes registry classification **only** where listed:
+quick-reference gate state (§ quick reference) and this record (§N). It confers
+**no implementation authority** and opens no adjacent gate.
+
 ---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
-closure registration; N4 pre-P4 reader-dependency trace registration).
+closure registration; N4 pre-P4 reader-dependency trace registration) and
+2026-06-09 (N5 P4 contract promotion and closure registration).
 Amendments are small docs slices with trio sign-off.*
