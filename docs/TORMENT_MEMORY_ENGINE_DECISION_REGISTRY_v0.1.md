@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -623,7 +623,45 @@ promoted, no fingerprint-algorithm / identity-token / serialization /
 allocator / manifest selection, no storage product, no migration, no H-1
 patch, no adjacent gate opened.
 
+**N4. Pre-P4 reader-dependency trace registration (2026-06-07, docs-only).**
+
+Registers the bounded read-only pre-P4 reader-dependency trace as
+`docs/TORMENT_MEMORY_ENGINE_PRE_P4_READER_DEPENDENCY_TRACE_v0.1.md`. Active
+gate: none. Next gate: unselected. P4 **not opened**.
+
+**Corrected Q-4 disposition** (supersedes the earlier "sole confirmed
+cognition surface" framing): there are **two** confirmed cognition-affecting
+reusable-eid dependencies, on different axes — (i) **DeepMemoryEcho** is the
+sole confirmed *direct echo-to-prompt* H-1 reader (presence-only beta
+validation; FILTER-A is orthogonal and does not close H-1); (ii)
+**motif membership → identity-anchor emission** is a *separate, derived*
+cognition-affecting reusable-eid path (`_maybe_emit_identity_anchor` resolves
+persisted motif member eids by presence and distils their summaries into a
+new `identity_anchor` memory; derived/non-canon anchors reach cognition
+through ordinary tier classification, **excluded** from the canon-only
+identity-anchor shortcut / full continuity boost unless promoted to canon;
+ordinary tiering may still classify them into an identity block by
+tier/half-life). **No governance
+reader** of reusable eids was found. **Stored node→node edges are
+latent-only** (loaded/appended, never read for cognition or governance).
+
+**Routing:** direct and derived reader/projection safety → **P4** (echo
+source-sameness; derived identity-anchor source-membership; raw-diagnostic
+intent-vs-capability fence; field-surfacing tiers; orphan observability;
+light spirit-reflection re-entry confirmation); recovery / stored-edge repair
+→ **P5a**; durability / identity-token / fingerprint / substrate mechanics →
+**P6**; migration execution → **P9**. No executable probe authorized.
+
+This amendment changes registry classification **only** where listed:
+quick-reference is unchanged (gate state already records P0–P2.5 closed, P4
+unselected); this record (§N) registers the trace artifact and the corrected
+Q-4 disposition. It does **not** amend P1 or P2 doctrine, does **not** open
+P4, and confers **no implementation authority**: no carrier, no identity-token
+/ fingerprint / serialization / allocator / manifest / substrate mechanics, no
+generic database promoted, no migration, no edge or motif redesign, no
+diagnostic-fence or disclosure-channel mechanics.
+
 ---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
-closure registration). Amendments are small docs slices with trio
-sign-off.*
+closure registration; N4 pre-P4 reader-dependency trace registration).
+Amendments are small docs slices with trio sign-off.*

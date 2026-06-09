@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-07 (P2.5 closure registration).
+**Date of last refresh:** 2026-06-07 (pre-P4 reader-dependency trace registration).
 
 ---
 
@@ -26,8 +26,9 @@ authority; audit does not become authority.* Consistent with the MCP capability
 boundary doctrine (`docs/MCP_CAPABILITY_BOUNDARY.md`): **automatic remains
 allowed; autonomous remains not authorized.** Autonomy has not opened.
 
-The next primary lane is intentionally **unselected** — pending this
-orientation-map curation and a small maintenance re-verification (see §7). Any
+The next primary lane is intentionally **unselected**. Orientation-map curation
+and the small maintenance re-verification are closed. Any new lane requires a
+separate trio decision under the gate-start survey rule in §5. Any
 slice that pushes against the automatic/autonomous boundary needs its own
 ratification; any slice that respects it proceeds under the gate-start survey
 rule in §5.
@@ -36,7 +37,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-06-03, the following arcs are closed on `main`. Each row points to
+As of 2026-06-07, the following arcs are closed on `main`. Each row points to
 the tracked source of truth for what shipped or was ratified. (Not every arc has
 a dedicated checkpoint doc — some point to a doctrine/framing doc, and a few
 recent hardening items are commit-level only.)
@@ -486,17 +487,14 @@ expected-by-design).
 The doctrinal kernel from §1 anchors any direction unchanged: *Memory
 may shape context. Memory may not seize authority.*
 
-**Ordering discipline (2026-05-31).** No narrow local finding automatically
-becomes the next implementation thread. Sequence: (1) this orientation-map
-curation, then pause; (2) small maintenance re-verification — re-survey before
-acting (do not assume the old checklist is still current): remaining model
-defaults in bench tools, the `.env.example` URL naming inconsistency
-(`TORMENT_SERVER_URL` vs `TORMENT_URL`), and the Predicate #7 hardening item;
-(3) re-rank substantive work afterward. **Authority-versus-emergence stays a
+**Ordering discipline (updated 2026-06-07).** Orientation-map curation and the
+small maintenance re-verification are closed. No narrow local finding
+automatically becomes the next implementation thread. The pre-P4
+reader-dependency trace is now closed and registered below. Any substantive
+next lane must still be selected separately. **Authority-versus-emergence stays a
 small audit-first design-memo side lane — not an auto-opened Loop probe and not
-a primary implementation lane.** If maintenance closes cleanly and the trio wants
-an implementation lane, Track B v0.2 (runtime contest ledger) advanced through
-B2-S1 → B2-S4, all non-load-bearing: **B2-S1 framing closed 2026-06-03 at
+a primary implementation lane.** Track B v0.2 (runtime contest ledger) previously
+advanced through B2-S1 → B2-S4, all non-load-bearing: **B2-S1 framing closed 2026-06-03 at
 `c64417e`**, **B2-S2 isolated ContestRecord vocabulary closed 2026-06-04 at
 `f42b6ee`**, **B2-S3 isolated ContestLedger persistence closed 2026-06-04 at
 `9c027a0`**, **B2-S4 narrowed framing closed 2026-06-04 at `36a8a84`**, and
@@ -542,17 +540,20 @@ facts, provisional postures, carried doctrine, operator intent, parked
 questions, research hypotheses, controlled vocabulary, the revised phase
 graph (P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 →
 P11, with P5b / P8b / maintenance side lanes), and evidence-versus-
-maintenance routing. **P1 remains closed and requires a separate trio
-decision.**
+maintenance routing. **At P0 promotion time, P1 remained unopened and required
+a separate trio decision. P1 later closed as recorded below.**
 
 **TORMENT Memory Engine P1 — Era and Schema Minimum Contract closed (2026-06-07).**
-`docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md` is promoted as the ratified P1 contract: one unified append-only era ledger per workspace (EraEvent minimum vocabulary, `event_ordinal` primary order, fail-closed integrity posture); era attribution as interpretation context — never ratification, protection, truth, or authority; `era_genesis` / `legacy_precontract` handling for the pre-contract corpus with the hard rule that unattributable post-genesis objects never fall back to legacy; schema-version minimums with one canonical shim per family; the nested-schema verbatim-or-omit rule; family-bound ReaderPolicy outcomes with the diagnostic fencing clause; the SRG disable-honesty contract; and the Hilmir-ratified crystal recommendation/contestability posture (no automatic re-homing; auditable, contestable, reversible recommendations only). Windows deep-store scan: `metadata.srg` 0 matches (local corpus evidence only). Implementation, migration mechanics, recovery, projection instantiation, and storage primitives remain parked to P2/P3/P4/P5a/P6/P9 per the memo §9; `TORMENT_SRG_COGNITION` default reconciliation is a separately ratifiable maintenance candidate. **The next gate is unselected; P2 opens only by explicit trio decision.**
+`docs/TORMENT_MEMORY_ENGINE_P1_ERA_SCHEMA_MINIMUM_CONTRACT_v0.1.md` is promoted as the ratified P1 contract: one unified append-only era ledger per workspace (EraEvent minimum vocabulary, `event_ordinal` primary order, fail-closed integrity posture); era attribution as interpretation context — never ratification, protection, truth, or authority; `era_genesis` / `legacy_precontract` handling for the pre-contract corpus with the hard rule that unattributable post-genesis objects never fall back to legacy; schema-version minimums with one canonical shim per family; the nested-schema verbatim-or-omit rule; family-bound ReaderPolicy outcomes with the diagnostic fencing clause; the SRG disable-honesty contract; and the Hilmir-ratified crystal recommendation/contestability posture (no automatic re-homing; auditable, contestable, reversible recommendations only). Windows deep-store scan: `metadata.srg` 0 matches (local corpus evidence only). Implementation, migration mechanics, recovery, projection instantiation, and storage primitives remain parked to P2/P3/P4/P5a/P6/P9 per the memo §9; `TORMENT_SRG_COGNITION` default reconciliation is a separately ratifiable maintenance candidate. **At P1 closure time, P2 remained unopened and required an explicit trio decision. P2 later closed as recorded below.**
 
 **TORMENT Memory Engine P2 — Family Identity and Era Attribution Contract closed (2026-06-07).**
 `docs/TORMENT_MEMORY_ENGINE_P2_FAMILY_IDENTITY_ERA_ATTRIBUTION_CONTRACT_v0.1.md` is promoted as the ratified P2 contract. Evidence: the operator-run Windows disposable characterization confirmed **H-1** — clean trailing-row loss can recycle an `eid`, and a stale deep echo can become presence-valid against an unrelated new node (mechanically confirmed hazard; NOT proven real-corpus corruption; NOT patch authorization). Core P2 contract: `eid` is retained as a load-bearing local handle but is **never sufficient durable identity**; a **three-axis identity model** — local graph handle · memory-lineage identity · record-revision identity — plus a revision fingerprint (or equivalent checkable evidence); the **Genesis Baseline profile of IntegrityManifest** binds the pre-contract corpus with bare-eid legacy membership **forbidden** (fingerprint match required); the **serialization-era validity** rule (a fingerprint is valid only relative to a declared serialization era/profile); **edges** are their own durable assertion with their own attribution route; and the **Hilmir-ratified lost-anchor default** — if the Genesis Baseline manifest is missing/unreadable/unverifiable, legacy records stay readable/inspectable/recoverable and are never deleted or silently suppressed, but their unverifiable `legacy_precontract` claim drops to `diagnostic_only` (not silent cognition-eligibility), with later explicit recovery possible. Identity-token technology, fingerprint algorithm, manifest mechanics, allocator/durability, echo-side checking, clone reconciliation, and projection filtering all remain parked to P4/P5a/P6/P9; no H-1 patch is authorized. **Standing tension carried forward:** memory-lineage identity has no current substrate carrier — the headline P2.5 write-site conformance gap, not silently solved here. **At P2 closure time, P2.5 was next in the recorded graph and was NOT thereby selected or opened; it could own cross-contract write-site conformance review only if separately authorized. That separate authorization later occurred, and P2.5 is now closed as recorded below. The decision-registry amendment recording P2 closure is a separate Slice B.**
 
 **TORMENT Memory Engine P2.5 — Cross-Contract Reconciliation and Write-Site Conformance Review closed (2026-06-07).**
 `docs/TORMENT_MEMORY_ENGINE_P2_5_CROSS_CONTRACT_RECONCILIATION_v0.1.md` is promoted as the tracked reconciliation artifact (reconciliation findings + later-owner routing only; no implementation authority). Stable center: canonical P1/P2 carrier field vocabulary was absent across the inspected current `torment_service` code surfaces; several durable families contain semantic identity analogues; none is automatically proven contract-conformant; analogue ≠ canonical carrier. Anti-drift safeguard: `embedding_checksum` is adjacent content-derived prior art only — not a P2 revision-fingerprint carrier — and must not be silently promoted. Separated eid concerns: allocator reconstruction (`max_eid+1`) = survivability weakness; DeepMemoryEcho borrowed-eid + presence-only validation = confirmed durable-sameness overload; migration cursor eid ordinal = derived-substrate migration hazard; edge `src`/`tgt` eid = correct local linkage today, future reassociation risk only, no current reader harm proven; `update_payload` same-eid re-append = lineage gap, suspected overload only, reader trace required. Parked Q-2 (closure_id/version_id prior-art vs reference shape), Q-3 (which operational ledgers are P2-governed vs audit evidence), Q-4 (reader eid-sameness dependency beyond DeepMemoryEcho). Later routing recorded without opening work: family-specific stamping slices; P4 (reader/projection enforcement, echo evidence-based joins, diagnostic fencing, orphan observability, reader-dependency trace); P5a (recovery/reconciliation); P6 (identity-token / allocator-state / revision-fingerprint / serialization / IntegrityManifest / durability mechanics, and any relationship to `embedding_checksum`); P9 (migration execution, cursor-semantics transition). **Memory Engine phase state: P0, P1, P2, and P2.5 closed; active gate none; next gate unselected; P4 is next in the recorded graph, not opened and not auto-selected.** Hard non-decisions hold: no carrier designed · no analogue promoted · no fingerprint algorithm selected · no identity-token technology selected · no serialization mechanics selected · no allocator mechanics selected · no manifest mechanics selected · no storage product selected · no migration authorized · no H-1 patch authorized · no adjacent gate opened.
+
+**TORMENT Memory Engine — pre-P4 reader-dependency trace closed (2026-06-07).**
+`docs/TORMENT_MEMORY_ENGINE_PRE_P4_READER_DEPENDENCY_TRACE_v0.1.md` records the bounded read-only evidence map. **DeepMemoryEcho is the sole confirmed direct echo-to-prompt H-1 reader** (presence-only beta validation; FILTER-A is orthogonal and does not close H-1). **Motif member-eid → identity-anchor emission is a separate derived cognition-affecting reusable-eid path** (`_maybe_emit_identity_anchor` resolves persisted motif members by presence and distils them into a new `identity_anchor` memory; derived/non-canon anchors reach cognition through ordinary tier classification, excluded from the canon-only identity-anchor shortcut / full continuity boost unless promoted to canon; ordinary tiering may still classify them into an identity block by tier/half-life) and must be named in later P4. No governance reader of reusable eids was found. **Stored node→node edges are latent-only today** (loaded/appended, never read for cognition or governance). P4 remains unopened and unselected; it would own echo source-sameness + derived identity-anchor source-membership + raw-diagnostic intent-vs-capability fencing + field-surfacing tiers (stored-edge repair excluded → P5a; identity/fingerprint/substrate mechanics → P6). **Future storage framing:** TORMENT-specific governed memory substrate design, not generic database-product selection; current JSONL-canonical + SQLite-derived-sidecar substrate is scaffolding (SQLite non-authoritative/optional/rebuildable) — see `docs/TORMENT_ROADMAP_NOTES.md` future-storage concern and `docs/CLUSTER_5_STORAGE_SURVIVABILITY_v0.1.md` §3.1–§3.2.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
