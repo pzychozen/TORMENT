@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -16,12 +16,12 @@ plus tracked docs by path.
 
 | | |
 |---|---|
-| **Active gate** | none — P0, P1, P2, P2.5 closed; P4 contract promoted and closed at `dbdbc30` |
-| **Next gate** | unselected — P3 is next in the recorded graph after P4, not opened and not thereby selected; selecting the next active slice requires deliberate trio steering |
+| **Active gate** | none — P0, P1, P2, P2.5 closed; P4 contract promoted and closed at `dbdbc30`; Governed-Memory Substrate Programme Stage A Recovery and Reconciliation Semantics Contract promoted and closed at `2bf3b29` |
+| **Next gate** | unselected — Stage A is closed; no next gate is auto-opened. Stage B mechanics and database design remain unopened. Selecting any next active slice requires deliberate trio steering and the Issue #54 clean-checkpoint boundary |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
-| **Three hard non-goals** | no implementation · no storage-product selection · no P4 auto-open |
+| **Three hard non-goals** | no implementation · no storage-product selection · no Stage B or database-design auto-open |
 
 ---
 
@@ -722,8 +722,86 @@ This amendment changes registry classification **only** where listed:
 quick-reference gate state (§ quick reference) and this record (§N). It confers
 **no implementation authority** and opens no adjacent gate.
 
+**N6. Governed-Memory Substrate Programme Stage A contract promotion and closure
+registration (2026-06-09, docs-only).**
+
+Governed-Memory Substrate Programme Stage A — Recovery and Reconciliation
+Semantics Contract: **promoted and closed** at commit `2bf3b29`. Promoted
+artifact:
+`docs/TORMENT_MEMORY_ENGINE_STAGE_A_RECOVERY_RECONCILIATION_SEMANTICS_CONTRACT_v0.1.md`.
+The full Stage A/B framing reports, Codex adversarial reviews, and working-folder
+drafts remain working-folder evidence only and are **not** promoted. Active gate:
+none. Next gate: unselected — Stage B mechanics and database design remain
+unopened and are not auto-selected. GitHub Issue #54 remains the checkpoint
+barrier before database design may be considered.
+
+**Contract shape (do not reproduce full text here; cite the artifact).** Seven
+requirement-level obligations: (O1) governance-meaning-complete recovery; (O2)
+visible family-bound ReaderPolicy dispositions, with no universal storage-error
+bin; (O3) era-aware recovery and no silent reclassification; (O4) explicit
+audited restoration boundary; (O5) committed-write durability promise bound to
+O1 governance-meaning-complete recovery; (O6) character-basin preservation
+without rigid pinning; (O7) storage-shape freedom under semantic-invariant
+preservation. Plus one **contract-wide non-coercion and audit invariant**
+governing O1–O7, not an eighth implementable feature.
+
+**Ratified Hilmir values-layer postures.** (1) A write reported committed
+promises recoverability after process crash and ordinary OS or power
+interruption within honest local-hardware guarantees; committed durability
+includes the artifacts and evidence required for governance-meaning-complete
+recovery. (2) Within that durability scope, authored canonical character state
+survives verbatim; durable basin-shaping assertions survive or are faithfully
+rederived; derived state may rebuild; genuinely ephemeral modulation may
+recompute; soft guidance may not be silently pinned into rigid substrate
+control. (3) Deterministic automatic restoration is permitted only when required
+evidence is fully proven valid again under the applicable family-bound
+ReaderPolicy, with an explicit auditable event, inspectability, contestability,
+and reversibility; ambiguous cases stage recommendations or await explicit
+governance acceptance; no invisible automatic finalizer; Hilmir retains ultimate
+operator authority.
+
+**Anti-drift.** recovery != text-only reread · storage lane != authority class ·
+canonicality != authority · eligibility != projection · diagnostic_only !=
+automatic exposure · diagnostic_only != deletion · quarantine != deletion ·
+fingerprint != truth · inventory != authority · era attribution != authority ·
+storage-shape change != semantic change.
+
+**No mechanics authorized by Stage A.** no implementation · no runtime patch · no
+tests · no executable probe · no database-product or SQL selection · no
+identity-token / UUID / ULID selection · no fingerprint algorithm · no
+serialization profile · no allocator mechanics · no IntegrityManifest mechanics ·
+no journal format · no transaction design · no fsync strategy · no replication or
+backup design · no snapshot or compaction format · no packaging decision · no pip
+distribution · no repository extraction · no migration · no Track B authority
+reopening · no CodeQL work · no security redesign · no security-paper update.
+
+**Later-owner routing stays parked.** Stage B / P6-shaped mechanics: identity
+carriers · revision fingerprints · serialization · allocator durability ·
+IntegrityManifest mechanics · transaction model · append guarantees · substrate
+architecture · adapter boundary · packaging evaluation · database evaluation.
+P5a adjacency: reconciliation procedure · quarantine procedure · rollback
+recovery semantics · clone reconciliation · torn-append handling · duplicate
+repair · partial-restore repair · stored-edge repair adjacency. P7: conditional
+compaction questions. P8a/P8b: research-hypothesis admission benchmarks only.
+P9: migration execution · architecture-wide promotion. Maintenance lane: CodeQL
+and minor named repairs, separately authorized. Future security layer:
+multi-process coordination · at-rest protection · access-boundary hardening ·
+GitHub security-paper update after database work.
+
+**Next-gate posture.** Stage A is closed. No next gate is auto-opened. Stage B
+mechanics and database design remain unopened. Before database design is
+considered, Issue #54 requires a synchronized Windows-authoritative clean
+checkpoint and a fresh-chat handoff.
+
+This amendment changes registry classification **only** where listed: the
+amendment-date line, quick-reference gate state, three-hard-non-goals wording,
+and this §N6 record. It confers **no implementation authority**, selects no
+mechanics, opens no adjacent gate, and does not amend the recorded dependency
+graph.
+
 ---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
-2026-06-09 (N5 P4 contract promotion and closure registration).
+2026-06-09 (N5 P4 contract promotion and closure registration; N6 Stage A
+recovery/reconciliation semantics contract promotion and closure registration).
 Amendments are small docs slices with trio sign-off.*

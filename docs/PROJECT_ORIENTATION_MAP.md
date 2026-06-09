@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-09 (P4 Reader and Projection Safety Contract promotion + closure registration).
+**Date of last refresh:** 2026-06-09 (Stage A Recovery and Reconciliation Semantics Contract promotion + closure registration).
 
 ---
 
@@ -561,18 +561,44 @@ a separate trio decision. P1 later closed as recorded below.**
 **TORMENT Memory Engine — post-P4 substrate-readiness logistics note (2026-06-09).**
 `docs/TORMENT_MEMORY_ENGINE_SUBSTRATE_READINESS_PHASE_CONSOLIDATION_MEMO_v0.1.md`
 records that the remaining phase graph is a dependency map, not a
-mandatory conveyor belt. Active gate: none. P3 is real but dormant.
-Substrate-design consideration is eligible under registry §K at minimum
-through the documented unmet-transactional-guarantees trigger, but the
-TORMENT Governed-Memory Substrate Programme remains unopened. Its future
-shape is one umbrella with two distinct internal stages: P5a-shaped
-recovery/reconciliation semantics and P6-shaped carrier/substrate
-mechanics. Cluster 5 v0.2 fragility work contributes inputs; Track B
+mandatory conveyor belt; P3 is real but dormant. At logistics-note
+promotion time, substrate-design consideration was eligible under
+registry §K at minimum through the documented unmet-transactional-
+guarantees trigger, but the TORMENT Governed-Memory Substrate Programme
+remained unopened. The note framed its future shape as one umbrella with
+two distinct internal stages: P5a-shaped recovery/reconciliation
+semantics and P6-shaped carrier/substrate mechanics. *(Stage A has since
+been promoted and closed — see the Stage A closure paragraph below.)*
+Cluster 5 v0.2 fragility work contributes inputs; Track B
 durability contributes requirements without absorbing Track B
 authority semantics. P7/P8a/P8b/P9 remain conditional or later; P10/P11
-are unspecified placeholders. No implementation, mechanics selection,
-graph amendment, registry amendment, maintenance, or CodeQL work is
-authorized.
+are unspecified placeholders. At logistics-note promotion time, no
+implementation, mechanics selection, graph amendment, registry
+amendment, maintenance, or CodeQL work was authorized.
+
+**TORMENT Governed-Memory Substrate Programme Stage A — Recovery and Reconciliation Semantics Contract promoted and closed (2026-06-09, `2bf3b29`).**
+`docs/TORMENT_MEMORY_ENGINE_STAGE_A_RECOVERY_RECONCILIATION_SEMANTICS_CONTRACT_v0.1.md`
+is the promoted requirement-level semantics contract. It fixes **seven
+obligations** — (O1) governance-meaning-complete recovery; (O2) visible
+family-bound failure disposition; (O3) era-aware recovery and no silent
+reclassification; (O4) explicit audited restoration; (O5) committed-write
+durability bound to governance-meaning-complete recovery; (O6) character-basin
+preservation without rigid pinning; (O7) storage-shape freedom under invariant
+preservation — plus one **contract-wide non-coercion/audit invariant** governing
+all seven (not an eighth feature). **Ratified Hilmir posture:** committed means
+honestly recoverable after process crash and ordinary OS/power interruption
+within local-hardware guarantees; authored canonical character state survives
+verbatim within that committed scope without soft-guidance pinning; deterministic
+automatic restoration is allowed only under full proof with explicit auditable,
+inspectable, contestable, reversible history and no invisible finalizer. **Stage A
+selects no mechanics and opens no implementation, database design, migration,
+packaging, CodeQL, or security work.** Stage B mechanics and database design
+remain unopened and are not auto-selected. **GitHub Issue #54 remains the
+checkpoint barrier:** before database design is considered, record synchronized
+Windows-authoritative HEAD and clean-tree status and prepare the usual fresh-chat
+handoff; the issue also preserves Hilmir's reminder to update the GitHub security
+paper after database-design work as a separate deliberate slice. Registry
+companion: §N6 of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
