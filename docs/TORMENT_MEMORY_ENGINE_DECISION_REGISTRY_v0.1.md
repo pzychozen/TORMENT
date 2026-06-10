@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -799,9 +799,74 @@ and this §N6 record. It confers **no implementation authority**, selects no
 mechanics, opens no adjacent gate, and does not amend the recorded dependency
 graph.
 
+**N7. Thinking-layer archaeology: ratified soft-state continuity postures and
+parked private-thinking-layer seam (2026-06-09, docs-only).**
+
+Source: read-only thinking/cognition runtime archaeology survey + closure
+reconciliation (working-folder evidence; survey conclusions confirmed standing at
+`076f4c2`, the intervening commit being docs-only). The survey established, as
+VERIFIED FACT: (i) the named "thinking/cognition" layer is **deterministic
+heuristic routing and retrieval shaping, not a separate private model-deliberation
+room** (`thinking_controller.py:398–455`; cognition roles have no model calls and
+are off the default `/agent/query` path); (ii) the **TriOcta memory kernel is live
+on every ingest and load-bearing** — geometric state gates writes and sets
+strength/confidence/half-life/promotion signals (`fabric.py:2535,2654`;
+`memory_kernel.py:392–395`); (iii) the **character basin is real and
+preservation-relevant**; (iv) **private deliberative cognition is not yet
+meaningfully implemented** (roadmap-only). No reader-safety, projection-safety,
+path-integrity, or storage-correctness flaw surfaced; RSB is dead code, RGD is a
+fixed composite with no dynamics.
+
+**Operator-ratified soft-state continuity postures (Hilmir, 2026-06-09).** These
+record OPERATOR INTENT for how future substrate work must treat cognition-adjacent
+continuity state; they select no carrier, schema, serialization, or mechanic, and
+they refine — they do not amend — the Stage A O6 soft-guidance boundary.
+
+- **TriOcta ModelState** — durable non-canonical continuity state; recoverable
+  after ordinary crash when valid evidence exists; not authored canon; not
+  immutable; not authority-bearing; not a personality lock; not an absolute
+  preservation lock; resettable through an explicit auditable operator-visible
+  path.
+- **CorridorMonitor EMA** — durable non-canonical continuity state where needed
+  for faithful continuation; not authored canon; not rigidly pinned; resettable
+  and rebuildable where technically valid.
+- **tri_mod multipliers** — ephemeral per-step modulation; never persist as
+  durable state; recompute naturally.
+- **cycle-stage transients** — ephemeral; do not persist.
+- **spirit-return warmth** — durable soft guidance; bounded; inspectable;
+  contestable; resettable; decay-capable; never canonical; never authority-bearing;
+  never an absolute preservation lock.
+- **mood / drift history** — durable soft guidance; preserve enough continuity to
+  avoid arbitrary flattening; never silently promote into canon; remain resettable
+  and contestable.
+- **symbol trace** — rebuildable from attributable durable history where possible;
+  do not freeze it into a rigid first-class carrier unless later evidence shows
+  faithful reconstruction is insufficient.
+- **SRG** — remain default-off; remain benchmark-gated; do not freeze into
+  first-class substrate requirements yet.
+
+**Governing principle:** *preserve continuity without preserving compulsion.*
+
+**Parked roadmap seam — future private-thinking-layer gate (parked, not opened,
+not designed).** Purpose: make internal cognition meaningfully real while allowing
+private deliberation to remain hidden from ordinary output. Standing guards: raw
+inner deliberation does not automatically become durable memory; hidden cognition
+does not become hidden authority; governed-memory crossing paths remain explicit
+and bounded; architecture remains inspectable. This records, honestly, that
+TORMENT has a real memory organism but does not yet have the private cognitive
+interior it may eventually want; opening the seam requires its own audit-first
+trio decision.
+
+This amendment changes registry classification **only** where listed: the
+amendment-date line and this §N7 record. It registers OPERATOR INTENT and a PARKED
+QUESTION; it confers **no implementation authority**, selects no mechanics, opens
+no adjacent gate, does not amend the Stage A contract, and does not amend the
+recorded dependency graph.
+
 ---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
 2026-06-09 (N5 P4 contract promotion and closure registration; N6 Stage A
-recovery/reconciliation semantics contract promotion and closure registration).
-Amendments are small docs slices with trio sign-off.*
+recovery/reconciliation semantics contract promotion and closure registration;
+N7 thinking-layer ratified soft-state postures and parked private-thinking-layer
+seam). Amendments are small docs slices with trio sign-off.*

@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-09 (Stage A Recovery and Reconciliation Semantics Contract promotion + closure registration).
+**Date of last refresh:** 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam).
 
 ---
 
@@ -599,6 +599,34 @@ Windows-authoritative HEAD and clean-tree status and prepare the usual fresh-cha
 handoff; the issue also preserves Hilmir's reminder to update the GitHub security
 paper after database-design work as a separate deliberate slice. Registry
 companion: §N6 of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
+
+**TORMENT thinking-layer archaeology — ratified soft-state continuity postures + parked private-thinking-layer seam (2026-06-09).**
+A read-only survey of the cognition/thinking runtime established four facts.
+**The current named thinking/cognition layer is deterministic routing and
+retrieval shaping; it is not a separate model-deliberation room.** The **TriOcta
+memory kernel** is live on every ingest and load-bearing (its geometric state
+gates writes and sets strength/confidence/half-life/promotion signals —
+`fabric.py:2535,2654`, `memory_kernel.py:392–395`). The **character basin** is
+real and preservation-relevant. **Private deliberative cognition is not yet
+meaningfully implemented** (roadmap-only). No safety/storage flaw surfaced; RSB is
+dead code, RGD is a fixed composite with no dynamics. Hilmir **ratified soft-state
+continuity postures** under the principle *preserve continuity without preserving
+compulsion*: TriOcta ModelState and CorridorMonitor EMA are durable non-canonical
+continuity state (recoverable when valid, not canon, not authority-bearing, not a
+personality lock, resettable via an explicit auditable path); `tri_mod` and
+cycle-stage transients stay ephemeral; spirit-return warmth and mood/drift history
+are durable soft guidance (bounded, inspectable, contestable, resettable, never
+canonical or authority-bearing); symbol trace should be rebuildable from durable
+history rather than frozen as a first-class carrier; SRG stays default-off and
+benchmark-gated. A **future private-thinking-layer gate is parked** (not opened,
+not designed): purpose — make internal cognition meaningfully real while allowing
+private deliberation to remain hidden from ordinary output; standing guards — raw
+inner deliberation does not auto-become durable memory, hidden cognition does not
+become hidden authority, governed-memory crossings stay explicit and bounded,
+architecture stays inspectable. This registers operator intent and a parked
+question only; it selects no mechanics, does not amend the Stage A contract, and
+opens no gate. Registry companion: §N7 of
+`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
