@@ -83,7 +83,6 @@ def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
     """
     try:
         from .geometric_harvester import harvest_geometric_context
-        from .thinking_models import GeometricStanceContext
 
         # Kernel state: corridor monitor has persistent EMAs
         tri_mod = None
@@ -846,7 +845,6 @@ def _fast_governance_set(fabric, ctx: RequestContext, payload: Dict[str, Any]) -
 
     # Workspace audit log (best-effort)
     try:
-        import os
         data_dir = fabric.data_dir
         audit_log = GovernanceAuditLog(data_dir=data_dir, workspace_id=ctx.workspace_id)
         audit_log.log(eid=eid, agent_id=ctx.agent_id, changes=audit_record.get("changed", {}),
