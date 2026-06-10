@@ -22,6 +22,8 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Tuple
 import json, os, time
 
+from .pathing import ensure_within_base, safe_slug
+
 def _now_ts() -> int:
     return int(time.time())
 
@@ -76,7 +78,11 @@ class RoleStore:
         os.makedirs(self.data_dir, exist_ok=True)
 
     def _path(self, workspace_id: str, agent_id: str) -> str:
-        return os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "roles.json")
+        # Defense-in-depth: validate components + contain beneath data_dir.
+        ws = safe_slug(workspace_id, "workspace_id")
+        ag = safe_slug(agent_id, "agent_id")
+        p = os.path.join(self.data_dir, "workspaces", ws, "agents", ag, "roles.json")
+        return ensure_within_base(p, self.data_dir)
 
     def load(self, workspace_id: str, agent_id: str) -> RoleProfile:
         p = self._path(workspace_id, agent_id)

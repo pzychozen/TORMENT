@@ -4,6 +4,9 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 import json, os, time
 
+from .pathing import ensure_within_base, safe_slug
+
+
 def _now_ts() -> int:
     return int(time.time())
 
@@ -57,7 +60,14 @@ class IdentityStore:
         os.makedirs(self.data_dir, exist_ok=True)
 
     def _path(self, workspace_id: str, agent_id: str) -> str:
-        return os.path.join(self.data_dir, "workspaces", workspace_id, "agents", agent_id, "identity.json")
+        # Defense-in-depth: validate dynamic components and contain the
+        # resulting path beneath data_dir at the path-builder, so every sink
+        # (load/save/create) is reached only via a contained path rather than
+        # relying solely on upstream caller validation.
+        ws = safe_slug(workspace_id, "workspace_id")
+        ag = safe_slug(agent_id, "agent_id")
+        p = os.path.join(self.data_dir, "workspaces", ws, "agents", ag, "identity.json")
+        return ensure_within_base(p, self.data_dir)
 
     def load(self, workspace_id: str, agent_id: str) -> Optional[AgentIdentity]:
         p = self._path(workspace_id, agent_id)

@@ -10,6 +10,7 @@
 # ---------------------------------------------------------------------------
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import unittest
@@ -25,6 +26,8 @@ from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
 from torment_service import mcp_server as _mcp_server_prime  # noqa: F401
 incident_mod = sys.modules["torment_service.incident_log"]
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -231,21 +234,29 @@ class TestAdminStatusMCPResource(unittest.TestCase):
 
         agents = []
         for key in fabric.agent_states:
-            ws, ag = key.split(":", 1) if ":" in key else ("unknown", key)
+            # Canonical composite key is "workspace_id/agent_id" ("/" separator);
+            # ":" is a legacy fallback. Mirror production recovery (mcp_server /
+            # app admin-status) instead of splitting on ":" only.
+            if "/" in key:
+                ws, ag = key.split("/", 1)
+            elif ":" in key:
+                ws, ag = key.split(":", 1)
+            else:
+                ws, ag = "unknown", key
             drift_score = 0.0
             try:
                 cstate = fabric.character_store.load_state(ws, ag)
                 if cstate:
                     drift_score = float(cstate.drift_score)
             except Exception as e:
-                log.debug(f"Failed to load character state for {ws}:{ag}: {e}")
+                logger.debug(f"Failed to load character state for {ws}:{ag}: {e}")
             mem_count = 0
             try:
                 graph = fabric.private_graphs.get(key)
                 if graph:
                     mem_count = len(graph.entities)
             except Exception as e:
-                log.debug(f"Failed to load private graph for {key}: {e}")
+                logger.debug(f"Failed to load private graph for {key}: {e}")
             agents.append({
                 "workspace_id": ws, "agent_id": ag,
                 "memory_count": mem_count,

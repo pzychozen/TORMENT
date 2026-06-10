@@ -29,6 +29,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .pathing import ensure_within_base, safe_slug
+
 log = logging.getLogger("torment.collective_policy")
 
 
@@ -78,7 +80,13 @@ class ReingestTracker:
     """
 
     def __init__(self, data_dir: str, workspace_id: str) -> None:
-        self._base = os.path.join(data_dir, "workspaces", workspace_id, "collective")
+        # Defense-in-depth: validate the workspace component and contain the
+        # base beneath data_dir, so the log sinks (load/record/confirm) are
+        # reached only via a contained path.
+        ws = safe_slug(workspace_id, "workspace_id")
+        self._base = ensure_within_base(
+            os.path.join(data_dir, "workspaces", ws, "collective"), data_dir
+        )
         os.makedirs(self._base, exist_ok=True)
         self._log_path = os.path.join(self._base, "reingest_log.jsonl")
         self._lock = threading.Lock()

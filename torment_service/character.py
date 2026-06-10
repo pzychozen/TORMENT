@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .motifs import cosine
+from .pathing import ensure_within_base, safe_slug
 
 log = logging.getLogger("torment.character")
 
@@ -203,10 +204,14 @@ class CharacterStore:
     # -- Seed paths --
 
     def _seed_path(self, workspace_id: str, seed_id: str) -> str:
-        return os.path.join(
-            self.data_dir, "workspaces", workspace_id,
-            "seeds", seed_id, "seed.json",
+        # Defense-in-depth: validate components + contain beneath data_dir.
+        ws = safe_slug(workspace_id, "workspace_id")
+        sid = safe_slug(seed_id, "seed_id")
+        p = os.path.join(
+            self.data_dir, "workspaces", ws,
+            "seeds", sid, "seed.json",
         )
+        return ensure_within_base(p, self.data_dir)
 
     def load_seed(self, workspace_id: str, seed_id: str) -> Optional[CharacterSeed]:
         p = self._seed_path(workspace_id, seed_id)
@@ -224,10 +229,14 @@ class CharacterStore:
     # -- State paths --
 
     def _state_path(self, workspace_id: str, agent_id: str) -> str:
-        return os.path.join(
-            self.data_dir, "workspaces", workspace_id,
-            "agents", agent_id, "character_state.json",
+        # Defense-in-depth: validate components + contain beneath data_dir.
+        ws = safe_slug(workspace_id, "workspace_id")
+        ag = safe_slug(agent_id, "agent_id")
+        p = os.path.join(
+            self.data_dir, "workspaces", ws,
+            "agents", ag, "character_state.json",
         )
+        return ensure_within_base(p, self.data_dir)
 
     def load_state(self, workspace_id: str, agent_id: str) -> Optional[CharacterState]:
         p = self._state_path(workspace_id, agent_id)
