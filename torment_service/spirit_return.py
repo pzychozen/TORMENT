@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .symbols import SYMBOL_MEANINGS
+from .pathing import ensure_within_base
 
 logger = logging.getLogger(__name__)
 
@@ -452,13 +453,18 @@ class WarmupTracker:
     """
 
     def __init__(self, storage_path: Path, *, base_dir: str) -> None:
-        base = os.path.realpath(base_dir)
-        resolved = os.path.realpath(str(storage_path))
-        if resolved != base and not resolved.startswith(base + os.sep):
-            raise ValueError("WarmupTracker storage_path escapes base directory")
-        self.storage_path = Path(resolved)
+        # Path-integrity hardening: derive every stored path from the canonical
+        # sanitizer (pathing.ensure_within_base) so the containment guard is
+        # recognized at each filesystem sink, not only at construction. Mirrors
+        # SpiritReflectionStore in spirit_reflection.py. Behavior is unchanged
+        # for legitimate contained paths; traversal / outside-base paths still
+        # raise ValueError ("escapes base directory").
+        self._base_dir = base_dir
+        self.storage_path = Path(ensure_within_base(str(storage_path), base_dir))
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        self._file = self.storage_path / "warmup_state.jsonl"
+        self._file = Path(
+            ensure_within_base(str(self.storage_path / "warmup_state.jsonl"), base_dir)
+        )
         self._states: Optional[Dict[int, WarmupState]] = None
 
     def _ensure_loaded(self) -> None:
@@ -567,8 +573,13 @@ class WarmupTracker:
                 "entries_after": entries_after,
             }
 
-        # Write compacted file atomically: write to temp, then rename
-        tmp_file = self._file.with_suffix(".jsonl.tmp")
+        # Write compacted file atomically: write to temp, then rename.
+        # Validate the temp path through the same containment sanitizer so the
+        # write / replace / unlink sinks below are reached only via a contained
+        # path (defense-in-depth; the suffix change keeps it in the same dir).
+        tmp_file = Path(
+            ensure_within_base(str(self._file.with_suffix(".jsonl.tmp")), self._base_dir)
+        )
         try:
             with open(tmp_file, "w", encoding="utf-8") as f:
                 for ws in self._states.values():

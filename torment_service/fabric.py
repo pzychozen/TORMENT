@@ -3669,8 +3669,12 @@ class TormentFabric:
             _sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
             _current_sym = str(_sym_state.get("last_symbol", "◯") or "◯")
 
-            # Warmup tracker (lazy init per agent)
-            _warmup_dir = Path(self.data_dir) / "workspaces" / workspace_id / "agents" / agent_id / "warmup"
+            # Warmup tracker (lazy init per agent). Build the directory through
+            # the guarded _agent_dir() helper so workspace_id / agent_id are
+            # validated and contained (matches every other per-agent path in
+            # fabric); the raw join here previously relied solely on
+            # WarmupTracker's constructor guard.
+            _warmup_dir = Path(_agent_dir(self.data_dir, workspace_id, agent_id)) / "warmup"
             _warmup = WarmupTracker(_warmup_dir, base_dir=self.data_dir)
 
             # Source-row presence predicate for beta filtering and the
