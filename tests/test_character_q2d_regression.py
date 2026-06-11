@@ -79,10 +79,8 @@ def _minimal_character_seed():
     """Construct a minimal CharacterSeed for testing. Mirrors the shape
     used in test_character_selfstate.py.
     """
-    try:
-        from torment_service.character import CharacterSeed
-    except ImportError as exc:
-        pytest.skip(f"character import unavailable: {exc}")
+    character = pytest.importorskip("torment_service.character")
+    CharacterSeed = character.CharacterSeed
     return CharacterSeed(
         seed_id="q2d_test_v1",
         character_name="Q2D Test Character",
