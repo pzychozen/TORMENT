@@ -447,10 +447,8 @@ def test_h1b_resource_provenance_surfaces_h1c_stamp_not_h1a_shim():
     Uses the same helper-level proxy as the H1b test file: invoke the
     H1b row-building helper on a payload that was stamped by H1c.
     """
-    try:
-        from torment_service.mcp_server import _lifecycle_field_for_payload
-    except ImportError as exc:
-        pytest.skip(f"mcp_server import unavailable: {exc}")
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    _lifecycle_field_for_payload = mcp_server._lifecycle_field_for_payload
 
     ensure = _ensure()
     payload: Dict[str, Any] = {"text": "row stamped by H1c"}

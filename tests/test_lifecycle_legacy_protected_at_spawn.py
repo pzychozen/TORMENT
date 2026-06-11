@@ -546,10 +546,8 @@ def test_h1b_inspector_surfaces_new_protected_row_as_protected_system():
     test that catches silent removal of the Slice 3 wiring inside
     ``_ensure_lifecycle_envelope``.
     """
-    try:
-        from torment_service.mcp_server import _lifecycle_field_for_payload
-    except ImportError as exc:
-        pytest.skip(f"mcp_server import unavailable: {exc}")
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    _lifecycle_field_for_payload = mcp_server._lifecycle_field_for_payload
 
     ensure = _ensure()
     payload: Dict[str, Any] = {"canon": True,
