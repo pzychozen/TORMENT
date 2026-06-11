@@ -369,10 +369,7 @@ def _invoke_resource_provenance(fabric, workspace_id, agent_id):
     """Build the MCP server at guarded tier, invoke resource_provenance
     via read_resource, return the parsed JSON response.
     """
-    try:
-        import torment_service.mcp_server as mcp_mod
-    except ImportError as exc:
-        pytest.skip(f"mcp_server unavailable: {exc}")
+    mcp_mod = pytest.importorskip("torment_service.mcp_server")
 
     old_tier = os.environ.get("TORMENT_MCP_EXPOSURE_TIER")
     os.environ["TORMENT_MCP_EXPOSURE_TIER"] = "guarded"
