@@ -294,13 +294,11 @@ def _try_build_fabric_with_entity(payload: Dict[str, Any]):
     """Build a fabric, inject a single entity with the supplied payload,
     return (fabric, ak, eid) or raise pytest.skip on missing deps.
     """
-    try:
-        from torment_service.fabric import TormentFabric
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.kernel.seed_entities import SeedEntity
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"fabric import failed (deps?): {exc}")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("fastapi")
+    from torment_service.fabric import TormentFabric
+    from torment_service.memory_graph import MemoryGraph
+    from torment_service.kernel.seed_entities import SeedEntity
 
     tmpdir = tempfile.mkdtemp(prefix="torment_h1b_test_")
     os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
