@@ -382,12 +382,12 @@ def test_spawn_memory_canon_row_is_compression_protected():
     via=CANON_SET). Reading is_compression_protected on that payload
     returns True via the Slice 5 lifecycle path.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5_")
@@ -411,12 +411,12 @@ def test_spawn_memory_canon_row_is_compression_protected():
 
 
 def test_spawn_memory_no_markers_row_is_not_compression_protected():
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5_unset_")
