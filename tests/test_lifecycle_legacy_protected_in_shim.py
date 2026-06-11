@@ -343,10 +343,8 @@ def test_h1b_lifecycle_field_helper_surfaces_protected_for_legacy_canon():
     This is the cross-slice regression test that catches silent removal
     of the Q2-D Slice 2 wiring inside the shim.
     """
-    try:
-        from torment_service.mcp_server import _lifecycle_field_for_payload
-    except ImportError as exc:
-        pytest.skip(f"mcp_server import unavailable: {exc}")
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    _lifecycle_field_for_payload = mcp_server._lifecycle_field_for_payload
 
     payload = {"canon": True, "summary": "legacy protected row"}
     surfaced = _lifecycle_field_for_payload(payload)
