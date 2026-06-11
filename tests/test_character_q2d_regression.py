@@ -447,12 +447,10 @@ def test_deliberate_disagreement_surfaces_in_h1b_inspector_helper():
     """The H1b/Slice 4-wiring-A inspector helper for resource_provenance
     surfaces the disagreement as a structured dict on the row.
     """
-    try:
-        from torment_service.mcp_server import (
-            _lifecycle_disagreement_field_for_payload,
-        )
-    except ImportError as exc:
-        pytest.skip(f"mcp_server unavailable: {exc}")
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    _lifecycle_disagreement_field_for_payload = (
+        mcp_server._lifecycle_disagreement_field_for_payload
+    )
 
     payload = {
         "lifecycle_status": _explicit_released_envelope(),
