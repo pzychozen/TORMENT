@@ -98,13 +98,16 @@ def _build_minimal_graph_env():
     Returns dict of components so tests can inject the same env into
     plant_seed and inspect afterward.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.motifs import MotifRegistry
-        from torment_service.coherence_field import CoherenceField
-        from torment_service.embeddings import HashEmbedding
-    except ImportError as exc:
-        pytest.skip(f"graph/motif deps unavailable: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    motifs = pytest.importorskip("torment_service.motifs")
+    coherence_field_module = pytest.importorskip(
+        "torment_service.coherence_field"
+    )
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    MemoryGraph = memory_graph.MemoryGraph
+    MotifRegistry = motifs.MotifRegistry
+    CoherenceField = coherence_field_module.CoherenceField
+    HashEmbedding = embeddings.HashEmbedding
 
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_char_")
     embedder = HashEmbedding(dim=8)
@@ -245,10 +248,8 @@ def test_seed_row_through_full_plant_seed_path():
     plant_seed writes one row per concept (split from seed_text).
     Every resulting row must carry the PROTECTED envelope.
     """
-    try:
-        from torment_service.character import plant_seed
-    except ImportError as exc:
-        pytest.skip(f"character.plant_seed unavailable: {exc}")
+    character = pytest.importorskip("torment_service.character")
+    plant_seed = character.plant_seed
 
     env = _build_minimal_graph_env()
     seed = _minimal_character_seed()
@@ -283,11 +284,10 @@ def test_seed_row_persists_protected_through_flush_and_reload():
     """Disk round-trip: spawn seed row → flush_node → reload from a
     fresh MemoryGraph instance → the PROTECTED envelope is intact.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps unavailable: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_char_persist_")
     embedder = HashEmbedding(dim=8)
