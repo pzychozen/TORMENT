@@ -101,7 +101,6 @@ class TestInvalidDomainToolResultIngestAtomicity(unittest.TestCase):
 
     def test_failed_ingest_returns_envelope_not_ok(self):
         """A failed envelope is the visible signal to the caller."""
-        before = _snapshot_state(self.fabric)
         req = SpineRequest(
             workspace_id="test-ws",
             agent_id="agent-1",
