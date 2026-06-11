@@ -106,13 +106,8 @@ def _join_required_envelope_dict(
 @pytest.fixture(scope="module")
 def disagreement_field():
     """Lazy import: skip the module if MCP deps aren't available."""
-    try:
-        from torment_service.mcp_server import (
-            _lifecycle_disagreement_field_for_payload,
-        )
-    except ImportError as exc:
-        pytest.skip(f"mcp_server import failed (deps?): {exc}")
-    return _lifecycle_disagreement_field_for_payload
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    return mcp_server._lifecycle_disagreement_field_for_payload
 
 
 def test_helper_returns_none_when_no_envelope_present(disagreement_field):
