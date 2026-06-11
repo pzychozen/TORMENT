@@ -298,12 +298,13 @@ def test_stamped_envelope_revalidates_cleanly():
 
 def _try_build_graph():
     """Construct a fresh MemoryGraph in a temp dir. Skip on missing deps."""
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
+
     tmpdir = tempfile.mkdtemp(prefix="torment_h1c_test_")
     embedder = HashEmbedding(dim=8)
     graph = MemoryGraph(tmpdir, embedder=embedder)
