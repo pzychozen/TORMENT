@@ -399,12 +399,12 @@ def test_integration_stamped_protected_envelope_persists_through_flush_reload():
     discard graph → reload from disk → the PROTECTED envelope is intact
     on the rehydrated entity.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_slice3_persist_")
     embedder = HashEmbedding(dim=8)
