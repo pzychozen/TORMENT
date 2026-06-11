@@ -393,12 +393,12 @@ def test_h1c_canon_row_yields_protected_tier():
     carries the H1c-stamped PROTECTED envelope; ``derive_retention_tier``
     on that payload returns "protected" via the lifecycle path.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5b_canon_")
@@ -422,12 +422,12 @@ def test_h1c_no_markers_row_follows_normal_tier_logic():
     half_life-based tier classification, NOT the protected branch.
     Half_life=30 from spawn_memory's default -> "relational".
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5b_unset_")

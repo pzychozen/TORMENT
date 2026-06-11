@@ -356,12 +356,12 @@ def test_h1c_canon_row_is_protected(scorer):
     carries the H1c-stamped PROTECTED envelope; _is_protected returns
     True via the lifecycle path's direct True branch.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5c_canon_")
@@ -383,12 +383,12 @@ def test_h1c_no_markers_row_is_not_protected(scorer):
     """An H1c-stamped row with no legacy markers carries the canonical
     UNSET envelope; _is_protected returns False.
     """
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
 
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s5c_unset_")
