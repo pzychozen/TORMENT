@@ -105,11 +105,8 @@ def _ensure():
 
     Skip if those deps aren't installed in this environment.
     """
-    try:
-        from torment_service.memory_graph import _ensure_lifecycle_envelope
-    except ImportError as exc:
-        pytest.skip(f"memory_graph import failed (deps?): {exc}")
-    return _ensure_lifecycle_envelope
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    return memory_graph._ensure_lifecycle_envelope
 
 
 # --- Category 1 -- absent envelope -> stamped UNSET ---------------------
