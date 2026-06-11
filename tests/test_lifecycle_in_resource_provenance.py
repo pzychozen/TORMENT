@@ -114,11 +114,8 @@ def lifecycle_field():
     in this environment (the helper lives in mcp_server.py which imports
     fastmcp). The Windows source-of-truth environment will have these.
     """
-    try:
-        from torment_service.mcp_server import _lifecycle_field_for_payload
-    except ImportError as exc:
-        pytest.skip(f"mcp_server import failed (deps?): {exc}")
-    return _lifecycle_field_for_payload
+    mcp_server = pytest.importorskip("torment_service.mcp_server")
+    return mcp_server._lifecycle_field_for_payload
 
 
 # --- Category 1 -- absent envelope -> canonical UNSET --------------------
