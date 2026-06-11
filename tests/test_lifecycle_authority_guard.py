@@ -444,10 +444,8 @@ def test_h1c_stamped_payload_through_primitive_returns_none():
     helper passes the Q2-F primitive cleanly. The whole Slice 0 → H1a
     → H1c → Q2-F chain composes.
     """
-    try:
-        from torment_service.memory_graph import _ensure_lifecycle_envelope
-    except ImportError as exc:
-        pytest.skip(f"memory_graph import unavailable: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    _ensure_lifecycle_envelope = memory_graph._ensure_lifecycle_envelope
     payload: Dict[str, Any] = {"text": "fresh row"}
     _ensure_lifecycle_envelope(payload)
     env = read_lifecycle_envelope(payload)
