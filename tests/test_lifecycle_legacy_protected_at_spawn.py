@@ -280,12 +280,13 @@ def test_caller_dict_with_marker_not_mutated_until_helper_runs():
 
 
 def _try_build_graph():
-    try:
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"memory_graph deps not available: {exc}")
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    embeddings = pytest.importorskip("torment_service.embeddings")
+    np = pytest.importorskip("numpy")
+
+    MemoryGraph = memory_graph.MemoryGraph
+    HashEmbedding = embeddings.HashEmbedding
+
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_slice3_")
     embedder = HashEmbedding(dim=8)
     graph = MemoryGraph(tmpdir, embedder=embedder)
