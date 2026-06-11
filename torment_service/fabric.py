@@ -3820,8 +3820,14 @@ class TormentFabric:
         # may extract a public iter_all() method on DeepMemoryStore.
         try:
             deep_store._ensure_loaded()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning(
+                "orphan diagnostic enumeration: deep store load failed "
+                "for workspace_id=%s agent_id=%s: %s",
+                workspace_id,
+                agent_id,
+                exc,
+            )
         all_records = list(getattr(deep_store, "_memories", None) or [])
 
         pg = self.private_graphs.get(ak)

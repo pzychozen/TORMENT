@@ -20,6 +20,7 @@ P0 -- wrapper-shape correctness at the helper boundary:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 from torment_service.deep_hits import DeepRetrievalHit, OrphanedDeepHit
@@ -254,3 +255,52 @@ def test_orphaned_results_are_orphaned_deep_hit_and_lack_retrieval_fields():
     assert record.source_eid == 42
     assert record.orphan_reason == "source_eid_not_found"
     assert record.detected_at > 0
+
+
+# ---------------------------------------------------------------------------
+# P0: fail-soft diagnostic honesty when the deep store fails to load
+# ---------------------------------------------------------------------------
+
+
+def test_list_orphaned_fail_soft_warns_when_ensure_loaded_raises(caplog):
+    """If ``deep_store._ensure_loaded()`` raises, the orphan diagnostic
+    enumeration must stay fail-soft: still return a list (the existing
+    empty-list shape for a store exposing no records), while emitting a
+    WARNING breadcrumb that identifies the load failure and carries the
+    synthetic exception context. The return contract is unchanged.
+    """
+
+    class _RaisingDeepStore:
+        # ``_ensure_loaded`` raises; ``_memories`` stays empty so the
+        # post-failure continuation yields the existing empty-list shape.
+        _memories: List[DeepMemory] = []
+
+        def _ensure_loaded(self) -> None:
+            raise RuntimeError("synthetic ensure_loaded failure XYZZY")
+
+    fake, ws_id, ag_id = _make_fake_fabric(deep_store=_RaisingDeepStore())
+
+    with caplog.at_level(logging.WARNING, logger="torment.fabric"):
+        result = _call(fake, ws_id, ag_id)
+
+    # 1 + 2: fail-soft -- returns a list, in the existing empty-list shape
+    assert isinstance(result, list)
+    assert result == []
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    # 3 + 4: a WARNING breadcrumb identifying orphan diagnostic load failure
+    assert any(
+        "orphan diagnostic enumeration" in r.getMessage()
+        and "load failed" in r.getMessage()
+        for r in warnings
+    ), (
+        "expected an orphan-diagnostic load-failure WARNING; got: "
+        f"{[r.getMessage() for r in warnings]}"
+    )
+
+    # 5: the synthetic exception context is visible in the captured log
+    assert any(
+        "synthetic ensure_loaded failure XYZZY" in r.getMessage()
+        for r in warnings
+    )
