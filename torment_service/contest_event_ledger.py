@@ -58,7 +58,7 @@ import json
 import os
 from typing import List
 
-from .counter_contest_event import CounterContestEvent, CounterContestEventError
+from .counter_contest_event import CounterContestEvent
 from .embedding_store import _canonical_storage_root, _child_path
 from .pathing import safe_slug
 
