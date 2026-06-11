@@ -78,11 +78,8 @@ def _ensure():
 
     Skip the whole file if those deps aren't available in the env.
     """
-    try:
-        from torment_service.memory_graph import _ensure_lifecycle_envelope
-    except ImportError as exc:
-        pytest.skip(f"memory_graph import failed (deps?): {exc}")
-    return _ensure_lifecycle_envelope
+    memory_graph = pytest.importorskip("torment_service.memory_graph")
+    return memory_graph._ensure_lifecycle_envelope
 
 
 def _explicit_envelope_dict(
