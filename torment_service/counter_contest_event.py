@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, fields
-from enum import Enum
 from typing import Any, Dict
 
 from torment_service.contest_record import ContestActor, ContestReasonClass
