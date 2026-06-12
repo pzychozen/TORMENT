@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
-from torment_service import mcp_server as _mcp_server_prime  # noqa: F401
+from torment_service import mcp_server as _mcp_server_prime
 incident_mod = sys.modules["torment_service.incident_log"]
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ class TestAdminStatusMCPResource(unittest.TestCase):
 
     def _call_admin_status(self) -> dict:
         """Call the MCP resource handler directly."""
-        mcp_mod = sys.modules["torment_service.mcp_server"]
+        mcp_mod = _mcp_server_prime
 
         # Set up the module-level fabric and client context
         mcp_mod._fabric = fabric
