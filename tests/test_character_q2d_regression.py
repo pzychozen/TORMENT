@@ -36,13 +36,11 @@ Out of scope for this pack (and these tests):
 """
 from __future__ import annotations
 
-import copy
 import logging
 import os
 import sys
 import tempfile
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import pytest
 

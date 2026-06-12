@@ -41,9 +41,7 @@ Out of scope (these tests do NOT exercise):
 """
 from __future__ import annotations
 
-import asyncio
 import copy
-import json
 import os
 import sys
 import tempfile
