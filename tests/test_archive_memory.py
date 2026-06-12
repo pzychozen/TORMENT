@@ -25,6 +25,7 @@ Invariants verified here:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import unittest
@@ -58,8 +59,10 @@ class _ArchiveStoreTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         try:
             self.store.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(
+                "ArchiveStore.close() failed during teardown: %s", e
+            )
         try:
             self._tmpdir.cleanup()
         except Exception:
