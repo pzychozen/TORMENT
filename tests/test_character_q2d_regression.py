@@ -54,14 +54,11 @@ from torment_service.compression import (
 from torment_service.governance import is_compression_protected
 from torment_service.lifecycle import (
     LifecycleActor,
-    LifecycleJoinTarget,
     LifecycleSetBy,
     LifecycleSetVia,
     LifecycleState,
     LifecycleStatus,
-    SideChannel,
     detect_lifecycle_legacy_marker_disagreement,
-    read_lifecycle_envelope,
 )
 
 
