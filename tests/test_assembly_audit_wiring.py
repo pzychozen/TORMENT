@@ -28,11 +28,10 @@ Test classes:
 """
 from __future__ import annotations
 
-import copy
 import importlib
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 from unittest.mock import patch, MagicMock
 
 import numpy as np

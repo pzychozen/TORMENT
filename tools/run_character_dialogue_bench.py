@@ -60,7 +60,7 @@ import re
 import sys
 import time
 import traceback
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 

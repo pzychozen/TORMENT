@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from typing import Any, Dict
 
 import pytest
 

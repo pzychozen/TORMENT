@@ -23,7 +23,6 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import numpy as np
-import pytest
 
 from torment_service.deep_memory import DeepMemory
 from torment_service.fabric import TormentFabric

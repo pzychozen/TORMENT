@@ -12,7 +12,6 @@ no external API calls) with compression force-enabled.
 
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
