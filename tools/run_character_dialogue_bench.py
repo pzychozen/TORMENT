@@ -434,6 +434,8 @@ def _detect_interesting_moments(
                         "to": d_cur,
                     })
             except (TypeError, ValueError):
+                # Non-numeric drift_score on this row — skip the heuristic alert;
+                # the raw row is already preserved in the timeseries artifact.
                 pass
             # retrieval count change
             try:
@@ -449,6 +451,8 @@ def _detect_interesting_moments(
                         "to": r_cur,
                     })
             except (TypeError, ValueError):
+                # Non-numeric retrieved_count on this row — skip the heuristic
+                # alert; the raw row is already preserved in the timeseries.
                 pass
     return alerts
 
