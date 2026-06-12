@@ -282,14 +282,12 @@ def _try_build_mixed_corpus():
     """Build a fabric with the four-row mixed corpus, return
     (fabric, ws, ag) or skip on missing deps.
     """
-    try:
-        from torment_service.fabric import TormentFabric
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.kernel.seed_entities import SeedEntity
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"fabric/graph deps not available: {exc}")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("fastapi")
+    from torment_service.fabric import TormentFabric
+    from torment_service.memory_graph import MemoryGraph
+    from torment_service.kernel.seed_entities import SeedEntity
+    from torment_service.embeddings import HashEmbedding
 
     tmpdir = tempfile.mkdtemp(prefix="torment_q2d_s4wA_")
     os.environ["TORMENT_EMBED_PROVIDER"] = "hash"

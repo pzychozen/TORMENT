@@ -141,14 +141,12 @@ def _build_mixed_corpus():
     four origins as separate entities. Returns (fabric, workspace_id,
     agent_id) or skips on missing deps.
     """
-    try:
-        from torment_service.fabric import TormentFabric
-        from torment_service.memory_graph import MemoryGraph
-        from torment_service.kernel.seed_entities import SeedEntity
-        from torment_service.embeddings import HashEmbedding
-        import numpy as np
-    except ImportError as exc:
-        pytest.skip(f"fabric/graph deps not available: {exc}")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("fastapi")
+    from torment_service.fabric import TormentFabric
+    from torment_service.memory_graph import MemoryGraph
+    from torment_service.kernel.seed_entities import SeedEntity
+    from torment_service.embeddings import HashEmbedding
 
     tmpdir = tempfile.mkdtemp(prefix="torment_h1d_meta_")
     os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
