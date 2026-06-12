@@ -534,8 +534,9 @@ def test_claude_inference_class_resolves_without_instantiation():
         pytest.fail(
             f"live_agent.inference.ClaudeInference unavailable: {exc}"
         )
-    # Sanity: the class is a class.
-    assert isinstance(ClaudeInference, type)
+    else:
+        # Sanity: the class is a class.
+        assert isinstance(ClaudeInference, type)
 
 
 def test_memory_bridge_module_imports():
