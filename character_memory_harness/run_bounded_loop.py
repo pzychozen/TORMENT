@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import logging
 import os
 import re
 import secrets
@@ -133,8 +134,10 @@ def _load_dotenv_safely() -> None:
                 key, val = key.strip(), val.strip()
                 if key and key not in os.environ:
                     os.environ[key] = val
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(
+                ".env load skipped for %s: %s", path, e
+            )
 
 
 def _env(name: str, default: str) -> str:
