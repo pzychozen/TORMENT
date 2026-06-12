@@ -58,7 +58,6 @@ from torment_service.lifecycle import (
     SideChannel,
     assert_lifecycle_row_authoritative,
     read_lifecycle_envelope,
-    validate_lifecycle_envelope,
 )
 
 
