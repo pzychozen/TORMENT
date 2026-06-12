@@ -49,7 +49,6 @@ from torment_service.lifecycle import (
     LifecycleSetBy,
     LifecycleSetVia,
     LifecycleState,
-    LifecycleStateError,
     LifecycleStatus,
     SideChannel,
 )
