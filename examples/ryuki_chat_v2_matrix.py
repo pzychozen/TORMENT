@@ -262,6 +262,8 @@ class ClaudeClient:
             import anthropic
             self._sdk = anthropic.Anthropic(api_key=api_key)
         except ImportError:
+            # Optional dependency: `anthropic` SDK is not required to run this
+            # example — fall back to the HTTP path when it isn't installed.
             pass
 
     def message(self, system: str, messages: List[Dict[str, str]], max_tokens: int = 1024) -> str:
