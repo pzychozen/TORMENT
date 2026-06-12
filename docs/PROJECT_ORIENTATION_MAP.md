@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam).
+**Date of last refresh:** 2026-06-12 (CodeQL non-C1 maintenance closure pointer added; prior thinking-layer archaeology and parked private-thinking-layer seam retained below).
 
 ---
 
@@ -37,7 +37,7 @@ rule in §5.
 
 ## 2. Where main currently stands
 
-As of 2026-06-07, the following arcs are closed on `main`. Each row points to
+As of 2026-06-12, the following arcs are closed on `main`. Each row points to
 the tracked source of truth for what shipped or was ratified. (Not every arc has
 a dedicated checkpoint doc — some point to a doctrine/framing doc, and a few
 recent hardening items are commit-level only.)
@@ -78,6 +78,7 @@ recent hardening items are commit-level only.)
 | Track B v0.2 — B2-S3 isolated ContestLedger persistence (single workspace-scoped `contest_records.jsonl`; append-only `append_record(ContestRecord)` + literal unbounded `list_records()`; **fail-closed** malformed-line handling + read-time duplicate-`contest_id` raise; no append-time scan / no lock / no fsync; `contest_record` importer allowlist narrowed explicitly to `contest_ledger.py`; ordinary runtime imports of `contest_ledger` forbidden; **no consumer wiring**, no `contest_events.jsonl`; B2-S4 counter-contest semantics remains parked, not auto-open) | 2026-06-04 | `docs/CHECKPOINT_2026-06_TRACK_B_V0_2_B2_S3_CONTEST_LEDGER_PERSISTENCE.md` (commit `9c027a0`) |
 | Track B v0.2 — B2-S4 narrowed counter-contest event framing (ratified framing artifact narrowing the parent §12 B2-S4 step to counter-contest event vocabulary + isolated persistence; excludes `candidate_handle → eid` binding; **not** implementation authorization) | 2026-06-04 | `docs/TRACK_B_V0_2_B2_S4_COUNTER_CONTEST_EVENT_FRAMING_v0.1.md` (commit `36a8a84`) |
 | Track B v0.2 — B2-S4 isolated counter-contest event persistence (frozen immutable six-field `CounterContestEvent`, **no outcome/status/precedence field**; workspace-scoped append-only `contest_events.jsonl`; literal `list_events()` + `list_events_for_contest()` filtering in append order only — chronology, not precedence; **fail-closed** malformed-line / invalid-event / read-time duplicate-`event_id` raise; `target_contest_id` UUID-shaped structurally only, no existence check, dangling linkage representable; `ContestActor`/`ContestReasonClass` reused unchanged; AST guards enforce zero consumers / no authority-retrieval-prompt-cognition-MCP imports / no resolver surface; **no consumer wiring**, no resolver) | 2026-06-04 | `docs/CHECKPOINT_2026-06_TRACK_B_V0_2_B2_S4_COUNTER_CONTEST_EVENT_PERSISTENCE.md` (commit `1a17d6f`) |
+| CodeQL non-C1 maintenance closure — nine query families resolved by narrow fixes + intentional dismissals to **0 open dashboard alerts**; test/example/harness only; no production / schema / reader-projection / cognition-eligibility / authority-boundary / continuity / database / Memory Engine change; storage redesign remains unopened | 2026-06-12 | `docs/CHECKPOINT_2026-06_CODEQL_NON_C1_CLOSURE.md` (commits `2225e65`, `92960b2`, `cebd5d7`, `adedb71`, `ff1a021`, `ddaeea1`, `fc69c3c`) |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
