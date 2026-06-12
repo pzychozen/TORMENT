@@ -19,7 +19,9 @@ Tests:
 
 import shutil
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from torment_service.fabric import TormentFabric
 
@@ -73,22 +75,36 @@ class TestCanonicalStep(unittest.TestCase):
         """Thread-window bonus should not change when top_k is small
         enough to exclude recent memories. With canonical step, the
         bonus computation is the same regardless of retrieval size."""
-        # Query with large top_k — should include recent memories
-        r_large = self.fabric.query(
-            workspace_id="ws",
-            agent_id="agent",
-            query_text="weather observation",
-            top_k=20,
-            continuity_debug=True,
-        )
-        # Query with top_k=1 — may only get one hit
-        r_small = self.fabric.query(
-            workspace_id="ws",
-            agent_id="agent",
-            query_text="weather observation",
-            top_k=1,
-            continuity_debug=True,
-        )
+        # Pin subsystem-local recency and graph-decay clocks so this test
+        # isolates the canonical-step invariant.
+        fixed_fabric_now = int(time.time())
+        fixed_graph_now = int(time.time())
+        with (
+            patch(
+                "torment_service.fabric._now_ts",
+                return_value=fixed_fabric_now,
+            ),
+            patch(
+                "torment_service.memory_graph._now_ts",
+                return_value=fixed_graph_now,
+            ),
+        ):
+            # Query with large top_k — should include recent memories
+            r_large = self.fabric.query(
+                workspace_id="ws",
+                agent_id="agent",
+                query_text="weather observation",
+                top_k=20,
+                continuity_debug=True,
+            )
+            # Query with top_k=1 — may only get one hit
+            r_small = self.fabric.query(
+                workspace_id="ws",
+                agent_id="agent",
+                query_text="weather observation",
+                top_k=1,
+                continuity_debug=True,
+            )
 
         # Find a common eid that appears in both result sets
         large_by_eid = {h["eid"]: h for h in r_large.get("results", [])}
@@ -148,16 +164,30 @@ class TestCanonicalStep(unittest.TestCase):
     def test_repeated_queries_produce_consistent_scores(self):
         """Two identical queries should produce identical final_scores
         for the same eids — there's no randomness in step derivation."""
-        r1 = self.fabric.query(
-            workspace_id="ws", agent_id="agent",
-            query_text="weather observation step",
-            top_k=10,
-        )
-        r2 = self.fabric.query(
-            workspace_id="ws", agent_id="agent",
-            query_text="weather observation step",
-            top_k=10,
-        )
+        # Pin subsystem-local recency and graph-decay clocks so this test
+        # isolates the canonical-step invariant.
+        fixed_fabric_now = int(time.time())
+        fixed_graph_now = int(time.time())
+        with (
+            patch(
+                "torment_service.fabric._now_ts",
+                return_value=fixed_fabric_now,
+            ),
+            patch(
+                "torment_service.memory_graph._now_ts",
+                return_value=fixed_graph_now,
+            ),
+        ):
+            r1 = self.fabric.query(
+                workspace_id="ws", agent_id="agent",
+                query_text="weather observation step",
+                top_k=10,
+            )
+            r2 = self.fabric.query(
+                workspace_id="ws", agent_id="agent",
+                query_text="weather observation step",
+                top_k=10,
+            )
 
         eids1 = {h["eid"]: h["final_score"] for h in r1.get("results", [])}
         eids2 = {h["eid"]: h["final_score"] for h in r2.get("results", [])}
