@@ -48,7 +48,6 @@ class ProviderAdapter(Protocol):
                 refusal, auth failure, etc.). The runner catches and records
                 this per cell rather than aborting the whole run.
         """
-        ...
 
 
 def get_adapter(provider: str, model: str) -> ProviderAdapter:
