@@ -29,11 +29,9 @@ from torment_service.assembly_audit import (
     _classification_basis,
     _spirit_return_summary,
     _tool_result_summary,
-    _filter_a_record,
     _request_record,
     _embedder_snapshot,
     _character_summary,
-    _assembly_summary,
 )
 from torment_service.governance import SURFACE_LLM_CONTEXT
 from torment_service.retrieval_assembler import (
