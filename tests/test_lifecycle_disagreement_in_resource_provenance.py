@@ -541,10 +541,7 @@ def test_resource_provenance_still_hidden_at_open_tier():
     the tier gate. The whole resource_provenance MCP resource remains
     hidden at the open tier; the new field stays inside guarded.
     """
-    try:
-        from tests.test_mcp_resource_gating import _get_resource_uris
-    except ImportError as exc:
-        pytest.skip(f"tier gate harness unavailable: {exc}")
+    from tests.test_mcp_resource_gating import _get_resource_uris
 
     uris = _get_resource_uris("open")
     provenance_uris = [u for u in uris if "provenance" in u]
@@ -557,10 +554,7 @@ def test_resource_provenance_visible_at_guarded_tier():
     """Sanity: the resource_provenance URI is still registered at the
     guarded tier after Slice 4-wiring-A. Regression guard.
     """
-    try:
-        from tests.test_mcp_resource_gating import _get_resource_uris
-    except ImportError as exc:
-        pytest.skip(f"tier gate harness unavailable: {exc}")
+    from tests.test_mcp_resource_gating import _get_resource_uris
 
     uris = _get_resource_uris("guarded")
     provenance_uris = [u for u in uris if "provenance" in u]
