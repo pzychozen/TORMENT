@@ -307,8 +307,9 @@ class TestBuildAssemblyAudit_NoIO(unittest.TestCase):
         libraries. `import os` is allowed (for utility access) but
         specific IO-actuating symbols must not appear.
         """
-        import torment_service.assembly_audit as mod
-        src = inspect.getsource(mod)
+        src = inspect.getsource(
+            sys.modules["torment_service.assembly_audit"]
+        )
         forbidden_substrings = [
             "import requests",
             "import socket",
