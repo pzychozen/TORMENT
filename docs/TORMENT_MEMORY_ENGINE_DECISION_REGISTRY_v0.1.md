@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9) · amended 2026-06-13 (Seed-Governance Blueprint v0.1 promotion and closure registration — docs-only; see §N10)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -898,6 +898,30 @@ This amendment changes registry classification **only** where listed: the amendm
 This amendment changes registry classification **only** where listed: the amendment-date line, the footer, and this §N9 record. It confers **no implementation authority, no mechanics, no scheduler / trigger / budget, no store / schema / API, no candidate-store carrier, no Stage B opening, no autonomy opening, and no amendment to Document A / P4 / Stage A / Cluster 2 / Ledger / MCP boundary.** It does not amend the recorded dependency graph or any prior contract text.
 
 ---
+
+**N10. Seed-Governance Blueprint v0.1 promotion and closure registration (2026-06-13, docs-only).**
+
+`docs/TORMENT_SEED_GOVERNANCE_BLUEPRINT_v0.1.md` is promoted as a **requirement-level seed / identity / canon governance contract** and **closed** as docs-only. It **specializes Document A's write-side wall for seed / identity / canon outcomes** and amends Document A in no way. It belongs to the pre-substrate architecture reconstruction programme, distinct from the Memory Engine phase graph, and is registered here because it interacts with Document A / Document B / P4 / Stage A / Cluster 2 / Ledger / MCP-boundary doctrine.
+
+**Core posture:** *Seed-Governance is not a seed rewrite mechanism; it is the requirement-level governance contract preventing seed, identity, and canon from being quietly rewritten.*
+
+**Contract shape (summary; full text not reproduced):**
+
+- requirement-level seed / identity / canon governance contract;
+- operator-governed seed revision (operator-only default; lineage-preserving; explicit, auditable, contestable, reversible);
+- identity / seed / canon-affecting candidates are stricter than ordinary proposed writes and **never auto-admit**;
+- **Document A remains the admission edge** — Seed-Governance only adds stricter class requirements (a stricter parameterization of A's crossing, not a rival crossing);
+- canon-source class must remain **governance-distinguishable** (one `canon` boolean is not sufficient governance truth; no new field/schema selected);
+- automatic identity / seed / canon writers require later governed reconciliation before being treated as conformant (a not-yet-conformant flag, not a must-patch-now order);
+- `mood_drift → drift centroid → gravity_correction → canon=True` named as a **compound hazard**, not patched;
+- ordinary non-canon derived identity anchors stay **outside** Seed-Governance unless promoted / canonized / used as seed-revision evidence / given durable identity-authority weight;
+- SRG crystal remains **adjacent / Memory-Engine-P1-owned, not absorbed**.
+
+**Programme state after N10:** active gate **none**; next gate **unselected**. No reconciliation, gravity_correction, writer-authority, Stage B, P5a/P6, or implementation lane is opened by this registration.
+
+This registration confers **no implementation authority, no mechanics, no runtime mutation, no runtime seed writer, no canon-editing mechanics, no schema / store / field names, no migration, no Stage B, no autonomy, and no amendment to Document A / Document B / P4 / Stage A / Cluster 2 / Ledger / MCP boundary** (nor to existing separately ratified collective-canon / quorum / operator materialization paths). It changes registry classification **only** where listed: the amendment-date line, the footer, and this §N10 record. It does not amend the recorded dependency graph or any prior contract text.
+
+---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
 2026-06-09 (N5 P4 contract promotion and closure registration; N6 Stage A
@@ -905,5 +929,6 @@ recovery/reconciliation semantics contract promotion and closure registration;
 N7 thinking-layer ratified soft-state postures and parked private-thinking-layer
 seam) and 2026-06-13 (N8 Document A candidate-containment and writer-authority
 contract promotion and closure registration; N9 Document B private-cognition and
-unified-reflection blueprint promotion and closure registration). Amendments are
+unified-reflection blueprint promotion and closure registration; N10 Seed-Governance
+Blueprint v0.1 promotion and closure registration). Amendments are
 small docs slices with trio sign-off.*

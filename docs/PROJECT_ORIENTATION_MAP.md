@@ -82,6 +82,7 @@ recent hardening items are commit-level only.)
 | Pre-substrate architecture framing v0.1 — reconstruction of the higher architecture (thinking / reflection / seed / soft-continuity) above the paused substrate; framing only (no implementation, no mechanics, no Stage B); Document A eligible but **not** opened | 2026-06-13 | `docs/TORMENT_PRE_SUBSTRATE_ARCHITECTURE_FRAMING_v0.1.md` (promoted at `27d8aa4`) |
 | Document A — Candidate Containment and Writer-Authority Contract v0.1 — docs-only requirement-level **write-side** boundary; unadmitted reflection artifacts structurally barred from ordinary cognition-shaping fan-out; admission defaults to **at most released / low-authority** (stricter outcomes allowed); admission ≠ promotion; runtime enforcement later-owned; no implementation, mechanics, Stage B, or Document B | 2026-06-13 | `docs/TORMENT_CANDIDATE_CONTAINMENT_WRITER_AUTHORITY_CONTRACT_v0.1.md` |
 | Document B — Private Cognition and Unified Reflection Blueprint v0.1 — docs-only requirement-level **interior** contract; bounded private-cognition interior inside Document A's wall and behind P4's read-side boundary; two regimes (active continuity / offline dream-incubation) under one governance skeleton; staging permitted inside the chamber, admission remains Document A's; Envelope Audit detect/flag/stage only; silence as non-reentry footprint; no implementation, mechanics, scheduler, store/schema, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` |
+| Seed-Governance Blueprint v0.1 — docs-only requirement-level **seed / identity / canon governance** contract; specializes Document A's write-side wall for seed/identity/canon outcomes (amends A in no way); operator-governed seed revision (operator-only default, lineage-preserving); identity/seed/canon-affecting candidates stricter than ordinary and never auto-admit; Document A remains the admission edge; canon governed by source class, not one boolean; automatic identity/seed/canon writers flagged not-yet-conformant (require later reconciliation, not patched); `mood_drift → drift → gravity_correction → canon=True` named as a compound hazard; no implementation, runtime seed writer, canon-editing mechanics, schema/store, migration, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_SEED_GOVERNANCE_BLUEPRINT_v0.1.md` |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
@@ -654,6 +655,32 @@ PROMOTION → operator promotion. The **Seed-Governance Blueprint** is **eligibl
 but not opened**; this map records no recommended next document and implies no
 auto-next sequencing. Registry companion: §N9 of
 `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
+
+**TORMENT Seed-Governance Blueprint v0.1 promoted and closed (2026-06-13).**
+`docs/TORMENT_SEED_GOVERNANCE_BLUEPRINT_v0.1.md` is the promoted requirement-level
+**seed / identity / canon governance** contract. It **specializes Document A's
+write-side wall for seed / identity / canon outcomes** and **does not amend
+Document A, Document B, P4, Stage A, Cluster 2, Ledger doctrine, or the MCP
+boundary.** Core posture: *Seed-Governance is not a seed rewrite mechanism; it is
+the requirement-level governance contract preventing seed, identity, and canon
+from being quietly rewritten.* Eight obligations (operator-governed seed revision,
+operator-only default and lineage-preserving; identity/seed/canon-affecting
+candidates stricter than ordinary and never auto-admit; Document A remains the
+single admission edge; canon governed by source class not one boolean; automatic
+identity/seed/canon writers flagged not-yet-conformant; soft guidance must not
+silently become seed/canon authority; recognition ≠ authority; recovery preserves
+authored canon verbatim without pinning or locking). The
+`mood_drift → drift centroid → gravity_correction → canon=True` compound hazard is
+named, not patched; ordinary non-canon derived identity anchors stay outside
+Seed-Governance unless promoted/canonized/used as seed-revision evidence/given
+durable identity-authority weight; SRG crystal stays adjacent / Memory-Engine-P1-
+owned, not absorbed. **It authorizes no implementation, runtime seed writer,
+canon-editing mechanics, schema, store, migration, Stage B, prompt/retrieval
+coupling, or autonomy**, and opens no reconciliation, gravity_correction,
+writer-authority, Stage B, or P5a/P6 lane. **Active gate after closure: none.
+Next gate after closure: unselected** (the pre-substrate next documents named in
+the framing remain eligible-but-unopened; no auto-next). Registry companion: §N10
+of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
