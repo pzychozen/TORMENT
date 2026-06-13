@@ -1,9 +1,10 @@
-# TORMENT Pre-Substrate Architecture Framing v0.1 (DRAFT)
+# TORMENT Pre-Substrate Architecture Framing v0.1
 
-> **Draft status.** This is a **scratch draft** of an intended tracked artifact
-> (`docs/TORMENT_PRE_SUBSTRATE_ARCHITECTURE_FRAMING_v0.1.md`). It has **not** been
-> promoted into `docs/`. It awaits GPT / Hilmir wording review. Until promoted it is
-> non-load-bearing local evidence. Windows-visible tracked repo state remains authoritative.
+> **Status.** Tracked docs-only framing artifact, promoted 2026-06-13. Framing only:
+> it authorizes no implementation; selects no mechanics, schemas, storage technology,
+> storage layout, model APIs, trigger schedules, budgets, or prompt formats; opens no
+> Stage B; authorizes no migration; and auto-opens no subsequent design gate.
+> Windows-visible tracked repo state remains authoritative.
 
 **Tags used throughout:** `[FACT]` · `[OPERATOR POSTURE]` · `[CONTRACT CANDIDATE]` · `[PARKED]` · `[NON-AUTHORIZATION]` · `[LATER OWNER]`.
 
@@ -321,8 +322,8 @@ PASS_1D_R2_PERSONAL_CONFIRMATION.md
 codex\CODEX_CHALLENGE_BRIEF.md
 ```
 
-`[FACT]` These scratch artifacts remain **non-load-bearing evidence lineage**. They are preserved for audit history; they are not promoted doctrine and do not authorize implementation. Only this framing artifact, once promoted by explicit trio decision, becomes tracked. Even then it authorizes no implementation and auto-opens no subsequent design gate. Sections 10–11 record the eligible next design sequence; each later document still requires a separate bounded opening decision.
+`[FACT]` These scratch artifacts remain **non-load-bearing evidence lineage**. They are preserved for audit history; they are not promoted doctrine and do not authorize implementation. This framing artifact is now tracked and promoted; even so, it authorizes no implementation and auto-opens no subsequent design gate. Sections 10–11 record the eligible next design sequence; each later document still requires a separate bounded opening decision.
 
 ---
 
-*End DRAFT TORMENT Pre-Substrate Architecture Framing v0.1. Scratch draft, awaiting GPT / Hilmir wording review. No tracked promotion, no mechanics, no Stage B.*
+*End TORMENT Pre-Substrate Architecture Framing v0.1. Tracked docs-only framing artifact, promoted 2026-06-13. No implementation, no mechanics, no Stage B; auto-opens no subsequent design gate.*
