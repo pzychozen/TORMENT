@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -884,11 +884,26 @@ Admission ceiling refinement:
 This amendment changes registry classification **only** where listed: the amendment-date line, the footer, and this §N8 record. It confers **no implementation authority, no runtime Authority Gate, no runtime patch, no schema, no storage selection, no database design, no migration, no Document B opening, no Stage B opening, and no autonomy opening.** It does not amend the recorded dependency graph or any prior contract text.
 
 ---
+
+**N9. Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration (2026-06-13, docs-only).**
+
+`docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` is promoted as a **requirement-level interior design contract** and **closed** as docs-only. Document B is the private-cognition / unified-reflection **interior** layer, sitting **inside Document A's containment wall and behind P4's read-side boundary**; runtime conformance remains later-owned (P2.5 / a separately authorized implementation track). It belongs to the pre-substrate architecture reconstruction programme, distinct from the Memory Engine phase graph, and is registered here because it interacts with Document A / P4 / Stage A / Cluster 2 / Ledger / MCP-boundary doctrine.
+
+**Programme state after N9:** active gate **none**; next gate **unselected**; **Seed-Governance Blueprint eligible but not opened** (no recommended-next, no auto-next sequencing); Stage B remains **closed**; runtime implementation remains **later-owned**. No Memory Engine phase was opened or selected by this registration.
+
+**Contract shape (summary; full text not reproduced):** ten obligations — B-O1 unified-surface / mode-honesty; B-O2 / B-O2.1 chamber thread-continuity (thread-bounded by default, durable cross-session only when separately governed, never canonical / authority-bearing / pinned); B-O3 explicit lifecycle transitions (no silent class upgrade); B-O4 non-reachability (structural, not tag-honoring); B-O5 / B-O5.1 two-regime governance skeleton + minimal requirement on any future governed live-coupling surface; B-O6 / B-O6.1 Envelope Audit detect/flag/stage only + high-stakes surfacing reconciliation; B-O7 self-bounding / no self-authority; B-O8 inspectability without authority; B-O9 staging permitted / crossing gated; B-O10 / B-O10.1 silence as a permitted non-reentry footprint. The deliberate **B-O2 / B-O4 friction** (chamber-internal continuity permitted; external leakage forbidden) is stated explicitly. Admission remains Document A's; per-mode staging dispositions are requirement-level; the identity / seed / canon-affecting class routes to the Seed-Governance Blueprint.
+
+**Registered values-layer inputs (operator-ratified, 2026-06-13):** the five steering answers (Regime A coupling routing; thread-bounded chamber-continuity durability; staging permitted inside the chamber / crossing gated; per-mode staging defaults; silence as a non-reentry footprint) and the four draft-review resolutions Q-a–Q-d (identity/seed/canon "stricter; never auto-admit" sufficient for v0.1; minimal live-coupling-surface requirement; silence footprint permitted-not-mandatory; risk-flag surfacing reconciliation). Lineage: design-framing report → rev1 → Codex adversarial (ACCEPT WITH WORDING CORRECTIONS) → rev2 → GPT ACCEPT FOR OPERATOR PROMOTION → operator promotion.
+
+This amendment changes registry classification **only** where listed: the amendment-date line, the footer, and this §N9 record. It confers **no implementation authority, no mechanics, no scheduler / trigger / budget, no store / schema / API, no candidate-store carrier, no Stage B opening, no autonomy opening, and no amendment to Document A / P4 / Stage A / Cluster 2 / Ledger / MCP boundary.** It does not amend the recorded dependency graph or any prior contract text.
+
+---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
 2026-06-09 (N5 P4 contract promotion and closure registration; N6 Stage A
 recovery/reconciliation semantics contract promotion and closure registration;
 N7 thinking-layer ratified soft-state postures and parked private-thinking-layer
 seam) and 2026-06-13 (N8 Document A candidate-containment and writer-authority
-contract promotion and closure registration). Amendments are small docs slices
-with trio sign-off.*
+contract promotion and closure registration; N9 Document B private-cognition and
+unified-reflection blueprint promotion and closure registration). Amendments are
+small docs slices with trio sign-off.*

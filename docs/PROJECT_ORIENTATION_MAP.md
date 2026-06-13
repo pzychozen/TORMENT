@@ -81,6 +81,7 @@ recent hardening items are commit-level only.)
 | CodeQL non-C1 maintenance closure — nine query families resolved by narrow fixes + intentional dismissals to **0 open dashboard alerts**; test/example/harness only; no production / schema / reader-projection / cognition-eligibility / authority-boundary / continuity / database / Memory Engine change; storage redesign remains unopened | 2026-06-12 | `docs/CHECKPOINT_2026-06_CODEQL_NON_C1_CLOSURE.md` (commits `2225e65`, `92960b2`, `cebd5d7`, `adedb71`, `ff1a021`, `ddaeea1`, `fc69c3c`) |
 | Pre-substrate architecture framing v0.1 — reconstruction of the higher architecture (thinking / reflection / seed / soft-continuity) above the paused substrate; framing only (no implementation, no mechanics, no Stage B); Document A eligible but **not** opened | 2026-06-13 | `docs/TORMENT_PRE_SUBSTRATE_ARCHITECTURE_FRAMING_v0.1.md` (promoted at `27d8aa4`) |
 | Document A — Candidate Containment and Writer-Authority Contract v0.1 — docs-only requirement-level **write-side** boundary; unadmitted reflection artifacts structurally barred from ordinary cognition-shaping fan-out; admission defaults to **at most released / low-authority** (stricter outcomes allowed); admission ≠ promotion; runtime enforcement later-owned; no implementation, mechanics, Stage B, or Document B | 2026-06-13 | `docs/TORMENT_CANDIDATE_CONTAINMENT_WRITER_AUTHORITY_CONTRACT_v0.1.md` |
+| Document B — Private Cognition and Unified Reflection Blueprint v0.1 — docs-only requirement-level **interior** contract; bounded private-cognition interior inside Document A's wall and behind P4's read-side boundary; two regimes (active continuity / offline dream-incubation) under one governance skeleton; staging permitted inside the chamber, admission remains Document A's; Envelope Audit detect/flag/stage only; silence as non-reentry footprint; no implementation, mechanics, scheduler, store/schema, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
@@ -629,6 +630,29 @@ become hidden authority, governed-memory crossings stay explicit and bounded,
 architecture stays inspectable. This registers operator intent and a parked
 question only; it selects no mechanics, does not amend the Stage A contract, and
 opens no gate. Registry companion: §N7 of
+`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
+
+**TORMENT Document B — Private Cognition and Unified Reflection Blueprint v0.1 promoted and closed (2026-06-13).**
+`docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` is the
+promoted requirement-level **interior** design contract: the bounded
+private-cognition / unified-reflection interior that sits **inside Document A's
+containment wall and behind P4's read-side boundary**. Ten obligations
+(mode-honesty; chamber thread-continuity, thread-bounded by default, durable
+cross-session only when separately governed; explicit lifecycle transitions with
+no silent class upgrade; non-reachability, structural not tag-honoring;
+two-regime governance skeleton — active continuity and offline dream/incubation;
+Envelope Audit detect/flag/stage only; self-bounding / no self-authority;
+inspectability without authority; staging permitted inside the chamber while
+admission remains Document A's; silence as a permitted non-reentry footprint).
+The **B-O2/B-O4 friction is deliberate design** — chamber-internal continuity
+permitted, external leakage forbidden. Runtime conformance is later-owned (P2.5 /
+separately authorized track); **no implementation, mechanics, scheduler / trigger
+/ budget, store / schema / API, Stage B, or autonomy** authorized. Lineage:
+design-framing report → rev1 (GPT five-point steering + Q-a–Q-d) → Codex
+adversarial (ACCEPT WITH WORDING CORRECTIONS) → rev2 → GPT ACCEPT FOR OPERATOR
+PROMOTION → operator promotion. The **Seed-Governance Blueprint** is **eligible
+but not opened**; this map records no recommended next document and implies no
+auto-next sequencing. Registry companion: §N9 of
 `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
