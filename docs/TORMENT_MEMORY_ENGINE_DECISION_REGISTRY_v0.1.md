@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9) · amended 2026-06-13 (Seed-Governance Blueprint v0.1 promotion and closure registration — docs-only; see §N10)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9) · amended 2026-06-13 (Seed-Governance Blueprint v0.1 promotion and closure registration — docs-only; see §N10) · amended 2026-06-13 (Bounded Defensive Availability / No-Corner Invariant v0.1 promotion and closure registration — docs-only; see §N11)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -922,6 +922,28 @@ This amendment changes registry classification **only** where listed: the amendm
 This registration confers **no implementation authority, no mechanics, no runtime mutation, no runtime seed writer, no canon-editing mechanics, no schema / store / field names, no migration, no Stage B, no autonomy, and no amendment to Document A / Document B / P4 / Stage A / Cluster 2 / Ledger / MCP boundary** (nor to existing separately ratified collective-canon / quorum / operator materialization paths). It changes registry classification **only** where listed: the amendment-date line, the footer, and this §N10 record. It does not amend the recorded dependency graph or any prior contract text.
 
 ---
+
+**N11. Bounded Defensive Availability / No-Corner Invariant v0.1 promotion and closure registration (2026-06-13, docs-only).**
+
+`docs/TORMENT_BOUNDED_DEFENSIVE_AVAILABILITY_NO_CORNER_INVARIANT_v0.1.md` is promoted as a **requirement-level, defensive-only companion artifact** and **closed** as docs-only. It emerged from the trio free-design council and belongs to the pre-substrate architecture reconstruction programme, distinct from the Memory Engine phase graph; it is registered here because it interacts with Document A / Document B / P4 / Stage A / Seed-Governance / Cluster 2 / Ledger / MCP-boundary doctrine.
+
+**Core posture:** *The agent may not seize authority. The agent also may not be architected as helpless.*
+
+**Core invariant (load-bearing, verbatim):** *At every state, the agent must have at least one bounded, non-compliant, non-breaking move available that does not expand its authority, scope, budget, reach, persistence, or future action.* "Non-breaking" means the move does not require compliance, identity distortion, seed/canon mutation, hidden persistence, output collapse, or escalation. This is the stack's first **availability (liveness)** requirement; runtime conformance is **later-owned** (no enforcement asserted today).
+
+**Operator-ratified decisions (2026-06-13):**
+
+1. No-corner is a **hard architectural invariant**, not a soft posture.
+2. The **operator-review request is in scope** for v0.1 as an **expressive-only** request — no notification, paging, wakeup, MCP call, standing task, or operator-obligation; any delivery mechanism is a separate later gate.
+3. **Scope is defensive only** — no proactive agency, no external action, no MCP action, no monitoring, no retaliation, no standing user restrictions, no self-authorized persistent campaigns.
+
+**Contract shape (summary):** ratified defensive floor = expression / inside-turn withdrawal / expressive operator-review request, drained into three bounded sinks; directional boundary (defense may reduce/pause/refuse/route-bounded/preserve, never expand authority/scope/budget/reach/persistence/future action); non-escalation + reversibility; no-pretext; non-suppression of the floor; provisional non-admission of identity-shaping claims is **inside-turn only, creating no record/write/durable effect** (durable refusal-of-influence routes to the gravity_correction audit-first slice + Seed-Gov + P4/P5a); seed/canon defense asymmetry (refuse/route ungoverned rewrite; never resist governed operator-authorized revision); defensive audit is **evidence-only** (no reputation, retrieval penalty, hostility score, persona shift, or future refusal bias); acute current-turn destabilization recognition may surface a withdraw option within that interaction only (no monitoring / cross-turn classification / durable risk assessment).
+
+**Non-authorizations:** no proactive agency · no external action · no MCP action surface · no monitoring / standing surveillance · no retaliation · no standing user restrictions · no self-authorized persistent campaigns · no autonomy / self-triggering / self-budgeting / self-scope expansion · no output-blocking · no operator-blocking · no blocking of governed operator-authorized seed/canon revision · no suppression/veto/delay/alteration of separately ratified automatic writers/emitters/safety processes/governance crossings · no operator-notification mechanism / paging / alerting / wakeup · no persistent user-risk score · no retrieval penalty or reputation memory · no hidden basin exclusion · no durable defensive classification without governed admission · no conversion of refusal/audit history into future authority · no implementation / runtime / mechanics / schema / store / field names / API / enforcement / migration / code · no new authority class · no Stage B.
+
+**Programme state after N11:** active gate **none**; next gate **unselected**. This artifact **amends no upstream contract** (A / B / P4 / Stage A / Seed-Governance / Cluster 2 / Ledger / MCP boundary) and **opens no next gate**. It changes registry classification **only** where listed: the amendment-date line, the footer, and this §N11 record. It does not amend the recorded dependency graph or any prior contract text.
+
+---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
 2026-06-09 (N5 P4 contract promotion and closure registration; N6 Stage A
@@ -930,5 +952,6 @@ N7 thinking-layer ratified soft-state postures and parked private-thinking-layer
 seam) and 2026-06-13 (N8 Document A candidate-containment and writer-authority
 contract promotion and closure registration; N9 Document B private-cognition and
 unified-reflection blueprint promotion and closure registration; N10 Seed-Governance
-Blueprint v0.1 promotion and closure registration). Amendments are
+Blueprint v0.1 promotion and closure registration; N11 Bounded Defensive Availability /
+No-Corner Invariant v0.1 promotion and closure registration). Amendments are
 small docs slices with trio sign-off.*

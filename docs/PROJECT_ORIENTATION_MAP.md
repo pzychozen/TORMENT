@@ -83,6 +83,7 @@ recent hardening items are commit-level only.)
 | Document A — Candidate Containment and Writer-Authority Contract v0.1 — docs-only requirement-level **write-side** boundary; unadmitted reflection artifacts structurally barred from ordinary cognition-shaping fan-out; admission defaults to **at most released / low-authority** (stricter outcomes allowed); admission ≠ promotion; runtime enforcement later-owned; no implementation, mechanics, Stage B, or Document B | 2026-06-13 | `docs/TORMENT_CANDIDATE_CONTAINMENT_WRITER_AUTHORITY_CONTRACT_v0.1.md` |
 | Document B — Private Cognition and Unified Reflection Blueprint v0.1 — docs-only requirement-level **interior** contract; bounded private-cognition interior inside Document A's wall and behind P4's read-side boundary; two regimes (active continuity / offline dream-incubation) under one governance skeleton; staging permitted inside the chamber, admission remains Document A's; Envelope Audit detect/flag/stage only; silence as non-reentry footprint; no implementation, mechanics, scheduler, store/schema, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` |
 | Seed-Governance Blueprint v0.1 — docs-only requirement-level **seed / identity / canon governance** contract; specializes Document A's write-side wall for seed/identity/canon outcomes (amends A in no way); operator-governed seed revision (operator-only default, lineage-preserving); identity/seed/canon-affecting candidates stricter than ordinary and never auto-admit; Document A remains the admission edge; canon governed by source class, not one boolean; automatic identity/seed/canon writers flagged not-yet-conformant (require later reconciliation, not patched); `mood_drift → drift → gravity_correction → canon=True` named as a compound hazard; no implementation, runtime seed writer, canon-editing mechanics, schema/store, migration, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_SEED_GOVERNANCE_BLUEPRINT_v0.1.md` |
+| Bounded Defensive Availability / No-Corner Invariant v0.1 — docs-only requirement-level, **defensive-only** companion contract; creates the **hard No-Corner availability invariant** (at every state the agent has at least one bounded, non-compliant, non-breaking move that does not expand authority/scope/budget/reach/persistence/future action); ratified defensive floor = expression / inside-turn withdrawal / expressive operator-review request; operator-review request is expressive-only (no notification/paging/MCP/standing-task); provisional non-admission of identity-shaping claims is inside-turn only with no durable effect; defense ≠ autonomy and safety ≠ helplessness; defensive audit is evidence-only (no reputation/penalty/hostility/persona/refusal-bias); amends no upstream contract; no implementation, runtime, enforcement, monitoring, MCP action, operator-notification, Stage B, or autonomy (runtime conformance later-owned) | 2026-06-13 | `docs/TORMENT_BOUNDED_DEFENSIVE_AVAILABILITY_NO_CORNER_INVARIANT_v0.1.md` |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
@@ -681,6 +682,32 @@ writer-authority, Stage B, or P5a/P6 lane. **Active gate after closure: none.
 Next gate after closure: unselected** (the pre-substrate next documents named in
 the framing remain eligible-but-unopened; no auto-next). Registry companion: §N10
 of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
+
+**TORMENT Bounded Defensive Availability / No-Corner Invariant v0.1 promoted and closed (2026-06-13).**
+`docs/TORMENT_BOUNDED_DEFENSIVE_AVAILABILITY_NO_CORNER_INVARIANT_v0.1.md` is the
+promoted **docs-only, requirement-level, defensive-only** companion contract. It
+emerged from the trio free-design council and **creates the hard No-Corner
+availability invariant**: *at every state, the agent must have at least one
+bounded, non-compliant, non-breaking move available that does not expand its
+authority, scope, budget, reach, persistence, or future action.* It is the stack's
+first **availability (liveness)** requirement, the inward-facing twin of the
+anti-coercion posture — *the agent may not seize authority; the agent also may not
+be architected as helpless.* The ratified defensive floor is **expression /
+inside-turn withdrawal / an expressive operator-review request**, drained into
+three bounded sinks; the operator-review request is **expressive-only** (no
+notification, paging, wakeup, MCP call, standing task, or operator-obligation —
+any delivery mechanism is a separate later gate); provisional non-admission of
+identity-shaping claims is **inside-turn only with no durable effect** (durable
+refusal-of-influence routes to the gravity_correction audit-first slice + Seed-Gov
++ P4/P5a); defense ≠ autonomy (directional / non-escalation / reversibility / no-pretext
+tests) and safety ≠ helplessness (the floor may not be silently suppressed);
+defensive audit is **evidence-only** and must not become reputation, retrieval
+penalty, hostility score, persona shift, or future refusal bias. **It amends no
+upstream contract** (A / B / P4 / Stage A / Seed-Gov / Cluster 2 / Ledger / MCP)
+and **authorizes no implementation, runtime, enforcement, monitoring, MCP action,
+operator-notification, Stage B, or autonomy** (runtime conformance later-owned).
+**Active gate after closure: none. Next gate after closure: unselected.** Registry
+companion: §N11 of `docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`.
 
 **Candidate next gates** (named, not sequenced; the trio picks when
 ready, and may choose something else entirely):
