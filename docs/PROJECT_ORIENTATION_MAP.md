@@ -428,6 +428,15 @@ Items that have been deferred from an active slice but are not lost:
   open (query-mutation durability, Spine/audit durability, fan-out→hazard reach). **No tests, code,
   fixes, locks, or implementation authorized.** See
   `docs/TORMENT_GATE_A_LIVE_ADVISORY_BOUNDARY_CHARACTERIZATION_CHECKPOINT_v0.1.md`.
+- **Gate A tests-only lock proposal — FILED docs-only (2026-06-17)** — proposes tests-only
+  regression-lock **candidates C1–C5 only**, under Codex constraints (locks describe *current
+  direct-call absence / current routing / current shape*, never "safety," never a future-freezing
+  negative): C1 advisory-module direct-call absence (AST guard, advisory modules only); C2 `/agent/query`
+  consumes only MemoryPlan; C3 `/agent/query` no direct ingest/promote/gravity; C4 MemoryPlan shape only
+  (no fabric.query clamp); C5 Phase-7 ordinary-ingest routing characterization. **C6 (Document B absence)
+  rejected** — would tripwire future governed implementation. **No tests/code/fixes/locks/implementation
+  authorized;** tests remain separate authorization. See
+  `docs/TORMENT_GATE_A_TESTS_ONLY_LOCK_PROPOSAL_v0.1.md`.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
