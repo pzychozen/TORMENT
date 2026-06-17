@@ -417,6 +417,17 @@ Items that have been deferred from an active slice but are not lost:
   visible/parked for Gate B; no P4/Document B/dream/candidate-store/durable-private-state/
   database mechanics opened. Trace execution and any tests-only locks require separate later
   authorization. See `docs/TORMENT_GATE_A_LIVE_ADVISORY_BOUNDARY_TRACE_PLAN_v0.1.md`.
+- **Gate A characterization checkpoint — FILED (2026-06-17)** — trace executed read-only;
+  characterized boundary recorded with Codex's precision correction. Three-way model:
+  (1) no direct advisory write found; (2) **`fabric.query` has retrieval-internal state effects**
+  (warmup-state persist, evolved-SRG payload mutation) — so "read-only" means *no direct advisory
+  authority writer, not no mutation anywhere*; (3) **Phase-7 ordinary ingest is the real
+  response-to-memory path** (`AgentRunner.run_turn` → `fabric.ingest` of a turn summary), and
+  ordinary ingest ≠ Document B admission. `/agent/query` uses only the MemoryPlan (draft/review/
+  stance discarded), no direct ingest/promote/gravity. Writer hazards stay parked Gate B; residuals
+  open (query-mutation durability, Spine/audit durability, fan-out→hazard reach). **No tests, code,
+  fixes, locks, or implementation authorized.** See
+  `docs/TORMENT_GATE_A_LIVE_ADVISORY_BOUNDARY_CHARACTERIZATION_CHECKPOINT_v0.1.md`.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
