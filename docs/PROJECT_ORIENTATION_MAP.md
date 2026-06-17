@@ -398,6 +398,16 @@ Items that have been deferred from an active slice but are not lost:
   remain unopened.** Old-doc authority quarantine and guidance-not-control remain binding.
   See `docs/TORMENT_L2_STAGE_B_OPENING_DECISION_RECORD_v0.1.md` (supersedes the proposed
   packet `…_PACKET_PROPOSED_v0.1.md`). No registry amendment / number taken.
+- **Cognition roadmap completion / sequencing map — FILED read-only (2026-06-17)** — the L2
+  framing lane's first deliverable: a READ-ONLY / FRAMING / SEQUENCING-ONLY map of the
+  dream/cognition/thinking/private-state/seed/guided-memory layers (four buckets: ratified
+  requirement / live pre-contract / parked non-conformance / not-yet-built conformance). Names
+  **candidate gates only** (Gate 0 filing; A containment/advisory-boundary; B write-side authority
+  + visible writer-hazard targets; C P4 read-side framing; D Layer-1 thinking + Envelope Audit
+  ephemeral; deferred substrate-dependent set) — order intent A→P4→Document B, Regime B dream
+  deferred, Cluster 2 v0.2 verification-pending. **No implementation, mechanics, construction, P4,
+  Seed-Gov, writer fixes, canon_source, or dream runtime opened.** Old-doc quarantine binding. See
+  `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md`.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
