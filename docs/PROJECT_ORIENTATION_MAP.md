@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below).
+**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below); 2026-06-17 (writer-path/endpoint-wiring characterization triad — Seams 1–3 — closure pointer added; runtime/test-chain baseline `b549a97`).
 
 ---
 
@@ -84,6 +84,7 @@ recent hardening items are commit-level only.)
 | Document B — Private Cognition and Unified Reflection Blueprint v0.1 — docs-only requirement-level **interior** contract; bounded private-cognition interior inside Document A's wall and behind P4's read-side boundary; two regimes (active continuity / offline dream-incubation) under one governance skeleton; staging permitted inside the chamber, admission remains Document A's; Envelope Audit detect/flag/stage only; silence as non-reentry footprint; no implementation, mechanics, scheduler, store/schema, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` |
 | Seed-Governance Blueprint v0.1 — docs-only requirement-level **seed / identity / canon governance** contract; specializes Document A's write-side wall for seed/identity/canon outcomes (amends A in no way); operator-governed seed revision (operator-only default, lineage-preserving); identity/seed/canon-affecting candidates stricter than ordinary and never auto-admit; Document A remains the admission edge; canon governed by source class, not one boolean; automatic identity/seed/canon writers flagged not-yet-conformant (require later reconciliation, not patched); `mood_drift → drift → gravity_correction → canon=True` named as a compound hazard; no implementation, runtime seed writer, canon-editing mechanics, schema/store, migration, Stage B, or autonomy | 2026-06-13 | `docs/TORMENT_SEED_GOVERNANCE_BLUEPRINT_v0.1.md` |
 | Bounded Defensive Availability / No-Corner Invariant v0.1 — docs-only requirement-level, **defensive-only** companion contract; creates the **hard No-Corner availability invariant** (at every state the agent has at least one bounded, non-compliant, non-breaking move that does not expand authority/scope/budget/reach/persistence/future action); ratified defensive floor = expression / inside-turn withdrawal / expressive operator-review request; operator-review request is expressive-only (no notification/paging/MCP/standing-task); provisional non-admission of identity-shaping claims is inside-turn only with no durable effect; defense ≠ autonomy and safety ≠ helplessness; defensive audit is evidence-only (no reputation/penalty/hostility/persona/refusal-bias); amends no upstream contract; no implementation, runtime, enforcement, monitoring, MCP action, operator-notification, Stage B, or autonomy (runtime conformance later-owned) | 2026-06-13 | `docs/TORMENT_BOUNDED_DEFENSIVE_AVAILABILITY_NO_CORNER_INVARIANT_v0.1.md` |
+| Writer-path / endpoint-wiring characterization triad — Seam 1 `drift_reflex_callback` consumption trace (read-only: declared/dispatch-capable but unwired, no runtime consumer); Seam 2 `_maybe_emit_identity_anchor` writer-path lock (test-only, `cd35aae`: derived `canon=False` `identity_anchor` from motif heuristics, no authority/seed-gov/operator input; read-side tier hygiene not re-tested, no P4/source-sameness or retirement opened); Seam 3 `POST /promote` force-bypass endpoint-wiring lock (test-only: `force=True` → `is_canon`+`user_approved`, reaches `promote_chunk`, `result.promote or req.force` branch; writer row shape not re-tested, no auth/governance doctrine imported). Characterization only — no fix, no desired-runtime-doctrine claim, no gate opened | 2026-06-17 | `docs/CHECKPOINT_2026-06_WRITER_PATH_CHARACTERIZATION_TRIAD.md`; baseline through `b549a97` |
 
 **Q3-D1 affect attribution is CLOSED as a bounded chain** (S1 → S2 → H1 → S3 →
 S4 → S5b → S5a). The next gate is **intentionally unselected** — it must be
@@ -359,6 +360,14 @@ project authority.
 
 Items that have been deferred from an active slice but are not lost:
 
+- **Writer-path / endpoint-wiring characterization triad — parked fixes** — the
+  Seam 1–3 chain (closed read-only / test-only, characterization only) parks all
+  future *fixes* without opening them: `_maybe_emit_identity_anchor` writer
+  authority and `promote_chunk` / `POST /promote` force authorization →
+  writer-authority reconciliation slice; identity-anchor presence→source-membership
+  → P4 O2; `drift_reflex_callback` wiring (if ever) → separate cognition-affecting
+  slice. See `docs/CHECKPOINT_2026-06_WRITER_PATH_CHARACTERIZATION_TRIAD.md` §5.
+  None opened.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
