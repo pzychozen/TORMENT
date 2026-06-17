@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below); 2026-06-17 (writer-path/endpoint-wiring characterization triad — Seams 1–3 — closure pointer added; runtime/test-chain baseline `b549a97`); 2026-06-17 (Lane A `mood_drift → drift-centroid` inclusion trace recorded read-only; baseline `1f6cd0d`).
+**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below); 2026-06-17 (writer-path/endpoint-wiring characterization triad — Seams 1–3 — closure pointer added; runtime/test-chain baseline `b549a97`); 2026-06-17 (Lane A `mood_drift → drift-centroid` inclusion trace recorded read-only; baseline `1f6cd0d`); 2026-06-17 (Gate A advisory-boundary characterization CLOSED at `d0315a0`; closure doc `docs/TORMENT_GATE_A_ADVISORY_BOUNDARY_CLOSURE_CHECKPOINT_v0.1.md`; characterization + tests-only lock only; next likely step Gate B pending explicit operator authorization).
 
 ---
 
@@ -437,6 +437,12 @@ Items that have been deferred from an active slice but are not lost:
   rejected** — would tripwire future governed implementation. **No tests/code/fixes/locks/implementation
   authorized;** tests remain separate authorization. See
   `docs/TORMENT_GATE_A_TESTS_ONLY_LOCK_PROPOSAL_v0.1.md`.
+- **Gate A — CLOSED as advisory-boundary characterization + tests-only lock (2026-06-17, `d0315a0`)** —
+  Gate A advisory-boundary characterization is closed at `d0315a0`. Closure doc:
+  `docs/TORMENT_GATE_A_ADVISORY_BOUNDARY_CLOSURE_CHECKPOINT_v0.1.md`. Gate A closed **only** as
+  advisory-boundary characterization + tests-only lock. It does **not** certify runtime safety, does
+  **not** fix writer hazards, and does **not** open database/substrate construction. Next likely step:
+  **Gate B writer-authority hazards**, pending explicit operator authorization.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
