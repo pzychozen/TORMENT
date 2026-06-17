@@ -4,7 +4,7 @@
 
 **Status:** Proposed decision packet (Claude-side draft input). Not promoted as a decision. Selects no mechanics. Opens no gate. Authorizes nothing.
 **Date:** 2026-06-17.
-**Current synchronized baseline for this packet:** `fd25ab4`. Issue #54 was re-verified at `01ec838` and L2-A subsequently closed at `fd25ab4`; both are part of the chain, but `fd25ab4` is the current HEAD.
+**Current synchronized baseline for this packet:** `fd25ab4`. Issue #54 was re-verified at `01ec838`; L2-A subsequently closed at `fd25ab4`; this proposed packet was committed at `731a7a4`. `fd25ab4` is the packet baseline, not the proposal commit.
 
 **Terminology (load-bearing):** "Stage B" (Issue #54 / council sense) = the database/substrate design gate. Opening it would start the Governed-Memory Substrate Programme, whose first task is a bounded design-framing pass defining the programme's internal Stage A (recovery/reconciliation semantics, P5a-shaped) / internal Stage B (carrier/substrate mechanics, P6-shaped) boundary.
 
@@ -22,7 +22,7 @@ A proposed bounded gate for the trio + Hilmir. It proposes **whether to authoriz
 - **Later mechanics selection requires separate bounded authorization.**
 - **Construction requires a separate construction-entry packet with evidence, clean state, and Hilmir hand-back.**
 
-**Topic headings** the framing pass may inventory (council outcome §5 — headings only, no answers, no mechanics): meaning-preserving recovery; identity/sameness; canon-by-source distinguishability; write-side authority; durability/crash-safety; migration approach from JSON/JSONL; read-side conformance *scheduling* (P4 runtime conformance stays a separate, later-authorized track). Adopted work-ordering rule (council §4): `requirements → carrier proposal → family write-site work`, reader/projection runtime conformance separate.
+**Topic headings** the framing pass may inventory (council outcome §5 — headings only, no answers, no mechanics): meaning-preserving recovery; identity/sameness; canon-by-source distinguishability; write-side authority; durability/crash-safety; migration meaning-preservation constraints from JSON/JSONL; read-side conformance *scheduling* (P4 runtime conformance stays a separate, later-authorized track). Adopted work-ordering rule (council §4): `requirements → carrier proposal → family write-site work`, reader/projection runtime conformance separate.
 
 ## 2. Old-doc authority quarantine (carried)
 
@@ -45,10 +45,10 @@ These are requirements a later design must honor; none is solved or represented 
 - **P4 source-sameness not assumed from presence-only joins.**
 - **P2.5 memory-lineage carrier absent;** analogues are not carriers.
 - **Cluster 5 storage fragility handles** (`JSONL-NO-FSYNC`, `IDENTITY-NON-ATOMIC-SAVE`, `INGEST-NOT-TRANSACTIONAL`, `JSONL-LOADER-NOT-FAIL-TOLERANT`) **are design inputs, not fix authorization.**
-- **No-Corner:** guidance not control; audit does not become authority.
+- **No-Corner:** guidance not control; audit does not become authority; no durable user-risk scoring, monitoring, notification surface, or reputation/penalty ledger.
 - **Stage A recovery preserves governance meaning without pinning identity/canon/seed/soul** (and without invisible finalizer, output blocking, or hidden deletion/refusal).
 
-## 4. Runtime hazards — parked non-conformances (NOT baseline behavior)
+## 4. Runtime hazards — parked non-conformances (NOT baseline authority)
 
 Carried as parked non-conformances; a later design must not encode them as correct:
 
@@ -59,7 +59,7 @@ Carried as parked non-conformances; a later design must not encode them as corre
 
 ## 5. Proof bar (framing → mechanics → construction)
 
-- **Registry §K trigger evidence before framing → construction** — at least one of: measured volume/load-time limits; transactional guarantees unmet by subordinate primitives; benchmarked geometric-locality advantage (G7); portability/auditability/recovery blockers; a TORMENT-native mechanism requiring deeper coupling (owning P6 eval / P8b evidence; trio authority).
+- **Applicable Registry §K trigger evidence before framing → construction** — the §K evidence categories (measured volume/load-time limits; transactional guarantees unmet by subordinate primitives; benchmarked geometric-locality advantage (G7); portability/auditability/recovery blockers; a TORMENT-native mechanism requiring deeper coupling) as applicable to the proposed scope; the trio judges sufficiency — no single arbitrary trigger is treated as sufficient on its own (owning P6 eval / P8b evidence; trio authority).
 - **Requirement-to-carrier traceability before carrier proposals become load-bearing** (each §3 requirement has an explicit "the design will honor this" statement first).
 - **Fresh clean checkpoint before construction-entry** (Issue #54-style state re-verified at the construction-entry HEAD).
 - **Hilmir hand-back before any identity/canon/seed/soul meaning change.**
