@@ -13,7 +13,7 @@ adversarial corrections (query-mutation precision) → this checkpoint.
 
 ## 1. Status and scope
 
-- **HEAD = origin/main = `03cf734`** ("docs(engine): open Gate A advisory-boundary characterization").
+- **Trace baseline: `03cf734`** (Gate A opening commit). **Checkpoint filed at `3316073`.**
 - **Gate A is open characterization-only.** This is a checkpoint, **not a proof closure**. No tests,
   no code, no fixes are produced or authorized here.
 
@@ -76,9 +76,15 @@ fixed here:
 - `_maybe_emit_identity_anchor` automatic derived identity writer.
 - `POST /promote` force bypass — **note: not part of the Phase-7 path**, but remains parked.
 - `mood_drift → centroid → gravity_correction → canon=True`.
+- **`AgentRunner.run_turn` Phase-8 (Stabilize) `gravity_correction` reachability** — a parked Gate B
+  residual. `run_turn` reaches gravity correction by **two distinct routes**, not only one: (a) the
+  Phase-7 ordinary-ingest fan-out (drift band), and (b) **Phase-8 Stabilize**, which reuses the Phase-5
+  drift measurement and can invoke gravity correction directly. Readers must not infer all `run_turn`
+  gravity reachability flows only through Phase-7 ordinary ingest.
 
-The Phase-7 ordinary-ingest fan-out (§5) is the path by which a turn summary can *reach* the
-mood_drift / drift-band / identity-anchor hazards; `/promote` force is a separate caller-triggered
+The Phase-7 ordinary-ingest fan-out (§5) is *one* path by which a turn can *reach* the
+mood_drift / drift-band / identity-anchor hazards; **Phase-8 Stabilize is a separate route to
+`gravity_correction`** within the same turn; `/promote` force is a separate caller-triggered
 surface.
 
 ## 7. Spine / audit characterization and residual
@@ -96,8 +102,11 @@ surface.
   evolved SRG state) — persistence scope and governance posture not fully pinned.
 - **Spine / audit envelope durability** outside the immediate return path.
 - **Ordinary-ingest fan-out** reachability to the parked Gate B writer hazards (named, routed to Gate B).
+- **`AgentRunner.run_turn` Phase-8 (Stabilize) `gravity_correction` reachability** — a second,
+  distinct route to gravity correction within a turn (separate from the Phase-7 fan-out); parked Gate B.
 - Full line-by-line confirmation that `fabric.query` performs no admission/authority write (the
-  inspected evidence shows none; the retrieval-internal mutations above are the only writes found).
+  inspected evidence shows none; the retrieval-internal mutations above are the only writes
+  identified in the inspected evidence — this is not a full line-by-line proof).
 
 ## 9. What this checkpoint does not authorize
 
