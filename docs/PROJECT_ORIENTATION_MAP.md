@@ -376,6 +376,12 @@ Items that have been deferred from an active slice but are not lost:
   governance consideration remains parked and unopened; no filtering, gravity, or
   runtime requirement is implied. See
   `docs/CHECKPOINT_2026-06_MOOD_DRIFT_CENTROID_INCLUSION_TRACE.md`. None opened.
+- **Issue #54 cross-before-design barrier — re-verified clean at `01ec838`**
+  (2026-06-17; test-only/docs-only work only since `0563a84`). Recorded in the
+  existing post-N16 Issue #54 checkpoint doc
+  (`docs/TORMENT_GOVERNED_MEMORY_SUBSTRATE_POST_N16_ISSUE_54_CLEAN_CHECKPOINT_v0.1.md`
+  §6). L2 Stage B Opening Decision is named but unopened; database/substrate
+  design and construction remain unopened.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if

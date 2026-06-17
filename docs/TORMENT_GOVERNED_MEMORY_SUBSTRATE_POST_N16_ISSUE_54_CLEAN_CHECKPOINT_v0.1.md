@@ -44,6 +44,40 @@ Supplied exact evidence:
 
 This post-N16 checkpoint supersedes the earlier `076f4c2` Issue #54 checkpoint **only for the post-N16 state**. The `076f4c2` record stays intact and visible as historical evidence; nothing about it is deleted, rewritten, or invalidated for the state it originally captured.
 
+## 6. Re-verification at `01ec838` (2026-06-17)
+
+Re-verified clean crossing at the current synchronized HEAD after the
+post-`0563a84` test-only / docs-only work.
+
+- **HEAD = origin/main = `01ec838`** — full hash
+  `01ec8384e78cbc8221b63a65733c21d728221f2e`; Windows-confirmed.
+- **Working tree clean** — `git status -sb` = `## main...origin/main`;
+  `git status --porcelain` empty (synchronized; no ahead/behind divergence).
+- **Windows full-suite baseline:** `3873 passed, 5 skipped, 22 subtests passed
+  in 73.96s` via `python -m pytest tests\ -q` (Windows source of truth).
+- This **re-establishes the Issue #54 clean-checkpoint / cross-before-design
+  barrier at the current HEAD.** It **supersedes the `0563a84` record for the
+  current state only**; the `0563a84` and `076f4c2` records are kept
+  historically intact, not deleted or rewritten.
+- **Fresh-chat handoff prepared** as part of crossing L1.
+- The intervening commits — `40e6fd6` (gravity_correction canon hazard lock),
+  `cd35aae` (identity-anchor writer-path characterization), `b549a97` (promote
+  force endpoint-wiring characterization), `1f6cd0d` (writer-path
+  characterization triad checkpoint), `c887df8` (mood_drift → drift-centroid
+  inclusion trace), `ede50cd` (Probe-v0 relational-count explanation), `01ec838`
+  (character_context surfacing note) — were **test-only / docs-only**
+  characterization and reconciliation work. **No production runtime, doctrine,
+  gate, or registry change**; doctrine state is unchanged: active gate none,
+  next gate unselected.
+- **L2 Stage B Opening Decision remains named (label only) and unopened.**
+- **Database / substrate design and construction remain unopened**; no
+  schema/storage/mechanics selected.
+- **Carried reminder preserved:** update the GitHub security paper *after*
+  database-design work, as a later deliberate slice.
+
+Context: council outcome (§N16), substrate-readiness memo, DB/Substrate doctrine
+reconciliation, orientation map.
+
 ## Anti-drift footer
 
 This artifact records **repo/doc state and evidence only**. It opens no gate. **Stage B and database/substrate design remain unopened.** It selects no SQL, schema, tables, fields, IDs, fingerprints, carriers, allocator rules, serialization, migration mechanics, storage product, runtime implementation, or authority enforcement. It confers **no implementation authority, no schema/storage/carrier/migration/runtime authority, and no autonomy.** It amends no contract and **does not amend the Decision Registry. It makes no registry amendment and reserves no registry amendment number.** Active gate: none. Next gate: unselected. Guide, not control; audit observes authority and does not become authority; nothing rewrites identity/canon/seed/soul. The earlier `076f4c2` checkpoint remains historically intact and is superseded only for the post-N16 state. Subsequent versions require their own trio/operator ratification.
