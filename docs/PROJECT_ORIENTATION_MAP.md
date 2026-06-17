@@ -382,6 +382,13 @@ Items that have been deferred from an active slice but are not lost:
   (`docs/TORMENT_GOVERNED_MEMORY_SUBSTRATE_POST_N16_ISSUE_54_CLEAN_CHECKPOINT_v0.1.md`
   §6). L2 Stage B Opening Decision is named but unopened; database/substrate
   design and construction remain unopened.
+- **L2-A Pre-Stage-B Ratification Audit — CLOSED read-only (2026-06-17)** — synthesis
+  of read-only archaeology + Codex adversarial challenge; found no structural blocker
+  to *preparing* the L2 Stage B Opening Decision, provided the Codex objections and the
+  old-doc authority quarantine are carried into the L2 packet. Records carry-forward
+  warnings only; selects no mechanics; edits no prior design/roadmap/archive docs. See
+  `docs/TORMENT_L2A_PRE_STAGE_B_RATIFICATION_AUDIT_CLOSURE_v0.1.md`. **L2 remains
+  unopened**; Stage B / database / schema / carriers / migration remain unopened.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
