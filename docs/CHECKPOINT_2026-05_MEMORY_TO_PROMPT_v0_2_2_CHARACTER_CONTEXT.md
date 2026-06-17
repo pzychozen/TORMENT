@@ -264,7 +264,7 @@ installed:
 ### Inherited parked items (from v0.2 closure, all still parked)
 
 1. v0.1 block-count cleanup (4-block → 5-block; `BLOCK_REFERENCE`).
-2. v0.2 §4.3 `/agent/query` doctrine-vs-reality correction (Option A wired only `/retrieve`).
+2. v0.2 §4.3 `/agent/query` doctrine-vs-reality correction (Option A wired only `/retrieve`). **(2026-06-17: parked shorthand refined by read-only trace — when character_context is built, both endpoints surface it in different shapes (`/agent/query` raw `fabric.query` dict; `/retrieve` curated subset); API-response observability only; no parity/surfacing-policy decision. See `docs/PROJECT_ORIENTATION_MAP.md` §6.)**
 3. `excluded` vs `filter_excluded` naming duplication on `Workspace.query()` return shape.
 4. Archive-FILTER-A gap fix. **(CLOSED 2026-05-27 by v0.2.4-A1 — no longer parked; see `docs/CHECKPOINT_2026-05_MEMORY_TO_PROMPT_v0_2_4_ARCHIVE_FILTER_A.md`.)**
 5. `live_agent/` repo-root duplicate cleanup.

@@ -392,10 +392,15 @@ Items that have been deferred from an active slice but are not lost:
   TTL / hard expiry, deep routing preference, spirit return exclusion,
   per-tool-name half-life, freshness detection, auto-refresh, scheduled
   decay sweeps. All still correctly deferred.
-- **`/agent/query` doctrine-vs-reality correction** — parked from v0.2.2
-  closure. The v0.2.2 surfacing (Option A) wired only `/retrieve`;
-  doctrine names both `/retrieve` and `/agent/query`. Small docs-vs-code
-  reconciliation slice.
+- **`/agent/query` / `/retrieve` character_context surfacing reconciliation** —
+  read-only trace refined the v0.2.2 parked shorthand. When character_context is
+  built, both endpoints can surface it, but in different response shapes:
+  `/agent/query` returns `fabric.query(...)` verbatim, including the full current
+  `assemble_character_context` dict, while `/retrieve` adds only its curated
+  stable character_context subset to `assembled.to_dict()`. When no
+  character_context is built, both omit it. This records API-response
+  observability only; no prompt / assembled_text behavior was changed or traced,
+  and no parity or surfacing-policy decision is made here.
 - **Gap C — spirit-return summary relationship lock — CLOSED 2026-06-06**
   (test-only, commit `aab9f5d`; checkpoint
   `docs/CHECKPOINT_2026-06_MEMORY_TO_PROMPT_GAP_C_SPIRIT_RETURN_SUMMARY_RELATIONSHIP.md`).
