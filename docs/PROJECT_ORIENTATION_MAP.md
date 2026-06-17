@@ -389,13 +389,15 @@ Items that have been deferred from an active slice but are not lost:
   warnings only; selects no mechanics; edits no prior design/roadmap/archive docs. See
   `docs/TORMENT_L2A_PRE_STAGE_B_RATIFICATION_AUDIT_CLOSURE_v0.1.md`. **L2 remains
   unopened**; Stage B / database / schema / carriers / migration remain unopened.
-- **L2 Stage B Opening Decision packet — PROPOSED, non-authorizing (2026-06-17)** — a
-  proposed Claude-side draft packet exists (baseline `fd25ab4`); it proposes *whether*
-  to authorize Stage-B-to-framing, carries the old-doc authority quarantine and the
-  parked constraints/hazards, and **opens nothing**. GPT steering + Codex challenge +
-  operator authorization not yet done. See
-  `docs/TORMENT_L2_STAGE_B_OPENING_DECISION_PACKET_PROPOSED_v0.1.md`. **L2 / Stage B /
-  mechanics / construction all remain unopened.**
+- **L2 Stage B Opening Decision — operator-authorized: Stage-B-to-framing only (2026-06-17)**
+  — operator authorized opening a **bounded framing lane only**; its **first task is
+  dream/cognition/thinking/private-state/guided-memory roadmap completion and
+  ratification-to-implementation sequencing** (cognition-layer-first, *not* database
+  mechanics). **Mechanics, schema/storage/carriers/migration, construction, P4 runtime
+  conformance, Seed-Gov implementation, writer-authority fixes, and canon_source all
+  remain unopened.** Old-doc authority quarantine and guidance-not-control remain binding.
+  See `docs/TORMENT_L2_STAGE_B_OPENING_DECISION_RECORD_v0.1.md` (supersedes the proposed
+  packet `…_PACKET_PROPOSED_v0.1.md`). No registry amendment / number taken.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if

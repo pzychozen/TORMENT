@@ -1,5 +1,7 @@
 # TORMENT Governed-Memory Substrate Programme — L2 Stage B Opening Decision Packet [PROPOSED]
 
+**SUPERSEDED 2026-06-17 by `docs/TORMENT_L2_STAGE_B_OPENING_DECISION_RECORD_v0.1.md`** (the operator-authorized decision opening bounded Stage-B-to-framing only). This proposed packet is retained intact as lineage; it remains non-authorizing.
+
 **PROPOSED / NON-AUTHORIZING / OPENS NOTHING.**
 
 **Status:** Proposed decision packet (Claude-side draft input). Not promoted as a decision. Selects no mechanics. Opens no gate. Authorizes nothing.
