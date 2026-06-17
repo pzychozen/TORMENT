@@ -47,7 +47,7 @@ Across three runs the instrument deflated its own first impression in the right 
 
 - **Authority-versus-emergence tension** — Eland's seed deliberately rewards premature pattern-completion, the very behavior the current rubric scores as invented authority; the seed and the gate are in tension. Subject of a separate audit-first design gate, not closed here.
 - **Presupposition-loaded callback** — the current callback presupposes a shared passage state; a non-presupposing variant (allowing honest uncertainty) belongs to the next instrument.
-- **Relational-count observability mismatch** — `character_context.tier_breakdown.relational = 1` while `relational_count = 0` / "no relational memories yet" when the relational hit is surfaced. Forensic-only; does not touch the model-visible contract.
+- **Relational-count observability mismatch** — currently explained by different populations and snapshot timing: `tier_breakdown.relational` counts relational hits surfaced in the current query, while `relational_count` is the last drift-snapshot private-graph relational census passed through from `CharacterState`. The "No relational memories yet..." recommendation follows the snapshot counter, so it can lag a relational hit surfaced this turn. This is an observability/telemetry note only; no prompt/model-visible contract, retrieval behavior, or counter relationship is changed or asserted here.
 - **`agent_locks = 2` at `3059` preflight** — observed before workspace creation; verify locks release cleanly across runs.
 - **Probe-v1** (production `assembled_text` surface with `[Identity Context]`/`[Drift:]`/`[Voice:]`/`[Flavor:]` labels) and **`/agent/query`** raw-retrieval comparison remain parked by design.
 

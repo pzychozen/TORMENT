@@ -418,10 +418,14 @@ Items that have been deferred from an active slice but are not lost:
   variant (allowing honest uncertainty) belongs to the next character-memory
   instrument, not Probe-v0. Named in
   `docs/CHECKPOINT_2026-05_CHARACTER_MEMORY_PROBE_V0.md`.
-- **Probe-v0 relational-count observability mismatch** —
-  `character_context.tier_breakdown.relational=1` while `relational_count=0`
-  / "no relational memories yet" when the relational hit is surfaced.
-  Forensic-only; does not touch the model-visible prompt contract.
+- **Probe-v0 relational-count observability mismatch** — currently explained by
+  different populations and snapshot timing: `tier_breakdown.relational` counts
+  relational hits surfaced in the current query, while `relational_count` is the
+  last drift-snapshot private-graph relational census passed through from
+  `CharacterState`. The "No relational memories yet..." recommendation follows the
+  snapshot counter, so it can lag a relational hit surfaced this turn. This is an
+  observability/telemetry note only; no prompt/model-visible contract, retrieval
+  behavior, or counter relationship is changed or asserted here.
 - **Probe-v0 `agent_locks=2` at preflight** — observed before workspace
   creation during the `3059` run; verify agent locks release cleanly across
   runs. Small observability check, not blocking.
