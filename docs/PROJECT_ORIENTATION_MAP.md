@@ -408,6 +408,15 @@ Items that have been deferred from an active slice but are not lost:
   deferred, Cluster 2 v0.2 verification-pending. **No implementation, mechanics, construction, P4,
   Seed-Gov, writer fixes, canon_source, or dream runtime opened.** Old-doc quarantine binding. See
   `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md`.
+- **Gate A — opened CHARACTERIZATION-ONLY (2026-06-17)** — Document A containment /
+  live-advisory boundary, opened only as a characterization gate; first and only authorized
+  deliverable is a **read-only boundary trace plan** (what evidence will be gathered later).
+  Carries Codex's sharpening: advisory is influence not automatically harmless; retrieval
+  shaping + Phase-7 turn-summary ingest must be traced; ordinary ingest ≠ Document B admission.
+  **No code, no tests, no fixes, no implementation, no runtime change.** Writer hazards stay
+  visible/parked for Gate B; no P4/Document B/dream/candidate-store/durable-private-state/
+  database mechanics opened. Trace execution and any tests-only locks require separate later
+  authorization. See `docs/TORMENT_GATE_A_LIVE_ADVISORY_BOUNDARY_TRACE_PLAN_v0.1.md`.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
