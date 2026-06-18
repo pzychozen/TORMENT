@@ -1,20 +1,23 @@
 """
-torment_service/reflection_trace.py — ReflectionTrace v0.1.
+torment_service/reflection_trace.py — ReflectionTrace (v0.2).
 
 Ephemeral, in-memory, per-turn observation surface for the CURRENT deterministic
 decision-shape structure of the thinking layer. Observation only.
 
-Scope (v0.1):
-- Records coarse decision-shape LABELS only. It carries NO raw reasoning, raw
-  input text, response draft, review rationale text, revised text, prompt text,
-  memory content, seed text, kernel raw values (kappa/phi/Omega/drift/...), or
-  retrieved context.
+Scope:
+- Records coarse decision-shape LABELS / flags / counts / scores only. It carries
+  NO raw reasoning, raw input text, normalized input, response draft, review
+  rationale text, revised text, action reason, payload, tone hints, prompt text,
+  memory content, seed text, retrieved context, or raw kernel/SRG values.
 - It does NOT persist, write memory, write canon/identity, touch
   database/schema/storage, block or finalize output, or create durable private
   state. It is built from values the controller already computed and attached to
   the per-call ThinkingResult; nothing in the runtime branches on it.
 - It is NOT Layer-2 reflection, NOT temporally extended reflection, NOT
   chosen-silence mechanics, and NOT governed-memory candidacy.
+
+v0.2 enriches the surface with additional coarse mode/action/frame fields (all
+scalars/booleans). No content-bearing field is ever added.
 
 This module imports ONLY the standard library by design (no fabric / spine /
 graph / storage / kernel), so its non-reachability is structural, not promised.
@@ -30,16 +33,41 @@ class ReflectionTrace:
     """Immutable, shape-only record of one turn's decision structure.
 
     Frozen: field reassignment raises. All fields are coarse labels / counts /
-    flags — never raw text or content.
+    flags / scores — never raw text or content.
     """
 
+    # --- decision identity (required) ---
     chosen_mode: str
     action: str
+
+    # --- existing v0.1 shape ---
     stance: Optional[str] = None
     review_status_flags: Dict[str, bool] = field(default_factory=dict)
     active_lanes: Tuple[str, ...] = ()
     lane_budget_shape: Dict[str, int] = field(default_factory=dict)
     geometric_context_present: bool = False
+
+    # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
+    allowed_depth: int = 1
+    requires_self_review: bool = False
+    may_escalate: bool = False
+    confidence_floor: float = 0.0
+
+    # --- v0.2 coarse action shape (ActionDecision) ---
+    requires_execution: bool = False
+
+    # --- v0.2 coarse frame shape (TaskFrame) ---
+    source_type: str = "user_text"
+    action_need: bool = False
+    memory_need: bool = False
+    tool_need: bool = False
+    governance_sensitive: bool = False
+    identity_sensitive: bool = False
+    live_social: bool = False
+    urgency: float = 0.0
+    ambiguity_score: float = 0.0
+    confidence_need: float = 0.0
+
     scope: str = "per_turn_ephemeral"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -53,6 +81,21 @@ class ReflectionTrace:
             "active_lanes": list(self.active_lanes),
             "lane_budget_shape": dict(self.lane_budget_shape),
             "geometric_context_present": self.geometric_context_present,
+            "allowed_depth": self.allowed_depth,
+            "requires_self_review": self.requires_self_review,
+            "may_escalate": self.may_escalate,
+            "confidence_floor": self.confidence_floor,
+            "requires_execution": self.requires_execution,
+            "source_type": self.source_type,
+            "action_need": self.action_need,
+            "memory_need": self.memory_need,
+            "tool_need": self.tool_need,
+            "governance_sensitive": self.governance_sensitive,
+            "identity_sensitive": self.identity_sensitive,
+            "live_social": self.live_social,
+            "urgency": self.urgency,
+            "ambiguity_score": self.ambiguity_score,
+            "confidence_need": self.confidence_need,
             "scope": self.scope,
         }
 
@@ -65,13 +108,28 @@ def build_reflection_trace(
     review_status_flags: Mapping[str, bool],
     top_k_by_lane: Mapping[str, int],
     geometric_context_present: bool,
+    allowed_depth: int = 1,
+    requires_self_review: bool = False,
+    may_escalate: bool = False,
+    confidence_floor: float = 0.0,
+    requires_execution: bool = False,
+    source_type: str = "user_text",
+    action_need: bool = False,
+    memory_need: bool = False,
+    tool_need: bool = False,
+    governance_sensitive: bool = False,
+    identity_sensitive: bool = False,
+    live_social: bool = False,
+    urgency: float = 0.0,
+    ambiguity_score: float = 0.0,
+    confidence_need: float = 0.0,
 ) -> ReflectionTrace:
     """Pure constructor for a ReflectionTrace from already-computed, coarse
     decision values.
 
     No side effects, no I/O, no writers, no storage. Inputs are expected to be
-    plain labels / ints / bools the caller already holds; this function copies
-    and normalizes them into an immutable record. It reads no raw text and
+    plain labels / ints / floats / bools the caller already holds; this function
+    copies and normalizes them into an immutable record. It reads no raw text and
     derives nothing from memory content or kernel internals.
     """
     active_lanes = tuple(
@@ -88,5 +146,20 @@ def build_reflection_trace(
         active_lanes=active_lanes,
         lane_budget_shape=lane_budget_shape,
         geometric_context_present=bool(geometric_context_present),
+        allowed_depth=int(allowed_depth),
+        requires_self_review=bool(requires_self_review),
+        may_escalate=bool(may_escalate),
+        confidence_floor=float(confidence_floor),
+        requires_execution=bool(requires_execution),
+        source_type=str(source_type),
+        action_need=bool(action_need),
+        memory_need=bool(memory_need),
+        tool_need=bool(tool_need),
+        governance_sensitive=bool(governance_sensitive),
+        identity_sensitive=bool(identity_sensitive),
+        live_social=bool(live_social),
+        urgency=float(urgency),
+        ambiguity_score=float(ambiguity_score),
+        confidence_need=float(confidence_need),
         scope="per_turn_ephemeral",
     )

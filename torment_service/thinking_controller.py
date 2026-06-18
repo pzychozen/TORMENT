@@ -651,6 +651,22 @@ class ThinkingController:
             },
             top_k_by_lane=memory_plan.top_k_by_lane,
             geometric_context_present=(geometric_context is not None),
+            # v0.2 coarse mode/action/frame shape (already-computed scalars only)
+            allowed_depth=mode.allowed_depth,
+            requires_self_review=mode.requires_self_review,
+            may_escalate=mode.may_escalate,
+            confidence_floor=mode.confidence_floor,
+            requires_execution=action.requires_execution,
+            source_type=frame.source_type,
+            action_need=frame.action_need,
+            memory_need=frame.memory_need,
+            tool_need=frame.tool_need,
+            governance_sensitive=frame.governance_sensitive,
+            identity_sensitive=frame.identity_sensitive,
+            live_social=frame.live_social,
+            urgency=frame.urgency,
+            ambiguity_score=frame.ambiguity_score,
+            confidence_need=frame.confidence_need,
         )
 
         return ThinkingResult(

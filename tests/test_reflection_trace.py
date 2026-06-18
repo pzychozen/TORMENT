@@ -43,18 +43,57 @@ _EXPECTED_FIELDS = {
     "active_lanes",
     "lane_budget_shape",
     "geometric_context_present",
+    # v0.2 coarse additions
+    "allowed_depth",
+    "requires_self_review",
+    "may_escalate",
+    "confidence_floor",
+    "requires_execution",
+    "source_type",
+    "action_need",
+    "memory_need",
+    "tool_need",
+    "governance_sensitive",
+    "identity_sensitive",
+    "live_social",
+    "urgency",
+    "ambiguity_score",
+    "confidence_need",
     "scope",
+}
+
+# v0.2 coarse fields and their required primitive types.
+_V02_COARSE_TYPES = {
+    "allowed_depth": int,
+    "requires_self_review": bool,
+    "may_escalate": bool,
+    "confidence_floor": float,
+    "requires_execution": bool,
+    "source_type": str,
+    "action_need": bool,
+    "memory_need": bool,
+    "tool_need": bool,
+    "governance_sensitive": bool,
+    "identity_sensitive": bool,
+    "live_social": bool,
+    "urgency": float,
+    "ambiguity_score": float,
+    "confidence_need": float,
 }
 
 # Field names that would imply raw reasoning / content leaked into the trace.
 _FORBIDDEN_CONTENT_FIELDS = {
     "raw_input",
+    "normalized_input",
     "response_draft",
     "draft",
     "revised_text",
+    "reason",
     "review_notes",
     "notes",
     "rationale",
+    "payload",
+    "tone_hints",
     "prompt",
     "assembled_text",
     "memory",
@@ -66,6 +105,7 @@ _FORBIDDEN_CONTENT_FIELDS = {
     "phi",
     "omega",
     "drift_score",
+    "srg",
     "embedding",
 }
 
@@ -163,6 +203,42 @@ class TestThinkPopulatesTrace:
         assert rt.chosen_mode == result.mode_decision.chosen_mode.value
         assert rt.action == result.action_decision.action.value
         assert rt.geometric_context_present is (result.geometric_context is not None)
+
+    def test_new_coarse_fields_match_locals(self):
+        result = ThinkingController().think(
+            workspace_id="ws", agent_id="ag", raw_input="Please run a quick search",
+        )
+        rt = result.reflection_trace
+        mode = result.mode_decision
+        action = result.action_decision
+        frame = result.task_frame
+        # mode shape
+        assert rt.allowed_depth == mode.allowed_depth
+        assert rt.requires_self_review == mode.requires_self_review
+        assert rt.may_escalate == mode.may_escalate
+        assert rt.confidence_floor == mode.confidence_floor
+        # action shape
+        assert rt.requires_execution == action.requires_execution
+        # frame shape
+        assert rt.source_type == frame.source_type
+        assert rt.action_need == frame.action_need
+        assert rt.memory_need == frame.memory_need
+        assert rt.tool_need == frame.tool_need
+        assert rt.governance_sensitive == frame.governance_sensitive
+        assert rt.identity_sensitive == frame.identity_sensitive
+        assert rt.live_social == frame.live_social
+        assert rt.urgency == frame.urgency
+        assert rt.ambiguity_score == frame.ambiguity_score
+        assert rt.confidence_need == frame.confidence_need
+
+    def test_new_coarse_fields_are_primitive(self):
+        d = ThinkingController().think(
+            workspace_id="ws", agent_id="ag", raw_input="hello",
+        ).reflection_trace.to_dict()
+        for name, typ in _V02_COARSE_TYPES.items():
+            # bool is a subclass of int; require exact-type match to avoid a
+            # bool slipping in where a float/int is expected and vice versa.
+            assert type(d[name]) is typ, f"{name} is {type(d[name])}, expected {typ}"
 
     def test_to_dict_surfaces_trace_like_thinking_debug(self):
         # /thinking/debug returns result.to_dict(); this mirrors that surface.
@@ -411,6 +487,49 @@ class TestReflectionTraceModuleIsInert:
                 if nm in _FORBIDDEN_CALL_NAMES or nm == "write":
                     flagged.add(nm)
         assert "ingest" in flagged and "write" in flagged
+
+
+class TestNonReentryProductionScan:
+    """Strengthened non-reentry lock: no production torment_service module may
+    READ `.reflection_trace`. Only ThinkingResult.to_dict() (thinking_models.py)
+    serializes it; /agent/query, fabric, prompt assembly, blocks, etc. must not
+    consume it. thinking_controller only *writes* it as a constructor keyword
+    (an ast.keyword, not an attribute read), so it is not flagged.
+    """
+
+    def test_no_production_module_reads_reflection_trace(self):
+        offenders = {}
+        for py in sorted(_SERVICE_DIR.glob("*.py")):
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=py.name)
+            reads = sorted(
+                n.lineno for n in ast.walk(tree)
+                if isinstance(n, ast.Attribute) and n.attr == "reflection_trace"
+            )
+            if reads and py.name != "thinking_models.py":
+                offenders[py.name] = reads
+        assert offenders == {}, (
+            f".reflection_trace is read outside ThinkingResult.to_dict(): {offenders!r}"
+        )
+
+    def test_thinking_models_only_reads_it_in_to_dict(self):
+        # Positive anchor: thinking_models.py is the single allowed reader, and
+        # only inside to_dict() (guarded serialization). Confirms the allow-list
+        # entry is real, so the scan above is not vacuously passing.
+        tree = ast.parse(
+            (_SERVICE_DIR / "thinking_models.py").read_text(encoding="utf-8"),
+            filename="thinking_models.py",
+        )
+        reader_funcs = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if any(
+                    isinstance(a, ast.Attribute) and a.attr == "reflection_trace"
+                    for a in ast.walk(node)
+                ):
+                    reader_funcs.add(node.name)
+        assert reader_funcs == {"to_dict"}, (
+            f"reflection_trace read in unexpected thinking_models functions: {reader_funcs!r}"
+        )
 
 
 if __name__ == "__main__":
