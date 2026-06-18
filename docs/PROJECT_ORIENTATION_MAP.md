@@ -7,7 +7,7 @@ the project, so we stop rediscovering project state by accident.
 It is the *anti-confusion layer*: where to look, what each layer means, and how
 to start a new gate without re-litigating work that already exists.
 
-**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below); 2026-06-17 (writer-path/endpoint-wiring characterization triad — Seams 1–3 — closure pointer added; runtime/test-chain baseline `b549a97`); 2026-06-17 (Lane A `mood_drift → drift-centroid` inclusion trace recorded read-only; baseline `1f6cd0d`); 2026-06-17 (Gate A advisory-boundary characterization CLOSED at `d0315a0`; closure doc `docs/TORMENT_GATE_A_ADVISORY_BOUNDARY_CLOSURE_CHECKPOINT_v0.1.md`; characterization + tests-only lock only; next likely step Gate B pending explicit operator authorization); 2026-06-17 (Gate B writer-authority hazard inventory FILED read-only at `39ce57f`; inventory doc `docs/TORMENT_GATE_B_WRITER_AUTHORITY_HAZARD_INVENTORY_v0.1.md`; framing only — no writer fix / tests / implementation / registry; next likely step Gate B writer-authority decision artifact pending explicit operator authorization).
+**Date of last refresh:** 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract v0.1 promotion pointer added; pre-substrate architecture framing v0.1 pointer retained; prior CodeQL non-C1 maintenance closure and thinking-layer archaeology / parked private-thinking-layer seam retained below); 2026-06-17 (writer-path/endpoint-wiring characterization triad — Seams 1–3 — closure pointer added; runtime/test-chain baseline `b549a97`); 2026-06-17 (Lane A `mood_drift → drift-centroid` inclusion trace recorded read-only; baseline `1f6cd0d`); 2026-06-17 (Gate A advisory-boundary characterization CLOSED at `d0315a0`; closure doc `docs/TORMENT_GATE_A_ADVISORY_BOUNDARY_CLOSURE_CHECKPOINT_v0.1.md`; characterization + tests-only lock only; next likely step Gate B pending explicit operator authorization); 2026-06-17 (Gate B writer-authority hazard inventory FILED read-only at `39ce57f`; inventory doc `docs/TORMENT_GATE_B_WRITER_AUTHORITY_HAZARD_INVENTORY_v0.1.md`; framing only — no writer fix / tests / implementation / registry; next likely step Gate B writer-authority decision artifact pending explicit operator authorization); 2026-06-17 (Gate B writer-authority decision frame FILED definitional-only at `4b50a63`; decision-frame doc `docs/TORMENT_GATE_B_WRITER_AUTHORITY_DECISION_FRAME_v0.1.md`; ratifies only the write-side authority boundary + requirement-level "governed writer" vocabulary + non-binding consideration grouping; governs/fixes/selects/builds no writer; any later target-selection or governance-vehicle determination requires a separate explicit operator authorization).
 
 ---
 
@@ -450,6 +450,15 @@ Items that have been deferred from an active slice but are not lost:
   registry edit. It does **not** open database/substrate construction, P4/source-sameness, Seed-Gov
   implementation, Document B runtime, or dream/incubation runtime. Next likely step: a **Gate B
   writer-authority decision artifact**, pending explicit operator authorization (no auto-open of fixes).
+- **Gate B — writer-authority decision frame FILED definitional-only (2026-06-17, `4b50a63`)** — the
+  Gate B writer-authority decision framing is filed at `4b50a63`. Decision-frame doc:
+  `docs/TORMENT_GATE_B_WRITER_AUTHORITY_DECISION_FRAME_v0.1.md`. **Definitional-only:** it ratifies only
+  the write-side authority boundary, the requirement-level "governed writer" vocabulary, and a
+  non-binding consideration grouping. It **governs, fixes, selects, or builds no writer** — no mechanism,
+  no governance-vehicle selection, no behavior change, no registry edit; it opens no new gate and no
+  P4/source-sameness, Seed-Gov, Document B, dream/incubation, candidate-store, durable-private-state, or
+  database/substrate work. Any later target-selection or governance-vehicle determination requires a
+  separate explicit operator authorization.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
