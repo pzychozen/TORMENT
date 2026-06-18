@@ -17,6 +17,7 @@ from .thinking_models import (
     ThinkingResult,
 )
 from .stance_policy import determine_stance
+from .reflection_trace import build_reflection_trace
 
 
 QUESTION_PREFIXES = (
@@ -632,6 +633,26 @@ class ThinkingController:
             geometric_context=geometric_context,
         )
 
+        # ReflectionTrace v0.1 (observation only): coarse decision-shape labels
+        # built from the values already computed above. It is NOT branched on,
+        # NOT consumed by any decision/retrieval/write path, and NOT fed back
+        # anywhere. Attached to the per-call ThinkingResult for inspection
+        # surfaces (e.g. /thinking/debug) only.
+        _reflection_trace = build_reflection_trace(
+            chosen_mode=mode.chosen_mode.value,
+            action=action.action.value,
+            stance=(stance.stance.value if stance is not None else None),
+            review_status_flags={
+                "approved": bool(review.approved),
+                "revised": bool(review.revised),
+                "escalate": bool(review.escalate),
+                "ask_user": bool(review.ask_user),
+                "blocked": bool(review.blocked),
+            },
+            top_k_by_lane=memory_plan.top_k_by_lane,
+            geometric_context_present=(geometric_context is not None),
+        )
+
         return ThinkingResult(
             task_frame=frame,
             mode_decision=mode,
@@ -642,6 +663,7 @@ class ThinkingController:
             stance=stance,
             geometric_context=geometric_context,
             debug={"controller_version": "0.3"},
+            reflection_trace=_reflection_trace,
         )
 
     def _draft_response(

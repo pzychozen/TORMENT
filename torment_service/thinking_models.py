@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from .reflection_trace import ReflectionTrace
+
 
 @dataclass
 class GeometricStanceContext:
@@ -233,6 +235,10 @@ class ThinkingResult:
     stance: Optional[ResponseStanceDecision] = None
     geometric_context: Optional[GeometricStanceContext] = None
     debug: Dict[str, Any] = field(default_factory=dict)
+    # ReflectionTrace v0.1: ephemeral, observation-only decision-shape record.
+    # Surfaced only through to_dict() (e.g. /thinking/debug); never consumed by
+    # retrieval, prompt assembly, writers, or any decision path.
+    reflection_trace: Optional[ReflectionTrace] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -245,4 +251,5 @@ class ThinkingResult:
             "stance": self.stance.to_dict() if self.stance else None,
             "geometric_context": self.geometric_context.to_dict() if self.geometric_context else None,
             "debug": self.debug,
+            "reflection_trace": self.reflection_trace.to_dict() if self.reflection_trace else None,
         }
