@@ -200,3 +200,28 @@ as eligibility under existing gates, never as guaranteed fan-out; topology relat
 or magnitude claim; the Phase-8 route is parked behind its `FabricHandle` binding caveat. Naming a
 hazard opens nothing. Guide, not control; audit observes authority and does not become authority; memory
 may guide context, memory may not seize authority. Any Gate B decision remains a separate authorization.
+
+---
+
+## Appendix A — Read-only evidence pass (2026-06-17, `a72d0ba`)
+
+Read-only characterization evidence under the committed evidence frame
+(`docs/TORMENT_GATE_B_READ_ONLY_CHARACTERIZATION_EVIDENCE_FRAME_v0.1.md`). Source/docs inspection only;
+no execution. Findings are evidence for later decision-making only — not correctness, incorrectness,
+priority, target selection, or authorization to fix.
+
+- **Scope inspected:** current source and these Gate B docs only; **no** operator-identified
+  workspaces/artifacts were inspected (none were named).
+- **H1 — reachable in current source.** `character.gravity_correction` writes `mtype="drift_correction"`
+  with `canon=True` and is called from the `TormentFabric.ingest()` periodic post-store drift check.
+- **H1 prior observation / content / frequency:** **not determinable read-only — deferred** (requires
+  operator-identified pre-existing artifacts/workspaces).
+- **H5 — no production service binding found.** `fabric.py` defines no `gravity_correction` method;
+  `AgentRunner` is constructed only in `examples/` and `tests/`, not in `torment_service/`. The
+  `FabricHandle → character.gravity_correction` Phase-8 route appears demo/test-injected only, not wired
+  through the `torment_service` runtime. (De-risks H5; still not a proven live route.)
+- **Anchors:** checked anchors fresh for H1 (`character.py` 565/603/607; `fabric.py` ingest drift block
+  ~3289–3341, call ~3333) and H3 (`app.py` 1775/1831/1840; `promotion.py` 242/~295). Unchecked anchors
+  were not re-verified in this pass.
+- **No** execution, tests, service start, loop, endpoint, ingest, writer path, instrumentation, scenario
+  forcing, target selection, or fix recommendation was used or made.
