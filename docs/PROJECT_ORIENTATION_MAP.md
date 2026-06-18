@@ -459,6 +459,14 @@ Items that have been deferred from an active slice but are not lost:
   P4/source-sameness, Seed-Gov, Document B, dream/incubation, candidate-store, durable-private-state, or
   database/substrate work. Any later target-selection or governance-vehicle determination requires a
   separate explicit operator authorization.
+- **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
+  code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
+  decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
+  `/thinking/debug`). Checkpoint:
+  `docs/CHECKPOINT_2026-06_REFLECTION_TRACE_V0_2_PRIVATE_COGNITION_OBSERVABILITY.md`. **Database remains
+  last.** Next work should continue **code-grounded** private-cognition / thinking improvements unless a
+  future slice crosses persistence, canon/identity, model-visible cognition, or authority boundaries — in
+  which case it is a separate, explicitly-authorized step.
 - **Batch C accumulating workspace** — the long-iteration plan §3 Batch C
   design target. Wrapper code change required (`tier0_smoke.py` currently
   creates fresh-per-iteration workspaces). Separate ratifiable slice if
