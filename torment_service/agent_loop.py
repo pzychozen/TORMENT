@@ -50,6 +50,7 @@ from .thinking_models import (
     ReviewResult,
     TaskFrame,
 )
+from .reflection_trace import ReflectionTrace, build_reflection_trace
 
 
 @dataclass
@@ -181,6 +182,12 @@ class TurnResult:
     gravity_correction_applied: bool
     ingest_attempted: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Runner-path ReflectionTrace parity (observation-only): a coarse
+    # end-of-turn decision-shape record built from already-computed locals
+    # after review, using the Phase-5 effective action. It is never read back
+    # inside this module, never placed on TurnContext/metadata, and never
+    # routed to prompts, retrieval, fabric, writers, or model-visible context.
+    reflection_trace: Optional[ReflectionTrace] = None
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +606,46 @@ class AgentRunner:
             except Exception as e:
                 turn_metadata["phase8_gravity_error"] = str(e)
 
+        # Runner-path ReflectionTrace parity (observation-only). Built from
+        # locals already computed above, using the Phase-5 *effective* action
+        # (`effective_action`), NOT the Phase-4 `bundle.action_decision`. It is
+        # attached ONLY to the returned TurnResult below; it is never placed on
+        # TurnContext, passed to fabric/LLM/tool/ingest/drift/gravity, fed into
+        # the execution outcome or response text, consumed by
+        # assimilation_outcomes, or surfaced to any model-visible context. It is
+        # also never read back inside this module (so the non-reentry source
+        # scan stays green — construction here is a keyword, not an attribute
+        # read).
+        _reflection_trace = build_reflection_trace(
+            chosen_mode=bundle.mode_decision.chosen_mode.value,
+            action=effective_action.action.value,
+            stance=None,
+            review_status_flags={
+                "approved": bool(review_outcome.approved),
+                "revised": bool(review_outcome.revised),
+                "escalate": bool(review_outcome.escalate),
+                "ask_user": bool(review_outcome.ask_user),
+                "blocked": bool(review_outcome.blocked),
+            },
+            top_k_by_lane=bundle.memory_plan.top_k_by_lane,
+            geometric_context_present=False,
+            allowed_depth=bundle.mode_decision.allowed_depth,
+            requires_self_review=bundle.mode_decision.requires_self_review,
+            may_escalate=bundle.mode_decision.may_escalate,
+            confidence_floor=bundle.mode_decision.confidence_floor,
+            requires_execution=effective_action.requires_execution,
+            source_type=bundle.task_frame.source_type,
+            action_need=bundle.task_frame.action_need,
+            memory_need=bundle.task_frame.memory_need,
+            tool_need=bundle.task_frame.tool_need,
+            governance_sensitive=bundle.task_frame.governance_sensitive,
+            identity_sensitive=bundle.task_frame.identity_sensitive,
+            live_social=bundle.task_frame.live_social,
+            urgency=bundle.task_frame.urgency,
+            ambiguity_score=bundle.task_frame.ambiguity_score,
+            confidence_need=bundle.task_frame.confidence_need,
+        )
+
         return TurnResult(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -614,6 +661,7 @@ class AgentRunner:
             gravity_correction_applied=gravity_applied,
             ingest_attempted=ingest_attempted,
             metadata=turn_metadata,
+            reflection_trace=_reflection_trace,
         )
 
     def enter_reflex(
