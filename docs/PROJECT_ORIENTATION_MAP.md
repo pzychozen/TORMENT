@@ -35,6 +35,43 @@ rule in §5.
 
 ---
 
+## 1A. Pre-database programme ladder (orientation)
+
+**Anti-drift map.** The pre-database programme is **two parallel ladders plus a code-improvements
+lane**. Do not collapse it into a single local label (e.g. Gate B1 / H3) — those are leaves, not the
+programme.
+
+**Ladder 1 — Memory Engine / database-readiness contracts and later mechanics.** The registry-governed
+`P0→P11` phase graph (`docs/TORMENT_MEMORY_ENGINE_DECISION_REGISTRY_v0.1.md`). Purpose:
+source-meaning, recovery, migration-readiness, and constraints any later substrate mechanics must carry.
+**Governed database/substrate mechanics remain unopened; P6 carrier/substrate mechanics and Stage
+B/database design remain later, separately authorized lanes.**
+
+**Ladder 2 — Pre-Substrate Architecture / mind-readiness contracts and reconciliation memos** (all
+**requirement-level, docs-only, promoted — not implemented**): Document A (Candidate Containment +
+Writer Authority); Document B (Private Cognition + Unified Reflection); Seed-Governance; No-Corner /
+bounded defensive availability; and the Database/Substrate Reconciliation memo. Purpose: cognition,
+reflection, identity, and candidate/canon boundaries defined **before** permanent storage.
+
+**Code-grounded improvements / characterization lane** — improves or characterizes TORMENT-as-it-is,
+**not** full systems: memory-to-prompt observability; ReflectionTrace observability; behavior-pack
+`high_regime_action`; Gate A / Gate B characterizations. These are bounded observability,
+policy-wiring, and characterization work — **not** private cognition, dreaming, or database
+implementation.
+
+**Current position.** Main programme: **pre-database readiness**. Current main system: **Writer
+Authority**. Current contract family: **Document A / Gate B**. Current leaf: **H3 (`POST /promote` force
+path)**. Current status: **evidence-readiness closed; H3 target-specific design not opened.** **H3 is a
+leaf, not the programme.**
+
+**Not implemented (carry forward, do not overstate):** Document B runtime surfaces — private cognition,
+continued thought, dream / incubation, and envelope audit — plus Seed-Governance mechanics, candidate
+store, source-sameness enforcement, and governed database/substrate mechanics are **requirement-level
+only, parked, or unopened**. Current JSON/JSONL/SQLite scaffolding remains as-is; no new governed
+substrate/runtime exists for these surfaces.
+
+---
+
 ## 2. Where main currently stands
 
 As of 2026-06-12, the following arcs are closed on `main`. Each row points to
