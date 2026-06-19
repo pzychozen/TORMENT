@@ -582,6 +582,20 @@ Items that have been deferred from an active slice but are not lost:
   governed admission implementation, or database/substrate; database/substrate remains last. **No
   automatic successor gate** — only a separately authorized read-only Gate 4 conformance-gap map may
   follow.
+- **Gate 4 — read-only conformance-gap map FILED docs-only (2026-06-19, `41c4349`; Codex ACCEPT WITH
+  CORRECTIONS, applied)** — the separately authorized read-only successor to the selection frame.
+  Artifact: `docs/TORMENT_GATE_4_READ_ONLY_CONFORMANCE_GAP_MAP_v0.1.md`. **Read-only gap characterization
+  only** — for each path it records *conformance posture not yet recorded → not-yet-conformant / requires
+  reconciliation*, with **no verdict, no remedy, no fix order, no writer-patch selection, no enforcement,
+  no governance vehicle, no runtime authority gate**. Five **core runtime rows**: `gravity_correction`;
+  derived identity anchors; `mood_drift`→drift-centroid→`gravity_correction` (**topology only**);
+  spirit-return warmth/warmup; role inference / identity-anchor cadence. Authored `seed_text` is
+  **boundary context only — no automatic-writer gap**. Adjacencies (not core rows): H3
+  writer-authority-adjacent, **not** automatic identity-pressure; H5 binding-contingent / parked; H6
+  eligibility / reachability only. Selects **no** implementation, tests, runtime, P4/source-sameness or
+  Seed-Gov mechanics, chamber/private-cognition runtime, candidate store, governed admission
+  implementation, or database/substrate. **No automatic successor gate** — any later step needs separate
+  authorization; database/substrate remains last.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
