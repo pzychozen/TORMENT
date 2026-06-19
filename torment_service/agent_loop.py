@@ -444,6 +444,15 @@ class AgentRunner:
             return self.pack.stabilization_program.high_threshold
         return self.drift_high_threshold
 
+    def _effective_high_regime_action(self) -> ActionType:
+        # Behavior packs may declare which intent the Phase-5 drift veto forces
+        # in the high regime (DEFER default — stabilizing; NO_OP — fail-closed
+        # terminus). Symmetric with _effective_drift_threshold(); no pack →
+        # DEFER, which is the prior hardcoded behavior.
+        if self.pack is not None:
+            return self.pack.stabilization_program.high_regime_action
+        return ActionType.DEFER
+
     def run_turn(
         self,
         workspace_id: str,
@@ -523,6 +532,7 @@ class AgentRunner:
             bundle.mode_decision,
             drift_regime,
             bundle.task_frame,
+            high_regime_action=self._effective_high_regime_action(),
         )
         policy_decision = apply_tool_narrowing(
             policy_decision,

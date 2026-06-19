@@ -17,7 +17,7 @@ References:
     - docs/TORMENT_AGENT_RUNTIME_SLICE_v0.1_PLAN.md S2
     - docs/TORMENT_AGENT_DOCTRINE_v0.1.md Appendix A (thresholds)
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -40,6 +40,7 @@ from torment_service.thinking_models import (
     CognitiveModeDecision,
     TaskFrame,
 )
+from torment_service.behavior_packs import DEBUGGING_SESSION_PACK
 
 
 # ---------------------------------------------------------------------------
@@ -567,3 +568,226 @@ class TestRunnerDriftVetoIntegration:
         # original_action_type is populated on the policy decision
         if result.action_policy_decision.drift_veto_applied:
             assert result.action_policy_decision.original_action_type is not None
+
+
+# ---------------------------------------------------------------------------
+# apply_drift_veto — pack-declared high_regime_action (NO_OP stabilization)
+# ---------------------------------------------------------------------------
+
+
+class TestDriftVetoHighRegimeAction:
+    """`StabilizationProgram.high_regime_action` wiring: a pack may force NO_OP
+    in the high regime. Default DEFER must reproduce the prior behavior."""
+
+    def test_omitted_param_preserves_defer_behavior(self):
+        # The existing 4-arg call (no high_regime_action) keeps DEFER-when-legal.
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), _frame()
+        )
+        assert result.action.action == ActionType.DEFER
+        assert result.drift_veto_applied is True
+        assert result.fallback_reason == "drift_high_regime_veto"
+
+    def test_explicit_defer_matches_default(self):
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), _frame(),
+            high_regime_action=ActionType.DEFER,
+        )
+        assert result.action.action == ActionType.DEFER
+        assert result.fallback_reason == "drift_high_regime_veto"
+
+    def test_no_op_forces_no_op_even_when_defer_legal(self):
+        # TOOL mode permits DEFER, yet a NO_OP program forces NO_OP.
+        assert ActionType.DEFER in MODE_LEGAL_INTENTS[CognitiveMode.TOOL]
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result.action.action == ActionType.NO_OP
+        assert result.drift_veto_applied is True
+
+    def test_no_op_branch_uses_distinct_fallback_reason(self):
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result.fallback_reason == "drift_high_regime_pack_no_op"
+        assert result.action.payload.get("fallback_reason") == "drift_high_regime_pack_no_op"
+        # observability: drift state + pre-veto action recorded, like DEFER path
+        assert result.action.payload.get("pre_drift_action") == "use_tool"
+        assert result.action.payload.get("drift_score") == -0.5
+        assert result.action.payload.get("drift_direction") == "away_seed"
+
+    def test_no_op_target_in_fast_mode_uses_pack_reason(self):
+        # FAST has no DEFER; both the NO_OP target and the DEFER-else-NO_OP
+        # fallback would land on NO_OP, but the NO_OP target runs first.
+        original = _passthrough_policy(ActionType.ANSWER)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.FAST), _high_away(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result.action.action == ActionType.NO_OP
+        assert result.fallback_reason == "drift_high_regime_pack_no_op"
+
+    def test_unsupported_high_regime_action_falls_back_legally(self):
+        # An unsupported value (e.g. ANSWER) is NOT honored as a target; the
+        # veto falls through to the existing DEFER-else-NO_OP path. No raise,
+        # no illegal action.
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), _frame(),
+            high_regime_action=ActionType.ANSWER,
+        )
+        assert result.action.action == ActionType.DEFER
+        assert result.fallback_reason == "drift_high_regime_veto"
+        assert is_legal(CognitiveMode.TOOL, result.action.action)
+
+    def test_governance_review_preserved_even_with_no_op_target(self):
+        # GOVERNANCE_REVIEW preservation runs BEFORE the NO_OP target.
+        original = _passthrough_policy(ActionType.GOVERNANCE_REVIEW)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.GOVERNED), _high_away(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result is original
+        assert result.drift_veto_applied is False
+
+    def test_governance_urgency_override_bypasses_no_op_target(self):
+        # The governance + high-urgency override runs BEFORE the NO_OP target.
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        frame = _frame(governance_sensitive=True, urgency=0.9)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _high_away(), frame,
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result is original
+        assert result.drift_veto_applied is False
+        assert result.action.action == ActionType.USE_TOOL
+
+    def test_no_op_target_passes_through_on_low_drift(self):
+        # No high-away drift → no veto, regardless of high_regime_action.
+        original = _passthrough_policy(ActionType.USE_TOOL)
+        result = apply_drift_veto(
+            original, _mode(CognitiveMode.TOOL), _low(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert result is original
+        assert result.drift_veto_applied is False
+
+    @pytest.mark.parametrize("mode", list(CognitiveMode))
+    def test_no_op_target_never_widens_legality(self, mode):
+        original = _passthrough_policy(ActionType.ANSWER)
+        result = apply_drift_veto(
+            original, _mode(mode), _high_away(), _frame(),
+            high_regime_action=ActionType.NO_OP,
+        )
+        assert is_legal(mode, result.action.action), (
+            f"NO_OP target produced {result.action.action.value!r} in mode "
+            f"{mode.value!r}, not in legal set "
+            f"{[a.value for a in MODE_LEGAL_INTENTS[mode]]}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# AgentRunner._effective_high_regime_action + runner integration
+# ---------------------------------------------------------------------------
+
+
+def _no_op_pack():
+    """DEBUGGING_SESSION_PACK with high_regime_action forced to NO_OP."""
+    return replace(
+        DEBUGGING_SESSION_PACK,
+        stabilization_program=replace(
+            DEBUGGING_SESSION_PACK.stabilization_program,
+            high_regime_action=ActionType.NO_OP,
+        ),
+    )
+
+
+class TestEffectiveHighRegimeActionHelper:
+    def test_no_pack_returns_defer(self):
+        runner = AgentRunner(
+            controller=ThinkingController(), fabric=FakeFabric(), pack=None,
+        )
+        assert runner._effective_high_regime_action() == ActionType.DEFER
+
+    def test_default_pack_returns_defer(self):
+        runner = AgentRunner(
+            controller=ThinkingController(), fabric=FakeFabric(),
+            pack=DEBUGGING_SESSION_PACK,
+        )
+        assert runner._effective_high_regime_action() == ActionType.DEFER
+
+    def test_custom_pack_value_wins(self):
+        runner = AgentRunner(
+            controller=ThinkingController(), fabric=FakeFabric(),
+            pack=_no_op_pack(),
+        )
+        assert runner._effective_high_regime_action() == ActionType.NO_OP
+
+
+class TestRunnerHonorsPackHighRegimeAction:
+    _HIGH_DRIFT = {"drift_score": -0.5, "drift_direction": "away_seed"}
+
+    def _runner(self, pack):
+        return AgentRunner(
+            controller=ThinkingController(),
+            fabric=FakeFabric(drift_return=self._HIGH_DRIFT),
+            llm_client=FakeLLM(),
+            pack=pack,
+        )
+
+    def test_no_op_pack_yields_no_op_under_high_drift(self):
+        # "run this code now" → TOOL mode → USE_TOOL; DEFER is legal in TOOL,
+        # but the NO_OP pack forces NO_OP.
+        runner = self._runner(_no_op_pack())
+        result = runner.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=Observation(text="run this code now"), step=1,
+        )
+        assert result.action_policy_decision.action.action == ActionType.NO_OP
+        assert result.action_policy_decision.drift_veto_applied is True
+        assert result.action_policy_decision.fallback_reason == "drift_high_regime_pack_no_op"
+
+    def test_default_pack_yields_defer_under_same_drift(self):
+        runner = self._runner(DEBUGGING_SESSION_PACK)
+        result = runner.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=Observation(text="run this code now"), step=1,
+        )
+        # Default pack declares DEFER; TOOL mode permits DEFER → DEFER.
+        assert result.action_policy_decision.action.action == ActionType.DEFER
+        assert result.action_policy_decision.drift_veto_applied is True
+
+    def test_gravity_keyed_to_drift_regime_not_chosen_action(self):
+        # Gravity fires on the high-away drift regime, independent of whether
+        # the chosen action is NO_OP (pack) or DEFER (default).
+        fabric_no_op = FakeFabric(drift_return=self._HIGH_DRIFT)
+        runner_no_op = AgentRunner(
+            controller=ThinkingController(), fabric=fabric_no_op,
+            llm_client=FakeLLM(), pack=_no_op_pack(),
+        )
+        r1 = runner_no_op.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=Observation(text="run this code now"), step=1,
+        )
+        assert r1.action_policy_decision.action.action == ActionType.NO_OP
+        assert r1.gravity_correction_applied is True
+        assert len(fabric_no_op.gravity_correction_calls) == 1
+
+        fabric_defer = FakeFabric(drift_return=self._HIGH_DRIFT)
+        runner_defer = AgentRunner(
+            controller=ThinkingController(), fabric=fabric_defer,
+            llm_client=FakeLLM(), pack=DEBUGGING_SESSION_PACK,
+        )
+        r2 = runner_defer.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=Observation(text="run this code now"), step=1,
+        )
+        assert r2.action_policy_decision.action.action == ActionType.DEFER
+        assert r2.gravity_correction_applied is True
+        assert len(fabric_defer.gravity_correction_calls) == 1

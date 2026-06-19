@@ -114,7 +114,8 @@ class StabilizationProgram:
         high_regime_action: the primary intent the drift veto
             forces when the high regime triggers. v0.1 supports
             DEFER (default — stabilizing) and NO_OP (fail-closed
-            terminus when DEFER is not legal for the mode).
+            terminus). The action policy must still enforce mode
+            legality and never widen the mode's legal intents.
     """
     low_threshold: float = 0.15
     high_threshold: float = 0.35

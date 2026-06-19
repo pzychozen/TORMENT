@@ -385,6 +385,7 @@ def apply_drift_veto(
     mode_decision: CognitiveModeDecision,
     drift_regime: DriftRegime,
     frame: TaskFrame,
+    high_regime_action: ActionType = ActionType.DEFER,
 ) -> ActionPolicyDecision:
     """Apply Phase 5 drift-regime veto after apply_legality.
 
@@ -404,8 +405,15 @@ def apply_drift_veto(
         3. NOT overridden by governance_sensitive + urgency > 0.7.
 
     When the veto fires, the new action is:
+        - NO_OP when the active program declares
+          ``high_regime_action == NO_OP`` (fail-closed terminus; NO_OP is
+          legal in every mode, so this never widens legality), else
         - DEFER if DEFER is legal for the current mode, else
         - NO_OP as the fail-closed terminus (invariant 9).
+
+    ``high_regime_action`` defaults to DEFER, which reproduces the prior
+    behavior exactly; any value other than NO_OP also follows the DEFER
+    path, so an unsupported value can never yield an illegal action.
 
     Preserves invariants:
         - Invariant 3: high-regime drift vetoes outward action.
@@ -434,7 +442,8 @@ def apply_drift_veto(
     ):
         return policy_decision
 
-    # Apply veto: downgrade to DEFER if legal, else NO_OP.
+    # Apply veto. Pack-declared high_regime_action selects the stabilization
+    # target; default DEFER reproduces the prior behavior exactly.
     mode = mode_decision.chosen_mode
     legal_set = MODE_LEGAL_INTENTS.get(mode, set())
     pre_veto_action_type = (
@@ -442,6 +451,36 @@ def apply_drift_veto(
         if policy_decision.original_action_type is not None
         else current_action
     )
+
+    # Honor a program that declares NO_OP as its high-regime terminus, when
+    # NO_OP is legal for the mode (NO_OP is a member of every mode's legal
+    # set, so this never widens legality). Any value other than NO_OP —
+    # including unsupported intents — falls through to the DEFER-else-NO_OP
+    # path below, so the veto can never raise or emit an illegal action.
+    if high_regime_action == ActionType.NO_OP and ActionType.NO_OP in legal_set:
+        return ActionPolicyDecision(
+            action=ActionDecision(
+                action=ActionType.NO_OP,
+                reason=(
+                    f"Drift-veto stabilization: program high_regime_action=NO_OP "
+                    f"under high drift (score={drift_regime.score:.2f}, "
+                    f"direction=away_seed); {current_action.value!r} forced to "
+                    f"NO_OP terminus in mode {mode.value!r}."
+                ),
+                requires_execution=False,
+                payload={
+                    "original_action": pre_veto_action_type.value,
+                    "pre_drift_action": current_action.value,
+                    "drift_score": drift_regime.score,
+                    "drift_direction": drift_regime.direction,
+                    "high_regime_action": "no_op",
+                    "fallback_reason": "drift_high_regime_pack_no_op",
+                },
+            ),
+            original_action_type=pre_veto_action_type,
+            fallback_reason="drift_high_regime_pack_no_op",
+            drift_veto_applied=True,
+        )
 
     if ActionType.DEFER in legal_set:
         return ActionPolicyDecision(
