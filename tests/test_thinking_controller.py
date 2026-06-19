@@ -1,3 +1,5 @@
+import pytest
+
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ActionType, CognitiveMode
 
@@ -161,3 +163,99 @@ def test_to_dict_is_serializable_shape():
     assert "memory_plan" in payload
     assert "action_decision" in payload
     assert "review_result" in payload
+
+
+# ---------------------------------------------------------------------------
+# Tuned-scoring provenance lock (current-behavior characterization).
+#
+# These tests pin the CURRENT scoring behavior of _estimate_ambiguity and
+# _estimate_urgency through the public frame_task seam. They are the
+# calibration basis underneath the already-locked ambiguity-clarify thresholds
+# (primary 0.72 / fallback 0.60) and the drift-veto urgency override (> 0.7).
+# This is a provenance / drift lock — NOT a claim that these tuned values are
+# permanently correct. Do not change any scoring value without provenance
+# archaeology (source / tests / docs / history / operator context).
+#
+# Reachable public buckets (current implementation; neither reaches 1.0):
+#   ambiguity: {0.0, 0.20, 0.35, 0.40, 0.55, 0.60, 0.75, 0.95}
+#   urgency:   {0.0, 0.1, 0.2, 0.3, 0.6, 0.7, 0.8, 0.9}
+# ---------------------------------------------------------------------------
+
+
+def _amb(text: str) -> float:
+    return ThinkingController().frame_task("ws", "agent", text).ambiguity_score
+
+
+def _urg(text: str) -> float:
+    return ThinkingController().frame_task("ws", "agent", text).urgency
+
+
+def test_ambiguity_signal_contributions_provenance_lock():
+    # Each ambiguity signal contributes its documented points, isolated (>= 4
+    # words so the short bonus is excluded except where it is the signal under
+    # test). Inputs avoid urgency words so urgency stays 0.0.
+    assert _amb("the report here") == pytest.approx(0.35)              # short (<4 words)
+    assert _amb("maybe the report is fine") == pytest.approx(0.20)     # "maybe"
+    assert _amb("is the report fine??") == pytest.approx(0.20)         # count("?") > 1
+    assert _amb("the report has stuff inside") == pytest.approx(0.20)  # "stuff" (something-family)
+
+
+def test_ambiguity_reachable_buckets_provenance_lock():
+    # One representative input per reachable public bucket. Max is 0.95;
+    # 1.0 is NOT reachable through current public text signals.
+    assert _amb("the report covers data") == pytest.approx(0.0)
+    assert _amb("maybe the report is fine") == pytest.approx(0.20)
+    assert _amb("the report here") == pytest.approx(0.35)
+    assert _amb("maybe the report has stuff inside") == pytest.approx(0.40)  # maybe + stuff
+    assert _amb("maybe here ok") == pytest.approx(0.55)                      # short + maybe
+    assert _amb("maybe the stuff here?? really") == pytest.approx(0.60)      # maybe + stuff + ?? (no short)
+    assert _amb("maybe something") == pytest.approx(0.75)                    # short + maybe + something
+    assert _amb("maybe stuff??") == pytest.approx(0.95)                      # short + maybe + stuff + ??
+
+
+def test_high_ambiguity_via_double_question_is_guarded_from_primary_clarify():
+    # Provenance distinction: a reachable high-ambiguity bucket is NOT the same
+    # as a primary-clarify-triggering case. "maybe stuff??" scores 0.95
+    # (> 0.72) but contains "?", so choose_action's separate `"?" not in lower`
+    # guard blocks primary clarification. (Contrast: the no-"?" 0.75 case DOES
+    # clarify — see test_high_ambiguity_without_question_triggers_clarification.)
+    ctl = ThinkingController()
+    assert ctl.frame_task("ws", "agent", "maybe stuff??").ambiguity_score == pytest.approx(0.95)
+    result = ctl.think("default", "ryuki", "maybe stuff??")
+    assert result.action_decision.action != ActionType.ASK_CLARIFICATION
+
+
+def test_urgency_signal_contributions_provenance_lock():
+    # Each urgency signal contributes its documented points, isolated.
+    assert _urg("please handle this urgent matter") == pytest.approx(0.6)  # "urgent"
+    assert _urg("please respond right now") == pytest.approx(0.2)          # "now"
+    assert _urg("please respond very quickly") == pytest.approx(0.2)       # "quickly"
+    assert _urg("please handle this matter!") == pytest.approx(0.1)        # "!"
+
+
+def test_urgency_reachable_buckets_provenance_lock():
+    # One representative input per reachable public bucket. Max is 0.9;
+    # 1.0 is NOT reachable through current public text signals.
+    assert _urg("the report covers data") == pytest.approx(0.0)
+    assert _urg("please handle this matter!") == pytest.approx(0.1)
+    assert _urg("please respond right now") == pytest.approx(0.2)
+    assert _urg("please respond right now!") == pytest.approx(0.3)              # now + !
+    assert _urg("please handle this urgent matter") == pytest.approx(0.6)       # urgent
+    assert _urg("please handle this urgent matter!") == pytest.approx(0.7)      # urgent + !
+    assert _urg("please handle this urgent matter now") == pytest.approx(0.8)   # urgent + now
+    assert _urg("please handle this urgent matter now!") == pytest.approx(0.9)  # urgent + now + !
+
+
+def test_urgency_override_boundary_provenance_lock():
+    # Locks the current scoring relative to the drift-veto governance override
+    # (action_policy bypasses the veto when governance_sensitive AND
+    # urgency > 0.7; see tests/test_drift_veto.py for the override at 0.7).
+    # "urgent" alone = 0.6 (below the bar); "urgent now" = 0.8 and
+    # "urgent now!" = 0.9 (above). "urgent!" = 0.7 sits exactly at the bar.
+    assert _urg("please handle this urgent matter") == pytest.approx(0.6)
+    assert _urg("please handle this urgent matter") < 0.7                        # urgent alone does not cross
+    assert _urg("please handle this urgent matter!") == pytest.approx(0.7)       # boundary == 0.7
+    assert _urg("please handle this urgent matter now") == pytest.approx(0.8)
+    assert _urg("please handle this urgent matter now") > 0.7                    # urgent + now crosses
+    assert _urg("please handle this urgent matter now!") == pytest.approx(0.9)
+    assert _urg("please handle this urgent matter now!") > 0.7
