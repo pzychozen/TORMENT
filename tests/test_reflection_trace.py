@@ -158,6 +158,65 @@ class TestFrozenShapeOnly:
 
 
 # ---------------------------------------------------------------------------
+# 1b. Inner containers are read-only after construction (immutability hardening)
+# ---------------------------------------------------------------------------
+
+class TestInnerContainersReadOnly:
+    """`frozen=True` blocks field *reassignment*, but the inner mapping fields
+    must also be genuinely read-only after construction — mutating a constructed
+    trace's containers must raise. `active_lanes` is already a tuple."""
+
+    def test_review_status_flags_cannot_be_mutated(self):
+        t = _sample_trace()
+        with pytest.raises(TypeError):
+            t.review_status_flags["approved"] = False  # type: ignore[index]
+        with pytest.raises(TypeError):
+            t.review_status_flags["new_key"] = True  # type: ignore[index]
+
+    def test_lane_budget_shape_cannot_be_mutated(self):
+        t = _sample_trace()
+        with pytest.raises(TypeError):
+            t.lane_budget_shape["core"] = 999  # type: ignore[index]
+
+    def test_active_lanes_is_immutable_tuple(self):
+        t = _sample_trace()
+        assert isinstance(t.active_lanes, tuple)
+        with pytest.raises(TypeError):
+            t.active_lanes[0] = "mutated"  # type: ignore[index]
+
+    def test_default_constructed_trace_is_also_read_only(self):
+        # The hardening lives in __post_init__, not the builder, so the
+        # bare-defaults construction path must be read-only too.
+        t = ReflectionTrace(chosen_mode="fast", action="answer")
+        with pytest.raises(TypeError):
+            t.review_status_flags["x"] = True  # type: ignore[index]
+        with pytest.raises(TypeError):
+            t.lane_budget_shape["x"] = 1  # type: ignore[index]
+
+    def test_direct_construction_copies_source_mapping(self):
+        # __post_init__ wraps a *private copy*: a dict passed straight to the
+        # constructor cannot be mutated through after the fact.
+        src = {"approved": True}
+        t = ReflectionTrace(
+            chosen_mode="fast", action="answer", review_status_flags=src,
+        )
+        src["approved"] = False
+        src["injected"] = True
+        assert dict(t.review_status_flags) == {"approved": True}
+
+    def test_to_dict_still_returns_mutable_plain_copies(self):
+        # The read-only guarantee is on the trace's own containers; to_dict()
+        # must still yield plain, mutable, JSON-safe primitives (copies).
+        d = _sample_trace().to_dict()
+        d["review_status_flags"]["approved"] = False  # must NOT raise
+        d["lane_budget_shape"]["core"] = 0  # must NOT raise
+        d["active_lanes"].append("x")  # must NOT raise
+        assert type(d["review_status_flags"]) is dict
+        assert type(d["lane_budget_shape"]) is dict
+        assert type(d["active_lanes"]) is list
+
+
+# ---------------------------------------------------------------------------
 # 2. Builder purity
 # ---------------------------------------------------------------------------
 
@@ -414,7 +473,7 @@ class TestNoDurableState:
 # 8. AST/source lock — reflection_trace.py is writer-free and storage-free
 # ---------------------------------------------------------------------------
 
-_ALLOWED_IMPORT_ROOTS = {"__future__", "dataclasses", "typing"}
+_ALLOWED_IMPORT_ROOTS = {"__future__", "dataclasses", "types", "typing"}
 
 _FORBIDDEN_CALL_NAMES = frozenset({
     "ingest", "spawn_memory", "add_memory", "update_payload", "flush_node",

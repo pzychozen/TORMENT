@@ -25,6 +25,7 @@ graph / storage / kernel), so its non-reachability is structural, not promised.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 
@@ -32,8 +33,11 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 class ReflectionTrace:
     """Immutable, shape-only record of one turn's decision structure.
 
-    Frozen: field reassignment raises. All fields are coarse labels / counts /
-    flags / scores — never raw text or content.
+    Frozen: field reassignment raises, and the inner mapping fields are wrapped
+    in read-only ``MappingProxyType`` views in ``__post_init__`` (backed by a
+    private copy), so mutating a constructed trace's containers also raises. All
+    fields are coarse labels / counts / flags / scores — never raw text or
+    content.
     """
 
     # --- decision identity (required) ---
@@ -42,9 +46,9 @@ class ReflectionTrace:
 
     # --- existing v0.1 shape ---
     stance: Optional[str] = None
-    review_status_flags: Dict[str, bool] = field(default_factory=dict)
+    review_status_flags: Mapping[str, bool] = field(default_factory=dict)
     active_lanes: Tuple[str, ...] = ()
-    lane_budget_shape: Dict[str, int] = field(default_factory=dict)
+    lane_budget_shape: Mapping[str, int] = field(default_factory=dict)
     geometric_context_present: bool = False
 
     # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
@@ -69,6 +73,17 @@ class ReflectionTrace:
     confidence_need: float = 0.0
 
     scope: str = "per_turn_ephemeral"
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` blocks attribute *reassignment* but not mutation of the
+        # inner containers; wrap the mapping fields in read-only views backed by a
+        # private copy so the record is genuinely immutable after construction.
+        object.__setattr__(
+            self, "review_status_flags", MappingProxyType(dict(self.review_status_flags))
+        )
+        object.__setattr__(
+            self, "lane_budget_shape", MappingProxyType(dict(self.lane_budget_shape))
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to plain primitives for inspection surfaces only
