@@ -282,6 +282,20 @@ def promote_chunk(
             "canon": True,
         }
         if extra_payload:
+            # Fail-closed guard: caller-supplied extra_payload may enrich the
+            # row with provenance (e.g. promotion_* keys) but must not override
+            # the core promotion payload keys that define the write's class.
+            _reserved_keys = {
+                "memory_class", "kind", "tier", "source_ref", "promoted_at", "canon",
+            }
+            _collisions = _reserved_keys & set(extra_payload)
+            if _collisions:
+                log.warning(
+                    "Promotion aborted for chunk %s: extra_payload may not "
+                    "override reserved core promotion keys: %s",
+                    _sanitize_log(chunk_id), sorted(_collisions),
+                )
+                return None
             payload.update(extra_payload)
 
         eid = memory_graph.spawn_memory(

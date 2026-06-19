@@ -143,12 +143,15 @@ def test_promote_force_true_maps_is_canon_and_user_approved_and_reaches_promote_
     def _spy_eval(*args, **kwargs):
         captured["is_canon"] = kwargs.get("is_canon")
         captured["user_approved"] = kwargs.get("user_approved")
-        return real_eval(*args, **kwargs)
+        res = real_eval(*args, **kwargs)
+        captured["eval_promote"] = bool(res.promote)
+        return res
 
-    sentinel = {"called": False}
+    sentinel = {"called": False, "extra_payload": None}
 
     def _sentinel_promote(*args, **kwargs):
         sentinel["called"] = True
+        sentinel["extra_payload"] = kwargs.get("extra_payload")
         return 424242
 
     # Patch at the source module — the endpoint imports these names
@@ -170,6 +173,13 @@ def test_promote_force_true_maps_is_canon_and_user_approved_and_reaches_promote_
     assert captured["is_canon"] is True
     assert captured["user_approved"] is True
 
+    # H3 provenance: the force route is recorded in the written extra_payload,
+    # and the evaluator's own decision is recorded alongside it.
+    ep = sentinel["extra_payload"]
+    assert ep is not None
+    assert ep["promotion_force_requested"] is True
+    assert ep["promotion_evaluator_promote"] == captured["eval_promote"]
+
 
 # ===========================================================================
 # 3. result.promote or req.force — force executes even when eval declines
@@ -189,10 +199,11 @@ def test_promote_force_true_executes_even_when_evaluation_declines(
             promote=False, score=0.0, reason="patched-decline", criteria={}
         )
 
-    sentinel = {"called": False}
+    sentinel = {"called": False, "extra_payload": None}
 
     def _sentinel_promote(*args, **kwargs):
         sentinel["called"] = True
+        sentinel["extra_payload"] = kwargs.get("extra_payload")
         return 525252
 
     monkeypatch.setattr(promo, "evaluate_promotion", _declining_eval)
@@ -207,3 +218,54 @@ def test_promote_force_true_executes_even_when_evaluation_declines(
     assert body["evaluation"]["promote"] is False
     assert sentinel["called"] is True
     assert body["promoted_eid"] == 525252
+
+    # H3 provenance: a true force-bypass (force requested, evaluator declined)
+    # is recorded distinctly in the written extra_payload.
+    ep = sentinel["extra_payload"]
+    assert ep is not None
+    assert ep["promotion_force_requested"] is True
+    assert ep["promotion_evaluator_promote"] is False
+
+
+# ===========================================================================
+# 4. evaluator-approved, non-force promotion records provenance distinctly
+# ===========================================================================
+
+
+def test_promote_evaluator_approved_non_force_records_provenance(
+    client: TestClient, monkeypatch
+):
+    _setup_ws_agent_and_chunk(client)
+
+    import torment_service.promotion as promo
+    from torment_service.promotion import PromotionResult
+
+    def _approving_eval(*args, **kwargs):
+        return PromotionResult(
+            promote=True, score=1.0, reason="patched-approve", criteria={}
+        )
+
+    sentinel = {"called": False, "extra_payload": None}
+
+    def _sentinel_promote(*args, **kwargs):
+        sentinel["called"] = True
+        sentinel["extra_payload"] = kwargs.get("extra_payload")
+        return 626262
+
+    monkeypatch.setattr(promo, "evaluate_promotion", _approving_eval)
+    monkeypatch.setattr(promo, "promote_chunk", _sentinel_promote)
+
+    # Non-force request; evaluator approves on its own.
+    r = _promote(client, force=False)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["evaluation"]["promote"] is True
+    assert sentinel["called"] is True
+    assert body["promoted_eid"] == 626262
+
+    # H3 provenance: evaluator-approved, non-force route recorded distinctly.
+    ep = sentinel["extra_payload"]
+    assert ep is not None
+    assert ep["promotion_force_requested"] is False
+    assert ep["promotion_evaluator_promote"] is True

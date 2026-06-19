@@ -396,6 +396,80 @@ class TestPromotionExecution:
         assert eid is not None
         assert len(graph._spawned[0]["summary"]) <= 500
 
+    def test_promote_chunk_records_force_route_provenance(self):
+        """H3: extra_payload provenance is stamped into the written row, and the
+        existing core promotion shape is unchanged."""
+        graph = _FakeMemoryGraph()
+        embedder = _FakeEmbedder()
+
+        eid = promote_chunk(
+            chunk_id="chunk_prov",
+            chunk_text="Ryuki expresses care through pressure.",
+            doc_id="doc_prov",
+            memory_graph=graph,
+            embedder=embedder,
+            extra_payload={
+                "promotion_force_requested": True,
+                "promotion_evaluator_promote": False,
+            },
+        )
+        assert eid is not None
+        ep = graph._spawned[0]["extra_payload"]
+        # New provenance keys present.
+        assert ep["promotion_force_requested"] is True
+        assert ep["promotion_evaluator_promote"] is False
+        # Existing core shape unchanged.
+        assert ep["kind"] == "canon_promotion"
+        assert ep["tier"] == "core_identity"
+        assert ep["memory_class"] == "core"
+        assert ep["source_ref"]["doc_id"] == "doc_prov"
+        assert ep["canon"] is True
+
+    def test_promote_chunk_reserved_key_collision_fails_closed(self):
+        """Reserved core promotion keys may not be overridden via extra_payload;
+        any collision fails closed (no spawn, no flush, returns None)."""
+        reserved_keys = [
+            "memory_class", "kind", "tier", "source_ref", "promoted_at", "canon",
+        ]
+        for reserved in reserved_keys:
+            graph = _FakeMemoryGraph()
+            embedder = _FakeEmbedder()
+            eid = promote_chunk(
+                chunk_id="chunk_guard",
+                chunk_text="text",
+                doc_id="doc_guard",
+                memory_graph=graph,
+                embedder=embedder,
+                extra_payload={reserved: "attacker_value"},
+            )
+            assert eid is None, f"reserved key {reserved!r} did not fail closed"
+            assert graph._spawned == [], f"reserved key {reserved!r} spawned a node"
+            assert graph._flushed == [], f"reserved key {reserved!r} flushed a node"
+
+    def test_promote_summary_not_polluted_by_provenance(self):
+        """The distilled summary remains the chunk text; provenance keys never
+        leak into the summary."""
+        graph = _FakeMemoryGraph()
+        embedder = _FakeEmbedder()
+        text = "Ryuki expresses care through pressure."
+
+        eid = promote_chunk(
+            chunk_id="chunk_sum",
+            chunk_text=text,
+            doc_id="doc_sum",
+            memory_graph=graph,
+            embedder=embedder,
+            extra_payload={
+                "promotion_force_requested": True,
+                "promotion_evaluator_promote": False,
+            },
+        )
+        assert eid is not None
+        summary = graph._spawned[0]["summary"]
+        assert summary == text.strip()
+        assert "promotion_force_requested" not in summary
+        assert "promotion_evaluator_promote" not in summary
+
 
 # ---------------------------------------------------------------------------
 # Test: Retrieval Counting

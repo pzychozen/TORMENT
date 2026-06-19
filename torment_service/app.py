@@ -1853,6 +1853,10 @@ def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
                 memory_graph=graph,
                 embedder=fabric.kernel.embedder,
                 step=req.step,
+                extra_payload={
+                    "promotion_force_requested": bool(req.force),
+                    "promotion_evaluator_promote": bool(result.promote),
+                },
             )
 
     return {
