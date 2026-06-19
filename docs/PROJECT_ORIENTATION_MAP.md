@@ -571,6 +571,17 @@ Items that have been deferred from an active slice but are not lost:
   endpoint redesign, H1/`gravity_correction`, Phase-7, Seed-Gov, P4, private cognition, dream runtime, or
   database/substrate. H3 remains a **leaf** under Writer Authority / Document A; **H1 remains parked and
   not de-risked**; database/substrate remains last.
+- **Gate 4 — read-only runtime-conformance selection frame FILED docs-only (2026-06-19, `dd53b7e`)** —
+  selects Gate 4 first **only at read-only runtime-conformance selection level** (old identity-pressure
+  conformance-gap framing); **this is not a Writer Authority un-pause**. Artifact:
+  `docs/TORMENT_GATE_4_READ_ONLY_RUNTIME_CONFORMANCE_SELECTION_FRAME_v0.1.md`. **Gate 1 deferred** until
+  the old live identity-pressure floor is framed against existing boundaries; **Gate 2 and Gate 3
+  deferred** as substrate-coupled mechanism work (seed-revision / candidate-store / governed-admission).
+  Selects **no** writer patch, remedy, enforcement, governance vehicle, or runtime authority gate, and
+  **no** P4/source-sameness, Seed-Gov mechanics, chamber/private-cognition runtime, candidate store,
+  governed admission implementation, or database/substrate; database/substrate remains last. **No
+  automatic successor gate** — only a separately authorized read-only Gate 4 conformance-gap map may
+  follow.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
