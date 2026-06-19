@@ -102,11 +102,16 @@ MODE_LEGAL_INTENTS: Dict[CognitiveMode, Set[ActionType]] = {
 }
 
 
-# Ambiguity threshold at which the fallback chain prefers
-# ASK_CLARIFICATION over DEFER. Tuned to match the existing
-# thinking_controller.choose_action ambiguity threshold (0.72)
-# so fallbacks and primary deliberation agree on when ambiguity
-# is high enough to warrant a scoped question back to the user.
+# Ambiguity threshold at which the fallback chain prefers ASK_CLARIFICATION
+# over DEFER. INTENTIONALLY LOWER than the primary
+# thinking_controller.choose_action threshold (0.72): this fallback fires only
+# after an action was already ruled illegal for the mode, so it is deliberately
+# more eager to ask a scoped question. 0.60 belongs to the stance/fallback
+# clarification family (cf. stance_policy rule 5: 0.60 * geometric_modifier);
+# 0.72 is separately bucket-calibrated against thinking_controller's
+# _estimate_ambiguity additive buckets (see tests/test_thinking_controller.py).
+# These two values are NOT the same number and must not be "unified" casually —
+# the difference is by design (see tests/test_fallback_chain.py provenance lock).
 _AMBIGUITY_CLARIFY_THRESHOLD = 0.60
 
 

@@ -91,6 +91,20 @@ def test_high_ambiguity_without_question_triggers_clarification():
     assert result.action_decision.action == ActionType.ASK_CLARIFICATION
 
 
+def test_primary_does_not_clarify_below_0_72_intentional_divergence():
+    # Provenance lock (NOT drift): the primary choose_action bar is 0.72,
+    # deliberately HIGHER than the action-policy fallback bar (0.60). The
+    # reachable non-"?" buckets of _estimate_ambiguity jump 0.55 -> 0.75, and
+    # 0.72 sits in that gap. "maybe wrong" = short(<4, +0.35) + "maybe"(+0.20)
+    # = 0.55 (< 0.72), no "?". Primary must NOT ask clarification here.
+    # (The 0.60 bucket is only reachable with "??", which choose_action's
+    # separate '?' guard excludes from clarification regardless.)
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "maybe wrong")
+    assert result.action_decision.action != ActionType.ASK_CLARIFICATION
+    assert result.action_decision.action == ActionType.ANSWER
+
+
 def test_live_social_short_turn_becomes_no_op():
     ctl = ThinkingController()
     ctl.think(

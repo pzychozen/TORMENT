@@ -25,6 +25,7 @@ from torment_service.action_policy import (
     MODE_LEGAL_INTENTS,
     apply_legality,
     is_legal,
+    _AMBIGUITY_CLARIFY_THRESHOLD,
 )
 from torment_service.thinking_models import (
     ActionDecision,
@@ -263,3 +264,44 @@ class TestObservability:
             _frame(),
         )
         assert result.action.payload.get("original_action") == ActionType.USE_TOOL.value
+
+
+# ---------------------------------------------------------------------------
+# Ambiguity-threshold provenance lock (intentional divergence, not drift)
+# ---------------------------------------------------------------------------
+
+
+class TestAmbiguityThresholdProvenanceLock:
+    """Locks the INTENTIONAL difference between the fallback clarify bar (0.60)
+    and the primary thinking_controller.choose_action bar (0.72). This is
+    divergence-by-design, not drift — do not 'unify' these thresholds. See
+    action_policy._AMBIGUITY_CLARIFY_THRESHOLD and the primary-side lock in
+    tests/test_thinking_controller.py."""
+
+    def test_fallback_clarifies_at_0_60_boundary(self):
+        # ANSWER is illegal in TOOL -> fallback chain; ambiguity at the 0.60
+        # fallback bar -> ASK_CLARIFICATION (step 2).
+        result = apply_legality(
+            _action(ActionType.ANSWER),
+            _mode(CognitiveMode.TOOL),
+            _frame(governance_sensitive=False, ambiguity_score=0.60),
+        )
+        assert result.action.action == ActionType.ASK_CLARIFICATION
+        assert result.fallback_reason == "ambiguity_clarification_fallback"
+
+    def test_fallback_defers_just_below_0_60(self):
+        # Just under the 0.60 bar -> step 2 does not fire -> DEFER (step 3).
+        result = apply_legality(
+            _action(ActionType.ANSWER),
+            _mode(CognitiveMode.TOOL),
+            _frame(governance_sensitive=False, ambiguity_score=0.59),
+        )
+        assert result.action.action == ActionType.DEFER
+        assert result.fallback_reason == "defer_fallback"
+
+    def test_fallback_threshold_is_intentionally_below_primary(self):
+        # Drift guard: fails loudly if anyone changes either value to unify
+        # them. 0.60 is the fallback/stance clarify bar; 0.72 is the primary
+        # bucket-calibrated choose_action bar. The difference is by design.
+        assert _AMBIGUITY_CLARIFY_THRESHOLD == 0.60
+        assert _AMBIGUITY_CLARIFY_THRESHOLD < 0.72
