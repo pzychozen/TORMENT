@@ -662,6 +662,28 @@ Items that have been deferred from an active slice but are not lost:
   chamber/private-cognition runtime, candidate store, governed admission implementation, or
   database/substrate. **No automatic successor gate** — any later step needs separate authorization;
   database/substrate remains last.
+- **Gate 4 — role inference / identity-anchor cadence (D2) row conformance-question frame FILED docs-only
+  (2026-06-20, `f466a01`; Codex ACCEPT WITH CORRECTIONS, applied)** — **row D2** in the split-D framing
+  sequence (**D2 = role inference / identity-anchor cadence (this frame); D1 = spirit-return warmth,
+  separate and already framed**); **C derived identity anchors is downstream context only**, and
+  **D2 / C / D1 are distinct runtime surfaces**. Scoped to **one row** — a **durable-soft, non-canon**
+  role profile in `roles.json`, **deterministic/offline/model-free keyword-scored**, **slow EMA from
+  ingest-summary text**, whose `dominant_role` maps to `anchor_count_mult` / `anchor_gap_mult` and
+  **modulates `_maybe_emit_identity_anchor` cadence** (**indirect cadence modulation — not direct
+  identity-anchor writing**). Artifact:
+  `docs/TORMENT_GATE_4_ROLE_INFERENCE_CADENCE_READ_ONLY_CONFORMANCE_QUESTION_FRAME_v0.1.md`. **Diagnostic
+  read-surface exposure is reporting only, not prompt authority**; **role profile ≠ identity authority,
+  ≠ persona/voice writing; durable-soft ≠ pinned.** **Question framing only** — poses **Q-R1–Q-R4 posed
+  only, not answered** (boundary Stage A **O6**, named requirement/posture); **does not re-answer
+  Q-D1–Q-D5 or Q-W1–Q-W4**; **does not open or continue any writer-authority work — it only characterizes
+  the cadence-modulation surface**. Selects **no** O6 mechanics, must-not-pin implementation, Seed-Gov
+  mechanics, canon claim, authority claim, verdict, remedy, writer patch, fix order, enforcement,
+  governance vehicle, runtime authority gate, chamber/private-cognition runtime, candidate store, governed
+  admission implementation, or database/substrate. **No automatic successor gate** — any later step needs
+  separate authorization; database/substrate remains last. **With this D2 frame the Gate 4 per-row
+  question-framing pass over the five core runtime rows (A gravity / B mood-topology / C derived anchors /
+  D1 warmth / D2 role-cadence) is now complete as a question-framing pass only — not a fix order, not a
+  remedy selection, not implementation, and not a closure of the posed questions.**
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
