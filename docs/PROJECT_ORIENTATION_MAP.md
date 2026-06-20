@@ -627,6 +627,23 @@ Items that have been deferred from an active slice but are not lost:
   runtime authority gate, P4/source-sameness or Seed-Gov mechanics, chamber/private-cognition runtime,
   candidate store, governed admission implementation, or database/substrate. **No automatic successor
   gate** — any later step needs separate authorization; database/substrate remains last.
+- **Gate 4 — derived identity anchors row conformance-question frame FILED docs-only (2026-06-20,
+  `8953b90`; Codex ACCEPT WITH CORRECTIONS, applied)** — **row C** in the A→B→C→D **framing sequence (not
+  a fix order)**, scoped to **exactly one row: `torment_service/fabric.py::_maybe_emit_identity_anchor`**
+  (an **automatic derived identity-family writer**, **`canon=False`**, `anchor_origin="derived"` /
+  `anchor_source="motif_cluster"`, motif count/gap-gated; may retire a prior same-motif anchor as
+  write-surface behavior only). Artifact:
+  `docs/TORMENT_GATE_4_DERIVED_IDENTITY_ANCHORS_READ_ONLY_CONFORMANCE_QUESTION_FRAME_v0.1.md`. Reentry is
+  **ordinary-tier / ordinary-reentry only**; **any separate promotion question is outside this frame,
+  unopened and unevaluated**. **Question framing only** — poses **Q-D1–Q-D5 posed only, not answered**
+  (**Q-D4** opens no `update_payload` repair, stored-edge repair, or P4/Q lineage mechanics). **P4 O2
+  named only as requirement / posture** — **no source-membership proof design, no source-sameness/P4
+  mechanics, no `diagnostic_only` implementation**. Role cadence and affect-sensitivity are **context
+  only, not scope**. Selects **no** verdict, canon claim, automatic promotion, remedy, writer patch, fix
+  order, enforcement, governance vehicle, runtime authority gate, Seed-Gov mechanics,
+  chamber/private-cognition runtime, candidate store, governed admission implementation, or
+  database/substrate. **No automatic successor gate** — any later step needs separate authorization;
+  database/substrate remains last.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
