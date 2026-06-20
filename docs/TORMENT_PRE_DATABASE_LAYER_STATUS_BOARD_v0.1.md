@@ -39,7 +39,7 @@ exist, zero build.
 | ReflectionTrace / observability floor | HARDENED-FOR-NOW | Ephemeral, content-free decision-shape observation; non-reentrant; stdlib-only | `reflection_trace.py`; `test_reflection_trace.py` + runner-parity; `48ae289` | none; reuse as scaffold |
 | /thinking/debug read-only surface | HARDENED-FOR-NOW | Debug endpoint returns full chain (intentional, ephemeral, non-persisted); handler read-only-locked | `app.py:2667`; `TestDebugEndpointReadOnlyCompanion`; `e9212a7` | none |
 | Spine thinking-alignment buffer | HARDENED-FOR-NOW | Bounded (200), in-memory, content-free advisory buffer + read endpoint; live population not proven | `spine.py`; `test_spine_thinking_alignment_buffer.py`; `805a0ba` | none |
-| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`):** behavior-preserving routing scaffold — frozen primitive-only `EphemeralCognitionState`; `build_memory_plan()` routes through it with `MemoryPlan` parity (no production behavior change). Tests-locked; no new capability yet | `thinking_models.py` (`EphemeralCognitionState`); `_build_ephemeral_cognition_state`; `test_ephemeral_cognition_state.py`; `4e164c3` | Slice 2 (numeric retrieval shaping) definition drafted, pending authorization (`..._SLICE_2_DEFINITION_v0.1.md`); see §5 |
+| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`)** routing scaffold; **Slice 2 IMPLEMENTED (`06a9536`)** — first *gated, reversible* retrieval-shaping rule (lane no longer scaffold-only). Default-off behind `TORMENT_COGNITION_SHAPING_V2`; when on: `deep.top_k` +1 (cap 4, never reduce) iff `ambiguity_score >= 0.50` **and** deep already enabled. Plan-boundary, `top_k_by_lane["deep"]` only. Tests-locked | `thinking_controller.py` (`_apply_cognition_shaping_v2`); `test_ephemeral_cognition_state.py`; `4e164c3`, `06a9536` | lane paused; further rules / archive-collective live shaping / default-on remain deferred (§5) |
 | Candidate Gate D / Layer-1 private thinking | FRAMED | Eligible substrate-independent interior slice; **framed only**, pending operator selection | cognition roadmap §9; comparison frame `5472639`; pointer `3659089` | full Gate D remains unopened; proceed only via separately bounded slices |
 | Envelope Audit | FRAMED | Requirement only (Document B §7); no module; only a coarse `requires_self_review` flag exists | Document B §7 | none until Gate D opens |
 | Dream / incubation / Regime-B | DEFERRED | Offline reflection; no runtime exists; explicitly deferred + substrate-coupled | Document B §5; pre-substrate §3 | none; last |
@@ -83,9 +83,24 @@ Gate 4 writer remedies, and database/substrate/Stage B. See §5.
 - **Validation:** `104 passed in 1.06s`.
 - **Boundaries preserved:** no serialization · no `ThinkingResult` exposure · no `/thinking/debug` exposure ·
   no `/agent/query` output-shape change · no durable state · no database/substrate.
-- **Next possible slice:** Slice 2 (numeric retrieval shaping) — **definition drafted, pending authorization.**
-  Envelope fixed in `docs/TORMENT_EPHEMERAL_COGNITION_STATE_SLICE_2_DEFINITION_v0.1.md`; not implementable
-  until that artifact's §4 (exact numeric rule) and §5 (rollout posture) are decided.
+### Slice 2 — IMPLEMENTED (`06a9536`)
+
+- **Rule:** default-off behind `TORMENT_COGNITION_SHAPING_V2`. When enabled: if
+  `EphemeralCognitionState.ambiguity_score >= 0.50` **and** `deep.top_k > 0`, then `deep.top_k` nudges
+  **+1**, capped at **<= 4**, **never reducing** an existing value.
+- **Deep-disabled guard (ratified):** Slice 2 does **not** enable a disabled deep lane — never produces
+  `retrieve_deep=False` paired with `deep.top_k=1`.
+- **Scope preserved:** controller-produced `MemoryPlan` only · plan-boundary shaping only · only
+  `top_k_by_lane["deep"]` · no weights · no core/relational/archive/collective · no retrieval booleans ·
+  no `safety_constraints` · no `max_token_budget` · no packs · no `app.py` / `agent_loop.py` /
+  `fabric.py` / `behavior_packs.py`.
+- **Status meaning:** the lane moves from behavior-preserving *scaffold* (Slice 1) to a first **gated,
+  reversible** retrieval-shaping improvement. Default-off, so default runtime behavior is unchanged. This
+  does **not** newly complete the thinking layer — the selected thinking surfaces were already
+  HARDENED-FOR-NOW before this lane (see §4 row 1).
+- **Validation:** `126 passed in 1.46s`. Working tree after push clean (`## main...origin/main`).
+- **Next:** lane paused. Further shaping rules, live archive/collective shaping, and any default-on
+  decision remain deferred — see `docs/TORMENT_EPHEMERAL_COGNITION_STATE_SLICE_2_DEFINITION_v0.1.md`.
 
 ---
 

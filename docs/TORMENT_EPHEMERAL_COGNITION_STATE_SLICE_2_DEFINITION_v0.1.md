@@ -1,9 +1,9 @@
 # TORMENT Ephemeral Cognition State — Slice 2 Definition / Authorization v0.1
 
-**Status:** DRAFT DEFINITION — pending operator / trio authorization. **Not an implementation, not a
-patch, not doctrine, not a gate or registry artifact.** It fixes the *envelope* of what a future Slice 2
-numeric retrieval-shaping change may touch, so that when authorized the slice is already tiny, explicit,
-reversible, and test-locked.
+**Status:** ACTIVE — first rule **IMPLEMENTED** (`06a9536`). The envelope below remains in force for any
+*further* shaping rules. **Not doctrine, not a gate or registry artifact.** It fixes the *envelope* of
+what Slice 2 numeric retrieval-shaping may touch, so each rule stays tiny, explicit, reversible, and
+test-locked.
 
 **Lane:** Ephemeral structured cognition state (pre-database).
 **Slice 1:** CLOSED — code `4e164c3`, board `3d461b8`. Behavior-preserving routing scaffold only; no
@@ -13,8 +13,15 @@ implementation and needs this definition first.
 **Authority note:** navigation / authorization aid only. The orientation map, Decision Registry, and
 promoted contracts remain source of truth.
 
-> One-line gate: Slice 2 may NOT be implemented until §4 (exact numeric rule) and §5 (final rollout
-> posture) are filled in and accepted. Everything else below is decided.
+> One-line gate: a Slice 2 rule may NOT be implemented until §4 (exact numeric rule) and §5 (final
+> rollout posture) are filled in and accepted. (Rule 1 is now accepted and landed — see implementation
+> status below; this gate still governs any *additional* rule.)
+
+> **Implementation status (2026-06-20):** Rule 1 landed at `06a9536`, default-off behind
+> `TORMENT_COGNITION_SHAPING_V2`: when `ambiguity_score >= 0.50` **and** `deep.top_k > 0`, `deep.top_k`
+> +1 (cap 4, never reduce). The §2 **deep-disabled guard was ratified** — no `retrieve_deep=False` with
+> `deep.top_k=1`. §4/§5 are DECIDED *for Rule 1*; the schema and §11 gate still apply to further rules.
+> Validation `126 passed`; working tree clean (`## main...origin/main`).
 
 ---
 
