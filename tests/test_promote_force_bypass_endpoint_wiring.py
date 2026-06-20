@@ -192,10 +192,9 @@ def test_promote_force_true_executes_even_when_evaluation_declines(
     _setup_ws_agent_and_chunk(client)
 
     import torment_service.promotion as promo
-    from torment_service.promotion import PromotionResult
 
     def _declining_eval(*args, **kwargs):
-        return PromotionResult(
+        return promo.PromotionResult(
             promote=False, score=0.0, reason="patched-decline", criteria={}
         )
 
@@ -238,10 +237,9 @@ def test_promote_evaluator_approved_non_force_records_provenance(
     _setup_ws_agent_and_chunk(client)
 
     import torment_service.promotion as promo
-    from torment_service.promotion import PromotionResult
 
     def _approving_eval(*args, **kwargs):
-        return PromotionResult(
+        return promo.PromotionResult(
             promote=True, score=1.0, reason="patched-approve", criteria={}
         )
 

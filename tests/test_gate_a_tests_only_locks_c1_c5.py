@@ -358,7 +358,7 @@ class TestC3AgentQueryNoDirectWriters:
         req = appmod.QueryReq(
             workspace_id="ws", agent_id="ag", query="hello", top_k=3,
         )
-        out = appmod.query(req)
+        appmod.query(req)
 
         # Retrieval boundary is reached exactly once.
         assert spy.calls.get("query", 0) == 1
