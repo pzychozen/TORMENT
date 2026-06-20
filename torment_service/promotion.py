@@ -260,6 +260,14 @@ def promote_chunk(
 
     Returns the new eid, or None on failure.
     """
+    # Path C Q1 enforcement (deep-hit tripwire): reject a NonAuthoritativeDeepHit
+    # wrapper passed as extra_payload BEFORE the canon-promotion write. Placed
+    # before the try so a wrapper input raises NonAuthoritativeMemoryError
+    # cleanly rather than being swallowed into a None return. Narrow guard:
+    # dict / None pass untouched; it asserts nothing about source-sameness.
+    from .deep_hits import assert_authoritative_memory
+    assert_authoritative_memory(extra_payload)
+
     try:
         # Distill: use the chunk text as-is for now (future: LLM summarization)
         # The text should already be reasonably concise from chunking.
