@@ -684,6 +684,18 @@ Items that have been deferred from an active slice but are not lost:
   question-framing pass over the five core runtime rows (A gravity / B mood-topology / C derived anchors /
   D1 warmth / D2 role-cadence) is now complete as a question-framing pass only — not a fix order, not a
   remedy selection, not implementation, and not a closure of the posed questions.**
+- **Post-Gate-4 cognition sequencing comparison frame FILED docs-only (2026-06-20, `5472639`)** —
+  **comparison / sequencing only, selects none; decision pending operator selection.** Artifact:
+  `docs/TORMENT_POST_GATE_4_COGNITION_SEQUENCING_COMPARISON_FRAME_v0.1.md`. **Not a bare "Gate 1" frame**
+  ("Gate 1" is a legacy/ambiguous label); uses **cognition-roadmap candidate-gate vocabulary**. Compares
+  three options only: **(1)** Candidate Gate D — Layer-1 private thinking + Envelope Audit, **ephemeral
+  only**, inside Document A's wall and behind P4; **(2)** continue **"A wall → P4 gates"** framing first;
+  **(3)** pause / handoff-only. Anchored on the cognition-roadmap sequence doc + Document B + this map,
+  without duplicating or amending them. Authorizes **no** implementation, runtime, mechanics, durable
+  chamber continuity, raw-reflection durability, candidate store, recovery, scheduler/trigger/budget,
+  P4/source-sameness, Seed-Gov, or O6 mechanics, database/substrate, Gate 4 question resolution, contract
+  amendment, ThinkingController/Document B conflation, automatic successor gate, or registry amendment.
+  **Decision remains the operator's; no option opened.**
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
