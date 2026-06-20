@@ -591,5 +591,43 @@ class TestNonReentryProductionScan:
         )
 
 
+# ---------------------------------------------------------------------------
+# 9. Content-leak value guard on the think() controller path (gap-level)
+# ---------------------------------------------------------------------------
+#
+# Companion to the name-based content-field denylist (TestFrozenShapeOnly) and
+# to the runner-path value-level secret test
+# (test_reflection_trace_runner_parity.py::test_no_review_text_notes_or_draft_in_trace):
+# a distinctive token placed in the controller's caller-supplied content
+# (raw_input / metadata) must never surface anywhere in the trace's serialized
+# shape. This locks content-freeness at the VALUE level on the think() path,
+# symmetric to the runner path. It is NOT a label-vocabulary freeze — only the
+# injected markers are checked — and it neither names nor freezes any future
+# governed Document B / Envelope Audit / private-cognition surface.
+
+class TestThinkPathContentLeakGuard:
+    def test_raw_input_token_absent_from_think_trace(self):
+        token = "ZZQ_RAWINPUT_MARKER_7F3A"
+        result = ThinkingController().think(
+            workspace_id="ws", agent_id="ag",
+            raw_input=f"please remember {token} for later",
+        )
+        blob = json.dumps(result.reflection_trace.to_dict())
+        assert token not in blob, (
+            "raw_input content leaked into the think()-path ReflectionTrace"
+        )
+
+    def test_metadata_token_absent_from_think_trace(self):
+        token = "ZZQ_METADATA_MARKER_91C2"
+        result = ThinkingController().think(
+            workspace_id="ws", agent_id="ag", raw_input="hello",
+            metadata={"note": token},
+        )
+        blob = json.dumps(result.reflection_trace.to_dict())
+        assert token not in blob, (
+            "metadata content leaked into the think()-path ReflectionTrace"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

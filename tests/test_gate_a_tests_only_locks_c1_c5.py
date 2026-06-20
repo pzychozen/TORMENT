@@ -632,5 +632,45 @@ class TestC5Phase7RoutingCharacterization:
         assert fabric.nonzero_forbidden() == {}
 
 
+# ===========================================================================
+# C2 companion (minimal) — /agent/query does not wire review output-control
+# fields (blocked / revised_text) into the live path
+# ===========================================================================
+#
+# Live-advisory companion seam ONLY (NOT a Candidate Gate D invariant): proves
+# the CURRENT /agent/query handler does not consume review output-control
+# fields, i.e. review.blocked / review.revised_text are not turned into live
+# output control on the query path. This complements C2 (which excludes
+# response_draft / review_result / stance by name) and supports the
+# ReflectionTrace non-reentry boundary: the live advisory seam exposes no
+# output-control re-entry. Like C2, this is a CURRENT handler-shape
+# characterization, NOT a claim that the seam is correct or permanent, and it
+# does NOT freeze the absence of any future governed Document B / Envelope
+# Audit implementation (a later authorized change would update it via review).
+
+_REVIEW_OUTPUT_CONTROL_FIELDS = ("blocked", "revised_text")
+
+
+class TestC2CompanionReviewFieldsNotLiveOutputControl:
+    @pytest.fixture(scope="class")
+    def handler(self):
+        tree = _parse_module_source("app.py")
+        node = _find_route_handler(tree, "post", "/agent/query")
+        assert node is not None, "could not locate @app.post('/agent/query') handler"
+        return node
+
+    def test_handler_does_not_consume_review_output_control_fields(self, handler):
+        leaked = sorted({
+            n.attr for n in ast.walk(handler)
+            if isinstance(n, ast.Attribute) and n.attr in _REVIEW_OUTPUT_CONTROL_FIELDS
+        })
+        assert leaked == [], (
+            "/agent/query handler references review output-control field(s) "
+            f"{leaked!r}; review.blocked / review.revised_text must not be wired "
+            "into live output control (current-shape characterization, not a "
+            "permanence claim)"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
