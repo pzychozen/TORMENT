@@ -672,5 +672,92 @@ class TestC2CompanionReviewFieldsNotLiveOutputControl:
         )
 
 
+# ===========================================================================
+# Debug-endpoint read-only companion — POST /thinking/debug handler shape
+# ===========================================================================
+#
+# Debug-endpoint read-only companion ONLY. This is NOT a C1–C5 expansion, NOT a
+# Candidate Gate D invariant, and NOT an Envelope Audit / Layer-1 private
+# thinking / Document B surface. The POST /thinking/debug handler runs the
+# thinking controller and returns the FULL decision chain for inspection; that
+# exposure is intentional. These tests lock ONLY that the handler is READ-ONLY:
+# it calls thinking_controller.think(...), returns result.to_dict(), and makes
+# no direct stateful retrieval / writer / mutation call.
+#
+# Deliberate non-goals: this does NOT assert /thinking/debug hides or redacts
+# the decision chain (it legitimately exposes it), does NOT inspect/redact debug
+# content, does NOT gate / disable / reframe the endpoint, and does NOT freeze
+# the absence of any future governed Document B / Envelope Audit implementation.
+# AST-only: app.py is parsed as source, never imported or served.
+#
+# `query` is intentionally in the forbidden set: repo history treats
+# `fabric.query` as opaque and NOT mutation-free (Gate A C3 / reflection-trace
+# non-reentry posture), so a read-only debug handler must not reach it.
+# `measure_drift` is included for the same read-only reason.
+
+_DEBUG_FORBIDDEN_CALL_NAMES = frozenset(
+    FORBIDDEN_CALL_NAMES | {"query", "measure_drift"}
+)
+
+
+class TestDebugEndpointReadOnlyCompanion:
+    @pytest.fixture(scope="class")
+    def handler(self):
+        tree = _parse_module_source("app.py")
+        node = _find_route_handler(tree, "post", "/thinking/debug")
+        assert node is not None, "could not locate @app.post('/thinking/debug') handler"
+        return node
+
+    def test_handler_calls_thinking_controller_think(self, handler):
+        think_calls = [
+            n for n in ast.walk(handler)
+            if isinstance(n, ast.Call) and _called_name(n) == "think"
+        ]
+        assert think_calls, "/thinking/debug handler does not call .think()"
+
+    def test_handler_returns_to_dict(self, handler):
+        # The handler returns the full decision chain via result.to_dict();
+        # assert a to_dict() call appears inside a return statement. This does
+        # NOT constrain what to_dict() contains — only that the handler returns
+        # the controller's own serialization rather than something else.
+        returns_with_to_dict = []
+        for n in ast.walk(handler):
+            if not isinstance(n, ast.Return) or n.value is None:
+                continue
+            if any(
+                isinstance(c, ast.Call) and _called_name(c) == "to_dict"
+                for c in ast.walk(n.value)
+            ):
+                returns_with_to_dict.append(getattr(n, "lineno", -1))
+        assert returns_with_to_dict, (
+            "/thinking/debug handler does not return a result.to_dict() payload"
+        )
+
+    def test_handler_makes_no_stateful_retrieval_writer_or_mutation_calls(self, handler):
+        violations = []
+        for n in ast.walk(handler):
+            if not isinstance(n, ast.Call):
+                continue
+            name = _called_name(n)
+            if name in _DEBUG_FORBIDDEN_CALL_NAMES:
+                violations.append((getattr(n, "lineno", -1), name))
+            elif name == "write":
+                violations.append((getattr(n, "lineno", -1), ".write"))
+            elif name == "open" and _open_is_write(n):
+                violations.append((getattr(n, "lineno", -1), "open(write)"))
+        assert violations == [], (
+            "/thinking/debug handler makes forbidden stateful retrieval/writer/"
+            f"mutation call(s) (line, name): {violations!r}"
+        )
+
+    def test_debug_forbidden_set_is_broader_than_c1_writer_set(self):
+        # Guard: keep the read-only intent explicit. The debug set is strictly
+        # the C1 writer set PLUS `query` and `measure_drift`, so the intent
+        # survives any future edit to FORBIDDEN_CALL_NAMES.
+        assert "query" in _DEBUG_FORBIDDEN_CALL_NAMES
+        assert "measure_drift" in _DEBUG_FORBIDDEN_CALL_NAMES
+        assert FORBIDDEN_CALL_NAMES <= _DEBUG_FORBIDDEN_CALL_NAMES
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
