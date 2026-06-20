@@ -81,6 +81,12 @@ _TOOL_NAME = "audit_smoke:probe"
 _AUDIT_KEY = "assembly_audit"
 _QUERY_TEXT = "What did we decide about storage?"
 
+# v0.2.4 item #2 closer — isolated archive-FILTER-A live section. Uses a
+# SEPARATE workspace (suffix below) so the core-only fixture and its
+# `filter_a.archive_excluded == []` check in verify_audit() stay intact.
+_ARCHIVE_WS_SUFFIX = "_archfilter"
+_ARCHIVE_PRIVATE_MARKER = "TOKEN_SMOKE_PRIVATE_ARCHIVE_v024_NOT_SHAREABLE"
+
 
 # ---------------------------------------------------------------------------
 # Findings collector — green / yellow / red
@@ -617,6 +623,102 @@ def verify_ab_byte_identity(
 
 
 # ---------------------------------------------------------------------------
+# Archive FILTER-A — isolated live section (v0.2.4 item #2 closer)
+# ---------------------------------------------------------------------------
+
+def ingest_private_archive(
+    base_url: str, workspace_id: str, agent_id: str, marker: str
+) -> str:
+    """Ingest one non-shareable archive document via the real HTTP endpoint.
+
+    Exercises the v0.2.4 item #2 governance pass-through on
+    ``/archive/ingest_document`` (the request model now accepts an optional
+    ``governance`` dict). Returns the doc_id.
+    """
+    print("\n[3b] Ingest non-shareable archive document (HTTP governance)")
+    text = (
+        f"Private memo about storage policy decisions. {marker}. "
+        "Internal only — restricted distribution."
+    )
+    r = _post(base_url, "/archive/ingest_document", {
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "text": text,
+        "title": "smoke_private_archive",
+        "governance": {"non_shareable": True},
+    })
+    body = r.json()
+    doc_id = str(body.get("doc_id", ""))
+    print(
+        f"  archive ingested: doc_id={doc_id!r} "
+        f"chunk_count={body.get('chunk_count')}"
+    )
+    if not doc_id:
+        _abort("/archive/ingest_document returned no doc_id")
+    return doc_id
+
+
+def verify_archive_filter_a(
+    base_url: str,
+    workspace_id: str,
+    agent_id: str,
+    marker: str,
+    doc_id: str,
+    findings: FindingsCollector,
+) -> None:
+    """Prove the non-shareable archive doc is retrieved internally but excluded
+    from prompt-visible output by the existing FILTER-A path. Runs against its
+    own workspace, so the core-only checks in verify_audit() are untouched."""
+    print("\n[6b] Archive FILTER-A live verification (separate workspace)")
+    body_on = call_retrieve(base_url, workspace_id, agent_id, include_audit=True)
+    body_off = call_retrieve(base_url, workspace_id, agent_id, include_audit=False)
+
+    audit = body_on.get(_AUDIT_KEY) or {}
+    fa = audit.get("filter_a") or {}
+    archive_excluded = fa.get("archive_excluded") or []
+    matched = [e for e in archive_excluded if e.get("doc_id") == doc_id]
+
+    # The chunk was retrieved as a candidate AND excluded (non-vacuous).
+    findings.check(
+        bool(matched),
+        f"non-shareable archive doc {doc_id!r} is in filter_a.archive_excluded "
+        f"(retrieved internally as a candidate, then excluded)",
+        f"non-shareable archive doc {doc_id!r} NOT in filter_a.archive_excluded "
+        f"(archive_excluded={archive_excluded!r}); it was either not retrieved "
+        f"(query/embedder mismatch) or not excluded",
+    )
+
+    # Exclusion reason is non_shareable.
+    findings.check(
+        bool(matched) and all(e.get("excluded_reason") == "non_shareable" for e in matched),
+        "archive exclusion record reason == 'non_shareable'",
+        f"exclusion reason mismatch: "
+        f"{[e.get('excluded_reason') for e in matched]!r} (expected 'non_shareable')",
+    )
+
+    # Marker absent from assembled_text — both audit modes (filter is unconditional).
+    findings.check(
+        marker not in body_on.get("assembled_text", "")
+        and marker not in body_off.get("assembled_text", ""),
+        "private archive marker absent from assembled_text (audit-on AND audit-off)",
+        "private archive marker LEAKED into assembled_text",
+    )
+
+    # Marker doc absent from blocks['archive_context'] — both audit modes.
+    leaked = False
+    for body in (body_on, body_off):
+        for block in body.get("blocks", {}).get("archive_context", []):
+            meta = block.get("metadata", {}) or {}
+            if meta.get("doc_id") == doc_id:
+                leaked = True
+    findings.check(
+        not leaked,
+        "non-shareable archive doc absent from blocks['archive_context'] (both modes)",
+        f"non-shareable archive doc {doc_id!r} leaked into blocks['archive_context']",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -715,6 +817,34 @@ def main() -> None:
 
     # 6. A/B byte identity
     verify_ab_byte_identity(body_off, body_on, findings)
+
+    # 6b. Archive FILTER-A — isolated section (separate workspace), v0.2.4
+    #     item #2 closer. Proves a non-shareable archive doc ingested through the
+    #     real /archive/ingest_document HTTP endpoint (governance pass-through)
+    #     is retrieved internally but excluded from prompt-visible output. Uses
+    #     its own workspace so the core-only `archive_excluded == []` check above
+    #     stays intact.
+    # Unique per-run archive workspace. Reusing a fixed `_archfilter` workspace
+    # accumulated near-identical non_shareable docs across repeated runs; the
+    # bounded top_k archive retrieval then returned older excluded docs and
+    # crowded out the current doc_id, producing a false RED (FILTER-A was
+    # working — it excluded what it retrieved). A fresh workspace per run holds
+    # only the current doc. time_ns() is effectively collision-free across reruns.
+    archive_ws = f"{args.workspace_id}{_ARCHIVE_WS_SUFFIX}_{time.time_ns()}"
+    if archive_ws in _PROTECTED_WORKSPACES:
+        _abort(
+            f"derived archive workspace {archive_ws!r} is protected; "
+            f"choose a different --workspace-id."
+        )
+    setup_workspace_and_agent(args.base_url, archive_ws, args.agent_id)
+    ingest_fixtures(args.base_url, archive_ws, args.agent_id)
+    archive_doc_id = ingest_private_archive(
+        args.base_url, archive_ws, args.agent_id, _ARCHIVE_PRIVATE_MARKER
+    )
+    verify_archive_filter_a(
+        args.base_url, archive_ws, args.agent_id,
+        _ARCHIVE_PRIVATE_MARKER, archive_doc_id, findings,
+    )
 
     # 7. Pretty-print audit payload for operator inspection
     print("\n[7] assembly_audit payload (for inspection):")
