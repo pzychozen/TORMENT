@@ -447,6 +447,13 @@ Items that have been deferred from an active slice but are not lost:
   deferred, Cluster 2 v0.2 verification-pending. **No implementation, mechanics, construction, P4,
   Seed-Gov, writer fixes, canon_source, or dream runtime opened.** Old-doc quarantine binding. See
   `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md`.
+- **Governed-Memory Substrate — Stage A / Stage B Boundary Framing — FILED read-only (2026-06-20)** — the
+  current **governed-memory substrate boundary-framing anchor**: defines the Stage A (recovery /
+  reconciliation **semantics**) vs Stage B (carrier / substrate **mechanics**) boundary and the
+  carry-forward constraints; restates the §K eligibility evidence (incl. the narrowed
+  `INGEST-NOT-TRANSACTIONAL`). **Stage B remains unopened**; no mechanics / schema / storage / carriers /
+  migration selected; no registry amendment. See
+  `docs/TORMENT_GOVERNED_MEMORY_SUBSTRATE_STAGE_A_STAGE_B_BOUNDARY_FRAMING_v0.1.md`.
 - **Gate A — opened CHARACTERIZATION-ONLY (2026-06-17)** — Document A containment /
   live-advisory boundary, opened only as a characterization gate; first and only authorized
   deliverable is a **read-only boundary trace plan** (what evidence will be gathered later).
