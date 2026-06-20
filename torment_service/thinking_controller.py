@@ -208,6 +208,14 @@ _COGNITION_SHAPING_V2_ENABLE = os.environ.get("TORMENT_COGNITION_SHAPING_V2", "0
     "", "0", "false", "no", "off",
 )
 
+# Slice 3 (ephemeral cognition state) — core-lane numeric shaping. DEFAULT OFF.
+# Separate flag from Slice 2 (deliberately NOT folded in), so each rule toggles
+# independently. Opt-in, plan-boundary-only shaping of `top_k_by_lane["core"]`.
+# Empty string is treated as OFF (same stricter default-off posture as Slice 2).
+_COGNITION_CORE_SHAPING_V1_ENABLE = os.environ.get("TORMENT_COGNITION_CORE_SHAPING_V1", "0").strip() not in (
+    "", "0", "false", "no", "off",
+)
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -520,6 +528,10 @@ class ThinkingController:
         # default-flag plan stays byte-identical to Slice 1.
         self._apply_cognition_shaping_v2(plan, state)
 
+        # Slice 3 (default-off): optional core-lane shaping behind its own flag.
+        # No-op unless TORMENT_COGNITION_CORE_SHAPING_V1 is enabled.
+        self._apply_cognition_core_shaping_v1(plan, state)
+
         return plan
 
     def _apply_cognition_shaping_v2(
@@ -561,6 +573,44 @@ class ThinkingController:
         shaped = min(current_deep + 1, 4)
         # max(...) guarantees we never reduce an already-larger budget.
         plan.top_k_by_lane["deep"] = max(shaped, current_deep)
+
+    def _apply_cognition_core_shaping_v1(
+        self,
+        plan: MemoryPlan,
+        state: EphemeralCognitionState,
+    ) -> None:
+        """Slice 3 (default-off) numeric retrieval shaping — core lane.
+
+        Approved rule (env flag ``TORMENT_COGNITION_CORE_SHAPING_V1``):
+          when ``state.confidence_need >= 0.60`` AND the turn is neither
+          governance- nor identity-sensitive AND the core lane is already
+          enabled (``core`` top_k > 0), nudge ``core.top_k`` to
+          ``min(current + 1, 7)``; otherwise unchanged.
+
+        Scope: mutates ONLY ``top_k_by_lane["core"]``. Weights, the other lanes
+        (``relational`` / ``archive`` / ``deep`` / ``collective``), retrieval
+        booleans, ``safety_constraints`` and ``max_token_budget`` are left
+        exactly as built. Independent of Slice 2 — its own flag, its own driver.
+
+        Guards: governance- and identity-sensitive turns are explicitly excluded
+        (no retrieval reshaping on those classes). Core is always enabled in the
+        current builder, but the ``> 0`` check keeps the rule self-consistent and
+        leaves a ``0`` budget untouched. Never reduces an existing value (the cap
+        is an upper clamp only). A no-op when the flag is off — ``build_memory_plan``
+        then matches the pre-Slice-3 plan byte-for-byte.
+        """
+        if not _COGNITION_CORE_SHAPING_V1_ENABLE:
+            return
+        if state.confidence_need < 0.60:
+            return
+        if state.governance_sensitive or state.identity_sensitive:
+            return
+        current_core = plan.top_k_by_lane.get("core", 0)
+        if current_core <= 0:
+            return
+        shaped = min(current_core + 1, 7)
+        # max(...) guarantees we never reduce an already-larger budget (7->7, 8->8).
+        plan.top_k_by_lane["core"] = max(shaped, current_core)
 
     def choose_action(
         self,

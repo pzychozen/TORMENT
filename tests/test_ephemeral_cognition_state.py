@@ -464,10 +464,12 @@ def test_token_budget_parity(raw, source_type):
 
 @pytest.fixture(autouse=True)
 def _shaping_v2_off_by_default(monkeypatch):
-    # Pin Slice-2 shaping OFF for every test in this module unless a test
-    # explicitly turns it on. Makes the suite (incl. the Slice-1 parity tests
-    # above) robust to an ambient TORMENT_COGNITION_SHAPING_V2 in the env.
+    # Pin BOTH cognition-shaping flags OFF for every test in this module unless a
+    # test explicitly turns one on. Makes the suite (incl. the Slice-1 parity
+    # tests above) robust to an ambient TORMENT_COGNITION_SHAPING_V2 /
+    # TORMENT_COGNITION_CORE_SHAPING_V1 in the env.
     monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", False)
 
 
 def _state_with_ambiguity(amb: float):
@@ -596,6 +598,152 @@ def test_flag_on_does_not_change_result_shape_or_expose_state(monkeypatch):
     monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
     ctl = ThinkingController()
     payload = ctl.think("ws", "ag", "maybe something off").to_dict()
+    expected_keys = {
+        "task_frame", "mode_decision", "memory_plan", "action_decision",
+        "review_result", "response_draft", "stance", "geometric_context",
+        "debug", "reflection_trace",
+    }
+    assert set(payload) == expected_keys
+    for key in payload:
+        assert "ephemeral" not in key
+        assert "cognition_state" not in key
+
+
+# ===========================================================================
+# Slice 3 — default-off core-lane shaping (TORMENT_COGNITION_CORE_SHAPING_V1)
+#
+# Rule: when confidence_need >= 0.60 AND the turn is neither governance- nor
+# identity-sensitive AND core top_k > 0, core.top_k -> min(current + 1, 7),
+# never reducing. Separate flag from Slice 2; mutates only top_k_by_lane["core"].
+# ===========================================================================
+
+
+def _state_for_core(confidence_need, *, governance=False, identity=False):
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "why does this pattern tend to be fragile?", "user_text")
+    base = ctl._build_ephemeral_cognition_state(frame, mode)
+    return dataclasses.replace(
+        base,
+        confidence_need=confidence_need,
+        governance_sensitive=governance,
+        identity_sensitive=identity,
+    )
+
+
+@pytest.mark.parametrize("raw,source_type", MATRIX)
+def test_core_flag_off_parity_matches_reference(raw, source_type, monkeypatch):
+    # Flag OFF: build_memory_plan is byte-identical to the pre-shaping reference
+    # across the full matrix (Slice 2 flag also off via autouse).
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", False)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, raw, source_type)
+    assert ctl.build_memory_plan(frame, mode).to_dict() == _reference_memory_plan(frame, mode).to_dict()
+
+
+def test_core_flag_on_bumps_core_only(monkeypatch):
+    # Flag ON, confidence_need >= 0.60, non-governance, non-identity: ONLY
+    # top_k_by_lane["core"] moves, 6 -> 7; everything else identical.
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", False)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "why does this pattern tend to be fragile?", "user_text")
+    assert frame.confidence_need >= 0.60
+    assert frame.governance_sensitive is False
+    assert frame.identity_sensitive is False
+
+    off = ctl.build_memory_plan(frame, mode).to_dict()
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    on = ctl.build_memory_plan(frame, mode).to_dict()
+
+    assert off["top_k_by_lane"]["core"] == 6
+    assert on["top_k_by_lane"]["core"] == 7
+    for key in off:
+        if key == "top_k_by_lane":
+            continue
+        assert on[key] == off[key], f"field {key!r} changed under core shaping"
+    off_topk, on_topk = off["top_k_by_lane"], on["top_k_by_lane"]
+    for lane in ("relational", "archive", "deep", "collective"):
+        assert on_topk[lane] == off_topk[lane], f"lane {lane!r} changed"
+    assert on_topk["core"] - off_topk["core"] == 1
+
+
+def test_core_flag_on_below_threshold_unchanged(monkeypatch):
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "tell me about the weather", "user_text")
+    assert frame.confidence_need < 0.60
+    assert ctl.build_memory_plan(frame, mode).top_k_by_lane["core"] == 6
+
+
+def test_core_flag_on_identity_sensitive_no_bump(monkeypatch):
+    # Identity-sensitive turn at/above threshold: guard blocks the bump.
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "why does my identity drift tend to be fragile?", "user_text")
+    assert frame.identity_sensitive is True
+    assert frame.confidence_need >= 0.60
+    assert ctl.build_memory_plan(frame, mode).top_k_by_lane["core"] == 6
+
+
+def test_core_flag_on_governance_sensitive_no_bump(monkeypatch):
+    # Governance-sensitive turn at/above threshold: guard blocks the bump.
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "why does deleting this policy tend to be fragile?", "user_text")
+    assert frame.governance_sensitive is True
+    assert frame.confidence_need >= 0.60
+    assert ctl.build_memory_plan(frame, mode).top_k_by_lane["core"] == 6
+
+
+def test_core_shaping_cap_never_reduce_and_guards(monkeypatch):
+    # Direct unit test of the rule: +1 / cap at 7 / never-reduce / disabled-lane
+    # / threshold / governance + identity guards / flag-off.
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    ctl = ThinkingController()
+
+    def _shaped(core_val, *, conf=0.60, governance=False, identity=False):
+        plan = MemoryPlan()
+        plan.top_k_by_lane = {"core": core_val, "deep": 3}
+        ctl._apply_cognition_core_shaping_v1(
+            plan, _state_for_core(conf, governance=governance, identity=identity)
+        )
+        return plan.top_k_by_lane["core"]
+
+    assert _shaped(6) == 7            # +1
+    assert _shaped(7) == 7            # cap at 7
+    assert _shaped(8) == 8            # never reduce an already-larger value
+    assert _shaped(0) == 0            # disabled lane untouched
+    assert _shaped(6, conf=0.59) == 6             # below threshold
+    assert _shaped(6, governance=True) == 6       # governance guard
+    assert _shaped(6, identity=True) == 6         # identity guard
+
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", False)
+    plan = MemoryPlan()
+    plan.top_k_by_lane = {"core": 6}
+    ctl._apply_cognition_core_shaping_v1(plan, _state_for_core(0.60))
+    assert plan.top_k_by_lane["core"] == 6
+
+
+def test_core_and_slice2_flags_are_independent(monkeypatch):
+    # Slice 3 fires under its own flag only; Slice 2's flag does not trigger it
+    # and vice versa.
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "why does this pattern tend to be fragile?", "user_text")
+    # Slice 2 ON, Slice 3 OFF -> core unchanged (this input's ambiguity < 0.50,
+    # and core is not Slice 2's lane regardless).
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", False)
+    assert ctl.build_memory_plan(frame, mode).top_k_by_lane["core"] == 6
+    # Slice 3 ON, Slice 2 OFF -> core bumps.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    assert ctl.build_memory_plan(frame, mode).top_k_by_lane["core"] == 7
+
+
+def test_core_flag_on_does_not_expose_state(monkeypatch):
+    # Flag ON must not change /think result shape or expose the ephemeral state.
+    monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+    ctl = ThinkingController()
+    payload = ctl.think("ws", "ag", "why does this pattern tend to be fragile?").to_dict()
     expected_keys = {
         "task_frame", "mode_decision", "memory_plan", "action_decision",
         "review_result", "response_draft", "stance", "geometric_context",
