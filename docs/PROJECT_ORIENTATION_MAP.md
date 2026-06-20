@@ -596,6 +596,22 @@ Items that have been deferred from an active slice but are not lost:
   Seed-Gov mechanics, chamber/private-cognition runtime, candidate store, governed admission
   implementation, or database/substrate. **No automatic successor gate** — any later step needs separate
   authorization; database/substrate remains last.
+- **Gate 4 — `gravity_correction` row conformance-question frame FILED docs-only (2026-06-20, `03af2c3`;
+  Codex ACCEPT WITH CORRECTIONS, applied)** — the **first row-specific** read-only conformance-**question**
+  frame, scoped to **exactly one row: `gravity_correction`**. Artifact:
+  `docs/TORMENT_GATE_4_GRAVITY_CORRECTION_READ_ONLY_CONFORMANCE_QUESTION_FRAME_v0.1.md`. **Question framing
+  only** — poses **Q-C1–Q-C4** (automatic-canon-vs-governed-crossing; writer-authority-vs-payload-flag;
+  single-`canon`-flag-vs-canon-by-source; soft-guidance→canon chain, **gravity end only**) **posed only,
+  not answered**. The §N14 `gravity_correction` audit-first reconciliation memo remains the
+  **doctrine-status / later-owner routing** (already done); this frame **does not duplicate, re-open,
+  re-scope, amend, or answer** §N14 or its Q-G1–Q-G7. `mood_drift`→drift-centroid→`gravity_correction` is
+  a **dependent topology-only** path (no causal/magnitude/frequency claim); the mood-topology question
+  **would be eligible only as a later separately authorized frame**; the A→B→C→D order is a **framing
+  sequence, not a fix order**. Selects **no** verdict, remedy, writer patch, fix order, enforcement,
+  governance vehicle, runtime authority gate, P4/source-sameness or Seed-Gov mechanics,
+  chamber/private-cognition runtime, candidate store, governed admission implementation, or
+  database/substrate. **No automatic successor gate** — any later step needs separate authorization;
+  database/substrate remains last.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
