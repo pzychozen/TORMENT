@@ -26,8 +26,11 @@ exist, zero build.
 
 - CodeQL hygiene slice **closed** (`6e492a9`; 4 alerts fixed, #996 intentionally left).
 - **This board is the current administrative bridge.**
-- **Active lane:** the **ephemeral structured cognition** lane (see §5 Active Lane Contract) — **Slice 1
-  CLOSED** (`4e164c3`); Slice 2 (numeric retrieval shaping) deferred / not yet authorized.
+- **Most recent lane:** the **ephemeral structured cognition** lane (see §5 Active Lane Contract) —
+  **Slice 1 CLOSED** (`4e164c3`) and **Slice 2 IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`).
+  The lane is now **paused / PARTIAL**: further shaping rules, live archive/collective shaping, and any
+  default-on decision are deferred. **No active implementation lane is currently open** — next direction
+  is the §4 next-row selection.
 
 ---
 
