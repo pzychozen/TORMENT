@@ -1235,6 +1235,11 @@ class IngestDocumentReq(BaseModel):
     target_tokens: int = 350
     max_tokens: int = 500
     overlap_tokens: int = 60
+    # v0.2.4 item #2: optional per-document governance metadata, passed
+    # straight through to ArchiveStore.ingest_document (which has accepted it
+    # since v0.2.4-A1). Omitting it preserves the exact pre-existing behavior:
+    # chunks ingest with governance=None and FILTER-A default-passes them.
+    governance: Optional[Dict[str, Any]] = None
 
 
 class ArchiveQueryReq(BaseModel):
@@ -1262,6 +1267,7 @@ def ingest_document(req: IngestDocumentReq) -> Dict[str, Any]:
         target_tokens=req.target_tokens,
         max_tokens=req.max_tokens,
         overlap_tokens=req.overlap_tokens,
+        governance=req.governance,
     )
 
 
