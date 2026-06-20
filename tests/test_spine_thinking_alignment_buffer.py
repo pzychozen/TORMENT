@@ -30,11 +30,15 @@ lock guards), so they do not leak state into other tests.
 from __future__ import annotations
 
 import ast
+import json
+import os
 from pathlib import Path
 
 import pytest
 
 import torment_service.spine as spine
+from torment_service.fabric import TormentFabric
+from torment_service.request_context import RequestContext, TRUST_OPERATOR
 
 _SERVICE_DIR = Path(__file__).resolve().parents[1] / "torment_service"
 
@@ -307,6 +311,120 @@ class TestAlignmentReadEndpointHandlerShape:
         for name in ("query", "measure_drift", "connect", "write_text",
                      "write_bytes", "dump"):
             assert name in _FORBIDDEN_HANDLER_CALLS
+
+
+# ---------------------------------------------------------------------------
+# 5. Live-population fix — submit_task() records one coarse alignment record
+#
+# Characterizes the Option-B fix: the live Spine seam now calls
+# _record_alignment(alignment) right after attaching it to audit_dict, so the
+# ring buffer (and /spine/alignment) reflect real advisory-thinking traffic.
+# advisory_thinking is gated by the import-time module flag
+# _THINKING_ADVISORY_ENABLE, which these tests patch on the module object (NOT
+# via env, which would not affect the already-imported module).
+# ---------------------------------------------------------------------------
+
+def _live_fabric(tmp_path):
+    """A minimal real TormentFabric (mirrors tests/test_spine.py setUp)."""
+    os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    fabric.get_workspace("ws1")
+    fabric.create_agent("ws1", "atlas")
+    return fabric
+
+
+def _submit(fabric, text, *, payload_key="text", operation="query_state"):
+    """Run one governed submit_task with advisory text present (a read op)."""
+    ctx = RequestContext(
+        client_id="op", trust_tier=TRUST_OPERATOR,
+        workspace_id="ws1", agent_id="atlas",
+    )
+    req = spine.SpineRequest(
+        workspace_id="ws1", agent_id="atlas",
+        operation=operation, payload={payload_key: text},
+    )
+    return spine.submit_task(req, fabric, ctx)
+
+
+class TestLivePopulationFix:
+    def test_advisory_off_live_submit_does_not_populate(self, isolated_buffer, monkeypatch, tmp_path):
+        # (1) advisory disabled -> _advisory_thinking returns None -> seam skips
+        # -> no record reaches the buffer.
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", False)
+        fabric = _live_fabric(tmp_path)
+        resp = _submit(fabric, "hello there please respond")
+        assert resp.ok
+        assert len(spine._alignment_buffer) == 0
+        assert spine.get_alignment_summary(last_n=50)["total"] == 0
+
+    def test_advisory_on_live_submit_records_exactly_one(self, isolated_buffer, monkeypatch, tmp_path):
+        # (2) advisory enabled -> exactly one coarse alignment record per submit.
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", True)
+        fabric = _live_fabric(tmp_path)
+        assert len(spine._alignment_buffer) == 0
+        resp = _submit(fabric, "please summarize the archive document")
+        assert resp.ok
+        assert len(spine._alignment_buffer) == 1
+        rec = spine._alignment_buffer[-1]
+        assert {"aligned", "spine_weight", "thinking_weight", "ts"}.issubset(rec.keys())
+
+    def test_live_recorded_entry_is_content_free_and_primitive(self, isolated_buffer, monkeypatch, tmp_path):
+        # (3) the live-recorded entry carries no content keys and only coarse
+        # primitive values.
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", True)
+        fabric = _live_fabric(tmp_path)
+        _submit(fabric, "remember what we agreed about the plan before")
+        rec = spine._alignment_buffer[-1]
+        assert _CONTENT_KEYS.isdisjoint(rec.keys())
+        for v in rec.values():
+            assert isinstance(v, _COARSE_PRIMS), (rec, v)
+
+    @pytest.mark.parametrize("payload_key", ["text", "query", "user_input"])
+    def test_sentinel_in_any_advisory_key_does_not_leak(self, isolated_buffer, monkeypatch, tmp_path, payload_key):
+        # (4) a unique sentinel placed in request text / query / user_input must
+        # never appear in the summary JSON — the record holds coarse labels only.
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", True)
+        fabric = _live_fabric(tmp_path)
+        sentinel = "ZZQX_SENTINEL_DO_NOT_LEAK_42"
+        resp = _submit(fabric, f"please analyze {sentinel} carefully", payload_key=payload_key)
+        assert resp.ok
+        summary = spine.get_alignment_summary(last_n=200)
+        assert summary["total"] >= 1, f"advisory did not populate for key {payload_key!r}"
+        assert sentinel not in json.dumps(summary)
+
+    def test_summary_reflects_live_recorded_count(self, isolated_buffer, monkeypatch, tmp_path):
+        # (5) get_alignment_summary reflects the number of live submissions.
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", True)
+        fabric = _live_fabric(tmp_path)
+        for _ in range(3):
+            _submit(fabric, "tell me about the archive notes")
+        summary = spine.get_alignment_summary(last_n=200)
+        assert summary["total"] == 3
+        assert len(summary["records"]) == 3
+
+    def test_live_population_schema_matches_helper_population(self, isolated_buffer, monkeypatch, tmp_path):
+        # (8) the live seam introduces NO endpoint schema expansion: a
+        # live-populated summary has the same top-level keys and record keys as
+        # a helper-populated one, and data arrives only through the existing
+        # `records` field.
+        spine._record_alignment(_coarse_record())
+        helper = spine.get_alignment_summary(last_n=50)
+        helper_keys = set(helper.keys())
+        helper_rec_keys = set(helper["records"][0].keys())
+
+        with spine._alignment_lock:
+            spine._alignment_buffer.clear()
+
+        monkeypatch.setattr(spine, "_THINKING_ADVISORY_ENABLE", True)
+        fabric = _live_fabric(tmp_path)
+        _submit(fabric, "analyze the plan in depth")
+        live = spine.get_alignment_summary(last_n=50)
+
+        assert set(live.keys()) == helper_keys
+        assert live["records"], "data must arrive via the existing records field"
+        assert set(live["records"][0].keys()) == helper_rec_keys
+        assert _CONTENT_KEYS.isdisjoint(live.keys())
+        assert _CONTENT_KEYS.isdisjoint(live["records"][0].keys())
 
 
 if __name__ == "__main__":

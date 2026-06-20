@@ -2709,7 +2709,9 @@ def thinking_alignment_recent(last_n: int = 50) -> Dict[str, Any]:
     Query params:
         last_n  — how many of the most-recent records to include (default 50, max 200)
 
-    The ring buffer only populates when TORMENT_THINKING_ADVISORY=1.
+    The ring buffer populates when advisory thinking actually runs during a
+    Spine submission (submit_task with advisory text present and
+    TORMENT_THINKING_ADVISORY enabled); the env var alone does not populate it.
     Accessible via both /spine/thinking_alignment/recent and /spine/alignment.
     """
     from .spine import get_alignment_summary

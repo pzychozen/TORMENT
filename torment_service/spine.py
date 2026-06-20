@@ -1353,6 +1353,14 @@ def submit_task(
             thinking_action=advisory_thinking_result.get("action_decision", {}).get("action", "unknown"),
         )
         audit_dict["thinking_alignment"] = alignment
+        # Live-population fix: push the coarse, content-free alignment record
+        # into the bounded (200), in-memory ring buffer so the /spine/alignment
+        # read endpoint reflects real advisory-thinking traffic. Records ONLY
+        # `alignment` (coarse spine_path/op_class/weight/aligned/note) — never
+        # audit_dict, advisory_thinking_result, the request payload, response,
+        # prompt, memory, seed, or any raw/hidden reasoning. Reached only when
+        # advisory thinking actually ran (advisory_thinking_result is not None).
+        _record_alignment(alignment)
 
     resp = SpineResponse(
         ok=True,
