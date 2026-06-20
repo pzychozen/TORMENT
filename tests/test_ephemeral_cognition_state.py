@@ -755,5 +755,100 @@ def test_core_flag_on_does_not_expose_state(monkeypatch):
         assert "cognition_state" not in key
 
 
+# ===========================================================================
+# Slice 2 + Slice 3 composition — both flags on compose ONLY where each rule is
+# independently eligible. Proves the rules are orthogonal and the per-rule
+# guards are independent (Slice 2 has NO identity/governance guard; Slice 3 does).
+# ===========================================================================
+
+class TestShapingComposition:
+    def test_both_eligible_bumps_deep_and_core(self, monkeypatch):
+        # "why maybe fragile?": ambiguity 0.55 (>=0.50, deep enabled) AND
+        # confidence_need 0.8 (>=0.60), non-governance, non-identity.
+        monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+        ctl = ThinkingController()
+        frame, mode = _frame_and_mode(ctl, "why maybe fragile?", "user_text")
+        assert frame.ambiguity_score >= 0.50
+        assert frame.confidence_need >= 0.60
+        assert frame.governance_sensitive is False
+        assert frame.identity_sensitive is False
+
+        off = ctl.build_memory_plan(frame, mode).to_dict()
+        assert off["top_k_by_lane"]["deep"] == 3
+        assert off["top_k_by_lane"]["core"] == 6
+
+        monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+        on = ctl.build_memory_plan(frame, mode).to_dict()
+
+        assert on["top_k_by_lane"]["deep"] == 4   # Slice 2 fired
+        assert on["top_k_by_lane"]["core"] == 7   # Slice 3 fired
+        for key in off:
+            if key == "top_k_by_lane":
+                continue
+            assert on[key] == off[key], f"field {key!r} changed"
+        for lane in ("relational", "archive", "collective"):
+            assert on["top_k_by_lane"][lane] == off["top_k_by_lane"][lane]
+
+    def test_both_on_only_slice2_eligible_bumps_deep_only(self, monkeypatch):
+        # "maybe something off": ambiguity 0.75 (Slice 2 eligible), but
+        # confidence_need 0.40 (< 0.60, Slice 3 NOT eligible).
+        monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+        ctl = ThinkingController()
+        frame, mode = _frame_and_mode(ctl, "maybe something off", "user_text")
+        assert frame.ambiguity_score >= 0.50
+        assert frame.confidence_need < 0.60
+        plan = ctl.build_memory_plan(frame, mode)
+        assert plan.top_k_by_lane["deep"] == 4   # Slice 2 fired
+        assert plan.top_k_by_lane["core"] == 6   # Slice 3 below threshold
+
+    def test_both_on_only_slice3_eligible_bumps_core_only(self, monkeypatch):
+        # "why does this pattern tend to be fragile?": confidence_need 0.60
+        # (Slice 3 eligible) but ambiguity 0.0 (< 0.50, Slice 2 NOT eligible).
+        monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+        ctl = ThinkingController()
+        frame, mode = _frame_and_mode(ctl, "why does this pattern tend to be fragile?", "user_text")
+        assert frame.confidence_need >= 0.60
+        assert frame.ambiguity_score < 0.50
+        plan = ctl.build_memory_plan(frame, mode)
+        assert plan.top_k_by_lane["deep"] == 3   # Slice 2 below threshold
+        assert plan.top_k_by_lane["core"] == 7   # Slice 3 fired
+
+    def test_both_on_identity_bumps_deep_not_core(self, monkeypatch):
+        # Guard asymmetry: an identity-sensitive, high-ambiguity turn lets
+        # Slice 2 bump deep (it has NO identity guard) while Slice 3 leaves core
+        # alone (it DOES guard identity). "maybe my identity?".
+        monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+        ctl = ThinkingController()
+        frame, mode = _frame_and_mode(ctl, "maybe my identity?", "user_text")
+        assert frame.identity_sensitive is True
+        assert frame.ambiguity_score >= 0.50
+        plan = ctl.build_memory_plan(frame, mode)
+        assert plan.retrieve_deep is True
+        assert plan.top_k_by_lane["deep"] == 4   # Slice 2 fired (no identity guard)
+        assert plan.top_k_by_lane["core"] == 6   # Slice 3 blocked by identity guard
+
+    def test_both_on_governance_neither_fires(self, monkeypatch):
+        # Governance turn: routes GOVERNED (deep disabled, so Slice 2's deep>0
+        # guard holds) and Slice 3's governance guard holds -> neither bumps.
+        monkeypatch.setattr(tc, "_SPINE_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+        monkeypatch.setattr(tc, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)
+        ctl = ThinkingController()
+        frame, mode = _frame_and_mode(ctl, "maybe delete this?", "user_text")
+        assert frame.governance_sensitive is True
+        assert frame.ambiguity_score >= 0.50
+        plan = ctl.build_memory_plan(frame, mode)
+        assert plan.retrieve_deep is False
+        assert plan.top_k_by_lane["deep"] == 0   # Slice 2 guard (deep disabled)
+        assert plan.top_k_by_lane["core"] == 6   # Slice 3 governance guard
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
