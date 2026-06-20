@@ -39,7 +39,7 @@ exist, zero build.
 | ReflectionTrace / observability floor | HARDENED-FOR-NOW | Ephemeral, content-free decision-shape observation; non-reentrant; stdlib-only | `reflection_trace.py`; `test_reflection_trace.py` + runner-parity; `48ae289` | none; reuse as scaffold |
 | /thinking/debug read-only surface | HARDENED-FOR-NOW | Debug endpoint returns full chain (intentional, ephemeral, non-persisted); handler read-only-locked | `app.py:2667`; `TestDebugEndpointReadOnlyCompanion`; `e9212a7` | none |
 | Spine thinking-alignment buffer | HARDENED-FOR-NOW | Bounded (200), in-memory, content-free advisory buffer + read endpoint; live population not proven | `spine.py`; `test_spine_thinking_alignment_buffer.py`; `805a0ba` | none |
-| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`):** behavior-preserving routing scaffold — frozen primitive-only `EphemeralCognitionState`; `build_memory_plan()` routes through it with `MemoryPlan` parity (no production behavior change). Tests-locked; no new capability yet | `thinking_models.py` (`EphemeralCognitionState`); `_build_ephemeral_cognition_state`; `test_ephemeral_cognition_state.py`; `4e164c3` | Slice 2 (numeric retrieval shaping) deferred — not yet authorized/defined; see §5 |
+| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`):** behavior-preserving routing scaffold — frozen primitive-only `EphemeralCognitionState`; `build_memory_plan()` routes through it with `MemoryPlan` parity (no production behavior change). Tests-locked; no new capability yet | `thinking_models.py` (`EphemeralCognitionState`); `_build_ephemeral_cognition_state`; `test_ephemeral_cognition_state.py`; `4e164c3` | Slice 2 (numeric retrieval shaping) definition drafted, pending authorization (`..._SLICE_2_DEFINITION_v0.1.md`); see §5 |
 | Candidate Gate D / Layer-1 private thinking | FRAMED | Eligible substrate-independent interior slice; **framed only**, pending operator selection | cognition roadmap §9; comparison frame `5472639`; pointer `3659089` | full Gate D remains unopened; proceed only via separately bounded slices |
 | Envelope Audit | FRAMED | Requirement only (Document B §7); no module; only a coarse `requires_self_review` flag exists | Document B §7 | none until Gate D opens |
 | Dream / incubation / Regime-B | DEFERRED | Offline reflection; no runtime exists; explicitly deferred + substrate-coupled | Document B §5; pre-substrate §3 | none; last |
@@ -83,7 +83,9 @@ Gate 4 writer remedies, and database/substrate/Stage B. See §5.
 - **Validation:** `104 passed in 1.06s`.
 - **Boundaries preserved:** no serialization · no `ThinkingResult` exposure · no `/thinking/debug` exposure ·
   no `/agent/query` output-shape change · no durable state · no database/substrate.
-- **Next possible slice:** Slice 2 (numeric retrieval shaping) — **deferred / not yet authorized or defined.**
+- **Next possible slice:** Slice 2 (numeric retrieval shaping) — **definition drafted, pending authorization.**
+  Envelope fixed in `docs/TORMENT_EPHEMERAL_COGNITION_STATE_SLICE_2_DEFINITION_v0.1.md`; not implementable
+  until that artifact's §4 (exact numeric rule) and §5 (rollout posture) are decided.
 
 ---
 
