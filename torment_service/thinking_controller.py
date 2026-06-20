@@ -199,6 +199,15 @@ _SRG_COGNITION_ENABLE = os.environ.get("TORMENT_SRG_COGNITION", "1").strip() not
 _ARCHIVE_RECALL_ENABLE = os.environ.get("TORMENT_ARCHIVE_RECALL", "1").strip() not in ("0", "false", "no", "off")
 _LIVE_SOCIAL_ENABLE = os.environ.get("TORMENT_LIVE_SOCIAL", "1").strip() not in ("0", "false", "no", "off")
 
+# Slice 2 (ephemeral cognition state) — numeric retrieval shaping. DEFAULT OFF.
+# Opt-in, plan-boundary-only shaping of `top_k_by_lane["deep"]`. The empty
+# string is treated as OFF (stricter than the always-on flags above) because
+# this flag defaults off and must not silently enable on a blank value.
+# Envelope: docs/TORMENT_EPHEMERAL_COGNITION_STATE_SLICE_2_DEFINITION_v0.1.md
+_COGNITION_SHAPING_V2_ENABLE = os.environ.get("TORMENT_COGNITION_SHAPING_V2", "0").strip() not in (
+    "", "0", "false", "no", "off",
+)
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -506,7 +515,52 @@ class ThinkingController:
         else:
             plan.max_token_budget = 2400
 
+        # Slice 2 (default-off): optional numeric retrieval shaping at the plan
+        # boundary. No-op unless TORMENT_COGNITION_SHAPING_V2 is enabled, so the
+        # default-flag plan stays byte-identical to Slice 1.
+        self._apply_cognition_shaping_v2(plan, state)
+
         return plan
+
+    def _apply_cognition_shaping_v2(
+        self,
+        plan: MemoryPlan,
+        state: EphemeralCognitionState,
+    ) -> None:
+        """Slice 2 (default-off) numeric retrieval shaping — first rule.
+
+        Approved rule (env flag ``TORMENT_COGNITION_SHAPING_V2``):
+          when ``state.ambiguity_score >= 0.50``, ``deep.top_k += 1``, clamped
+          to ``<= 4``; otherwise unchanged.
+
+        Scope (Slice 2 Definition v0.1): mutates ONLY ``top_k_by_lane["deep"]``.
+        Weights, the other lanes (``core`` / ``relational`` / ``archive`` /
+        ``collective``), retrieval booleans, ``safety_constraints`` and
+        ``max_token_budget`` are left exactly as built.
+
+        Guard — shape only an *already-enabled* deep lane (current
+        ``deep`` top_k > 0). Definition §2 is explicit that Slice 2 shapes *how
+        much* of an enabled lane, never *whether* a lane is enabled; bumping a
+        disabled (``0``) deep budget to ``1`` would both create a never-before
+        ``retrieve_deep=False / deep_top_k=1`` plan state and (downstream, in
+        the untouched ``fabric.query`` gap-fill path) risk *reducing* deep
+        retrieval. So a disabled deep lane is left at ``0``.
+
+        Never reduces an existing value (the cap is an upper clamp only). A
+        no-op when the flag is off — ``build_memory_plan`` then matches Slice 1
+        byte-for-byte.
+        """
+        if not _COGNITION_SHAPING_V2_ENABLE:
+            return
+        if state.ambiguity_score < 0.50:
+            return
+        current_deep = plan.top_k_by_lane.get("deep", 0)
+        if current_deep <= 0:
+            # Deep lane not enabled this turn — shape already-enabled lanes only.
+            return
+        shaped = min(current_deep + 1, 4)
+        # max(...) guarantees we never reduce an already-larger budget.
+        plan.top_k_by_lane["deep"] = max(shaped, current_deep)
 
     def choose_action(
         self,

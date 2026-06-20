@@ -25,6 +25,7 @@ import dataclasses
 
 import pytest
 
+import torment_service.thinking_controller as tc
 from torment_service.thinking_controller import (
     ThinkingController,
     _ARCHIVE_RECALL_ENABLE,
@@ -450,6 +451,160 @@ def test_token_budget_parity(raw, source_type):
         assert plan.max_token_budget == 900
     else:
         assert plan.max_token_budget == 2400
+
+
+# ===========================================================================
+# Slice 2 — default-off numeric retrieval shaping (deep top_k)
+#
+# Approved rule (env flag TORMENT_COGNITION_SHAPING_V2): when
+# ambiguity_score >= 0.50, deep.top_k += 1 clamped to <= 4, shaping only an
+# already-enabled deep lane and never reducing an existing value.
+# ===========================================================================
+
+
+@pytest.fixture(autouse=True)
+def _shaping_v2_off_by_default(monkeypatch):
+    # Pin Slice-2 shaping OFF for every test in this module unless a test
+    # explicitly turns it on. Makes the suite (incl. the Slice-1 parity tests
+    # above) robust to an ambient TORMENT_COGNITION_SHAPING_V2 in the env.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+
+
+def _state_with_ambiguity(amb: float):
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "maybe something off", "user_text")
+    base = ctl._build_ephemeral_cognition_state(frame, mode)
+    return dataclasses.replace(base, ambiguity_score=amb)
+
+
+@pytest.mark.parametrize("raw,source_type", MATRIX)
+def test_flag_off_parity_matches_reference(raw, source_type, monkeypatch):
+    # (1) Flag OFF: build_memory_plan is byte-identical to the pre-Slice-2
+    # reference oracle across the full matrix.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, raw, source_type)
+    got = ctl.build_memory_plan(frame, mode)
+    expected = _reference_memory_plan(frame, mode)
+    assert got.to_dict() == expected.to_dict()
+
+
+def test_flag_on_low_ambiguity_leaves_plan_unchanged(monkeypatch):
+    # (2) Flag ON but ambiguity below threshold: plan identical to flag-off,
+    # even though the deep lane is enabled (so the bump is purely
+    # threshold-gated, not lane-availability-gated).
+    monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(
+        ctl, "I want to understand my identity drift and character seed history.", "user_text"
+    )
+    assert frame.ambiguity_score < 0.50
+
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    on = ctl.build_memory_plan(frame, mode).to_dict()
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    off = ctl.build_memory_plan(frame, mode).to_dict()
+
+    assert on["top_k_by_lane"]["deep"] == 3  # deep enabled
+    assert on == off
+
+
+def test_flag_on_high_ambiguity_changes_only_deep_topk(monkeypatch):
+    # (3,5,6,7,8,9) Flag ON, ambiguity >= 0.50, deep enabled: ONLY
+    # top_k_by_lane["deep"] moves, by exactly +1; every other field is
+    # untouched (weights, other lanes, retrieval booleans, safety_constraints,
+    # max_token_budget).
+    monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "maybe something off", "user_text")
+    assert frame.ambiguity_score >= 0.50
+
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    off = ctl.build_memory_plan(frame, mode).to_dict()
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    on = ctl.build_memory_plan(frame, mode).to_dict()
+
+    assert off["top_k_by_lane"]["deep"] == 3
+    assert on["top_k_by_lane"]["deep"] == 4
+
+    # Everything except the top_k_by_lane dict is identical.
+    for key in off:
+        if key == "top_k_by_lane":
+            continue
+        assert on[key] == off[key], f"field {key!r} changed under shaping"
+
+    # Within top_k_by_lane, only "deep" differs, by exactly +1.
+    off_topk, on_topk = off["top_k_by_lane"], on["top_k_by_lane"]
+    for lane in ("core", "relational", "archive", "collective"):
+        assert on_topk[lane] == off_topk[lane], f"lane {lane!r} top_k changed"
+    assert on_topk["deep"] - off_topk["deep"] == 1
+
+
+def test_flag_on_high_ambiguity_but_deep_disabled_no_bump(monkeypatch):
+    # (9 / guard) Flag ON, ambiguity >= 0.50, but deep lane disabled: the bump
+    # is NOT applied — Slice 2 shapes only already-enabled lanes (Definition
+    # §2). Locks the interpretive choice that 0 -> 1 must not happen.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    # Pin spine on so "delete" routes to GOVERNED (deep disabled) deterministically,
+    # rather than falling through to REFLECTIVE (deep enabled) if spine is off.
+    monkeypatch.setattr(tc, "_SPINE_ENABLE", True)
+    ctl = ThinkingController()
+    frame, mode = _frame_and_mode(ctl, "maybe delete something??", "user_text")
+    assert frame.ambiguity_score >= 0.50
+
+    plan = ctl.build_memory_plan(frame, mode)
+    assert plan.retrieve_deep is False
+    assert plan.top_k_by_lane["deep"] == 0
+
+
+def test_shaping_caps_at_4_and_never_reduces(monkeypatch):
+    # (4) Direct unit test of the shaping rule: +1, capped at 4, never reduces,
+    # threshold-gated, lane-availability-gated, and flag-gated.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    ctl = ThinkingController()
+    st_hi = _state_with_ambiguity(0.50)
+
+    def _shaped(deep_val):
+        plan = MemoryPlan()
+        plan.top_k_by_lane = {"core": 6, "deep": deep_val}
+        ctl._apply_cognition_shaping_v2(plan, st_hi)
+        return plan.top_k_by_lane["deep"]
+
+    assert _shaped(3) == 4   # +1
+    assert _shaped(4) == 4   # already at cap -> unchanged
+    assert _shaped(5) == 5   # above cap -> never reduced
+    assert _shaped(0) == 0   # lane disabled -> untouched
+
+    # Below threshold -> unchanged.
+    st_lo = _state_with_ambiguity(0.49)
+    plan = MemoryPlan()
+    plan.top_k_by_lane = {"deep": 3}
+    ctl._apply_cognition_shaping_v2(plan, st_lo)
+    assert plan.top_k_by_lane["deep"] == 3
+
+    # Flag off -> no-op even at high ambiguity.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", False)
+    plan = MemoryPlan()
+    plan.top_k_by_lane = {"deep": 3}
+    ctl._apply_cognition_shaping_v2(plan, st_hi)
+    assert plan.top_k_by_lane["deep"] == 3
+
+
+def test_flag_on_does_not_change_result_shape_or_expose_state(monkeypatch):
+    # (10) Flag ON must not change /think result shape and must not expose the
+    # ephemeral state. Shaping touches only a MemoryPlan numeric field.
+    monkeypatch.setattr(tc, "_COGNITION_SHAPING_V2_ENABLE", True)
+    ctl = ThinkingController()
+    payload = ctl.think("ws", "ag", "maybe something off").to_dict()
+    expected_keys = {
+        "task_frame", "mode_decision", "memory_plan", "action_decision",
+        "review_result", "response_draft", "stance", "geometric_context",
+        "debug", "reflection_trace",
+    }
+    assert set(payload) == expected_keys
+    for key in payload:
+        assert "ephemeral" not in key
+        assert "cognition_state" not in key
 
 
 if __name__ == "__main__":
