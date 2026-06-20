@@ -10,6 +10,7 @@ from .thinking_models import (
     CognitiveMode,
     CognitiveModeDecision,
     DeliberationBundle,
+    EphemeralCognitionState,
     GeometricStanceContext,
     MemoryPlan,
     ReviewResult,
@@ -396,32 +397,84 @@ class ThinkingController:
             confidence_floor=0.40,
         )
 
+    def _build_ephemeral_cognition_state(
+        self,
+        frame: TaskFrame,
+        mode: CognitiveModeDecision,
+    ) -> EphemeralCognitionState:
+        """Build the per-turn, content-free, deterministic cognition state.
+
+        Pure function of ``(frame, mode)``. Collects only already-computed
+        primitive scalars plus the derived retrieval-shaping predicates that
+        ``build_memory_plan`` consumes. Holds NO raw/normalized text, no
+        reasons, no payloads, no collections. The struct is advisory /
+        observation-shape only — it is built here, consumed by
+        ``build_memory_plan`` to shape the (identical) ``MemoryPlan``, and
+        then discarded. It is never serialized, persisted, attached to
+        ``ThinkingResult``, or exposed by any endpoint in Slice 1.
+
+        Environment gates (``_SRG_COGNITION_ENABLE`` /
+        ``_ARCHIVE_RECALL_ENABLE``) are deliberately NOT folded in here; the
+        ``*_signal`` / ``*_eligible`` fields are the pre-flag predicates and
+        the flags are applied downstream, so this state stays a pure
+        function of its two inputs.
+        """
+        character_state_context_eligible = frame.identity_sensitive or mode.chosen_mode in {
+            CognitiveMode.IDENTITY_SENSITIVE,
+            CognitiveMode.LIVE_SOCIAL,
+        }
+        deep_context_eligible = mode.chosen_mode in {
+            CognitiveMode.REFLECTIVE,
+            CognitiveMode.IDENTITY_SENSITIVE,
+        }
+        archive_context_signal = (
+            "archive" in frame.context_tags
+            or "document" in frame.normalized_input.lower()
+        )
+        collective_context_signal = "collective" in frame.normalized_input.lower()
+
+        return EphemeralCognitionState(
+            chosen_mode=mode.chosen_mode.value,
+            allowed_depth=mode.allowed_depth,
+            requires_self_review=mode.requires_self_review,
+            may_escalate=mode.may_escalate,
+            confidence_floor=mode.confidence_floor,
+            urgency=frame.urgency,
+            ambiguity_score=frame.ambiguity_score,
+            confidence_need=frame.confidence_need,
+            action_need=frame.action_need,
+            memory_need=frame.memory_need,
+            tool_need=frame.tool_need,
+            governance_sensitive=frame.governance_sensitive,
+            identity_sensitive=frame.identity_sensitive,
+            live_social=frame.live_social,
+            archive_context_signal=archive_context_signal,
+            collective_context_signal=collective_context_signal,
+            character_state_context_eligible=character_state_context_eligible,
+            deep_context_eligible=deep_context_eligible,
+        )
+
     def build_memory_plan(
         self,
         frame: TaskFrame,
         mode: CognitiveModeDecision,
     ) -> MemoryPlan:
+        # Slice 1: route retrieval shaping through the ephemeral, content-free
+        # cognition state. This is a behavior-preserving refactor — the
+        # MemoryPlan produced below is byte-for-byte identical to the previous
+        # direct-from-(frame, mode) computation. Environment gates are applied
+        # here (not inside the state) exactly as before.
+        state = self._build_ephemeral_cognition_state(frame, mode)
+
         plan = MemoryPlan()
 
         plan.retrieve_core = True
-        plan.retrieve_character_state = frame.identity_sensitive or mode.chosen_mode in {
-            CognitiveMode.IDENTITY_SENSITIVE,
-            CognitiveMode.LIVE_SOCIAL,
-        }
-        plan.retrieve_srg_state = _SRG_COGNITION_ENABLE and plan.retrieve_character_state
-        plan.retrieve_relational = frame.memory_need or frame.live_social
-        plan.retrieve_archive = _ARCHIVE_RECALL_ENABLE and (
-            "archive" in frame.context_tags
-            or "document" in frame.normalized_input.lower()
-        )
-        plan.retrieve_deep = _ARCHIVE_RECALL_ENABLE and mode.chosen_mode in {
-            CognitiveMode.REFLECTIVE,
-            CognitiveMode.IDENTITY_SENSITIVE,
-        }
-        plan.retrieve_collective = (
-            frame.governance_sensitive
-            and "collective" in frame.normalized_input.lower()
-        )
+        plan.retrieve_character_state = state.character_state_context_eligible
+        plan.retrieve_srg_state = _SRG_COGNITION_ENABLE and state.character_state_context_eligible
+        plan.retrieve_relational = state.memory_need or state.live_social
+        plan.retrieve_archive = _ARCHIVE_RECALL_ENABLE and state.archive_context_signal
+        plan.retrieve_deep = _ARCHIVE_RECALL_ENABLE and state.deep_context_eligible
+        plan.retrieve_collective = state.governance_sensitive and state.collective_context_signal
 
         plan.top_k_by_lane = {
             "core": 6,
@@ -439,16 +492,16 @@ class ThinkingController:
             "collective": 0.35 if plan.retrieve_collective else 0.0,
         }
 
-        if frame.identity_sensitive:
+        if state.identity_sensitive:
             plan.safety_constraints.append("identity_must_outrank_archive")
-        if frame.governance_sensitive:
+        if state.governance_sensitive:
             plan.safety_constraints.append("governance_review_before_execution")
         if plan.retrieve_collective:
             plan.safety_constraints.append("collective_context_non_dominant")
 
-        if mode.chosen_mode == CognitiveMode.FAST:
+        if state.chosen_mode == CognitiveMode.FAST.value:
             plan.max_token_budget = 1200
-        elif mode.chosen_mode == CognitiveMode.LIVE_SOCIAL:
+        elif state.chosen_mode == CognitiveMode.LIVE_SOCIAL.value:
             plan.max_token_budget = 900
         else:
             plan.max_token_budget = 2400

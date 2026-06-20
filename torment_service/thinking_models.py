@@ -132,6 +132,66 @@ class MemoryPlan:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class EphemeralCognitionState:
+    """Per-turn, content-free, deterministic routing state (Slice 1).
+
+    A frozen, primitive-only snapshot of the *shape* of a single
+    deliberation turn — the already-computed scalar signals that drive
+    ``ThinkingController.build_memory_plan`` retrieval shaping. It is the
+    same boundary class as ``ReflectionTrace``:
+
+      * **Ephemeral** — built per call, never persisted, never reentered.
+      * **Content-free** — holds NO raw or normalized input, no reasons,
+        no payloads, no tone hints, no drafts, no notes, no memory/seed
+        text, no vectors, no collections. Every field is a bare
+        ``bool`` / ``int`` / ``float`` / ``str`` scalar.
+      * **Deterministic** — a pure function of ``(TaskFrame,
+        CognitiveModeDecision)``; it reads no environment, clock, or
+        external state of its own.
+      * **Advisory / observation-shape only** — it shapes nothing on its
+        own. ``build_memory_plan`` routes its decisions *through* this
+        state, but the resulting ``MemoryPlan`` is byte-for-byte what it
+        was before this struct existed.
+
+    Slice-1 hard lines (see the pre-database status board §5): this struct
+    is intentionally NOT serialized, NOT attached to ``ThinkingResult``,
+    NOT exposed by ``/thinking/debug`` or ``/agent/query``, and carries no
+    durable or content-bearing state. ``chosen_mode`` is stored as the
+    plain ``str`` mode value (not the enum) to keep the struct trivially
+    primitive.
+
+    The ``*_context_signal`` fields are raw content/mode-derived detection
+    predicates; the ``*_context_eligible`` fields are mode-derived
+    eligibility predicates. Both are pre-environment-flag — the
+    ``_SRG_COGNITION_ENABLE`` / ``_ARCHIVE_RECALL_ENABLE`` gates are applied
+    downstream in ``build_memory_plan``, keeping this state independent of
+    runtime configuration.
+    """
+
+    # mode-decision shape (already-computed scalars)
+    chosen_mode: str
+    allowed_depth: int
+    requires_self_review: bool
+    may_escalate: bool
+    confidence_floor: float
+    # task-frame shape (already-computed scalars)
+    urgency: float
+    ambiguity_score: float
+    confidence_need: float
+    action_need: bool
+    memory_need: bool
+    tool_need: bool
+    governance_sensitive: bool
+    identity_sensitive: bool
+    live_social: bool
+    # derived retrieval-shaping predicates (pre-environment-flag)
+    archive_context_signal: bool
+    collective_context_signal: bool
+    character_state_context_eligible: bool
+    deep_context_eligible: bool
+
+
 @dataclass
 class ActionDecision:
     action: ActionType
