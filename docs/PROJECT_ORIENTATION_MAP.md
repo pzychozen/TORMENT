@@ -612,6 +612,21 @@ Items that have been deferred from an active slice but are not lost:
   chamber/private-cognition runtime, candidate store, governed admission implementation, or
   database/substrate. **No automatic successor gate** — any later step needs separate authorization;
   database/substrate remains last.
+- **Gate 4 — mood_drift centroid-inclusion topology row conformance-question frame FILED docs-only
+  (2026-06-20, `cc6cac4`; Codex ACCEPT WITH CORRECTIONS, applied)** — the second row-specific read-only
+  conformance-**question** frame, scoped to **one row: mood_drift centroid-inclusion topology /
+  reachability only** (an in-window same-agent `mood_drift` `canon=False` row is eligible for inclusion in
+  the `measure_drift` recent-memory centroid upstream of the `gravity_correction` writer). Artifact:
+  `docs/TORMENT_GATE_4_MOOD_DRIFT_CENTROID_INCLUSION_TOPOLOGY_CONFORMANCE_QUESTION_FRAME_v0.1.md`.
+  `gravity_correction` appears as **hard-canon endpoint context only**. **Question framing only** — poses
+  **Q-M1–Q-M4 posed only, not answered** (primary boundary Seed-Gov **SG-O6**). **No causal, magnitude,
+  frequency/workspace, usually-triggers, or decisiveness claim; no unsafe/defect/contaminated/block/filter
+  claim.** Does **not re-answer** the gravity frame's Q-C1–Q-C4 and **does not resolve or re-pick** §N14
+  Q-G7. A→B→C→D is a **framing sequence, not a fix order**; later C/D frames only if **separately
+  authorized**. Selects **no** verdict, remedy, writer patch, fix order, enforcement, governance vehicle,
+  runtime authority gate, P4/source-sameness or Seed-Gov mechanics, chamber/private-cognition runtime,
+  candidate store, governed admission implementation, or database/substrate. **No automatic successor
+  gate** — any later step needs separate authorization; database/substrate remains last.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
