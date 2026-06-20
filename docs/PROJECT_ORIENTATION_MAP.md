@@ -644,6 +644,24 @@ Items that have been deferred from an active slice but are not lost:
   chamber/private-cognition runtime, candidate store, governed admission implementation, or
   database/substrate. **No automatic successor gate** — any later step needs separate authorization;
   database/substrate remains last.
+- **Gate 4 — spirit-return warmth / warmup (D1) row conformance-question frame FILED docs-only
+  (2026-06-20, `f54b8e7`; Codex ACCEPT WITH CORRECTIONS, applied)** — **row D1** in the split-D framing
+  sequence (**D1 = spirit-return warmth (this frame); D2 = role inference / identity-anchor cadence,
+  separate and unopened**); **D1 and D2 are distinct runtime surfaces, not conflated**. Scoped to **one
+  row: spirit-return warmth / warmup only** — a **durable-soft, non-canon** retrieval/prompt-shaping signal
+  tracked **per deep-memory EID**, persisted in `warmup_state.jsonl` (append-only with compaction /
+  path-integrity carried only), scaling spirit-return hit strength via a per-mode multiplier, where
+  `return_mode` + warmth thresholds **may influence block classification including possible identity-block
+  placement** (a **prompt-assembly classification only — not canon/admission/promotion/authority**).
+  Artifact: `docs/TORMENT_GATE_4_SPIRIT_RETURN_WARMTH_READ_ONLY_CONFORMANCE_QUESTION_FRAME_v0.1.md`.
+  **Retrieval/prompt-shaping only — `durable` ≠ `pinned`; no graph-memory write; no authority crossing.**
+  **Question framing only** — poses **Q-W1–Q-W4 posed only, not answered** (boundaries Stage A **O6**,
+  Seed-Gov **SG-O6/SG-O8**, named as requirement/posture). Selects **no** patch/block/filter warmth, O6
+  mechanics, must-not-pin implementation, Seed-Gov mechanics, canon claim, authority claim, verdict,
+  remedy, writer patch, fix order, enforcement, governance vehicle, runtime authority gate,
+  chamber/private-cognition runtime, candidate store, governed admission implementation, or
+  database/substrate. **No automatic successor gate** — any later step needs separate authorization;
+  database/substrate remains last.
 - **ReflectionTrace v0.2 — private-cognition observability checkpoint (2026-06-17, `d15d9c5` + `3d0ba1a`)** —
   code slices `d15d9c5` and `3d0ba1a` landed an **ephemeral, non-reentrant, debug-observable**
   decision-shape trace (`torment_service/reflection_trace.py`, surfaced via `ThinkingResult.to_dict()` /
