@@ -87,6 +87,42 @@ def test_flag_on_includes_field(monkeypatch):
     assert d["participation_guidance"] == "none"
 
 
+# --- enable/measure: live think() pipeline surfaces non-"none" values --------
+# With the flag on AND contextual_abstention enabled, an ordinary user_text
+# live-social turn drives a whitelisted stance, which the mapper surfaces as a
+# candidate — proving the flag is meaningful end-to-end without touching output,
+# dispatch, /agent/query, memory, or review.blocked. geometric_context=None pins
+# the stance thresholds (all geo modifiers = 1.0 → token_count<3, urgency<0.3).
+
+def test_think_live_value_silent_observe_candidate(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG, True)
+    r = ThinkingController().think(
+        "ws", "ag", "voice",
+        capabilities={"contextual_abstention": True},
+        geometric_context=None,
+    )
+    # ordinary live-social turn (else the mapper would map to "none").
+    assert r.task_frame.source_type == "user_text"
+    assert r.task_frame.live_social
+    assert not r.task_frame.governance_sensitive and not r.task_frame.identity_sensitive
+    # live-social + very short → SILENT_OBSERVE (stance rule 6).
+    assert r.to_dict()["participation_guidance"] == "silent_observe_candidate"
+
+
+def test_think_live_value_respond_briefly_candidate(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG, True)
+    r = ThinkingController().think(
+        "ws", "ag", "let us speak calmly about the space",
+        capabilities={"contextual_abstention": True},
+        geometric_context=None,
+    )
+    assert r.task_frame.source_type == "user_text"
+    assert r.task_frame.live_social
+    assert not r.task_frame.governance_sensitive and not r.task_frame.identity_sensitive
+    # live-social + low urgency + longer than rule-6's short window → RESPOND_BRIEFLY.
+    assert r.to_dict()["participation_guidance"] == "respond_briefly_candidate"
+
+
 # --- Spine advisory audit surface (6, 7, 9) ---------------------------------
 
 def _fresh_fabric(data_dir, monkeypatch):
