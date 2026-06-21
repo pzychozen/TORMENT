@@ -328,5 +328,86 @@ def test_spine_advisory_memory_plan_is_geometrically_shaped(tmp_path, monkeypatc
         assert core_w < 1.0
 
 
+# ---------------------------------------------------------------------------
+# (8) capstone — the shaped plan actually moves fabric.query ranking pressure,
+#     not just the advisory audit. geo → shaped weight_by_lane["core"] →
+#     memory_plan into fabric.query → core hit final_score is multiplied while
+#     the (untouched) relational lane is unchanged → core-vs-relational ranking
+#     pressure shifts. Deterministic via score *ratios* (no order-flip, no
+#     dependence on absolute embedding similarity).
+# ---------------------------------------------------------------------------
+
+def test_geometric_shaping_changes_query_ranking_pressure(tmp_path, monkeypatch):
+    monkeypatch.setattr(tc, _FLAG, True)
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+
+    from torment_service.fabric import TormentFabric
+
+    # One fabric, core(private) + relational(shared) memory. "remember"/"we"
+    # set memory_need (-> relational lane enabled); no identity/governance words,
+    # so geometric shaping is NOT skipped on this turn. query() is a pure read
+    # for this path (SRG off), so querying the same fabric twice is fine.
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    fabric.get_workspace("ws")
+    fabric.create_agent("ws", "ag")
+    fabric.ingest(workspace_id="ws", agent_id="ag",
+                  text="my private routine notes about the water survey", step=10)
+    fabric.ingest(workspace_id="ws", agent_id="ag",
+                  text="our shared project notes about the water survey", step=11, scope="shared")
+
+    query_text = "what do we remember about the water survey notes"
+    ctl = ThinkingController()
+    frame = ctl.frame_task("ws", "ag", query_text)
+    mode = ctl.choose_mode(frame)
+    assert not frame.governance_sensitive and not frame.identity_sensitive
+
+    plan_base = ctl.build_memory_plan(frame, mode)  # geo None -> core weight 1.0
+    plan_shaped = ctl.build_memory_plan(frame, mode, geometric_context=_geo(0.95, 0.95))
+
+    # geometric origin: shaping raised core weight, left relational untouched.
+    base_core_w = plan_base.weight_by_lane["core"]
+    shaped_core_w = plan_shaped.weight_by_lane["core"]
+    assert shaped_core_w > base_core_w
+    assert plan_shaped.weight_by_lane.get("relational") == plan_base.weight_by_lane.get("relational")
+    # relational lane must actually be enabled, or the proof has no control hit.
+    assert plan_base.retrieve_relational, "relational lane disabled - query won't return the shared hit"
+
+    def _mp(plan):
+        return {"top_k_by_lane": plan.top_k_by_lane, "weight_by_lane": plan.weight_by_lane}
+
+    def _scores_by_scope(query_result):
+        # COLLISION-SAFE keying. The private and shared stores have INDEPENDENT
+        # eid spaces, so the private/core hit and the shared/relational hit both
+        # come back as eid=1. Keying results by bare eid silently overwrites the
+        # private score with the shared one (which made shaping look like a
+        # no-op in an earlier draft of this test). Key by scope/lane instead.
+        scores = {}
+        for h in query_result.get("results", []):
+            scores[h.get("scope")] = h["final_score"]
+        return scores
+
+    base = _scores_by_scope(fabric.query(
+        workspace_id="ws", agent_id="ag", query_text=query_text,
+        top_k=20, memory_plan=_mp(plan_base)))
+    shaped = _scores_by_scope(fabric.query(
+        workspace_id="ws", agent_id="ag", query_text=query_text,
+        top_k=20, memory_plan=_mp(plan_shaped)))
+
+    assert "private" in base and "private" in shaped, "private/core hit missing from query results"
+    assert "shared" in base and "shared" in shaped, "shared/relational hit missing from query results"
+
+    ratio = shaped_core_w / base_core_w  # the geometric multiplier (~1.135)
+
+    # core (private) hit: final_score scaled by exactly the geometric core-weight
+    # ratio. relational (shared) lane is untouched, so its score is the built-in
+    # determinism guard for the two same-fabric reads.
+    assert shaped["private"] == pytest.approx(base["private"] * ratio, rel=1e-3)
+    assert shaped["private"] != pytest.approx(base["private"], rel=1e-3)
+    assert shaped["shared"] == pytest.approx(base["shared"], rel=1e-3)
+
+    # ranking pressure: core-vs-relational gap shifted toward core under shaping.
+    assert (shaped["private"] / shaped["shared"]) > (base["private"] / base["shared"])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
