@@ -8,18 +8,19 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `a4acdc2` / `origin/main` / clean.
+- **HEAD:** `d1da01a` / `origin/main` / clean.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
-- **Last closed (geometric / ephemeral-shaping vein):**
+- **Last closed:**
   - `5050de5` — SRG→social_resonance live chain.
   - `63b8073` — gated geometric MemoryPlan shaping (coherence + stability → core/deep lane weights).
   - `0dbd9e0` — geometric shaping proven to affect query ranking.
-  - `a4acdc2` — relational prominence shaping (default-off `TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1`; `ambiguity_tolerance` → relational lane weight only, capped ≤ 0.99; no top_k / stance / output / identity / archive; 22 passed on Windows).
-- **Active next:** the geometric / ephemeral MemoryPlan-shaping vein is **likely harvested** — relational prominence was the last clean small knob. The next real capability is no longer simple shaping; it is an **operator/Codex-gated** choice among: R-field (blocked on the `_srg_last_ingest_band` leak), `social_resonance → stance` (output-adjacent), or the next cognition layer (Document B / Layer-1 private thinking, gated). Pending a source-first direction check + operator selection. Claude proposes from source; GPT steers; Codex challenges boundary-bearing choices; Hilmir resolves true operator forks.
+  - `a4acdc2` — relational prominence shaping (default-off `TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1`; `ambiguity_tolerance` → relational lane weight only, capped ≤ 0.99; no top_k / stance / output / identity / archive).
+  - `d1da01a` — SRG same-band per-agent scoping fix (correctness): the same-band retrieval bonus now reads/writes the last-ingest band per `(workspace_id, agent_id)`, fixing the old fabric-wide scalar's cross-agent / cross-workspace scoring influence; ×1.08 multiplier, formula, and `TORMENT_SRG_ENABLE` unchanged; does **not** open R-field.
+- **Active next:** the geometric / ephemeral MemoryPlan-shaping vein is **likely harvested** — relational prominence was the last clean small knob. The next real capability is no longer simple shaping; it is an **operator/Codex-gated** choice among: R-field (no longer blocked by the `_srg_last_ingest_band` leak — fixed in `d1da01a` — but still its own deliberate decision), `social_resonance → stance` (output-adjacent), or the next cognition layer (Document B / Layer-1 private thinking, gated). Pending a source-first direction check + operator selection. Claude proposes from source; GPT steers; Codex challenges boundary-bearing choices; Hilmir resolves true operator forks.
 - **Parked / not auto-open:**
   - database / substrate / design / product-selection / schema / storage / migration;
   - GitHub issues #54 / #55 — database-boundary evidence only;
-  - R-field — until the `_srg_last_ingest_band` per-fabric cross-agent leak is understood;
+  - R-field — operator/Codex-gated and not auto-open; the `_srg_last_ingest_band` cross-agent leak that previously blocked it is **fixed** (`d1da01a`), so it is no longer blocked by that — but it remains its own deliberate decision;
   - Gate B writer-authority items — unless specifically reopened;
   - Document B / dream / Seed-Gov / private-cognition runtime — unless separately selected.
 - **Evidence-only, NOT active authority:** the dated changelog/header below; the cognition sequencing map; `TORMENT_ROADMAP_NOTES`; `CHECKPOINT_*` docs; scratch packets; external/older roadmaps.
