@@ -8,13 +8,14 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `0dbd9e0` / `origin/main` / clean.
+- **HEAD:** `a4acdc2` / `origin/main` / clean.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
-- **Last closed:**
+- **Last closed (geometric / ephemeral-shaping vein):**
   - `5050de5` — SRG→social_resonance live chain.
-  - `63b8073` — gated geometric MemoryPlan shaping.
-  - `0dbd9e0` — geometric shaping affects query ranking.
-- **Active next:** source-first direction check to select the next living-system capability surface. Claude proposes from source; GPT steers; Codex challenges boundary-bearing choices; Hilmir only resolves true operator forks.
+  - `63b8073` — gated geometric MemoryPlan shaping (coherence + stability → core/deep lane weights).
+  - `0dbd9e0` — geometric shaping proven to affect query ranking.
+  - `a4acdc2` — relational prominence shaping (default-off `TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1`; `ambiguity_tolerance` → relational lane weight only, capped ≤ 0.99; no top_k / stance / output / identity / archive; 22 passed on Windows).
+- **Active next:** the geometric / ephemeral MemoryPlan-shaping vein is **likely harvested** — relational prominence was the last clean small knob. The next real capability is no longer simple shaping; it is an **operator/Codex-gated** choice among: R-field (blocked on the `_srg_last_ingest_band` leak), `social_resonance → stance` (output-adjacent), or the next cognition layer (Document B / Layer-1 private thinking, gated). Pending a source-first direction check + operator selection. Claude proposes from source; GPT steers; Codex challenges boundary-bearing choices; Hilmir resolves true operator forks.
 - **Parked / not auto-open:**
   - database / substrate / design / product-selection / schema / storage / migration;
   - GitHub issues #54 / #55 — database-boundary evidence only;
