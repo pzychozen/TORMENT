@@ -16,6 +16,7 @@ from .thinking_models import (
     ReviewResult,
     TaskFrame,
     ThinkingResult,
+    map_participation_guidance,
 )
 from .stance_policy import determine_stance
 from .reflection_trace import build_reflection_trace
@@ -236,6 +237,18 @@ _GEOMETRIC_MEMORY_SHAPING_V1_ENABLE = os.environ.get("TORMENT_GEOMETRIC_MEMORY_S
 # is off OR ``geometric_context is None``. Empty string is treated as OFF.
 _GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE = os.environ.get(
     "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1", "0"
+).strip() not in ("", "0", "false", "no", "off")
+
+# Participation guidance v1 — surfaces a single visible advisory
+# ``participation_guidance`` candidate on the thinking/advisory audit surface
+# (``ThinkingResult.to_dict()`` / Spine ``audit["advisory_thinking"]``) ONLY. NOT
+# on ``/agent/query``, NOT a response-control field; it never suppresses, vetoes,
+# blocks, or empties a response and never touches dispatch / ``review.blocked`` /
+# authority / memory. DEFAULT OFF — when off the field is omitted entirely (exact
+# parity). Empty string treated as OFF. See
+# docs/TORMENT_PARTICIPATION_GUIDANCE_FRAME_v0.1.md.
+_PARTICIPATION_GUIDANCE_V1_ENABLE = os.environ.get(
+    "TORMENT_PARTICIPATION_GUIDANCE_V1", "0"
 ).strip() not in ("", "0", "false", "no", "off")
 
 
@@ -983,6 +996,15 @@ class ThinkingController:
             confidence_need=frame.confidence_need,
         )
 
+        # Participation guidance v1 (default-off, visible advisory only): map the
+        # (frame, stance) to a single advisory candidate for the thinking/advisory
+        # audit surface. Omitted entirely when the flag is off. Never output
+        # control — the final response path stays free to ignore/soften/express it.
+        _participation_guidance = (
+            map_participation_guidance(frame, stance)
+            if _PARTICIPATION_GUIDANCE_V1_ENABLE else None
+        )
+
         return ThinkingResult(
             task_frame=frame,
             mode_decision=mode,
@@ -994,6 +1016,7 @@ class ThinkingController:
             geometric_context=geometric_context,
             debug={"controller_version": "0.3"},
             reflection_trace=_reflection_trace,
+            participation_guidance=_participation_guidance,
         )
 
     def _draft_response(

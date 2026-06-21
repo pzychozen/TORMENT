@@ -245,6 +245,52 @@ class ResponseStanceDecision:
         return d
 
 
+# ---------------------------------------------------------------------------
+# Participation guidance v1 (visible advisory only — NEVER output control).
+# Maps (TaskFrame, optional ResponseStanceDecision) to a single advisory
+# candidate string surfaced on ThinkingResult.to_dict() / the advisory audit.
+# It does NOT suppress, block, veto, finalize, or empty a response, and touches
+# no dispatch / review.blocked / authority / memory path. The final response
+# path stays free to ignore, soften, or express it. See
+# docs/TORMENT_PARTICIPATION_GUIDANCE_FRAME_v0.1.md.
+# ---------------------------------------------------------------------------
+
+_PARTICIPATION_GUIDANCE_WHITELIST: Dict[ResponseStance, str] = {
+    ResponseStance.RESPOND_BRIEFLY: "respond_briefly_candidate",
+    ResponseStance.DEFER: "defer_candidate",
+    ResponseStance.SILENT_OBSERVE: "silent_observe_candidate",
+}
+
+
+def map_participation_guidance(
+    frame: TaskFrame,
+    stance: Optional[ResponseStanceDecision],
+) -> str:
+    """Map (frame, stance) -> an advisory participation-guidance candidate.
+
+    Returns exactly one of: ``"none"``, ``"respond_briefly_candidate"``,
+    ``"defer_candidate"``, ``"silent_observe_candidate"``.
+
+    Non-ordinary turns map to ``"none"``: a missing frame; any non-``user_text``
+    source (operator / system / reflex-like); or governance-/identity-sensitive
+    turns. A missing stance, or any stance outside the explicit whitelist, also
+    maps to ``"none"``.
+
+    Visible advisory ONLY — this is a label, not a control. It never suppresses,
+    blocks, vetoes, or empties a response and never reads/writes review.blocked,
+    dispatch, authority, or memory.
+    """
+    if frame is None:
+        return "none"
+    if getattr(frame, "source_type", "user_text") != "user_text":
+        return "none"
+    if getattr(frame, "governance_sensitive", False) or getattr(frame, "identity_sensitive", False):
+        return "none"
+    if stance is None:
+        return "none"
+    return _PARTICIPATION_GUIDANCE_WHITELIST.get(stance.stance, "none")
+
+
 @dataclass
 class ReviewResult:
     approved: bool = True
@@ -299,9 +345,13 @@ class ThinkingResult:
     # Surfaced only through to_dict() (e.g. /thinking/debug); never consumed by
     # retrieval, prompt assembly, writers, or any decision path.
     reflection_trace: Optional[ReflectionTrace] = None
+    # Participation guidance v1 (visible advisory only): a single candidate
+    # string set by the controller ONLY when the flag is on. ``None`` ⇒ omitted
+    # from ``to_dict()`` entirely (flag off ⇒ exact parity). Never output control.
+    participation_guidance: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "task_frame": self.task_frame.to_dict(),
             "mode_decision": self.mode_decision.to_dict(),
             "memory_plan": self.memory_plan.to_dict(),
@@ -313,3 +363,7 @@ class ThinkingResult:
             "debug": self.debug,
             "reflection_trace": self.reflection_trace.to_dict() if self.reflection_trace else None,
         }
+        # Visible advisory only; omitted entirely when unset (flag off ⇒ parity).
+        if self.participation_guidance is not None:
+            d["participation_guidance"] = self.participation_guidance
+        return d
