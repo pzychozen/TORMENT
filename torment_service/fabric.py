@@ -714,6 +714,11 @@ class TormentFabric:
 
         # SRG living memory (opt-in) — disabled by default
         self._srg_enable = str(os.environ.get("TORMENT_SRG_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
+        # SRG relational signal (Slice A, advisory, in-memory): per-agent EMA of
+        # each ingested memory's L_amplitude. Populated only while SRG is
+        # enabled; stays empty otherwise. Not persisted, not authoritative, not
+        # exposed via API/debug. Consumed by nothing yet (primitive only).
+        self._srg_relational_ema: Dict[Tuple[str, str], float] = {}
 
         # Hivemind collective resonance (opt-in) — disabled by default
         self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -760,6 +765,18 @@ class TormentFabric:
     ) -> Optional[KernelRuntimeContext]:
         """Return an existing per-agent kernel context without creating it."""
         return self._kernel_contexts.get(self._agent_key(workspace_id, agent_id))
+
+    def get_srg_relational_signal(
+        self, workspace_id: str, agent_id: str,
+    ) -> Optional[float]:
+        """Return the per-agent SRG relational EMA, or ``None``.
+
+        ``None`` means SRG is disabled or no memory has been ingested for this
+        agent yet. Advisory, in-memory, non-authoritative; not persisted and
+        not exposed through any API/debug/result surface. Slice A primitive —
+        no consumer wired yet.
+        """
+        return self._srg_relational_ema.get((workspace_id, agent_id))
 
     def _create_kernel_state_and_context(
         self,
@@ -2556,7 +2573,7 @@ class TormentFabric:
         # SRG living memory — build dual-field state if enabled (Phase 1+2)
         _srg_dict = None
         if self._srg_enable:
-            from .srg_engine import build_memory_srg, detect_character_mode
+            from .srg_engine import build_memory_srg, detect_character_mode, relational_amplitude
             _srg_char_mode = detect_character_mode(text)
             _srg_state = build_memory_srg(
                 strength=float(signals.strength),
@@ -2569,6 +2586,19 @@ class TormentFabric:
             _srg_dict = _srg_state.to_dict()
             # Track last-ingested band for same-band scoring in query path
             self._srg_last_ingest_band = _srg_state.R_band
+
+            # SRG relational signal (Slice A, advisory): update the per-agent EMA
+            # of this memory's L_amplitude. First ingest seeds it; later ingests
+            # blend with alpha=0.2. In-memory only; no persistence, no authority.
+            _srg_rel_amp = relational_amplitude(_srg_state)
+            _srg_rel_key = (workspace_id, agent_id)
+            _srg_rel_prev = self._srg_relational_ema.get(_srg_rel_key)
+            if _srg_rel_prev is None:
+                self._srg_relational_ema[_srg_rel_key] = _srg_rel_amp
+            else:
+                self._srg_relational_ema[_srg_rel_key] = (
+                    0.8 * _srg_rel_prev + 0.2 * _srg_rel_amp
+                )
 
         # Character continuity (v1.11): soft role inference (guidance signal).
         # Updates slowly and is used only to tune memory behavior (anchors/recency), never persona writing.

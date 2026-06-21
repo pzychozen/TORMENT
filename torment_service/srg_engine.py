@@ -388,6 +388,18 @@ def detect_character_mode(text: str) -> str:
     return ""
 
 
+def relational_amplitude(state: "SRGMemoryState") -> float:
+    """Smallest honest agent-relational scalar from a per-memory SRG state.
+
+    Returns the breathing amplitude of the L (compression / "who the memory is
+    to") field — ``L_amplitude``. ``L`` itself is pinned to ``L_0`` at build,
+    so ``L_amplitude`` is the per-memory quantity that actually varies; an
+    agent-level aggregate of it is the minimal SRG relational signal. Advisory
+    only — it carries no authority and writes nothing.
+    """
+    return float(state.L_amplitude)
+
+
 # ============================================================================
 # Convenience: build full SRG state for a freshly ingested memory
 # ============================================================================
