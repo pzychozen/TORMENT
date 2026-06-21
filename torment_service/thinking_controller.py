@@ -216,6 +216,17 @@ _COGNITION_CORE_SHAPING_V1_ENABLE = os.environ.get("TORMENT_COGNITION_CORE_SHAPI
     "", "0", "false", "no", "off",
 )
 
+# Geometric MemoryPlan shaping v1 — the first retrieval-plan (MemoryPlan)
+# consumer of the live kernel ``geometric_context`` (``stance_policy`` already
+# consumes it for contextual abstention). DEFAULT OFF. Opt-in, plan-boundary-only shaping
+# of ``weight_by_lane`` for already-enabled core/deep lanes, driven by
+# coherence + stability. No-op when the flag is off OR when
+# ``geometric_context is None`` (every non-advisory path). Empty string is
+# treated as OFF (same stricter default-off posture as Slices 2/3).
+_GEOMETRIC_MEMORY_SHAPING_V1_ENABLE = os.environ.get("TORMENT_GEOMETRIC_MEMORY_SHAPING_V1", "0").strip() not in (
+    "", "0", "false", "no", "off",
+)
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -475,6 +486,7 @@ class ThinkingController:
         self,
         frame: TaskFrame,
         mode: CognitiveModeDecision,
+        geometric_context: Optional[GeometricStanceContext] = None,
     ) -> MemoryPlan:
         # Slice 1: route retrieval shaping through the ephemeral, content-free
         # cognition state. This is a behavior-preserving refactor — the
@@ -531,6 +543,12 @@ class ThinkingController:
         # Slice 3 (default-off): optional core-lane shaping behind its own flag.
         # No-op unless TORMENT_COGNITION_CORE_SHAPING_V1 is enabled.
         self._apply_cognition_core_shaping_v1(plan, state)
+
+        # Geometric shaping v1 (default-off): first retrieval-plan consumer of
+        # the live kernel geometric_context. No-op unless the flag is on AND a
+        # geometric_context is supplied (advisory path only), so the
+        # default-flag / geo-None plan stays byte-identical to Slices 1-3.
+        self._apply_geometric_memory_shaping_v1(plan, state, geometric_context)
 
         return plan
 
@@ -611,6 +629,70 @@ class ThinkingController:
         shaped = min(current_core + 1, 7)
         # max(...) guarantees we never reduce an already-larger budget (7->7, 8->8).
         plan.top_k_by_lane["core"] = max(shaped, current_core)
+
+    def _apply_geometric_memory_shaping_v1(
+        self,
+        plan: MemoryPlan,
+        state: EphemeralCognitionState,
+        geometric_context: Optional[GeometricStanceContext] = None,
+    ) -> None:
+        """Geometric shaping v1 — first retrieval-plan (MemoryPlan) consumer of
+        geometric_context (``stance_policy.determine_stance`` already consumes it
+        for contextual abstention; this is the first *retrieval-facing* one).
+
+        When the live kernel's ``geometric_context`` is present, lightly shape
+        the already-built MemoryPlan lane *weights* from ``coherence`` and
+        ``stability`` — the two dimensions that semantically map to retrieval
+        confidence/depth. This is guidance, not control:
+
+          * No-op unless ``TORMENT_GEOMETRIC_MEMORY_SHAPING_V1`` is enabled, so
+            the default-flag plan stays byte-identical to Slices 1-3.
+          * No-op when ``geometric_context is None`` — every non-advisory caller
+            (``agent_loop``, direct/test callers) passes ``None`` and is
+            therefore unchanged regardless of the flag.
+          * Shapes ONLY ``weight_by_lane`` for ALREADY-ENABLED ``core`` / ``deep``
+            lanes (current weight > 0). Never enables a disabled lane, never
+            touches ``top_k_by_lane``, retrieval booleans, ``safety_constraints``,
+            ``max_token_budget``, or any other lane.
+          * ``social_resonance`` is intentionally NOT used for retrieval shaping
+            (that dimension belongs to stance, not retrieval depth).
+          * Governance- / identity-sensitive turns are skipped entirely (safety
+            parity with Slice 3) — the living kernel does not reshape retrieval
+            on those classes.
+          * Bounded: settledness ``s = (coherence + stability) / 2`` in [0, 1]
+            maps to a multiplier ``m = clamp(0.85 + 0.30*s, 0.85, 1.15)``
+            (neutral at ``s == 0.5``); each shaped weight is then re-clamped to
+            the downstream ``[0.1, 2.0]`` lane-weight band. So the kernel can
+            nudge a lane weight by at most +/-15% and can never invert lane
+            ordering or zero a lane.
+        """
+        if not _GEOMETRIC_MEMORY_SHAPING_V1_ENABLE:
+            return
+        if geometric_context is None:
+            return
+        # Safety parity with Slice 3: no retrieval reshaping on governed/identity.
+        if state.governance_sensitive or state.identity_sensitive:
+            return
+
+        def _clamp(v: float, lo: float, hi: float) -> float:
+            return lo if v < lo else (hi if v > hi else v)
+
+        settled = _clamp(
+            0.5 * (float(geometric_context.coherence) + float(geometric_context.stability)),
+            0.0, 1.0,
+        )
+        mult = _clamp(0.85 + 0.30 * settled, 0.85, 1.15)
+
+        # core lane — always enabled in the current builder, so reliably
+        # observable; shape only when actually enabled this turn (weight > 0).
+        current_core_w = plan.weight_by_lane.get("core", 0.0)
+        if plan.retrieve_core and current_core_w > 0.0:
+            plan.weight_by_lane["core"] = _clamp(current_core_w * mult, 0.1, 2.0)
+
+        # deep lane — shape only when already enabled this turn (weight > 0).
+        current_deep_w = plan.weight_by_lane.get("deep", 0.0)
+        if plan.retrieve_deep and current_deep_w > 0.0:
+            plan.weight_by_lane["deep"] = _clamp(current_deep_w * mult, 0.1, 2.0)
 
     def choose_action(
         self,
@@ -716,6 +798,7 @@ class ThinkingController:
         *,
         source_type: str = "user_text",
         metadata: Optional[Dict[str, Any]] = None,
+        geometric_context: Optional[GeometricStanceContext] = None,
     ) -> DeliberationBundle:
         """Run the inner deliberation loop (Phases 2-4) and return the bundle.
 
@@ -737,7 +820,7 @@ class ThinkingController:
             metadata=metadata,
         )
         mode = self.choose_mode(frame)
-        memory_plan = self.build_memory_plan(frame, mode)
+        memory_plan = self.build_memory_plan(frame, mode, geometric_context=geometric_context)
         action = self.choose_action(frame, mode, memory_plan)
         return DeliberationBundle(
             task_frame=frame,
@@ -772,6 +855,7 @@ class ThinkingController:
             raw_input=raw_input,
             source_type=source_type,
             metadata=metadata,
+            geometric_context=geometric_context,
         )
         frame = bundle.task_frame
         mode = bundle.mode_decision
