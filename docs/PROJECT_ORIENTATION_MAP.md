@@ -8,7 +8,7 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `d1da01a` / `origin/main` / clean.
+- **HEAD:** `8e4e27b` / `origin/main` / clean.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
 - **Last closed:**
   - `5050de5` — SRG→social_resonance live chain.
@@ -16,7 +16,8 @@ overrides.
   - `0dbd9e0` — geometric shaping proven to affect query ranking.
   - `a4acdc2` — relational prominence shaping (default-off `TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1`; `ambiguity_tolerance` → relational lane weight only, capped ≤ 0.99; no top_k / stance / output / identity / archive).
   - `d1da01a` — SRG same-band per-agent scoping fix (correctness): the same-band retrieval bonus now reads/writes the last-ingest band per `(workspace_id, agent_id)`, fixing the old fabric-wide scalar's cross-agent / cross-workspace scoring influence; ×1.08 multiplier, formula, and `TORMENT_SRG_ENABLE` unchanged; does **not** open R-field.
-- **Active next (SELECTED — frame filed, no code yet):** **participation guidance** (`social_resonance → visible advisory stance`). Frame: `docs/TORMENT_PARTICIPATION_GUIDANCE_FRAME_v0.1.md` — principle `participation_guidance ≠ output control`; a single visible advisory field only (never suppress / veto / block / `response=None`; does not touch `ok`/`allowed`/`path`/`result_code`/`review.blocked`; default-off; character social route). **Frame only — no code authorized;** a narrow default-off implementation proposal proceeds only if Hilmir/GPT select it after review, with Codex challenging the boundary. Parked operator/Codex-gated alternatives: R-field (unblocked, not selected), the next cognition layer (Document B / Layer-1 private thinking). The geometric / ephemeral MemoryPlan-shaping vein is harvested.
+  - `8e4e27b` — advisory participation guidance v1 (default-off `TORMENT_PARTICIPATION_GUIDANCE_V1`): a single `participation_guidance` candidate (`none` / `respond_briefly_candidate` / `defer_candidate` / `silent_observe_candidate`) surfaced **only** on `ThinkingResult.to_dict()` / Spine `audit["advisory_thinking"]`. Guidance, not control — no `/agent/query` exposure, no `agent_loop.py`, no `review.blocked`, no output suppression / `response_text=None`, no memory writes / persistence. Frame: `docs/TORMENT_PARTICIPATION_GUIDANCE_FRAME_v0.1.md`.
+- **Active next:** participation guidance **v1 implemented** (`8e4e27b`, default-off `TORMENT_PARTICIPATION_GUIDANCE_V1`, advisory-audit-only; principle `participation_guidance ≠ output control`; frame `docs/TORMENT_PARTICIPATION_GUIDANCE_FRAME_v0.1.md`). Next is **unselected** — a source-first direction check among: enable/measure participation guidance behind the flag; the next cognition layer (Document B / Layer-1 private thinking, gated); or R-field (unblocked, not selected). All are operator/Codex-gated. The geometric / ephemeral MemoryPlan-shaping vein is harvested. Claude proposes from source; GPT steers; Codex challenges boundary-bearing choices; Hilmir resolves true operator forks.
 - **Parked / not auto-open:**
   - database / substrate / design / product-selection / schema / storage / migration;
   - GitHub issues #54 / #55 — database-boundary evidence only;
