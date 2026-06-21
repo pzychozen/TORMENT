@@ -111,10 +111,19 @@ def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
             except Exception as e:
                 logger.debug("Character state extraction failed (non-fatal): %s", e)
 
+        # SRG relational signal (Slice B): pass the agent-level signal through
+        # when present. None (SRG off, or no ingest yet) ⇒ unchanged behavior.
+        _srg_rel = None
+        try:
+            _srg_rel = fabric.get_srg_relational_signal(workspace_id, agent_id)
+        except Exception:
+            _srg_rel = None
+
         return harvest_geometric_context(
             character_state=char_state,
             tri_mod=tri_mod,
             live_social=live_social,
+            srg_relational=_srg_rel,
         )
     except Exception as e:
         logger.debug("Geometric context harvest failed (non-fatal): %s", e)

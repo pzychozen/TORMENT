@@ -23,6 +23,7 @@ def harvest_geometric_context(
     tri_mod: Optional[Dict[str, Any]] = None,
     coherence_summary: Optional[Dict[str, Any]] = None,
     live_social: bool = False,
+    srg_relational: Optional[float] = None,
 ) -> Optional[GeometricStanceContext]:
     """Build a GeometricStanceContext from available runtime state.
 
@@ -127,6 +128,15 @@ def harvest_geometric_context(
         surv = tri_mod.get("survival_steps", 0.0)
         surv_norm = _clamp(surv / 2.0)  # surv_ema range 0–3, normalize to 0–1
         social_resonance = 0.5 * social_resonance + 0.3 * coherence + 0.2 * surv_norm
+
+    # ── SRG relational blend (Slice B, advisory) ─────────────────────
+    # When the agent-level SRG relational signal is available, let it lightly
+    # inform social_resonance — it informs, never dominates. ``None`` (SRG off,
+    # or no ingest yet) reproduces the exact prior behavior. The input is
+    # clamped so the blended output stays bounded 0.0–1.0.
+    if srg_relational is not None:
+        _srg = _clamp(float(srg_relational))
+        social_resonance = _clamp(0.85 * social_resonance + 0.15 * _srg)
 
     return GeometricStanceContext(
         coherence=round(coherence, 4),
