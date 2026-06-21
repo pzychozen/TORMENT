@@ -719,6 +719,12 @@ class TormentFabric:
         # enabled; stays empty otherwise. Not persisted, not authoritative, not
         # exposed via API/debug. Consumed by nothing yet (primitive only).
         self._srg_relational_ema: Dict[Tuple[str, str], float] = {}
+        # Per-agent last-ingested SRG R band, keyed by (workspace_id, agent_id)
+        # — same key discipline as the relational EMA above. Replaces a former
+        # fabric-wide scalar that let one agent's last-ingest band influence
+        # another agent's same-band query/trace scoring inside a shared fabric
+        # instance. In-memory only; not persisted, not authoritative, not exposed.
+        self._srg_last_ingest_band_by_agent: Dict[Tuple[str, str], int] = {}
 
         # Hivemind collective resonance (opt-in) — disabled by default
         self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -2584,8 +2590,10 @@ class TormentFabric:
                 is_seed=False,
             )
             _srg_dict = _srg_state.to_dict()
-            # Track last-ingested band for same-band scoring in query path
-            self._srg_last_ingest_band = _srg_state.R_band
+            # Track last-ingested band PER AGENT for same-band scoring in the
+            # query/trace path, keyed by (workspace_id, agent_id) so one agent's
+            # ingest cannot influence another agent's same-band scoring.
+            self._srg_last_ingest_band_by_agent[(workspace_id, agent_id)] = _srg_state.R_band
 
             # SRG relational signal (Slice A, advisory): update the per-agent EMA
             # of this memory's L_amplitude. First ingest seeds it; later ingests
@@ -4234,8 +4242,10 @@ class TormentFabric:
             if self._srg_enable:
                 _srg_hit = (h.get("payload") or {}).get("srg")
                 if _srg_hit:
-                    # Same-band resonance: 8% boost
-                    if hasattr(self, "_srg_last_ingest_band") and _srg_hit.get("R_band") == self._srg_last_ingest_band:
+                    # Same-band resonance: 8% boost — compare against THIS agent's
+                    # last-ingested band only (keyed by (workspace_id, agent_id)).
+                    _srg_last_band = self._srg_last_ingest_band_by_agent.get((workspace_id, agent_id))
+                    if _srg_last_band is not None and _srg_hit.get("R_band") == _srg_last_band:
                         final *= 1.08
                     # Crystal identity anchor: 5% boost
                     if _srg_hit.get("is_crystal", False):
@@ -6553,8 +6563,10 @@ class TormentFabric:
             if self._srg_enable:
                 _srg_hit = hit.get("srg")
                 if _srg_hit and isinstance(_srg_hit, dict):
-                    # Same-band resonance: 8% boost
-                    if hasattr(self, "_srg_last_ingest_band") and _srg_hit.get("R_band") == self._srg_last_ingest_band:
+                    # Same-band resonance: 8% boost — compare against THIS agent's
+                    # last-ingested band only (keyed by (workspace_id, agent_id)).
+                    _srg_last_band = self._srg_last_ingest_band_by_agent.get((workspace_id, agent_id))
+                    if _srg_last_band is not None and _srg_hit.get("R_band") == _srg_last_band:
                         _srg_same_band = 1.08
                         final *= _srg_same_band
                     # Crystal identity anchor: 5% boost

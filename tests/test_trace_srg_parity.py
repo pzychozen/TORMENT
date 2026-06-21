@@ -67,7 +67,7 @@ class TestTraceSRGParity(unittest.TestCase):
             srg_payload={"R_band": "B", "is_crystal": False, "heartbeat_class": "C"},
         )
         # Set last ingest band AFTER ingest (ingest overwrites this attribute)
-        self.fabric._srg_last_ingest_band = "B"
+        self.fabric._srg_last_ingest_band_by_agent[("ws", "agent")] = "B"
 
         t = self.fabric.trace(
             workspace_id="ws", agent_id="agent",
@@ -144,7 +144,7 @@ class TestTraceSRGParity(unittest.TestCase):
             srg_payload={"R_band": "A", "is_crystal": True, "heartbeat_class": "A"},
         )
         # Set last ingest band AFTER ingest
-        self.fabric._srg_last_ingest_band = "A"
+        self.fabric._srg_last_ingest_band_by_agent[("ws", "agent")] = "A"
 
         # Get score without SRG (disable temporarily)
         self.fabric._srg_enable = False
@@ -221,7 +221,7 @@ class TestTraceSRGParity(unittest.TestCase):
             step=20,
             srg_payload={"R_band": "A", "is_crystal": True, "heartbeat_class": "A"},
         )
-        self.fabric._srg_last_ingest_band = "A"
+        self.fabric._srg_last_ingest_band_by_agent[("ws", "agent")] = "A"
 
         t2 = self.fabric.trace(
             workspace_id="ws", agent_id="agent",
