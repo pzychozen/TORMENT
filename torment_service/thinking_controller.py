@@ -227,6 +227,17 @@ _GEOMETRIC_MEMORY_SHAPING_V1_ENABLE = os.environ.get("TORMENT_GEOMETRIC_MEMORY_S
     "", "0", "false", "no", "off",
 )
 
+# Geometric relational-prominence shaping v1 — sibling of the geometric shaping
+# above, on its OWN DEFAULT-OFF flag. Opt-in, plan-boundary-only shaping of the
+# already-enabled ``relational`` lane weight only, driven by ``ambiguity_tolerance``
+# (seed-basin health). This changes relational *prominence among already-retrieved
+# candidates* — it does NOT widen recall (``top_k`` is untouched), and does not
+# touch core/deep/archive/identity lanes, stance, or output. No-op when the flag
+# is off OR ``geometric_context is None``. Empty string is treated as OFF.
+_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE = os.environ.get(
+    "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1", "0"
+).strip() not in ("", "0", "false", "no", "off")
+
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
@@ -550,6 +561,12 @@ class ThinkingController:
         # default-flag / geo-None plan stays byte-identical to Slices 1-3.
         self._apply_geometric_memory_shaping_v1(plan, state, geometric_context)
 
+        # Geometric relational-prominence shaping v1 (default-off, separate flag):
+        # nudges ONLY the already-enabled relational lane weight from
+        # ambiguity_tolerance. No-op unless its own flag is on AND geometric_context
+        # is supplied. Disjoint from the core/deep shaping above — relational only.
+        self._apply_geometric_relational_prominence_shaping_v1(plan, state, geometric_context)
+
         return plan
 
     def _apply_cognition_shaping_v2(
@@ -693,6 +710,62 @@ class ThinkingController:
         current_deep_w = plan.weight_by_lane.get("deep", 0.0)
         if plan.retrieve_deep and current_deep_w > 0.0:
             plan.weight_by_lane["deep"] = _clamp(current_deep_w * mult, 0.1, 2.0)
+
+    def _apply_geometric_relational_prominence_shaping_v1(
+        self,
+        plan: MemoryPlan,
+        state: EphemeralCognitionState,
+        geometric_context: Optional[GeometricStanceContext] = None,
+    ) -> None:
+        """Geometric relational-prominence shaping v1 — sibling of
+        ``_apply_geometric_memory_shaping_v1``, on its own default-off flag.
+
+        When the live kernel ``geometric_context`` is present, lightly shape the
+        already-enabled ``relational`` lane *weight* from ``ambiguity_tolerance``
+        (seed-basin health). This changes how strongly already-retrieved
+        relational memory RANKS — relational *prominence* — it does NOT widen
+        recall: ``top_k`` is never touched, so no new memory is pulled in. This
+        is guidance, not control:
+
+          * No-op unless ``TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1``
+            is enabled (separate flag from the core/deep geometric shaping).
+          * No-op when ``geometric_context is None``.
+          * Shapes ONLY ``weight_by_lane["relational"]`` and ONLY when that lane
+            is already enabled this turn (``retrieve_relational`` and weight > 0).
+            Never creates/enables the lane; never touches core / deep / archive /
+            collective, ``top_k_by_lane``, retrieval booleans, ``safety_constraints``
+            or ``max_token_budget``.
+          * Governance-/identity-sensitive turns are skipped entirely (parity with
+            the core/deep helper).
+          * Bounded: ``t = ambiguity_tolerance`` in [0, 1] maps to a multiplier
+            ``clamp(0.85 + 0.30*t, 0.85, 1.15)`` (neutral at t=0.5); the shaped
+            weight is re-clamped to ``[0.1, 2.0]`` and then held under a fixed
+            peripheral ceiling (<= 0.99) so a peripheral lane never reaches core's
+            base prominence (1.0) — peripheral stays peripheral, without coupling
+            dynamically to the core helper.
+        """
+        if not _GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE:
+            return
+        if geometric_context is None:
+            return
+        # Safety parity with the core/deep helper: skip governed/identity turns.
+        if state.governance_sensitive or state.identity_sensitive:
+            return
+
+        def _clamp(v: float, lo: float, hi: float) -> float:
+            return lo if v < lo else (hi if v > hi else v)
+
+        # relational lane only; shape only when already enabled this turn.
+        current_relational_w = plan.weight_by_lane.get("relational", 0.0)
+        if not (plan.retrieve_relational and current_relational_w > 0.0):
+            return
+
+        tol = _clamp(float(geometric_context.ambiguity_tolerance), 0.0, 1.0)
+        mult = _clamp(0.85 + 0.30 * tol, 0.85, 1.15)
+        shaped = _clamp(current_relational_w * mult, 0.1, 2.0)
+        # Peripheral ceiling: relational never reaches core's base prominence (1.0).
+        _PERIPHERAL_CEILING = 0.99
+        plan.weight_by_lane["relational"] = min(shaped, _PERIPHERAL_CEILING)
 
     def choose_action(
         self,

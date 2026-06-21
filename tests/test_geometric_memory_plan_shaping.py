@@ -103,6 +103,28 @@ def _expected_mult(coherence, stability) -> float:
     return max(0.85, min(1.15, 0.85 + 0.30 * settled))
 
 
+# --- relational-prominence shaping v1 helpers ------------------------------
+
+_FLAG_REL = "_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE"
+_PERIPHERAL_CEILING = 0.99
+
+
+def _geo_amb(ambiguity_tolerance, coherence=0.5, stability=0.5) -> GeometricStanceContext:
+    """Geometric context with a chosen ambiguity_tolerance (drives the relational
+    slice); coherence/stability default to neutral (they drive the core/deep slice)."""
+    return GeometricStanceContext(
+        coherence=coherence,
+        stability=stability,
+        identity_lock=0.5,
+        ambiguity_tolerance=ambiguity_tolerance,
+        social_resonance=0.5,
+    )
+
+
+def _rel_mult(tol) -> float:
+    return max(0.85, min(1.15, 0.85 + 0.30 * max(0.0, min(1.0, tol))))
+
+
 # ---------------------------------------------------------------------------
 # (1) None / flag-off ⇒ no-op
 # ---------------------------------------------------------------------------
@@ -407,6 +429,175 @@ def test_geometric_shaping_changes_query_ranking_pressure(tmp_path, monkeypatch)
 
     # ranking pressure: core-vs-relational gap shifted toward core under shaping.
     assert (shaped["private"] / shaped["shared"]) > (base["private"] / base["shared"])
+
+
+# ---------------------------------------------------------------------------
+# (R) relational-prominence shaping v1 — ambiguity_tolerance → relational lane
+#     WEIGHT only. This is *prominence among already-retrieved candidates*, NOT
+#     breadth: top_k is never touched. Separate default-off flag; relational lane
+#     only; never core/deep/archive/identity; peripheral ceiling <= 0.99.
+# ---------------------------------------------------------------------------
+
+def test_relprom_flag_off_is_noop(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG_REL, False)
+    ctl = ThinkingController()
+    p = _plan(relational=0.85, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p, _state(), _geo_amb(0.95))
+    assert p.to_dict() == before.to_dict()
+
+
+def test_relprom_geo_none_is_noop(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(relational=0.85, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p, _state(), None)
+    assert p.to_dict() == before.to_dict()
+
+
+def test_relprom_disabled_relational_stays_disabled(monkeypatch):
+    """Never create/enable the relational lane when it is not already enabled."""
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(retrieve_relational=False)  # relational weight 0.0, lane not enabled
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(
+        p, _state(memory_need=False), _geo_amb(0.95)
+    )
+    assert p.weight_by_lane["relational"] == 0.0
+    assert p.retrieve_relational is False
+    assert p.to_dict() == before.to_dict()
+
+
+def test_relprom_governance_sensitive_skips(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(relational=0.85, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(
+        p, _state(governance_sensitive=True), _geo_amb(0.95)
+    )
+    assert p.to_dict() == before.to_dict()
+
+
+def test_relprom_identity_sensitive_skips(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(relational=0.85, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(
+        p, _state(identity_sensitive=True), _geo_amb(0.95)
+    )
+    assert p.to_dict() == before.to_dict()
+
+
+def test_relprom_neutral_tolerance_is_identity(monkeypatch):
+    """ambiguity_tolerance == 0.5 → multiplier 1.0 → relational unchanged."""
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(relational=0.85, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p, _state(), _geo_amb(0.5))
+    assert p.weight_by_lane["relational"] == pytest.approx(before.weight_by_lane["relational"])
+
+
+def test_relprom_direction_raises_and_lowers(monkeypatch):
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p_hi = _plan(relational=0.85, retrieve_relational=True)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p_hi, _state(), _geo_amb(0.95))
+    p_lo = _plan(relational=0.85, retrieve_relational=True)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p_lo, _state(), _geo_amb(0.05))
+    assert p_hi.weight_by_lane["relational"] > 0.85
+    assert p_lo.weight_by_lane["relational"] < 0.85
+    assert p_hi.weight_by_lane["relational"] == pytest.approx(min(0.85 * _rel_mult(0.95), _PERIPHERAL_CEILING))
+    assert p_lo.weight_by_lane["relational"] == pytest.approx(0.85 * _rel_mult(0.05))
+
+
+def test_relprom_peripheral_ceiling(monkeypatch):
+    """Shaped relational never reaches core's base prominence (1.0): capped <= 0.99."""
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    # synthetic high relational base so the multiplier would push above the ceiling.
+    p = _plan(relational=0.95, retrieve_relational=True)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p, _state(), _geo_amb(1.0))
+    # 0.95 * 1.15 = 1.0925 → capped at the peripheral ceiling.
+    assert p.weight_by_lane["relational"] == pytest.approx(_PERIPHERAL_CEILING)
+    assert p.weight_by_lane["relational"] <= _PERIPHERAL_CEILING + 1e-12
+
+
+def test_relprom_leaves_core_and_deep_untouched(monkeypatch):
+    """relational prominence ON, core/deep geometric shaping OFF → core/deep and
+    top_k are byte-identical; only relational weight moves."""
+    monkeypatch.setattr(tc, _FLAG, False)
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    ctl = ThinkingController()
+    p = _plan(core=1.0, deep=0.60, relational=0.85,
+              retrieve_deep=True, retrieve_relational=True)
+    before = copy.deepcopy(p)
+    ctl._apply_geometric_relational_prominence_shaping_v1(p, _state(), _geo_amb(0.95))
+    assert p.weight_by_lane["core"] == before.weight_by_lane["core"]
+    assert p.weight_by_lane["deep"] == before.weight_by_lane["deep"]
+    assert p.top_k_by_lane == before.top_k_by_lane
+    assert p.weight_by_lane["relational"] != before.weight_by_lane["relational"]
+
+
+def test_relprom_changes_query_relational_ranking(tmp_path, monkeypatch):
+    """Live proof: shaped relational weight reaches fabric.query ranking. Scope-keyed
+    (private/shared eids collide). core/deep shaping OFF, so the private/core hit is
+    the unchanged control."""
+    monkeypatch.setattr(tc, _FLAG, False)
+    monkeypatch.setattr(tc, _FLAG_REL, True)
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+
+    from torment_service.fabric import TormentFabric
+
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    fabric.get_workspace("ws")
+    fabric.create_agent("ws", "ag")
+    fabric.ingest(workspace_id="ws", agent_id="ag",
+                  text="my private routine notes about the water survey", step=10)
+    fabric.ingest(workspace_id="ws", agent_id="ag",
+                  text="our shared project notes about the water survey", step=11, scope="shared")
+
+    query_text = "what do we remember about the water survey notes"
+    ctl = ThinkingController()
+    frame = ctl.frame_task("ws", "ag", query_text)
+    mode = ctl.choose_mode(frame)
+    assert not frame.governance_sensitive and not frame.identity_sensitive
+
+    plan_base = ctl.build_memory_plan(frame, mode)  # geo None → relational unshaped
+    plan_shaped = ctl.build_memory_plan(frame, mode, geometric_context=_geo_amb(0.95))
+    assert plan_base.retrieve_relational, "relational lane disabled — no control hit"
+    rel_base_w = plan_base.weight_by_lane["relational"]
+    rel_shaped_w = plan_shaped.weight_by_lane["relational"]
+    assert rel_shaped_w > rel_base_w
+    # core/deep geometric shaping is OFF → core weight identical across plans.
+    assert plan_shaped.weight_by_lane["core"] == plan_base.weight_by_lane["core"]
+
+    def _mp(plan):
+        return {"top_k_by_lane": plan.top_k_by_lane, "weight_by_lane": plan.weight_by_lane}
+
+    def _scores_by_scope(query_result):
+        return {h.get("scope"): h["final_score"] for h in query_result.get("results", [])}
+
+    base = _scores_by_scope(fabric.query(workspace_id="ws", agent_id="ag",
+                                         query_text=query_text, top_k=20, memory_plan=_mp(plan_base)))
+    shaped = _scores_by_scope(fabric.query(workspace_id="ws", agent_id="ag",
+                                           query_text=query_text, top_k=20, memory_plan=_mp(plan_shaped)))
+
+    assert "private" in base and "shared" in base, "core/relational hit missing (base)"
+    assert "private" in shaped and "shared" in shaped, "core/relational hit missing (shaped)"
+
+    rel_ratio = rel_shaped_w / rel_base_w
+    # relational (shared) hit scaled by the relational-weight ratio...
+    assert shaped["shared"] == pytest.approx(base["shared"] * rel_ratio, rel=1e-3)
+    assert shaped["shared"] != pytest.approx(base["shared"], rel=1e-3)
+    # ...core (private) hit unchanged (core/deep shaping off — determinism guard)...
+    assert shaped["private"] == pytest.approx(base["private"], rel=1e-3)
+    # ...so relational prominence rose relative to core.
+    assert (shaped["shared"] / shaped["private"]) > (base["shared"] / base["private"])
 
 
 if __name__ == "__main__":
