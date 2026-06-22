@@ -10,7 +10,7 @@ direction confusion and to be reused in handoffs. **Not a gate, registry, roadma
 
 ## 1. Baseline
 
-- **HEAD / baseline:** `6e492a9` *test: clean CodeQL hygiene alerts*
+- **HEAD / baseline:** `93f6519` *docs(project): record R-surface inventory closure*
 - **Expected Windows state:** `main...origin/main` (clean)
 - **Board status:** living checklist; update the rows + the handoff block each session.
 
@@ -24,13 +24,21 @@ exist, zero build.
 
 ## 3. Current active direction
 
-- CodeQL hygiene slice **closed** (`6e492a9`; 4 alerts fixed, #996 intentionally left).
 - **This board is the current administrative bridge.**
-- **Most recent lane:** the **ephemeral structured cognition** lane (see §5 Active Lane Contract) —
-  **Slice 1 CLOSED** (`4e164c3`) and **Slice 2 IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`).
-  The lane is now **paused / PARTIAL**: further shaping rules, live archive/collective shaping, and any
-  default-on decision are deferred. **No active implementation lane is currently open** — next direction
-  is the §4 next-row selection.
+- **Ephemeral structured cognition** lane (see §5) — **Slice 1 CLOSED** (`4e164c3`) and **Slice 2
+  IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`); lane **paused / PARTIAL** (further rules,
+  live archive/collective shaping, and any default-on decision deferred).
+- **Recently closed since then (record only, no lane reopened):**
+  - participation guidance **v1** — advisory-only, implemented + measured, default-off
+    `TORMENT_PARTICIPATION_GUIDANCE_V1` (`8e4e27b`, `9e0cbca`; §0 record `d73c148`).
+  - **D** motion-keeper — tests-only `query().explain` shape lock vs `trace()` decomposition (`022c86e`).
+  - **A0** Gate D readiness review — **DEFER / NO-OPEN** recorded (`d8a65e3`).
+  - **SRG R-surface authority-fencing inventory** — docs-only; existing `R` / `R_band` / `is_crystal` /
+    `heartbeat_class` fenced as guidance/continuity, not authority; **R-field NOT opened**, tests not
+    authorized (`d1b357b`; §0 record `93f6519`).
+- **Current posture: HOLD.** No active implementation lane is open. The next move is an **operator/trio
+  fork**, not a board-driven next-row selection — see `PROJECT_ORIENTATION_MAP.md` §0 (the live work
+  order and fork list).
 
 ---
 
@@ -43,8 +51,8 @@ exist, zero build.
 | /thinking/debug read-only surface | HARDENED-FOR-NOW | Debug endpoint returns full chain (intentional, ephemeral, non-persisted); handler read-only-locked | `app.py:2667`; `TestDebugEndpointReadOnlyCompanion`; `e9212a7` | none |
 | Spine thinking-alignment buffer | HARDENED-FOR-NOW | Bounded (200), in-memory, content-free advisory buffer + read endpoint. **Live population now wired (`679b403`):** the advisory live seam in `submit_task()` records the existing content-free `alignment` dict only into the same max-200 in-memory ring; `/spine/alignment` can now return non-empty `records` via the existing field (read surface/schema unchanged). No raw input/prompt/response/memory/seed/hidden CoT; no retrieval/prompt/persona/weight/identity/output-control effects; `app.py` docstring corrected in the same commit | `spine.py`; `test_spine_thinking_alignment_buffer.py`; `805a0ba`, `679b403` | none |
 | Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`)** routing scaffold; **Slice 2 IMPLEMENTED (`06a9536`)** — first *gated, reversible* retrieval-shaping rule (lane no longer scaffold-only). Default-off behind `TORMENT_COGNITION_SHAPING_V2`; when on: `deep.top_k` +1 (cap 4, never reduce) iff `ambiguity_score >= 0.50` **and** deep already enabled. Plan-boundary, `top_k_by_lane["deep"]` only. Tests-locked | `thinking_controller.py` (`_apply_cognition_shaping_v2`); `test_ephemeral_cognition_state.py`; `4e164c3`, `06a9536` | lane paused; further rules / archive-collective live shaping / default-on remain deferred (§5) |
-| Candidate Gate D / Layer-1 private thinking | FRAMED | Eligible substrate-independent interior slice; **framed only**, pending operator selection | cognition roadmap §9; comparison frame `5472639`; pointer `3659089` | full Gate D remains unopened; proceed only via separately bounded slices |
-| Envelope Audit | FRAMED | Requirement only (Document B §7); no module; only a coarse `requires_self_review` flag exists | Document B §7; `..._ENVELOPE_AUDIT_OBSERVABILITY_SHELL_DEFINITION_v0.1.md` | scoped as observability shell → **DEFER** (duplicates ReflectionTrace or needs a model-API track); Gate D unopened, operator/Codex-gated |
+| Candidate Gate D / Layer-1 private thinking | FRAMED | Eligible substrate-independent interior slice; **framed only**, pending operator selection | cognition roadmap §9; comparison frame `5472639`; pointer `3659089` | A0 readiness review (`d8a65e3`) concluded **DEFER / NO-OPEN** — valuable Layer-1 / Envelope-Audit version needs model-API/substrate authorization; full Gate D remains unopened |
+| Envelope Audit | FRAMED | Requirement only (Document B §7); no module; only a coarse `requires_self_review` flag exists | Document B §7; `..._ENVELOPE_AUDIT_OBSERVABILITY_SHELL_DEFINITION_v0.1.md` | scoped as observability shell → **DEFER** (duplicates ReflectionTrace or needs a model-API track); Gate D unopened, operator/Codex-gated; A0 (`d8a65e3`) reaffirmed **DEFER** |
 | Dream / incubation / Regime-B | DEFERRED | Offline reflection; no runtime exists; explicitly deferred + substrate-coupled | Document B §5; pre-substrate §3 | none; last |
 | Private cognition / Document B chamber interior | FRAMED | Requirement doctrine **complete (promoted 2026-06-13)**; **zero runtime** | `TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` | tied to Gate D decision |
 | Guided memory layer | PARTIAL | Live retrieval/prompt-shaping + observability hardened; conformance of its automatic inputs only framed (Gate 4) | memory-to-prompt v0.2.x; `character_context`; guidance-without-coercion map | none clean (its open Q = Gate 4) |
