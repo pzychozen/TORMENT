@@ -7,28 +7,27 @@ SCOPE (read carefully):
     * It is **not** a live evaluator / model / provider integration. The
       response-generation path is inspected by source/AST only; no model is
       called and no llm_client is exercised.
-    * Updated finding (post ``audit_admitted_context_items`` staging seam):
-      ``agent_loop.TurnResult`` can now STAGE the final reviewed ``response_text``
-      (via ``execution_outcome``) alongside caller-supplied candidate admitted
-      context (``audit_admitted_context_items``) — so the two halves CAN coexist
-      on ``TurnResult``. The invariant this file now guards is therefore **no
-      audit packet sidecar is built or attached in production**, NOT "no
-      response/context coexistence anywhere". Staging is observation-only; it
-      selects no sink and proves no same-turn provenance.
+    * Updated finding (post ``audit_evidence_packet`` sink slice): the audit
+      packet observation sink is now SELECTED on ``agent_loop.TurnResult``.
+      ``AgentRunner.run_turn`` builds an observation-only packet from explicit
+      inputs — the final reviewed ``execution_outcome.response_text`` plus the
+      caller-supplied ``audit_admitted_context_items`` — via the item-core
+      builder ``build_audit_evidence_sidecar_from_items`` ONLY. The invariant
+      this file now guards is that the packet is **observation-only**: returned
+      on ``TurnResult`` only, built from explicit inputs only (no
+      assembled-context wrapper; no ``selected_admitted_items`` /
+      ``assemble_context`` / ``AssembledContext`` / extractor / packet-module
+      import), and never routed into prompt / review / output / ingest / fabric /
+      model-visible context. AgentRunner proves no same-turn provenance.
     * Endpoint surfaces are unchanged: ``app.py::retrieve_assembled``
       (``/retrieve``) holds assembler prompt context (``assemble_context`` /
       ``assembled.to_dict()``) but generates no ``response_text``;
       ``app.py::query`` (``/agent/query``) returns ``fabric.query(...)``, not
-      generated text. ``AgentRunner.run_turn`` / ``_execute`` generate/review
-      ``response_text`` and now accept the staging field, but still
-      import/build no assembler context and no audit packet.
-    * Explicitly NOT covered / NOT claimed: this does not select any surface as
-      the future packet sink; it does not claim ``response_text`` and assembler
-      context never coexist (``TurnResult`` staging is the explicit exception);
-      and it does not assert any live response path uses assembled context.
-
-The next implementation step after this characterization would CHOOSE or CREATE
-an actual sink, and therefore requires a separate review/ratification.
+      generated text. No endpoint builds or attaches the audit packet; the sink
+      lives only on ``TurnResult``.
+    * Explicitly NOT covered / NOT claimed: this does not wire any endpoint to
+      the packet, does not assert same-turn provenance, and does not claim the
+      packet confers authority / control / persistence.
 
 All assertions use AST / source inspection only (files located via ``__file__``);
 the module imports no ``torment_service`` code and exercises no runtime path.
@@ -122,10 +121,10 @@ _ASSEMBLER_CONTEXT_NAMES = {"assemble_context", "AssembledContext", "assembled_t
 
 class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
     """AgentRunner.run_turn / _execute generate+review response_text but
-    reference no assembler prompt context. (The staging seam now lets the caller
-    supply candidate admitted context via ``audit_admitted_context_items``, but
-    AgentRunner itself still imports/builds no assembler context and no packet —
-    see test_agent_runner_stages_admitted_context_but_builds_no_packet.)"""
+    reference no assembler prompt context. (AgentRunner now also builds an
+    observation-only audit packet via the item-core builder — see
+    test_agent_runner_builds_observation_only_packet_via_item_core — but still
+    imports/builds no assembler context.)"""
 
     def test_agent_runner_has_response_generation_but_no_assembled_context(self):
         tree = _parse("agent_loop.py")
@@ -151,25 +150,27 @@ class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
             ),
         )
 
-    def test_agent_runner_stages_admitted_context_but_builds_no_packet(self):
-        # Post-staging-seam invariant: AgentRunner can STAGE caller-supplied
-        # candidate admitted context (audit_admitted_context_items) but builds /
-        # attaches NO audit packet — no packet / sidecar / extractor builder is
-        # referenced anywhere in agent_loop.py.
+    def test_agent_runner_builds_observation_only_packet_via_item_core(self):
+        # Post-sink slice: AgentRunner now builds an observation-only audit packet
+        # on TurnResult via the item-core builder ONLY. It still references no
+        # assembler context / extractor / packet module and does not call the
+        # assembled-context wrapper.
         tree = _parse("agent_loop.py")
-        runner = _class(tree, "AgentRunner")
-        run_turn = _method(runner, "run_turn")
-        self.assertIn(
-            "audit_admitted_context_items", _idents(run_turn),
-            "expected the staging field on AgentRunner.run_turn",
-        )
         module_idents = _idents(tree)
-        for builder in ("build_audit_evidence_packet", "selected_admitted_items",
-                        "build_audit_evidence_sidecar_from_items",
-                        "build_audit_evidence_sidecar_from_assembled_context"):
+        self.assertIn(
+            "build_audit_evidence_sidecar_from_items", module_idents,
+            "expected the item-core builder reference",
+        )
+        self.assertIn(
+            "audit_evidence_packet", module_idents,
+            "expected the observation-only packet field",
+        )
+        for forbidden in ("build_audit_evidence_sidecar_from_assembled_context",
+                          "build_audit_evidence_packet", "selected_admitted_items",
+                          "assemble_context", "AssembledContext"):
             self.assertNotIn(
-                builder, module_idents,
-                msg=f"agent_loop.py references packet builder: {builder}",
+                forbidden, module_idents,
+                msg=f"agent_loop.py references forbidden builder/context: {forbidden}",
             )
 
 

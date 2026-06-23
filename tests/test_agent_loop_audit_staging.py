@@ -150,36 +150,46 @@ class TestSourceGuards(unittest.TestCase):
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                     and n.name == "run_turn")
 
-    def test_run_turn_passes_items_only_into_turnresult(self):
+    def test_run_turn_routes_items_only_to_packet_builder_and_turnresult(self):
+        # Post-sink slice: the staged items now also feed the observation-only
+        # packet builder. They must reach ONLY (a) the item-core packet builder
+        # and (b) the TurnResult construction — never fabric / llm / review /
+        # ingest / TurnContext / metadata calls.
         rt = self._run_turn_node(self._tree())
-        # The staged param is READ exactly once in the body — the pass-through.
-        load_names = [
-            n for n in ast.walk(rt)
-            if isinstance(n, ast.Name) and n.id == "audit_admitted_context_items"
-            and isinstance(n.ctx, ast.Load)
-        ]
-        self.assertEqual(
-            len(load_names), 1,
-            "audit_admitted_context_items must be read exactly once (TurnResult pass-through)",
-        )
-        # ...and that single read is the value of the TurnResult(...) keyword.
-        found = False
+        receivers = set()
         for n in ast.walk(rt):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "TurnResult":
+            if isinstance(n, ast.Call):
+                passed = []
+                for a in n.args:
+                    if isinstance(a, ast.Name):
+                        passed.append(a.id)
                 for kw in n.keywords:
-                    if (kw.arg == "audit_admitted_context_items"
-                            and isinstance(kw.value, ast.Name)
-                            and kw.value.id == "audit_admitted_context_items"):
-                        found = True
-        self.assertTrue(found, "items must be passed only via the TurnResult(...) keyword")
+                    if isinstance(kw.value, ast.Name):
+                        passed.append(kw.value.id)
+                if "audit_admitted_context_items" in passed:
+                    f = n.func
+                    receivers.add(
+                        f.id if isinstance(f, ast.Name)
+                        else f.attr if isinstance(f, ast.Attribute) else "?"
+                    )
+        allowed = {"build_audit_evidence_sidecar_from_items", "TurnResult"}
+        self.assertTrue(
+            receivers <= allowed,
+            msg=f"items routed to unexpected call(s): {sorted(receivers - allowed)}",
+        )
+        self.assertIn("TurnResult", receivers)
 
-    def test_agent_loop_does_not_import_audit_or_assembler_modules(self):
+    def test_agent_loop_imports_only_item_core_not_assembled_wrapper(self):
         tree = self._tree()
-        forbidden = {
-            "audit_evidence_sidecar", "audit_evidence_context",
-            "audit_evidence_packet", "retrieval_assembler",
+        # Post-sink slice: audit_evidence_sidecar IS now imported (the item-core
+        # builder is the ratified observation sink). The extractor / packet /
+        # assembler modules remain forbidden, and the assembled-context wrapper
+        # must NOT be imported or called.
+        forbidden_modules = {
+            "audit_evidence_context", "audit_evidence_packet", "retrieval_assembler",
         }
         import_leaves = set()
+        imported_names = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for n in node.names:
@@ -187,21 +197,24 @@ class TestSourceGuards(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     import_leaves.add(node.module.split(".")[-1])
+                for n in node.names:
+                    imported_names.add(n.name)
         self.assertEqual(
-            import_leaves & forbidden, set(),
-            msg=f"agent_loop.py imports forbidden module(s): {sorted(import_leaves & forbidden)}",
+            import_leaves & forbidden_modules, set(),
+            msg=f"agent_loop.py imports forbidden module(s): {sorted(import_leaves & forbidden_modules)}",
         )
-        # And no packet/sidecar/extractor/assembler build call appears.
+        self.assertIn("build_audit_evidence_sidecar_from_items", imported_names)
+        self.assertNotIn("build_audit_evidence_sidecar_from_assembled_context", imported_names)
         call_names = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 f = node.func
-                nm = (f.id if isinstance(f, ast.Name)
-                      else f.attr if isinstance(f, ast.Attribute) else "")
-                call_names.add(nm)
+                call_names.add(
+                    f.id if isinstance(f, ast.Name)
+                    else f.attr if isinstance(f, ast.Attribute) else ""
+                )
         for bad in ("build_audit_evidence_packet", "selected_admitted_items",
-                    "assemble_context", "build_audit_evidence_sidecar_from_items",
-                    "build_audit_evidence_sidecar_from_assembled_context"):
+                    "assemble_context", "build_audit_evidence_sidecar_from_assembled_context"):
             self.assertNotIn(bad, call_names, msg=f"agent_loop.py calls forbidden builder: {bad}")
 
 

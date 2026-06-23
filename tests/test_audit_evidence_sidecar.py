@@ -162,11 +162,17 @@ class TestSourceGuards(unittest.TestCase):
             msg=f"forbidden code references: {sorted(idents & self.FORBIDDEN_IDENTS)}",
         )
 
-    def test_no_production_module_imports_or_calls_sidecar(self):
+    def test_only_agent_loop_sink_imports_or_calls_sidecar(self):
+        # The sidecar is no longer called nowhere: AgentRunner / TurnResult is the
+        # ratified observation-only sink and may call the item-core builder
+        # (build_audit_evidence_sidecar_from_items). No OTHER production module may
+        # import or call the sidecar; agent_loop.py is the single permitted caller.
         svc_dir = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc_dir):
-            if not fn.endswith(".py") or fn == "audit_evidence_sidecar.py":
+            if not fn.endswith(".py") or fn in (
+                "audit_evidence_sidecar.py", "agent_loop.py",
+            ):
                 continue
             with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
                 src = fh.read()

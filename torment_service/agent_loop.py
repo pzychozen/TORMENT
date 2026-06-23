@@ -51,6 +51,7 @@ from .thinking_models import (
     TaskFrame,
 )
 from .reflection_trace import ReflectionTrace, build_reflection_trace
+from .audit_evidence_sidecar import build_audit_evidence_sidecar_from_items
 
 
 @dataclass
@@ -197,6 +198,15 @@ class TurnResult:
     # ingest summary, fabric calls, writer paths, or any model-visible context.
     # No packet is built or attached here, and no sink is selected.
     audit_admitted_context_items: Optional[List[Dict[str, Any]]] = None
+    # Observation-only audit evidence packet, built from the FINAL reviewed
+    # ``execution_outcome.response_text`` plus the caller-supplied candidate
+    # admitted context items (``audit_admitted_context_items``). AgentRunner
+    # makes NO same-turn provenance claim — the caller owns provenance. Returned
+    # on TurnResult ONLY; never routed into prompt / review / output / ingest /
+    # fabric / writer paths or any model-visible context, and it confers no
+    # authority / control / persistence. ``None`` when there is no reviewed
+    # response, no caller-supplied items, or the builder failed (fail-soft).
+    audit_evidence_packet: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +685,25 @@ class AgentRunner:
             confidence_need=bundle.task_frame.confidence_need,
         )
 
+        # Audit packet observation sink (observation-only). Built AFTER all
+        # review / ingest / fabric / gravity paths are complete, from the FINAL
+        # reviewed response_text (review may have revised it, or set it to None
+        # on block) plus the caller-supplied candidate admitted context items.
+        # No same-turn provenance claim; the caller owns provenance. Fail-soft:
+        # any builder error leaves the packet None and is NOT routed into
+        # prompts / review / ingest / fabric / metadata / output. Returned ONLY
+        # on TurnResult below.
+        _audit_evidence_packet: Optional[Dict[str, Any]] = None
+        _final_response_text = execution_outcome.response_text
+        if _final_response_text and audit_admitted_context_items is not None:
+            try:
+                _audit_evidence_packet = build_audit_evidence_sidecar_from_items(
+                    _final_response_text,
+                    audit_admitted_context_items,
+                )
+            except Exception:
+                _audit_evidence_packet = None
+
         return TurnResult(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -695,6 +724,9 @@ class AgentRunner:
             # No provenance claim; observation staging only — never routed into
             # cognition / review / prompt / ingest / fabric / writer paths.
             audit_admitted_context_items=audit_admitted_context_items,
+            # Observation-only audit packet built above from the final reviewed
+            # response_text + caller-supplied items (or None). Returned here only.
+            audit_evidence_packet=_audit_evidence_packet,
         )
 
     def enter_reflex(
