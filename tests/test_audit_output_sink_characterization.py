@@ -7,26 +7,25 @@ SCOPE (read carefully):
     * It is **not** a live evaluator / model / provider integration. The
       response-generation path is inspected by source/AST only; no model is
       called and no llm_client is exercised.
-    * Core finding encoded: there is currently **no single seam where both
-      halves of a future audit packet co-occur** —
-        - ``app.py::retrieve_assembled`` (``/retrieve``) holds the assembler
-          prompt context (``assemble_context`` / ``assembled.to_dict()``) but
-          generates no ``response_text``;
-        - ``agent_loop.AgentRunner.run_turn`` / ``_execute`` generate and review
-          ``response_text`` (via ``LLMClient.complete`` → ``ExecutionOutcome``)
-          but reference no ``assemble_context`` / ``AssembledContext`` /
-          ``assembled_text``;
-        - ``app.py::query`` (``/agent/query``) returns ``fabric.query(...)``,
-          not generated response text.
-      This is phrased as the **current co-occurrence gap**, not a permanent
-      prohibition and not a claim that the code must never change.
-    * Explicitly NOT covered / NOT claimed: this does not select ``TurnResult``
-      (or any surface) as the future sink; it does not claim that no endpoint
-      anywhere accepts ``blocks + response_text`` (only the two model-audit-
-      relevant candidates ``query`` and ``retrieve_assembled`` are inspected;
-      other post-response write-back endpoints are out of scope and are not
-      same-turn generation sinks); and it does not assert any live response path
-      uses assembled context.
+    * Updated finding (post ``audit_admitted_context_items`` staging seam):
+      ``agent_loop.TurnResult`` can now STAGE the final reviewed ``response_text``
+      (via ``execution_outcome``) alongside caller-supplied candidate admitted
+      context (``audit_admitted_context_items``) — so the two halves CAN coexist
+      on ``TurnResult``. The invariant this file now guards is therefore **no
+      audit packet sidecar is built or attached in production**, NOT "no
+      response/context coexistence anywhere". Staging is observation-only; it
+      selects no sink and proves no same-turn provenance.
+    * Endpoint surfaces are unchanged: ``app.py::retrieve_assembled``
+      (``/retrieve``) holds assembler prompt context (``assemble_context`` /
+      ``assembled.to_dict()``) but generates no ``response_text``;
+      ``app.py::query`` (``/agent/query``) returns ``fabric.query(...)``, not
+      generated text. ``AgentRunner.run_turn`` / ``_execute`` generate/review
+      ``response_text`` and now accept the staging field, but still
+      import/build no assembler context and no audit packet.
+    * Explicitly NOT covered / NOT claimed: this does not select any surface as
+      the future packet sink; it does not claim ``response_text`` and assembler
+      context never coexist (``TurnResult`` staging is the explicit exception);
+      and it does not assert any live response path uses assembled context.
 
 The next implementation step after this characterization would CHOOSE or CREATE
 an actual sink, and therefore requires a separate review/ratification.
@@ -123,8 +122,10 @@ _ASSEMBLER_CONTEXT_NAMES = {"assemble_context", "AssembledContext", "assembled_t
 
 class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
     """AgentRunner.run_turn / _execute generate+review response_text but
-    reference no assembler prompt context — the current co-occurrence gap on
-    the response-generation side (not a permanent prohibition)."""
+    reference no assembler prompt context. (The staging seam now lets the caller
+    supply candidate admitted context via ``audit_admitted_context_items``, but
+    AgentRunner itself still imports/builds no assembler context and no packet —
+    see test_agent_runner_stages_admitted_context_but_builds_no_packet.)"""
 
     def test_agent_runner_has_response_generation_but_no_assembled_context(self):
         tree = _parse("agent_loop.py")
@@ -149,6 +150,27 @@ class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
                 f"appeared in AgentRunner.run_turn/_execute: {sorted(leaked)}"
             ),
         )
+
+    def test_agent_runner_stages_admitted_context_but_builds_no_packet(self):
+        # Post-staging-seam invariant: AgentRunner can STAGE caller-supplied
+        # candidate admitted context (audit_admitted_context_items) but builds /
+        # attaches NO audit packet — no packet / sidecar / extractor builder is
+        # referenced anywhere in agent_loop.py.
+        tree = _parse("agent_loop.py")
+        runner = _class(tree, "AgentRunner")
+        run_turn = _method(runner, "run_turn")
+        self.assertIn(
+            "audit_admitted_context_items", _idents(run_turn),
+            "expected the staging field on AgentRunner.run_turn",
+        )
+        module_idents = _idents(tree)
+        for builder in ("build_audit_evidence_packet", "selected_admitted_items",
+                        "build_audit_evidence_sidecar_from_items",
+                        "build_audit_evidence_sidecar_from_assembled_context"):
+            self.assertNotIn(
+                builder, module_idents,
+                msg=f"agent_loop.py references packet builder: {builder}",
+            )
 
 
 class TestRetrieveAssembledHasContextButNoGeneration(unittest.TestCase):

@@ -188,6 +188,15 @@ class TurnResult:
     # inside this module, never placed on TurnContext/metadata, and never
     # routed to prompts, retrieval, fabric, writers, or model-visible context.
     reflection_trace: Optional[ReflectionTrace] = None
+    # Caller-supplied candidate admitted context items, staged for a FUTURE
+    # audit-evidence packet (observation staging seam only). AgentRunner does
+    # NOT prove same-turn provenance — these are caller-supplied candidate
+    # admitted context, not a verified same-turn model-visible record. Returned
+    # on TurnResult ONLY; never placed on TurnContext, metadata,
+    # ExecutionOutcome, review input, the LLM system prompt / messages, the
+    # ingest summary, fabric calls, writer paths, or any model-visible context.
+    # No packet is built or attached here, and no sink is selected.
+    audit_admitted_context_items: Optional[List[Dict[str, Any]]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +468,18 @@ class AgentRunner:
         agent_id: str,
         observation: Observation,
         step: int,
+        *,
+        audit_admitted_context_items: Optional[List[Dict[str, Any]]] = None,
     ) -> TurnResult:
-        """Execute one full agent turn through all 8 phases."""
+        """Execute one full agent turn through all 8 phases.
+
+        ``audit_admitted_context_items`` (keyword-only, optional) is
+        caller-supplied candidate admitted context staged for a future
+        audit-evidence packet. AgentRunner does NOT prove same-turn provenance;
+        it returns the value on ``TurnResult.audit_admitted_context_items`` only
+        and never routes it into cognition, review, prompts, ingest, fabric,
+        writers, or any model-visible context. No packet is built here.
+        """
         # Phase 1: Observe — input has arrived. Nothing to do here
         # beyond acknowledging the observation; kept explicit so the
         # phase seam is visible.
@@ -672,6 +691,10 @@ class AgentRunner:
             ingest_attempted=ingest_attempted,
             metadata=turn_metadata,
             reflection_trace=_reflection_trace,
+            # Pass caller-supplied candidate admitted context through unchanged.
+            # No provenance claim; observation staging only — never routed into
+            # cognition / review / prompt / ingest / fabric / writer paths.
+            audit_admitted_context_items=audit_admitted_context_items,
         )
 
     def enter_reflex(
