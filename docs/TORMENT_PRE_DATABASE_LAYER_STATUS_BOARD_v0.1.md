@@ -10,7 +10,7 @@ direction confusion and to be reused in handoffs. **Not a gate, registry, roadma
 
 ## 1. Baseline
 
-- **HEAD / baseline:** `93f6519` *docs(project): record R-surface inventory closure*
+- **HEAD / baseline:** `24bd268` *docs(project): record first model-api audit tests-only characterization*
 - **Expected Windows state:** `main...origin/main` (clean)
 - **Board status:** living checklist; update the rows + the handoff block each session.
 
@@ -36,6 +36,12 @@ exist, zero build.
   - **SRG R-surface authority-fencing inventory** — docs-only; existing `R` / `R_band` / `is_crystal` /
     `heartbeat_class` fenced as guidance/continuity, not authority; **R-field NOT opened**, tests not
     authorized (`d1b357b`; §0 record `93f6519`).
+  - **Model-API truthfulness audit — first tests-only characterization** — CLOSED-FOR-NOW; tests-only
+    negative-property characterization (audit-observation non-consumption / payload-absence; `srg.is_crystal`
+    anti-pattern by negation); **no** implementation / runtime / model call / schema / output control /
+    memory write / database / substrate; test commit `384bf95`, validation `6 passed in 0.56s`;
+    closure/status commit pending. (Lane framed across docs-only boundaries; see
+    `PROJECT_ORIENTATION_MAP.md` §0.)
 - **Current posture: HOLD.** No active implementation lane is open. The next move is an **operator/trio
   fork**, not a board-driven next-row selection — see `PROJECT_ORIENTATION_MAP.md` §0 (the live work
   order and fork list).
