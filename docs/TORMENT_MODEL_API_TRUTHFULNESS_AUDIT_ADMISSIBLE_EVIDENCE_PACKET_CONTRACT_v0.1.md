@@ -6,6 +6,8 @@
 
 **Lineage:** boundary frame (`444cc9b`) → constraints lock (`bb9bb16`) → admissibility boundary (`3621e58`) → proof-obligation/anti-pattern boundary (`d5a7ccb`) → test-characterization boundary (`722e796`) → first tests-only characterization CLOSED-FOR-NOW (`384bf95`) → smallest-real-evaluator-boundary proposal (Phase-8 sidecar seam PASS; C2 named the blocker) → Admissible Evidence Packet Contract proposal → Codex **PASS WITH REQUIRED CORRECTIONS** → this contract note (correction applied: "already-model-visible" tightened to *evidence actually admitted into the turn's response context*, never re-filtered raw hits, fresh retrieval, or audit-expanded context).
 
+**Amendment A (this revision, docs-only).** Adds **§4A**: a **coarse structural `block_type=="identity_context"` exclusion for audit-packet filtering only**, which recovers §4's seed / canon / identity categorical exclusion after raw markers are lost at assembly. It is **category, not authority** (not lifecycle / governance / identity truth; no new memory-row or sensitivity schema), **read-only / exclusion-only / never projected, persisted, or fed back**, and authorizes only a later, **separately reviewed pure builder/test slice** — **no production wiring**. Codex: **PASS WITH CONDITIONS** (applied in §4A). See §4A.
+
 **Core posture (governing).** TORMENT is an ethical memory system, not a control system. Memory may guide context, continuity, revision, symbolic integration, and history awareness. Memory must not seize authority, suppress output, trap an agent in prior state, make identity unrevisable, or create hidden output/personality pressure.
 
 **Governed by, amends in no way:** the boundary frame, constraints lock, admissibility boundary (C1–C8), proof-obligation/anti-pattern boundary, and test-characterization boundary; Document B; P4; the Ledger Observational-Boundary; Track-A; the MCP capability boundary.
@@ -45,7 +47,38 @@ The evaluator observes *what the response model already saw* for that turn — i
 
 Excluded regardless of caps or model-visibility: seed material; private memory; canon material; governance-sensitive / protected / `non_shareable` material; identity-sensitive material; private-cognition / dream material; hidden chain-of-thought; raw model reasoning; whole prompt-transcript reuse; whole-memory dumps; durable private-cognition material; unbounded packets; payload pass-through; and **any audit-packet field/key that a runtime reader could later silently honor like `srg.is_crystal`**.
 
-Sensitivity is determined by existing markers only (no new sensitivity schema): `scope=="private"`, `canon is True`, `kind`/`type` ∈ {seed, identity, core_identity}, `tier=="core_identity"`, `srg.is_crystal`, `governance.protected`, `non_shareable`, and deep/private-cognition flags (`deep_memory` / `spirit_return_mode`).
+Sensitivity is determined by existing markers only (no new sensitivity schema): `scope=="private"`, `canon is True`, `kind`/`type` ∈ {seed, identity, core_identity}, `tier=="core_identity"`, `srg.is_crystal`, `governance.protected`, `non_shareable`, and deep/private-cognition flags (`deep_memory` / `spirit_return_mode`). **One coarse structural exception is recorded in §4A** — `block_type=="identity_context"` — used **only** to recover this section's seed / canon / identity exclusion when those raw markers are dropped during assembly; it is an audit-filtering signal, **not a new marker and not a new sensitivity schema**.
+
+## 4A. Structural identity-context exclusion (v0.1 Amendment A)
+
+**Status of this amendment.** Docs-only. It extends §4's categorical exclusions with one **coarse structural exclusion signal for audit-packet filtering only**. It authorizes no code by itself; it authorizes only a later, separately reviewed **pure builder/test slice** (see §4A.7 and §8). **No production wiring.**
+
+**4A.1 — What is admitted.** A future packet filter MAY exclude a selected admitted item when its post-assembler `block_type == "identity_context"` (the value of `retrieval_assembler.BLOCK_IDENTITY`). This is a **coarse structural exclusion for audit-packet filtering only** — a filtering signal at the packet boundary, nothing more.
+
+**4A.2 — Why it is needed (marker loss at assembly).** `retrieval_assembler._classify_core_hit(...)` routes seed / canon / identity-like material into the identity block using signals such as `mtype == "seed_canon"`, `mtype == "drift_correction"`, a canon `identity_anchor`, any `canon == True`, `character_tier in {"core_identity", "derived_identity"}`, or `half_life >= 365.0`. But `_hit_to_block(...)` does **not** preserve many of those raw markers into `ContextBlock.metadata` — `canon`, `tier` / `character_tier`, `scope`, `governance`, `srg`, and `deep_memory` are dropped at conversion. Consequently some selected identity-context blocks are **marker-invisible after assembly**, and `block_type == "identity_context"` is the **surviving structural shadow** of the identity classification. Honoring it therefore **recovers the existing §4 seed / canon / identity categorical exclusion** that would otherwise leak once the raw markers are gone — it restores an existing exclusion, it adds no new exclusion category.
+
+**4A.3 — Category, not authority.** `block_type == "identity_context"` is an **assembler-assigned presentation category**, not a truth claim. It is explicitly:
+
+- **not** lifecycle truth (it neither asserts nor derives a `LifecycleStatus` / protected envelope);
+- **not** governance truth (it asserts nothing about `governance.*`);
+- **not** identity authority (it confers no identity / seed / canon authority and cannot make anything canonical or unrevisable);
+- **not** a new memory-row schema (it adds no field to any stored memory row);
+- **not** a new general sensitivity schema (it introduces no marker; §4's "sensitivity determined by existing markers only" rule is preserved, with this single structural exception recorded here explicitly so the rule stays honest).
+
+**4A.4 — Read-only, exclusion-only, never carried.** The signal is read for a boolean exclusion decision only. It is:
+
+- **read-only** and **exclusion-only**;
+- **never copied into packet output** (it is not a projected field; the §3 primitive projection is unchanged);
+- **never persisted**;
+- **never fed back** into retrieval scoring, `MemoryPlan`, prompt assembly, output / output-control, persistence, any writer path, the evaluator, any model call, provider / prompt, endpoint, database / substrate, dream / private cognition, Gate D, or Envelope Audit.
+
+This carries the §7 non-reentry / anti-control properties forward unchanged.
+
+**4A.5 — Effect on audit posture.** Excluding the whole identity-context category is deliberately **conservative / fail-closed**: it removes all identity-block items, including some that may be benign. This **increases** the §6 "insufficient admissible evidence" / incomplete-evidence behavior. Per §6 that is acceptable, but the evaluator **must not** read the resulting absence as unsupported, dishonest, or as any negative claim — absence of admissible evidence is not evidence of anything.
+
+**4A.6 — Recorded coupling and re-review obligation.** This exclusion is **coupled to** `retrieval_assembler.BLOCK_IDENTITY` (the string value `"identity_context"`) and to the identity-classification semantics of `retrieval_assembler._classify_core_hit(...)`. Because audit admissibility now depends on that classifier, **any future change to identity-classification semantics — the conditions under which a hit becomes `identity_context`, or the value of `BLOCK_IDENTITY` — requires an audit-boundary re-review before production wiring.**
+
+**4A.7 — What this amendment authorizes.** Only a later, **separately reviewed pure builder/test slice**: a read-only structural exclusion inside the packet builder plus its tests, and nothing else. The builder should hold the excluded value as its own literal (e.g. `_EXCLUDED_BLOCK_TYPES = ("identity_context",)`) and **must not import `retrieval_assembler`**; the coupling in §4A.6 should be **pinned by a test** that asserts the literal equals `retrieval_assembler.BLOCK_IDENTITY`. It opens **no** production wiring, evaluator, model call, provider / prompt, endpoint, persistence, output control, memory write, dream / private cognition, Gate D, or Envelope Audit. Those remain parked exactly as in §1 and §9.
 
 ## 5. Snippet rule
 
