@@ -205,6 +205,41 @@ class TestPacketBuilderCompatibilitySeparateStages(unittest.TestCase):
         self.assertIn(1, kept_eids)
         self.assertNotIn(2, kept_eids)
 
+    def test_selected_seed_block_excluded_by_builder_metadata_read(self):
+        # A seed block as retrieval_assembler._build_seed_block emits it:
+        # identity block_type, eid/chunk_id None, marker in metadata={"is_seed": True}.
+        # Stage 1 (extractor) returns it (source-selection, no admissibility claim);
+        # Stage 2 (builder) now reads the metadata marker and excludes it.
+        from torment_service.audit_evidence_packet import build_audit_evidence_packet
+
+        ctx = _ctx(
+            blocks={
+                "identity": [
+                    _block("identity", eid=None, chunk_id=None,
+                           metadata={"is_seed": True}, summary="seed identity text"),
+                ],
+                "relational": [
+                    _block("relational", eid=1, summary="ordinary shared fact"),
+                ],
+            },
+            selection_log=[
+                _sel("identity", eid=None, chunk_id=None, action="selected"),
+                _sel("relational", eid=1, action="selected"),
+            ],
+        )
+        items = selected_admitted_items(ctx)
+        # Stage 1: both source-selected; the seed block carries its metadata marker.
+        self.assertEqual(len(items), 2)
+        self.assertTrue(
+            any(i.get("metadata", {}).get("is_seed") is True for i in items)
+        )
+
+        # Stage 2: builder drops the seed block, keeps the ordinary fact.
+        packet = build_audit_evidence_packet("resp", items)
+        kept = packet["evidence_items"]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].get("snippet"), "ordinary shared fact")
+
 
 if __name__ == "__main__":
     unittest.main()

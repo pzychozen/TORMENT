@@ -20,7 +20,13 @@ By construction it performs:
 Exclusion uses existing markers only: the lifecycle protected-marker reader
 (canon / kind|type / tier / ``srg.is_crystal`` / ``governance.protected``) plus
 direct reads of ``governance.non_shareable``, ``scope=="private"``,
-``deep_memory``, and ``spirit_return_mode``.
+``deep_memory``, ``spirit_return_mode``, and ``is_seed``.
+
+These same allowlisted markers are read at the item's top level AND one level
+inside ``item["metadata"]`` when ``metadata`` is a dict — real ``ContextBlock``
+dicts (``asdict``) keep markers there, not at the top level. The metadata read
+is read-only and discarded: no value from ``metadata`` is ever copied into the
+packet output, and the output projection is unchanged.
 """
 from __future__ import annotations
 
@@ -39,31 +45,66 @@ _PRIMITIVE_META_FIELDS = ("eid", "lane", "source_class", "support_bucket")
 _PRIMITIVE_TYPES = (str, int, float, bool)
 
 
-def _is_sensitive(item: Dict[str, Any]) -> bool:
-    """True if an admitted item carries any existing sensitivity marker.
+def _markers_indicate_sensitive(level: Any) -> bool:
+    """True if a SINGLE dict level carries any allowlisted exclusion marker.
 
-    Fail-closed: anything not classifiable as clearly non-sensitive is excluded.
+    Read-only: reads only the allowlisted markers and returns a boolean — it
+    copies nothing. On this one level it covers:
+      * canon / kind|type / tier / ``srg.is_crystal`` / ``governance.protected``
+        (via the lifecycle protected-marker reader);
+      * ``governance.non_shareable``, ``scope=="private"``, ``deep_memory``,
+        ``spirit_return_mode``, ``is_seed`` (direct reads).
+
+    The two nested sub-objects the lifecycle reader / direct reads consult
+    (``governance``, ``srg``) are inspected at most one level deeper — exactly
+    as the original top-level logic already did. A non-dict ``level`` is not
+    sensitive (the caller decides what a missing/odd level means).
     """
-    if not isinstance(item, dict):
-        return True
+    if not isinstance(level, dict):
+        return False
     # Lifecycle protected markers: canon / kind|type / tier / srg.is_crystal /
     # governance.protected.
     try:
-        if derive_protected_lifecycle_from_legacy_markers(item, now=0) is not None:
+        if derive_protected_lifecycle_from_legacy_markers(level, now=0) is not None:
             return True
     except Exception:
         return True
     # governance.non_shareable (direct read; no governance import needed).
-    gov = item.get("governance")
+    gov = level.get("governance")
     if isinstance(gov, dict) and gov.get("non_shareable"):
         return True
     # scope == "private" (packet-contract exclusion marker; NOT a lifecycle marker).
-    if item.get("scope") == "private":
+    if level.get("scope") == "private":
         return True
     # deep / spirit-return markers.
-    if item.get("deep_memory"):
+    if level.get("deep_memory"):
         return True
-    if item.get("spirit_return_mode"):
+    if level.get("spirit_return_mode"):
+        return True
+    # seed identity marker (set by retrieval_assembler._build_seed_block).
+    if level.get("is_seed") is True:
+        return True
+    return False
+
+
+def _is_sensitive(item: Dict[str, Any]) -> bool:
+    """True if an admitted item carries any existing sensitivity marker.
+
+    Fail-closed: anything not classifiable as clearly non-sensitive is excluded.
+
+    Markers are read at the item's TOP LEVEL and, when present, one level inside
+    ``item["metadata"]`` — real ``ContextBlock`` dicts keep markers there. The
+    metadata read is read-only: nothing from ``metadata`` is copied into the
+    packet output; the output projection is unchanged.
+    """
+    if not isinstance(item, dict):
+        return True
+    # Top-level markers (original behavior, plus is_seed).
+    if _markers_indicate_sensitive(item):
+        return True
+    # Same allowlisted markers nested one level inside metadata. Read-only;
+    # no metadata value is ever copied into the packet.
+    if _markers_indicate_sensitive(item.get("metadata")):
         return True
     return False
 

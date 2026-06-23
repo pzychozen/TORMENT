@@ -73,6 +73,122 @@ class TestExcludesSensitiveMarkerClasses(unittest.TestCase):
         self._excluded({"eid": 11, "spirit_return_mode": "resonance", "summary": "x"})
 
 
+class TestExcludesSensitiveMarkerClassesInMetadata(unittest.TestCase):
+    """Each existing sensitivity marker ALSO excludes when it lives one level
+    inside ``metadata`` — the shape real ContextBlock dicts (asdict) carry."""
+
+    def _excluded(self, metadata):
+        item = {"eid": 1, "summary": "x", "metadata": metadata}
+        pkt = build_audit_evidence_packet("resp", [item])
+        self.assertEqual(_items(pkt), [], f"metadata marker should exclude: {metadata!r}")
+
+    def test_canon(self):
+        self._excluded({"canon": True})
+
+    def test_kind_seed(self):
+        self._excluded({"kind": "seed"})
+
+    def test_kind_identity(self):
+        self._excluded({"kind": "identity"})
+
+    def test_tier_core_identity(self):
+        self._excluded({"tier": "core_identity"})
+
+    def test_type_fallback_seed(self):
+        self._excluded({"type": "seed"})
+
+    def test_governance_protected(self):
+        self._excluded({"governance": {"protected": True}})
+
+    def test_governance_non_shareable(self):
+        self._excluded({"governance": {"non_shareable": True}})
+
+    def test_scope_private(self):
+        self._excluded({"scope": "private"})
+
+    def test_srg_is_crystal(self):
+        self._excluded({"srg": {"is_crystal": True}})
+
+    def test_deep_memory(self):
+        self._excluded({"deep_memory": True})
+
+    def test_spirit_return_mode(self):
+        self._excluded({"spirit_return_mode": "resonance"})
+
+    def test_non_marker_metadata_does_not_exclude(self):
+        # Negative control: ordinary metadata (no marker) is not sensitive.
+        item = {
+            "eid": 7, "scope": "shared", "summary": "ordinary",
+            "metadata": {"type": "memory", "half_life": 30.0, "warmth_score": 0.4},
+        }
+        out = _items(build_audit_evidence_packet("resp", [item]))
+        self.assertEqual({e.get("eid") for e in out}, {7})
+
+
+class TestIsSeedMarker(unittest.TestCase):
+    """``is_seed is True`` excludes at the top level and inside metadata."""
+
+    def test_top_level_is_seed_excluded(self):
+        pkt = build_audit_evidence_packet(
+            "resp", [{"eid": 1, "is_seed": True, "summary": "x"}]
+        )
+        self.assertEqual(_items(pkt), [])
+
+    def test_metadata_is_seed_excluded(self):
+        # Mirrors retrieval_assembler._build_seed_block: metadata={"is_seed": True}.
+        pkt = build_audit_evidence_packet(
+            "resp", [{"eid": 1, "summary": "x", "metadata": {"is_seed": True}}]
+        )
+        self.assertEqual(_items(pkt), [])
+
+    def test_is_seed_not_strictly_true_is_not_a_seed_marker(self):
+        # Strict ``is True``: a falsey is_seed value is not a seed marker.
+        item = {
+            "eid": 2, "scope": "shared", "summary": "ordinary",
+            "metadata": {"is_seed": False},
+        }
+        out = _items(build_audit_evidence_packet("resp", [item]))
+        self.assertEqual({e.get("eid") for e in out}, {2})
+
+
+class TestMetadataNeverCopiedIntoOutput(unittest.TestCase):
+    """The metadata read is for exclusion only. No metadata key/value, and no
+    nested payload inside metadata, is ever copied into the packet output."""
+
+    def test_non_marker_metadata_not_copied(self):
+        item = {
+            "eid": 1, "scope": "shared", "lane": "core",
+            "source_class": "memory", "support_bucket": "high",
+            "summary": "ordinary fact",
+            "metadata": {
+                "half_life": 30.0, "warmth_score": 0.4, "doc_title": "D",
+                "provenance_type": "collective_echo", "type": "memory",
+            },
+        }
+        entry = _items(build_audit_evidence_packet("resp", [item]))[0]
+        self.assertNotIn("metadata", entry)
+        for leaked in ("half_life", "warmth_score", "doc_title",
+                       "provenance_type", "type"):
+            self.assertNotIn(leaked, entry)
+        # Only the allowlisted primitives + snippet survive.
+        self.assertEqual(entry.get("eid"), 1)
+        self.assertEqual(entry.get("lane"), "core")
+        self.assertEqual(entry.get("snippet"), "ordinary fact")
+
+    def test_nested_metadata_payload_not_copied(self):
+        item = {
+            "eid": 1, "scope": "shared", "summary": "fact",
+            "metadata": {"payload": {"secret": "nope"}, "srg": {"R": 0.1}},
+        }
+        entry = _items(build_audit_evidence_packet("resp", [item]))[0]
+        self.assertNotIn("metadata", entry)
+        self.assertNotIn("payload", entry)
+        self.assertNotIn("srg", entry)
+        for k, v in entry.items():
+            self.assertIsInstance(k, str)
+            self.assertTrue(v is None or isinstance(v, (str, int, float, bool)))
+
+
 class TestKeepsNonSensitiveItems(unittest.TestCase):
 
     def test_ordinary_item_kept_with_primitive_metadata(self):
@@ -203,18 +319,49 @@ class TestSourceGuards(unittest.TestCase):
             self.assertNotIn(bad, src, msg=f"helper references forbidden seam: {bad}")
 
     def test_helper_has_no_production_caller(self):
+        """Robust AST guard (not a substring scan): no production module IMPORTS
+        the packet module / its public builder symbol, and none CALLS
+        ``build_audit_evidence_packet``. Textual mentions in docstrings or
+        comments (e.g. ``audit_evidence_context.py`` naming the builder to say it
+        does NOT use it) are correctly not treated as callers — only real
+        import/call AST nodes are. The guard still bites on any genuine wiring."""
         svc_dir = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc_dir):
             if not fn.endswith(".py") or fn == "audit_evidence_packet.py":
                 continue
             with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
-                content = fh.read()
-            if "audit_evidence_packet" in content or "build_audit_evidence_packet" in content:
-                offenders.append(fn)
+                src = fh.read()
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                # (a) import of the packet module or its public builder symbol
+                if isinstance(node, ast.Import):
+                    for n in node.names:
+                        if n.name.split(".")[-1] == "audit_evidence_packet":
+                            offenders.append(f"{fn}: import {n.name}")
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    if mod.split(".")[-1] == "audit_evidence_packet":
+                        offenders.append(f"{fn}: from {mod} import ...")
+                    else:
+                        for n in node.names:
+                            if n.name == "build_audit_evidence_packet":
+                                offenders.append(
+                                    f"{fn}: from {mod} import build_audit_evidence_packet"
+                                )
+                # (b) call build_audit_evidence_packet(...) / *.build_audit_evidence_packet(...)
+                elif isinstance(node, ast.Call):
+                    func = node.func
+                    if isinstance(func, ast.Name) and func.id == "build_audit_evidence_packet":
+                        offenders.append(f"{fn}: call build_audit_evidence_packet(...)")
+                    elif isinstance(func, ast.Attribute) and func.attr == "build_audit_evidence_packet":
+                        offenders.append(f"{fn}: call *.build_audit_evidence_packet(...)")
         self.assertEqual(
             offenders, [],
-            msg=f"audit_evidence_packet referenced by production module(s): {offenders}",
+            msg=f"audit_evidence_packet has production caller(s): {offenders}",
         )
 
 
