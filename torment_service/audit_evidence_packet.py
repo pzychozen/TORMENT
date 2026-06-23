@@ -17,9 +17,9 @@ By construction it performs:
       endpoint access (it imports none of those);
     * NO nested payload pass-through, NO new sensitivity schema.
 
-Exclusion uses existing markers only: the lifecycle protected-marker reader
-(canon / kind|type / tier / ``srg.is_crystal`` / ``governance.protected``) plus
-direct reads of ``governance.non_shareable``, ``scope=="private"``,
+Marker-based exclusion uses existing markers only: the lifecycle protected-marker
+reader (canon / kind|type / tier / ``srg.is_crystal`` / ``governance.protected``)
+plus direct reads of ``governance.non_shareable``, ``scope=="private"``,
 ``deep_memory``, ``spirit_return_mode``, and ``is_seed``.
 
 These same allowlisted markers are read at the item's top level AND one level
@@ -27,6 +27,14 @@ inside ``item["metadata"]`` when ``metadata`` is a dict — real ``ContextBlock`
 dicts (``asdict``) keep markers there, not at the top level. The metadata read
 is read-only and discarded: no value from ``metadata`` is ever copied into the
 packet output, and the output projection is unchanged.
+
+In addition to marker reads, a coarse STRUCTURAL exclusion drops items whose
+post-assembler ``block_type`` is in ``_EXCLUDED_BLOCK_TYPES`` (currently the
+identity block ``"identity_context"``) — the surviving shadow of the
+seed/canon/identity classification after the assembler dropped the raw markers
+at conversion. This is read-only / exclusion-only: ``block_type`` is never
+projected into the packet output. It is a filtering signal, not authority. See
+the Admissible Evidence Packet Contract v0.1 §4A.
 """
 from __future__ import annotations
 
@@ -43,6 +51,17 @@ MAX_TOTAL_SNIPPET_CHARS: int = 2000
 # AND primitive. No other fields, and never a nested object, are projected.
 _PRIMITIVE_META_FIELDS = ("eid", "lane", "source_class", "support_bucket")
 _PRIMITIVE_TYPES = (str, int, float, bool)
+
+# Contract §4A coarse STRUCTURAL exclusion: post-assembler block types that are
+# dropped from the packet because they are the surviving shadow of the
+# seed/canon/identity categorical exclusion once the assembler discarded the raw
+# markers (canon / tier / scope / governance / srg / deep_memory) at conversion.
+# The literal intentionally mirrors ``retrieval_assembler.BLOCK_IDENTITY``
+# (== "identity_context"). It is deliberately NOT imported from the assembler —
+# that keeps this module's import surface closed (no retrieval/assembler import)
+# — and the coupling is pinned by a test-only drift guard. Category, not
+# authority: read-only, exclusion-only, never projected into output.
+_EXCLUDED_BLOCK_TYPES = ("identity_context",)
 
 
 def _markers_indicate_sensitive(level: Any) -> bool:
@@ -98,6 +117,13 @@ def _is_sensitive(item: Dict[str, Any]) -> bool:
     packet output; the output projection is unchanged.
     """
     if not isinstance(item, dict):
+        return True
+    # §4A coarse STRUCTURAL exclusion: drop the identity block by its
+    # post-assembler block_type — the surviving shadow of the seed/canon/identity
+    # classification after _hit_to_block dropped the raw markers. Read-only /
+    # exclusion-only: block_type is never copied into output (not in
+    # _PRIMITIVE_META_FIELDS). Category, not authority — see contract §4A.
+    if item.get("block_type") in _EXCLUDED_BLOCK_TYPES:
         return True
     # Top-level markers (original behavior, plus is_seed).
     if _markers_indicate_sensitive(item):

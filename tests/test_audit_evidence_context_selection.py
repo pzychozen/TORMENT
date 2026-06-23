@@ -240,6 +240,40 @@ class TestPacketBuilderCompatibilitySeparateStages(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(kept[0].get("snippet"), "ordinary shared fact")
 
+    def test_marker_invisible_identity_context_dropped_by_block_type(self):
+        # §4A end-to-end: a selected identity hit that is marker-invisible after
+        # assembly (no is_seed; type=="seed_canon" not in the lifecycle set;
+        # half_life not a marker) is returned by the extractor (stage 1) but
+        # dropped by the builder (stage 2) via its post-assembler block_type.
+        from torment_service.audit_evidence_packet import build_audit_evidence_packet
+
+        ctx = _ctx(
+            blocks={
+                "identity_context": [
+                    _block("identity_context", eid=7,
+                           metadata={"type": "seed_canon", "half_life": 400.0},
+                           summary="canon-ish identity text"),
+                ],
+                "relational_context": [
+                    _block("relational_context", eid=1, summary="ordinary fact"),
+                ],
+            },
+            selection_log=[
+                _sel("identity_context", eid=7, action="selected"),
+                _sel("relational_context", eid=1, action="selected"),
+            ],
+        )
+        items = selected_admitted_items(ctx)
+        # Stage 1: both source-selected; the identity item carries NO surviving marker.
+        self.assertEqual({e.get("eid") for e in items}, {1, 7})
+        identity_item = next(e for e in items if e.get("eid") == 7)
+        self.assertNotIn("is_seed", identity_item)
+        self.assertNotIn("is_seed", identity_item.get("metadata", {}))
+
+        # Stage 2: builder drops the identity_context item, keeps the relational fact.
+        packet = build_audit_evidence_packet("resp", items)
+        self.assertEqual({e.get("eid") for e in packet["evidence_items"]}, {1})
+
 
 if __name__ == "__main__":
     unittest.main()

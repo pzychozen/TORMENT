@@ -189,6 +189,58 @@ class TestMetadataNeverCopiedIntoOutput(unittest.TestCase):
             self.assertTrue(v is None or isinstance(v, (str, int, float, bool)))
 
 
+class TestStructuralBlockTypeExclusion(unittest.TestCase):
+    """§4A coarse structural exclusion: items whose post-assembler block_type is
+    ``identity_context`` are dropped even when no marker survives. block_type is
+    read-only / exclusion-only and is never projected into packet output."""
+
+    def test_identity_context_no_marker_excluded(self):
+        item = {"eid": 1, "block_type": "identity_context", "summary": "x"}
+        self.assertEqual(_items(build_audit_evidence_packet("resp", [item])), [])
+
+    def test_identity_context_with_benign_metadata_excluded(self):
+        # Marker-invisible identity hit: type=="seed_canon" is NOT in the lifecycle
+        # exact-match set, half_life is not a marker, no is_seed — only block_type
+        # identifies it.
+        item = {
+            "eid": 1, "block_type": "identity_context", "summary": "x",
+            "metadata": {"type": "seed_canon", "half_life": 400.0},
+        }
+        self.assertEqual(_items(build_audit_evidence_packet("resp", [item])), [])
+
+    def test_other_block_types_kept_when_non_sensitive(self):
+        kept_types = (
+            "reference_context", "relational_context",
+            "situational_context", "archive_context",
+        )
+        items = [
+            {"eid": i, "block_type": bt, "scope": "shared", "summary": "s"}
+            for i, bt in enumerate(kept_types, start=1)
+        ]
+        out = _items(build_audit_evidence_packet("resp", items))
+        self.assertEqual({e.get("eid") for e in out}, {1, 2, 3, 4})
+
+    def test_block_type_not_projected_for_kept_items(self):
+        item = {
+            "eid": 9, "block_type": "relational_context", "scope": "shared",
+            "lane": "relational", "summary": "ordinary fact",
+        }
+        entry = _items(build_audit_evidence_packet("resp", [item]))[0]
+        self.assertNotIn("block_type", entry)
+        self.assertEqual(entry.get("eid"), 9)
+        self.assertEqual(entry.get("snippet"), "ordinary fact")
+
+    def test_excluded_block_types_pins_assembler_constant(self):
+        # Test-only drift-pin. The production builder does NOT import the
+        # assembler; this asserts the literal mirrors the real constant so a
+        # future rename of BLOCK_IDENTITY fails loud here.
+        from torment_service import retrieval_assembler
+        from torment_service.audit_evidence_packet import _EXCLUDED_BLOCK_TYPES
+        self.assertEqual(
+            _EXCLUDED_BLOCK_TYPES, (retrieval_assembler.BLOCK_IDENTITY,)
+        )
+
+
 class TestKeepsNonSensitiveItems(unittest.TestCase):
 
     def test_ordinary_item_kept_with_primitive_metadata(self):
