@@ -376,11 +376,19 @@ class TestSourceGuards(unittest.TestCase):
         ``build_audit_evidence_packet``. Textual mentions in docstrings or
         comments (e.g. ``audit_evidence_context.py`` naming the builder to say it
         does NOT use it) are correctly not treated as callers — only real
-        import/call AST nodes are. The guard still bites on any genuine wiring."""
+        import/call AST nodes are. The guard still bites on any genuine wiring.
+
+        Exception: ``audit_evidence_sidecar.py`` is permitted to import/call the
+        builder — it is the single pure composition caller and is itself called
+        nowhere (proven in tests/test_audit_evidence_sidecar.py). No live
+        production surface (endpoint / AgentRunner / /retrieve / model / writer /
+        persistence) calls the builder."""
         svc_dir = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc_dir):
-            if not fn.endswith(".py") or fn == "audit_evidence_packet.py":
+            if not fn.endswith(".py") or fn in (
+                "audit_evidence_packet.py", "audit_evidence_sidecar.py",
+            ):
                 continue
             with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
                 src = fh.read()

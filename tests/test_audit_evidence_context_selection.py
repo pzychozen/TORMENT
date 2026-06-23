@@ -162,10 +162,16 @@ class TestSourceGuards(unittest.TestCase):
         )
 
     def test_helper_has_no_production_caller(self):
+        # audit_evidence_sidecar.py is the ONE permitted internal pure-composition
+        # caller of selected_admitted_items; it is itself called nowhere (proven in
+        # tests/test_audit_evidence_sidecar.py). No live production surface
+        # (endpoint / AgentRunner / /retrieve / model / writer / persistence) calls it.
         svc_dir = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc_dir):
-            if not fn.endswith(".py") or fn == "audit_evidence_context.py":
+            if not fn.endswith(".py") or fn in (
+                "audit_evidence_context.py", "audit_evidence_sidecar.py",
+            ):
                 continue
             with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
                 content = fh.read()
