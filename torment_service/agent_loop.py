@@ -396,6 +396,22 @@ class ToolExecutor(Protocol):
 _DEFAULT_DRIFT_HIGH_THRESHOLD = 0.35
 
 
+@dataclass
+class _LLMPromptRequest:
+    """Internal value object capturing the exact model-visible prompt request for
+    one ``_execute`` call: the system prompt, the messages, and the tools.
+
+    Behavior-preserving extraction only. Built and consumed locally inside
+    ``AgentRunner._execute``; never stored on ``self``, never returned, and never
+    routed to review / ingest / fabric / writer / metadata / TurnResult /
+    persistence / retrieval / ranking / retry / output-control / endpoints. Its
+    fields reach only ``llm_client.complete``.
+    """
+    system_prompt: str
+    messages: List[Dict[str, object]]
+    tools: Optional[List[object]]
+
+
 class AgentRunner:
     """Outer-loop runner for a single TORMENT agent turn.
 
@@ -802,10 +818,11 @@ class AgentRunner:
                 return ExecutionOutcome(
                     response_text="[no llm client wired — v0.1 stub]",
                 )
+            req = self._build_llm_prompt_request(frame, mode, tools=None)
             response = self.llm_client.complete(
-                system_prompt=self._build_system_prompt(frame, mode),
-                messages=[{"role": "user", "content": frame.raw_input}],
-                tools=None,
+                system_prompt=req.system_prompt,
+                messages=req.messages,
+                tools=req.tools,
             )
             # v0.1.0c: LLMResponse clean-break — use .text. Any
             # unexpected tool_calls on the ANSWER path are ignored
@@ -844,10 +861,11 @@ class AgentRunner:
             # Call LLM with the single narrowed signature. LLM fills
             # arguments via a tool_use block in its response; we parse
             # that from LLMResponse.tool_calls.
+            req = self._build_llm_prompt_request(frame, mode, tools=[signature_spec])
             llm_response = self.llm_client.complete(
-                system_prompt=self._build_system_prompt(frame, mode),
-                messages=[{"role": "user", "content": frame.raw_input}],
-                tools=[signature_spec],
+                system_prompt=req.system_prompt,
+                messages=req.messages,
+                tools=req.tools,
             )
 
             # v0.1.0c: three-path split based on response shape.
@@ -938,6 +956,23 @@ class AgentRunner:
         # Unexpected action type (should not happen given Phase 5
         # legality enforcement). Treat as no-op.
         return ExecutionOutcome(no_op=True)
+
+    def _build_llm_prompt_request(
+        self,
+        frame: TaskFrame,
+        mode: CognitiveModeDecision,
+        *,
+        tools: Optional[List[object]],
+    ) -> "_LLMPromptRequest":
+        """Capture the exact model-visible prompt request for one ``_execute``
+        call. Behavior-preserving: identical ``system_prompt`` and ``messages``
+        as the prior inline construction; ``tools`` is the explicit argument.
+        Local-only; its fields reach only ``llm_client.complete``."""
+        return _LLMPromptRequest(
+            system_prompt=self._build_system_prompt(frame, mode),
+            messages=[{"role": "user", "content": frame.raw_input}],
+            tools=tools,
+        )
 
     def _build_system_prompt(
         self,

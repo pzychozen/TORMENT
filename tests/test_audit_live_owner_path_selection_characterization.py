@@ -148,6 +148,23 @@ def _messages_carry_frame_raw_input(value):
     return False
 
 
+def _is_req_field(value, field):
+    """``req.<field>`` — the local prompt-request object's field access."""
+    return (isinstance(value, ast.Attribute) and value.attr == field
+            and isinstance(value.value, ast.Name) and value.value.id == "req")
+
+
+def _build_request_calls(node):
+    """All ``self._build_llm_prompt_request(...)`` calls under ``node``."""
+    out = []
+    for n in ast.walk(node):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "_build_llm_prompt_request"
+                and isinstance(n.func.value, ast.Name) and n.func.value.id == "self"):
+            out.append(n)
+    return out
+
+
 class TestLiveGenerationBoundary(unittest.TestCase):
 
     def setUp(self):
@@ -161,22 +178,62 @@ class TestLiveGenerationBoundary(unittest.TestCase):
         self.assertTrue(calls, "expected self.llm_client.complete(...) in _execute")
 
     def test_prompt_boundary_shape_in_execute(self):
+        # Post-extraction: _execute passes the LOCAL request object's fields
+        # unchanged into complete(...) (the boundary is preserved in the helper,
+        # see test_build_llm_prompt_request_preserves_boundary).
         calls = _complete_calls(self.execute)
         self.assertTrue(calls)
         for call in calls:
-            sp = _kw(call, "system_prompt")
-            msgs = _kw(call, "messages")
-            self.assertIsNotNone(sp, "complete(...) missing system_prompt kwarg")
-            self.assertTrue(_is_build_system_prompt_call(sp),
-                            "system_prompt is not self._build_system_prompt(frame, mode)")
-            self.assertIsNotNone(msgs, "complete(...) missing messages kwarg")
-            self.assertTrue(_messages_carry_frame_raw_input(msgs),
-                            "messages do not carry frame.raw_input as user content")
+            self.assertTrue(_is_req_field(_kw(call, "system_prompt"), "system_prompt"),
+                            "system_prompt is not req.system_prompt")
+            self.assertTrue(_is_req_field(_kw(call, "messages"), "messages"),
+                            "messages is not req.messages")
+            self.assertTrue(_is_req_field(_kw(call, "tools"), "tools"),
+                            "tools is not req.tools")
+
+    def test_execute_builds_request_via_helper(self):
+        # _execute builds req via self._build_llm_prompt_request(frame, mode,
+        # tools=...): tools=None on ANSWER, tools=[...] on USE_TOOL.
+        calls = _build_request_calls(self.execute)
+        self.assertGreaterEqual(len(calls), 2,
+                                "expected _build_llm_prompt_request on ANSWER and USE_TOOL paths")
+        tools_values = [_kw(c, "tools") for c in calls]
+        self.assertTrue(any(isinstance(v, ast.Constant) and v.value is None for v in tools_values),
+                        "expected a _build_llm_prompt_request(..., tools=None) call (ANSWER)")
+        self.assertTrue(any(isinstance(v, ast.List) for v in tools_values),
+                        "expected a _build_llm_prompt_request(..., tools=[...]) call (USE_TOOL)")
+        for c in calls:
+            arg_names = [a.id for a in c.args if isinstance(a, ast.Name)]
+            self.assertIn("frame", arg_names)
+            self.assertIn("mode", arg_names)
+
+    def test_build_llm_prompt_request_preserves_boundary(self):
+        # The helper is where the ORIGINAL prompt boundary is preserved.
+        helper = _method(self.runner, "_build_llm_prompt_request")
+        self.assertIsNotNone(helper, "_build_llm_prompt_request not found")
+        ctor = next((n for n in ast.walk(helper)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "_LLMPromptRequest"), None)
+        self.assertIsNotNone(ctor, "_LLMPromptRequest(...) construction not found")
+        self.assertTrue(_is_build_system_prompt_call(_kw(ctor, "system_prompt")),
+                        "system_prompt is not self._build_system_prompt(frame, mode)")
+        self.assertTrue(_messages_carry_frame_raw_input(_kw(ctor, "messages")),
+                        "messages do not carry frame.raw_input as user content")
+        tools_v = _kw(ctor, "tools")
+        self.assertTrue(isinstance(tools_v, ast.Name) and tools_v.id == "tools",
+                        "tools is not the explicit tools argument")
 
     def test_no_assembled_context_in_prompt_boundary(self):
-        nodes = [self.execute, _method(self.runner, "_build_system_prompt")]
-        self.assertEqual(_idents(*nodes) & _ASSEMBLER_CTX, set(),
+        # Unchanged meaning, now applied to _execute, _build_system_prompt, AND
+        # the new _build_llm_prompt_request.
+        nodes = [self.execute,
+                 _method(self.runner, "_build_system_prompt"),
+                 _method(self.runner, "_build_llm_prompt_request")]
+        ids = _idents(*nodes)
+        self.assertEqual(ids & _ASSEMBLER_CTX, set(),
                          "prompt boundary consumes assembler context")
+        self.assertNotIn("audit_admitted_context_items", ids,
+                         "prompt boundary references audit_admitted_context_items")
         leaves, names = _import_leaves_names(self.tree)
         self.assertNotIn("retrieval_assembler", leaves)
         self.assertNotIn("AssembledContext", names)
