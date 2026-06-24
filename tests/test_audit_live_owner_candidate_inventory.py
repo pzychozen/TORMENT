@@ -40,6 +40,10 @@ import unittest
 
 _BRIDGE = "audit_selected_items_runner_bridge.py"
 _BRIDGE_REL = "torment_service/audit_selected_items_runner_bridge.py"
+# The private generation owner (design shape A): a generation-owner candidate that
+# extracts selected items and owns/captures its own prompt; unwired (tests-only).
+_OWNER = "audit_private_generation_owner.py"
+_OWNER_REL = "torment_service/audit_private_generation_owner.py"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
 
 # The five owner-relevant call sites this inventory tracks.
@@ -296,8 +300,11 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
                          {"agent_loop.py"})
 
     def test_model_completion_caller_inventory(self):
-        # The model-completion boundary is owned only by the runner.
-        self.assertEqual(_service_callers_of("complete"), {"agent_loop.py"})
+        # The model-completion boundary is reached by the runner and the private
+        # generation owner (design shape A; unwired, tests-only). No endpoint or
+        # other service module.
+        self.assertEqual(_service_callers_of("complete"),
+                         {"agent_loop.py", _OWNER})
 
     def test_inventory_snapshot_is_exact(self):
         # One explicit snapshot for the next gate's A-vs-B comparison.
@@ -309,7 +316,7 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
             "run_turn_with_selected_items_observation": [],
             "_build_llm_prompt_request": ["agent_loop.py"],
             "_build_system_prompt": ["agent_loop.py"],
-            "complete": ["agent_loop.py"],
+            "complete": ["agent_loop.py", _OWNER],
         })
 
 
@@ -398,8 +405,10 @@ class TestInvariant5BridgeForwardsItemsOnlyReadsNoPacket(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 class TestInvariant6FutureOwnerShapesRecordedNeitherSelected(unittest.TestCase):
-    """Records the two — and only two — shapes a future live owner could take, and
-    proves NEITHER is realized today. Selection / design is out of scope here."""
+    """Records the two — and only two — shapes a future LIVE owner could take, and
+    proves neither is a live (wired) owner today. Shape A (private generation
+    owner) now exists as an UNWIRED private module; shape B (runner delegation
+    seam) remains deferred. Selection of a live owner is out of scope here."""
 
     # Documented for the next gate (record only; NOT authorization):
     #   * a private generation owner that holds the captured prompt/messages, or
@@ -413,11 +422,11 @@ class TestInvariant6FutureOwnerShapesRecordedNeitherSelected(unittest.TestCase):
         self.assertEqual(len(self.CANDIDATE_OWNER_SHAPES), 2)
         self.assertEqual(len(set(self.CANDIDATE_OWNER_SHAPES)), 2)
 
-    def test_only_unwired_bridge_seam_fuses_assembly_and_generation(self):
+    def test_only_unwired_seams_fuse_assembly_and_generation(self):
         # Extraction/assembly ownership and generation/prompt ownership are
-        # DISJOINT across production EXCEPT in the recognized delegation-seam
-        # CANDIDATE (the bridge). That candidate is NOT a live owner: it is called
-        # nowhere and reads no result packet.
+        # DISJOINT across production EXCEPT in the two recognized UNWIRED
+        # candidates: the runner delegation-seam bridge (shape B candidate) and the
+        # private generation owner (shape A). Neither is a live owner.
         assemble = {"assemble_context", "selected_admitted_items"}
         generate = {"run_turn", "complete", "_build_llm_prompt_request",
                     "_build_system_prompt"}
@@ -432,17 +441,33 @@ class TestInvariant6FutureOwnerShapesRecordedNeitherSelected(unittest.TestCase):
                 if (calls & assemble) and (calls & generate):
                     fusing.add(rel)
         self.assertEqual(
-            fusing, {_BRIDGE_REL},
+            fusing, {_BRIDGE_REL, _OWNER_REL},
             msg=f"unexpected assembly+generation fusion: {sorted(fusing)}")
-        # The candidate seam is unwired and packet-blind, so not a live owner.
+        # Bridge candidate: called nowhere, packet-blind.
         self.assertEqual(
             _service_callers_of("run_turn_with_selected_items_observation"), set())
         self.assertNotIn("audit_evidence_packet", _idents(_parse_service(_BRIDGE)))
+        # Owner candidate: no service module imports it (unwired, tests-only).
+        owner_importers = set()
+        for rel, ab in _iter_py(_service_dir()):
+            if os.path.basename(ab) == _OWNER:
+                continue
+            try:
+                leaves, names = _import_leaves_names(_parse(ab))
+            except (SyntaxError, ValueError):
+                continue
+            if ("audit_private_generation_owner" in leaves
+                    or "PrivateGenerationOwner" in names):
+                owner_importers.add(rel)
+        self.assertEqual(owner_importers, set(),
+                         msg=f"owner wired into: {sorted(owner_importers)}")
 
-    def test_generation_owner_shape_is_not_realized(self):
-        # No production generation owner also holds retrieval/extraction: the
-        # module that owns prompt capture + completion (agent_loop.py) calls no
-        # assembler/extractor, so the generation-owner shape is a candidate only.
+    def test_generation_owner_exists_as_module_but_is_unwired(self):
+        # Shape A now EXISTS as a private module, but it is UNWIRED: no service
+        # module imports it (tests-only). The live runner (agent_loop.py) still
+        # owns prompt capture + completion and does NOT fuse retrieval/extraction,
+        # so it is not itself a generation owner.
+        self.assertTrue(os.path.exists(os.path.join(_service_dir(), _OWNER)))
         al = _parse_service("agent_loop.py")
         called = _called_names(al)
         self.assertIn("complete", called)
@@ -459,7 +484,11 @@ class TestInvariant7PacketPresenceUnused(unittest.TestCase):
     consumed by no prompt / review / output / ingest / retrieval / ranking / retry
     / style / write / persistence path."""
 
-    def test_packet_identifier_only_in_runner_sink(self):
+    def test_packet_identifier_only_in_runner_sink_or_owner_result(self):
+        # The packet identifier appears only in the runner sink (agent_loop.py) and
+        # the private generation owner's result (audit_private_generation_owner.py).
+        # Both are observation-only: the owner returns the packet and drives no
+        # branch on it (proven in tests/test_audit_private_generation_owner.py).
         refs = set()
         for rel, ab in _iter_py(_service_dir()):
             try:
@@ -469,7 +498,7 @@ class TestInvariant7PacketPresenceUnused(unittest.TestCase):
             if "audit_evidence_packet" in _idents(tree):
                 refs.add(os.path.relpath(ab, _service_dir()).replace("\\", "/"))
         self.assertEqual(
-            refs, {"agent_loop.py"},
+            refs, {"agent_loop.py", _OWNER},
             msg=f"unexpected audit_evidence_packet references: {sorted(refs)}")
 
     def test_built_packet_routes_only_to_turnresult_and_drives_no_branch(self):

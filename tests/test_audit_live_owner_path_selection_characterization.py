@@ -294,16 +294,20 @@ class TestItemsRouteToObserverAndTurnResult(unittest.TestCase):
 
 class TestOnlyAgentLoopCallsObserver(unittest.TestCase):
 
-    def test_only_agent_loop_imports_or_calls_observer(self):
-        # The observer now has exactly ONE ratified production caller:
-        # agent_loop.py (the observation-only TurnResult sink). No OTHER
-        # production module may import or call it.
+    def test_only_sanctioned_callers_import_or_call_observer(self):
+        # The observer may be imported/called only by sanctioned private
+        # observation callers: agent_loop.py (the live observation-only TurnResult
+        # sink) and audit_private_generation_owner.py (the private generation
+        # owner, design shape A; called by tests only). No OTHER production module
+        # may import or call it. Historical note: before the private owner,
+        # agent_loop.py was the only ratified caller.
         svc = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc):
             if not fn.endswith(".py") or fn in (
                 "audit_prompt_inclusion_observation.py",
                 "agent_loop.py",
+                "audit_private_generation_owner.py",
             ):
                 continue
             try:

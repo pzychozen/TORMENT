@@ -209,16 +209,23 @@ class TestSourceGuards(unittest.TestCase):
         present = [w for w in self.FORBIDDEN_FLAG_WORDS if w in src]
         self.assertEqual(present, [], msg=f"helper source contains forbidden flag word(s): {present}")
 
-    def test_only_agent_loop_imports_or_calls_helper(self):
-        # The observer is no longer called nowhere: agent_loop.py is the ONE
-        # ratified production caller (the live, observation-only TurnResult sink).
-        # No OTHER production module may import or call it.
+    def test_only_sanctioned_private_observation_callers_import_or_call_helper(self):
+        # The observer may be imported/called only by sanctioned PRIVATE
+        # observation callers, and never becomes public / API / runtime / control
+        # wiring. Ratified callers:
+        #   * agent_loop.py — the live, observation-only TurnResult sink;
+        #   * audit_private_generation_owner.py — the private generation owner
+        #     (design shape A), itself called by tests only.
+        # No OTHER production module may import or call it (app.py stays forbidden,
+        # asserted separately below). Historical note: before the private owner,
+        # agent_loop.py was the only ratified caller.
         svc = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc):
             if not fn.endswith(".py") or fn in (
-                "audit_prompt_inclusion_observation.py",
-                "agent_loop.py",
+                "audit_prompt_inclusion_observation.py",   # the helper module itself
+                "agent_loop.py",                           # live observation-only sink
+                "audit_private_generation_owner.py",       # private generation owner (tests-only)
             ):
                 continue
             try:
@@ -235,7 +242,7 @@ class TestSourceGuards(unittest.TestCase):
                     nm = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
                     if nm == "observe_prompt_inclusion_packet":
                         offenders.append(f"{fn}: call")
-        self.assertEqual(offenders, [], msg=f"helper has production caller(s): {offenders}")
+        self.assertEqual(offenders, [], msg=f"helper has unsanctioned production caller(s): {offenders}")
 
     def test_app_does_not_import_helper(self):
         leaves, names = _import_leaves(_parse(os.path.join(_torment_service_dir(), "app.py")))

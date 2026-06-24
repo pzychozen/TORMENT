@@ -171,6 +171,9 @@ class TestSourceGuards(unittest.TestCase):
         #   * audit_selected_items_runner_bridge.py — the approved private selected-items
         #     runner bridge: the single bridge that feeds the observation-only audit
         #     seam, itself called nowhere else.
+        #   * audit_private_generation_owner.py — the private generation owner
+        #     (design shape A): extracts selected items in its own frame; called by
+        #     tests only.
         # No live production surface (endpoint / AgentRunner self-call / /retrieve /
         # model / writer / persistence) may reference it.
         svc_dir = _torment_service_dir()
@@ -178,6 +181,7 @@ class TestSourceGuards(unittest.TestCase):
             "audit_evidence_context.py",
             "audit_evidence_sidecar.py",
             "audit_selected_items_runner_bridge.py",
+            "audit_private_generation_owner.py",
         }
         offenders = []
         for fn in os.listdir(svc_dir):

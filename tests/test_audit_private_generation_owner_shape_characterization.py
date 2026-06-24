@@ -424,10 +424,13 @@ class TestComposeOrderAndNoBranch(unittest.TestCase):
 
 class TestForbiddenSurfacesAbsent(unittest.TestCase):
 
-    def test_owner_module_does_not_exist(self):
-        self.assertFalse(
+    def test_owner_module_exists_but_is_unwired(self):
+        # Shape A landed: the module now EXISTS. It must remain unwired — no
+        # service module references it (asserted by
+        # test_no_service_module_references_the_owner_module below).
+        self.assertTrue(
             os.path.exists(os.path.join(_service_dir(), _OWNER_MODULE)),
-            msg="audit_private_generation_owner.py must NOT exist (design-only)")
+            msg="audit_private_generation_owner.py should exist after the owner slice")
 
     def test_no_service_module_references_the_owner_module(self):
         offenders = []
