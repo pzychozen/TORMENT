@@ -161,23 +161,34 @@ class TestSourceGuards(unittest.TestCase):
             msg=f"unexpected imports: {sorted(leaves)}",
         )
 
-    def test_helper_has_no_production_caller(self):
-        # audit_evidence_sidecar.py is the ONE permitted internal pure-composition
-        # caller of selected_admitted_items; it is itself called nowhere (proven in
-        # tests/test_audit_evidence_sidecar.py). No live production surface
-        # (endpoint / AgentRunner / /retrieve / model / writer / persistence) calls it.
+    def test_only_sanctioned_modules_reference_the_helper(self):
+        # Historical fact: before the approved bridge (ec17d2e) the pure-composition
+        # sidecar was the ONLY permitted internal caller of selected_admitted_items,
+        # and it is itself called nowhere (proven in tests/test_audit_evidence_sidecar.py).
+        # New invariant: selected_admitted_items / audit_evidence_context may be
+        # referenced ONLY by sanctioned, observation-only modules:
+        #   * audit_evidence_sidecar.py            — pure packet composition, called nowhere
+        #   * audit_selected_items_runner_bridge.py — the approved private selected-items
+        #     runner bridge: the single bridge that feeds the observation-only audit
+        #     seam, itself called nowhere else.
+        # No live production surface (endpoint / AgentRunner self-call / /retrieve /
+        # model / writer / persistence) may reference it.
         svc_dir = _torment_service_dir()
+        sanctioned = {
+            "audit_evidence_context.py",
+            "audit_evidence_sidecar.py",
+            "audit_selected_items_runner_bridge.py",
+        }
         offenders = []
         for fn in os.listdir(svc_dir):
-            if not fn.endswith(".py") or fn in (
-                "audit_evidence_context.py", "audit_evidence_sidecar.py",
-            ):
+            if not fn.endswith(".py") or fn in sanctioned:
                 continue
             with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
                 content = fh.read()
             if "audit_evidence_context" in content or "selected_admitted_items" in content:
                 offenders.append(fn)
-        self.assertEqual(offenders, [], msg=f"referenced by production: {offenders}")
+        self.assertEqual(offenders, [],
+                         msg=f"referenced by non-sanctioned production: {offenders}")
 
 
 class TestPacketBuilderCompatibilitySeparateStages(unittest.TestCase):

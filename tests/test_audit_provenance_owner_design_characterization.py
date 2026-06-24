@@ -44,6 +44,11 @@ _PROVENANCE_FLAGS = (
 )
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
 
+# The single approved private bridge authorized to reference / pass
+# ``audit_admitted_context_items`` into ``run_turn`` (observation-only; service-dir
+# relative path, since this file walks torment_service/).
+_APPROVED_BRIDGE = "audit_selected_items_runner_bridge.py"
+
 
 def _repo_root():
     here = os.path.dirname(os.path.abspath(__file__))
@@ -298,31 +303,39 @@ class TestNoCurrentOwner(unittest.TestCase):
             except (SyntaxError, ValueError):
                 continue
 
-    def test_only_agent_loop_references_audit_items_and_not_in_prompt_path(self):
-        # The admitted-items token appears in production ONLY in agent_loop, and
-        # within agent_loop it is absent from the prompt-construction path — so
-        # nothing connects the items to the model-visible context (no owner).
+    def test_audit_items_referenced_only_by_agent_loop_and_approved_bridge(self):
+        # The admitted-items token appears in production ONLY in agent_loop (the
+        # observation-only sink) and the approved private bridge (which forwards
+        # selected item dicts into that sink). Within agent_loop it is absent from
+        # the prompt-construction path — so nothing connects the items to the
+        # model-visible context as a generation owner. Historical fact (ec17d2e):
+        # before the approved bridge, agent_loop.py was the ONLY referent.
         referencing = set()
         for rel, raw, tree in self._trees():
             idents = _idents(tree)
             if "audit_admitted_context_items" in idents:
                 referencing.add(rel)
-        self.assertEqual(referencing, {"agent_loop.py"},
-                         msg=f"unexpected production references to audit items: {sorted(referencing)}")
+        self.assertEqual(
+            referencing, {"agent_loop.py", _APPROVED_BRIDGE},
+            msg=f"unexpected production references to audit items: {sorted(referencing)}")
         runner = _class(_parse_service("agent_loop.py"), "AgentRunner")
         execute_idents = _idents(_method(runner, "_execute"),
                                  _method(runner, "_build_system_prompt"))
         self.assertNotIn("audit_admitted_context_items", execute_idents)
 
-    def test_no_production_run_turn_caller_passes_audit_items(self):
-        offenders = []
+    def test_only_approved_bridge_run_turn_caller_passes_audit_items(self):
+        # New invariant: the only service module that passes audit items into
+        # run_turn is the approved private bridge. Historical fact (ec17d2e): none did.
+        callers = []
         for rel, raw, tree in self._trees():
             for n in ast.walk(tree):
                 if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                         and n.func.attr == "run_turn"):
                     if any(k.arg == "audit_admitted_context_items" for k in n.keywords):
-                        offenders.append(rel)
-        self.assertEqual(offenders, [], msg=f"production run_turn caller passes audit items: {offenders}")
+                        callers.append(rel)
+        self.assertEqual(
+            sorted(callers), [_APPROVED_BRIDGE],
+            msg=f"only the approved bridge may pass audit items into run_turn; got: {sorted(callers)}")
 
     def test_app_does_not_import_or_call_agent_runner(self):
         tree = _parse_service("app.py")

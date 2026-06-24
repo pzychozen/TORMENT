@@ -53,6 +53,13 @@ _FORBIDDEN_FLAGS = {
     "trusted", "certified", "honest",
 }
 
+# The single private bridge authorized (this slice) to pass
+# ``audit_admitted_context_items`` into ``run_turn``. Historical fact: at ec17d2e
+# NO ``torment_service`` module passed audit items into ``run_turn`` ("none
+# exist"). This slice adds the first narrowly-scoped exception; the live
+# invariant below locks the exception to exactly this module.
+_APPROVED_AUDIT_ITEMS_BRIDGE = "audit_selected_items_runner_bridge.py"
+
 
 def _torment_service_dir():
     here = os.path.dirname(os.path.abspath(__file__))            # tests/
@@ -179,17 +186,70 @@ class TestNoProductionCallerOwnsBothHalves(unittest.TestCase):
             msg=f"production function owns both assemble_context + run_turn: {offenders}",
         )
 
-    def test_no_production_caller_passes_audit_items_into_run_turn(self):
-        offenders = []
+    def test_only_approved_bridge_passes_audit_items_into_run_turn(self):
+        """Historical fact (ec17d2e): NO ``torment_service`` module passed
+        ``audit_admitted_context_items`` into ``run_turn`` -- "none exist". This
+        slice authorizes EXACTLY ONE private bridge to do so. Live invariant: the
+        only service module that passes ``audit_admitted_context_items`` into
+        ``run_turn`` is the approved private selected-items runner bridge, and
+        that module exists at the approved path. (Renamed from the prior
+        ``test_no_production_caller_passes_audit_items_into_run_turn``; the
+        absolute "none exist" claim was true only for the pre-bridge topology.)"""
+        callers = set()
         for fn, tree in _iter_service_trees():
             for n in ast.walk(tree):
                 if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                         and n.func.attr == "run_turn"
                         and any(k.arg == "audit_admitted_context_items" for k in n.keywords)):
-                    offenders.append(fn)
+                    callers.add(fn)
+        self.assertEqual(
+            sorted(callers), [_APPROVED_AUDIT_ITEMS_BRIDGE],
+            msg=("exactly the approved private bridge may pass "
+                 f"audit_admitted_context_items into run_turn; got: {sorted(callers)}"),
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(_torment_service_dir(),
+                                        _APPROVED_AUDIT_ITEMS_BRIDGE)),
+            msg="approved selected-items runner bridge module is missing",
+        )
+
+
+class TestApprovedBridgeShape(unittest.TestCase):
+    """Locks the SHAPE of the single authorized exception (the private
+    selected-items runner bridge): it CALLS the pure extractor and forwards the
+    extractor's selected item dicts -- never a raw parameter such as the whole
+    caller-supplied ``AssembledContext``."""
+
+    def setUp(self):
+        self.bridge = _parse_service(_APPROVED_AUDIT_ITEMS_BRIDGE)
+
+    def test_bridge_calls_selected_items_extractor(self):
+        self.assertIn(
+            "selected_admitted_items", _called_names(self.bridge),
+            msg="approved bridge does not call selected_admitted_items",
+        )
+
+    def test_bridge_forwards_extracted_items_not_a_raw_parameter(self):
+        # The value forwarded as ``audit_admitted_context_items`` must NOT be one
+        # of the bridge function's own parameters (which include the whole
+        # caller-supplied assembled context). It must be a local -- the extractor
+        # output -- proving only selected item dicts are forwarded.
+        offenders = []
+        for fn_node in _all_functions(self.bridge):
+            param_names = {a.arg for a in fn_node.args.args}
+            param_names |= {a.arg for a in fn_node.args.kwonlyargs}
+            param_names |= {a.arg for a in fn_node.args.posonlyargs}
+            for n in ast.walk(fn_node):
+                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                        and n.func.attr == "run_turn"):
+                    for k in n.keywords:
+                        if (k.arg == "audit_admitted_context_items"
+                                and isinstance(k.value, ast.Name)
+                                and k.value.id in param_names):
+                            offenders.append((fn_node.name, k.value.id))
         self.assertEqual(
             offenders, [],
-            msg=f"production run_turn caller passes audit_admitted_context_items: {offenders}",
+            msg=f"bridge forwards a raw parameter as audit items: {offenders}",
         )
 
 

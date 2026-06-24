@@ -98,6 +98,11 @@ def _import_leaves_names(tree):
 
 _ASSEMBLER_CTX = {"assemble_context", "AssembledContext", "assembled_text"}
 
+# The single approved private bridge authorized to pass
+# ``audit_admitted_context_items`` into ``run_turn`` (observation-only; feeds the
+# inclusion observer, never the prompt/review/ingest/fabric path).
+_APPROVED_BRIDGE = "audit_selected_items_runner_bridge.py"
+
 
 def _is_self_llm_complete(call):
     """True for ``self.llm_client.complete(...)``."""
@@ -343,11 +348,14 @@ class TestEndpointsOwnNeitherBothHalves(unittest.TestCase):
         self.assertNotIn("response_text", q_idents)
         self.assertNotIn("assemble_context", q_idents)
 
-    def test_no_production_caller_passes_items_as_inclusion_proof(self):
-        # Across torment_service, no run_turn call passes audit_admitted_context_items
-        # (it would be co-location, not inclusion proof). Tests may; production must not.
+    def test_only_approved_bridge_passes_items_into_run_turn(self):
+        # Historical fact (ec17d2e): across torment_service, NO run_turn call passed
+        # audit_admitted_context_items (co-location is not inclusion proof). New
+        # invariant: the ONLY service module that passes the items into run_turn is
+        # the approved private selected-items runner bridge; everything else (app.py,
+        # agent_loop self-call, endpoints, other production code) still must not.
         svc = _torment_service_dir()
-        offenders = []
+        callers = set()
         for fn in os.listdir(svc):
             if not fn.endswith(".py"):
                 continue
@@ -359,8 +367,11 @@ class TestEndpointsOwnNeitherBothHalves(unittest.TestCase):
                 if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                         and n.func.attr == "run_turn"
                         and any(k.arg == "audit_admitted_context_items" for k in n.keywords)):
-                    offenders.append(fn)
-        self.assertEqual(offenders, [], msg=f"production run_turn caller passes items: {offenders}")
+                    callers.add(fn)
+        self.assertEqual(
+            sorted(callers), [_APPROVED_BRIDGE],
+            msg=f"only the approved bridge may pass items into run_turn; got: {sorted(callers)}",
+        )
 
 
 class TestFutureOwnerMustChooseOneOfTwoDesigns(unittest.TestCase):

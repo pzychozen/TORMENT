@@ -50,7 +50,16 @@ def _parse_bytes(raw):
     return ast.parse(raw.replace(b"\x00", b""))
 
 
+# The single approved private bridge authorized to supply
+# ``audit_admitted_context_items`` into ``run_turn`` (observation-only). It is a
+# sanctioned exception to the prior "no honest live caller" topology and gets its
+# own category so the live/endpoint/runner-owner negatives stay intact.
+_APPROVED_BRIDGE_REL = "torment_service/audit_selected_items_runner_bridge.py"
+
+
 def _category(rel):
+    if rel == _APPROVED_BRIDGE_REL:
+        return "approved_bridge"
     if rel == "torment_service/app.py":
         return "endpoint"
     if rel == "torment_service/agent_loop.py":
@@ -255,12 +264,22 @@ class TestNoHonestLiveCallerSuppliesItems(unittest.TestCase):
             msg=f"production/endpoint run_turn caller passes audit_admitted_context_items: {sorted(offenders)}",
         )
 
-    def test_audit_items_passed_into_run_turn_only_in_tests(self):
+    def test_audit_items_into_run_turn_only_in_tests_or_approved_bridge(self):
         scan = _scan()
-        non_test = {rel for rel in scan["audit_kw_callers"] if _category(rel) != "test"}
+        # Only tests and the single approved private bridge may pass the items.
+        other = {rel for rel in scan["audit_kw_callers"]
+                 if _category(rel) not in {"test", "approved_bridge"}}
         self.assertEqual(
-            non_test, set(),
-            msg=f"non-test run_turn caller passes audit_admitted_context_items: {sorted(non_test)}",
+            other, set(),
+            msg=f"unexpected run_turn caller passes audit_admitted_context_items: {sorted(other)}",
+        )
+        # Lock the exception narrowly: the approved-bridge category resolves to
+        # exactly the one approved bridge file.
+        approved = {rel for rel in scan["audit_kw_callers"]
+                    if _category(rel) == "approved_bridge"}
+        self.assertEqual(
+            approved, {_APPROVED_BRIDGE_REL},
+            msg=f"approved-bridge caller set must be exactly the bridge; got: {sorted(approved)}",
         )
 
     def test_no_production_passes_assembledcontext_into_runner(self):
@@ -289,6 +308,7 @@ class TestRunTurnCallerInventory(unittest.TestCase):
         prod_service = by_cat.get("production_service", set())
         owner = by_cat.get("runner_owner", set())
         examples = by_cat.get("example_or_script", set())
+        approved = by_cat.get("approved_bridge", set())
 
         # No endpoint and no (non-owner) production-service caller exists.
         self.assertEqual(endpoint, set(), f"endpoint calls run_turn: {sorted(endpoint)}")
@@ -297,6 +317,10 @@ class TestRunTurnCallerInventory(unittest.TestCase):
         # The runner owns an internal self-call (enter_reflex); demo/example
         # callers may exist. Neither supplies audit items (asserted elsewhere).
         self.assertIn("torment_service/agent_loop.py", owner)
+        # The approved private bridge is the one sanctioned run_turn caller that
+        # MAY supply audit items; it resolves to exactly the bridge file.
+        self.assertEqual(approved, {_APPROVED_BRIDGE_REL},
+                         f"approved-bridge run_turn callers: {sorted(approved)}")
         for rel in examples:
             self.assertNotIn(rel, scan["audit_kw_callers"],
                              msg=f"example/demo {rel} passes audit_admitted_context_items")

@@ -546,9 +546,14 @@ def _c5_make_runner(drift_return=None):
 
 def _c5_stub_execute(runner, monkeypatch, *, response_text, no_op):
     from torment_service.agent_loop import ExecutionOutcome
+    # run_turn now reaches _execute via _execute_with_prompt_request, which calls
+    # self._execute(frame, mode, action) POSITIONALLY. Accept *a/**k so the stub
+    # matches that call shape (the prior **kw-only stub rejected positional args).
+    # Test-only stub signature fix; production _execute(frame, mode, action) is
+    # unchanged.
     monkeypatch.setattr(
         runner, "_execute",
-        lambda **kw: ExecutionOutcome(
+        lambda *a, **k: ExecutionOutcome(
             response_text=response_text, no_op=no_op, llm_called=True,
         ),
     )
