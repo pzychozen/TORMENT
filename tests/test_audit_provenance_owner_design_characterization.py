@@ -12,9 +12,11 @@ and NO verification/provenance/truth/authority flag. It characterizes the curren
 architecture and states the A-prime obligation:
 
   * The model-visible context construction boundary today is
-    ``AgentRunner._execute`` building ``system_prompt`` (via ``_build_system_prompt``)
-    + ``messages`` (from ``frame.raw_input``) and passing them to
-    ``LLMClient.complete(...)``.
+    ``AgentRunner._execute`` passing the local prompt request's fields
+    (``req.system_prompt`` / ``req.messages`` / ``req.tools``) to
+    ``LLMClient.complete(...)``; the request is built by
+    ``_build_llm_prompt_request`` from ``_build_system_prompt(frame, mode)`` and
+    ``messages`` derived from ``frame.raw_input``.
   * That prompt path consumes NO assembled context and NO
     ``audit_admitted_context_items`` — so the admitted items are NOT part of the
     model-visible context that produced the response.
@@ -122,6 +124,27 @@ def _calls_attr_on_self_attr(node, outer_attr, method):
     return False
 
 
+def _all_complete_calls_pass_req_fields(node):
+    """Every ``self.llm_client.complete(...)`` in ``node`` passes
+    ``system_prompt=req.system_prompt``, ``messages=req.messages``,
+    ``tools=req.tools`` (the local prompt-request object's fields, unchanged)."""
+    found = False
+    for n in ast.walk(node):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "complete"
+                and isinstance(n.func.value, ast.Attribute)
+                and n.func.value.attr == "llm_client"):
+            continue
+        found = True
+        kw = {k.arg: k.value for k in n.keywords if k.arg}
+        for field in ("system_prompt", "messages", "tools"):
+            v = kw.get(field)
+            if not (isinstance(v, ast.Attribute) and v.attr == field
+                    and isinstance(v.value, ast.Name) and v.value.id == "req"):
+                return False
+    return found
+
+
 # --- A-prime obligation, made executable now (synthetic; no live owner) -------
 
 def _proves_same_turn_inclusion(selected_item_texts, model_visible_context_text):
@@ -132,26 +155,49 @@ def _proves_same_turn_inclusion(selected_item_texts, model_visible_context_text)
 
 
 class TestModelVisibleContextBoundary(unittest.TestCase):
-    """The model-visible context boundary is AgentRunner._execute → llm_client
-    .complete(system_prompt, messages); it consumes no assembled context and no
-    admitted items."""
+    """The model-visible context boundary is AgentRunner._execute → the local
+    prompt request's fields passed to llm_client.complete(...); the request is
+    built by _build_llm_prompt_request from _build_system_prompt + frame.raw_input.
+    It consumes no assembled context and no admitted items."""
 
     def setUp(self):
         self.tree = _parse_service("agent_loop.py")
         self.runner = _class(self.tree, "AgentRunner")
         self.execute = _method(self.runner, "_execute")
         self.build_prompt = _method(self.runner, "_build_system_prompt")
+        self.build_request = _method(self.runner, "_build_llm_prompt_request")
 
     def test_boundary_is_llmclient_complete_in_execute(self):
         self.assertIsNotNone(self.execute)
+        # (1) The model-visible boundary is still self.llm_client.complete(...).
         self.assertTrue(
             _calls_attr_on_self_attr(self.execute, "llm_client", "complete"),
             "expected the model-visible boundary self.llm_client.complete(...) in _execute",
         )
-        # The prompt is built from _build_system_prompt + the user input.
-        idents = _idents(self.execute)
-        self.assertIn("_build_system_prompt", idents)
-        self.assertIn("complete", idents)
+        exec_idents = _idents(self.execute)
+        self.assertIn("complete", exec_idents)
+        # (2) Post-extraction: _execute builds the prompt via the local request
+        # helper and (3) passes its fields to complete unchanged.
+        self.assertIn("_build_llm_prompt_request", exec_idents)
+        self.assertTrue(
+            _all_complete_calls_pass_req_fields(self.execute),
+            "expected complete(system_prompt=req.system_prompt, messages=req.messages, tools=req.tools)",
+        )
+        # (4) The request helper preserves the ORIGINAL prompt source:
+        # system_prompt via _build_system_prompt(frame, mode), messages from
+        # frame.raw_input.
+        self.assertIsNotNone(self.build_request, "_build_llm_prompt_request not found")
+        helper_idents = _idents(self.build_request)
+        self.assertIn("_build_system_prompt", helper_idents)
+        self.assertIn("raw_input", helper_idents)
+        # (5) The boundary (execute + request helper) is the prompt request +
+        # complete — NOT assembled context, audit packet snippets, or admitted items.
+        boundary_idents = exec_idents | helper_idents
+        self.assertEqual(boundary_idents & _ASSEMBLER_CTX_NAMES, set(),
+                         "prompt boundary consumes assembler context")
+        self.assertNotIn("audit_admitted_context_items", boundary_idents)
+        self.assertNotIn("audit_evidence_packet", boundary_idents)
+        self.assertNotIn("evidence_items", boundary_idents)
 
     def test_execute_does_not_consume_assembled_context_or_audit_items(self):
         idents = _idents(self.execute)
@@ -177,12 +223,14 @@ class TestColocationIsNotProvenance(unittest.TestCase):
         self.runner = _class(self.tree, "AgentRunner")
         self.run_turn = _method(self.runner, "run_turn")
 
-    def test_audit_items_reach_only_packet_builder_and_turnresult(self):
+    def test_audit_items_reach_only_observer_and_turnresult(self):
+        # Post-#57: items now feed the inclusion observer (the observation-only
+        # sink) and TurnResult — never the prompt / review / ingest / fabric path.
         receivers = _call_receivers(self.run_turn, "audit_admitted_context_items")
+        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
         self.assertTrue(
-            receivers <= {"build_audit_evidence_sidecar_from_items", "TurnResult"},
-            msg=f"audit items routed to unexpected call(s): "
-                f"{sorted(receivers - {'build_audit_evidence_sidecar_from_items', 'TurnResult'})}",
+            receivers <= allowed,
+            msg=f"audit items routed to unexpected call(s): {sorted(receivers - allowed)}",
         )
 
     def test_packet_reaches_only_turnresult(self):

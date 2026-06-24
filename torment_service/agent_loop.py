@@ -51,7 +51,7 @@ from .thinking_models import (
     TaskFrame,
 )
 from .reflection_trace import ReflectionTrace, build_reflection_trace
-from .audit_evidence_sidecar import build_audit_evidence_sidecar_from_items
+from .audit_prompt_inclusion_observation import observe_prompt_inclusion_packet
 
 
 @dataclass
@@ -412,6 +412,18 @@ class _LLMPromptRequest:
     tools: Optional[List[object]]
 
 
+@dataclass
+class _ExecutionWithPromptRequest:
+    """Runner-local pairing of a Phase-6 ``ExecutionOutcome`` with the prompt
+    request sent to the model boundary this turn (``None`` when no model call
+    occurred). Private; carried only inside ``run_turn`` from execution to the
+    observation sink — never stored on ``self``, returned to public callers, or
+    exposed on ``TurnResult`` / ``ExecutionOutcome`` / metadata / endpoint /
+    schema / API."""
+    outcome: ExecutionOutcome
+    prompt_request: Optional[_LLMPromptRequest]
+
+
 class AgentRunner:
     """Outer-loop runner for a single TORMENT agent turn.
 
@@ -587,11 +599,13 @@ class AgentRunner:
         effective_action = policy_decision.action
 
         # Phase 6: Execute + review sub-gate (R6.a).
-        execution_outcome = self._execute(
+        _exec = self._execute_with_prompt_request(
             frame=bundle.task_frame,
             mode=bundle.mode_decision,
             action=effective_action,
         )
+        execution_outcome = _exec.outcome
+        _prompt_request = _exec.prompt_request
 
         review_outcome = self.controller.review(
             frame=bundle.task_frame,
@@ -701,21 +715,26 @@ class AgentRunner:
             confidence_need=bundle.task_frame.confidence_need,
         )
 
-        # Audit packet observation sink (observation-only). Built AFTER all
-        # review / ingest / fabric / gravity paths are complete, from the FINAL
-        # reviewed response_text (review may have revised it, or set it to None
-        # on block) plus the caller-supplied candidate admitted context items.
-        # No same-turn provenance claim; the caller owns provenance. Fail-soft:
-        # any builder error leaves the packet None and is NOT routed into
-        # prompts / review / ingest / fabric / metadata / output. Returned ONLY
-        # on TurnResult below.
+        # Audit packet observation sink (observation-only). Composed AFTER all
+        # review / ingest / fabric / gravity paths are complete, via the inert
+        # prompt-inclusion observer: the packet exists ONLY when every supplied
+        # admitted item's text is observed in the captured model-visible request
+        # (system_prompt + messages) that produced the FINAL reviewed response.
+        # Gated on a captured request (a model call occurred this turn). No
+        # same-turn provenance claim; the caller owns provenance. Fail-soft: any
+        # error leaves the packet None and is NOT routed into prompts / review /
+        # ingest / fabric / metadata / output. Returned ONLY on TurnResult below.
         _audit_evidence_packet: Optional[Dict[str, Any]] = None
         _final_response_text = execution_outcome.response_text
-        if _final_response_text and audit_admitted_context_items is not None:
+        if (_final_response_text
+                and audit_admitted_context_items is not None
+                and _prompt_request is not None):
             try:
-                _audit_evidence_packet = build_audit_evidence_sidecar_from_items(
-                    _final_response_text,
-                    audit_admitted_context_items,
+                _audit_evidence_packet = observe_prompt_inclusion_packet(
+                    system_prompt=_prompt_request.system_prompt,
+                    messages=_prompt_request.messages,
+                    admitted_context_items=audit_admitted_context_items,
+                    response_text=_final_response_text,
                 )
             except Exception:
                 _audit_evidence_packet = None
@@ -956,6 +975,26 @@ class AgentRunner:
         # Unexpected action type (should not happen given Phase 5
         # legality enforcement). Treat as no-op.
         return ExecutionOutcome(no_op=True)
+
+    def _execute_with_prompt_request(
+        self,
+        frame: TaskFrame,
+        mode: CognitiveModeDecision,
+        action: ActionDecision,
+    ) -> "_ExecutionWithPromptRequest":
+        """Phase 6 execute plus the prompt request actually sent to the model
+        boundary this turn (``None`` when no model call occurred). Private; for
+        ``run_turn`` only. ``_execute(...) -> ExecutionOutcome`` is preserved
+        unchanged for existing private callers/tests; this wrapper adds the
+        runner-local captured request without altering execution behavior."""
+        outcome = self._execute(frame, mode, action)
+        prompt_request: Optional[_LLMPromptRequest] = None
+        if outcome.llm_called:
+            # The model boundary ran this turn. The request it sent is the
+            # deterministic _build_llm_prompt_request(frame, mode): identical
+            # system_prompt and messages. (tools is immaterial to observation.)
+            prompt_request = self._build_llm_prompt_request(frame, mode, tools=None)
+        return _ExecutionWithPromptRequest(outcome=outcome, prompt_request=prompt_request)
 
     def _build_llm_prompt_request(
         self,

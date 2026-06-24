@@ -209,11 +209,17 @@ class TestSourceGuards(unittest.TestCase):
         present = [w for w in self.FORBIDDEN_FLAG_WORDS if w in src]
         self.assertEqual(present, [], msg=f"helper source contains forbidden flag word(s): {present}")
 
-    def test_no_production_module_imports_or_calls_helper(self):
+    def test_only_agent_loop_imports_or_calls_helper(self):
+        # The observer is no longer called nowhere: agent_loop.py is the ONE
+        # ratified production caller (the live, observation-only TurnResult sink).
+        # No OTHER production module may import or call it.
         svc = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc):
-            if not fn.endswith(".py") or fn == "audit_prompt_inclusion_observation.py":
+            if not fn.endswith(".py") or fn in (
+                "audit_prompt_inclusion_observation.py",
+                "agent_loop.py",
+            ):
                 continue
             try:
                 tree = _parse(os.path.join(svc, fn))
@@ -236,10 +242,11 @@ class TestSourceGuards(unittest.TestCase):
         self.assertNotIn("audit_prompt_inclusion_observation", leaves)
         self.assertNotIn("observe_prompt_inclusion_packet", names)
 
-    def test_agent_loop_does_not_import_helper(self):
+    def test_agent_loop_imports_helper(self):
+        # agent_loop.py is the ratified live caller (the observation-only sink).
         leaves, names = _import_leaves(_parse(os.path.join(_torment_service_dir(), "agent_loop.py")))
-        self.assertNotIn("audit_prompt_inclusion_observation", leaves)
-        self.assertNotIn("observe_prompt_inclusion_packet", names)
+        self.assertIn("audit_prompt_inclusion_observation", leaves)
+        self.assertIn("observe_prompt_inclusion_packet", names)
 
 
 if __name__ == "__main__":

@@ -1,26 +1,29 @@
-"""Characterization: current live-owner topology for a future model-visible
-context owner (tests-only / source-only).
+"""Characterization: live-owner topology after connecting the prompt-inclusion
+observer to AgentRunner (tests-only / source-only).
 
-Codex REVISE on #56 → one narrow characterization BEFORE any live wiring. This
-file wires nothing, connects nothing to ``AgentRunner``, touches no endpoint, and
-changes no production code. It records, by AST/source inspection, where live
-generation happens today and why no current path can honestly own the
-model-visible inclusion claim — so a future owner must make an explicit design
-choice.
+Issue #57 PASS connected ``observe_prompt_inclusion_packet(...)`` to the captured
+AgentRunner prompt request at the post-review ``TurnResult`` sink. This file wires
+nothing itself, touches no endpoint, and changes no production code. It records,
+by AST/source inspection, the now-connected topology and the boundaries that
+still hold.
 
 What it characterizes:
-  1. ``AgentRunner._execute`` is the only current live generation boundary.
-  2. The exact live prompt boundary is still
-     ``llm_client.complete(system_prompt=self._build_system_prompt(frame, mode),
-     messages=[{"role": "user", "content": frame.raw_input}])``.
-  3. No current path renders ``assembled_text`` into that boundary.
-  4. Passing ``audit_admitted_context_items`` into ``run_turn`` before inclusion
-     is observed is only co-location/staging, not proof of inclusion.
-  5. ``audit_prompt_inclusion_observation`` is still called nowhere in production.
+  1. ``AgentRunner._execute`` is the only live generation boundary.
+  2. The live prompt boundary is preserved as the local request object's fields
+     (``req.system_prompt`` / ``req.messages`` / ``req.tools``) built by
+     ``_build_llm_prompt_request`` from ``self._build_system_prompt(frame, mode)``
+     and ``[{"role": "user", "content": frame.raw_input}]``.
+  3. No path renders ``assembled_text`` into that boundary, and
+     ``audit_admitted_context_items`` never enters the prompt path.
+  4. ``audit_admitted_context_items`` reaches ONLY the inclusion observer and
+     ``TurnResult`` — never prompt / review / ingest / fabric.
+  5. ``observe_prompt_inclusion_packet`` is now imported and called by exactly
+     ONE production module: ``agent_loop.py`` (the observation-only sink).
   6. Endpoint paths still do not own both assembled context and generated
      response together.
-  7. A future live owner must choose ONE of two explicit designs: refactor/
-     capture AgentRunner's prompt request, OR become the generation owner itself.
+  7. Generation ownership and assembled-context ownership still live in DISJOINT
+     functions; the connection observes inclusion at the sink without merging
+     them.
 
 No forbidden wording is introduced.
 """
@@ -239,14 +242,14 @@ class TestLiveGenerationBoundary(unittest.TestCase):
         self.assertNotIn("AssembledContext", names)
 
 
-class TestStagingIsNotInclusionProof(unittest.TestCase):
+class TestItemsRouteToObserverAndTurnResult(unittest.TestCase):
 
     def setUp(self):
         self.tree = _parse_service("agent_loop.py")
         self.runner = _class(self.tree, "AgentRunner")
         self.run_turn = _method(self.runner, "run_turn")
 
-    def test_items_route_only_to_packet_builder_and_turnresult(self):
+    def test_items_route_only_to_observer_and_turnresult(self):
         receivers = set()
         for n in ast.walk(self.run_turn):
             if isinstance(n, ast.Call):
@@ -256,27 +259,47 @@ class TestStagingIsNotInclusionProof(unittest.TestCase):
                     f = n.func
                     receivers.add(f.id if isinstance(f, ast.Name)
                                   else f.attr if isinstance(f, ast.Attribute) else "?")
-        # Items reach only the packet builder and TurnResult — never the prompt
-        # path. So items on TurnResult are staging/co-location, not inclusion.
-        self.assertTrue(receivers <= {"build_audit_evidence_sidecar_from_items", "TurnResult"},
-                        msg=f"items routed unexpectedly: {sorted(receivers - {'build_audit_evidence_sidecar_from_items', 'TurnResult'})}")
+        # Items reach ONLY the inclusion observer and TurnResult — never the
+        # prompt / review / ingest / fabric path.
+        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
+        self.assertTrue(receivers <= allowed,
+                        msg=f"items routed unexpectedly: {sorted(receivers - allowed)}")
 
-    def test_inclusion_observer_not_used_in_live_path(self):
-        # The helper that would PROVE inclusion is not imported or called by the
-        # live runner — so the live path performs no inclusion proof.
+    def test_inclusion_observer_connected_in_live_path(self):
+        # The observer that PROVES inclusion is now imported and called by the
+        # live runner (the ratified #57 connection), and is given the admitted
+        # items as ``admitted_context_items``.
         leaves, names = _import_leaves_names(self.tree)
-        self.assertNotIn("audit_prompt_inclusion_observation", leaves)
-        self.assertNotIn("observe_prompt_inclusion_packet", names)
-        self.assertNotIn("observe_prompt_inclusion_packet", _idents(self.tree))
+        self.assertIn("audit_prompt_inclusion_observation", leaves)
+        self.assertIn("observe_prompt_inclusion_packet", names)
+        self.assertIn("observe_prompt_inclusion_packet", _idents(self.tree))
+        observer_calls = [
+            n for n in ast.walk(self.run_turn)
+            if isinstance(n, ast.Call)
+            and ((isinstance(n.func, ast.Name) and n.func.id == "observe_prompt_inclusion_packet")
+                 or (isinstance(n.func, ast.Attribute) and n.func.attr == "observe_prompt_inclusion_packet"))
+        ]
+        self.assertTrue(observer_calls, "observe_prompt_inclusion_packet not called in run_turn")
+        kw_value_names = []
+        for c in observer_calls:
+            kw_value_names += [k.value.id for k in c.keywords if isinstance(k.value, ast.Name)]
+        self.assertIn("audit_admitted_context_items", kw_value_names,
+                      "observer not given the admitted items")
 
 
-class TestObserverCalledNowhereInProduction(unittest.TestCase):
+class TestOnlyAgentLoopCallsObserver(unittest.TestCase):
 
-    def test_no_production_module_imports_or_calls_observer(self):
+    def test_only_agent_loop_imports_or_calls_observer(self):
+        # The observer now has exactly ONE ratified production caller:
+        # agent_loop.py (the observation-only TurnResult sink). No OTHER
+        # production module may import or call it.
         svc = _torment_service_dir()
         offenders = []
         for fn in os.listdir(svc):
-            if not fn.endswith(".py") or fn == "audit_prompt_inclusion_observation.py":
+            if not fn.endswith(".py") or fn in (
+                "audit_prompt_inclusion_observation.py",
+                "agent_loop.py",
+            ):
                 continue
             try:
                 tree = _parse_service(fn)
@@ -292,7 +315,7 @@ class TestObserverCalledNowhereInProduction(unittest.TestCase):
                     nm = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
                     if nm == "observe_prompt_inclusion_packet":
                         offenders.append(f"{fn}: call")
-        self.assertEqual(offenders, [], msg=f"observer has production caller(s): {offenders}")
+        self.assertEqual(offenders, [], msg=f"observer has unexpected production caller(s): {offenders}")
 
 
 class TestEndpointsOwnNeitherBothHalves(unittest.TestCase):

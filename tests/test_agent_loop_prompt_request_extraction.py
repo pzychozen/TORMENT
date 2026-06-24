@@ -93,9 +93,10 @@ class TestExecutePromptRequest(unittest.TestCase):
 
 
 class TestRunTurnBehaviorPreserved(unittest.TestCase):
-    """End-to-end: a full turn still completes, and the existing TurnResult audit
-    packet sink still builds only after review from the final response + supplied
-    items (extraction did not change run_turn behavior)."""
+    """End-to-end: a full turn still completes, and the TurnResult audit packet
+    sink composes the packet (via the inclusion observer) from the final reviewed
+    response + supplied items when the item text is present in the captured
+    prompt. The prompt-request extraction did not change this turn flow."""
 
     def test_turn_completes_and_packet_sink_unchanged(self):
         from dataclasses import dataclass, field
@@ -140,12 +141,13 @@ class TestRunTurnBehaviorPreserved(unittest.TestCase):
         items = [{"eid": 1, "block_type": "relational_context", "text": "ordinary fact"}]
         result = runner.run_turn(
             workspace_id="ws", agent_id="agent",
-            observation=Observation(text="tell me something"), step=1,
+            observation=Observation(text="tell me something about ordinary fact"), step=1,
             audit_admitted_context_items=items,
         )
         # Review-finalized response is used; turn completed.
         self.assertEqual(result.execution_outcome.response_text, "FINAL reply")
-        # Existing sink builds the packet from the final response + supplied items.
+        # The observer-backed sink builds the packet from the final reviewed
+        # response + supplied items (item text present in the captured prompt).
         self.assertEqual(
             result.audit_evidence_packet,
             build_audit_evidence_sidecar_from_items("FINAL reply", items),
@@ -181,7 +183,10 @@ class TestSourceGuards(unittest.TestCase):
                     out.add(n.arg)
         return out
 
-    def test_agent_loop_does_not_import_or_call_observer(self):
+    def test_agent_loop_imports_and_calls_observer(self):
+        # The #57 live connection: agent_loop imports and calls the observer for
+        # the observation-only TurnResult sink, and no longer directly imports the
+        # sidecar item-core for that sink.
         tree = self._agent_loop_tree()
         leaves = set()
         names = set()
@@ -194,9 +199,10 @@ class TestSourceGuards(unittest.TestCase):
             elif isinstance(n, ast.Import):
                 for x in n.names:
                     leaves.add(x.name.split(".")[-1])
-        self.assertNotIn("audit_prompt_inclusion_observation", leaves)
-        self.assertNotIn("observe_prompt_inclusion_packet", names)
-        self.assertNotIn("observe_prompt_inclusion_packet", self._idents(tree))
+        self.assertIn("audit_prompt_inclusion_observation", leaves)
+        self.assertIn("observe_prompt_inclusion_packet", names)
+        self.assertIn("observe_prompt_inclusion_packet", self._idents(tree))
+        self.assertNotIn("build_audit_evidence_sidecar_from_items", names)
 
     def test_prompt_request_helper_has_no_assembler_or_audit_refs(self):
         cls = self._class(self._agent_loop_tree(), "AgentRunner")

@@ -7,12 +7,14 @@ SCOPE (read carefully):
     * It is **not** a live evaluator / model / provider integration. The
       response-generation path is inspected by source/AST only; no model is
       called and no llm_client is exercised.
-    * Updated finding (post ``audit_evidence_packet`` sink slice): the audit
-      packet observation sink is now SELECTED on ``agent_loop.TurnResult``.
-      ``AgentRunner.run_turn`` builds an observation-only packet from explicit
-      inputs — the final reviewed ``execution_outcome.response_text`` plus the
-      caller-supplied ``audit_admitted_context_items`` — via the item-core
-      builder ``build_audit_evidence_sidecar_from_items`` ONLY. The invariant
+    * Updated finding (post #57 live-observation connection): the audit packet
+      observation sink is SELECTED on ``agent_loop.TurnResult``.
+      ``AgentRunner.run_turn`` composes an observation-only packet via the inert
+      prompt-inclusion observer ``observe_prompt_inclusion_packet`` — from the
+      final reviewed ``execution_outcome.response_text`` plus the caller-supplied
+      ``audit_admitted_context_items``, and only when each item's text is observed
+      in the captured model-visible request. agent_loop no longer directly calls
+      ``build_audit_evidence_sidecar_from_items`` for this sink. The invariant
       this file now guards is that the packet is **observation-only**: returned
       on ``TurnResult`` only, built from explicit inputs only (no
       assembled-context wrapper; no ``selected_admitted_items`` /
@@ -150,16 +152,21 @@ class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
             ),
         )
 
-    def test_agent_runner_builds_observation_only_packet_via_item_core(self):
-        # Post-sink slice: AgentRunner now builds an observation-only audit packet
-        # on TurnResult via the item-core builder ONLY. It still references no
-        # assembler context / extractor / packet module and does not call the
-        # assembled-context wrapper.
+    def test_agent_runner_builds_observation_only_packet_via_observer(self):
+        # Post-#57 connection: AgentRunner composes the observation-only audit
+        # packet on TurnResult via the prompt-inclusion observer, and no longer
+        # directly references the item-core builder for this sink. It still
+        # references no assembler context / extractor / packet module and does not
+        # call the assembled-context wrapper.
         tree = _parse("agent_loop.py")
         module_idents = _idents(tree)
         self.assertIn(
+            "observe_prompt_inclusion_packet", module_idents,
+            "expected the prompt-inclusion observer reference",
+        )
+        self.assertNotIn(
             "build_audit_evidence_sidecar_from_items", module_idents,
-            "expected the item-core builder reference",
+            "agent_loop must not directly reference the item-core builder for this sink",
         )
         self.assertIn(
             "audit_evidence_packet", module_idents,

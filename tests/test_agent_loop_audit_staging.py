@@ -150,11 +150,11 @@ class TestSourceGuards(unittest.TestCase):
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                     and n.name == "run_turn")
 
-    def test_run_turn_routes_items_only_to_packet_builder_and_turnresult(self):
-        # Post-sink slice: the staged items now also feed the observation-only
-        # packet builder. They must reach ONLY (a) the item-core packet builder
-        # and (b) the TurnResult construction — never fabric / llm / review /
-        # ingest / TurnContext / metadata calls.
+    def test_run_turn_routes_items_only_to_observer_and_turnresult(self):
+        # Post-#57 connection: the staged items now also feed the observation-only
+        # inclusion observer. They must reach ONLY (a) the prompt-inclusion
+        # observer and (b) the TurnResult construction — never fabric / llm /
+        # review / ingest / TurnContext / metadata calls.
         rt = self._run_turn_node(self._tree())
         receivers = set()
         for n in ast.walk(rt):
@@ -172,19 +172,20 @@ class TestSourceGuards(unittest.TestCase):
                         f.id if isinstance(f, ast.Name)
                         else f.attr if isinstance(f, ast.Attribute) else "?"
                     )
-        allowed = {"build_audit_evidence_sidecar_from_items", "TurnResult"}
+        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
         self.assertTrue(
             receivers <= allowed,
             msg=f"items routed to unexpected call(s): {sorted(receivers - allowed)}",
         )
         self.assertIn("TurnResult", receivers)
 
-    def test_agent_loop_imports_only_item_core_not_assembled_wrapper(self):
+    def test_agent_loop_imports_observer_not_item_core_or_assembled_wrapper(self):
         tree = self._tree()
-        # Post-sink slice: audit_evidence_sidecar IS now imported (the item-core
-        # builder is the ratified observation sink). The extractor / packet /
-        # assembler modules remain forbidden, and the assembled-context wrapper
-        # must NOT be imported or called.
+        # Post-#57 connection: agent_loop imports the prompt-inclusion observer
+        # (the ratified observation sink) and no longer directly imports the
+        # item-core builder for that sink. The extractor / packet / assembler
+        # modules remain forbidden, and the assembled-context wrapper must NOT be
+        # imported or called.
         forbidden_modules = {
             "audit_evidence_context", "audit_evidence_packet", "retrieval_assembler",
         }
@@ -203,7 +204,8 @@ class TestSourceGuards(unittest.TestCase):
             import_leaves & forbidden_modules, set(),
             msg=f"agent_loop.py imports forbidden module(s): {sorted(import_leaves & forbidden_modules)}",
         )
-        self.assertIn("build_audit_evidence_sidecar_from_items", imported_names)
+        self.assertIn("observe_prompt_inclusion_packet", imported_names)
+        self.assertNotIn("build_audit_evidence_sidecar_from_items", imported_names)
         self.assertNotIn("build_audit_evidence_sidecar_from_assembled_context", imported_names)
         call_names = set()
         for node in ast.walk(tree):
