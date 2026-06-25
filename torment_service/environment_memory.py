@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 
 from .embedding_store import _canonical_storage_root, _child_path
 from .pathing import safe_slug
+from .candidate_types import CandidateShapedValue
 
 
 log = logging.getLogger("torment.environment_memory")
@@ -328,6 +329,18 @@ class EnvironmentStore:
         if not target_runtime or not scope_tag or not key:
             return {"ok": False, "result_code": "missing_evidence_field",
                     "env_id": ""}
+
+        # === GATE A LAYER 4 — environment value candidate refusal (brick #4) ===
+        # After evidence-class + required-field validation (envelope rejections
+        # preserved), before env_id allocation, EnvironmentEntry construction,
+        # self._entries mutation, _append_jsonl, and event writes. Single
+        # named-field, type-only, non-recursive refusal of a candidate-shaped
+        # `value` — the one caller-forwarded Any sink validate_evidence does not
+        # cover and that consult projects back via EnvironmentFactView.value. No
+        # container iteration, no key/metadata/provenance inspection; the message
+        # never interpolates the value. Not wall completion.
+        if isinstance(value, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as an environment fact value")
 
         env_id = f"env_{uuid.uuid4().hex[:16]}"
         ts = _now_ts()
