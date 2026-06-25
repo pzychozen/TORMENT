@@ -26,6 +26,7 @@ from .lifecycle import (
     derive_protected_lifecycle_from_legacy_markers,
     validate_lifecycle_envelope,
 )
+from .candidate_types import CandidateShapedValue
 
 log = logging.getLogger("torment.memory_graph")
 
@@ -689,6 +690,23 @@ class MemoryGraph:
             memory_class: "core" (identity/relational) or "archive" (document chunks).
                           Defaults to "core" to preserve existing behavior.
         """
+        # === GATE A LAYER 4 — candidate refusal at node-creation primitive ===
+        # First executable statement. Structural, content-blind, type-only refusal
+        # of a candidate-shaped value passed as the ordinary-memory `summary`,
+        # before any payload construction, world.spawn, embedding write, logging,
+        # JSONL write, or self mutation. Covers every MemoryGraph creation caller
+        # (ordinary ingest, identity anchors, shared writes, promotion-beneath,
+        # character seeding) via this one choke. Inspects only the TYPE of
+        # `summary` — never contents, metadata, tags, payload keys, provenance,
+        # links, extra_payload, nested structures, or markers; the message never
+        # interpolates the value.
+        #
+        # SCOPE (smallest brick): `summary` ONLY. UNRESOLVED / out of scope:
+        # update_payload, extra_payload, links, ReferenceStore, EnvironmentStore,
+        # ArchiveStore, the other direct-writer bypasses, and the parked writer
+        # non-conformances. This is NOT wall completion.
+        if isinstance(summary, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as ordinary memory summary")
         links = links or []
         payload: Dict[str, Any] = {
             "summary": summary,
