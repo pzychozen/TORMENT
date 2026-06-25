@@ -39,6 +39,7 @@ from .checkpoint import (
     build_motif_summary, build_shard_snapshot,
 )
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
+from .candidate_types import CandidateShapedValue
 
 log = logging.getLogger("torment.fabric")
 
@@ -2478,6 +2479,24 @@ class TormentFabric:
         skip_packet_emission: bool = False,
         suppress_canon: bool = False,
     ) -> Dict[str, Any]:
+        # === GATE A LAYER 4 — ordinary-ingest candidate refusal (first brick) ===
+        # FIRST executable statement. Structural, content-blind type refusal:
+        # ordinary ingest must not accept a candidate-shaped value as ordinary
+        # memory input. This precedes _agent_key, create_agent, provenance, kernel
+        # processing, and ALL fan-out / mutation, so a refused call has zero side
+        # effects. It inspects ONLY the type of `text` — never its contents,
+        # metadata, tags, payload keys, provenance, marker fields, or container
+        # structure; the error message never interpolates the value or its repr.
+        #
+        # SCOPE (smallest brick): `text` parameter ONLY. The non-text parameters
+        # (supplied_summary, extra_payload, supplied_embedding, provenance, ...)
+        # and the known direct-writer bypasses remain UNRESOLVED and out of scope.
+        # This is NOT wall completion.
+        if isinstance(text, CandidateShapedValue):
+            raise TypeError(
+                "TormentFabric.ingest does not accept candidate-shaped values as "
+                "ordinary memory input (Gate A Layer 4 text-boundary refusal)."
+            )
         # === BOUNDARY GUARD ===
         # Core ingest ALWAYS creates "core" memory. Archive documents use
         # ArchiveStore.ingest_document() via /archive/ingest_document endpoint.
