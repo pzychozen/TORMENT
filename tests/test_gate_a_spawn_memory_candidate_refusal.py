@@ -100,6 +100,24 @@ def _call_add(self_obj, summary):
     )
 
 
+def _call_spawn_ep(self_obj, extra_payload, summary="an ordinary memory summary"):
+    # Ordinary string summary so the candidate (if any) is carried by
+    # extra_payload, not summary — exercising the brick-3 guard specifically.
+    return MemoryGraph.spawn_memory(
+        self_obj, summary=summary, embedding=None, mtype="episode",
+        strength=0.5, confidence=0.5, half_life_days=1.0,
+        extra_payload=extra_payload,
+    )
+
+
+def _call_add_ep(self_obj, extra_payload, summary="an ordinary memory summary"):
+    return MemoryGraph.add_memory(
+        self_obj, summary=summary, embedding=None, mtype="episode",
+        strength=0.5, confidence=0.5, half_life_days=1.0,
+        extra_payload=extra_payload,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Runtime: pre-side-effect refusal
 # --------------------------------------------------------------------------- #
@@ -193,12 +211,15 @@ class TestGuardPlacementAndShape(unittest.TestCase):
                 self.assertNotEqual(n.id, "summary",
                                     msg="raise message must not reference `summary`")
 
-    def test_guard_references_only_summary_not_other_params(self):
+    def test_summary_guard_references_only_summary_not_other_params(self):
+        # Scoped to the SUMMARY guard (first non-docstring statement). The
+        # sibling extra_payload guard is checked in TestExtraPayloadGuardShape;
+        # this assertion is deliberately NOT broadened to the whole function.
         names = {n.id for n in ast.walk(self.guard) if isinstance(n, ast.Name)}
         for other in ("extra_payload", "links", "embedding", "memory_class",
                       "mtype", "user_id", "canon"):
             self.assertNotIn(other, names,
-                             msg=f"guard unexpectedly references {other}")
+                             msg=f"summary guard unexpectedly references {other}")
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +272,198 @@ class TestImportIsDependencyFree(unittest.TestCase):
             if isinstance(node, ast.Import):
                 for a in node.names:
                     self.assertNotIn("torment_service", a.name)
+
+
+def _nondoc_body(func):
+    body = func.body
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(getattr(body[0], "value", None), ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        return body[1:]
+    return body
+
+
+# --------------------------------------------------------------------------- #
+# Brick #3 — runtime: extra_payload candidate refusal before side effects
+# --------------------------------------------------------------------------- #
+
+class TestExtraPayloadRefusal(unittest.TestCase):
+
+    def test_extra_payload_object_refused_before_any_self_access(self):
+        # extra_payload IS a candidate -> TypeError; _TripSelf never touched.
+        with self.assertRaises(TypeError) as ctx:
+            _call_spawn_ep(_TripSelf(), CandidateShapedValue(_SECRET))
+        self.assertIs(type(ctx.exception), TypeError)
+
+    def test_extra_payload_value_refused_before_any_self_access(self):
+        # A candidate carried as an immediate extra_payload value -> TypeError,
+        # before world.spawn / payload mutation (no self access on _TripSelf).
+        with self.assertRaises(TypeError) as ctx:
+            _call_spawn_ep(_TripSelf(), {"x": CandidateShapedValue(_SECRET)})
+        self.assertIs(type(ctx.exception), TypeError)
+
+    def test_extra_payload_error_messages_are_contents_free(self):
+        for ep in (CandidateShapedValue(_SECRET), {"x": CandidateShapedValue(_SECRET)}):
+            with self.assertRaises(TypeError) as ctx:
+                _call_spawn_ep(_TripSelf(), ep)
+            self.assertNotIn(_SECRET, str(ctx.exception))
+
+    def test_ordinary_extra_payload_passes_guard_to_first_real_statement(self):
+        # An ordinary dict is NOT refused; with an ordinary string summary it
+        # flows past both candidate guards to the first real self access
+        # (self._vec3) and trips the sentinel there. Proves the brick-3 guard is
+        # a no-op for ordinary extra_payload.
+        with self.assertRaises(AssertionError) as ctx:
+            _call_spawn_ep(_TripSelf(), {"x": 1, "y": "ok"})
+        self.assertIn("_vec3", str(ctx.exception))
+
+    def test_add_memory_refuses_extra_payload_through_spawn_memory(self):
+        # add_memory's first action is self.spawn_memory(...); the candidate
+        # extra_payload value is refused there -> TypeError (not AssertionError).
+        with self.assertRaises(TypeError) as ctx:
+            _call_add_ep(_DelegateSpawnSelf(), {"x": CandidateShapedValue(_SECRET)})
+        self.assertIs(type(ctx.exception), TypeError)
+
+
+# --------------------------------------------------------------------------- #
+# Brick #3 — source/AST: placement, key-blindness, non-recursion, type-only
+# --------------------------------------------------------------------------- #
+
+class TestExtraPayloadGuardShape(unittest.TestCase):
+
+    def setUp(self):
+        self.func = _method(_tree("memory_graph.py"), "MemoryGraph", "spawn_memory")
+        self.assertIsNotNone(self.func, "MemoryGraph.spawn_memory not found")
+        self.body = _nondoc_body(self.func)
+        self.assertGreaterEqual(len(self.body), 4,
+                                "spawn_memory body shorter than expected")
+        self.summary_guard = self.body[0]
+        self.ep_obj_guard = self.body[1]
+        self.ep_val_guard = self.body[2]
+
+    def test_summary_guard_is_still_first_nondoc_statement(self):
+        g = self.summary_guard
+        self.assertIsInstance(g, ast.If)
+        self.assertIsInstance(g.test, ast.Call)
+        self.assertEqual(g.test.func.id, "isinstance")
+        self.assertEqual(g.test.args[0].id, "summary")
+        self.assertEqual(g.test.args[1].id, "CandidateShapedValue")
+
+    def test_extra_payload_object_guard_is_second(self):
+        g = self.ep_obj_guard
+        self.assertIsInstance(g, ast.If)
+        self.assertIsInstance(g.test, ast.Call)
+        self.assertEqual(g.test.func.id, "isinstance")
+        self.assertEqual(g.test.args[0].id, "extra_payload")
+        self.assertEqual(g.test.args[1].id, "CandidateShapedValue")
+        self.assertEqual(len(g.body), 1)
+        self.assertIsInstance(g.body[0], ast.Raise)
+        self.assertEqual(g.body[0].exc.func.id, "TypeError")
+
+    def test_extra_payload_value_guard_is_third(self):
+        g = self.ep_val_guard
+        # `if extra_payload:` wrapping a single for-loop over .values()
+        self.assertIsInstance(g, ast.If)
+        self.assertIsInstance(g.test, ast.Name)
+        self.assertEqual(g.test.id, "extra_payload")
+        self.assertEqual(len(g.body), 1)
+        self.assertIsInstance(g.body[0], ast.For)
+
+    def test_value_guard_iterates_values_only(self):
+        forloop = self.ep_val_guard.body[0]
+        self.assertIsInstance(forloop, ast.For)
+        it = forloop.iter
+        self.assertIsInstance(it, ast.Call)
+        self.assertIsInstance(it.func, ast.Attribute)
+        self.assertEqual(it.func.attr, "values")           # not keys/items/get
+        self.assertIsInstance(it.func.value, ast.Name)
+        self.assertEqual(it.func.value.id, "extra_payload")
+        self.assertEqual(it.args, [])                       # values() takes no args
+        self.assertEqual(len(forloop.body), 1)
+        inner = forloop.body[0]
+        self.assertIsInstance(inner, ast.If)
+        self.assertIsInstance(inner.test, ast.Call)
+        self.assertEqual(inner.test.func.id, "isinstance")  # type-only
+        self.assertIsInstance(inner.test.args[0], ast.Name)  # the loop var, by type
+        self.assertEqual(inner.test.args[1].id, "CandidateShapedValue")
+        self.assertEqual(len(inner.body), 1)
+        self.assertIsInstance(inner.body[0], ast.Raise)
+        self.assertEqual(inner.body[0].exc.func.id, "TypeError")
+
+    def test_value_guard_has_no_nested_iteration_or_recursion(self):
+        region = (self.ep_obj_guard, self.ep_val_guard)
+        fors = [n for stmt in region for n in ast.walk(stmt) if isinstance(n, ast.For)]
+        self.assertEqual(len(fors), 1, "exactly one loop expected in extra_payload guard")
+        for n in ast.walk(fors[0]):
+            self.assertNotIsInstance(
+                n, (ast.While, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp),
+                msg="no nested/comprehension iteration allowed")
+            if isinstance(n, ast.Call):
+                name = (n.func.attr if isinstance(n.func, ast.Attribute)
+                        else getattr(n.func, "id", None))
+                self.assertNotIn(name, {"spawn_memory", "add_memory", "update_payload"})
+
+    def test_guard_has_no_subscript_or_comparison(self):
+        for stmt in (self.ep_obj_guard, self.ep_val_guard):
+            for n in ast.walk(stmt):
+                self.assertNotIsInstance(n, ast.Subscript,
+                                         msg="guard must not subscript/index")
+                self.assertNotIsInstance(n, ast.Compare,
+                                         msg="guard must not compare (no key/content match)")
+
+    def test_guard_only_attribute_is_values_on_extra_payload(self):
+        attrs = [n for stmt in (self.ep_obj_guard, self.ep_val_guard)
+                 for n in ast.walk(stmt) if isinstance(n, ast.Attribute)]
+        self.assertTrue(attrs, "expected the .values() attribute access")
+        for a in attrs:
+            self.assertEqual(a.attr, "values", msg=f"unexpected attribute .{a.attr}")
+            self.assertIsInstance(a.value, ast.Name)
+            self.assertEqual(a.value.id, "extra_payload")
+
+    def test_guard_messages_are_contents_free_constants(self):
+        raises = [n for stmt in (self.ep_obj_guard, self.ep_val_guard)
+                  for n in ast.walk(stmt) if isinstance(n, ast.Raise)]
+        self.assertEqual(len(raises), 2)
+        for r in raises:
+            for n in ast.walk(r):
+                self.assertNotIsInstance(n, ast.JoinedStr,
+                                         msg="raise message must not be an f-string")
+            self.assertIsInstance(r.exc, ast.Call)
+            self.assertEqual(r.exc.func.id, "TypeError")
+            self.assertIsInstance(r.exc.args[0], ast.Constant)
+            self.assertIsInstance(r.exc.args[0].value, str)
+            ref_names = {n.id for n in ast.walk(r) if isinstance(n, ast.Name)}
+            self.assertEqual(ref_names, {"TypeError"},
+                             msg=f"raise references unexpected names: {ref_names}")
+
+    def test_extra_payload_guards_do_not_touch_self(self):
+        for stmt in (self.ep_obj_guard, self.ep_val_guard):
+            names = {n.id for n in ast.walk(stmt) if isinstance(n, ast.Name)}
+            self.assertNotIn("self", names)
+
+    def test_guard_region_has_no_side_effecting_calls(self):
+        forbidden = {"spawn", "update", "append", "_log_event", "_append_jsonl",
+                     "_register_embedding", "save", "index_node", "flush_node"}
+        for stmt in (self.summary_guard, self.ep_obj_guard, self.ep_val_guard):
+            for n in ast.walk(stmt):
+                if isinstance(n, ast.Call):
+                    name = (n.func.attr if isinstance(n.func, ast.Attribute)
+                            else getattr(n.func, "id", None))
+                    self.assertNotIn(name, forbidden,
+                                     msg=f"side-effecting call {name} inside guard region")
+
+    def test_links_remains_unguarded_by_this_brick(self):
+        # No candidate guard references `links`; the link edge-write loop is
+        # still present and unmodified. links stays UNRESOLVED for this brick.
+        for n in ast.walk(self.func):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "isinstance" and len(n.args) == 2
+                    and isinstance(n.args[1], ast.Name)
+                    and n.args[1].id == "CandidateShapedValue"):
+                self.assertIsInstance(n.args[0], ast.Name)
+                self.assertNotEqual(n.args[0].id, "links",
+                                    msg="links must remain unguarded by this brick")
+        self.assertIn("for tgt in links:", _read("memory_graph.py"))
 
 
 if __name__ == "__main__":

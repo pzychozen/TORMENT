@@ -707,6 +707,21 @@ class MemoryGraph:
         # non-conformances. This is NOT wall completion.
         if isinstance(summary, CandidateShapedValue):
             raise TypeError("candidate-shaped value cannot be written as ordinary memory summary")
+        # === GATE A LAYER 4 — extra_payload candidate refusal (brick #3) ===
+        # Immediately after the summary guard, before any ordinary-memory side
+        # effect (links normalization, payload construction, lifecycle envelope,
+        # world.spawn, embedding write, MEMORY_CREATE log, link writes, flush).
+        # Refuses (a) extra_payload BEING a candidate-shaped value, and (b) any
+        # IMMEDIATE value carrying one. Key-blind, non-recursive, type-only,
+        # immediate values only; contents-free message. Never inspects keys,
+        # nested structures, tags, provenance, or metadata. `links` and
+        # `update_payload` remain UNRESOLVED. This is NOT wall completion.
+        if isinstance(extra_payload, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as ordinary memory extra_payload")
+        if extra_payload:
+            for _ep_value in extra_payload.values():
+                if isinstance(_ep_value, CandidateShapedValue):
+                    raise TypeError("candidate-shaped value cannot be written into ordinary memory payload")
         links = links or []
         payload: Dict[str, Any] = {
             "summary": summary,
