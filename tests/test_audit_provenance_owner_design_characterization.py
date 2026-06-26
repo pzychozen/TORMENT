@@ -235,10 +235,11 @@ class TestColocationIsNotProvenance(unittest.TestCase):
         self.run_turn = _method(self.runner, "run_turn")
 
     def test_audit_items_reach_only_observer_and_turnresult(self):
-        # Post-#57: items now feed the inclusion observer (the observation-only
-        # sink) and TurnResult — never the prompt / review / ingest / fabric path.
+        # Post-extraction: items now feed the audit-evidence helper (the
+        # observation-only sink, which routes them only to the inclusion observer)
+        # and TurnResult — never the prompt / review / ingest / fabric path.
         receivers = _call_receivers(self.run_turn, "audit_admitted_context_items")
-        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
+        allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
         self.assertTrue(
             receivers <= allowed,
             msg=f"audit items routed to unexpected call(s): {sorted(receivers - allowed)}",

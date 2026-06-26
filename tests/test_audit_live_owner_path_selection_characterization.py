@@ -272,31 +272,51 @@ class TestItemsRouteToObserverAndTurnResult(unittest.TestCase):
                     f = n.func
                     receivers.add(f.id if isinstance(f, ast.Name)
                                   else f.attr if isinstance(f, ast.Attribute) else "?")
-        # Items reach ONLY the inclusion observer and TurnResult — never the
-        # prompt / review / ingest / fabric path.
-        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
+        # Post-extraction: items reach ONLY the audit-evidence helper (the
+        # observation-only sink) and TurnResult in run_turn — never the prompt /
+        # review / ingest / fabric path.
+        allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
         self.assertTrue(receivers <= allowed,
                         msg=f"items routed unexpectedly: {sorted(receivers - allowed)}")
+        # Inside the helper, the admitted items route ONLY to the inclusion observer.
+        helper = _method(self.runner, "_observe_audit_evidence_from_prompt_request")
+        self.assertIsNotNone(helper, "audit-evidence helper not found")
+        helper_recv = set()
+        for n in ast.walk(helper):
+            if isinstance(n, ast.Call):
+                passed = [a.id for a in n.args if isinstance(a, ast.Name)]
+                passed += [k.value.id for k in n.keywords if isinstance(k.value, ast.Name)]
+                if "admitted_context_items" in passed:
+                    f = n.func
+                    helper_recv.add(f.id if isinstance(f, ast.Name)
+                                    else f.attr if isinstance(f, ast.Attribute) else "?")
+        self.assertTrue(helper_recv <= {"observe_prompt_inclusion_packet"},
+                        msg=f"helper routes items unexpectedly: {sorted(helper_recv)}")
 
     def test_inclusion_observer_connected_in_live_path(self):
-        # The observer that PROVES inclusion is now imported and called by the
-        # live runner (the ratified #57 connection), and is given the admitted
-        # items as ``admitted_context_items``.
+        # The observer that PROVES inclusion remains imported and module-visible.
+        # Post-extraction, the live runner reaches it through the private
+        # audit-evidence helper: run_turn calls the helper, and the helper calls
+        # observe_prompt_inclusion_packet, given the admitted items.
         leaves, names = _import_leaves_names(self.tree)
         self.assertIn("audit_prompt_inclusion_observation", leaves)
         self.assertIn("observe_prompt_inclusion_packet", names)
         self.assertIn("observe_prompt_inclusion_packet", _idents(self.tree))
+        self.assertIn("_observe_audit_evidence_from_prompt_request", _idents(self.run_turn))
+        helper = _method(self.runner, "_observe_audit_evidence_from_prompt_request")
+        self.assertIsNotNone(helper, "audit-evidence helper not found")
         observer_calls = [
-            n for n in ast.walk(self.run_turn)
+            n for n in ast.walk(helper)
             if isinstance(n, ast.Call)
             and ((isinstance(n.func, ast.Name) and n.func.id == "observe_prompt_inclusion_packet")
                  or (isinstance(n.func, ast.Attribute) and n.func.attr == "observe_prompt_inclusion_packet"))
         ]
-        self.assertTrue(observer_calls, "observe_prompt_inclusion_packet not called in run_turn")
+        self.assertTrue(observer_calls,
+                        "observe_prompt_inclusion_packet not called in the audit-evidence helper")
         kw_value_names = []
         for c in observer_calls:
             kw_value_names += [k.value.id for k in c.keywords if isinstance(k.value, ast.Name)]
-        self.assertIn("audit_admitted_context_items", kw_value_names,
+        self.assertIn("admitted_context_items", kw_value_names,
                       "observer not given the admitted items")
 
 

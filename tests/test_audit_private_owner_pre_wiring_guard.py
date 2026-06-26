@@ -37,6 +37,7 @@ _OWNER = "audit_private_generation_owner.py"
 _BOUNDARY_METHOD = "_execute"
 _PROMPT_BUILDER = "_build_llm_prompt_request"
 _HELPER = "_complete_llm_prompt_request"      # the thin model-call helper (post-extraction)
+_AUDIT_HELPER = "_observe_audit_evidence_from_prompt_request"   # the audit-evidence helper (post-extraction)
 _BUILT_PACKET = "_audit_evidence_packet"      # the BUILT packet value (not inputs)
 _OBSERVER = "observe_prompt_inclusion_packet"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
@@ -282,15 +283,14 @@ class TestPW5PacketAbsenceNonPunitive(unittest.TestCase):
         al = _parse_service(_AGENT_LOOP)
         self.assertEqual(_module_branch_uses(al, _BUILT_PACKET), [],
                          msg="packet presence/absence guards a divergent path (punitive)")
-        # The observation block must be fail-soft: the observer call sits under a
-        # try/except so an observer error yields no packet and no error path.
-        run_turn = _method(_class(al, "AgentRunner"), "run_turn")
-        self.assertIsNotNone(run_turn)
-        observed_under_try = False
-        for n in ast.walk(run_turn):
-            if isinstance(n, ast.Try):
-                if _OBSERVER in _called_names(n):
-                    observed_under_try = True
+        # The observation is fail-soft: the observer call sits under a try/except in
+        # the audit-evidence helper (composition extracted from run_turn), so an
+        # observer error yields no packet and no error path.
+        helper = _method(_class(al, "AgentRunner"), _AUDIT_HELPER)
+        self.assertIsNotNone(helper, "audit-evidence helper not found")
+        observed_under_try = any(
+            isinstance(n, ast.Try) and _OBSERVER in _called_names(n)
+            for n in ast.walk(helper))
         self.assertTrue(observed_under_try,
                         "audit observation is not fail-soft (not under try/except)")
 
@@ -331,27 +331,31 @@ class TestPW6NoForbiddenReachability(unittest.TestCase):
 
 class TestPW7ObservationAroundNotControlOfGeneration(unittest.TestCase):
 
-    def test_observer_runs_in_run_turn_only_never_in_the_generation_method(self):
+    def test_observer_runs_in_audit_helper_only_never_in_the_generation_method(self):
         al = _parse_service(_AGENT_LOOP)
-        # The evidence observer is composed ONLY in run_turn (downstream), and NEVER
-        # inside _execute (the generation control flow). So evidence sits AROUND the
-        # generation call, it does not control generation.
-        self.assertEqual(_funcs_calling(al, _OBSERVER), {"run_turn"},
-                         msg="audit observation is not confined to run_turn")
+        # The evidence observer is composed ONLY in the audit-evidence helper
+        # (downstream, called by run_turn), and NEVER inside _execute (the
+        # generation control flow). Evidence sits AROUND generation, not in it.
+        self.assertEqual(_funcs_calling(al, _OBSERVER), {_AUDIT_HELPER},
+                         msg="audit observation is not confined to the audit-evidence helper")
+        self.assertEqual(_funcs_calling(al, _AUDIT_HELPER), {"run_turn"},
+                         msg="the audit-evidence helper is called by something other than run_turn")
         execute = _method(_class(al, "AgentRunner"), _BOUNDARY_METHOD)
         self.assertNotIn(_OBSERVER, _called_names(execute),
                          msg="generation method composes audit evidence (control-of-generation risk)")
+        self.assertNotIn(_AUDIT_HELPER, _called_names(execute),
+                         msg="generation method composes audit evidence via the helper")
 
     def test_observer_composes_from_final_response(self):
         # The packet is composed only after a final response exists (downstream of
-        # generation): the observer call passes a response_text-derived argument.
-        run_turn = _method(_class(_parse_service(_AGENT_LOOP), "AgentRunner"), "run_turn")
-        observer_calls = [c for c in _attr_calls(run_turn, _OBSERVER.split(".")[-1])]
-        # _OBSERVER is a bare name call, not attribute; find Name-func calls instead.
-        name_calls = [n for n in ast.walk(run_turn)
+        # generation): the observer call (now in the audit-evidence helper) passes a
+        # response_text-derived argument.
+        helper = _method(_class(_parse_service(_AGENT_LOOP), "AgentRunner"), _AUDIT_HELPER)
+        self.assertIsNotNone(helper, "audit-evidence helper not found")
+        name_calls = [n for n in ast.walk(helper)
                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                       and n.func.id == _OBSERVER]
-        self.assertTrue(name_calls, "observer not called in run_turn")
+        self.assertTrue(name_calls, "observer not called in the audit-evidence helper")
         kw_names = set()
         for c in name_calls:
             kw_names |= {k.arg for k in c.keywords}

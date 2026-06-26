@@ -327,11 +327,14 @@ class TestAuditBlindBoundaryAndEvidenceOnlyPacket(unittest.TestCase):
 
     def test_run_turn_packet_is_evidence_only_not_control(self):
         # Any future connection routes audit evidence the way run_turn already
-        # does: composed AFTER execution, driving no branch, returned only on
-        # TurnResult — observation-only, never output control.
+        # does: composed AFTER execution by the audit-evidence helper, driving no
+        # branch, returned only on TurnResult — observation-only, never control.
         run_turn = _method(self.runner, "run_turn")
         self.assertIsNotNone(run_turn)
-        self.assertIn("observe_prompt_inclusion_packet", _called_names(run_turn))
+        self.assertIn("_observe_audit_evidence_from_prompt_request", _called_names(run_turn))
+        helper = _method(self.runner, "_observe_audit_evidence_from_prompt_request")
+        self.assertIsNotNone(helper, "audit-evidence helper not found")
+        self.assertIn("observe_prompt_inclusion_packet", _called_names(helper))
         self.assertEqual(_branch_uses(run_turn, "_audit_evidence_packet"), [],
                          msg="audit packet drives a control branch in run_turn")
         receivers = _call_receivers(run_turn, "_audit_evidence_packet")

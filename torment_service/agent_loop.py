@@ -724,20 +724,12 @@ class AgentRunner:
         # same-turn provenance claim; the caller owns provenance. Fail-soft: any
         # error leaves the packet None and is NOT routed into prompts / review /
         # ingest / fabric / metadata / output. Returned ONLY on TurnResult below.
-        _audit_evidence_packet: Optional[Dict[str, Any]] = None
         _final_response_text = execution_outcome.response_text
-        if (_final_response_text
-                and audit_admitted_context_items is not None
-                and _prompt_request is not None):
-            try:
-                _audit_evidence_packet = observe_prompt_inclusion_packet(
-                    system_prompt=_prompt_request.system_prompt,
-                    messages=_prompt_request.messages,
-                    admitted_context_items=audit_admitted_context_items,
-                    response_text=_final_response_text,
-                )
-            except Exception:
-                _audit_evidence_packet = None
+        _audit_evidence_packet = self._observe_audit_evidence_from_prompt_request(
+            _prompt_request,
+            audit_admitted_context_items,
+            _final_response_text,
+        )
 
         return TurnResult(
             workspace_id=workspace_id,
@@ -988,6 +980,40 @@ class AgentRunner:
             messages=req.messages,
             tools=req.tools,
         )
+
+    def _observe_audit_evidence_from_prompt_request(
+        self,
+        prompt_request: Optional["_LLMPromptRequest"],
+        admitted_context_items: Optional[List[Dict[str, Any]]],
+        final_response_text: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Behavior-preserving extraction of the run_turn audit-evidence composition.
+
+        Composes the observation-only audit packet via
+        ``observe_prompt_inclusion_packet(...)`` from the already-captured
+        model-visible request (``system_prompt`` + ``messages``), the caller-supplied
+        admitted context items, and the FINAL reviewed response text. Returns the
+        packet, or ``None`` when inputs are insufficient (no captured request, no
+        caller-supplied items, or no final response) or on any error — fail-soft,
+        identical to the prior inline logic. Observation only: it drives no branch,
+        mutates no prompt, makes no same-turn provenance claim, references no
+        ``PrivateGenerationOwner``, and reaches no writer / memory / retrieval /
+        review / output / fabric / control path. The result is returned only to the
+        ``TurnResult.audit_evidence_packet`` surface by the caller.
+        """
+        if not (final_response_text
+                and admitted_context_items is not None
+                and prompt_request is not None):
+            return None
+        try:
+            return observe_prompt_inclusion_packet(
+                system_prompt=prompt_request.system_prompt,
+                messages=prompt_request.messages,
+                admitted_context_items=admitted_context_items,
+                response_text=final_response_text,
+            )
+        except Exception:
+            return None
 
     def _execute_with_prompt_request(
         self,

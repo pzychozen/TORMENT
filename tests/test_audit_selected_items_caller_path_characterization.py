@@ -306,8 +306,10 @@ class TestAgentLoopOwnsNoAssemblerOrExtractor(unittest.TestCase):
 
     def test_audit_items_route_only_to_observer_and_turnresult(self):
         self.assertIsNotNone(self.run_turn, "run_turn not found")
+        # Post-extraction: items route to the audit-evidence helper (which routes
+        # them only to the inclusion observer) and TurnResult.
         receivers = _call_receivers(self.run_turn, "audit_admitted_context_items")
-        allowed = {"observe_prompt_inclusion_packet", "TurnResult"}
+        allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
         self.assertTrue(
             receivers <= allowed,
             msg=f"audit items routed to unexpected call(s): {sorted(receivers - allowed)}",
