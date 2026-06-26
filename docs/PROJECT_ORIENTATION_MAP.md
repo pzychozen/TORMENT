@@ -8,7 +8,7 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `f973333` / `origin/main` / docs-only working tree pending Gate D readiness review commit.
+- **HEAD:** `79988e9` / `origin/main` / clean.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
 - **Last closed:**
   - `5050de5` — SRG→social_resonance live chain.
