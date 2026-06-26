@@ -8,7 +8,7 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `dc9799f` / `origin/main` / docs-only working tree pending §0 pointer commit.
+- **HEAD:** `aa35a25` / `origin/main` / docs(audit): frame exact prompt request test proposal.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
 - **Last closed:**
   - `5050de5` — SRG→social_resonance live chain.
