@@ -283,6 +283,14 @@ def _no_op():
     return types.SimpleNamespace(action=ActionType.NO_OP, payload={})
 
 
+def _use_tool(sig=None):
+    sig = sig or {"name": "demo_tool", "description": "demo", "parameters": {}}
+    return types.SimpleNamespace(
+        action=ActionType.USE_TOOL,
+        payload={"tool_signature": sig, "tool_family": "fam", "tool_defaults": {}},
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 1. Current reconstruction gap (point 1) — and point 2 stays a future target
 # --------------------------------------------------------------------------- #
@@ -368,9 +376,12 @@ class TestObjectIdentityGap(unittest.TestCase):
         self.assertEqual(carried, fresh)    # equal values
         self.assertIsNot(carried, fresh)    # distinct object — reconstruction
 
-    def test_carried_values_match_what_was_sent_to_the_model(self):
-        # Value-faithful on the observation axis: the carried system_prompt/messages
-        # equal what the (fake) model boundary actually received this turn.
+    def test_carried_values_match_what_was_sent_answer_path_only(self):
+        # ANSWER-PATH ONLY. Value-faithful on the observation axis for system_prompt
+        # and messages: the carried system_prompt/messages equal what the (fake)
+        # model boundary received this turn. Tools are deliberately NOT asserted here
+        # — on USE_TOOL the reconstruction drops tools (see
+        # test_use_tool_reconstruction_drops_tools_today_carry_through_future_only).
         llm = _CapturingLLM()
         runner = _runner(llm)
         frame, mode = _frame(), _mode()
@@ -379,6 +390,24 @@ class TestObjectIdentityGap(unittest.TestCase):
         sent = llm.calls[0]
         self.assertEqual(ewpr.prompt_request.system_prompt, sent["system_prompt"])
         self.assertEqual(ewpr.prompt_request.messages, sent["messages"])
+
+    def test_use_tool_reconstruction_drops_tools_today_carry_through_future_only(self):
+        # CURRENT TERRAIN: `_execute_with_prompt_request(...)` reconstructs with
+        # `tools=None` today, so on the USE_TOOL path the carried
+        # `prompt_request.tools` (None) does NOT match the explicit tool surface
+        # actually sent to the model ([sig]). This asymmetry confirms exact-request
+        # carry-through is still FUTURE-ONLY and NOT implemented (a carry-through
+        # refactor would carry the SAME object, tools included).
+        llm = _CapturingLLM()
+        runner = _runner(llm)
+        frame, mode = _frame(), _mode()
+        sig = {"name": "demo_tool", "description": "demo", "parameters": {}}
+        ewpr = runner._execute_with_prompt_request(frame=frame, mode=mode, action=_use_tool(sig))
+        self.assertTrue(ewpr.outcome.llm_called)
+        sent = llm.calls[0]
+        self.assertEqual(sent["tools"], [sig])
+        self.assertIsNone(ewpr.prompt_request.tools)
+        self.assertNotEqual(ewpr.prompt_request.tools, sent["tools"])
 
 
 # --------------------------------------------------------------------------- #
@@ -442,6 +471,18 @@ class TestPromptSurfacePinned(unittest.TestCase):
         self.assertEqual(sent["system_prompt"], runner._build_system_prompt(frame, mode))
         self.assertEqual(sent["messages"], [{"role": "user", "content": "surface text"}])
         self.assertIsNone(sent["tools"])
+
+    def test_use_tool_path_sends_explicit_tool_surface(self):
+        # On USE_TOOL the model boundary receives the explicit single-tool surface.
+        llm = _CapturingLLM()
+        runner = _runner(llm)
+        frame, mode = _frame("surface text"), _mode()
+        sig = {"name": "demo_tool", "description": "demo", "parameters": {}}
+        runner._execute(frame=frame, mode=mode, action=_use_tool(sig))
+        sent = llm.calls[0]
+        self.assertEqual(sent["system_prompt"], runner._build_system_prompt(frame, mode))
+        self.assertEqual(sent["messages"], [{"role": "user", "content": "surface text"}])
+        self.assertEqual(sent["tools"], [sig])
 
 
 # --------------------------------------------------------------------------- #
