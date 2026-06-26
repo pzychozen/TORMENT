@@ -794,8 +794,19 @@ class AgentRunner:
         frame: TaskFrame,
         mode: CognitiveModeDecision,
         action: ActionDecision,
+        *,
+        _prompt_request_capture: Optional[List["_LLMPromptRequest"]] = None,
     ) -> ExecutionOutcome:
-        """Phase 6 Execute (pre-review)."""
+        """Phase 6 Execute (pre-review).
+
+        ``_prompt_request_capture`` is an OPTIONAL private one-slot capture list.
+        When ``_execute_with_prompt_request`` (its only caller) passes it, the exact
+        ``_LLMPromptRequest`` object built for this turn's model call is written into
+        ``_prompt_request_capture[0]`` immediately before ``_complete_llm_prompt_request``,
+        so the runner can observe the EXACT request sent rather than a reconstruction.
+        Existing callers omit it and still receive only an ``ExecutionOutcome``; the
+        request is never stored on ``self`` or exposed on any public/observable surface.
+        """
         at = action.action
 
         if at == ActionType.NO_OP:
@@ -830,6 +841,8 @@ class AgentRunner:
                     response_text="[no llm client wired — v0.1 stub]",
                 )
             req = self._build_llm_prompt_request(frame, mode, tools=None)
+            if _prompt_request_capture is not None:
+                _prompt_request_capture[0] = req
             response = self._complete_llm_prompt_request(req)
             # v0.1.0c: LLMResponse clean-break — use .text. Any
             # unexpected tool_calls on the ANSWER path are ignored
@@ -869,6 +882,8 @@ class AgentRunner:
             # arguments via a tool_use block in its response; we parse
             # that from LLMResponse.tool_calls.
             req = self._build_llm_prompt_request(frame, mode, tools=[signature_spec])
+            if _prompt_request_capture is not None:
+                _prompt_request_capture[0] = req
             llm_response = self._complete_llm_prompt_request(req)
 
             # v0.1.0c: three-path split based on response shape.
@@ -1021,19 +1036,21 @@ class AgentRunner:
         mode: CognitiveModeDecision,
         action: ActionDecision,
     ) -> "_ExecutionWithPromptRequest":
-        """Phase 6 execute plus the prompt request actually sent to the model
-        boundary this turn (``None`` when no model call occurred). Private; for
-        ``run_turn`` only. ``_execute(...) -> ExecutionOutcome`` is preserved
-        unchanged for existing private callers/tests; this wrapper adds the
-        runner-local captured request without altering execution behavior."""
-        outcome = self._execute(frame, mode, action)
-        prompt_request: Optional[_LLMPromptRequest] = None
-        if outcome.llm_called:
-            # The model boundary ran this turn. The request it sent is the
-            # deterministic _build_llm_prompt_request(frame, mode): identical
-            # system_prompt and messages. (tools is immaterial to observation.)
-            prompt_request = self._build_llm_prompt_request(frame, mode, tools=None)
-        return _ExecutionWithPromptRequest(outcome=outcome, prompt_request=prompt_request)
+        """Phase 6 execute plus the EXACT prompt request sent to the model boundary
+        this turn (``None`` when no model call occurred). Private; for ``run_turn``
+        only. ``_execute(...) -> ExecutionOutcome`` is preserved unchanged for existing
+        private callers/tests; this wrapper passes a private one-slot capture list into
+        ``_execute`` and reads back the SAME ``_LLMPromptRequest`` object ``_execute``
+        built for the model call — exact-object carry-through, no post-execution
+        reconstruction, no change to execution behavior."""
+        capture: List[Optional[_LLMPromptRequest]] = [None]
+        outcome = self._execute(frame, mode, action, _prompt_request_capture=capture)
+        # Exact-object carry-through: prompt_request is the SAME _LLMPromptRequest
+        # object _execute built for and sent to the model this turn (written into the
+        # one-slot list immediately before the model call), or None when no model call
+        # occurred. The capture stays runner-local — never on self / TurnResult /
+        # ExecutionOutcome / metadata / endpoint / schema / persistence.
+        return _ExecutionWithPromptRequest(outcome=outcome, prompt_request=capture[0])
 
     def _build_llm_prompt_request(
         self,

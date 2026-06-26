@@ -6,9 +6,10 @@ Subordinate to:
   docs/TORMENT_AUDIT_PRIVATE_OWNER_W1_W8_LIVE_OWNER_REFACTOR_PROPOSAL_FRAME_v0.1.md
   docs/TORMENT_AUDIT_PRIVATE_OWNER_LIVE_WIRING_DECISION_FRAME_v0.1.md
 
-This file CHARACTERIZES the current terrain; it implements no carry-through. Its
-purpose is to lock what is true today so a future, separately-authorized
-exact-request carry-through refactor cannot quietly change the safety invariants.
+This file CHARACTERIZES the exact prompt-request carry-through terrain AFTER the
+behavior-preserving carry-through refactor. The gap/identity tests now prove
+exact-object carry-through; the safety tests lock the invariants the refactor must
+not change.
 
 Terrain (read-only):
   AgentRunner._execute(...)
@@ -18,16 +19,19 @@ Terrain (read-only):
   AgentRunner._observe_audit_evidence_from_prompt_request(...)  (downstream observer seam)
   _ExecutionWithPromptRequest, _LLMPromptRequest, ExecutionOutcome
 
-CURRENT GAP (point 1, proven here): `_execute_with_prompt_request(...)`
-RECONSTRUCTS the prompt request after `_execute(...)` returns (via
-`_build_llm_prompt_request(frame, mode, tools=None)`, gated on `outcome.llm_called`).
-Exact-object carry-through is NOT implemented today.
+CARRY-THROUGH (point 1, proven here): `_execute_with_prompt_request(...)` passes a
+private one-slot capture list into `_execute(...)`; `_execute` writes the exact
+`_LLMPromptRequest` object it built into that slot immediately before
+`_complete_llm_prompt_request(...)`, and the wrapper carries that SAME object back.
+No post-execution reconstruction via `_build_llm_prompt_request(frame, mode, tools=None)`.
 
-EXACT-REQUEST PROOF TARGET (point 2): a FUTURE refactor would need
-`_ExecutionWithPromptRequest.prompt_request` to carry the SAME `_LLMPromptRequest`
-object built before `_complete_llm_prompt_request(...)`, not a reconstruction. This
-file records that target as a future obligation and does NOT assert it as a present
-fact (the identity-gap tests show today's behaviour is equal-valued-but-distinct).
+EXACT-OBJECT IDENTITY (point 2, proven here): `_ExecutionWithPromptRequest.prompt_request`
+IS the same `_LLMPromptRequest` object handed to `_complete_llm_prompt_request(...)`
+(asserted via a test-local runner that captures the req passed to the completion
+helper). ANSWER preserves `tools=None`; USE_TOOL preserves the exact sent
+`tools=[signature_spec]` on the carried object — the prior reconstruction asymmetry is
+closed. `ExecutionOutcome` stays free of any request field; the request rides on a
+runner-local capture only.
 
 This authorizes nothing: no production code, no W-7 resolution, no Shape B, no
 PrivateGenerationOwner wiring, no prompt-surface change, no endpoint/API/schema, no
@@ -291,31 +295,47 @@ def _use_tool(sig=None):
     )
 
 
+class _CapturingReqRunner(AgentRunner):
+    """Runner that records the EXACT `_LLMPromptRequest` object passed into the model
+    completion helper, so tests can assert exact-object carry-through identity
+    (`ewpr.prompt_request is captured_req`). It delegates to the real helper, so the
+    underlying capturing LLM still records the sent system_prompt/messages/tools."""
+
+    def __init__(self, llm=None):
+        super().__init__(controller=object(), fabric=object(), llm_client=llm or _CapturingLLM())
+        self.captured_reqs = []
+
+    def _complete_llm_prompt_request(self, req):
+        self.captured_reqs.append(req)
+        return super()._complete_llm_prompt_request(req)
+
+
 # --------------------------------------------------------------------------- #
-# 1. Current reconstruction gap (point 1) — and point 2 stays a future target
+# 1. No reconstruction after _execute (point 1: carry-through is implemented)
 # --------------------------------------------------------------------------- #
 
-class TestCurrentReconstructionGap(unittest.TestCase):
+class TestNoReconstructionAfterExecute(unittest.TestCase):
 
-    def test_carry_reconstructs_after_execute(self):
+    def test_carry_no_longer_reconstructs_after_execute(self):
+        # Carry-through: the seam calls _execute (passing a private capture) and NO
+        # LONGER reconstructs the request via _build_llm_prompt_request after
+        # execution.
         carry = _runner_method(_CARRY)
         self.assertIsNotNone(carry, "_execute_with_prompt_request missing")
         called = _called_names(carry)
         self.assertIn(_EXECUTE, called, "carry seam no longer calls _execute")
-        self.assertIn(_PROMPT_BUILDER, called,
-                      "carry seam no longer RECONSTRUCTS via _build_llm_prompt_request")
+        self.assertNotIn(_PROMPT_BUILDER, called,
+                         "carry seam still reconstructs via _build_llm_prompt_request")
 
-    def test_carry_does_not_read_a_request_off_the_outcome(self):
-        # Exact-object carry-through (point 2) would require the request to ride on
-        # the execution result. Today the seam reads only `outcome.llm_called`; it
-        # never reads `outcome.prompt_request` / `outcome.req`. => not implemented.
+    def test_request_rides_on_local_capture_not_the_outcome(self):
+        # The request is carried via a runner-local capture, never read off the
+        # ExecutionOutcome (which stays free of any request field).
         carry = _runner_method(_CARRY)
         outcome_attrs = _attr_reads(carry, "outcome")
-        self.assertIn("llm_called", outcome_attrs)
         self.assertNotIn("prompt_request", outcome_attrs)
         self.assertNotIn("req", outcome_attrs)
 
-    def test_execution_outcome_structurally_cannot_carry_the_request_today(self):
+    def test_execution_outcome_carries_no_prompt_request(self):
         al = _parse_service(_AGENT_LOOP)
         fields = _dataclass_fields(al, "ExecutionOutcome")
         self.assertNotIn("prompt_request", fields)
@@ -349,39 +369,27 @@ class TestExecuteReturnsExecutionOutcome(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# 3. Object-identity gap: reconstruction yields EQUAL VALUES, NOT THE SAME OBJECT
+# 3. Exact-object carry-through: carried request IS the object sent to the model
 # --------------------------------------------------------------------------- #
 
-class TestObjectIdentityGap(unittest.TestCase):
+class TestExactObjectCarryThrough(unittest.TestCase):
 
-    def test_two_reconstructions_are_equal_but_distinct(self):
-        runner = _runner()
-        frame, mode = _frame(), _mode()
-        a = runner._build_llm_prompt_request(frame, mode, tools=None)
-        b = runner._build_llm_prompt_request(frame, mode, tools=None)
-        self.assertEqual(a, b)          # equal values (dataclass __eq__)
-        self.assertIsNot(a, b)          # but NOT the same object
-
-    def test_carried_request_is_a_reconstruction_not_the_sent_object(self):
-        # The carried prompt_request equals a fresh reconstruction in value, yet is a
-        # distinct object — i.e. it is a reconstruction, not the exact object handed
-        # to the model boundary. (Carry-through of the SAME object stays a FUTURE
-        # target; today's seam cannot satisfy it.)
-        runner = _runner()
+    def test_answer_path_carries_the_exact_object_sent(self):
+        # The carried prompt_request IS the same _LLMPromptRequest object _execute
+        # built and passed to _complete_llm_prompt_request — exact-object
+        # carry-through, not a reconstruction.
+        llm = _CapturingLLM()
+        runner = _CapturingReqRunner(llm)
         frame, mode = _frame(), _mode()
         ewpr = runner._execute_with_prompt_request(frame=frame, mode=mode, action=_answer())
-        carried = ewpr.prompt_request
-        self.assertIsInstance(carried, _LLMPromptRequest)
-        fresh = runner._build_llm_prompt_request(frame, mode, tools=None)
-        self.assertEqual(carried, fresh)    # equal values
-        self.assertIsNot(carried, fresh)    # distinct object — reconstruction
+        self.assertEqual(len(runner.captured_reqs), 1)
+        captured_req = runner.captured_reqs[0]
+        self.assertIsInstance(ewpr.prompt_request, _LLMPromptRequest)
+        self.assertIs(ewpr.prompt_request, captured_req)
 
-    def test_carried_values_match_what_was_sent_answer_path_only(self):
-        # ANSWER-PATH ONLY. Value-faithful on the observation axis for system_prompt
-        # and messages: the carried system_prompt/messages equal what the (fake)
-        # model boundary received this turn. Tools are deliberately NOT asserted here
-        # — on USE_TOOL the reconstruction drops tools (see
-        # test_use_tool_reconstruction_drops_tools_today_carry_through_future_only).
+    def test_carried_values_match_what_was_sent_answer_path(self):
+        # The carried (now exact) object's system_prompt/messages equal what the
+        # model boundary received this turn.
         llm = _CapturingLLM()
         runner = _runner(llm)
         frame, mode = _frame(), _mode()
@@ -391,23 +399,22 @@ class TestObjectIdentityGap(unittest.TestCase):
         self.assertEqual(ewpr.prompt_request.system_prompt, sent["system_prompt"])
         self.assertEqual(ewpr.prompt_request.messages, sent["messages"])
 
-    def test_use_tool_reconstruction_drops_tools_today_carry_through_future_only(self):
-        # CURRENT TERRAIN: `_execute_with_prompt_request(...)` reconstructs with
-        # `tools=None` today, so on the USE_TOOL path the carried
-        # `prompt_request.tools` (None) does NOT match the explicit tool surface
-        # actually sent to the model ([sig]). This asymmetry confirms exact-request
-        # carry-through is still FUTURE-ONLY and NOT implemented (a carry-through
-        # refactor would carry the SAME object, tools included).
+    def test_use_tool_path_carries_exact_object_with_tools(self):
+        # USE_TOOL: the model boundary receives tools=[sig], and the carried
+        # prompt_request is the SAME object with tools=[sig] — the prior asymmetry
+        # (reconstructed tools=None) is closed.
         llm = _CapturingLLM()
-        runner = _runner(llm)
+        runner = _CapturingReqRunner(llm)
         frame, mode = _frame(), _mode()
         sig = {"name": "demo_tool", "description": "demo", "parameters": {}}
         ewpr = runner._execute_with_prompt_request(frame=frame, mode=mode, action=_use_tool(sig))
         self.assertTrue(ewpr.outcome.llm_called)
+        self.assertEqual(len(runner.captured_reqs), 1)
+        captured_req = runner.captured_reqs[0]
         sent = llm.calls[0]
         self.assertEqual(sent["tools"], [sig])
-        self.assertIsNone(ewpr.prompt_request.tools)
-        self.assertNotEqual(ewpr.prompt_request.tools, sent["tools"])
+        self.assertEqual(ewpr.prompt_request.tools, [sig])
+        self.assertIs(ewpr.prompt_request, captured_req)
 
 
 # --------------------------------------------------------------------------- #
