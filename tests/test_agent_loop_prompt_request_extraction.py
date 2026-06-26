@@ -220,21 +220,43 @@ class TestSourceGuards(unittest.TestCase):
                  self._method(cls, "_build_llm_prompt_request")]
         self.assertNotIn("audit_admitted_context_items", self._idents(*nodes))
 
-    def test_request_object_reaches_only_complete(self):
+    def test_request_object_reaches_only_completion_helper_then_only_complete(self):
+        # Re-based after the behavior-preserving model-call extraction.
+        #   Old invariant: in _execute, `req` is passed to no call (fields reach
+        #                  only llm_client.complete, inline).
+        #   New invariant: in _execute, `req` may be passed ONLY to the thin
+        #                  _complete_llm_prompt_request helper; inside that helper
+        #                  `req` is routed onward to nothing and every req.<field>
+        #                  is an argument of self.llm_client.complete(...); and the
+        #                  helper references no audit / owner / control surface.
         cls = self._class(self._agent_loop_tree(), "AgentRunner")
         execute = self._method(cls, "_execute")
+        helper = self._method(cls, "_complete_llm_prompt_request")
         self.assertIsNotNone(execute)
-        # The `req` object is never passed as an argument to any call (only its
-        # fields req.* are read), so it cannot be routed anywhere.
+        self.assertIsNotNone(helper, "_complete_llm_prompt_request not found")
+
+        # (1) In _execute, `req` may be passed ONLY to the completion helper.
         for n in ast.walk(execute):
             if isinstance(n, ast.Call):
                 arg_names = [a.id for a in n.args if isinstance(a, ast.Name)]
                 arg_names += [k.value.id for k in n.keywords if isinstance(k.value, ast.Name)]
+                if "req" in arg_names:
+                    callee = (n.func.attr if isinstance(n.func, ast.Attribute)
+                              else getattr(n.func, "id", None))
+                    self.assertEqual(
+                        callee, "_complete_llm_prompt_request",
+                        msg="req object passed to something other than the completion helper")
+
+        # (2) In the helper, `req` is routed onward to NO call, and every
+        # req.<field> access is an argument of a self.llm_client.complete call.
+        for n in ast.walk(helper):
+            if isinstance(n, ast.Call):
+                arg_names = [a.id for a in n.args if isinstance(a, ast.Name)]
+                arg_names += [k.value.id for k in n.keywords if isinstance(k.value, ast.Name)]
                 self.assertNotIn("req", arg_names,
-                                 msg="req object passed as an argument to a call")
-        # Every req.<field> access is an argument of a self.llm_client.complete call.
+                                 msg="completion helper routes the req object onward")
         complete_calls = [
-            n for n in ast.walk(execute)
+            n for n in ast.walk(helper)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
             and n.func.attr == "complete"
             and isinstance(n.func.value, ast.Attribute) and n.func.value.attr == "llm_client"
@@ -244,11 +266,20 @@ class TestSourceGuards(unittest.TestCase):
             for v in list(c.args) + [k.value for k in c.keywords]:
                 if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == "req":
                     allowed_req_attrs.add(id(v))
-        for n in ast.walk(execute):
+        for n in ast.walk(helper):
             if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
                     and n.value.id == "req"):
                 self.assertIn(id(n), allowed_req_attrs,
                               msg="req.<field> used outside llm_client.complete(...)")
+
+        # (3) The helper does NOTHING except the model call: no audit / owner /
+        # control surface.
+        helper_idents = self._idents(helper)
+        for forbidden in ("PrivateGenerationOwner", "audit_evidence_packet",
+                          "audit_admitted_context_items", "selected_admitted_items",
+                          "observe_prompt_inclusion_packet", "assemble_context"):
+            self.assertNotIn(forbidden, helper_idents,
+                             msg=f"completion helper references {forbidden}")
 
 
 if __name__ == "__main__":

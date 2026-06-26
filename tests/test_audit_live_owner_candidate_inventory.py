@@ -338,7 +338,12 @@ class TestInvariant4RunnerOwnsPromptCaptureOnly(unittest.TestCase):
         self.assertIsNotNone(execute)
         ecalls = _called_names(execute)
         self.assertIn("_build_llm_prompt_request", ecalls)
-        self.assertIn("complete", ecalls)
+        # Post-extraction: completion is reached via the thin helper (still a
+        # runner method), which performs the model call.
+        self.assertIn("_complete_llm_prompt_request", ecalls)
+        helper = _method(self.runner, "_complete_llm_prompt_request")
+        self.assertIsNotNone(helper)
+        self.assertIn("complete", _called_names(helper))
 
     def test_runner_does_not_own_retrieval_assembly_or_extraction(self):
         called = _called_names(self.al)

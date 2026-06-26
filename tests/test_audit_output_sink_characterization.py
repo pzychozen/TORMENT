@@ -134,11 +134,14 @@ class TestAgentRunnerGenerationButNoAssembledContext(unittest.TestCase):
         self.assertIsNotNone(runner, "AgentRunner class not found")
         run_turn = _method(runner, "run_turn")
         _execute = _method(runner, "_execute")
+        _complete = _method(runner, "_complete_llm_prompt_request")
         self.assertIsNotNone(run_turn, "AgentRunner.run_turn not found")
         self.assertIsNotNone(_execute, "AgentRunner._execute not found")
+        self.assertIsNotNone(_complete, "AgentRunner._complete_llm_prompt_request not found")
 
-        idents = _idents(run_turn, _execute)
-        # Response-generation surface exists in the scoped methods.
+        idents = _idents(run_turn, _execute, _complete)
+        # Response-generation surface exists in the scoped methods (the model call
+        # now lives in the thin completion helper).
         self.assertIn("complete", idents, "expected LLMClient.complete(...) surface")
         self.assertIn("ExecutionOutcome", idents, "expected ExecutionOutcome surface")
         self.assertIn("response_text", idents, "expected response_text surface")

@@ -44,6 +44,7 @@ _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "n
 _COMPLETE = "complete"
 _PROMPT_BUILDER = "_build_llm_prompt_request"
 _BOUNDARY_METHOD = "_execute"
+_HELPER = "_complete_llm_prompt_request"       # the thin model-call helper (post-extraction)
 
 # Reaches the generation boundary must NOT take (would break the W-properties).
 _WRITER_NAMES = frozenset({
@@ -218,25 +219,27 @@ class TestExactlyOneBoundary(unittest.TestCase):
     def setUp(self):
         self.al = _parse_service(_AGENT_LOOP)
 
-    def test_complete_is_called_only_in_execute(self):
-        # The model-completion call (`.complete(...)`) appears in exactly one
-        # method of agent_loop.py — `_execute` — so the generation-call boundary
-        # is singular.
+    def test_complete_is_confined_to_the_single_completion_helper(self):
+        # Post-extraction: the model-completion call (`.complete(...)`) appears in
+        # exactly one method — the thin `_complete_llm_prompt_request` helper — so
+        # the generation-call boundary stays singular.
         self.assertEqual(
-            _funcs_with_attr_call(self.al, _COMPLETE), {_BOUNDARY_METHOD},
-            msg="`.complete(...)` is not confined to a single _execute boundary")
+            _funcs_with_attr_call(self.al, _COMPLETE), {_HELPER},
+            msg="`.complete(...)` is not confined to the single completion helper")
 
-    def test_execute_exists_and_builds_prompt_before_completing(self):
+    def test_execute_builds_prompt_then_reaches_completion_helper(self):
         runner = _class(self.al, "AgentRunner")
         execute = _method(runner, _BOUNDARY_METHOD)
         self.assertIsNotNone(execute, "AgentRunner._execute not found")
         called = _called_names(execute)
         self.assertIn(_PROMPT_BUILDER, called,
                       "_execute does not build the prompt request")
-        self.assertIn(_COMPLETE, called, "_execute does not call complete")
-        # Every complete(...) consumes the built request `req` (prompt prepared
-        # BEFORE the model call).
-        for call in _attr_calls(execute, _COMPLETE):
+        self.assertIn(_HELPER, called, "_execute does not reach the completion helper")
+        # The model call (now in the helper) consumes the built request `req`
+        # fields — prompt prepared BEFORE the model call.
+        helper = _method(runner, _HELPER)
+        self.assertIsNotNone(helper, "completion helper not found")
+        for call in _attr_calls(helper, _COMPLETE):
             for kw in ("system_prompt", "messages"):
                 val = _kw(call, kw)
                 self.assertIsNotNone(val, f"complete() missing {kw}")

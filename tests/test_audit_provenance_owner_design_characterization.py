@@ -171,33 +171,39 @@ class TestModelVisibleContextBoundary(unittest.TestCase):
         self.execute = _method(self.runner, "_execute")
         self.build_prompt = _method(self.runner, "_build_system_prompt")
         self.build_request = _method(self.runner, "_build_llm_prompt_request")
+        self.complete_helper = _method(self.runner, "_complete_llm_prompt_request")
 
-    def test_boundary_is_llmclient_complete_in_execute(self):
+    def test_boundary_is_llmclient_complete_via_completion_helper(self):
         self.assertIsNotNone(self.execute)
-        # (1) The model-visible boundary is still self.llm_client.complete(...).
+        self.assertIsNotNone(self.complete_helper, "_complete_llm_prompt_request not found")
+        # (1) Post-extraction: the model-visible boundary self.llm_client.complete(...)
+        # lives in the thin completion helper, which _execute invokes.
         self.assertTrue(
-            _calls_attr_on_self_attr(self.execute, "llm_client", "complete"),
-            "expected the model-visible boundary self.llm_client.complete(...) in _execute",
+            _calls_attr_on_self_attr(self.complete_helper, "llm_client", "complete"),
+            "expected self.llm_client.complete(...) in the completion helper",
         )
         exec_idents = _idents(self.execute)
-        self.assertIn("complete", exec_idents)
-        # (2) Post-extraction: _execute builds the prompt via the local request
-        # helper and (3) passes its fields to complete unchanged.
+        helper_idents = _idents(self.complete_helper)
+        self.assertIn("_complete_llm_prompt_request", exec_idents)
+        self.assertIn("complete", helper_idents)
+        # (2) _execute builds the prompt via the local request helper and (3) the
+        # completion helper passes its fields to complete unchanged.
         self.assertIn("_build_llm_prompt_request", exec_idents)
         self.assertTrue(
-            _all_complete_calls_pass_req_fields(self.execute),
+            _all_complete_calls_pass_req_fields(self.complete_helper),
             "expected complete(system_prompt=req.system_prompt, messages=req.messages, tools=req.tools)",
         )
         # (4) The request helper preserves the ORIGINAL prompt source:
         # system_prompt via _build_system_prompt(frame, mode), messages from
         # frame.raw_input.
         self.assertIsNotNone(self.build_request, "_build_llm_prompt_request not found")
-        helper_idents = _idents(self.build_request)
-        self.assertIn("_build_system_prompt", helper_idents)
-        self.assertIn("raw_input", helper_idents)
-        # (5) The boundary (execute + request helper) is the prompt request +
-        # complete — NOT assembled context, audit packet snippets, or admitted items.
-        boundary_idents = exec_idents | helper_idents
+        req_idents = _idents(self.build_request)
+        self.assertIn("_build_system_prompt", req_idents)
+        self.assertIn("raw_input", req_idents)
+        # (5) The boundary (execute + request helper + completion helper) is the
+        # prompt request + complete — NOT assembled context, audit packet snippets,
+        # or admitted items.
+        boundary_idents = exec_idents | req_idents | helper_idents
         self.assertEqual(boundary_idents & _ASSEMBLER_CTX_NAMES, set(),
                          "prompt boundary consumes assembler context")
         self.assertNotIn("audit_admitted_context_items", boundary_idents)

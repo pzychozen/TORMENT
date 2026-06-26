@@ -838,11 +838,7 @@ class AgentRunner:
                     response_text="[no llm client wired — v0.1 stub]",
                 )
             req = self._build_llm_prompt_request(frame, mode, tools=None)
-            response = self.llm_client.complete(
-                system_prompt=req.system_prompt,
-                messages=req.messages,
-                tools=req.tools,
-            )
+            response = self._complete_llm_prompt_request(req)
             # v0.1.0c: LLMResponse clean-break — use .text. Any
             # unexpected tool_calls on the ANSWER path are ignored
             # (we didn't request tools; model returning some is odd
@@ -881,11 +877,7 @@ class AgentRunner:
             # arguments via a tool_use block in its response; we parse
             # that from LLMResponse.tool_calls.
             req = self._build_llm_prompt_request(frame, mode, tools=[signature_spec])
-            llm_response = self.llm_client.complete(
-                system_prompt=req.system_prompt,
-                messages=req.messages,
-                tools=req.tools,
-            )
+            llm_response = self._complete_llm_prompt_request(req)
 
             # v0.1.0c: three-path split based on response shape.
             # Strict contract enforcement per doctrine invariant 2
@@ -975,6 +967,27 @@ class AgentRunner:
         # Unexpected action type (should not happen given Phase 5
         # legality enforcement). Treat as no-op.
         return ExecutionOutcome(no_op=True)
+
+    def _complete_llm_prompt_request(
+        self,
+        req: "_LLMPromptRequest",
+    ) -> "LLMResponse":
+        """Behavior-preserving extraction of the single model-call boundary.
+
+        Does NOTHING except call ``self.llm_client.complete(...)`` with EXACTLY the
+        captured prompt request fields (``system_prompt`` / ``messages`` / ``tools``):
+        same prompt request, same return value, same exception behavior as the prior
+        inline calls. It composes no audit packet, references no
+        ``PrivateGenerationOwner`` / audit / owner / selected-item value, mutates no
+        prompt surface, drives no branch, and reaches no writer / retrieval / review /
+        retry / ranking / suppression / style / endpoint / Gate A / Gate D /
+        persistence path.
+        """
+        return self.llm_client.complete(
+            system_prompt=req.system_prompt,
+            messages=req.messages,
+            tools=req.tools,
+        )
 
     def _execute_with_prompt_request(
         self,

@@ -36,6 +36,7 @@ _AGENT_LOOP = "agent_loop.py"
 _OWNER = "audit_private_generation_owner.py"
 _BOUNDARY_METHOD = "_execute"
 _PROMPT_BUILDER = "_build_llm_prompt_request"
+_HELPER = "_complete_llm_prompt_request"      # the thin model-call helper (post-extraction)
 _BUILT_PACKET = "_audit_evidence_packet"      # the BUILT packet value (not inputs)
 _OBSERVER = "observe_prompt_inclusion_packet"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
@@ -178,15 +179,31 @@ def _iter_service():
 
 class TestPW1SoleBoundaryRemains(unittest.TestCase):
 
-    def test_complete_confined_to_execute(self):
+    def test_complete_confined_to_completion_helper(self):
+        # Post-extraction: the model call lives in the single thin helper, which is
+        # invoked only by the _execute boundary (still a singular generation call).
         al = _parse_service(_AGENT_LOOP)
         self.assertEqual(
-            _funcs_with_attr_call(al, "complete"), {_BOUNDARY_METHOD},
-            msg="the generation call is no longer the single _execute boundary")
+            _funcs_with_attr_call(al, "complete"), {_HELPER},
+            msg="the model call is not confined to the single completion helper")
+        self.assertEqual(
+            _funcs_calling(al, _HELPER), {_BOUNDARY_METHOD},
+            msg="the completion helper is called by something other than _execute")
         execute = _method(_class(al, "AgentRunner"), _BOUNDARY_METHOD)
         self.assertIsNotNone(execute, "AgentRunner._execute removed/renamed")
-        self.assertIn(_PROMPT_BUILDER, _called_names(execute),
+        ecalls = _called_names(execute)
+        self.assertIn(_PROMPT_BUILDER, ecalls,
                       "the boundary no longer builds its prompt via _build_llm_prompt_request")
+        self.assertIn(_HELPER, ecalls,
+                      "the boundary no longer reaches the completion helper")
+
+    def test_completion_helper_does_only_the_model_call(self):
+        # The thin helper does NOTHING except the model call (no audit / owner /
+        # review / writer / retrieval / branch).
+        helper = _method(_class(_parse_service(_AGENT_LOOP), "AgentRunner"), _HELPER)
+        self.assertIsNotNone(helper, "completion helper not found")
+        self.assertEqual(_called_names(helper), {"complete"},
+                         msg="completion helper does more than the model call")
 
 
 # --------------------------------------------------------------------------- #
@@ -354,6 +371,7 @@ class TestPW8GuardBindsFutureChange(unittest.TestCase):
         runner = _class(_parse_service(_AGENT_LOOP), "AgentRunner")
         self.assertIsNotNone(_method(runner, _BOUNDARY_METHOD), "boundary method gone")
         self.assertIsNotNone(_method(runner, _PROMPT_BUILDER), "prompt builder gone")
+        self.assertIsNotNone(_method(runner, _HELPER), "completion helper gone")
 
     def test_decision_frame_gates_any_wiring(self):
         path = os.path.join(_repo_root(), "docs",

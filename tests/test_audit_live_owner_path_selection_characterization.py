@@ -179,17 +179,25 @@ class TestLiveGenerationBoundary(unittest.TestCase):
         self.tree = _parse_service("agent_loop.py")
         self.runner = _class(self.tree, "AgentRunner")
         self.execute = _method(self.runner, "_execute")
+        self.helper = _method(self.runner, "_complete_llm_prompt_request")
 
     def test_execute_is_the_live_generation_boundary(self):
         self.assertIsNotNone(self.execute, "AgentRunner._execute not found")
-        calls = _complete_calls(self.execute)
-        self.assertTrue(calls, "expected self.llm_client.complete(...) in _execute")
+        self.assertIsNotNone(self.helper, "completion helper not found")
+        # Post-extraction: the model call lives in the thin completion helper,
+        # which _execute invokes.
+        self.assertTrue(_complete_calls(self.helper),
+                        "expected self.llm_client.complete(...) in the completion helper")
+        reaches_helper = any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "_complete_llm_prompt_request"
+            for n in ast.walk(self.execute))
+        self.assertTrue(reaches_helper, "_execute does not reach the completion helper")
 
-    def test_prompt_boundary_shape_in_execute(self):
-        # Post-extraction: _execute passes the LOCAL request object's fields
-        # unchanged into complete(...) (the boundary is preserved in the helper,
-        # see test_build_llm_prompt_request_preserves_boundary).
-        calls = _complete_calls(self.execute)
+    def test_prompt_boundary_shape_in_helper(self):
+        # Post-extraction: the completion helper passes the LOCAL request object's
+        # fields unchanged into complete(...). The boundary shape is preserved.
+        calls = _complete_calls(self.helper)
         self.assertTrue(calls)
         for call in calls:
             self.assertTrue(_is_req_field(_kw(call, "system_prompt"), "system_prompt"),
@@ -389,8 +397,18 @@ class TestFutureOwnerMustChooseOneOfTwoDesigns(unittest.TestCase):
         runner = _class(al, "AgentRunner")
         execute = _method(runner, "_execute")
         exec_idents = _idents(execute)
-        # _execute owns generation but not assembled context.
-        self.assertTrue(_complete_calls(execute))
+        # _execute still owns the generation PATH, but now by calling the private
+        # thin completion helper; the direct self.llm_client.complete(...) lives in
+        # the helper, not _execute. _execute still owns no assembled context.
+        helper = _method(runner, "_complete_llm_prompt_request")
+        self.assertIsNotNone(helper, "completion helper not found")
+        self.assertIn("_complete_llm_prompt_request", exec_idents)
+        self.assertTrue(_complete_calls(helper))
+        # The helper does not reference assembled context / selected items / audit.
+        helper_idents = _idents(helper)
+        self.assertEqual(helper_idents & _ASSEMBLER_CTX, set())
+        self.assertNotIn("selected_admitted_items", helper_idents)
+        self.assertNotIn("audit_evidence_packet", helper_idents)
         self.assertEqual(exec_idents & _ASSEMBLER_CTX, set())
 
         app = _parse_service("app.py")
