@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional
 
 from .embedding_store import _canonical_storage_root, _child_path
 from .pathing import safe_slug
+from .candidate_types import CandidateShapedValue
 
 
 log = logging.getLogger("torment.reference_memory")
@@ -258,6 +259,31 @@ class ReferenceStore:
         """Create a new reference entry. Source linkage is stored
         on the entry (per the ratified carry-forward caution).
         """
+        # === GATE A LAYER 4 — reference candidate refusal (brick #5) ===
+        # First executable statements, before ref_id allocation,
+        # compute_source_hash, ReferenceEntry construction, self._entries
+        # mutation, _append_jsonl, and event writes. Type-only, contents-free
+        # refusal of a candidate-shaped value arriving as an ordinary reference
+        # field. Named fields are checked individually; metadata is refused as an
+        # object and by immediate value only (key-blind .values(), non-recursive,
+        # no key inspection). `provenance` is internally constructed by
+        # fabric.ingest_reference and is deliberately NOT inspected. Not wall
+        # completion.
+        if isinstance(title, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as a reference title")
+        if isinstance(body, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as a reference body")
+        if isinstance(source_link, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as a reference source_link")
+        if isinstance(source_kind, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as a reference source_kind")
+        if isinstance(metadata, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written as reference metadata")
+        if metadata:
+            for _meta_value in metadata.values():
+                if isinstance(_meta_value, CandidateShapedValue):
+                    raise TypeError("candidate-shaped value cannot be written into reference metadata")
+
         ref_id = f"ref_{uuid.uuid4().hex[:16]}"
         source_hash = self.compute_source_hash(source_link, source_kind, body)
         entry = ReferenceEntry(
