@@ -21,8 +21,11 @@ baseline:
      `_complete_llm_prompt_request` / model completion.
   4. Public endpoint/API source does not wire retrieved/assembled memory into AgentRunner
      generation.
-  5. Current source has NO memory-to-prompt implementation (no model-visible memory
-     injection / retrieval-to-generation wiring into the generation boundary).
+  5. No live AUTHORITATIVE AgentRunner / app-endpoint path wires retrieved/assembled
+     memory into AgentRunner generation. (The existing PrivateGenerationOwner in
+     `audit_private_generation_owner.py` renders selected item text into its OWN prompt
+     before a generation boundary, but it is excluded — unwired / test-called and NOT the
+     authoritative AgentRunner path.)
 
 It asserts NO future memory source, NO injection point, NO prompt format/representation,
 reopens NO U1 / audit-owner / dual-ownership question, touches NO `PrivateGenerationOwner`,
@@ -288,30 +291,37 @@ class TestEndpointsDoNotWireMemoryToGeneration(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# 5 — no memory-to-prompt implementation anywhere in production source
+# 5 — no memory-to-prompt implementation on the LIVE AUTHORITATIVE path
 # --------------------------------------------------------------------------- #
 
-class TestNoMemoryToPromptImplementation(unittest.TestCase):
-    def test_no_production_module_wires_memory_into_generation(self):
+class TestNoMemoryToPromptOnAuthoritativePath(unittest.TestCase):
+    """No live AUTHORITATIVE AgentRunner / app-endpoint path wires retrieved/assembled
+    memory into AgentRunner generation. (The existing PrivateGenerationOwner in
+    ``audit_private_generation_owner.py`` renders selected item text into its OWN prompt
+    before a generation boundary, but it is unwired / test-called and is NOT the
+    authoritative AgentRunner path; it is excluded here, not inventoried.)"""
+
+    # The live authoritative generation path (agent_loop) + the public endpoint surface (app).
+    _AUTHORITATIVE_PATH = ("agent_loop.py", "app.py")
+
+    def test_no_authoritative_path_wires_memory_into_generation(self):
         offenders = {}
-        for rel in _production_py():
-            with open(os.path.join(_repo_root(), rel), "rb") as fh:
-                try:
-                    tree = _parse_bytes(fh.read())
-                except (SyntaxError, ValueError):
-                    continue
-            hits = _memory_into_generation_hits(tree)
+        for filename in self._AUTHORITATIVE_PATH:
+            hits = _memory_into_generation_hits(_parse_service(filename))
             if hits:
-                offenders[rel] = hits
+                offenders[filename] = hits
         self.assertEqual(
             offenders, {},
-            msg=("memory CONTENT wired into a generation boundary in production "
-                 f"(retrieval-to-generation wiring exists): {offenders}"),
+            msg=("no live authoritative AgentRunner/app-endpoint path may wire "
+                 "retrieved/assembled memory into AgentRunner generation "
+                 "(PrivateGenerationOwner is excluded/unwired/test-called and is not the "
+                 f"authoritative AgentRunner path); found: {offenders}"),
         )
 
-    def test_llm_prompt_request_stays_runner_internal(self):
-        # The request type is referenced only inside agent_loop (runner-local); no other
-        # production module references it (no prompt exposure / public surface change).
+    def test_agentrunner_prompt_request_stays_runner_internal(self):
+        # The AgentRunner request type ``_LLMPromptRequest`` is referenced only inside
+        # agent_loop (runner-local); no other production module references it, so the
+        # authoritative request is not exposed at any other/public surface.
         offenders = []
         for rel in _production_py():
             if rel == "torment_service/agent_loop.py":
@@ -325,6 +335,55 @@ class TestNoMemoryToPromptImplementation(unittest.TestCase):
                 offenders.append(rel)
         self.assertEqual(offenders, [],
                          msg=f"_LLMPromptRequest referenced outside the runner: {offenders}")
+
+
+# --------------------------------------------------------------------------- #
+# Positive boundary shape — the generation chain is exactly the claimed chain
+# --------------------------------------------------------------------------- #
+
+class TestGenerationBoundaryShape(unittest.TestCase):
+    """Positive lock: the current AgentRunner generation boundary is exactly the claimed
+    chain — build the minimal prompt request, route it through the model-call helper,
+    which calls the model with the request fields. Shape only; selects no future source /
+    injection point / prompt format / representation."""
+
+    def setUp(self):
+        self.cls = _class(_parse_service("agent_loop.py"), "AgentRunner")
+
+    def test_build_request_uses_system_prompt_and_raw_input(self):
+        idents = _idents(_method(self.cls, "_build_llm_prompt_request"))
+        self.assertIn("_build_system_prompt", idents,
+                      "_build_llm_prompt_request does not use _build_system_prompt(frame, mode)")
+        self.assertIn("raw_input", idents,
+                      "_build_llm_prompt_request does not use frame.raw_input")
+
+    def test_execute_builds_request_and_routes_through_completion_helper(self):
+        execute = _method(self.cls, "_execute")
+        self.assertTrue(_calls_callee(execute, "_build_llm_prompt_request"),
+                        "_execute does not call _build_llm_prompt_request(...)")
+        self.assertTrue(_calls_callee(execute, "_complete_llm_prompt_request"),
+                        "_execute does not route the request through _complete_llm_prompt_request(...)")
+
+    def test_completion_helper_calls_llm_client_complete_with_req_fields(self):
+        helper = _method(self.cls, "_complete_llm_prompt_request")
+        complete_calls = [
+            n for n in ast.walk(helper)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "complete"
+            and isinstance(n.func.value, ast.Attribute) and n.func.value.attr == "llm_client"
+        ]
+        self.assertTrue(
+            complete_calls,
+            "_complete_llm_prompt_request does not call self.llm_client.complete(...)")
+        passed = set()
+        for c in complete_calls:
+            for v in list(c.args) + [k.value for k in c.keywords]:
+                if (isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name)
+                        and v.value.id == "req"):
+                    passed.add(v.attr)
+        for field in ("system_prompt", "messages", "tools"):
+            self.assertIn(field, passed,
+                          f"self.llm_client.complete(...) does not receive req.{field}")
 
 
 if __name__ == "__main__":
