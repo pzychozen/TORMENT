@@ -453,7 +453,7 @@ closure does NOT resolve any of them.
 | 1 | **Per-document governance inheritance at ingest** | Natural shape: `ingest_document` accepts optional `doc_governance` and fills each new chunk's `governance` from it unless explicitly overridden. Moves inheritance into ingest, preserves single canonical retrieval shape. Out of scope here; named for the future. |
 | 2 | **`/archive/ingest_document` request-model extension** | The HTTP endpoint's `IngestDocumentReq` does not currently accept `governance`. Extending it would let live HTTP callers (and the live smoke) ingest governance-tagged archive content. Separate small ratifiable slice; pytest already covers the exclusion path via the `_ingest_archive_with_governance` helper that bypasses HTTP. |
 | 3 | **Archive-side autotagging / redaction heuristics** | Inferring `non_shareable` from chunk content (PII detection, etc.) at ingest time. Operator-only authorship vs autotag is a doctrinal question; deferred. |
-| 4 | **ST / BGE embedder live verification of v0.2.4** | Live smoke covers hash embedder only. A future verification slice could re-run the smoke under `TORMENT_EMBED_PROVIDER=st` (or bge) to confirm embedder-agnostic behavior, paralleling the v0.2 S6 ST follow-up pattern. |
+| 4 | **ST / BGE embedder live verification of v0.2.4** — **CLOSED (later validation-only run; see Addendum 2026-06-27)** | Live smoke covers hash embedder only *(historical note — true at v0.2.4 closure)*. A future verification slice could re-run the smoke under `TORMENT_EMBED_PROVIDER=st` (or bge) to confirm embedder-agnostic behavior, paralleling the v0.2 S6 ST follow-up pattern. **CLOSED by a later validation-only Windows run: the bounded archive-FILTER-A smoke remains green under ST/BGE; no production / test / behavior change — see the dated addendum below.** |
 | 5 | **Ryuki / real character workspace live check** | Inherited from v0.2 closure parked item #7. Still parked. Smoke continues to use the disposable `audit_smoke_v0_2` workspace; Ryuki remains in the hardcoded denylist. Separate explicit slice with explicit trio authorization. |
 | 6 | **`_ARCHIVE_FILTER_APPLIED_TODAY` constant removal** | The constant is retained as a legacy fallback per A1 §3 ratification. Future cleanup may remove it if the legacy path is deemed no longer needed. Cosmetic; non-blocking. |
 | 7 | **Transient A/B regression root-cause investigation** | The Commit 4 first pytest run surfaced an A/B byte-identity divergence that did not reproduce on the second run after the diagnostic exercise. Root cause was not identified. Post-v0.2.4 baseline is stable (full-suite + live-smoke both green), but if the signal recurs in a future slice, the diagnostic shape from `test_v0_2_4_diagnose_ab.py` (deleted) is the right starting point. |
@@ -517,6 +517,39 @@ Concretely:
 
 The next decision belongs to a separate planning moment when the
 trio is ready.
+
+---
+
+## Addendum — 2026-06-27: ST/BGE verification (deferred item #4 closed; validation-only)
+
+**Validation-only. No production code, no test, no smoke-behavior change.**
+Deferred item #4 (ST / BGE embedder live verification of v0.2.4) is now
+**CLOSED** by a later operator (Hilmir) Windows run. The bounded v0.2.4
+archive-FILTER-A live smoke (`tests/run_assembly_audit_smoke.py`) was re-run
+**unchanged** under the sentence-transformer embedder
+(`TORMENT_EMBED_PROVIDER=st`, model `BAAI/bge-small-en-v1.5`). Operator-reported
+results:
+
+- tests with no server running — clean;
+- tests with the server running normally (default embedder) — clean;
+- tests with the server running under ST/BGE with the correct embedder tag —
+  clean.
+
+This confirms the archive-FILTER-A live smoke **remains green under ST/BGE** and
+that the bounded behavior it exercises is **embedder-agnostic**, consistent with
+the hash-embedder result recorded at v0.2.4 closure (32 GREEN / 0 RED) and with
+the v0.2 S6 ST follow-up pattern. The original v0.2.4 record stands unchanged: at
+v0.2.4 closure the live smoke covered the hash embedder only; this addendum
+records the later ST/BGE confirmation.
+
+Scope of this closure is **exactly deferred item #4**. All other deferred items
+remain **parked** — #1 per-document governance inheritance, #2
+`/archive/ingest_document` request-model extension, #3 archive
+autotagging/redaction, #5 Ryuki / real-character workspace live check, #6
+`_ARCHIVE_FILTER_APPLIED_TODAY` removal, #7 transient A/B regression root-cause
+investigation. No new env var was introduced (`TORMENT_EMBED_PROVIDER` is
+pre-existing). No production code, tests, smoke behavior, `/agent/query`,
+database/substrate, or any other surface was changed. Opens no new lane.
 
 ---
 
