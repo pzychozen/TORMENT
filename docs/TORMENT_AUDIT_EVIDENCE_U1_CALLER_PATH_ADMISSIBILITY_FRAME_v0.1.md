@@ -210,6 +210,46 @@ A future wiring step would additionally need:
 - no reopening of the audit-owner owner/provenance lane (Option C stays)
 ```
 
+## Read-only candidate scan result — no admissible live caller today (addendum 2026-06-27)
+
+**Codex returned PASS on the read-only U1 caller-path candidate scan.** The scan selected
+no caller, wrote no code or tests, and proposed no wiring. Result recorded below; it does
+not change this frame's non-authorizing posture.
+
+**Disjoint-ownership finding (source-verified):**
+
+```text
+- /retrieve (app.py ~:1449) owns the assembled-context / selected-item terrain
+  (assemble_context(...) -> selected_admitted_items(...)), but does NOT generate through
+  AgentRunner.run_turn(...).
+- AgentRunner.run_turn(...) (production self-call at agent_loop.py ~:783) owns generation
+  and the inert audit-evidence packet sink, but does NOT own assembled context / selected
+  items (the live prompt is system_prompt + raw_input only).
+- run_turn_with_selected_items_observation(...) (audit_selected_items_runner_bridge.py)
+  co-locates the SHAPE (selected items -> run_turn) but is CALLED NOWHERE in production.
+Generation-ownership and assembled-context-ownership are therefore DISJOINT today.
+```
+
+**Conclusion:**
+
+```text
+- The C1 bridge is a FUTURE CANDIDATE SHAPE ONLY; no live caller is admissible today.
+- Selecting a live caller today would require a NEW same-turn dual-ownership / orchestration
+  authorization — a site that genuinely owns BOTH the assembled context AND the generation
+  for the same turn.
+- Without that, wiring the bridge from any current location would silently imply a same-turn
+  provenance claim and VIOLATE the caller-owned same-turn provenance contract
+  (co-location != provenance).
+```
+
+**HOLD (unchanged):** no activation; no caller selected; no tests; no production wiring.
+
+**Forbidden crossings (carried, unchanged):** no endpoint / API / schema; no prompt
+mutation / exposure; no output-control / review / suppression; no memory write; no
+retrieval-authority expansion; no audit-owner / private-owner reopening (Option C stays);
+no `PrivateGenerationOwner`; no Gate D / private cognition; no dream / incubation; no
+database / substrate; no R-field; no Gate B; no Probe-v1; no shaping slice.
+
 ## 10. Future gate
 
 ```text
