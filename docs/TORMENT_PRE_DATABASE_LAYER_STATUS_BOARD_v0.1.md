@@ -26,8 +26,10 @@ exist, zero build.
 
 - **This board is the current administrative bridge.**
 - **Ephemeral structured cognition** lane (see §5) — **Slice 1 CLOSED** (`4e164c3`) and **Slice 2
-  IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`); lane **paused / PARTIAL** (further rules,
-  live archive/collective shaping, and any default-on decision deferred).
+  IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`); **Slice 3 core-lane shaping ALSO ALREADY
+  LANDED** (`TORMENT_COGNITION_CORE_SHAPING_V1` / `_apply_cognition_core_shaping_v1`; plus later
+  geometric + relational-prominence shaping); lane **paused / PARTIAL** — **NOT "Slice 3 pending"**;
+  any further shaping is **Slice 4+** (see §5).
 - **Recently closed since then (record only, no lane reopened):**
   - participation guidance **v1** — advisory-only, implemented + measured, default-off
     `TORMENT_PARTICIPATION_GUIDANCE_V1` (`8e4e27b`, `9e0cbca`; §0 record `d73c148`).
@@ -56,7 +58,7 @@ exist, zero build.
 | ReflectionTrace / observability floor | HARDENED-FOR-NOW | Ephemeral, content-free decision-shape observation; non-reentrant; stdlib-only | `reflection_trace.py`; `test_reflection_trace.py` + runner-parity; `48ae289` | none; reuse as scaffold |
 | /thinking/debug read-only surface | HARDENED-FOR-NOW | Debug endpoint returns full chain (intentional, ephemeral, non-persisted); handler read-only-locked | `app.py:2667`; `TestDebugEndpointReadOnlyCompanion`; `e9212a7` | none |
 | Spine thinking-alignment buffer | HARDENED-FOR-NOW | Bounded (200), in-memory, content-free advisory buffer + read endpoint. **Live population now wired (`679b403`):** the advisory live seam in `submit_task()` records the existing content-free `alignment` dict only into the same max-200 in-memory ring; `/spine/alignment` can now return non-empty `records` via the existing field (read surface/schema unchanged). No raw input/prompt/response/memory/seed/hidden CoT; no retrieval/prompt/persona/weight/identity/output-control effects; `app.py` docstring corrected in the same commit | `spine.py`; `test_spine_thinking_alignment_buffer.py`; `805a0ba`, `679b403` | none |
-| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`)** routing scaffold; **Slice 2 IMPLEMENTED (`06a9536`)** — first *gated, reversible* retrieval-shaping rule (lane no longer scaffold-only). Default-off behind `TORMENT_COGNITION_SHAPING_V2`; when on: `deep.top_k` +1 (cap 4, never reduce) iff `ambiguity_score >= 0.50` **and** deep already enabled. Plan-boundary, `top_k_by_lane["deep"]` only. Tests-locked | `thinking_controller.py` (`_apply_cognition_shaping_v2`); `test_ephemeral_cognition_state.py`; `4e164c3`, `06a9536` | lane paused; further rules / archive-collective live shaping / default-on remain deferred (§5) |
+| Ephemeral structured cognition state | PARTIAL | **Slice 1 CLOSED (`4e164c3`)** routing scaffold; **Slice 2 IMPLEMENTED (`06a9536`)** deep-lane shaping (`TORMENT_COGNITION_SHAPING_V2`; `deep.top_k` +1 cap 4 iff `ambiguity_score >= 0.50` & deep enabled); **Slice 3 ALSO LANDED** core-lane shaping (`TORMENT_COGNITION_CORE_SHAPING_V1` / `_apply_cognition_core_shaping_v1`; `core.top_k` +1 cap 7 iff `confidence_need >= 0.60` & not governance/identity & core enabled); **geometric + relational-prominence shaping also live** — all default-off, plan-boundary, `top_k`/weight only. Tests-locked | `thinking_controller.py` (`_apply_cognition_shaping_v2`, `_apply_cognition_core_shaping_v1`); `test_ephemeral_cognition_state.py` (Slice 2 + Slice 3 sections); `4e164c3`, `06a9536` | lane paused; **NOT "Slice 3 pending" — Slice 3 landed**; further = **Slice 4+**, must be justified as real cognition capability (§5) |
 | Candidate Gate D / Layer-1 private thinking | FRAMED | Eligible substrate-independent interior slice; **framed only**, pending operator selection | cognition roadmap §9; comparison frame `5472639`; pointer `3659089` | A0 readiness review (`d8a65e3`) concluded **DEFER / NO-OPEN** — valuable Layer-1 / Envelope-Audit version needs model-API/substrate authorization; full Gate D remains unopened |
 | Envelope Audit | FRAMED | Requirement only (Document B §7); no module; only a coarse `requires_self_review` flag exists | Document B §7; `..._ENVELOPE_AUDIT_OBSERVABILITY_SHELL_DEFINITION_v0.1.md` | scoped as observability shell → **DEFER** (duplicates ReflectionTrace or needs a model-API track); Gate D unopened, operator/Codex-gated; A0 (`d8a65e3`) reaffirmed **DEFER** |
 | Dream / incubation / Regime-B | DEFERRED | Offline reflection; no runtime exists; explicitly deferred + substrate-coupled | Document B §5; pre-substrate §3 | none; last |
@@ -118,6 +120,36 @@ Gate 4 writer remedies, and database/substrate/Stage B. See §5.
 - **Validation:** `126 passed in 1.46s`. Working tree after push clean (`## main...origin/main`).
 - **Next:** lane paused. Further shaping rules, live archive/collective shaping, and any default-on
   decision remain deferred — see `docs/TORMENT_EPHEMERAL_COGNITION_STATE_SLICE_2_DEFINITION_v0.1.md`.
+
+### Slice 3 — ALREADY LANDED (core-lane numeric shaping; board correction 2026-06-27)
+
+**Board-staleness correction (docs-only; no code/test/behavior change).** The Slice 2 *Next* line
+above is **superseded**: a Slice 3 core-lane shaping rule in fact landed, is wired into
+`build_memory_plan`, and is tested. **The lane must no longer be treated as "Slice 3 pending."**
+
+- **Rule:** default-off behind its own flag `TORMENT_COGNITION_CORE_SHAPING_V1` (separate from
+  Slice 2). When enabled: if `EphemeralCognitionState.confidence_need >= 0.60` **and** the turn is
+  neither governance- nor identity-sensitive **and** the core lane is already enabled
+  (`core.top_k > 0`), then `core.top_k -> min(current + 1, 7)`, **never reducing**.
+- **Scope:** controller-produced `MemoryPlan` only · plan-boundary only · `top_k_by_lane["core"]`
+  only · no weights · no other lanes · no retrieval booleans · no `safety_constraints` /
+  `max_token_budget` · no `app.py` / `agent_loop.py` / `fabric.py`. Independent of Slice 2.
+- **Anchors:** `thinking_controller.py` — `_apply_cognition_core_shaping_v1` + its call in
+  `build_memory_plan`; flag `_COGNITION_CORE_SHAPING_V1_ENABLE`. Tests:
+  `test_ephemeral_cognition_state.py` §"Slice 3" (core flag off/on, below-threshold, governance- and
+  identity-sensitive guards, cap / never-reduce). Non-control lock:
+  `test_audit_memoryplan_shaping_noncontrol_characterization.py` references
+  `_apply_cognition_core_shaping_v1`.
+
+**Also already landed** (record only) as later default-off `MemoryPlan` shaping rules in
+`build_memory_plan`: **geometric memory shaping v1** (`TORMENT_GEOMETRIC_MEMORY_SHAPING_V1`; lane
+*weights* from coherence/stability) and **relational-prominence shaping v1** (relational lane weight
+from `ambiguity_tolerance`, ceiling ≤ 0.99).
+
+- **Lane status:** PARTIAL / paused — **not "Slice 3 pending."** Any further shaping is **Slice 4+**
+  and must be explicitly justified as **real cognition capability, not another marginal retrieval
+  nudge**; default-off / reversible / plan-boundary / content-free remain mandatory. This correction
+  changes **no code, no tests, no behavior, no flags**, and opens **no new lane**.
 
 ---
 
