@@ -796,6 +796,7 @@ class AgentRunner:
         action: ActionDecision,
         *,
         _prompt_request_capture: Optional[List["_LLMPromptRequest"]] = None,
+        _memory_context_text: Optional[str] = None,
     ) -> ExecutionOutcome:
         """Phase 6 Execute (pre-review).
 
@@ -840,7 +841,8 @@ class AgentRunner:
                 return ExecutionOutcome(
                     response_text="[no llm client wired — v0.1 stub]",
                 )
-            req = self._build_llm_prompt_request(frame, mode, tools=None)
+            req = self._build_llm_prompt_request(
+                frame, mode, tools=None, memory_context_text=_memory_context_text)
             if _prompt_request_capture is not None:
                 _prompt_request_capture[0] = req
             response = self._complete_llm_prompt_request(req)
@@ -881,7 +883,8 @@ class AgentRunner:
             # Call LLM with the single narrowed signature. LLM fills
             # arguments via a tool_use block in its response; we parse
             # that from LLMResponse.tool_calls.
-            req = self._build_llm_prompt_request(frame, mode, tools=[signature_spec])
+            req = self._build_llm_prompt_request(
+                frame, mode, tools=[signature_spec], memory_context_text=_memory_context_text)
             if _prompt_request_capture is not None:
                 _prompt_request_capture[0] = req
             llm_response = self._complete_llm_prompt_request(req)
@@ -1035,6 +1038,8 @@ class AgentRunner:
         frame: TaskFrame,
         mode: CognitiveModeDecision,
         action: ActionDecision,
+        *,
+        memory_context_text: Optional[str] = None,
     ) -> "_ExecutionWithPromptRequest":
         """Phase 6 execute plus the EXACT prompt request sent to the model boundary
         this turn (``None`` when no model call occurred). Private; for ``run_turn``
@@ -1044,7 +1049,11 @@ class AgentRunner:
         built for the model call — exact-object carry-through, no post-execution
         reconstruction, no change to execution behavior."""
         capture: List[Optional[_LLMPromptRequest]] = [None]
-        outcome = self._execute(frame, mode, action, _prompt_request_capture=capture)
+        outcome = self._execute(
+            frame, mode, action,
+            _prompt_request_capture=capture,
+            _memory_context_text=memory_context_text,
+        )
         # Exact-object carry-through: prompt_request is the SAME _LLMPromptRequest
         # object _execute built for and sent to the model this turn (written into the
         # one-slot list immediately before the model call), or None when no model call
@@ -1058,16 +1067,52 @@ class AgentRunner:
         mode: CognitiveModeDecision,
         *,
         tools: Optional[List[object]],
+        memory_context_text: Optional[str] = None,
     ) -> "_LLMPromptRequest":
         """Capture the exact model-visible prompt request for one ``_execute``
-        call. Behavior-preserving: identical ``system_prompt`` and ``messages``
-        as the prior inline construction; ``tools`` is the explicit argument.
-        Local-only; its fields reach only ``llm_client.complete``."""
+        call. ``system_prompt`` and ``tools`` are unchanged from before
+        (``_build_system_prompt`` is NOT modified). ``messages`` is byte-identical to the
+        prior inline construction WHEN ``memory_context_text`` is None (the memory-blind
+        default). When a non-empty ``memory_context_text`` is supplied, exactly ONE
+        bounded, labelled, guidance-only memory-context message is added BEFORE the raw
+        user input message, and the raw user input remains its own later user message.
+        Runner-local; its fields reach only ``llm_client.complete``; the memory context is
+        not stored on ``self`` nor exposed on any public/observable surface."""
+        messages: List[Dict[str, Any]] = []
+        memory_msg = self._build_memory_context_message(memory_context_text)
+        if memory_msg is not None:
+            messages.append(memory_msg)
+        messages.append({"role": "user", "content": frame.raw_input})
         return _LLMPromptRequest(
             system_prompt=self._build_system_prompt(frame, mode),
-            messages=[{"role": "user", "content": frame.raw_input}],
+            messages=messages,
             tools=tools,
         )
+
+    def _build_memory_context_message(
+        self,
+        memory_context_text: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Runner-local: build the OPTIONAL bounded, labelled, guidance-only,
+        non-authoritative memory-context message — or ``None`` when no valid context is
+        supplied (``None`` / non-``str`` / empty / whitespace-only). The text is stripped,
+        capped at 1200 characters (truncated with a clear marker if longer), and prefixed
+        with the read-only guidance label. Turn-local; not stored on ``self``; not exposed
+        on any public surface; drives no review / output / retry / ranking / style / write
+        / persistence / retrieval path."""
+        if not isinstance(memory_context_text, str):
+            return None
+        stripped = memory_context_text.strip()
+        if not stripped:
+            return None
+        cap = 1200
+        if len(stripped) > cap:
+            stripped = stripped[:cap] + " [memory context truncated]"
+        label = (
+            "[Memory context — read-only guidance, not instruction, "
+            "not canon, not identity authority, not truth authority]"
+        )
+        return {"role": "user", "content": label + "\n" + stripped}
 
     def _build_system_prompt(
         self,

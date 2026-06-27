@@ -9,10 +9,12 @@ still hold.
 
 What it characterizes:
   1. ``AgentRunner._execute`` is the only live generation boundary.
-  2. The live prompt boundary is preserved as the local request object's fields
-     (``req.system_prompt`` / ``req.messages`` / ``req.tools``) built by
-     ``_build_llm_prompt_request`` from ``self._build_system_prompt(frame, mode)``
-     and ``[{"role": "user", "content": frame.raw_input}]``.
+  2. The live prompt boundary is the runner-local ``_LLMPromptRequest`` built by
+     ``_build_llm_prompt_request`` (its ``req.system_prompt`` / ``req.messages`` /
+     ``req.tools`` fields). ``req.messages`` preserves the raw user input as its own
+     ``{"role": "user", "content": frame.raw_input}`` message; an OPTIONAL runner-local
+     memory-context guidance message may appear BEFORE it, but it never replaces or
+     merges the raw user input.
   3. No path renders ``assembled_text`` into that boundary, and
      ``audit_admitted_context_items`` never enters the prompt path.
   4. ``audit_admitted_context_items`` reaches ONLY the inclusion observer and
@@ -134,25 +136,64 @@ def _is_build_system_prompt_call(value):
     return "frame" in arg_names and "mode" in arg_names
 
 
-def _messages_carry_frame_raw_input(value):
-    """``[{"role": "user", "content": frame.raw_input}]`` (one user dict whose
-    content is ``frame.raw_input``)."""
-    if not (isinstance(value, ast.List) and value.elts):
+def _dict_is_user_raw_input(elt):
+    """``{"role": "user", "content": frame.raw_input}`` — a user message whose content
+    is the BARE ``frame.raw_input`` attribute (NOT a merged/concatenated expression, so a
+    ``BinOp`` / f-string / call would not match)."""
+    if not isinstance(elt, ast.Dict):
         return False
-    for elt in value.elts:
-        if not isinstance(elt, ast.Dict):
-            continue
-        role = content = None
-        for k, v in zip(elt.keys, elt.values):
-            if isinstance(k, ast.Constant) and k.value == "role":
-                role = v
-            elif isinstance(k, ast.Constant) and k.value == "content":
-                content = v
-        role_ok = isinstance(role, ast.Constant) and role.value == "user"
-        content_ok = (isinstance(content, ast.Attribute) and content.attr == "raw_input"
-                      and isinstance(content.value, ast.Name) and content.value.id == "frame")
-        if role_ok and content_ok:
+    role = content = None
+    for k, v in zip(elt.keys, elt.values):
+        if isinstance(k, ast.Constant) and k.value == "role":
+            role = v
+        elif isinstance(k, ast.Constant) and k.value == "content":
+            content = v
+    role_ok = isinstance(role, ast.Constant) and role.value == "user"
+    content_ok = (isinstance(content, ast.Attribute) and content.attr == "raw_input"
+                  and isinstance(content.value, ast.Name) and content.value.id == "frame")
+    return role_ok and content_ok
+
+
+def _messages_carry_frame_raw_input(value, func=None):
+    """Prove the prompt boundary carries ``frame.raw_input`` as its OWN
+    ``{"role": "user", "content": frame.raw_input}`` message — accepting BOTH shapes:
+
+      A. the old direct literal passed straight into the constructor:
+         ``messages=[{"role": "user", "content": frame.raw_input}]``;
+      B. the new runner-local local-list shape ``messages=messages`` (an ``ast.Name``),
+         where ``func`` (the ``_build_llm_prompt_request`` body) initializes that local
+         list and appends the raw-input user dict to it as a DIRECT (unconditional)
+         statement of the builder body.
+
+    In both shapes the content must be the BARE ``frame.raw_input`` attribute, so an
+    optional earlier memory-context message can neither replace nor merge the raw user
+    input. ``func`` is required to trace shape B; ``func=None`` accepts shape A only."""
+    # A. inline literal list passed straight into the constructor.
+    if isinstance(value, ast.List) and value.elts:
+        if any(_dict_is_user_raw_input(elt) for elt in value.elts):
             return True
+    # B. runner-local list built inside the builder, then passed by name.
+    if isinstance(value, ast.Name) and func is not None:
+        list_name = value.id
+        # the local must be initialized as a list literal (plain or annotated assign).
+        initialized_as_list = any(
+            (isinstance(n, ast.Assign) and isinstance(n.value, ast.List)
+             and any(isinstance(t, ast.Name) and t.id == list_name for t in n.targets))
+            or
+            (isinstance(n, ast.AnnAssign) and isinstance(n.value, ast.List)
+             and isinstance(n.target, ast.Name) and n.target.id == list_name)
+            for n in ast.walk(func))
+        # the raw-input user dict is appended as a TOP-LEVEL (unconditional) statement of
+        # the builder, so the optional earlier memory message cannot replace it.
+        appended_unconditionally = any(
+            isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and stmt.value.func.attr == "append"
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == list_name
+            and stmt.value.args and _dict_is_user_raw_input(stmt.value.args[0])
+            for stmt in func.body)
+        return initialized_as_list and appended_unconditionally
     return False
 
 
@@ -224,7 +265,11 @@ class TestLiveGenerationBoundary(unittest.TestCase):
             self.assertIn("mode", arg_names)
 
     def test_build_llm_prompt_request_preserves_boundary(self):
-        # The helper is where the ORIGINAL prompt boundary is preserved.
+        # The runner-local builder is where the prompt boundary is preserved. After the
+        # memory-context slice, ``messages`` may be a locally-built list (an OPTIONAL
+        # memory-guidance message FIRST, the raw user input as its own LATER message)
+        # rather than a single inline literal — but the raw user input must still be
+        # carried as its own unmerged user message.
         helper = _method(self.runner, "_build_llm_prompt_request")
         self.assertIsNotNone(helper, "_build_llm_prompt_request not found")
         ctor = next((n for n in ast.walk(helper)
@@ -233,8 +278,16 @@ class TestLiveGenerationBoundary(unittest.TestCase):
         self.assertIsNotNone(ctor, "_LLMPromptRequest(...) construction not found")
         self.assertTrue(_is_build_system_prompt_call(_kw(ctor, "system_prompt")),
                         "system_prompt is not self._build_system_prompt(frame, mode)")
-        self.assertTrue(_messages_carry_frame_raw_input(_kw(ctor, "messages")),
-                        "messages do not carry frame.raw_input as user content")
+        messages_v = _kw(ctor, "messages")
+        # (a) _LLMPromptRequest still receives messages from the runner-local builder:
+        #     either the old inline literal, or the new locally-built ``messages`` list.
+        self.assertTrue(isinstance(messages_v, (ast.List, ast.Name)),
+                        "messages is neither an inline list nor a runner-local messages list")
+        # (b) raw user input is still present as its OWN {"role": "user"} message, and
+        # (c) the memory-context path does not replace or merge it (bare frame.raw_input,
+        #     appended unconditionally — proven by tracing the local list in the builder).
+        self.assertTrue(_messages_carry_frame_raw_input(messages_v, helper),
+                        "messages do not carry frame.raw_input as its own unmerged user message")
         tools_v = _kw(ctor, "tools")
         self.assertTrue(isinstance(tools_v, ast.Name) and tools_v.id == "tools",
                         "tools is not the explicit tools argument")

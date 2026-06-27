@@ -10,8 +10,10 @@ calls a model) and asserts the *present* facts the design frame
 (`docs/TORMENT_MEMORY_TO_PROMPT_FOR_GENERATION_DESIGN_FRAME_v0.1.md`) named as the
 baseline:
 
-  1. AgentRunner generation is MEMORY-BLIND today: `_build_system_prompt(frame, mode)`
-     minimal prompt + `frame.raw_input` messages, via `_LLMPromptRequest` →
+  1. AgentRunner generation consumes no assembly/retrieval memory, and the optional
+     runner-local memory-context seam (`memory_context_text`) is DORMANT by default — no
+     live caller passes it — so the live path stays memory-blind: `_build_system_prompt(frame,
+     mode)` minimal prompt + `frame.raw_input` messages, via `_LLMPromptRequest` →
      `_complete_llm_prompt_request(...)`.
   2. The prompt/generation methods in `agent_loop.py` do not import/call/consume
      assemble_context / AssembledContext / assembled_text / retrieval_assembler /
@@ -384,6 +386,47 @@ class TestGenerationBoundaryShape(unittest.TestCase):
         for field in ("system_prompt", "messages", "tools"):
             self.assertIn(field, passed,
                           f"self.llm_client.complete(...) does not receive req.{field}")
+
+
+# --------------------------------------------------------------------------- #
+# Memory-context seam — the intentional runner-local opt-in, DORMANT by default
+# --------------------------------------------------------------------------- #
+
+class TestMemoryContextSeamDormant(unittest.TestCase):
+    """The first production slice adds an OPTIONAL runner-local `memory_context_text`
+    seam through the private prompt path. It must consume NO assembly/retrieval surface,
+    and it must be DORMANT by default — no live caller (e.g. `run_turn`) passes it — so
+    the default/live path stays memory-blind."""
+
+    def setUp(self):
+        self.cls = _class(_parse_service("agent_loop.py"), "AgentRunner")
+
+    def test_build_request_has_optional_memory_param_and_helper(self):
+        build = _method(self.cls, "_build_llm_prompt_request")
+        kwonly = {a.arg for a in build.args.kwonlyargs}
+        self.assertIn("memory_context_text", kwonly,
+                      "_build_llm_prompt_request must expose the optional memory_context_text param")
+        self.assertIn("_build_memory_context_message", _idents(build),
+                      "_build_llm_prompt_request must route memory through the runner-local helper")
+        # The seam still consumes NO assembly/retrieval surface.
+        self.assertEqual(_idents(build) & _MEMORY_ASSEMBLY_IDENTS, set())
+
+    def test_memory_helper_consumes_no_assembly_or_retrieval(self):
+        helper = _method(self.cls, "_build_memory_context_message")
+        self.assertIsNotNone(helper, "_build_memory_context_message helper missing")
+        self.assertEqual(_idents(helper) & _MEMORY_ASSEMBLY_IDENTS, set())
+
+    def test_live_path_is_dormant_no_caller_passes_memory(self):
+        # No call to `_execute_with_prompt_request` anywhere in agent_loop.py passes a
+        # `memory_context_text` argument -> the live run_turn path stays memory-blind.
+        tree = _parse_service("agent_loop.py")
+        offenders = []
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and _callee_name(n) == "_execute_with_prompt_request":
+                if any(kw.arg == "memory_context_text" for kw in n.keywords):
+                    offenders.append(getattr(n, "lineno", -1))
+        self.assertEqual(offenders, [],
+                         msg=f"a live caller passes memory_context_text (not dormant): {offenders}")
 
 
 if __name__ == "__main__":
