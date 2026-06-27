@@ -8,9 +8,10 @@ roadmap / checkpoint / scratch doc — is **evidence, not active authority**. If
 and an older note disagree on what is next, **§0 wins** unless Hilmir explicitly
 overrides.
 
-- **HEAD:** `ebcafdb` / `origin/main` / docs(memory): frame authority versus emergence.
+- **HEAD:** `87afbc8` / `origin/main` / test(shaping): lock geometric harvester read-only purity.
 - **Roadmap followed:** `docs/TORMENT_COGNITION_ROADMAP_COMPLETION_AND_IMPLEMENTATION_SEQUENCE_v0.1.md` — specifically the substrate-independent **ephemeral Layer-1 / MemoryPlan-shaping** lane (not database/substrate; that is deferred).
 - **Last closed:**
+  - `87afbc8` — **Geometric-harvester read-only purity lock — CLOSED (tests-only / source-only / AST-only)** (`tests/test_geometric_harvester_readonly_purity_characterization.py`; substrate-independent shaping / MemoryPlan lane). Locks `geometric_harvester.py` as a **read-only, non-authoring shaping bridge** — **complementary to the existing C1 direct-call locks** (`test_gate_a_tests_only_locks_c1_c5.py`), NOT a duplicate: it cedes the write / persistence / memory / promotion direct-call dimension to C1 and adds the four C1-uncovered structural invariants — **closed import surface** (`__future__` / `typing` / `.thinking_models` only), **no input/state mutation** (no subscript/attribute assignment targets; no mutating method calls), **no retrieval / prompt / model / agent-loop / app bridge calls** that C1 omits, and **return-only extractor shape** (`None` or `GeometricStanceContext(...)`). **No production code; no endpoint / API / schema; no prompt mutation / exposure; no output / review / control behavior; no writer / memory / persistence path; no Gate A / Gate D / database / substrate / audit-owner movement.** Opens **no new lane**.
   - `5050de5` — SRG→social_resonance live chain.
   - `63b8073` — gated geometric MemoryPlan shaping (coherence + stability → core/deep lane weights).
   - `0dbd9e0` — geometric shaping proven to affect query ranking.
