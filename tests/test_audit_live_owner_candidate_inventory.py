@@ -44,6 +44,10 @@ _BRIDGE_REL = "torment_service/audit_selected_items_runner_bridge.py"
 # extracts selected items and owns/captures its own prompt; unwired (tests-only).
 _OWNER = "audit_private_generation_owner.py"
 _OWNER_REL = "torment_service/audit_private_generation_owner.py"
+# The dormant / test-called memory-to-prompt orchestrator (candidate 6): owner-of-assembly
+# for the same-turn memory path. NOT audit-owner terrain; called nowhere in production.
+_ORCH = "memory_context_orchestrator.py"
+_ORCH_REL = "torment_service/memory_context_orchestrator.py"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
 
 # The five owner-relevant call sites this inventory tracks.
@@ -278,14 +282,16 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
     later gate can compare candidate owner shapes with evidence."""
 
     def test_assemble_context_caller_inventory(self):
-        # Retrieval / assembly is owned only by the /retrieve endpoint handler.
-        self.assertEqual(_service_callers_of("assemble_context"), {"app.py"})
+        # Retrieval / assembly is owned by the /retrieve endpoint handler and the dormant
+        # memory-to-prompt orchestrator (candidate 6; test-called only).
+        self.assertEqual(_service_callers_of("assemble_context"), {"app.py", _ORCH})
 
     def test_run_turn_caller_inventory(self):
-        # Generation entry is reached only by the runner's own reflex self-call
-        # and the approved private bridge — no endpoint, no other service module.
+        # Generation entry is reached by the runner's own reflex self-call, the approved
+        # private bridge, and the dormant memory-to-prompt orchestrator (candidate 6;
+        # test-called only) — no endpoint, no other service module.
         self.assertEqual(_service_callers_of("run_turn"),
-                         {"agent_loop.py", _BRIDGE})
+                         {"agent_loop.py", _BRIDGE, _ORCH})
 
     def test_selected_items_bridge_caller_inventory(self):
         # The bridge is a dead-end in production: no service module calls it.
@@ -311,8 +317,8 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
         snapshot = {name: sorted(_service_callers_of(name))
                     for name in _OWNER_CALL_SITES}
         self.assertEqual(snapshot, {
-            "assemble_context": ["app.py"],
-            "run_turn": ["agent_loop.py", _BRIDGE],
+            "assemble_context": ["app.py", _ORCH],
+            "run_turn": ["agent_loop.py", _BRIDGE, _ORCH],
             "run_turn_with_selected_items_observation": [],
             "_build_llm_prompt_request": ["agent_loop.py"],
             "_build_system_prompt": ["agent_loop.py"],
@@ -446,8 +452,12 @@ class TestInvariant6FutureOwnerShapesRecordedNeitherSelected(unittest.TestCase):
                 if (calls & assemble) and (calls & generate):
                     fusing.add(rel)
         self.assertEqual(
-            fusing, {_BRIDGE_REL, _OWNER_REL},
+            fusing, {_BRIDGE_REL, _OWNER_REL, _ORCH_REL},
             msg=f"unexpected assembly+generation fusion: {sorted(fusing)}")
+        # Memory-to-prompt orchestrator (candidate 6) fuses assembly+generation but is
+        # DORMANT: no production module calls its entrypoint (test-called only).
+        self.assertEqual(
+            _service_callers_of("run_turn_with_memory_context"), set())
         # Bridge candidate: called nowhere, packet-blind.
         self.assertEqual(
             _service_callers_of("run_turn_with_selected_items_observation"), set())

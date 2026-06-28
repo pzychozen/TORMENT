@@ -508,6 +508,7 @@ class AgentRunner:
         step: int,
         *,
         audit_admitted_context_items: Optional[List[Dict[str, Any]]] = None,
+        memory_context_text: Optional[str] = None,
     ) -> TurnResult:
         """Execute one full agent turn through all 8 phases.
 
@@ -603,6 +604,7 @@ class AgentRunner:
             frame=bundle.task_frame,
             mode=bundle.mode_decision,
             action=effective_action,
+            memory_context_text=memory_context_text,
         )
         execution_outcome = _exec.outcome
         _prompt_request = _exec.prompt_request

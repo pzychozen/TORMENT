@@ -416,17 +416,45 @@ class TestMemoryContextSeamDormant(unittest.TestCase):
         self.assertIsNotNone(helper, "_build_memory_context_message helper missing")
         self.assertEqual(_idents(helper) & _MEMORY_ASSEMBLY_IDENTS, set())
 
-    def test_live_path_is_dormant_no_caller_passes_memory(self):
-        # No call to `_execute_with_prompt_request` anywhere in agent_loop.py passes a
-        # `memory_context_text` argument -> the live run_turn path stays memory-blind.
+    def test_run_turn_exposes_optional_memory_context_param(self):
+        # CHANGE A: run_turn now accepts an OPTIONAL keyword-only memory_context_text
+        # (default None) — the slice's only new run_turn parameter.
+        rt = _method(self.cls, "run_turn")
+        self.assertIsNotNone(rt, "run_turn not found")
+        kwonly = [a.arg for a in rt.args.kwonlyargs]
+        self.assertIn("memory_context_text", kwonly,
+                      "run_turn must expose the optional memory_context_text param")
+        default = rt.args.kw_defaults[kwonly.index("memory_context_text")]
+        self.assertIsInstance(default, ast.Constant, "memory_context_text must have a default")
+        self.assertIsNone(default.value, "memory_context_text default must be None (dormant)")
+
+    def test_only_run_turn_threads_its_own_memory_param_into_seam(self):
+        # After CHANGE A, exactly ONE call inside run_turn passes memory_context_text into
+        # _execute_with_prompt_request, and the value is exactly the run_turn keyword
+        # parameter (a bare Name) — never assembled/retrieval/audit/private content. Parse
+        # ONCE and walk ONLY run_turn from that same tree, so "inside run_turn" is proven
+        # structurally (no cross-parse node-identity comparison). (The live path stays
+        # memory-blind: no production caller passes memory.)
         tree = _parse_service("agent_loop.py")
-        offenders = []
-        for n in ast.walk(tree):
+        cls = _class(tree, "AgentRunner")
+        rt = _method(cls, "run_turn")
+        self.assertIsNotNone(rt, "run_turn not found")
+        threading_calls = []
+        for n in ast.walk(rt):
             if isinstance(n, ast.Call) and _callee_name(n) == "_execute_with_prompt_request":
-                if any(kw.arg == "memory_context_text" for kw in n.keywords):
-                    offenders.append(getattr(n, "lineno", -1))
-        self.assertEqual(offenders, [],
-                         msg=f"a live caller passes memory_context_text (not dormant): {offenders}")
+                for kw in n.keywords:
+                    if kw.arg == "memory_context_text":
+                        threading_calls.append((n, kw.value))
+        self.assertEqual(len(threading_calls), 1,
+                         f"exactly one run_turn seam call may thread memory_context_text; "
+                         f"got {len(threading_calls)}")
+        _, value = threading_calls[0]
+        self.assertIsInstance(value, ast.Name,
+                              "memory_context_text must be threaded as the bare run_turn param")
+        self.assertEqual(value.id, "memory_context_text",
+                         "the threaded value must be the run_turn keyword param itself")
+        self.assertEqual(_idents(value) & _MEMORY_ASSEMBLY_IDENTS, set(),
+                         "threaded memory value must not carry assembly/retrieval content")
 
 
 if __name__ == "__main__":

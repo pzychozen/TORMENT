@@ -171,5 +171,95 @@ class TestNoExposure(unittest.TestCase):
             "ExecutionOutcome must not carry the prompt request")
 
 
+class TestRunTurnThreadsMemoryContext(unittest.TestCase):
+    """run_turn-level behaviour: the OPTIONAL memory_context_text param is threaded through
+    the live turn into the model-visible prompt, and the default turn stays memory-blind.
+    Uses the real ThinkingController plus fake fabric/LLM (mirrors test_agent_loop_smoke)."""
+
+    class _Fabric:
+        def __init__(self):
+            self.ingest_calls = []
+            self.drift_calls = []
+
+        def ingest(self, workspace_id, agent_id, text, step):
+            self.ingest_calls.append((workspace_id, agent_id, text, step))
+            return {"status": "ok"}
+
+        def measure_drift(self, workspace_id, agent_id):
+            self.drift_calls.append((workspace_id, agent_id))
+            return None
+
+        def gravity_correction(self, workspace_id, agent_id, drift_info):
+            pass
+
+    class _LLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, system_prompt, messages, tools=None):
+            self.calls.append({"system_prompt": system_prompt, "messages": messages, "tools": tools})
+            return LLMResponse(text="captured")
+
+    def _make(self):
+        from torment_service.thinking_controller import ThinkingController
+        fabric = self._Fabric()
+        llm = self._LLM()
+        runner = AgentRunner(controller=ThinkingController(), fabric=fabric, llm_client=llm)
+        return runner, fabric, llm
+
+    def _observation(self, text):
+        from torment_service.agent_loop import Observation
+        return Observation(text=text)
+
+    def _spy_memory(self, runner, seen):
+        orig = runner._execute_with_prompt_request
+
+        def spy(*args, **kwargs):
+            seen["memory_context_text"] = kwargs.get("memory_context_text", "UNSET")
+            return orig(*args, **kwargs)
+
+        runner._execute_with_prompt_request = spy
+
+    def test_run_turn_threads_memory_param_into_seam(self):
+        runner, _fabric, _llm = self._make()
+        seen = {}
+        self._spy_memory(runner, seen)
+        runner.run_turn(workspace_id="ws", agent_id="agent",
+                        observation=self._observation("What is the capital of France?"),
+                        step=1, memory_context_text="a recalled fact")
+        self.assertEqual(seen.get("memory_context_text"), "a recalled fact")
+
+    def test_run_turn_default_is_memory_blind(self):
+        runner, _fabric, _llm = self._make()
+        seen = {}
+        self._spy_memory(runner, seen)
+        runner.run_turn(workspace_id="ws", agent_id="agent",
+                        observation=self._observation("Hello"), step=1)
+        self.assertIsNone(seen.get("memory_context_text"))
+
+    def test_run_turn_memory_reaches_model_prompt_when_model_called(self):
+        runner, _fabric, llm = self._make()
+        result = runner.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=self._observation("What is the capital of France?"),
+            step=1, memory_context_text="PARIS_MEM_FACT")
+        if llm.calls:  # ANSWER path invoked the model this turn
+            msgs = llm.calls[0]["messages"]
+            self.assertTrue(any("PARIS_MEM_FACT" in m.get("content", "") for m in msgs),
+                            "memory context should reach the model-visible prompt")
+            self.assertEqual(msgs[-1].get("content"), result.task_frame.raw_input,
+                             "raw user input remains the separate, later message")
+            self.assertNotIn("PARIS_MEM_FACT", msgs[-1].get("content", ""))
+
+    def test_run_turn_does_not_expose_memory_on_turnresult(self):
+        runner, _fabric, _llm = self._make()
+        result = runner.run_turn(
+            workspace_id="ws", agent_id="agent",
+            observation=self._observation("What is the capital of France?"),
+            step=1, memory_context_text="SECRET_MEM_TOKEN")
+        for v in vars(result).values():
+            self.assertNotIn("SECRET_MEM_TOKEN", repr(v))
+
+
 if __name__ == "__main__":
     unittest.main()
