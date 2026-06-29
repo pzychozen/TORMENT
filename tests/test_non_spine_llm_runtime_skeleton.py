@@ -2,10 +2,12 @@
 
 Guards for the dormant, internal, non-Spine LLM runtime skeleton
 (``torment_service/non_spine_llm_runtime.py``): the bounded memory-context package, the
-prompt-request / completion boundary, and the provider-adapter readiness contracts.
+prompt-request / completion boundary, the provider-adapter readiness contracts, and the
+callable-only MANUAL provider adapter.
 
-Everything is fake / dormant / test-called only. The companion focused command runs the
-Spine characterization lock alongside this file to prove it remains green.
+Everything is fake / dormant / test-called only (the callable adapter is exercised solely
+with fake / spy callables). The companion focused command runs the Spine characterization
+lock alongside this file to prove it remains green.
 """
 import ast
 import dataclasses
@@ -27,6 +29,7 @@ from torment_service.non_spine_llm_runtime import (
     NonSpineLLMProviderResult,
     NonSpineLLMProviderAdapter,
     FakeNonSpineLLMProviderAdapter,
+    CallableNonSpineLLMProviderAdapter,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,18 +65,18 @@ FORBIDDEN_SUBSTRINGS = [
     "os.environ",
     "os.getenv",
     "getenv(",
+    "dotenv",
 ]
 
 ALLOWED_IMPORT_ROOTS = {"__future__", "dataclasses", "typing"}
 
-# Network / HTTP / socket / subprocess / SDK / async / env / secrets import roots.
 FORBIDDEN_IMPORT_ROOTS = {
     "openai",
     "anthropic",
     "socket",
+    "ssl",
     "http",
     "urllib",
-    "ssl",
     "subprocess",
     "requests",
     "httpx",
@@ -201,8 +204,6 @@ class TestMemoryContextWiring(unittest.TestCase):
 
 
 class TestProviderContracts(unittest.TestCase):
-    """Guards 1-7 - provider config/request/result + base + fake provider adapter."""
-
     def test_provider_contract_types_exist(self):
         for cls in (
             NonSpineLLMProviderConfig,
@@ -264,9 +265,75 @@ class TestProviderContracts(unittest.TestCase):
         self.assertIs(res.provider_called, False)
 
 
-class TestCompletionDelegatesToProvider(unittest.TestCase):
-    """Guard 8 - the fake completion adapter delegates through the provider boundary."""
+class TestCallableProviderAdapter(unittest.TestCase):
+    """Guards 1-9, 12 - the callable-only MANUAL provider adapter (fake/spy callables)."""
 
+    def _req(self, rendered="USER: hi"):
+        return NonSpineLLMProviderRequest(
+            prompt_request=NonSpineLLMPromptRequest(rendered_prompt=rendered)
+        )
+
+    def test_exists_and_subclasses_provider_adapter(self):
+        self.assertIsInstance(CallableNonSpineLLMProviderAdapter, type)
+        self.assertTrue(
+            issubclass(CallableNonSpineLLMProviderAdapter, NonSpineLLMProviderAdapter)
+        )
+
+    def test_requires_injected_callable(self):
+        adapter = CallableNonSpineLLMProviderAdapter(lambda request: "ok")
+        self.assertIsInstance(adapter, CallableNonSpineLLMProviderAdapter)
+
+    def test_rejects_non_callable(self):
+        with self.assertRaises(TypeError):
+            CallableNonSpineLLMProviderAdapter("not callable")
+
+    def test_generate_passes_provider_request_to_callable(self):
+        seen = []
+
+        def _cb(request):
+            seen.append(request)
+            return "manual text"
+
+        adapter = CallableNonSpineLLMProviderAdapter(_cb)
+        adapter.generate(self._req())
+        self.assertEqual(len(seen), 1)
+        self.assertIsInstance(seen[0], NonSpineLLMProviderRequest)
+
+    def test_converts_string_output_to_result_with_markers(self):
+        adapter = CallableNonSpineLLMProviderAdapter(lambda request: "manual text")
+        res = adapter.generate(self._req("USER: hi"))
+        self.assertIsInstance(res, NonSpineLLMProviderResult)
+        self.assertEqual(res.text, "manual text")
+        self.assertIs(res.provider_called, True)
+        self.assertIs(res.is_fake, False)
+        self.assertEqual(res.echoed_prompt, "USER: hi")
+
+    def test_coerces_non_string_output_to_str(self):
+        adapter = CallableNonSpineLLMProviderAdapter(lambda request: 123)
+        res = adapter.generate(self._req())
+        self.assertIsInstance(res.text, str)
+        self.assertEqual(res.text, "123")
+
+    def test_deterministic_when_callable_deterministic(self):
+        adapter = CallableNonSpineLLMProviderAdapter(lambda request: "stable")
+        self.assertEqual(adapter.generate(self._req()), adapter.generate(self._req()))
+
+    def test_callable_adapter_only_in_its_class_definition(self):
+        # Guard 12: the callable adapter is never instantiated or referenced in the
+        # module outside its own class definition (so no default path can use it).
+        lines = [
+            ln for ln in MODULE_SRC.splitlines()
+            if "CallableNonSpineLLMProviderAdapter" in ln
+        ]
+        self.assertTrue(lines, "CallableNonSpineLLMProviderAdapter must be defined")
+        for ln in lines:
+            self.assertTrue(
+                ln.lstrip().startswith("class CallableNonSpineLLMProviderAdapter"),
+                "referenced outside its class definition: %s" % ln.strip(),
+            )
+
+
+class TestCompletionDelegatesToProvider(unittest.TestCase):
     def test_completion_adapter_delegates_to_provider(self):
         calls = []
 
@@ -413,10 +480,10 @@ class TestForbiddenReferencesAbsent(unittest.TestCase):
                 "non-local provider-style .complete( call: %s" % ln.strip(),
             )
 
-    def test_generate_call_only_on_local_fake_provider_adapter(self):
+    def test_generate_call_only_on_local_provider_adapter(self):
         generate_lines = [ln for ln in MODULE_SRC.splitlines() if ".generate(" in ln]
         self.assertTrue(
-            generate_lines, "expected the local fake-provider .generate( call"
+            generate_lines, "expected the local provider .generate( call"
         )
         for ln in generate_lines:
             self.assertIn(

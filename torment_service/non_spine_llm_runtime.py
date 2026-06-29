@@ -15,6 +15,9 @@ Shape:
     ``NonSpineLLMProviderResult`` -- provider-adapter readiness contracts (all fake);
   - ``NonSpineLLMProviderAdapter`` -- the future provider boundary (no real provider);
   - ``FakeNonSpineLLMProviderAdapter`` -- a deterministic, in-memory, no-provider fake;
+  - a callable-only MANUAL provider adapter (operator-injected callable; never the
+    default path; the one place ``provider_called`` may be True / ``is_fake`` may be
+    False; still NOT a real SDK / env / network adapter);
   - ``NonSpineLLMCompletionAdapter`` -- the completion-boundary base (no provider here);
   - ``FakeNonSpineLLMCompletionAdapter`` -- the only default completion path; delegates
     through the fake provider adapter and converts the fake provider result;
@@ -34,7 +37,7 @@ gate and are not done here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 
 # Fixed prompt label for the read-only memory-context block.
@@ -152,10 +155,11 @@ class NonSpineLLMProviderRequest:
 
 @dataclass(frozen=True)
 class NonSpineLLMProviderResult:
-    """Explicit fake provider result (primitive fields only).
+    """Explicit provider result (primitive fields only).
 
-    No model produced ``text``; ``is_fake`` / ``provider_called`` make the dormant posture
-    explicit and assertable.
+    For the fake adapter ``is_fake`` is True / ``provider_called`` is False. For the
+    callable-only manual adapter these may be False / True respectively; no model produced
+    ``text`` either way in this dormant slice.
     """
 
     text: str
@@ -230,6 +234,41 @@ class FakeNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
             text=_FAKE_RESPONSE_TEXT,
             is_fake=True,
             provider_called=False,
+            provider_name=config.provider_name,
+            model_name=config.model_name,
+            echoed_prompt=request.prompt_request.rendered_prompt,
+        )
+
+
+class CallableNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
+    """Callable-only MANUAL provider adapter.
+
+    NOT a real SDK adapter, NOT env-gated, NOT network-enabled, and NEVER the default
+    runtime path -- the base runtime never instantiates it. It requires an operator-
+    injected callable that is handed the ``NonSpineLLMProviderRequest`` and returns a
+    string completion text. This is the one adapter where ``provider_called`` may be True
+    and ``is_fake`` may be False; the operator drives it manually with their own callable,
+    and tests use only fake / spy callables. It imports no SDK, reaches no network, and
+    reads no env or secret.
+    """
+
+    def __init__(
+        self,
+        completion_callable: "Callable[[NonSpineLLMProviderRequest], str]",
+    ) -> None:
+        if not callable(completion_callable):
+            raise TypeError("completion_callable must be callable")
+        self._completion_callable = completion_callable
+
+    def generate(
+        self, request: "NonSpineLLMProviderRequest"
+    ) -> "NonSpineLLMProviderResult":
+        text = self._completion_callable(request)
+        config = request.config
+        return NonSpineLLMProviderResult(
+            text=str(text),
+            is_fake=False,
+            provider_called=True,
             provider_name=config.provider_name,
             model_name=config.model_name,
             echoed_prompt=request.prompt_request.rendered_prompt,
