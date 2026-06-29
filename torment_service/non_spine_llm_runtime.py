@@ -1,41 +1,45 @@
 """torment_service/non_spine_llm_runtime.py
 
-Dormant, internal, NON-Spine LLM runtime SKELETON (test-callable only).
+Dormant, internal, NON-Spine LLM runtime SKELETON.
 
 This module is the named owner shape selected ON PAPER by the separate-LLM-runtime
-direction-selection frame (docs-only). It is INERT: nothing in production instantiates
-or calls it. It exists so a future, separately-authorized step has a concrete, fenced
-skeleton to build against.
+direction-selection frame (docs-only). Its default / fake / callable paths are INERT and
+production-unwired; nothing in production instantiates or calls them.
 
 Shape:
   - ``NonSpineLLMMemoryContext`` -- explicit, bounded, read-only memory-context package;
   - ``NonSpineLLMRuntimeRequest`` -- explicit, primitive-only input object;
   - ``NonSpineLLMPromptRequest`` -- explicit prompt-request package (carries memory ctx);
   - ``NonSpineLLMProviderConfig`` / ``NonSpineLLMProviderRequest`` /
-    ``NonSpineLLMProviderResult`` -- provider-adapter readiness contracts (all fake);
-  - ``NonSpineLLMProviderAdapter`` -- the future provider boundary (no real provider);
+    ``NonSpineLLMProviderResult`` -- provider-adapter readiness contracts;
+  - ``NonSpineLLMProviderAdapter`` -- the provider boundary base (no provider);
   - ``FakeNonSpineLLMProviderAdapter`` -- a deterministic, in-memory, no-provider fake;
-  - a callable-only MANUAL provider adapter (operator-injected callable; never the
-    default path; the one place ``provider_called`` may be True / ``is_fake`` may be
-    False; still NOT a real SDK / env / network adapter);
-  - ``NonSpineLLMCompletionAdapter`` -- the completion-boundary base (no provider here);
-  - ``FakeNonSpineLLMCompletionAdapter`` -- the only default completion path; delegates
-    through the fake provider adapter and converts the fake provider result;
+  - a callable-only MANUAL provider adapter (operator-injected callable; never default);
+  - ``AnthropicNonSpineLLMProviderAdapter`` -- the first REAL provider adapter (gated,
+    lazy-import, fail-closed, operator-constructed only; never the default and never
+    live-wired);
+  - ``NonSpineLLMCompletionAdapter`` / ``FakeNonSpineLLMCompletionAdapter`` -- the only
+    default completion path; delegates through the fake provider adapter;
   - ``NonSpineLLMCompletion`` -- explicit fake completion result;
   - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` stays fake / no-provider;
-  - ``run_non_spine_callable_provider_manual(...)`` -- a production-internal MANUAL helper
-    that builds the callable-adapter stack; NOT live-wired, NOT the default, called by
-    nothing in production.
+  - ``run_non_spine_callable_provider_manual(...)`` -- production-internal MANUAL helper.
 
-Fake path only (by construction):
-  - stdlib-only; deterministic; no network; no SDK; no env; no secrets; no real call;
+Default / fake / callable paths (by construction):
+  - stdlib-only at import; deterministic; the default runtime, the fake adapters, and the
+    callable adapter make no network, SDK, env, or secret access and no real call;
   - not on the live Spine path; references no Spine, cognition, or role surface;
   - no retrieval; no assembly; no memory side effects; no persistence; no log output;
   - no endpoint, no MCP registration, no startup hook, no background loop;
   - inert at import time (no import-time side effects).
 
-Live integration and any real provider adapter are a SEPARATE, separately-authorized
-gate and are not done here.
+The ONE exception is ``AnthropicNonSpineLLMProviderAdapter`` -- the first REAL provider
+adapter: operator-constructed only, never the default and never live-wired, gated by an env
+var, with the ``anthropic`` SDK lazily imported only AFTER the gate / key / model are
+validated, an explicit timeout (default <= 30s), and fail-closed behavior. Importing this
+module and constructing the adapter still do nothing (no env read, no SDK import); a real
+call happens only when an operator constructs it, the gate is set, and generate() runs.
+
+Live integration is a SEPARATE, separately-authorized gate and is not done here.
 """
 from __future__ import annotations
 
@@ -132,11 +136,7 @@ class NonSpineLLMPromptRequest:
 
 @dataclass(frozen=True)
 class NonSpineLLMProviderConfig:
-    """Fake, network-disabled provider configuration (primitive fields only).
-
-    Readiness contract only. ``is_fake`` and ``network_enabled`` are explicit markers; no
-    real provider, network, env, or secret handling exists in this dormant slice.
-    """
+    """Fake, network-disabled provider configuration (primitive fields only)."""
 
     provider_name: str = "fake"
     model_name: str = "fake-non-spine"
@@ -146,11 +146,7 @@ class NonSpineLLMProviderConfig:
 
 @dataclass(frozen=True)
 class NonSpineLLMProviderRequest:
-    """Provider-adapter request: carries the prompt-request package and the config.
-
-    This is the one contract that may carry existing objects (``prompt_request`` /
-    ``config``) rather than primitives.
-    """
+    """Provider-adapter request: carries the prompt-request package and the config."""
 
     prompt_request: "NonSpineLLMPromptRequest"
     config: "NonSpineLLMProviderConfig" = NonSpineLLMProviderConfig()
@@ -161,8 +157,7 @@ class NonSpineLLMProviderResult:
     """Explicit provider result (primitive fields only).
 
     For the fake adapter ``is_fake`` is True / ``provider_called`` is False. For the
-    callable-only manual adapter these may be False / True respectively; no model produced
-    ``text`` either way in this dormant slice.
+    callable or real adapter these may be False / True respectively.
     """
 
     text: str
@@ -175,12 +170,7 @@ class NonSpineLLMProviderResult:
 
 @dataclass(frozen=True)
 class NonSpineLLMCompletion:
-    """Explicit fake completion result returned by the fake completion adapter.
-
-    ``is_fake`` and ``provider_called`` make the dormant posture explicit and assertable.
-    No model produced ``text``; ``echoed_prompt`` is the in-memory request capture for
-    tests only.
-    """
+    """Explicit fake completion result returned by the fake completion adapter."""
 
     text: str
     is_fake: bool
@@ -190,12 +180,7 @@ class NonSpineLLMCompletion:
 
 @dataclass(frozen=True)
 class NonSpineLLMRuntimeResult:
-    """Explicit, fake / no-op result object.
-
-    Carries the fake completion data (``completion``) and the captured prompt request
-    (``prompt_request`` / ``rendered_prompt``) for tests only; nothing here is emitted
-    anywhere.
-    """
+    """Explicit, fake / no-op result object (default runtime path)."""
 
     response_text: str
     is_fake: bool
@@ -210,11 +195,7 @@ _FAKE_RESPONSE_TEXT = "[non_spine_llm_runtime: dormant fake no-op result]"
 
 
 class NonSpineLLMProviderAdapter:
-    """Provider-adapter boundary base. Defines the future provider seam; no provider.
-
-    A real, separately-authorized adapter would later sit behind this boundary. The base
-    itself contacts no model and reaches no network, env, or secret.
-    """
+    """Provider-adapter boundary base. Defines the seam; the base contacts no model."""
 
     def generate(
         self, request: "NonSpineLLMProviderRequest"
@@ -223,11 +204,7 @@ class NonSpineLLMProviderAdapter:
 
 
 class FakeNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
-    """Deterministic, in-memory fake provider adapter.
-
-    No network, no SDK, no env, no secrets. ``generate(...)`` returns a fixed-marker
-    ``NonSpineLLMProviderResult`` echoing the rendered prompt. Same input -> same output.
-    """
+    """Deterministic, in-memory fake provider adapter. No network, no SDK, no env."""
 
     def generate(
         self, request: "NonSpineLLMProviderRequest"
@@ -248,11 +225,9 @@ class CallableNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
 
     NOT a real SDK adapter, NOT env-gated, NOT network-enabled, and NEVER the default
     runtime path -- the base runtime never instantiates it. It requires an operator-
-    injected callable that is handed the ``NonSpineLLMProviderRequest`` and returns a
-    string completion text. This is the one adapter where ``provider_called`` may be True
-    and ``is_fake`` may be False; the operator drives it manually with their own callable,
-    and tests use only fake / spy callables. It imports no SDK, reaches no network, and
-    reads no env or secret.
+    injected callable handed the ``NonSpineLLMProviderRequest`` and returning a string.
+    This is one place where ``provider_called`` may be True and ``is_fake`` may be False;
+    tests use only fake / spy callables. It imports no SDK, reaches no network, no env.
     """
 
     def __init__(
@@ -279,11 +254,7 @@ class CallableNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
 
 
 class NonSpineLLMCompletionAdapter:
-    """Completion-boundary base. Defines the seam; carries no provider.
-
-    A real, separately-authorized adapter would later sit behind this same boundary. The
-    base itself performs no completion and contacts no model.
-    """
+    """Completion-boundary base. Defines the seam; the base contacts no model."""
 
     def complete(
         self, prompt_request: "NonSpineLLMPromptRequest"
@@ -292,11 +263,12 @@ class NonSpineLLMCompletionAdapter:
 
 
 class FakeNonSpineLLMCompletionAdapter(NonSpineLLMCompletionAdapter):
-    """The only default completion path. Deterministic and no-provider.
+    """The only default completion path. Deterministic and no-provider by default.
 
-    ``complete(...)`` builds a ``NonSpineLLMProviderRequest`` and delegates through the
-    fake provider adapter's ``generate(...)``, then converts the fake provider result into
-    a ``NonSpineLLMCompletion``. No real provider, no network, no env, no secrets.
+    ``complete(...)`` builds a ``NonSpineLLMProviderRequest`` and delegates through its
+    provider adapter's ``generate(...)``, then converts the result into a
+    ``NonSpineLLMCompletion``. The default provider adapter is the in-memory fake; an
+    operator MAY inject a different provider adapter explicitly.
     """
 
     def __init__(
@@ -328,9 +300,8 @@ class FakeNonSpineLLMCompletionAdapter(NonSpineLLMCompletionAdapter):
 class NonSpineLLMRuntime:
     """Named internal owner of the dormant, non-Spine LLM runtime skeleton.
 
-    Inert unless a test directly instantiates and calls it. Defaults to the in-memory
-    fake completion adapter; holds no resources, opens no connections, imports no
-    provider SDK, and touches no repo runtime surface.
+    Defaults to the in-memory fake completion adapter; holds no resources, opens no
+    connections, imports no provider SDK, and touches no repo runtime surface.
     """
 
     def __init__(self, adapter: "NonSpineLLMCompletionAdapter" = None) -> None:
@@ -345,11 +316,7 @@ class NonSpineLLMRuntime:
         is_governed: bool = True,
         source_label: str = "non_spine_runtime_request",
     ) -> "NonSpineLLMMemoryContext":
-        """Build the bounded memory-context package from the request's memory text.
-
-        ``is_governed`` is a caller-supplied assertion marker only -- it confers no
-        retrieval or assembly authority in this dormant slice.
-        """
+        """Build the bounded memory-context package from the request's memory text."""
         return NonSpineLLMMemoryContext.from_text(
             request.memory_context_text,
             source_label=source_label,
@@ -364,9 +331,7 @@ class NonSpineLLMRuntime:
         """Render the intended prompt-shaped data into an in-memory string (tests only).
 
         Pure string composition. The read-only guidance label is included only for a
-        non-empty memory-context package; an empty package renders no memory block. It
-        performs no external call and produces no durable side effect; the rendered text
-        exists only inside the returned objects.
+        non-empty memory-context package; an empty package renders no memory block.
         """
         parts: List[str] = []
         if request.system_text:
@@ -395,10 +360,8 @@ class NonSpineLLMRuntime:
     def run(self, request: "NonSpineLLMRuntimeRequest") -> "NonSpineLLMRuntimeResult":
         """Fake, no-provider execution path (test-callable only).
 
-        Builds a prompt request, passes it to the fake completion adapter (which delegates
-        through the fake provider adapter), and returns a fixed no-op result carrying the
-        fake completion and the captured request. No model/provider is contacted; nothing
-        is persisted.
+        Builds a prompt request, passes it to the fake completion adapter, and returns a
+        fixed no-op result. No model/provider is contacted; nothing is persisted.
         """
         prompt_request = self._build_prompt_request(request)
         completion = self._adapter.complete(prompt_request)
@@ -423,13 +386,7 @@ def run_non_spine_callable_provider_manual(
 ) -> "NonSpineLLMRuntimeResult":
     """Production-internal MANUAL helper: build the callable-adapter stack and run a turn.
 
-    NOT live-wired and NOT the default path -- nothing in production calls it. It builds a
-    ``NonSpineLLMRuntimeRequest`` from the primitive inputs, wraps the operator-injected
-    callable in a ``CallableNonSpineLLMProviderAdapter``, hands that to a
-    ``FakeNonSpineLLMCompletionAdapter`` as its provider adapter, drives a
-    ``NonSpineLLMRuntime`` on it, and returns the ``NonSpineLLMRuntimeResult``. No SDK, no
-    env, no secret, no network, no endpoint, no MCP, no startup, no retrieval, no assembly,
-    no persistence, and no log output.
+    NOT live-wired and NOT the default path -- nothing in production calls it.
     """
     request = NonSpineLLMRuntimeRequest(
         agent_id=agent_id,
@@ -444,3 +401,151 @@ def run_non_spine_callable_provider_manual(
     )
     runtime = NonSpineLLMRuntime(adapter=completion_adapter)
     return runtime.run(request)
+
+
+class NonSpineLLMRealProviderError(RuntimeError):
+    """Raised when the real-provider adapter refuses (fail-closed) or a call fails.
+
+    Used by ``AnthropicNonSpineLLMProviderAdapter`` for: gate unset, missing API key,
+    missing model, bad timeout, SDK unavailable, provider exception, or empty / malformed
+    response. There is no fallback provider and no retry.
+    """
+
+
+class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
+    """First REAL provider adapter for the non-Spine runtime (Anthropic).
+
+    Operator-constructed ONLY; never the default, never instantiated by
+    ``NonSpineLLMRuntime`` or ``FakeNonSpineLLMCompletionAdapter`` defaults, never
+    live-wired. Gated, lazy-import, and fail-closed:
+
+      - it refuses (raises ``NonSpineLLMRealProviderError``) BEFORE importing the SDK or
+        contacting a provider unless the env gate is exactly "1" and the API key and model
+        are present;
+      - the ``anthropic`` SDK is imported LAZILY, only after that validation;
+      - the call uses an explicit timeout (default <= 30s);
+      - on gate-unset, missing key/model, bad timeout, SDK unavailable, provider exception,
+        or empty / malformed response it fails closed with a clear exception;
+      - no fallback provider, no retry, no ranking, no style steering, no fake-as-real
+        substitution, no persistence, no log output, and no memory side effect or
+        model-output-to-memory feedback.
+
+    For testability the constructor accepts an optional explicit ``env`` mapping and an
+    optional ``sdk_factory`` (a zero-arg callable returning an ``anthropic``-shaped module);
+    when omitted, ``env`` resolves to ``os.environ`` and the SDK is the lazily-imported
+    ``anthropic`` package. Automated tests inject a fake env and a fake / monkeypatched SDK
+    only -- they never reach a real provider. No env lookup happens at construction.
+    """
+
+    PROVIDER_NAME = "anthropic"
+    GATE_ENV = "TORMENT_NON_SPINE_LLM_REAL_PROVIDER"
+    API_KEY_ENV = "ANTHROPIC_API_KEY"
+    MODEL_ENV = "TORMENT_NON_SPINE_ANTHROPIC_MODEL"
+    TIMEOUT_ENV = "TORMENT_NON_SPINE_PROVIDER_TIMEOUT_SECONDS"
+    DEFAULT_TIMEOUT_SECONDS = 30
+    MAX_TOKENS = 1024
+
+    def __init__(self, env=None, sdk_factory=None) -> None:
+        # Store readers only. No env lookup, no SDK import, no provider contact here.
+        self._env = env
+        self._sdk_factory = sdk_factory
+
+    def _resolve_env(self):
+        if self._env is not None:
+            return self._env
+        import os  # stdlib; resolved here at call time, never at module import
+        return os.environ
+
+    def _require_gate(self, env) -> None:
+        if env.get(self.GATE_ENV) != "1":
+            raise NonSpineLLMRealProviderError(
+                "real-provider gate %s is not set to '1'" % self.GATE_ENV
+            )
+
+    def _require_value(self, env, key: str) -> str:
+        value = (env.get(key) or "").strip()
+        if not value:
+            raise NonSpineLLMRealProviderError("%s is not set" % key)
+        return value
+
+    def _parse_timeout(self, env) -> float:
+        raw = (env.get(self.TIMEOUT_ENV) or "").strip()
+        if not raw:
+            return float(self.DEFAULT_TIMEOUT_SECONDS)
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            raise NonSpineLLMRealProviderError("%s must be a number" % self.TIMEOUT_ENV)
+        if seconds <= 0 or seconds > self.DEFAULT_TIMEOUT_SECONDS:
+            raise NonSpineLLMRealProviderError(
+                "%s must be in (0, %d] seconds"
+                % (self.TIMEOUT_ENV, self.DEFAULT_TIMEOUT_SECONDS)
+            )
+        return seconds
+
+    def _load_sdk(self):
+        try:
+            if self._sdk_factory is not None:
+                return self._sdk_factory()
+            import anthropic  # lazy: imported ONLY after gate / key / model validation
+            return anthropic
+        except NonSpineLLMRealProviderError:
+            raise
+        except Exception as exc:
+            raise NonSpineLLMRealProviderError(
+                "anthropic SDK could not be loaded: %s" % exc
+            )
+
+    @staticmethod
+    def _extract_text(response) -> str:
+        content = getattr(response, "content", None)
+        if not content:
+            return ""
+        parts = []
+        try:
+            for block in content:
+                value = getattr(block, "text", None)
+                if isinstance(value, str):
+                    parts.append(value)
+        except TypeError:
+            return ""
+        return "".join(parts).strip()
+
+    def generate(
+        self, request: "NonSpineLLMProviderRequest"
+    ) -> "NonSpineLLMProviderResult":
+        env = self._resolve_env()
+        self._require_gate(env)                              # refuse before SDK import
+        api_key = self._require_value(env, self.API_KEY_ENV)  # refuse before SDK import
+        model = self._require_value(env, self.MODEL_ENV)      # refuse before SDK import
+        timeout = self._parse_timeout(env)
+        sdk = self._load_sdk()                               # lazy import AFTER validation
+        try:
+            client = sdk.Anthropic(api_key=api_key, timeout=timeout)
+            response = client.messages.create(
+                model=model,
+                max_tokens=self.MAX_TOKENS,
+                system=request.prompt_request.system_text or "",
+                messages=[
+                    {"role": "user", "content": request.prompt_request.rendered_prompt}
+                ],
+            )
+        except NonSpineLLMRealProviderError:
+            raise
+        except Exception as exc:
+            raise NonSpineLLMRealProviderError(
+                "anthropic provider call failed: %s" % exc
+            )
+        text = self._extract_text(response)
+        if not text:
+            raise NonSpineLLMRealProviderError(
+                "anthropic returned empty or malformed text"
+            )
+        return NonSpineLLMProviderResult(
+            text=text,
+            is_fake=False,
+            provider_called=True,
+            provider_name=self.PROVIDER_NAME,
+            model_name=model,
+            echoed_prompt=request.prompt_request.rendered_prompt,
+        )
