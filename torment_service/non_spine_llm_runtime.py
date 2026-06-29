@@ -10,24 +10,26 @@ skeleton to build against.
 Shape:
   - ``NonSpineLLMMemoryContext`` -- explicit, bounded, read-only memory-context package;
   - ``NonSpineLLMRuntimeRequest`` -- explicit, primitive-only input object;
-  - ``NonSpineLLMPromptRequest`` -- explicit, primitive-shaped prompt-request package
-    built by the runtime from a request (carries the memory-context package);
+  - ``NonSpineLLMPromptRequest`` -- explicit prompt-request package (carries memory ctx);
+  - ``NonSpineLLMProviderConfig`` / ``NonSpineLLMProviderRequest`` /
+    ``NonSpineLLMProviderResult`` -- provider-adapter readiness contracts (all fake);
+  - ``NonSpineLLMProviderAdapter`` -- the future provider boundary (no real provider);
+  - ``FakeNonSpineLLMProviderAdapter`` -- a deterministic, in-memory, no-provider fake;
   - ``NonSpineLLMCompletionAdapter`` -- the completion-boundary base (no provider here);
-  - ``FakeNonSpineLLMCompletionAdapter`` -- a deterministic, in-memory, no-provider fake
-    that returns a ``NonSpineLLMCompletion``;
+  - ``FakeNonSpineLLMCompletionAdapter`` -- the only default completion path; delegates
+    through the fake provider adapter and converts the fake provider result;
   - ``NonSpineLLMCompletion`` -- explicit fake completion result;
-  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` builds a prompt request (via the
-    bounded memory-context package), passes it to the fake adapter's ``complete(...)``,
-    and returns a ``NonSpineLLMRuntimeResult``.
+  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` stays fake / no-provider.
 
 Fake path only (by construction):
-  - stdlib-only; deterministic; no network; no SDK; no real model call;
+  - stdlib-only; deterministic; no network; no SDK; no env; no secrets; no real call;
   - not on the live Spine path; references no Spine, cognition, or role surface;
   - no retrieval; no assembly; no memory side effects; no persistence; no log output;
   - no endpoint, no MCP registration, no startup hook, no background loop;
   - inert at import time (no import-time side effects).
 
-Live integration is a SEPARATE, separately-authorized gate and is not done here.
+Live integration and any real provider adapter are a SEPARATE, separately-authorized
+gate and are not done here.
 """
 from __future__ import annotations
 
@@ -123,8 +125,50 @@ class NonSpineLLMPromptRequest:
 
 
 @dataclass(frozen=True)
+class NonSpineLLMProviderConfig:
+    """Fake, network-disabled provider configuration (primitive fields only).
+
+    Readiness contract only. ``is_fake`` and ``network_enabled`` are explicit markers; no
+    real provider, network, env, or secret handling exists in this dormant slice.
+    """
+
+    provider_name: str = "fake"
+    model_name: str = "fake-non-spine"
+    is_fake: bool = True
+    network_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class NonSpineLLMProviderRequest:
+    """Provider-adapter request: carries the prompt-request package and the config.
+
+    This is the one contract that may carry existing objects (``prompt_request`` /
+    ``config``) rather than primitives.
+    """
+
+    prompt_request: "NonSpineLLMPromptRequest"
+    config: "NonSpineLLMProviderConfig" = NonSpineLLMProviderConfig()
+
+
+@dataclass(frozen=True)
+class NonSpineLLMProviderResult:
+    """Explicit fake provider result (primitive fields only).
+
+    No model produced ``text``; ``is_fake`` / ``provider_called`` make the dormant posture
+    explicit and assertable.
+    """
+
+    text: str
+    is_fake: bool
+    provider_called: bool
+    provider_name: str
+    model_name: str
+    echoed_prompt: str
+
+
+@dataclass(frozen=True)
 class NonSpineLLMCompletion:
-    """Explicit fake completion result returned by the fake adapter.
+    """Explicit fake completion result returned by the fake completion adapter.
 
     ``is_fake`` and ``provider_called`` make the dormant posture explicit and assertable.
     No model produced ``text``; ``echoed_prompt`` is the in-memory request capture for
@@ -158,6 +202,40 @@ class NonSpineLLMRuntimeResult:
 _FAKE_RESPONSE_TEXT = "[non_spine_llm_runtime: dormant fake no-op result]"
 
 
+class NonSpineLLMProviderAdapter:
+    """Provider-adapter boundary base. Defines the future provider seam; no provider.
+
+    A real, separately-authorized adapter would later sit behind this boundary. The base
+    itself contacts no model and reaches no network, env, or secret.
+    """
+
+    def generate(
+        self, request: "NonSpineLLMProviderRequest"
+    ) -> "NonSpineLLMProviderResult":
+        raise NotImplementedError
+
+
+class FakeNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
+    """Deterministic, in-memory fake provider adapter.
+
+    No network, no SDK, no env, no secrets. ``generate(...)`` returns a fixed-marker
+    ``NonSpineLLMProviderResult`` echoing the rendered prompt. Same input -> same output.
+    """
+
+    def generate(
+        self, request: "NonSpineLLMProviderRequest"
+    ) -> "NonSpineLLMProviderResult":
+        config = request.config
+        return NonSpineLLMProviderResult(
+            text=_FAKE_RESPONSE_TEXT,
+            is_fake=True,
+            provider_called=False,
+            provider_name=config.provider_name,
+            model_name=config.model_name,
+            echoed_prompt=request.prompt_request.rendered_prompt,
+        )
+
+
 class NonSpineLLMCompletionAdapter:
     """Completion-boundary base. Defines the seam; carries no provider.
 
@@ -172,20 +250,36 @@ class NonSpineLLMCompletionAdapter:
 
 
 class FakeNonSpineLLMCompletionAdapter(NonSpineLLMCompletionAdapter):
-    """Deterministic, in-memory fake completion adapter. No provider, no network.
+    """The only default completion path. Deterministic and no-provider.
 
-    ``complete(...)`` returns a fixed-marker ``NonSpineLLMCompletion`` and echoes the
-    rendered prompt back for tests. Same input -> same output; no external call.
+    ``complete(...)`` builds a ``NonSpineLLMProviderRequest`` and delegates through the
+    fake provider adapter's ``generate(...)``, then converts the fake provider result into
+    a ``NonSpineLLMCompletion``. No real provider, no network, no env, no secrets.
     """
+
+    def __init__(
+        self, provider_adapter: "NonSpineLLMProviderAdapter" = None
+    ) -> None:
+        # Default to the in-memory fake provider adapter. No resources, no connections.
+        self._provider_adapter: "NonSpineLLMProviderAdapter" = (
+            provider_adapter
+            if provider_adapter is not None
+            else FakeNonSpineLLMProviderAdapter()
+        )
 
     def complete(
         self, prompt_request: "NonSpineLLMPromptRequest"
     ) -> "NonSpineLLMCompletion":
+        provider_request = NonSpineLLMProviderRequest(
+            prompt_request=prompt_request,
+            config=NonSpineLLMProviderConfig(),
+        )
+        provider_result = self._provider_adapter.generate(provider_request)
         return NonSpineLLMCompletion(
-            text=_FAKE_RESPONSE_TEXT,
-            is_fake=True,
-            provider_called=False,
-            echoed_prompt=prompt_request.rendered_prompt,
+            text=provider_result.text,
+            is_fake=provider_result.is_fake,
+            provider_called=provider_result.provider_called,
+            echoed_prompt=provider_result.echoed_prompt,
         )
 
 
@@ -198,7 +292,7 @@ class NonSpineLLMRuntime:
     """
 
     def __init__(self, adapter: "NonSpineLLMCompletionAdapter" = None) -> None:
-        # Default to the in-memory fake adapter. No resources, no connections.
+        # Default to the in-memory fake completion adapter. No resources, no connections.
         self._adapter: "NonSpineLLMCompletionAdapter" = (
             adapter if adapter is not None else FakeNonSpineLLMCompletionAdapter()
         )
@@ -259,9 +353,10 @@ class NonSpineLLMRuntime:
     def run(self, request: "NonSpineLLMRuntimeRequest") -> "NonSpineLLMRuntimeResult":
         """Fake, no-provider execution path (test-callable only).
 
-        Builds a prompt request, passes it to the fake completion adapter, and returns a
-        fixed no-op result carrying the fake completion and the captured request. No
-        model/provider is contacted; nothing is persisted.
+        Builds a prompt request, passes it to the fake completion adapter (which delegates
+        through the fake provider adapter), and returns a fixed no-op result carrying the
+        fake completion and the captured request. No model/provider is contacted; nothing
+        is persisted.
         """
         prompt_request = self._build_prompt_request(request)
         completion = self._adapter.complete(prompt_request)

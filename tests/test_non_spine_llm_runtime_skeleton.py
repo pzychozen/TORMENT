@@ -1,17 +1,11 @@
 """tests/test_non_spine_llm_runtime_skeleton.py
 
 Guards for the dormant, internal, non-Spine LLM runtime skeleton
-(``torment_service/non_spine_llm_runtime.py``), including the provider-boundary /
-prompt-request package and the bounded, read-only memory-context package.
+(``torment_service/non_spine_llm_runtime.py``): the bounded memory-context package, the
+prompt-request / completion boundary, and the provider-adapter readiness contracts.
 
-Proves: the owner / request / memory-context / prompt-request / completion / adapter /
-run shape exists; the memory-context package is bounded, read-only, stripped, and capped;
-``run(...)`` goes through a deterministic fake, no-provider completion adapter; the
-read-only guidance label renders only for non-empty memory; forbidden references and
-non-stdlib/network/subprocess/SDK imports are absent; the only ``.complete(`` is the
-local fake-adapter call; no live wiring into app / spine / mcp_server / cognition / roles;
-and the Spine lock is present. The companion focused command runs the Spine
-characterization lock alongside this file to prove it remains green.
+Everything is fake / dormant / test-called only. The companion focused command runs the
+Spine characterization lock alongside this file to prove it remains green.
 """
 import ast
 import dataclasses
@@ -28,6 +22,11 @@ from torment_service.non_spine_llm_runtime import (
     NonSpineLLMCompletionAdapter,
     FakeNonSpineLLMCompletionAdapter,
     NonSpineLLMMemoryContext,
+    NonSpineLLMProviderConfig,
+    NonSpineLLMProviderRequest,
+    NonSpineLLMProviderResult,
+    NonSpineLLMProviderAdapter,
+    FakeNonSpineLLMProviderAdapter,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,9 +35,6 @@ MODULE_SRC = MODULE_PATH.read_text(encoding="utf-8")
 
 MEMORY_LABEL = "MEMORY-CONTEXT (read-only guidance):"
 
-# Substrings that must NOT appear anywhere in the new module source.
-# NOTE: ".complete(" is intentionally NOT here -- it is allowed ONLY as the local fake
-# adapter call and is checked separately (test_complete_call_only_on_local_fake_adapter).
 FORBIDDEN_SUBSTRINGS = [
     "FastAPI",
     "@mcp.tool",
@@ -63,12 +59,14 @@ FORBIDDEN_SUBSTRINGS = [
     "Thread",
     "subprocess",
     "socket",
+    "os.environ",
+    "os.getenv",
+    "getenv(",
 ]
 
-# Only these stdlib roots may be imported by the new module.
 ALLOWED_IMPORT_ROOTS = {"__future__", "dataclasses", "typing"}
 
-# Import roots that must never appear (network / HTTP / socket / subprocess / SDK / async).
+# Network / HTTP / socket / subprocess / SDK / async / env / secrets import roots.
 FORBIDDEN_IMPORT_ROOTS = {
     "openai",
     "anthropic",
@@ -84,6 +82,9 @@ FORBIDDEN_IMPORT_ROOTS = {
     "threading",
     "sqlite3",
     "pickle",
+    "os",
+    "secrets",
+    "dotenv",
 }
 
 
@@ -102,8 +103,6 @@ def _module_import_roots():
 
 
 class TestModuleShape(unittest.TestCase):
-    """Guard - the named owner / request / prompt-request / result / run shape exists."""
-
     def test_runtime_class_exists(self):
         self.assertTrue(hasattr(nslr, "NonSpineLLMRuntime"))
         self.assertIsInstance(NonSpineLLMRuntime, type)
@@ -119,8 +118,6 @@ class TestModuleShape(unittest.TestCase):
 
 
 class TestMemoryContextPackage(unittest.TestCase):
-    """Guards 1-7 - the bounded, read-only memory-context package."""
-
     def test_memory_context_exists_and_is_frozen_dataclass(self):
         self.assertIsInstance(NonSpineLLMMemoryContext, type)
         self.assertTrue(dataclasses.is_dataclass(NonSpineLLMMemoryContext))
@@ -166,15 +163,12 @@ class TestMemoryContextPackage(unittest.TestCase):
         self.assertFalse(mc.was_truncated)
 
     def test_is_governed_is_marker_only_no_authority(self):
-        # is_governed is a caller-supplied assertion marker; it is just a bool field.
         mc = NonSpineLLMMemoryContext.from_text("m", is_governed=True)
         self.assertIs(mc.is_governed, True)
         self.assertIs(mc.is_read_only, True)
 
 
 class TestMemoryContextWiring(unittest.TestCase):
-    """Guards 8-12 - build/use the package; render label only for non-empty memory."""
-
     def test_build_memory_context_returns_package(self):
         req = NonSpineLLMRuntimeRequest(memory_context_text="remembered alpha")
         mc = NonSpineLLMRuntime._build_memory_context(req)
@@ -206,9 +200,110 @@ class TestMemoryContextWiring(unittest.TestCase):
         self.assertIn("USER: hi", pr.rendered_prompt)
 
 
-class TestPromptRequestPackage(unittest.TestCase):
-    """Guard - the prompt-request package exists and is primitive/dataclass-shaped."""
+class TestProviderContracts(unittest.TestCase):
+    """Guards 1-7 - provider config/request/result + base + fake provider adapter."""
 
+    def test_provider_contract_types_exist(self):
+        for cls in (
+            NonSpineLLMProviderConfig,
+            NonSpineLLMProviderRequest,
+            NonSpineLLMProviderResult,
+            NonSpineLLMProviderAdapter,
+            FakeNonSpineLLMProviderAdapter,
+        ):
+            self.assertIsInstance(cls, type)
+
+    def test_config_request_result_are_frozen_dataclasses(self):
+        for cls in (
+            NonSpineLLMProviderConfig,
+            NonSpineLLMProviderRequest,
+            NonSpineLLMProviderResult,
+        ):
+            self.assertTrue(dataclasses.is_dataclass(cls))
+            self.assertTrue(cls.__dataclass_params__.frozen)
+
+    def test_config_and_result_are_primitive_shaped(self):
+        cfg = NonSpineLLMProviderConfig()
+        for value in (cfg.provider_name, cfg.model_name):
+            self.assertIsInstance(value, str)
+        for value in (cfg.is_fake, cfg.network_enabled):
+            self.assertIsInstance(value, bool)
+        res = FakeNonSpineLLMProviderAdapter().generate(
+            NonSpineLLMProviderRequest(prompt_request=NonSpineLLMPromptRequest())
+        )
+        for value in (res.text, res.provider_name, res.model_name, res.echoed_prompt):
+            self.assertIsInstance(value, str)
+        for value in (res.is_fake, res.provider_called):
+            self.assertIsInstance(value, bool)
+
+    def test_config_defaults_are_fake_and_network_disabled(self):
+        cfg = NonSpineLLMProviderConfig()
+        self.assertIs(cfg.is_fake, True)
+        self.assertIs(cfg.network_enabled, False)
+        self.assertEqual(cfg.provider_name, "fake")
+
+    def test_provider_base_adapter_raises(self):
+        req = NonSpineLLMProviderRequest(prompt_request=NonSpineLLMPromptRequest())
+        with self.assertRaises(NotImplementedError):
+            NonSpineLLMProviderAdapter().generate(req)
+
+    def test_fake_provider_adapter_returns_result_deterministic(self):
+        req = NonSpineLLMProviderRequest(
+            prompt_request=NonSpineLLMPromptRequest(rendered_prompt="USER: hi")
+        )
+        adapter = FakeNonSpineLLMProviderAdapter()
+        r1 = adapter.generate(req)
+        r2 = adapter.generate(req)
+        self.assertIsInstance(r1, NonSpineLLMProviderResult)
+        self.assertEqual(r1, r2)
+
+    def test_fake_provider_result_markers(self):
+        req = NonSpineLLMProviderRequest(prompt_request=NonSpineLLMPromptRequest())
+        res = FakeNonSpineLLMProviderAdapter().generate(req)
+        self.assertIs(res.is_fake, True)
+        self.assertIs(res.provider_called, False)
+
+
+class TestCompletionDelegatesToProvider(unittest.TestCase):
+    """Guard 8 - the fake completion adapter delegates through the provider boundary."""
+
+    def test_completion_adapter_delegates_to_provider(self):
+        calls = []
+
+        class _SpyProvider(NonSpineLLMProviderAdapter):
+            def generate(self, request):
+                calls.append(request)
+                return NonSpineLLMProviderResult(
+                    text="spy text",
+                    is_fake=True,
+                    provider_called=False,
+                    provider_name=request.config.provider_name,
+                    model_name=request.config.model_name,
+                    echoed_prompt=request.prompt_request.rendered_prompt,
+                )
+
+        adapter = FakeNonSpineLLMCompletionAdapter(provider_adapter=_SpyProvider())
+        pr = NonSpineLLMRuntime._build_prompt_request(
+            NonSpineLLMRuntimeRequest(user_input="hi")
+        )
+        comp = adapter.complete(pr)
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0], NonSpineLLMProviderRequest)
+        self.assertIsInstance(comp, NonSpineLLMCompletion)
+        self.assertEqual(comp.text, "spy text")
+
+    def test_default_completion_path_uses_fake_provider(self):
+        pr = NonSpineLLMRuntime._build_prompt_request(
+            NonSpineLLMRuntimeRequest(user_input="hi")
+        )
+        comp = FakeNonSpineLLMCompletionAdapter().complete(pr)
+        self.assertIsInstance(comp, NonSpineLLMCompletion)
+        self.assertIs(comp.is_fake, True)
+        self.assertIs(comp.provider_called, False)
+        self.assertIn("fake no-op", comp.text)
+
+
+class TestPromptRequestPackage(unittest.TestCase):
     def test_prompt_request_is_dataclass(self):
         self.assertIsInstance(NonSpineLLMPromptRequest, type)
         self.assertTrue(dataclasses.is_dataclass(NonSpineLLMPromptRequest))
@@ -226,8 +321,6 @@ class TestPromptRequestPackage(unittest.TestCase):
 
 
 class TestCompletionAdapters(unittest.TestCase):
-    """Guard - completion object + adapter base + fake adapter exist and behave."""
-
     def test_completion_and_adapter_types_exist(self):
         self.assertIsInstance(NonSpineLLMCompletion, type)
         self.assertIsInstance(NonSpineLLMCompletionAdapter, type)
@@ -245,7 +338,6 @@ class TestCompletionAdapters(unittest.TestCase):
         self.assertIs(comp.provider_called, False)
 
     def test_base_adapter_performs_no_completion(self):
-        # The base seam carries no provider; it performs no completion.
         req = NonSpineLLMRuntimeRequest(user_input="hi")
         pr = NonSpineLLMRuntime._build_prompt_request(req)
         with self.assertRaises(NotImplementedError):
@@ -253,8 +345,6 @@ class TestCompletionAdapters(unittest.TestCase):
 
 
 class TestRunUsesFakeAdapter(unittest.TestCase):
-    """Guard 13 - run(...) goes through the fake adapter; explicitly fake / no-op."""
-
     def _request(self):
         return NonSpineLLMRuntimeRequest(
             agent_id="agent_x",
@@ -279,12 +369,10 @@ class TestRunUsesFakeAdapter(unittest.TestCase):
     def test_result_carries_fake_completion_and_capture(self):
         runtime = NonSpineLLMRuntime()
         result = runtime.run(self._request())
-        # fake completion data carried
         self.assertIsInstance(result.completion, NonSpineLLMCompletion)
         self.assertIs(result.completion.is_fake, True)
         self.assertIs(result.completion.provider_called, False)
         self.assertEqual(result.response_text, result.completion.text)
-        # prompt / request + memory-context capture carried (in-memory, for tests only)
         self.assertIsInstance(result.prompt_request, NonSpineLLMPromptRequest)
         self.assertIsInstance(result.prompt_request.memory_context, NonSpineLLMMemoryContext)
         self.assertIn(MEMORY_LABEL, result.rendered_prompt)
@@ -300,8 +388,6 @@ class TestRunUsesFakeAdapter(unittest.TestCase):
 
 
 class TestForbiddenReferencesAbsent(unittest.TestCase):
-    """Guards 14-16 - forbidden references / imports absent; .complete( scoped to fake."""
-
     def test_forbidden_substrings_absent(self):
         present = [s for s in FORBIDDEN_SUBSTRINGS if s in MODULE_SRC]
         self.assertEqual(present, [], "forbidden substrings present: %s" % present)
@@ -310,7 +396,7 @@ class TestForbiddenReferencesAbsent(unittest.TestCase):
         offending = _module_import_roots() - ALLOWED_IMPORT_ROOTS
         self.assertEqual(offending, set(), "non-stdlib imports: %s" % offending)
 
-    def test_no_network_subprocess_sdk_imports(self):
+    def test_no_network_subprocess_sdk_env_imports(self):
         offending = _module_import_roots() & FORBIDDEN_IMPORT_ROOTS
         self.assertEqual(offending, set(), "forbidden imports: %s" % offending)
 
@@ -327,10 +413,20 @@ class TestForbiddenReferencesAbsent(unittest.TestCase):
                 "non-local provider-style .complete( call: %s" % ln.strip(),
             )
 
+    def test_generate_call_only_on_local_fake_provider_adapter(self):
+        generate_lines = [ln for ln in MODULE_SRC.splitlines() if ".generate(" in ln]
+        self.assertTrue(
+            generate_lines, "expected the local fake-provider .generate( call"
+        )
+        for ln in generate_lines:
+            self.assertIn(
+                "provider_adapter.generate(",
+                ln,
+                "non-local .generate( call: %s" % ln.strip(),
+            )
+
 
 class TestNoLiveWiring(unittest.TestCase):
-    """Guard 17 - no live surface imports or references the new module."""
-
     def _iter_target_sources(self):
         targets = [
             REPO_ROOT / "torment_service" / "app.py",
@@ -352,12 +448,6 @@ class TestNoLiveWiring(unittest.TestCase):
 
 
 class TestSpineLockPresent(unittest.TestCase):
-    """Guard 18 - the Spine characterization lock is present.
-
-    Its actual pass/fail is asserted by running it in the focused command alongside
-    this file.
-    """
-
     def test_spine_lock_file_present(self):
         lock = (
             REPO_ROOT
