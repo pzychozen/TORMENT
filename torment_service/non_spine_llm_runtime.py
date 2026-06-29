@@ -8,15 +8,17 @@ or calls it. It exists so a future, separately-authorized step has a concrete, f
 skeleton to build against.
 
 Shape:
+  - ``NonSpineLLMMemoryContext`` -- explicit, bounded, read-only memory-context package;
   - ``NonSpineLLMRuntimeRequest`` -- explicit, primitive-only input object;
   - ``NonSpineLLMPromptRequest`` -- explicit, primitive-shaped prompt-request package
-    built by the runtime from a request;
+    built by the runtime from a request (carries the memory-context package);
   - ``NonSpineLLMCompletionAdapter`` -- the completion-boundary base (no provider here);
   - ``FakeNonSpineLLMCompletionAdapter`` -- a deterministic, in-memory, no-provider fake
     that returns a ``NonSpineLLMCompletion``;
   - ``NonSpineLLMCompletion`` -- explicit fake completion result;
-  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` builds a prompt request, passes it
-    to the fake adapter's ``complete(...)``, and returns a ``NonSpineLLMRuntimeResult``.
+  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` builds a prompt request (via the
+    bounded memory-context package), passes it to the fake adapter's ``complete(...)``,
+    and returns a ``NonSpineLLMRuntimeResult``.
 
 Fake path only (by construction):
   - stdlib-only; deterministic; no network; no SDK; no real model call;
@@ -31,6 +33,65 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Tuple
+
+
+# Fixed prompt label for the read-only memory-context block.
+_MEMORY_CONTEXT_LABEL = "MEMORY-CONTEXT (read-only guidance):"
+# Hard cap on rendered memory-context characters.
+_MEMORY_CONTEXT_MAX_CHARS = 1200
+
+
+@dataclass(frozen=True)
+class NonSpineLLMMemoryContext:
+    """Explicit, bounded, read-only memory-context package (primitive fields only).
+
+    Built from caller-supplied text via :meth:`from_text`. ``is_governed`` is only a
+    caller-supplied assertion marker; in this dormant slice it implies NO retrieval or
+    assembly authority. An empty package renders no memory block.
+    """
+
+    text: str = ""
+    source_label: str = ""
+    is_read_only: bool = True
+    is_governed: bool = False
+    max_chars: int = _MEMORY_CONTEXT_MAX_CHARS
+    was_truncated: bool = False
+
+    @classmethod
+    def empty(cls) -> "NonSpineLLMMemoryContext":
+        """Return an empty / no-context package (renders no memory block)."""
+        return cls()
+
+    @classmethod
+    def from_text(
+        cls,
+        text: str,
+        source_label: str = "",
+        is_governed: bool = False,
+        max_chars: int = _MEMORY_CONTEXT_MAX_CHARS,
+    ) -> "NonSpineLLMMemoryContext":
+        """Build a bounded package from caller text.
+
+        Strips first; empty/whitespace becomes the empty package; non-empty text is
+        capped at ``max_chars`` and ``was_truncated`` is True only when capped.
+        """
+        stripped = (text or "").strip()
+        if not stripped:
+            return cls.empty()
+        was_truncated = len(stripped) > max_chars
+        bounded = stripped[:max_chars] if was_truncated else stripped
+        return cls(
+            text=bounded,
+            source_label=source_label,
+            is_read_only=True,
+            is_governed=bool(is_governed),
+            max_chars=max_chars,
+            was_truncated=was_truncated,
+        )
+
+    def is_empty(self) -> bool:
+        """True when there is no memory text (renders no memory block)."""
+        return not self.text
 
 
 @dataclass(frozen=True)
@@ -51,13 +112,14 @@ class NonSpineLLMRuntimeRequest:
 class NonSpineLLMPromptRequest:
     """Explicit, primitive-shaped prompt-request package built by the runtime.
 
-    Holds the rendered, prompt-shaped data in memory for the fake adapter and for tests.
-    Strings and a string tuple only; no repo object dependency.
+    Holds the rendered, prompt-shaped data in memory plus the bounded memory-context
+    package (for tests). Strings, a string tuple, and the memory-context package only.
     """
 
     system_text: str = ""
     rendered_prompt: str = ""
     messages: Tuple[str, ...] = ()
+    memory_context: "NonSpineLLMMemoryContext" = NonSpineLLMMemoryContext.empty()
 
 
 @dataclass(frozen=True)
@@ -142,19 +204,39 @@ class NonSpineLLMRuntime:
         )
 
     @staticmethod
-    def _render_prompt(request: "NonSpineLLMRuntimeRequest") -> str:
+    def _build_memory_context(
+        request: "NonSpineLLMRuntimeRequest",
+        is_governed: bool = True,
+        source_label: str = "non_spine_runtime_request",
+    ) -> "NonSpineLLMMemoryContext":
+        """Build the bounded memory-context package from the request's memory text.
+
+        ``is_governed`` is a caller-supplied assertion marker only -- it confers no
+        retrieval or assembly authority in this dormant slice.
+        """
+        return NonSpineLLMMemoryContext.from_text(
+            request.memory_context_text,
+            source_label=source_label,
+            is_governed=is_governed,
+        )
+
+    @staticmethod
+    def _render_prompt(
+        request: "NonSpineLLMRuntimeRequest",
+        memory_context: "NonSpineLLMMemoryContext",
+    ) -> str:
         """Render the intended prompt-shaped data into an in-memory string (tests only).
 
-        Pure string composition. It performs no external call and produces no durable
-        side effect; the rendered text exists only inside the returned objects.
+        Pure string composition. The read-only guidance label is included only for a
+        non-empty memory-context package; an empty package renders no memory block. It
+        performs no external call and produces no durable side effect; the rendered text
+        exists only inside the returned objects.
         """
         parts: List[str] = []
         if request.system_text:
             parts.append("SYSTEM: " + request.system_text)
-        if request.memory_context_text:
-            parts.append(
-                "MEMORY-CONTEXT (read-only guidance): " + request.memory_context_text
-            )
+        if not memory_context.is_empty():
+            parts.append(_MEMORY_CONTEXT_LABEL + " " + memory_context.text)
         for message in request.extra_messages:
             parts.append("MSG: " + str(message))
         parts.append("USER: " + request.user_input)
@@ -164,12 +246,14 @@ class NonSpineLLMRuntime:
     def _build_prompt_request(
         request: "NonSpineLLMRuntimeRequest",
     ) -> "NonSpineLLMPromptRequest":
-        """Build the explicit prompt-request package from a primitive input request."""
-        rendered = NonSpineLLMRuntime._render_prompt(request)
+        """Build the prompt-request package using the bounded memory-context package."""
+        memory_context = NonSpineLLMRuntime._build_memory_context(request)
+        rendered = NonSpineLLMRuntime._render_prompt(request, memory_context)
         return NonSpineLLMPromptRequest(
             system_text=request.system_text,
             rendered_prompt=rendered,
             messages=tuple(request.extra_messages),
+            memory_context=memory_context,
         )
 
     def run(self, request: "NonSpineLLMRuntimeRequest") -> "NonSpineLLMRuntimeResult":

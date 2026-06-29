@@ -2,15 +2,16 @@
 
 Guards for the dormant, internal, non-Spine LLM runtime skeleton
 (``torment_service/non_spine_llm_runtime.py``), including the provider-boundary /
-prompt-request package.
+prompt-request package and the bounded, read-only memory-context package.
 
-Proves: the owner / request / prompt-request / completion / adapter / run shape exists;
-``run(...)`` goes through a deterministic fake, no-provider completion adapter; forbidden
-references and non-stdlib/network/subprocess/SDK imports are absent from the module; the
-only ``.complete(`` is the local fake-adapter call; no live wiring into
-app / spine / mcp_server / cognition / roles; and the Spine lock is present. The companion
-focused command runs the Spine characterization lock alongside this file to prove it
-remains green.
+Proves: the owner / request / memory-context / prompt-request / completion / adapter /
+run shape exists; the memory-context package is bounded, read-only, stripped, and capped;
+``run(...)`` goes through a deterministic fake, no-provider completion adapter; the
+read-only guidance label renders only for non-empty memory; forbidden references and
+non-stdlib/network/subprocess/SDK imports are absent; the only ``.complete(`` is the
+local fake-adapter call; no live wiring into app / spine / mcp_server / cognition / roles;
+and the Spine lock is present. The companion focused command runs the Spine
+characterization lock alongside this file to prove it remains green.
 """
 import ast
 import dataclasses
@@ -26,11 +27,14 @@ from torment_service.non_spine_llm_runtime import (
     NonSpineLLMCompletion,
     NonSpineLLMCompletionAdapter,
     FakeNonSpineLLMCompletionAdapter,
+    NonSpineLLMMemoryContext,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "torment_service" / "non_spine_llm_runtime.py"
 MODULE_SRC = MODULE_PATH.read_text(encoding="utf-8")
+
+MEMORY_LABEL = "MEMORY-CONTEXT (read-only guidance):"
 
 # Substrings that must NOT appear anywhere in the new module source.
 # NOTE: ".complete(" is intentionally NOT here -- it is allowed ONLY as the local fake
@@ -98,7 +102,7 @@ def _module_import_roots():
 
 
 class TestModuleShape(unittest.TestCase):
-    """Guard 1 - the named owner / request / prompt-request / result / run shape exists."""
+    """Guard - the named owner / request / prompt-request / result / run shape exists."""
 
     def test_runtime_class_exists(self):
         self.assertTrue(hasattr(nslr, "NonSpineLLMRuntime"))
@@ -108,13 +112,102 @@ class TestModuleShape(unittest.TestCase):
         self.assertIsInstance(NonSpineLLMRuntimeRequest, type)
         self.assertIsInstance(NonSpineLLMRuntimeResult, type)
 
-    def test_run_and_build_prompt_request_callable(self):
+    def test_run_build_prompt_and_memory_context_callable(self):
         self.assertTrue(callable(getattr(NonSpineLLMRuntime, "run", None)))
         self.assertTrue(callable(getattr(NonSpineLLMRuntime, "_build_prompt_request", None)))
+        self.assertTrue(callable(getattr(NonSpineLLMRuntime, "_build_memory_context", None)))
+
+
+class TestMemoryContextPackage(unittest.TestCase):
+    """Guards 1-7 - the bounded, read-only memory-context package."""
+
+    def test_memory_context_exists_and_is_frozen_dataclass(self):
+        self.assertIsInstance(NonSpineLLMMemoryContext, type)
+        self.assertTrue(dataclasses.is_dataclass(NonSpineLLMMemoryContext))
+        params = getattr(NonSpineLLMMemoryContext, "__dataclass_params__", None)
+        self.assertIsNotNone(params)
+        self.assertTrue(params.frozen)
+
+    def test_memory_context_fields_are_primitive(self):
+        mc = NonSpineLLMMemoryContext.from_text("hello", source_label="src")
+        self.assertIsInstance(mc.text, str)
+        self.assertIsInstance(mc.source_label, str)
+        self.assertIsInstance(mc.is_read_only, bool)
+        self.assertIsInstance(mc.is_governed, bool)
+        self.assertIsInstance(mc.max_chars, int)
+        self.assertIsInstance(mc.was_truncated, bool)
+
+    def test_from_text_strips_input(self):
+        mc = NonSpineLLMMemoryContext.from_text("   padded text   ")
+        self.assertEqual(mc.text, "padded text")
+
+    def test_empty_or_whitespace_input_is_empty_package(self):
+        for raw in ("", "    ", "\n\t  "):
+            mc = NonSpineLLMMemoryContext.from_text(raw)
+            self.assertEqual(mc.text, "")
+            self.assertTrue(mc.is_empty())
+            self.assertFalse(mc.was_truncated)
+
+    def test_empty_classmethod_returns_empty_package(self):
+        mc = NonSpineLLMMemoryContext.empty()
+        self.assertEqual(mc.text, "")
+        self.assertTrue(mc.is_empty())
+        self.assertFalse(mc.was_truncated)
+
+    def test_long_memory_is_capped_and_flagged(self):
+        mc = NonSpineLLMMemoryContext.from_text("x" * 5000)
+        self.assertEqual(len(mc.text), 1200)
+        self.assertTrue(mc.was_truncated)
+        self.assertEqual(mc.max_chars, 1200)
+
+    def test_short_memory_not_truncated(self):
+        mc = NonSpineLLMMemoryContext.from_text("short memory")
+        self.assertEqual(mc.text, "short memory")
+        self.assertFalse(mc.was_truncated)
+
+    def test_is_governed_is_marker_only_no_authority(self):
+        # is_governed is a caller-supplied assertion marker; it is just a bool field.
+        mc = NonSpineLLMMemoryContext.from_text("m", is_governed=True)
+        self.assertIs(mc.is_governed, True)
+        self.assertIs(mc.is_read_only, True)
+
+
+class TestMemoryContextWiring(unittest.TestCase):
+    """Guards 8-12 - build/use the package; render label only for non-empty memory."""
+
+    def test_build_memory_context_returns_package(self):
+        req = NonSpineLLMRuntimeRequest(memory_context_text="remembered alpha")
+        mc = NonSpineLLMRuntime._build_memory_context(req)
+        self.assertIsInstance(mc, NonSpineLLMMemoryContext)
+        self.assertEqual(mc.text, "remembered alpha")
+
+    def test_build_prompt_request_carries_package(self):
+        req = NonSpineLLMRuntimeRequest(
+            user_input="hi", memory_context_text="remembered alpha"
+        )
+        pr = NonSpineLLMRuntime._build_prompt_request(req)
+        self.assertIsInstance(pr, NonSpineLLMPromptRequest)
+        self.assertIsInstance(pr.memory_context, NonSpineLLMMemoryContext)
+        self.assertEqual(pr.memory_context.text, "remembered alpha")
+
+    def test_rendered_prompt_includes_label_for_nonempty_memory(self):
+        req = NonSpineLLMRuntimeRequest(
+            user_input="hi", memory_context_text="remembered alpha"
+        )
+        pr = NonSpineLLMRuntime._build_prompt_request(req)
+        self.assertIn(MEMORY_LABEL, pr.rendered_prompt)
+        self.assertIn("remembered alpha", pr.rendered_prompt)
+
+    def test_empty_memory_renders_no_memory_block(self):
+        req = NonSpineLLMRuntimeRequest(user_input="hi", memory_context_text="   ")
+        pr = NonSpineLLMRuntime._build_prompt_request(req)
+        self.assertNotIn("MEMORY-CONTEXT", pr.rendered_prompt)
+        self.assertTrue(pr.memory_context.is_empty())
+        self.assertIn("USER: hi", pr.rendered_prompt)
 
 
 class TestPromptRequestPackage(unittest.TestCase):
-    """Guard 1 - the prompt-request package exists and is primitive/dataclass-shaped."""
+    """Guard - the prompt-request package exists and is primitive/dataclass-shaped."""
 
     def test_prompt_request_is_dataclass(self):
         self.assertIsInstance(NonSpineLLMPromptRequest, type)
@@ -126,7 +219,6 @@ class TestPromptRequestPackage(unittest.TestCase):
         )
         pr = NonSpineLLMRuntime._build_prompt_request(req)
         self.assertIsInstance(pr, NonSpineLLMPromptRequest)
-        # primitive-shaped fields only
         self.assertIsInstance(pr.system_text, str)
         self.assertIsInstance(pr.rendered_prompt, str)
         self.assertIsInstance(pr.messages, tuple)
@@ -134,7 +226,7 @@ class TestPromptRequestPackage(unittest.TestCase):
 
 
 class TestCompletionAdapters(unittest.TestCase):
-    """Guard 2 - completion object + adapter base + fake adapter exist and behave."""
+    """Guard - completion object + adapter base + fake adapter exist and behave."""
 
     def test_completion_and_adapter_types_exist(self):
         self.assertIsInstance(NonSpineLLMCompletion, type)
@@ -161,7 +253,7 @@ class TestCompletionAdapters(unittest.TestCase):
 
 
 class TestRunUsesFakeAdapter(unittest.TestCase):
-    """Guard 3 - run(...) goes through the fake adapter; explicitly fake / no-op."""
+    """Guard 13 - run(...) goes through the fake adapter; explicitly fake / no-op."""
 
     def _request(self):
         return NonSpineLLMRuntimeRequest(
@@ -192,10 +284,11 @@ class TestRunUsesFakeAdapter(unittest.TestCase):
         self.assertIs(result.completion.is_fake, True)
         self.assertIs(result.completion.provider_called, False)
         self.assertEqual(result.response_text, result.completion.text)
-        # prompt / request capture carried (in-memory, for tests only)
+        # prompt / request + memory-context capture carried (in-memory, for tests only)
         self.assertIsInstance(result.prompt_request, NonSpineLLMPromptRequest)
+        self.assertIsInstance(result.prompt_request.memory_context, NonSpineLLMMemoryContext)
+        self.assertIn(MEMORY_LABEL, result.rendered_prompt)
         self.assertIn("hello there", result.rendered_prompt)
-        self.assertIn("hello there", result.prompt_request.rendered_prompt)
         self.assertIn("you are agent_x", result.rendered_prompt)
         self.assertIn("remembered detail alpha", result.rendered_prompt)
         self.assertIn("prior turn beta", result.rendered_prompt)
@@ -207,7 +300,7 @@ class TestRunUsesFakeAdapter(unittest.TestCase):
 
 
 class TestForbiddenReferencesAbsent(unittest.TestCase):
-    """Guard 4 - forbidden references / imports absent; .complete( scoped to fake."""
+    """Guards 14-16 - forbidden references / imports absent; .complete( scoped to fake."""
 
     def test_forbidden_substrings_absent(self):
         present = [s for s in FORBIDDEN_SUBSTRINGS if s in MODULE_SRC]
@@ -236,7 +329,7 @@ class TestForbiddenReferencesAbsent(unittest.TestCase):
 
 
 class TestNoLiveWiring(unittest.TestCase):
-    """Guard 5 - no live surface imports or references the new module."""
+    """Guard 17 - no live surface imports or references the new module."""
 
     def _iter_target_sources(self):
         targets = [
@@ -259,7 +352,7 @@ class TestNoLiveWiring(unittest.TestCase):
 
 
 class TestSpineLockPresent(unittest.TestCase):
-    """Guard 6 - the Spine characterization lock is present.
+    """Guard 18 - the Spine characterization lock is present.
 
     Its actual pass/fail is asserted by running it in the focused command alongside
     this file.
