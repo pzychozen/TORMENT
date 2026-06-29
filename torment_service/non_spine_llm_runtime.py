@@ -22,7 +22,10 @@ Shape:
   - ``FakeNonSpineLLMCompletionAdapter`` -- the only default completion path; delegates
     through the fake provider adapter and converts the fake provider result;
   - ``NonSpineLLMCompletion`` -- explicit fake completion result;
-  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` stays fake / no-provider.
+  - ``NonSpineLLMRuntime`` -- the owner; ``run(...)`` stays fake / no-provider;
+  - ``run_non_spine_callable_provider_manual(...)`` -- a production-internal MANUAL helper
+    that builds the callable-adapter stack; NOT live-wired, NOT the default, called by
+    nothing in production.
 
 Fake path only (by construction):
   - stdlib-only; deterministic; no network; no SDK; no env; no secrets; no real call;
@@ -407,3 +410,37 @@ class NonSpineLLMRuntime:
             completion=completion,
             prompt_request=prompt_request,
         )
+
+
+def run_non_spine_callable_provider_manual(
+    completion_callable: "Callable",
+    *,
+    agent_id: str = "",
+    user_input: str = "",
+    system_text: str = "",
+    memory_context_text: str = "",
+    extra_messages: Tuple[str, ...] = (),
+) -> "NonSpineLLMRuntimeResult":
+    """Production-internal MANUAL helper: build the callable-adapter stack and run a turn.
+
+    NOT live-wired and NOT the default path -- nothing in production calls it. It builds a
+    ``NonSpineLLMRuntimeRequest`` from the primitive inputs, wraps the operator-injected
+    callable in a ``CallableNonSpineLLMProviderAdapter``, hands that to a
+    ``FakeNonSpineLLMCompletionAdapter`` as its provider adapter, drives a
+    ``NonSpineLLMRuntime`` on it, and returns the ``NonSpineLLMRuntimeResult``. No SDK, no
+    env, no secret, no network, no endpoint, no MCP, no startup, no retrieval, no assembly,
+    no persistence, and no log output.
+    """
+    request = NonSpineLLMRuntimeRequest(
+        agent_id=agent_id,
+        user_input=user_input,
+        system_text=system_text,
+        memory_context_text=memory_context_text,
+        extra_messages=tuple(extra_messages),
+    )
+    callable_adapter = CallableNonSpineLLMProviderAdapter(completion_callable)
+    completion_adapter = FakeNonSpineLLMCompletionAdapter(
+        provider_adapter=callable_adapter
+    )
+    runtime = NonSpineLLMRuntime(adapter=completion_adapter)
+    return runtime.run(request)
