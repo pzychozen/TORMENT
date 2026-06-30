@@ -49,6 +49,7 @@ class ReflectionTrace:
     review_status_flags: Mapping[str, bool] = field(default_factory=dict)
     active_lanes: Tuple[str, ...] = ()
     lane_budget_shape: Mapping[str, int] = field(default_factory=dict)
+    lane_weight_shape: Mapping[str, float] = field(default_factory=dict)
     geometric_context_present: bool = False
 
     # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
@@ -84,6 +85,9 @@ class ReflectionTrace:
         object.__setattr__(
             self, "lane_budget_shape", MappingProxyType(dict(self.lane_budget_shape))
         )
+        object.__setattr__(
+            self, "lane_weight_shape", MappingProxyType(dict(self.lane_weight_shape))
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to plain primitives for inspection surfaces only
@@ -95,6 +99,7 @@ class ReflectionTrace:
             "review_status_flags": dict(self.review_status_flags),
             "active_lanes": list(self.active_lanes),
             "lane_budget_shape": dict(self.lane_budget_shape),
+            "lane_weight_shape": dict(self.lane_weight_shape),
             "geometric_context_present": self.geometric_context_present,
             "allowed_depth": self.allowed_depth,
             "requires_self_review": self.requires_self_review,
@@ -122,6 +127,7 @@ def build_reflection_trace(
     stance: Optional[str],
     review_status_flags: Mapping[str, bool],
     top_k_by_lane: Mapping[str, int],
+    weight_by_lane: Optional[Mapping[str, float]] = None,
     geometric_context_present: bool,
     allowed_depth: int = 1,
     requires_self_review: bool = False,
@@ -153,6 +159,14 @@ def build_reflection_trace(
     lane_budget_shape = {
         str(k): int(v) for k, v in top_k_by_lane.items() if isinstance(v, int)
     }
+    # Content-free lane->weight shape, sourced ONLY from the already-computed
+    # MemoryPlan.weight_by_lane. Numeric weights only — never text/payload/raw
+    # SRG/kernel values, reasons, or retrieved context. (bool excluded.)
+    lane_weight_shape = {
+        str(k): float(v)
+        for k, v in (weight_by_lane or {}).items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
     return ReflectionTrace(
         chosen_mode=str(chosen_mode),
         action=str(action),
@@ -160,6 +174,7 @@ def build_reflection_trace(
         review_status_flags={str(k): bool(v) for k, v in review_status_flags.items()},
         active_lanes=active_lanes,
         lane_budget_shape=lane_budget_shape,
+        lane_weight_shape=lane_weight_shape,
         geometric_context_present=bool(geometric_context_present),
         allowed_depth=int(allowed_depth),
         requires_self_review=bool(requires_self_review),

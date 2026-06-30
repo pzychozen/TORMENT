@@ -42,6 +42,7 @@ _EXPECTED_FIELDS = {
     "review_status_flags",
     "active_lanes",
     "lane_budget_shape",
+    "lane_weight_shape",
     "geometric_context_present",
     # v0.2 coarse additions
     "allowed_depth",
@@ -117,6 +118,7 @@ def _sample_trace() -> ReflectionTrace:
         stance=None,
         review_status_flags={"approved": True, "blocked": False},
         top_k_by_lane={"core": 5, "relational": 0, "deep": 2},
+        weight_by_lane={"core": 1.0, "relational": 0.5, "deep": 1.2},
         geometric_context_present=False,
     )
 
@@ -153,6 +155,8 @@ class TestFrozenShapeOnly:
         assert isinstance(d["active_lanes"], list)
         assert isinstance(d["lane_budget_shape"], dict)
         assert all(isinstance(v, int) for v in d["lane_budget_shape"].values())
+        assert isinstance(d["lane_weight_shape"], dict)
+        assert all(isinstance(v, float) for v in d["lane_weight_shape"].values())
         assert isinstance(d["geometric_context_present"], bool)
         assert d["scope"] == "per_turn_ephemeral"
 
@@ -178,6 +182,11 @@ class TestInnerContainersReadOnly:
         with pytest.raises(TypeError):
             t.lane_budget_shape["core"] = 999  # type: ignore[index]
 
+    def test_lane_weight_shape_cannot_be_mutated(self):
+        t = _sample_trace()
+        with pytest.raises(TypeError):
+            t.lane_weight_shape["core"] = 9.9  # type: ignore[index]
+
     def test_active_lanes_is_immutable_tuple(self):
         t = _sample_trace()
         assert isinstance(t.active_lanes, tuple)
@@ -192,6 +201,8 @@ class TestInnerContainersReadOnly:
             t.review_status_flags["x"] = True  # type: ignore[index]
         with pytest.raises(TypeError):
             t.lane_budget_shape["x"] = 1  # type: ignore[index]
+        with pytest.raises(TypeError):
+            t.lane_weight_shape["x"] = 1.0  # type: ignore[index]
 
     def test_direct_construction_copies_source_mapping(self):
         # __post_init__ wraps a *private copy*: a dict passed straight to the
@@ -210,9 +221,11 @@ class TestInnerContainersReadOnly:
         d = _sample_trace().to_dict()
         d["review_status_flags"]["approved"] = False  # must NOT raise
         d["lane_budget_shape"]["core"] = 0  # must NOT raise
+        d["lane_weight_shape"]["core"] = 0.0  # must NOT raise
         d["active_lanes"].append("x")  # must NOT raise
         assert type(d["review_status_flags"]) is dict
         assert type(d["lane_budget_shape"]) is dict
+        assert type(d["lane_weight_shape"]) is dict
         assert type(d["active_lanes"]) is list
 
 
@@ -238,6 +251,30 @@ class TestBuilderPurity:
         assert t.active_lanes == ("core", "deep")
         assert t.lane_budget_shape == {"core": 4, "relational": 0, "deep": 1, "archive": 0}
 
+    def test_lane_weight_shape_from_weight_by_lane(self):
+        t = build_reflection_trace(
+            chosen_mode="retrieval",
+            action="answer",
+            stance=None,
+            review_status_flags={"approved": True},
+            top_k_by_lane={"core": 4, "deep": 1},
+            weight_by_lane={"core": 1.3, "relational": 0.5, "deep": 0.9},
+            geometric_context_present=False,
+        )
+        # lane->weight mapping sourced verbatim from weight_by_lane, floats only
+        assert t.lane_weight_shape == {"core": 1.3, "relational": 0.5, "deep": 0.9}
+        assert all(isinstance(v, float) for v in t.lane_weight_shape.values())
+
+    def test_lane_weight_shape_defaults_empty_without_weights(self):
+        # default / no-shaping path: omitting weight_by_lane yields an empty,
+        # stable lane_weight_shape (no invented weights).
+        t = build_reflection_trace(
+            chosen_mode="fast", action="answer", stance=None,
+            review_status_flags={"approved": True},
+            top_k_by_lane={"core": 3}, geometric_context_present=False,
+        )
+        assert t.lane_weight_shape == {}
+
     def test_repeated_calls_independent_objects(self):
         traces = [_sample_trace() for _ in range(50)]
         # value-equal but not the same identity (no shared/global instance)
@@ -262,6 +299,21 @@ class TestThinkPopulatesTrace:
         assert rt.chosen_mode == result.mode_decision.chosen_mode.value
         assert rt.action == result.action_decision.action.value
         assert rt.geometric_context_present is (result.geometric_context is not None)
+
+    def test_lane_weight_shape_matches_memory_plan(self):
+        # think() populates lane_weight_shape ONLY from the effective
+        # MemoryPlan.weight_by_lane (no new shaping rule, content-free).
+        result = ThinkingController().think(
+            workspace_id="ws", agent_id="ag", raw_input="What do I recall?",
+        )
+        rt = result.reflection_trace
+        expected = {
+            str(k): float(v)
+            for k, v in result.memory_plan.weight_by_lane.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
+        assert dict(rt.lane_weight_shape) == expected
+        assert all(isinstance(v, float) for v in rt.lane_weight_shape.values())
 
     def test_new_coarse_fields_match_locals(self):
         result = ThinkingController().think(

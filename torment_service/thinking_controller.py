@@ -977,6 +977,7 @@ class ThinkingController:
                 "blocked": bool(review.blocked),
             },
             top_k_by_lane=memory_plan.top_k_by_lane,
+            weight_by_lane=memory_plan.weight_by_lane,
             geometric_context_present=(geometric_context is not None),
             # v0.2 coarse mode/action/frame shape (already-computed scalars only)
             allowed_depth=mode.allowed_depth,

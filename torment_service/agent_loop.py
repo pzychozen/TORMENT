@@ -699,6 +699,7 @@ class AgentRunner:
                 "blocked": bool(review_outcome.blocked),
             },
             top_k_by_lane=bundle.memory_plan.top_k_by_lane,
+            weight_by_lane=bundle.memory_plan.weight_by_lane,
             geometric_context_present=False,
             allowed_depth=bundle.mode_decision.allowed_depth,
             requires_self_review=bundle.mode_decision.requires_self_review,

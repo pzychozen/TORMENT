@@ -173,6 +173,20 @@ class TestTracePresentOnTurnResult:
         assert rt.ambiguity_score == f.ambiguity_score
         assert rt.confidence_need == f.confidence_need
 
+    def test_lane_weight_shape_matches_effective_memory_plan(self):
+        # runner path populates lane_weight_shape ONLY from the effective
+        # MemoryPlan.weight_by_lane (content-free lane->weight numbers).
+        runner, *_ = _make_runner()
+        result = _run(runner)
+        rt = result.reflection_trace
+        expected = {
+            str(k): float(v)
+            for k, v in result.memory_plan.weight_by_lane.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
+        assert dict(rt.lane_weight_shape) == expected
+        assert all(isinstance(v, float) for v in rt.lane_weight_shape.values())
+
 
 # ---------------------------------------------------------------------------
 # 2. Trace tracks the Phase-5 EFFECTIVE action, not the Phase-4 action
