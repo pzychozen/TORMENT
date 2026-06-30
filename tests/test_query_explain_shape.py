@@ -1,27 +1,22 @@
-"""Characterization lock for query().explain shape vs trace() decomposition.
+"""Parity lock for query().explain shape vs trace() decomposition.
 
-This is a CHARACTERIZATION test (motion-keeper slice "D"), not a parity fix.
-It pins the *current* shape of the per-hit ``explain`` dict returned by
-``TormentFabric.query(..., explain=True)`` and documents — as an executable
-invariant — that it is a STRICT SUBSET of the per-hit ``explain`` dict returned
-by ``TormentFabric.trace(...)``.
+This is a PARITY test. It pins the shape of the per-hit ``explain`` dict
+returned by ``TormentFabric.query(..., explain=True)`` and asserts — as an
+executable invariant — that it now exposes the SAME diagnostic decomposition
+key set as the per-hit ``explain`` dict returned by ``TormentFabric.trace(...)``.
 
-Why this exists
----------------
+History
+-------
 ``query()`` and ``trace()`` build their per-hit ``explain`` dict off the *same*
-scoring contract (``score_hit``, identical static ``weights``), but ``trace()``
-surfaces a far richer decomposition. Every field ``trace()`` exposes and
-``query()`` omits is in fact already *computed* inside ``query()``'s scoring
-loop (continuity bonuses, SRG multipliers, lane weight, post-score discounts) —
-it is computed-then-discarded, not absent. A future "explain parity" slice would
-surface those values; this test freezes today's asymmetry so that such a slice
-becomes a *visible, intentional diff* against a pinned baseline rather than a
-silent shape change.
-
-This test locks SHAPE ONLY. It asserts nothing about scoring values, ranking,
-or behavior, and it changes no production code. If a later authorized parity
-slice adds fields to ``query().explain``, this test is expected to fail and be
-updated *intentionally* as part of that slice.
+scoring contract (``score_hit``, identical static ``weights``). ``query()``
+previously surfaced only a strict subset of trace()'s richer decomposition;
+every omitted field was already *computed* inside query()'s scoring loop
+(continuity bonuses, SRG multipliers, lane weight, post-score discounts) —
+computed-then-discarded, not absent. The explain-parity slice surfaced those
+already-computed values on ``query().explain`` as **diagnostic fields only**
+(no change to ``final_score``, ranking, returned hits, filtering, MemoryPlan
+behavior, SRG scoring, or any write path). This test pins that intentional
+parity so any future drift in either direction is a *visible, reviewed* diff.
 
 Source anchors (informational, at time of writing):
   * query().explain   — torment_service/fabric.py, ``if explain:`` block.
@@ -38,29 +33,28 @@ import unittest
 from torment_service.fabric import TormentFabric
 
 
-# --- Pinned baseline: the CURRENT key set of query().explain ----------------
-# Locked deliberately. A future parity slice that adds fields here must update
-# this set as an explicit, reviewed change.
+# --- Pinned baseline: the parity key set of query().explain -----------------
+# query().explain now mirrors trace().explain exactly. This is the intentional
+# parity baseline; any added/removed field must update this set as an explicit,
+# reviewed change.
 EXPECTED_QUERY_EXPLAIN_KEYS = frozenset({
+    # shared base decomposition
     "sim",
     "strength",
     "recency_days",
     "motif_alignment",
     "contradiction_risk",
+    "weights",
+    # conflict surface
     "conflict_status",
     "conflict_penalty",
     "conflict_ids",
-    "weights",
-})
-
-# --- Pinned baseline: the decomposition fields trace() surfaces that ---------
-# query().explain omits (the documented one-directional gap). 16 fields here;
-# ``provenance_type`` is the 17th gap element but is handled separately below
-# because query() *does* compute it — it simply places it at the hit top level,
-# not inside ``explain`` (a placement asymmetry, not an absence).
-EXPECTED_TRACE_ONLY_DECOMPOSITION = frozenset({
+    # post-score discounts
     "collective_discount",
     "tool_result_discount",
+    # provenance placement (now inside explain, mirroring trace)
+    "provenance_type",
+    # continuity bonus decomposition
     "self_thread_bonus",
     "self_anchor_bonus",
     "thread_window_bonus",
@@ -68,10 +62,12 @@ EXPECTED_TRACE_ONLY_DECOMPOSITION = frozenset({
     "mood_drift_bonus",
     "mood_spiral_penalty",
     "continuity_total_adjustment",
+    # SRG multiplier decomposition
     "srg_same_band_bonus",
     "srg_crystal_bonus",
     "srg_heartbeat_bonus",
     "srg_total_multiplier",
+    # memory-plan lane decomposition
     "memory_plan_lane",
     "lane_weight",
     "lane_weight_applied",
@@ -79,7 +75,7 @@ EXPECTED_TRACE_ONLY_DECOMPOSITION = frozenset({
 
 
 class TestQueryExplainShape(unittest.TestCase):
-    """Pin query().explain shape and its subset relationship to trace()."""
+    """Pin query().explain shape and its parity with trace()."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="torment_query_explain_shape_")
@@ -126,75 +122,65 @@ class TestQueryExplainShape(unittest.TestCase):
         self.assertIn("explain", item, "trace item is missing 'explain' surface")
         return item["explain"]
 
-    # -- 1. lock current query().explain key set ------------------------------
+    # -- 1. lock the parity query().explain key set ---------------------------
     def test_query_explain_key_set_locked(self):
-        """query().explain currently exposes exactly EXPECTED_QUERY_EXPLAIN_KEYS.
-
-        This is the baseline lock. If it fails because keys were ADDED, a
-        parity slice likely landed and this constant should be updated as a
-        reviewed, intentional change.
-        """
+        """query().explain exposes exactly EXPECTED_QUERY_EXPLAIN_KEYS (the
+        parity set). If this fails because keys changed, update the constant as
+        a reviewed, intentional change in the same slice."""
         q_explain = self._query_hit()["explain"]
         self.assertEqual(
             set(q_explain.keys()), set(EXPECTED_QUERY_EXPLAIN_KEYS),
             msg=(
-                "query().explain key set drifted from the pinned baseline. "
-                "If this is an intentional parity slice, update "
-                "EXPECTED_QUERY_EXPLAIN_KEYS in the same change."
+                "query().explain key set drifted from the pinned parity "
+                "baseline. Update EXPECTED_QUERY_EXPLAIN_KEYS in the same change."
             ),
         )
 
-    # -- 2. query().explain has nothing trace().explain lacks -----------------
-    def test_query_explain_is_strict_subset_of_trace(self):
-        """Every key in query().explain also appears in trace().explain, and
-        trace() carries strictly more (proper subset)."""
+    # -- 2. query().explain is at parity with trace().explain -----------------
+    def test_query_explain_is_parity_with_trace(self):
+        """query().explain and trace().explain now expose the SAME key set."""
         q_keys = set(self._query_hit()["explain"].keys())
         t_keys = set(self._trace_explain().keys())
 
-        missing_from_trace = q_keys - t_keys
+        missing_from_query = t_keys - q_keys
+        extra_in_query = q_keys - t_keys
         self.assertEqual(
-            missing_from_trace, set(),
-            msg=f"query().explain has keys trace() lacks: {missing_from_trace}",
+            missing_from_query, set(),
+            msg=f"query().explain is missing trace() fields: {sorted(missing_from_query)}",
         )
-        self.assertTrue(
-            q_keys < t_keys,
-            msg="query().explain should be a PROPER subset of trace().explain",
+        self.assertEqual(
+            extra_in_query, set(),
+            msg=f"query().explain has fields trace() lacks: {sorted(extra_in_query)}",
         )
+        self.assertEqual(q_keys, t_keys, msg="query()/trace() explain keys must be at parity")
 
-    # -- 3. the trace-only decomposition gap is exactly the documented set ----
-    def test_trace_only_decomposition_gap_is_exact(self):
-        """The keys trace().explain adds over query().explain are exactly the
-        16 documented decomposition fields plus provenance_type (placement
-        asymmetry). Locks the gap so a future parity slice is a visible diff.
-        """
+    # -- 3. no trace-only decomposition gap remains ---------------------------
+    def test_no_trace_only_decomposition_gap(self):
+        """The previously-documented trace-only decomposition gap (the 16
+        decomposition fields + provenance_type) is now closed: trace() exposes
+        no explain key that query() omits."""
         q_keys = set(self._query_hit()["explain"].keys())
         t_keys = set(self._trace_explain().keys())
 
         gap = t_keys - q_keys
-        expected_gap = set(EXPECTED_TRACE_ONLY_DECOMPOSITION) | {"provenance_type"}
         self.assertEqual(
-            gap, expected_gap,
-            msg=(
-                "trace-only decomposition gap drifted. Expected the 16 "
-                "decomposition fields + provenance_type. Got: "
-                f"{sorted(gap)}"
-            ),
+            gap, set(),
+            msg=f"unexpected trace-only explain gap re-opened: {sorted(gap)}",
         )
 
-    # -- 4. provenance_type placement asymmetry -------------------------------
-    def test_provenance_type_placement_asymmetry(self):
-        """provenance_type is computed on both surfaces, but query() places it
-        at the hit top level while trace() places it inside explain. Documented
-        as a placement asymmetry, not an absence."""
+    # -- 4. provenance_type now surfaced on both explain dicts ----------------
+    def test_provenance_type_parity_and_top_level(self):
+        """provenance_type is now inside BOTH query().explain and
+        trace().explain (placement parity), and query() still also surfaces it
+        at the hit top level (back-compat)."""
         hit = self._query_hit()
         q_explain = hit["explain"]
         t_explain = self._trace_explain()
 
-        # trace: inside explain
+        # parity: present inside both explain dicts
         self.assertIn("provenance_type", t_explain)
-        # query: NOT inside explain ...
-        self.assertNotIn("provenance_type", q_explain)
-        # ... but present at the hit top level
+        self.assertIn("provenance_type", q_explain)
+        # back-compat: query still surfaces it at the hit top level too
         self.assertIn(
             "provenance_type", hit,
             msg="query() should still surface provenance_type at hit top level",

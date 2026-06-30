@@ -4258,6 +4258,13 @@ class TormentFabric:
                 final += _reinforce_boost * math.log(1 + _rc)
 
             # SRG scoring bonuses + breathing evolution (Phase 3)
+            # Observability: track the per-hit SRG multipliers (default 1.0) so
+            # query(explain=True) can mirror trace()'s SRG decomposition. The
+            # `final *=` math is unchanged — the same literal multipliers are
+            # applied under the same conditions.
+            _srg_same_band = 1.0
+            _srg_crystal = 1.0
+            _srg_heartbeat = 1.0
             if self._srg_enable:
                 _srg_hit = (h.get("payload") or {}).get("srg")
                 if _srg_hit:
@@ -4265,13 +4272,16 @@ class TormentFabric:
                     # last-ingested band only (keyed by (workspace_id, agent_id)).
                     _srg_last_band = self._srg_last_ingest_band_by_agent.get((workspace_id, agent_id))
                     if _srg_last_band is not None and _srg_hit.get("R_band") == _srg_last_band:
-                        final *= 1.08
+                        _srg_same_band = 1.08
+                        final *= _srg_same_band
                     # Crystal identity anchor: 5% boost
                     if _srg_hit.get("is_crystal", False):
-                        final *= 1.05
+                        _srg_crystal = 1.05
+                        final *= _srg_crystal
                     # Class A (deep/slow heartbeat): 3% stability bonus
                     if _srg_hit.get("heartbeat_class") == "A":
-                        final *= 1.03
+                        _srg_heartbeat = 1.03
+                        final *= _srg_heartbeat
 
                     # Breathing evolution: retrieved memories are "active" → evolve
                     try:
@@ -4309,11 +4319,15 @@ class TormentFabric:
             # Phase D3b: tool-result retrieval discount
             # Tool results are external observations, not self-knowledge —
             # discount so they don't outrank organic experiential memories.
+            # Observability: track the effective discount (1.0 when not applied)
+            # for query(explain=True) parity with trace(). `final` math unchanged.
+            _tool_result_discount = 1.0
             if _h_is_tool_result:
                 try:
                     _tool_discount = float(os.getenv("TORMENT_TOOL_RESULT_RETRIEVAL_DISCOUNT", "0.85"))
                 except Exception:
                     _tool_discount = 0.85
+                _tool_result_discount = _tool_discount
                 final *= _tool_discount
 
             # Memory-plan lane weights (v2.4.2):
@@ -4322,21 +4336,32 @@ class TormentFabric:
             # deep/spirit-return → "deep".
             # NOTE: collective provenance is EXCLUDED — Phase D3 already
             # applies a dedicated discount. Stacking would over-penalize.
+            # Observability: track lane name / weight / applied-flag (defaults
+            # core / 1.0 / False) so query(explain=True) mirrors trace()'s lane
+            # decomposition. The `final *= _lane_w` math is unchanged.
+            _lane = "core"
+            _lane_w = 1.0
+            _lane_applied = False
             if _mp_weights:
                 _hit_scope = str(h.get("scope", "private"))
                 _is_deep = bool(h.get("spirit_return_mode") or h.get("deep_memory"))
                 if _is_deep:
+                    _lane = "deep"
                     _lane_w = float(_mp_weights.get("deep", 1.0))
                 elif _h_is_collective:
                     # Skip — Phase D3 collective discount already applied above.
+                    _lane = "collective"
                     _lane_w = 1.0
                 elif _hit_scope == "shared":
+                    _lane = "relational"
                     _lane_w = float(_mp_weights.get("relational", 1.0))
                 else:
+                    _lane = "core"
                     _lane_w = float(_mp_weights.get("core", 1.0))
                 # Clamp weight to [0.1, 2.0] to prevent extreme distortion
                 _lane_w = max(0.1, min(2.0, _lane_w))
                 final *= _lane_w
+                _lane_applied = True
 
             hh = dict(h)
             hh["motifs"] = motifs
@@ -4363,16 +4388,38 @@ class TormentFabric:
                     hh["conflict_penalty"] = conflict_penalty
 
             if explain:
+                # Observability parity with trace().explain_for_hit (diagnostic
+                # only — no effect on final_score, ranking, filtering, returned
+                # hits, MemoryPlan, SRG scoring, or any write path). Every field
+                # below is read from a value query() already computed above; this
+                # mirrors the same decomposition trace() surfaces.
                 hh["explain"] = {
                     "sim": sim,
                     "strength": strength,
                     "recency_days": recency_days,
                     "motif_alignment": motif_alignment,
                     "contradiction_risk": contradiction_risk,
-                    "conflict_status": conflict_status,
-                    "conflict_penalty": conflict_penalty,
-                    "conflict_ids": conflict_ids,
                     "weights": {"alpha": 0.35, "beta": 0.10, "gamma": 0.20, "delta": 0.30},
+                    "collective_discount": (_coll_discount if _h_is_collective else 1.0),
+                    "tool_result_discount": _tool_result_discount,
+                    "conflict_penalty": conflict_penalty,
+                    "conflict_status": conflict_status,
+                    "conflict_ids": conflict_ids,
+                    "provenance_type": _derive_q_prov(_h_prov_raw),
+                    "self_thread_bonus": _cont.self_thread_bonus,
+                    "self_anchor_bonus": _cont.self_anchor_bonus,
+                    "thread_window_bonus": _cont.thread_window_bonus,
+                    "affect_match_bonus": _cont.affect_match_bonus,
+                    "mood_drift_bonus": _cont.mood_drift_bonus,
+                    "mood_spiral_penalty": _cont.mood_spiral_penalty,
+                    "continuity_total_adjustment": _cont.total,
+                    "srg_same_band_bonus": _srg_same_band,
+                    "srg_crystal_bonus": _srg_crystal,
+                    "srg_heartbeat_bonus": _srg_heartbeat,
+                    "srg_total_multiplier": _srg_same_band * _srg_crystal * _srg_heartbeat,
+                    "memory_plan_lane": _lane,
+                    "lane_weight": _lane_w,
+                    "lane_weight_applied": _lane_applied,
                 }
             rescored.append(hh)
 
