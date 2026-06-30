@@ -174,6 +174,25 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+def _effective_srg_source(hit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the per-hit SRG state used for SCORING / explain decomposition.
+
+    ``MemoryGraph.search()`` flattens an entity's stored ``payload`` into the
+    top-level hit fields, so a stored ``payload["srg"]`` surfaces as
+    ``hit["srg"]``. Prefer that flattened top-level value; fall back defensively
+    to a nested ``hit["payload"]["srg"]`` for legacy / manual-shaped hits. Returns
+    ``None`` when neither is present or the value is not a dict.
+
+    READ-ONLY source selector for scoring/explain ONLY. It is NOT a gate for SRG
+    breathing/writeback — that path stays bound to its original nested source so
+    this normalization does not newly activate any write.
+    """
+    src = hit.get("srg")
+    if not isinstance(src, dict):
+        src = (hit.get("payload") or {}).get("srg")
+    return src if isinstance(src, dict) else None
+
+
 def random_chance(p: float) -> bool:
     """Return True with probability *p*, clamped to [0, 1]."""
     import random as _rng
@@ -4266,27 +4285,37 @@ class TormentFabric:
             _srg_crystal = 1.0
             _srg_heartbeat = 1.0
             if self._srg_enable:
-                _srg_hit = (h.get("payload") or {}).get("srg")
-                if _srg_hit:
+                # Normalized SRG SCORING/explain source: prefer flattened top-level
+                # hit["srg"] (MemoryGraph.search flattens payload), fall back to
+                # nested hit["payload"]["srg"] for legacy/manual-shaped hits — the
+                # same effective source trace() uses. Read-only; not a writeback gate.
+                _srg_score_src = _effective_srg_source(h)
+                if _srg_score_src:
                     # Same-band resonance: 8% boost — compare against THIS agent's
                     # last-ingested band only (keyed by (workspace_id, agent_id)).
                     _srg_last_band = self._srg_last_ingest_band_by_agent.get((workspace_id, agent_id))
-                    if _srg_last_band is not None and _srg_hit.get("R_band") == _srg_last_band:
+                    if _srg_last_band is not None and _srg_score_src.get("R_band") == _srg_last_band:
                         _srg_same_band = 1.08
                         final *= _srg_same_band
                     # Crystal identity anchor: 5% boost
-                    if _srg_hit.get("is_crystal", False):
+                    if _srg_score_src.get("is_crystal", False):
                         _srg_crystal = 1.05
                         final *= _srg_crystal
                     # Class A (deep/slow heartbeat): 3% stability bonus
-                    if _srg_hit.get("heartbeat_class") == "A":
+                    if _srg_score_src.get("heartbeat_class") == "A":
                         _srg_heartbeat = 1.03
                         final *= _srg_heartbeat
 
+                # Breathing evolution / writeback stays gated on the ORIGINAL
+                # nested payload source ONLY. This slice fixes scoring/explain
+                # source parity but does NOT newly activate breathing/writeback
+                # for flattened top-level hits — writeback remains HOLD.
+                _srg_writeback_src = (h.get("payload") or {}).get("srg")
+                if _srg_writeback_src:
                     # Breathing evolution: retrieved memories are "active" → evolve
                     try:
                         from .srg_engine import SRGMemoryState as _SMS, evolve_breathing as _evolve
-                        _srg_live = _SMS.from_dict(_srg_hit)
+                        _srg_live = _SMS.from_dict(_srg_writeback_src)
                         _evolve(_srg_live)
                         # Write back evolved state to the in-memory entity
                         _hit_eid = h.get("eid")
@@ -6638,8 +6667,11 @@ class TormentFabric:
             _srg_crystal = 1.0
             _srg_heartbeat = 1.0
             if self._srg_enable:
-                _srg_hit = hit.get("srg")
-                if _srg_hit and isinstance(_srg_hit, dict):
+                # Normalized SRG source (parity with query()): prefer top-level
+                # hit["srg"], fall back to nested hit["payload"]["srg"]. Trace stays
+                # read-only — no breathing/writeback here.
+                _srg_hit = _effective_srg_source(hit)
+                if _srg_hit:
                     # Same-band resonance: 8% boost — compare against THIS agent's
                     # last-ingested band only (keyed by (workspace_id, agent_id)).
                     _srg_last_band = self._srg_last_ingest_band_by_agent.get((workspace_id, agent_id))
