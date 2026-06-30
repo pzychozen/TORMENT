@@ -82,6 +82,7 @@ class TestTraceSRGParity(unittest.TestCase):
         self.assertAlmostEqual(explain.get("srg_crystal_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_heartbeat_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_total_multiplier"), 1.08, places=4)
+        self.assertEqual(explain.get("srg_active_modifiers"), ["same_band"])
 
     # -----------------------------------------------------------------
     # 2. Crystal identity: ×1.05
@@ -107,6 +108,7 @@ class TestTraceSRGParity(unittest.TestCase):
         self.assertAlmostEqual(explain.get("srg_crystal_bonus"), 1.05, places=4)
         self.assertAlmostEqual(explain.get("srg_heartbeat_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_total_multiplier"), 1.05, places=4)
+        self.assertEqual(explain.get("srg_active_modifiers"), ["crystal"])
 
     # -----------------------------------------------------------------
     # 3. Heartbeat class A: ×1.03
@@ -132,6 +134,7 @@ class TestTraceSRGParity(unittest.TestCase):
         self.assertAlmostEqual(explain.get("srg_crystal_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_heartbeat_bonus"), 1.03, places=4)
         self.assertAlmostEqual(explain.get("srg_total_multiplier"), 1.03, places=4)
+        self.assertEqual(explain.get("srg_active_modifiers"), ["heartbeat_a"])
 
     # -----------------------------------------------------------------
     # 4. Combined SRG modifiers compose multiplicatively
@@ -176,6 +179,12 @@ class TestTraceSRGParity(unittest.TestCase):
             explain.get("srg_total_multiplier"), expected_mult, places=4,
             msg=f"Combined SRG multiplier should be {expected_mult:.6f}",
         )
+        # combined active modifiers must surface in stable order
+        self.assertEqual(
+            explain.get("srg_active_modifiers"),
+            ["same_band", "crystal", "heartbeat_a"],
+            msg="combined active SRG modifiers must use stable order",
+        )
 
         # final_score should reflect the combined multiplier
         self.assertAlmostEqual(
@@ -213,6 +222,7 @@ class TestTraceSRGParity(unittest.TestCase):
         self.assertAlmostEqual(explain.get("srg_crystal_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_heartbeat_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain.get("srg_total_multiplier"), 1.0, places=4)
+        self.assertEqual(explain.get("srg_active_modifiers"), [])
 
         # Also test with SRG explicitly disabled at trace time
         self.fabric._srg_enable = False
@@ -236,6 +246,7 @@ class TestTraceSRGParity(unittest.TestCase):
         self.assertAlmostEqual(explain2.get("srg_crystal_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain2.get("srg_heartbeat_bonus"), 1.0, places=4)
         self.assertAlmostEqual(explain2.get("srg_total_multiplier"), 1.0, places=4)
+        self.assertEqual(explain2.get("srg_active_modifiers"), [])
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ EXPECTED_QUERY_EXPLAIN_KEYS = frozenset({
     "srg_crystal_bonus",
     "srg_heartbeat_bonus",
     "srg_total_multiplier",
+    "srg_active_modifiers",
     # memory-plan lane decomposition
     "memory_plan_lane",
     "lane_weight",
@@ -135,6 +136,9 @@ class TestQueryExplainShape(unittest.TestCase):
                 "baseline. Update EXPECTED_QUERY_EXPLAIN_KEYS in the same change."
             ),
         )
+        # srg_active_modifiers is an explain-only diagnostic list (derived from
+        # the SRG multiplier fields); its shape is a list regardless of SRG state.
+        self.assertIsInstance(q_explain.get("srg_active_modifiers"), list)
 
     # -- 2. query().explain is at parity with trace().explain -----------------
     def test_query_explain_is_parity_with_trace(self):

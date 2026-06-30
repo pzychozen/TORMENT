@@ -4417,6 +4417,17 @@ class TormentFabric:
                     "srg_crystal_bonus": _srg_crystal,
                     "srg_heartbeat_bonus": _srg_heartbeat,
                     "srg_total_multiplier": _srg_same_band * _srg_crystal * _srg_heartbeat,
+                    # Diagnostic-only: names of the SRG multipliers that fired
+                    # (non-neutral), in stable order. Derived purely from the
+                    # already-computed multiplier values above; reads no raw R
+                    # and affects no score / ranking / filter / write.
+                    "srg_active_modifiers": [
+                        _name for _name, _mult in (
+                            ("same_band", _srg_same_band),
+                            ("crystal", _srg_crystal),
+                            ("heartbeat_a", _srg_heartbeat),
+                        ) if _mult != 1.0
+                    ],
                     "memory_plan_lane": _lane,
                     "lane_weight": _lane_w,
                     "lane_weight_applied": _lane_applied,
@@ -6722,6 +6733,17 @@ class TormentFabric:
                     "srg_crystal_bonus": _srg_crystal,
                     "srg_heartbeat_bonus": _srg_heartbeat,
                     "srg_total_multiplier": _srg_same_band * _srg_crystal * _srg_heartbeat,
+                    # Diagnostic-only: names of the SRG multipliers that fired
+                    # (non-neutral), in stable order. Derived purely from the
+                    # already-computed multiplier values above; reads no raw R
+                    # and affects no score / ranking / filter / write.
+                    "srg_active_modifiers": [
+                        _name for _name, _mult in (
+                            ("same_band", _srg_same_band),
+                            ("crystal", _srg_crystal),
+                            ("heartbeat_a", _srg_heartbeat),
+                        ) if _mult != 1.0
+                    ],
                     "memory_plan_lane": _lane,
                     "lane_weight": _lane_w,
                     "lane_weight_applied": _lane_applied,
