@@ -4,13 +4,15 @@ Tests-only / source-AST PRE-IMPLEMENTATION GUARD for the C-D operator-orchestrat
 direction (memory-to-prompt / live-caller lane).
 
 The bounded C-D proposal recommends tests-first / characterization-first: land the guardrails
-BEFORE any surface code, so the boundaries exist before the thing they guard. This file locks
-that the C-D operator-orchestration surface does NOT exist yet and that every production
-closure the proposal depends on still holds. It reads source with pathlib + ast.parse only --
-it does NOT import or execute production runtime.
+BEFORE any surface code, so the boundaries exist before the thing they guard. The first
+bounded slice has now landed the manual operator-orchestration harness (under tests/manual
+only); this file locks that the C-D operator-orchestration PRODUCTION surface still does NOT
+exist and that every production closure the proposal depends on still holds. It reads source
+with pathlib + ast.parse only -- it does NOT import or execute production runtime.
 
-The candidate implementation NAMES below are absent / forbidden sentinels: they must appear in
-NO .py file except THIS guard, which excludes itself when scanning.
+The PRODUCTION candidate implementation NAMES below are absent / forbidden sentinels: they
+must appear in NO .py file except THIS guard, which excludes itself when scanning. (The
+manual harness module name is intentionally NOT among them -- that harness now exists.)
 
 Anchors (docs, not imported):
   - docs/TORMENT_MEMORY_TO_PROMPT_LIVE_CALLER_SOURCE_REVIEW_AFTER_NON_SPINE_PROVIDER_HANDOFF_v0.1.md
@@ -32,12 +34,16 @@ THIS_FILE = Path(__file__).resolve()
 # --- Candidate (absent / forbidden) sentinels -------------------------------- #
 CANDIDATE_MODULE_REL = "torment_service/memory_to_prompt_operator_orchestrator.py"
 CANDIDATE_HARNESS_REL = "tests/manual/memory_to_prompt_c_d_operator_orchestration_harness.py"
+# Production-only sentinels. The manual harness module name
+# ("memory_to_prompt_c_d_operator_orchestration_harness") was removed from this set once the
+# first bounded slice landed the harness: that module now legitimately exists, so its name
+# legitimately appears in the repo (the harness file + its test imports). The four names below
+# remain production wiring that must stay absent everywhere except this guard.
 CANDIDATE_NAMES = (
     "memory_to_prompt_operator_orchestrator",
     "MemoryToPromptOperatorOrchestrator",
     "run_memory_to_prompt_operator_orchestration",
     "TORMENT_MEMORY_TO_PROMPT_OPERATOR_ORCHESTRATION",
-    "memory_to_prompt_c_d_operator_orchestration_harness",
 )
 CANDIDATE_ROUTE_TOKENS = ("operator_orchestration", "c_d_operator")
 
@@ -59,6 +65,7 @@ NON_SPINE_FORBIDDEN_DIRS = ("cognition", "roles")
 PYTEST_REFUSING_MANUAL = (
     "tests/manual/non_spine_llm_anthropic_provider_harness.py",
     "tests/manual/non_spine_llm_character_operator_harness.py",
+    "tests/manual/memory_to_prompt_c_d_operator_orchestration_harness.py",
 )
 
 _MODEL_IDENTS = frozenset({
@@ -161,9 +168,13 @@ class TestCandidateSurfacesAbsent(unittest.TestCase):
         self.assertFalse((ROOT / CANDIDATE_MODULE_REL).exists(),
                          f"C-D orchestration module must not exist yet: {CANDIDATE_MODULE_REL}")
 
-    def test_no_candidate_manual_harness_exists(self):  # Invariant 2
-        self.assertFalse((ROOT / CANDIDATE_HARNESS_REL).exists(),
-                         f"C-D candidate manual harness must not exist yet: {CANDIDATE_HARNESS_REL}")
+    def test_manual_harness_exists_without_production_wiring(self):  # Invariant 2
+        # The bounded C-D manual operator-orchestration harness now EXISTS (operator-run,
+        # tests/manual only); the C-D production orchestrator module still does NOT.
+        self.assertTrue((ROOT / CANDIDATE_HARNESS_REL).exists(),
+                        f"C-D manual harness must now exist: {CANDIDATE_HARNESS_REL}")
+        self.assertFalse((ROOT / CANDIDATE_MODULE_REL).exists(),
+                         f"C-D production orchestrator must remain absent: {CANDIDATE_MODULE_REL}")
 
 
 # --------------------------------------------------------------------------- #
