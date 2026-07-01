@@ -38,6 +38,21 @@ _MEMORY_PLAN_SHAPING_POSTURE_KEYS = (
     "ambiguity_context_diversity",
 )
 
+# Fixed, content-free keys for the derived MemoryPlan quality/thinness summary.
+# Every value is a plain int or bool DERIVED from already-normalized, content-free
+# trace fields (lane budgets, confidence_need, and the shaping posture). These keys
+# are ALWAYS present (computed in ``ReflectionTrace.__post_init__``); no value is
+# ever supplied by a caller, so no stray key or raw text can enter this map.
+_MEMORY_PLAN_QUALITY_KEYS = (
+    "active_lane_count",
+    "non_core_active_lane_count",
+    "total_lane_budget",
+    "thin_context",
+    "low_confidence_need",
+    "shaping_reflex_count",
+    "heavily_shaped",
+)
+
 
 @dataclass(frozen=True)
 class ReflectionTrace:
@@ -69,6 +84,14 @@ class ReflectionTrace:
     # ``__post_init__``). Carries NO raw input / prompt / reasoning / provider /
     # output-decision / candidate content — only whether each reflex moved the plan.
     memory_plan_shaping_posture: Mapping[str, bool] = field(default_factory=dict)
+
+    # --- MemoryPlan quality/thinness summary (content-free, DERIVED) ---
+    # Coarse int/bool summary of plan thinness + shaping intensity, derived in
+    # ``__post_init__`` from the already-normalized content-free fields. Fixed keys,
+    # primitive values only; any value passed for this field is IGNORED and replaced
+    # by the derived map. Carries no raw text / prompt / reasoning / provider /
+    # output-decision / candidate content, and nothing branches on it.
+    memory_plan_quality: Mapping[str, Any] = field(default_factory=dict)
 
     # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
     allowed_depth: int = 1
@@ -118,6 +141,39 @@ class ReflectionTrace:
                  for k in _MEMORY_PLAN_SHAPING_POSTURE_KEYS}
             ),
         )
+        # Derive the content-free plan-quality/thinness summary from the ALREADY-
+        # normalized fields above — never from raw text or new inputs. lane_budget_shape
+        # is the int projection of ``top_k_by_lane``; the shaping posture is the two
+        # normalized booleans; confidence_need is a coarse float. Any value passed in
+        # for ``memory_plan_quality`` is ignored and replaced by this derived map, so
+        # it can carry no stray keys and no raw text. int/bool primitives only.
+        _budgets = {
+            k: v for k, v in dict(self.lane_budget_shape).items()
+            if isinstance(v, int) and not isinstance(v, bool)
+        }
+        _active = {k: v for k, v in _budgets.items() if v > 0}
+        _active_lane_count = len(_active)
+        _non_core_active = sum(1 for k in _active if k != "core")
+        _total_lane_budget = sum(_active.values())
+        _thin_context = (_non_core_active == 0) or (_active_lane_count == 1)
+        _low_confidence_need = float(self.confidence_need) >= 0.60
+        _shaping_reflex_count = sum(
+            1 for v in dict(self.memory_plan_shaping_posture).values() if v is True
+        )
+        _heavily_shaped = _shaping_reflex_count >= 2
+        object.__setattr__(
+            self,
+            "memory_plan_quality",
+            MappingProxyType({
+                "active_lane_count": int(_active_lane_count),
+                "non_core_active_lane_count": int(_non_core_active),
+                "total_lane_budget": int(_total_lane_budget),
+                "thin_context": bool(_thin_context),
+                "low_confidence_need": bool(_low_confidence_need),
+                "shaping_reflex_count": int(_shaping_reflex_count),
+                "heavily_shaped": bool(_heavily_shaped),
+            }),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to plain primitives for inspection surfaces only
@@ -132,6 +188,7 @@ class ReflectionTrace:
             "lane_weight_shape": dict(self.lane_weight_shape),
             "geometric_context_present": self.geometric_context_present,
             "memory_plan_shaping_posture": dict(self.memory_plan_shaping_posture),
+            "memory_plan_quality": dict(self.memory_plan_quality),
             "allowed_depth": self.allowed_depth,
             "requires_self_review": self.requires_self_review,
             "may_escalate": self.may_escalate,
