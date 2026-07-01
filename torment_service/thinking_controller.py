@@ -612,7 +612,13 @@ class ThinkingController:
         # dynamic-kernel coupling. Relational-only; never touches ``top_k_by_lane`` /
         # retrieval booleans / other lanes / ``safety_constraints``. No-op unless its
         # own flag is on, so the default-flag plan stays byte-identical to the above.
+        # (observation) record whether THIS reflex actually changes the effective
+        # relational lane weight, for the content-free ReflectionTrace posture below.
+        _relational_weight_before = plan.weight_by_lane.get("relational")
         self._apply_relational_ambiguity_prominence_v1(plan, state)
+        _relational_ambiguity_changed = (
+            plan.weight_by_lane.get("relational") != _relational_weight_before
+        )
 
         # Ambiguity context-diversity shaping v1 (default-off, separate flag): under
         # HIGH ambiguity, give the already-enabled non-core lanes a tiny bounded +1
@@ -622,7 +628,21 @@ class ThinkingController:
         # ``core`` / ``weight_by_lane`` / retrieval booleans / ``safety_constraints`` /
         # ``max_token_budget``, and never enables a disabled lane. No-op unless its own
         # flag is on, so the default-flag plan stays byte-identical to the above.
+        # (observation) record whether THIS reflex actually changes the effective
+        # lane budgets, for the content-free ReflectionTrace posture below.
+        _top_k_before = dict(plan.top_k_by_lane)
         self._apply_ambiguity_context_diversity_v1(plan, state)
+        _ambiguity_context_diversity_changed = plan.top_k_by_lane != _top_k_before
+
+        # Content-free, fixed-key boolean OBSERVATION surface: which default-off
+        # MemoryPlan shaping reflex actually moved the effective plan this turn. It is
+        # attached to the plan for the ReflectionTrace builder only; NOTHING in the
+        # runtime branches on it, it carries no raw text / reasoning / content, and it
+        # is NOT part of MemoryPlan's own serialization (asdict ignores it).
+        plan._shaping_posture = {
+            "relational_ambiguity_prominence": bool(_relational_ambiguity_changed),
+            "ambiguity_context_diversity": bool(_ambiguity_context_diversity_changed),
+        }
 
         return plan
 
@@ -1120,6 +1140,9 @@ class ThinkingController:
             top_k_by_lane=memory_plan.top_k_by_lane,
             weight_by_lane=memory_plan.weight_by_lane,
             geometric_context_present=(geometric_context is not None),
+            # content-free fixed-key boolean posture computed in build_memory_plan
+            # (which shaping reflex actually moved the effective plan); observation only
+            memory_plan_shaping_posture=getattr(memory_plan, "_shaping_posture", None),
             # v0.2 coarse mode/action/frame shape (already-computed scalars only)
             allowed_depth=mode.allowed_depth,
             requires_self_review=mode.requires_self_review,

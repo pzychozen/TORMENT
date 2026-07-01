@@ -44,6 +44,7 @@ _EXPECTED_FIELDS = {
     "lane_budget_shape",
     "lane_weight_shape",
     "geometric_context_present",
+    "memory_plan_shaping_posture",
     # v0.2 coarse additions
     "allowed_depth",
     "requires_self_review",

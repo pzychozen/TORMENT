@@ -29,6 +29,16 @@ from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 
+# Fixed, content-free keys for the MemoryPlan shaping posture. One boolean per
+# default-off MemoryPlan shaping reflex, recording whether that reflex ACTUALLY
+# changed the effective plan this turn. These keys are ALWAYS present and their
+# values are ALWAYS plain booleans (normalized in ``ReflectionTrace.__post_init__``).
+_MEMORY_PLAN_SHAPING_POSTURE_KEYS = (
+    "relational_ambiguity_prominence",
+    "ambiguity_context_diversity",
+)
+
+
 @dataclass(frozen=True)
 class ReflectionTrace:
     """Immutable, shape-only record of one turn's decision structure.
@@ -51,6 +61,14 @@ class ReflectionTrace:
     lane_budget_shape: Mapping[str, int] = field(default_factory=dict)
     lane_weight_shape: Mapping[str, float] = field(default_factory=dict)
     geometric_context_present: bool = False
+
+    # --- MemoryPlan shaping posture (content-free fixed-key boolean map) ---
+    # Which default-off MemoryPlan shaping reflex ACTUALLY changed the effective
+    # plan this turn (True) vs. was disabled / ineligible / skipped / no-op (False).
+    # Booleans only; the two fixed keys are always present (normalized in
+    # ``__post_init__``). Carries NO raw input / prompt / reasoning / provider /
+    # output-decision / candidate content — only whether each reflex moved the plan.
+    memory_plan_shaping_posture: Mapping[str, bool] = field(default_factory=dict)
 
     # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
     allowed_depth: int = 1
@@ -88,6 +106,18 @@ class ReflectionTrace:
         object.__setattr__(
             self, "lane_weight_shape", MappingProxyType(dict(self.lane_weight_shape))
         )
+        # Normalize the shaping posture to the fixed keys with plain-bool values so
+        # the surface is always exactly the two booleans (no missing keys, no stray
+        # keys, no non-bool / text values), then wrap read-only like the siblings.
+        _posture_src = dict(self.memory_plan_shaping_posture)
+        object.__setattr__(
+            self,
+            "memory_plan_shaping_posture",
+            MappingProxyType(
+                {k: bool(_posture_src.get(k, False))
+                 for k in _MEMORY_PLAN_SHAPING_POSTURE_KEYS}
+            ),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to plain primitives for inspection surfaces only
@@ -101,6 +131,7 @@ class ReflectionTrace:
             "lane_budget_shape": dict(self.lane_budget_shape),
             "lane_weight_shape": dict(self.lane_weight_shape),
             "geometric_context_present": self.geometric_context_present,
+            "memory_plan_shaping_posture": dict(self.memory_plan_shaping_posture),
             "allowed_depth": self.allowed_depth,
             "requires_self_review": self.requires_self_review,
             "may_escalate": self.may_escalate,
@@ -129,6 +160,7 @@ def build_reflection_trace(
     top_k_by_lane: Mapping[str, int],
     weight_by_lane: Optional[Mapping[str, float]] = None,
     geometric_context_present: bool,
+    memory_plan_shaping_posture: Optional[Mapping[str, bool]] = None,
     allowed_depth: int = 1,
     requires_self_review: bool = False,
     may_escalate: bool = False,
@@ -176,6 +208,9 @@ def build_reflection_trace(
         lane_budget_shape=lane_budget_shape,
         lane_weight_shape=lane_weight_shape,
         geometric_context_present=bool(geometric_context_present),
+        # Content-free fixed-key boolean posture; normalized again in
+        # ``__post_init__`` so the two keys are always present as plain booleans.
+        memory_plan_shaping_posture=(memory_plan_shaping_posture or {}),
         allowed_depth=int(allowed_depth),
         requires_self_review=bool(requires_self_review),
         may_escalate=bool(may_escalate),
