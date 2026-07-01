@@ -352,6 +352,7 @@ class ThinkingController:
             or relational_cue
             or retrieval_hint
             or "remember" in lower
+            or "recall" in lower
             or "before" in lower
             or "previous" in lower
             or "past" in lower

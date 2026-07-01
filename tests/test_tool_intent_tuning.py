@@ -337,6 +337,71 @@ class TestBucketC_RetrievalRoutesViaMemoryNeed:
 
 
 # ---------------------------------------------------------------------------
+# Recall cue (v0.1.0g) — explicit "recall" is a memory_need cue: a recall-only
+# prompt routes RETRIEVAL / ANSWER via the existing memory_need path (never tool).
+# ---------------------------------------------------------------------------
+
+_RECALL_ONLY_QUERIES = [
+    "Recall the plan for tomorrow.",
+    "Recall the address of the venue.",
+    "Recall the details from the briefing.",
+]
+
+
+class TestRecallCueRoutesViaMemoryNeed:
+    """v0.1.0g: an explicit "recall" cue contributes to frame.memory_need (NOT
+    tool_need), so a recall-only request routes to CognitiveMode.RETRIEVAL and
+    ActionType.ANSWER through the existing memory_need path and enables the
+    existing relational MemoryPlan lane. No new frame / plan / trace field."""
+
+    @pytest.mark.parametrize("query", _RECALL_ONLY_QUERIES)
+    def test_recall_sets_memory_need(self, query: str):
+        assert _frame(query).memory_need is True, (
+            f"{query!r} should set memory_need=True via the 'recall' cue"
+        )
+
+    @pytest.mark.parametrize("query", _RECALL_ONLY_QUERIES)
+    def test_recall_keeps_tool_need_false(self, query: str):
+        assert _frame(query).tool_need is False, (
+            f"{query!r} must NOT set tool_need=True (recall is not tool intent)"
+        )
+
+    @pytest.mark.parametrize("query", _RECALL_ONLY_QUERIES)
+    def test_recall_routes_to_retrieval_answer(self, query: str):
+        result = _tc.think("ws_test", "agent_test", query)
+        assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+        assert result.action_decision.action == ActionType.ANSWER
+
+    @pytest.mark.parametrize("query", _RECALL_ONLY_QUERIES)
+    def test_recall_enables_existing_relational_lane(self, query: str):
+        # Existing MemoryPlan relational lane enabled through the existing path:
+        # plan.retrieve_relational = memory_need or live_social. No new lane/field.
+        frame = _frame(query)
+        mode = _tc.choose_mode(frame)
+        plan = _tc.build_memory_plan(frame, mode)
+        assert plan.retrieve_relational is True
+        assert plan.top_k_by_lane["relational"] > 0
+        assert plan.weight_by_lane["relational"] > 0.0
+
+    def test_recall_with_execution_phrase_still_tool(self):
+        # Precedence: recall + explicit execution phrase still routes TOOL / USE_TOOL.
+        result = _tc.think("ws_test", "agent_test", "Recall the figures and compute them using python.")
+        assert result.task_frame.tool_need is True
+        assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+        assert result.action_decision.action == ActionType.USE_TOOL
+
+    def test_recall_with_analytical_phrase_stays_retrieval(self):
+        # Precedence: recall + analytical stays RETRIEVAL / ANSWER (memory_need is
+        # checked before the confidence_need REFLECTIVE branch).
+        result = _tc.think("ws_test", "agent_test", "Recall the design and analyze the tradeoffs.")
+        assert result.task_frame.memory_need is True
+        assert result.task_frame.tool_need is False
+        assert result.task_frame.confidence_need >= 0.60
+        assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+        assert result.action_decision.action == ActionType.ANSWER
+
+
+# ---------------------------------------------------------------------------
 # Phrase overrides — "using python" etc. should fire tool_need even if
 # the sentence also contains analytical/retrieval verbs.
 # ---------------------------------------------------------------------------

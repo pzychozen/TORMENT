@@ -306,3 +306,25 @@ def test_analytical_with_execution_phrase_still_routes_to_tool():
     assert result.task_frame.tool_need is True
     assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
     assert result.action_decision.action == ActionType.USE_TOOL
+
+
+def test_recall_prompt_routes_to_retrieval_via_memory_need():
+    # v0.1.0g: an explicit "recall" cue sets memory_need=True (not tool_need),
+    # so a recall-only prompt routes RETRIEVAL / ANSWER through the existing
+    # memory_need path and enables the relational MemoryPlan lane.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Recall the plan for tomorrow.")
+    assert result.task_frame.memory_need is True
+    assert result.task_frame.tool_need is False
+    assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+    assert result.action_decision.action == ActionType.ANSWER
+    assert result.memory_plan.retrieve_relational is True
+
+
+def test_recall_with_execution_phrase_still_routes_to_tool():
+    # Precedence guard: recall + explicit execution phrase -> TOOL / USE_TOOL.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Recall the figures and compute them using python.")
+    assert result.task_frame.tool_need is True
+    assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+    assert result.action_decision.action == ActionType.USE_TOOL
