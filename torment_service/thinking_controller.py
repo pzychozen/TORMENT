@@ -239,6 +239,18 @@ _GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE = os.environ.get(
     "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1", "0"
 ).strip() not in ("", "0", "false", "no", "off")
 
+# Relational ambiguity-prominence shaping v1 — a Layer-1 / MemoryPlan-shaping rule
+# that translates "high ambiguity / instability increases the usefulness of
+# relational context" into a small, bounded advisory LIFT on the already-enabled
+# ``relational`` lane WEIGHT (prominence). DEFAULT OFF. Opt-in, plan-boundary-only;
+# driven purely by the content-free ambiguity signal (``state.ambiguity_score``)
+# with NO dynamic-kernel / geometric-context coupling. No-op when the flag is off,
+# when ambiguity is not high, or when the relational lane is not already enabled.
+# Empty string is treated as OFF (same stricter default-off posture as the siblings).
+_RELATIONAL_AMBIGUITY_PROMINENCE_V1_ENABLE = os.environ.get(
+    "TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1", "0"
+).strip() not in ("", "0", "false", "no", "off")
+
 # Participation guidance v1 — surfaces a single visible advisory
 # ``participation_guidance`` candidate on the thinking/advisory audit surface
 # (``ThinkingResult.to_dict()`` / Spine ``audit["advisory_thinking"]``) ONLY. NOT
@@ -580,6 +592,14 @@ class ThinkingController:
         # is supplied. Disjoint from the core/deep shaping above — relational only.
         self._apply_geometric_relational_prominence_shaping_v1(plan, state, geometric_context)
 
+        # Relational ambiguity-prominence shaping v1 (default-off, separate flag):
+        # a small bounded advisory LIFT on the already-enabled relational lane weight
+        # when ambiguity is high. Content-free (``state.ambiguity_score`` only); NO
+        # dynamic-kernel coupling. Relational-only; never touches ``top_k_by_lane`` /
+        # retrieval booleans / other lanes / ``safety_constraints``. No-op unless its
+        # own flag is on, so the default-flag plan stays byte-identical to the above.
+        self._apply_relational_ambiguity_prominence_v1(plan, state)
+
         return plan
 
     def _apply_cognition_shaping_v2(
@@ -778,6 +798,57 @@ class ThinkingController:
         shaped = _clamp(current_relational_w * mult, 0.1, 2.0)
         # Peripheral ceiling: relational never reaches core's base prominence (1.0).
         _PERIPHERAL_CEILING = 0.99
+        plan.weight_by_lane["relational"] = min(shaped, _PERIPHERAL_CEILING)
+
+    def _apply_relational_ambiguity_prominence_v1(
+        self,
+        plan: MemoryPlan,
+        state: EphemeralCognitionState,
+    ) -> None:
+        """Relational ambiguity-prominence shaping v1 (default-off flag).
+
+        Translates the research principle "ambiguity / instability increases the
+        usefulness of relational context" into a small, bounded advisory LIFT on
+        the already-enabled ``relational`` lane WEIGHT (prominence), driven purely
+        by the content-free ``state.ambiguity_score``. Guidance, not control, and
+        it references NO dynamic-kernel machinery:
+
+          * No-op unless ``TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1`` is enabled.
+          * No-op unless ambiguity is HIGH (``ambiguity_score > 0.5``); the lift is a
+            monotone, bounded function of ambiguity above that threshold.
+          * Shapes ONLY ``weight_by_lane["relational"]`` and ONLY when that lane is
+            already enabled this turn (``retrieve_relational`` and weight > 0). Never
+            creates/enables the lane; never touches ``top_k_by_lane``, retrieval
+            booleans, ``core`` / ``deep`` / ``archive`` / ``collective`` weights,
+            ``safety_constraints`` or ``max_token_budget``.
+          * Governance-/identity-sensitive turns are skipped entirely (parity with
+            the geometric shaping siblings).
+          * LIFT-only + bounded: ``mult = 1.0 + 0.30 * clamp(ambiguity - 0.5, 0, 0.5)``
+            (in ``[1.0, 1.15]``); the shaped weight is re-clamped to ``[0.1, 2.0]`` and
+            held under a fixed peripheral ceiling (<= 0.99) so relational never reaches
+            core's base prominence (1.0) -- peripheral stays peripheral.
+        """
+        if not _RELATIONAL_AMBIGUITY_PROMINENCE_V1_ENABLE:
+            return
+        # Safety parity with the geometric helpers: skip governed / identity turns.
+        if state.governance_sensitive or state.identity_sensitive:
+            return
+
+        def _clamp(v: float, lo: float, hi: float) -> float:
+            return lo if v < lo else (hi if v > hi else v)
+
+        ambiguity = float(state.ambiguity_score)
+        if ambiguity <= 0.5:  # only HIGH ambiguity lifts relational prominence
+            return
+
+        # relational lane only; shape only when it is already enabled this turn.
+        current_relational_w = plan.weight_by_lane.get("relational", 0.0)
+        if not (plan.retrieve_relational and current_relational_w > 0.0):
+            return
+
+        mult = 1.0 + 0.30 * _clamp(ambiguity - 0.5, 0.0, 0.5)  # in [1.0, 1.15]
+        shaped = _clamp(current_relational_w * mult, 0.1, 2.0)
+        _PERIPHERAL_CEILING = 0.99  # relational never reaches core's base prominence (1.0)
         plan.weight_by_lane["relational"] = min(shaped, _PERIPHERAL_CEILING)
 
     def choose_action(
