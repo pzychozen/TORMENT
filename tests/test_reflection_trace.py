@@ -684,5 +684,100 @@ class TestThinkPathContentLeakGuard:
         )
 
 
+# ---------------------------------------------------------------------------
+# 3b. MemoryPlan observability maps on ThinkingResult.to_dict()["reflection_trace"]
+# ---------------------------------------------------------------------------
+#
+# The three MemoryPlan observability maps must surface on the /thinking/debug
+# serialization (ThinkingResult.to_dict()["reflection_trace"]) AND stay
+# content-free / DERIVED diagnostic maps: fixed string keys -> primitive
+# bool/int values only, carrying no raw input / prompt / reasoning text. The
+# fixed key sets are hard-coded here (not imported from production) so any drift
+# in the exposed shape is a visible, reviewed diff in this lock.
+
+_MEMORY_PLAN_MAP_FIELDS = (
+    "memory_plan_shaping_posture",
+    "memory_plan_quality",
+    "memory_plan_sufficiency_advisory",
+)
+_EXPECTED_SHAPING_POSTURE_KEYS = {
+    "relational_ambiguity_prominence",
+    "ambiguity_context_diversity",
+}
+_EXPECTED_QUALITY_KEYS = {
+    "active_lane_count",
+    "non_core_active_lane_count",
+    "total_lane_budget",
+    "thin_context",
+    "low_confidence_need",
+    "shaping_reflex_count",
+    "heavily_shaped",
+}
+_EXPECTED_SUFFICIENCY_KEYS = {
+    "thin_context_candidate",
+    "low_confidence_candidate",
+    "heavily_shaped_candidate",
+    "nominal_plan_candidate",
+}
+
+
+class TestMemoryPlanObservabilityMapsOnToDict:
+    """ThinkingResult.to_dict()["reflection_trace"] exposes the three MemoryPlan
+    observability maps, and each is a content-free / DERIVED diagnostic map
+    (fixed string keys -> primitive bool/int values), never raw text, prompt, or
+    private-reasoning content. This mirrors the /thinking/debug surface:
+    thinking_models.py serializes reflection_trace ONLY via to_dict()."""
+
+    def _trace_dict(self, raw_input="What do I recall about the plan?", **kw):
+        result = ThinkingController().think(
+            workspace_id="ws", agent_id="ag", raw_input=raw_input, **kw
+        )
+        assert isinstance(result, ThinkingResult)
+        d = result.to_dict()
+        assert d.get("reflection_trace") is not None
+        return d["reflection_trace"]
+
+    def test_maps_present_and_are_dicts(self):
+        rt = self._trace_dict()
+        for name in _MEMORY_PLAN_MAP_FIELDS:
+            assert name in rt, f"reflection_trace missing MemoryPlan map {name!r}"
+            assert isinstance(rt[name], dict), f"{name} must serialize as a map/dict"
+
+    def test_map_key_sets_are_fixed_content_free_shape(self):
+        rt = self._trace_dict()
+        assert set(rt["memory_plan_shaping_posture"]) == _EXPECTED_SHAPING_POSTURE_KEYS
+        assert set(rt["memory_plan_quality"]) == _EXPECTED_QUALITY_KEYS
+        assert set(rt["memory_plan_sufficiency_advisory"]) == _EXPECTED_SUFFICIENCY_KEYS
+
+    def test_map_values_are_primitives_not_text(self):
+        rt = self._trace_dict()
+        # posture + advisory: plain bool only (bool, never text / never bare int)
+        for name in ("memory_plan_shaping_posture", "memory_plan_sufficiency_advisory"):
+            for k, v in rt[name].items():
+                assert isinstance(k, str), f"{name} has non-str key {k!r}"
+                assert type(v) is bool, f"{name}[{k!r}] = {v!r} is not a plain bool"
+        # quality: int/bool only (bool subclasses int); never float / str / text
+        for k, v in rt["memory_plan_quality"].items():
+            assert isinstance(k, str), f"quality has non-str key {k!r}"
+            assert type(v) in (int, bool), f"quality[{k!r}] = {v!r} is not int/bool"
+
+    def test_map_keys_do_not_collide_with_content_denylist(self):
+        rt = self._trace_dict()
+        for name in _MEMORY_PLAN_MAP_FIELDS:
+            leaked = set(rt[name]) & _FORBIDDEN_CONTENT_FIELDS
+            assert leaked == set(), f"{name} exposes content-bearing key(s): {leaked!r}"
+
+    def test_raw_input_token_absent_from_memory_plan_maps(self):
+        # Value-level content-freeness: a distinctive raw_input marker must not
+        # surface anywhere in the serialized MemoryPlan maps (mirrors the
+        # TestThinkPathContentLeakGuard pattern, scoped to these three maps).
+        token = "ZZQ_MEMPLAN_MARKER_4B7E"
+        rt = self._trace_dict(raw_input=f"please remember {token} about the plan")
+        blob = json.dumps({k: rt[k] for k in _MEMORY_PLAN_MAP_FIELDS})
+        assert token not in blob, (
+            "raw_input content leaked into a MemoryPlan observability map"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

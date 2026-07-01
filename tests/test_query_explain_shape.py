@@ -75,6 +75,23 @@ EXPECTED_QUERY_EXPLAIN_KEYS = frozenset({
 })
 
 
+# --- Cross-surface boundary: retrieval lane-scoring keys vs ReflectionTrace-only
+# --- MemoryPlan metacognition maps. query()/trace() per-hit explain are RETRIEVAL
+# --- lane-scoring surfaces. The MemoryPlan *observability* maps (shaping posture /
+# --- quality / sufficiency advisory) live ONLY on ReflectionTrace
+# --- (ThinkingResult.to_dict()); they must never appear on the retrieval explain.
+REQUIRED_LANE_SCORING_KEYS = frozenset({
+    "memory_plan_lane",
+    "lane_weight",
+    "lane_weight_applied",
+})
+FORBIDDEN_REFLECTION_TRACE_MAP_KEYS = frozenset({
+    "memory_plan_shaping_posture",
+    "memory_plan_quality",
+    "memory_plan_sufficiency_advisory",
+})
+
+
 class TestQueryExplainShape(unittest.TestCase):
     """Pin query().explain shape and its parity with trace()."""
 
@@ -197,6 +214,51 @@ class TestQueryExplainShape(unittest.TestCase):
         q_weights = self._query_hit()["explain"].get("weights")
         t_weights = self._trace_explain().get("weights")
         self.assertEqual(q_weights, t_weights)
+
+
+    # -- 6. explain surfaces stay retrieval lane-scoring, not metacognition ----
+    def test_explain_surfaces_are_lane_scoring_only(self):
+        """query().explain and trace().explain remain RETRIEVAL lane-scoring
+        surfaces: they preserve the lane-scoring parity keys and expose NONE of
+        the ReflectionTrace-only MemoryPlan metacognition maps (shaping posture /
+        quality / sufficiency advisory)."""
+        hit = self._query_hit()
+        q_explain = hit["explain"]
+        t_explain = self._trace_explain()
+
+        # retrieval lane-scoring keys preserved on BOTH explain surfaces
+        for key in REQUIRED_LANE_SCORING_KEYS:
+            self.assertIn(key, q_explain, f"query().explain lost lane-scoring key {key!r}")
+            self.assertIn(key, t_explain, f"trace().explain lost lane-scoring key {key!r}")
+
+        # they are scalar retrieval scores, not maps: lane label (str), weight
+        # (numeric, not bool), applied flag (bool) — never a nested metacognition map.
+        for ex in (q_explain, t_explain):
+            self.assertIsInstance(ex["memory_plan_lane"], str)
+            self.assertIsInstance(ex["lane_weight"], (int, float))
+            self.assertNotIsInstance(ex["lane_weight"], bool)
+            self.assertIsInstance(ex["lane_weight_applied"], bool)
+
+        # ReflectionTrace-only metacognition maps must NOT appear on either
+        # explain surface, nor at the query() hit top level.
+        for key in FORBIDDEN_REFLECTION_TRACE_MAP_KEYS:
+            self.assertNotIn(key, q_explain, f"query().explain leaked metacognition map {key!r}")
+            self.assertNotIn(key, t_explain, f"trace().explain leaked metacognition map {key!r}")
+            self.assertNotIn(key, hit, f"query() hit top level leaked metacognition map {key!r}")
+
+    # -- 7. lane-scoring vs metacognition sets are disjoint & non-vacuous ------
+    def test_lane_scoring_and_metacognition_sets_are_disjoint(self):
+        """Guard so the boundary lock cannot pass vacuously: the retrieval
+        lane-scoring keys are a subset of the pinned parity baseline, while the
+        forbidden ReflectionTrace-only maps are disjoint from it (and from the
+        lane-scoring keys)."""
+        self.assertEqual(
+            REQUIRED_LANE_SCORING_KEYS & FORBIDDEN_REFLECTION_TRACE_MAP_KEYS, frozenset()
+        )
+        self.assertTrue(REQUIRED_LANE_SCORING_KEYS <= EXPECTED_QUERY_EXPLAIN_KEYS)
+        self.assertEqual(
+            FORBIDDEN_REFLECTION_TRACE_MAP_KEYS & EXPECTED_QUERY_EXPLAIN_KEYS, frozenset()
+        )
 
 
 if __name__ == "__main__":
