@@ -53,6 +53,7 @@ _SHAPING_FLAGS = (
     "_COGNITION_CORE_SHAPING_V1_ENABLE",
     "_GEOMETRIC_MEMORY_SHAPING_V1_ENABLE",
     "_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE",
+    "_AMBIGUITY_CONTEXT_DIVERSITY_V1_ENABLE",
 )
 
 
@@ -183,7 +184,8 @@ class TestDefaultOffGates(unittest.TestCase):
         for var in ("TORMENT_COGNITION_SHAPING_V2",
                     "TORMENT_COGNITION_CORE_SHAPING_V1",
                     "TORMENT_GEOMETRIC_MEMORY_SHAPING_V1",
-                    "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1"):
+                    "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1",
+                    "TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1"):
             self.assertEqual(_env_get_default(t, var), "0",
                              msg=f"{var} should default-off (\"0\")")
 
@@ -279,6 +281,7 @@ class TestShapingBehaviouralScope(unittest.TestCase):
             c._apply_cognition_core_shaping_v1(plan, _state(confidence_need=1.0))
             c._apply_geometric_memory_shaping_v1(plan, _state(), _geo())
             c._apply_geometric_relational_prominence_shaping_v1(plan, _state(), _geo())
+            c._apply_ambiguity_context_diversity_v1(plan, _state(ambiguity_score=1.0))
         self.assertEqual((dict(plan.weight_by_lane), dict(plan.top_k_by_lane)), before)
 
 
@@ -306,13 +309,26 @@ class TestShapingLaneOwnershipSource(unittest.TestCase):
         self.assertEqual(_assigned_subscript_keys(m, "weight_by_lane"), {"relational"})
         self.assertEqual(_assigned_subscript_keys(m, "top_k_by_lane"), set())
 
-    def test_only_cognition_rules_shape_top_k_and_only_deep_core(self):
+    def test_top_k_shaping_owned_by_cognition_and_ambiguity_diversity_only(self):
+        # top_k budget shaping is owned by exactly three helpers, each with a locked
+        # lane set and NO weight writes:
+        #   * cognition-v2          -> {deep}
+        #   * cognition-core        -> {core}
+        #   * ambiguity-diversity   -> {deep, relational, archive, collective} (NEVER core)
         v2 = self._m("_apply_cognition_shaping_v2")
         core = self._m("_apply_cognition_core_shaping_v1")
         self.assertEqual(_assigned_subscript_keys(v2, "top_k_by_lane"), {"deep"})
         self.assertEqual(_assigned_subscript_keys(v2, "weight_by_lane"), set())
         self.assertEqual(_assigned_subscript_keys(core, "top_k_by_lane"), {"core"})
         self.assertEqual(_assigned_subscript_keys(core, "weight_by_lane"), set())
+
+        amb = self._m("_apply_ambiguity_context_diversity_v1")
+        self.assertEqual(_assigned_subscript_keys(amb, "top_k_by_lane"),
+                         {"deep", "relational", "archive", "collective"})
+        # NON-CORE only: the diversity rule never broadens core.
+        self.assertNotIn("core", _assigned_subscript_keys(amb, "top_k_by_lane"))
+        # top-k-only: it writes NO lane weights (no weight-control path).
+        self.assertEqual(_assigned_subscript_keys(amb, "weight_by_lane"), set())
 
     def test_relational_ceiling_literal_present(self):
         # The doctrine-bearing peripheral ceiling is locked (not the tunable mult).
@@ -327,7 +343,8 @@ class TestShapingLaneOwnershipSource(unittest.TestCase):
                      "spawn_memory", "add_memory", "complete", "run_turn"}
         for name in ("_apply_cognition_shaping_v2", "_apply_cognition_core_shaping_v1",
                      "_apply_geometric_memory_shaping_v1",
-                     "_apply_geometric_relational_prominence_shaping_v1"):
+                     "_apply_geometric_relational_prominence_shaping_v1",
+                     "_apply_ambiguity_context_diversity_v1"):
             called = {n.func.attr for n in ast.walk(self._m(name))
                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
             called |= {n.func.id for n in ast.walk(self._m(name))
@@ -347,7 +364,8 @@ class TestSocialResonanceConsumptionBoundary(unittest.TestCase):
         for name in ("build_memory_plan", "_apply_cognition_shaping_v2",
                      "_apply_cognition_core_shaping_v1",
                      "_apply_geometric_memory_shaping_v1",
-                     "_apply_geometric_relational_prominence_shaping_v1"):
+                     "_apply_geometric_relational_prominence_shaping_v1",
+                     "_apply_ambiguity_context_diversity_v1"):
             m = _method(t, "ThinkingController", name)
             self.assertIsNotNone(m)
             self.assertNotIn("social_resonance", _idents(m),

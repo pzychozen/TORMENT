@@ -251,6 +251,20 @@ _RELATIONAL_AMBIGUITY_PROMINENCE_V1_ENABLE = os.environ.get(
     "TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1", "0"
 ).strip() not in ("", "0", "false", "no", "off")
 
+# Ambiguity context-diversity shaping v1 — a Layer-1 / MemoryPlan-shaping rule that
+# translates "high ambiguity should not over-collapse context into a single lane"
+# into a small, bounded advisory LIFT on the already-enabled non-core lane BUDGETS
+# (``top_k_by_lane``), NOT weights. DEFAULT OFF. Opt-in, plan-boundary-only; driven
+# purely by the content-free ambiguity signal (``state.ambiguity_score``) with NO
+# dynamic-kernel / geometric-context coupling. It never enables a disabled lane,
+# never touches ``core``, and never touches ``weight_by_lane`` / retrieval booleans /
+# ``safety_constraints`` / ``max_token_budget``. No-op when the flag is off, when
+# ambiguity is not high, or on identity-/governance-sensitive turns.
+# Empty string is treated as OFF (same stricter default-off posture as the siblings).
+_AMBIGUITY_CONTEXT_DIVERSITY_V1_ENABLE = os.environ.get(
+    "TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1", "0"
+).strip() not in ("", "0", "false", "no", "off")
+
 # Participation guidance v1 — surfaces a single visible advisory
 # ``participation_guidance`` candidate on the thinking/advisory audit surface
 # (``ThinkingResult.to_dict()`` / Spine ``audit["advisory_thinking"]``) ONLY. NOT
@@ -600,6 +614,16 @@ class ThinkingController:
         # own flag is on, so the default-flag plan stays byte-identical to the above.
         self._apply_relational_ambiguity_prominence_v1(plan, state)
 
+        # Ambiguity context-diversity shaping v1 (default-off, separate flag): under
+        # HIGH ambiguity, give the already-enabled non-core lanes a tiny bounded +1
+        # budget lift so context is not over-collapsed into a single lane. Content-free
+        # (``state.ambiguity_score`` only); NO dynamic-kernel coupling. Budget-only:
+        # touches ONLY ``top_k_by_lane`` for already-enabled non-core lanes, never
+        # ``core`` / ``weight_by_lane`` / retrieval booleans / ``safety_constraints`` /
+        # ``max_token_budget``, and never enables a disabled lane. No-op unless its own
+        # flag is on, so the default-flag plan stays byte-identical to the above.
+        self._apply_ambiguity_context_diversity_v1(plan, state)
+
         return plan
 
     def _apply_cognition_shaping_v2(
@@ -850,6 +874,52 @@ class ThinkingController:
         shaped = _clamp(current_relational_w * mult, 0.1, 2.0)
         _PERIPHERAL_CEILING = 0.99  # relational never reaches core's base prominence (1.0)
         plan.weight_by_lane["relational"] = min(shaped, _PERIPHERAL_CEILING)
+
+    def _apply_ambiguity_context_diversity_v1(
+        self, plan: MemoryPlan, state: EphemeralCognitionState
+    ) -> None:
+        """Bounded non-core BUDGET diversity under high ambiguity (default OFF).
+
+        Rule (env flag ``TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1``): when ambiguity is
+        HIGH, avoid over-collapsing retrieval into a single lane by giving each
+        already-enabled NON-CORE lane a tiny, bounded ``+1`` budget lift on
+        ``top_k_by_lane`` (capped per lane). It is:
+
+          * BUDGET-ONLY: mutates ONLY ``top_k_by_lane``; never ``weight_by_lane``,
+            retrieval booleans, ``safety_constraints``, or ``max_token_budget``.
+          * NON-CORE-ONLY: ``core`` is never touched.
+          * NON-ENABLING: a lane that is disabled (retrieval flag off or budget 0)
+            stays at 0 — this never turns a lane on.
+          * CONTENT-FREE: driven purely by ``state.ambiguity_score``; NO
+            dynamic-kernel / geometric-context coupling.
+          * PER-LANE CAPPED: each lift is ``min(current + 1, cap)`` so budgets stay
+            small (deep<=4, relational<=5, archive<=5, collective<=3).
+
+        No-op when the flag is off, when ambiguity is not high (``<= 0.5``), or on
+        identity-/governance-sensitive turns (safety parity with the siblings).
+        """
+        if not _AMBIGUITY_CONTEXT_DIVERSITY_V1_ENABLE:
+            return
+        # Safety parity with the ambiguity/geometric helpers: skip governed / identity.
+        if state.governance_sensitive or state.identity_sensitive:
+            return
+        if float(state.ambiguity_score) <= 0.5:  # only HIGH ambiguity broadens budgets
+            return
+
+        # BUDGET-ONLY, NON-CORE, NON-ENABLING, PER-LANE CAPPED. ``core`` is never a
+        # target below (it is never broadened). Each non-core lane is broadened by +1
+        # ONLY when it is already enabled (retrieval flag on AND current budget > 0);
+        # the per-lane cap keeps each budget small. Explicit constant-key assignments
+        # (not a dynamic loop) so the lane ownership stays AST-lockable, matching the
+        # sibling top_k helpers.
+        if plan.retrieve_deep and plan.top_k_by_lane.get("deep", 0) > 0:
+            plan.top_k_by_lane["deep"] = min(plan.top_k_by_lane["deep"] + 1, 4)
+        if plan.retrieve_relational and plan.top_k_by_lane.get("relational", 0) > 0:
+            plan.top_k_by_lane["relational"] = min(plan.top_k_by_lane["relational"] + 1, 5)
+        if plan.retrieve_archive and plan.top_k_by_lane.get("archive", 0) > 0:
+            plan.top_k_by_lane["archive"] = min(plan.top_k_by_lane["archive"] + 1, 5)
+        if plan.retrieve_collective and plan.top_k_by_lane.get("collective", 0) > 0:
+            plan.top_k_by_lane["collective"] = min(plan.top_k_by_lane["collective"] + 1, 3)
 
     def choose_action(
         self,
