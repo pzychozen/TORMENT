@@ -700,6 +700,12 @@ class AgentRunner:
             },
             top_k_by_lane=bundle.memory_plan.top_k_by_lane,
             weight_by_lane=bundle.memory_plan.weight_by_lane,
+            # Observability parity with think(): forward the effective plan's
+            # content-free shaping posture so the runner trace's posture-derived
+            # quality fields (shaping_reflex_count / heavily_shaped) don't
+            # under-report shaping intensity. Diagnostic attribute only; nothing
+            # branches on it and it never reaches prompts/fabric/tool/outcome.
+            memory_plan_shaping_posture=getattr(bundle.memory_plan, "_shaping_posture", None),
             geometric_context_present=False,
             allowed_depth=bundle.mode_decision.allowed_depth,
             requires_self_review=bundle.mode_decision.requires_self_review,
