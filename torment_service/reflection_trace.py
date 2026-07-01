@@ -53,6 +53,20 @@ _MEMORY_PLAN_QUALITY_KEYS = (
     "heavily_shaped",
 )
 
+# Fixed, content-free keys for the derived MemoryPlan sufficiency advisory. Each is
+# a plain bool DERIVED ONLY from the already-normalized ``memory_plan_quality`` map
+# (thin_context / low_confidence_need / heavily_shaped), plus a ``nominal`` flag that
+# is True only when none of those three candidates fire. These keys are ALWAYS
+# present (computed in ``ReflectionTrace.__post_init__``); no value is ever supplied
+# by a caller, so no stray key or raw text can enter this map. Advisory / observation
+# only — nothing branches on it.
+_MEMORY_PLAN_SUFFICIENCY_ADVISORY_KEYS = (
+    "thin_context_candidate",
+    "low_confidence_candidate",
+    "heavily_shaped_candidate",
+    "nominal_plan_candidate",
+)
+
 
 @dataclass(frozen=True)
 class ReflectionTrace:
@@ -92,6 +106,15 @@ class ReflectionTrace:
     # by the derived map. Carries no raw text / prompt / reasoning / provider /
     # output-decision / candidate content, and nothing branches on it.
     memory_plan_quality: Mapping[str, Any] = field(default_factory=dict)
+
+    # --- MemoryPlan sufficiency advisory (content-free, DERIVED) ---
+    # Coarse bool advisory of whether the plan looks thin / low-confidence / heavily
+    # shaped, or nominal — derived in ``__post_init__`` ONLY from the already-derived
+    # ``memory_plan_quality`` map. Fixed keys, bool values only; any value passed for
+    # this field is IGNORED and replaced by the derived map. Advisory / observation
+    # only: nothing branches on it, and it carries no raw text / prompt / reasoning /
+    # provider / output-decision / candidate content.
+    memory_plan_sufficiency_advisory: Mapping[str, bool] = field(default_factory=dict)
 
     # --- v0.2 coarse mode shape (CognitiveModeDecision) ---
     allowed_depth: int = 1
@@ -174,6 +197,24 @@ class ReflectionTrace:
                 "heavily_shaped": bool(_heavily_shaped),
             }),
         )
+        # Derive the content-free sufficiency advisory ONLY from the just-derived
+        # ``memory_plan_quality`` map above — no raw text, no new inputs. The three
+        # candidates mirror quality flags; ``nominal`` is True only when none fire.
+        # Any value passed in for this field is ignored and replaced. bool only.
+        _q = self.memory_plan_quality
+        _thin_cand = bool(_q["thin_context"])
+        _low_cand = bool(_q["low_confidence_need"])
+        _heavy_cand = bool(_q["heavily_shaped"])
+        object.__setattr__(
+            self,
+            "memory_plan_sufficiency_advisory",
+            MappingProxyType({
+                "thin_context_candidate": _thin_cand,
+                "low_confidence_candidate": _low_cand,
+                "heavily_shaped_candidate": _heavy_cand,
+                "nominal_plan_candidate": not (_thin_cand or _low_cand or _heavy_cand),
+            }),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to plain primitives for inspection surfaces only
@@ -189,6 +230,7 @@ class ReflectionTrace:
             "geometric_context_present": self.geometric_context_present,
             "memory_plan_shaping_posture": dict(self.memory_plan_shaping_posture),
             "memory_plan_quality": dict(self.memory_plan_quality),
+            "memory_plan_sufficiency_advisory": dict(self.memory_plan_sufficiency_advisory),
             "allowed_depth": self.allowed_depth,
             "requires_self_review": self.requires_self_review,
             "may_escalate": self.may_escalate,
