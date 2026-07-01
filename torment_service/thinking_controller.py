@@ -94,6 +94,18 @@ RETRIEVAL_HINT_WORDS = {
     "scan",
 }
 
+# v0.1.0h: recall / prior-context memory cues (the inline cues previously spelled
+# out in frame_task's memory_need expression). Matched at WORD boundaries via
+# ThinkingController._has_any_word — never as raw substrings — so accidental
+# embeddings like "pastel"->"past" do NOT signal memory intent.
+_MEMORY_CUE_WORDS = {
+    "remember",
+    "recall",
+    "before",
+    "previous",
+    "past",
+}
+
 GOVERNANCE_HINT_WORDS = {
     "delete",
     "remove",
@@ -344,18 +356,19 @@ class ThinkingController:
         # request routes to CognitiveMode.RETRIEVAL and stays ActionType.ANSWER
         # via the existing memory_need path. Reuses RETRIEVAL_HINT_WORDS (until
         # now declared but unmapped) — no new frame / plan / trace field.
-        retrieval_hint = self._has_any(lower, RETRIEVAL_HINT_WORDS)
+        # v0.1.0h: retrieval + recall/prior-context memory cues are matched at
+        # WORD boundaries (self._has_any_word), not as raw substrings, so
+        # accidental embeddings (bread->read, pastel->past, scanline->scan,
+        # opening->open) do NOT set memory_need. tool_need and every other cue
+        # family are unchanged.
+        retrieval_hint = self._has_any_word(lower, RETRIEVAL_HINT_WORDS)
 
         memory_need = bool(
             archive_relevant
             or identity_sensitive
             or relational_cue
             or retrieval_hint
-            or "remember" in lower
-            or "recall" in lower
-            or "before" in lower
-            or "previous" in lower
-            or "past" in lower
+            or self._has_any_word(lower, _MEMORY_CUE_WORDS)
             or token_count > 25
         )
 
@@ -1238,6 +1251,23 @@ class ThinkingController:
     @staticmethod
     def _has_any(text: str, hints: set[str]) -> bool:
         return any(h in text for h in hints)
+
+    @staticmethod
+    def _has_any_word(text: str, cues) -> bool:
+        """Whole-word cue match for memory / retrieval intent (v0.1.0h).
+
+        A cue counts only as a standalone word — bounded by string start/end or
+        a non-alphanumeric character — so accidental substrings do NOT signal
+        intent (e.g. "bread"->"read", "pastel"->"past", "scanline"->"scan",
+        "opening"->"open"). ``text`` is expected already lower-cased. Used only
+        for the retrieval (RETRIEVAL_HINT_WORDS) and recall/prior-context
+        (_MEMORY_CUE_WORDS) cue sets; other cue families keep their existing
+        substring matching via ``_has_any``.
+        """
+        for cue in cues:
+            if re.search(r"(?<![a-z0-9])" + re.escape(cue) + r"(?![a-z0-9])", text):
+                return True
+        return False
 
     @staticmethod
     def _estimate_urgency(text: str) -> float:

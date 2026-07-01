@@ -328,3 +328,25 @@ def test_recall_with_execution_phrase_still_routes_to_tool():
     assert result.task_frame.tool_need is True
     assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
     assert result.action_decision.action == ActionType.USE_TOOL
+
+
+def test_accidental_cue_substring_stays_fast_not_retrieval():
+    # v0.1.0h: word-boundary cue matching — "bread" contains "read" but must NOT
+    # trigger memory_need; the turn stays FAST / ANSWER (no accidental retrieval).
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "The bread is fresh today.")
+    assert result.task_frame.memory_need is False
+    assert result.task_frame.tool_need is False
+    assert result.mode_decision.chosen_mode == CognitiveMode.FAST
+    assert result.action_decision.action == ActionType.ANSWER
+
+
+def test_whole_word_recall_still_routes_retrieval():
+    # Positive: the whole word "recall" still routes RETRIEVAL / ANSWER via
+    # memory_need after boundary-tightening.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Recall the address of the venue.")
+    assert result.task_frame.memory_need is True
+    assert result.task_frame.tool_need is False
+    assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+    assert result.action_decision.action == ActionType.ANSWER

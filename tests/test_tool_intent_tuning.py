@@ -402,6 +402,82 @@ class TestRecallCueRoutesViaMemoryNeed:
 
 
 # ---------------------------------------------------------------------------
+# Memory/retrieval cue WORD-BOUNDARY hardening (v0.1.0h) — real cues still route
+# RETRIEVAL / ANSWER; accidental substrings (bread->read, pastel->past,
+# scanline->scan, opening->open) do NOT set memory_need and stay FAST / ANSWER.
+# ---------------------------------------------------------------------------
+
+# Prompts whose ONLY apparent cue is an accidental substring of a real cue word;
+# each has no other memory/tool/analytical signal, so it must stay FAST / ANSWER.
+_SUBSTRING_NON_CUE_QUERIES = [
+    "The bread is fresh today.",         # 'bread' contains 'read'
+    "The pastel palette is pleasant.",   # 'pastel' contains 'past'
+    "The scanline flickers on screen.",  # 'scanline' contains 'scan'
+    "The opening ceremony was lovely.",  # 'opening' contains 'open'
+]
+
+
+class TestMemoryCueWordBoundary:
+    """v0.1.0h: memory/retrieval cues match at WORD boundaries. Real cue words
+    still route through memory_need -> RETRIEVAL / ANSWER (and enable the
+    existing relational lane); accidental substrings do NOT set memory_need and
+    stay FAST / ANSWER. tool_need and the mode lattice are unchanged; no new
+    field / shaper / advisory / consumer."""
+
+    # -- real cues still route retrieval --
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_real_retrieval_cue_still_routes_retrieval(self, query: str):
+        f = _frame(query)
+        assert f.memory_need is True
+        assert f.tool_need is False
+        assert _mode(query) == CognitiveMode.RETRIEVAL
+
+    @pytest.mark.parametrize("query", _RECALL_ONLY_QUERIES)
+    def test_real_recall_cue_still_routes_retrieval(self, query: str):
+        f = _frame(query)
+        assert f.memory_need is True
+        assert f.tool_need is False
+        result = _tc.think("ws_test", "agent_test", query)
+        assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+        assert result.action_decision.action == ActionType.ANSWER
+
+    def test_real_memory_cue_enables_relational_lane(self):
+        frame = _frame("Recall the plan for tomorrow.")
+        plan = _tc.build_memory_plan(frame, _tc.choose_mode(frame))
+        assert plan.retrieve_relational is True
+        assert plan.top_k_by_lane["relational"] > 0
+        assert plan.weight_by_lane["relational"] > 0.0
+
+    def test_execution_phrase_still_wins(self):
+        result = _tc.think("ws_test", "agent_test", "Recall the figures and compute them using python.")
+        assert result.task_frame.tool_need is True
+        assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+        assert result.action_decision.action == ActionType.USE_TOOL
+
+    # -- accidental substrings do NOT trigger memory intent --
+    @pytest.mark.parametrize("query", _SUBSTRING_NON_CUE_QUERIES)
+    def test_substring_does_not_set_memory_need(self, query: str):
+        f = _frame(query)
+        assert f.memory_need is False, (
+            f"{query!r} must not set memory_need via an accidental cue substring"
+        )
+        assert f.tool_need is False
+
+    @pytest.mark.parametrize("query", _SUBSTRING_NON_CUE_QUERIES)
+    def test_substring_stays_fast_answer(self, query: str):
+        result = _tc.think("ws_test", "agent_test", query)
+        assert result.mode_decision.chosen_mode == CognitiveMode.FAST
+        assert result.action_decision.action == ActionType.ANSWER
+
+    def test_no_new_advisory_or_shaper_surface(self):
+        # Boundary-hardening adds no field / advisory / shaper / consumer.
+        f = _frame("Recall the plan for tomorrow.")
+        for name in ("memory_plan_sufficiency_advisory", "memory_plan_quality",
+                     "memory_plan_shaping_posture"):
+            assert not hasattr(f, name)
+
+
+# ---------------------------------------------------------------------------
 # Phrase overrides — "using python" etc. should fire tool_need even if
 # the sentence also contains analytical/retrieval verbs.
 # ---------------------------------------------------------------------------
