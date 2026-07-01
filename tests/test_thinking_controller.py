@@ -284,3 +284,25 @@ def test_retrieval_verb_with_execution_phrase_still_routes_to_tool():
     assert result.task_frame.tool_need is True
     assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
     assert result.action_decision.action == ActionType.USE_TOOL
+
+
+def test_analytical_imperative_routes_to_reflective_via_confidence_floor():
+    # v0.1.0f: a non-question analytical imperative floors confidence_need to
+    # >= 0.60 and routes to REFLECTIVE (not FAST) with tool_need False and
+    # ANSWER — no stronger priority (governance/identity/tool/memory) applies.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Analyze the tradeoffs in this proposal.")
+    assert result.task_frame.confidence_need >= 0.60
+    assert result.task_frame.tool_need is False
+    assert result.mode_decision.chosen_mode == CognitiveMode.REFLECTIVE
+    assert result.action_decision.action == ActionType.ANSWER
+
+
+def test_analytical_with_execution_phrase_still_routes_to_tool():
+    # Precedence guard: analytical verb + explicit execution phrase → TOOL /
+    # USE_TOOL. The analytical confidence floor does not suppress real tool intent.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Analyze this dataset using python.")
+    assert result.task_frame.tool_need is True
+    assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+    assert result.action_decision.action == ActionType.USE_TOOL

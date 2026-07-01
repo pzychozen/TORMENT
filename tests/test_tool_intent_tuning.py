@@ -136,12 +136,11 @@ class TestBucketB_AnalyticalNotTool:
         )
 
     def test_analytical_question_reaches_reflective(self):
-        """Analytical QUESTIONS (with ?) should reach REFLECTIVE via
-        analytical-depth + has_question combining into
-        confidence_need >= 0.60. Non-question analytical statements
-        may stay in FAST — that's §2A / choose_mode behavior, not a
-        v0.1.0d contract. v0.1.0d's guarantee is: analytical verbs
-        do not trigger TOOL."""
+        """Analytical QUESTIONS (with ?) reach REFLECTIVE via analytical-depth
+        + has_question. As of v0.1.0f, NON-question analytical imperatives also
+        reach REFLECTIVE through the analytical-depth confidence_need floor
+        (>= 0.60) — see TestBucketB_AnalyticalImperativeReflectiveFloor. v0.1.0d's
+        guarantee still holds: analytical verbs do not trigger TOOL."""
         mode = _mode("Why does this recursive pattern keep reappearing?")
         assert mode == CognitiveMode.REFLECTIVE, (
             f"expected REFLECTIVE, got {mode.value!r}"
@@ -184,6 +183,79 @@ class TestBucketC_RetrievalUnmapped:
             f"{query!r} routed to TOOL — retrieval verbs should not, "
             f"they're unmapped. got {mode.value!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bucket B (v0.1.0f) — analytical-depth cues impose a confidence_need floor of
+# >= 0.60, so NON-question analytical imperatives route to REFLECTIVE (not FAST)
+# via the existing choose_mode branch. tool_need stays False; action stays ANSWER.
+# ---------------------------------------------------------------------------
+
+# Clean non-question analytical imperatives (>= 4 words, no "?", and no
+# retrieval / tool / governance / identity / live-social / relational confounds),
+# so the ONLY escalation signal is the analytical-depth confidence floor.
+_ANALYTICAL_IMPERATIVE_QUERIES = [
+    "Analyze the tradeoffs in this proposal.",
+    "Explain how this module behaves.",
+    "Debug the failing branch in this routine.",
+    "Inspect the structure of this payload.",
+    "Check the consistency of these outputs.",
+]
+
+
+class TestBucketB_AnalyticalImperativeReflectiveFloor:
+    """v0.1.0f: analytical-depth cues impose a confidence_need floor of >= 0.60,
+    so a NON-question analytical imperative routes to CognitiveMode.REFLECTIVE
+    (not FAST) via the existing choose_mode branch — while tool_need stays False
+    and the action stays ANSWER. No new frame / plan / trace field, shaper, or
+    advisory."""
+
+    @pytest.mark.parametrize("query", _ANALYTICAL_IMPERATIVE_QUERIES)
+    def test_analytical_imperative_confidence_floor(self, query: str):
+        assert _frame(query).confidence_need >= 0.60, (
+            f"{query!r} should floor confidence_need to >= 0.60 (analytical depth)"
+        )
+
+    @pytest.mark.parametrize("query", _ANALYTICAL_IMPERATIVE_QUERIES)
+    def test_analytical_imperative_routes_to_reflective(self, query: str):
+        m = _mode(query)
+        assert m == CognitiveMode.REFLECTIVE, (
+            f"{query!r} should route to REFLECTIVE (got {m.value!r})"
+        )
+
+    @pytest.mark.parametrize("query", _ANALYTICAL_IMPERATIVE_QUERIES)
+    def test_analytical_imperative_keeps_tool_need_false(self, query: str):
+        assert _frame(query).tool_need is False, (
+            f"{query!r} must NOT set tool_need=True (analytical is not tool intent)"
+        )
+
+    @pytest.mark.parametrize("query", _ANALYTICAL_IMPERATIVE_QUERIES)
+    def test_analytical_imperative_action_is_answer(self, query: str):
+        result = _tc.think("ws_test", "agent_test", query)
+        assert result.action_decision.action != ActionType.USE_TOOL, (
+            f"{query!r} routed to USE_TOOL — analytical intent must stay ANSWER"
+        )
+        assert result.action_decision.action == ActionType.ANSWER
+
+    def test_execution_phrase_precedence_over_analytical(self):
+        # Precedence: an analytical verb + explicit execution phrase still routes
+        # TOOL / USE_TOOL (tool_need wins mode and action priority).
+        result = _tc.think("ws_test", "agent_test", "Analyze this dataset using python.")
+        assert result.task_frame.tool_need is True
+        assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+        assert result.action_decision.action == ActionType.USE_TOOL
+
+    def test_retrieval_plus_analytical_overlap_stays_retrieval(self):
+        # Overlap precedence: memory_need (retrieval verb) is checked BEFORE the
+        # confidence_need REFLECTIVE branch in choose_mode, so a retrieval +
+        # analytical prompt stays RETRIEVAL / ANSWER (retrieval-owned routing
+        # wins) even though the analytical floor also raised confidence_need.
+        result = _tc.think("ws_test", "agent_test", "Read the summary and analyze the tradeoffs.")
+        assert result.task_frame.memory_need is True
+        assert result.task_frame.tool_need is False
+        assert result.task_frame.confidence_need >= 0.60
+        assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+        assert result.action_decision.action == ActionType.ANSWER
 
 
 # ---------------------------------------------------------------------------

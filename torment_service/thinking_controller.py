@@ -379,6 +379,17 @@ class ThinkingController:
             confidence_need += 0.2   # §2A D2: crosses 0.60 REFLECTIVE threshold
         if ambiguity_score > 0.45:
             confidence_need += 0.2
+        # v0.1.0f: analytical-depth cues impose a REFLECTIVE confidence floor.
+        # A NON-question analytical imperative (analyze/explain/debug/inspect/
+        # check/trace/...) otherwise reached only ~0.40 and stayed FAST; floor
+        # confidence_need to the existing 0.60 REFLECTIVE threshold so it routes
+        # through the EXISTING choose_mode REFLECTIVE branch — but only when no
+        # stronger priority (governance / identity / live-social / tool / memory)
+        # claims the turn first. Floor only: never lowers an already-higher
+        # confidence_need; tool_need / action / every other field is untouched.
+        # No new field / shaper / advisory.
+        if analytical_depth:
+            confidence_need = max(confidence_need, 0.60)
 
         context_tags = []
         if archive_relevant:
