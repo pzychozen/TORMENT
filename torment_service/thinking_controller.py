@@ -75,14 +75,15 @@ TOOL_HINT_PHRASES = (
     "programmatically",
 )
 
-# v0.1.0d: retrieval verbs — DECLARED but NOT MAPPED to any tool
-# family in v0.1. Prompts containing these words fall back to normal
-# non-tool routing (RETRIEVAL mode via memory_need, or ANSWER,
-# depending on other signals). When a retrieval tool family like
-# `web_fetch` or `read_file` is added to tool_registry.py, this set
-# can be wired to raise tool_need for that family. Keeping the list
-# here gives the intent a truthful home instead of silently dropping
-# these words.
+# v0.1.0d/e: retrieval verbs — express memory / RETRIEVAL intent, NOT
+# tool intent. They are NOT mapped to any tool family (no retrieval tool
+# family exists in v0.1), so they never raise tool_need. As of v0.1.0e
+# they DO contribute to frame.memory_need (see frame_task), routing a
+# non-tool retrieval request to CognitiveMode.RETRIEVAL / ActionType.ANSWER
+# through the EXISTING memory_need path (no new field / shaper / advisory).
+# When a retrieval tool family like `web_fetch` or `read_file` is later
+# added to tool_registry.py, wiring these to tool_need for that family is
+# a separate change.
 RETRIEVAL_HINT_WORDS = {
     "search",
     "find",
@@ -337,10 +338,19 @@ class ThinkingController:
         # §2A D2: analytical depth detection
         analytical_depth = self._has_any(lower, ANALYTICAL_DEPTH_HINT_WORDS)
 
+        # v0.1.0e: retrieval verbs (search/find/lookup/fetch/read/open/scan)
+        # express memory / RETRIEVAL intent, not tool intent. They contribute
+        # to memory_need ONLY (never tool_need above), so a non-tool retrieval
+        # request routes to CognitiveMode.RETRIEVAL and stays ActionType.ANSWER
+        # via the existing memory_need path. Reuses RETRIEVAL_HINT_WORDS (until
+        # now declared but unmapped) — no new frame / plan / trace field.
+        retrieval_hint = self._has_any(lower, RETRIEVAL_HINT_WORDS)
+
         memory_need = bool(
             archive_relevant
             or identity_sensitive
             or relational_cue
+            or retrieval_hint
             or "remember" in lower
             or "before" in lower
             or "previous" in lower

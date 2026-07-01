@@ -6,9 +6,9 @@ Two concerns in one file:
    Bucket A — explicit execution verbs/phrases → TOOL mode (tool_need=True).
    Bucket B — analytical depth verbs → REFLECTIVE mode (via confidence_need),
              tool_need MUST remain False.
-   Bucket C — retrieval verbs → unmapped in v0.1. Tool_need MUST remain False;
-             mode may be anything non-TOOL (FAST/RETRIEVAL acceptable — the
-             contract is "no bogus TOOL routing").
+   Bucket C — retrieval verbs → memory/RETRIEVAL intent (v0.1.0e). Tool_need
+             MUST remain False; a non-tool retrieval request sets memory_need
+             and routes to RETRIEVAL / ANSWER via the existing memory_need path.
 
 2. apply_pack_intent_tightening unit tests:
    - No-op paths (pack=None / empty grammar / action not forbidden)
@@ -184,6 +184,84 @@ class TestBucketC_RetrievalUnmapped:
             f"{query!r} routed to TOOL — retrieval verbs should not, "
             f"they're unmapped. got {mode.value!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bucket C (v0.1.0e) — retrieval verbs express memory/RETRIEVAL intent and
+# route to RETRIEVAL / ANSWER via the EXISTING memory_need path (never tool).
+# ---------------------------------------------------------------------------
+
+# Clean single-retrieval-verb prompts with NO archive/identity/relational/
+# governance/live-social/tool confounds, so the only memory signal is the
+# retrieval verb and the only routing consequence is the memory_need path.
+_RETRIEVAL_ONLY_QUERIES = [
+    "Search the wiki for the onboarding guide.",
+    "Find the meeting slot in my calendar.",
+    "Fetch the weather outlook for tomorrow.",
+    "Read the summary of the quarterly budget.",
+    "Open the file about the vacation itinerary.",
+    "Scan the list for duplicate entries.",
+    "Lookup the phone extension for the front desk.",
+]
+
+
+class TestBucketC_RetrievalRoutesViaMemoryNeed:
+    """v0.1.0e: retrieval verbs contribute to frame.memory_need (NOT
+    tool_need). A non-tool retrieval request therefore routes to
+    CognitiveMode.RETRIEVAL and ActionType.ANSWER through the existing
+    memory_need path — no new frame / plan / trace field, shaper, or advisory."""
+
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_retrieval_sets_memory_need(self, query: str):
+        assert _frame(query).memory_need is True, (
+            f"{query!r} should set memory_need=True via RETRIEVAL_HINT_WORDS"
+        )
+
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_retrieval_keeps_tool_need_false(self, query: str):
+        assert _frame(query).tool_need is False, (
+            f"{query!r} must NOT set tool_need=True (retrieval is not tool intent)"
+        )
+
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_retrieval_routes_to_retrieval_mode(self, query: str):
+        m = _mode(query)
+        assert m == CognitiveMode.RETRIEVAL, (
+            f"{query!r} should route to RETRIEVAL (got {m.value!r})"
+        )
+
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_retrieval_does_not_route_to_use_tool(self, query: str):
+        result = _tc.think("ws_test", "agent_test", query)
+        assert result.action_decision.action != ActionType.USE_TOOL, (
+            f"{query!r} routed to USE_TOOL — retrieval intent must stay ANSWER"
+        )
+        assert result.action_decision.action == ActionType.ANSWER
+
+    @pytest.mark.parametrize("query", _RETRIEVAL_ONLY_QUERIES)
+    def test_retrieval_enables_existing_memoryplan_relational_lane(self, query: str):
+        # The existing MemoryPlan retrieval lane is enabled through the existing
+        # path: plan.retrieve_relational = memory_need or live_social. Prove the
+        # lane is on and its budget/weight are nonzero — no new lane/field added.
+        frame = _frame(query)
+        mode = _tc.choose_mode(frame)
+        plan = _tc.build_memory_plan(frame, mode)
+        assert plan.retrieve_relational is True
+        assert plan.top_k_by_lane["relational"] > 0
+        assert plan.weight_by_lane["relational"] > 0.0
+
+    def test_control_non_retrieval_leaves_relational_lane_off(self):
+        # Negative control: a plain statement with no retrieval verb (and no
+        # other memory signal) does not set memory_need or enable the relational
+        # lane — so the activations above are attributable to the retrieval-verb
+        # memory_need path, not an always-on default.
+        frame = _frame("The sky is clear this afternoon.")
+        assert frame.memory_need is False
+        assert frame.tool_need is False
+        mode = _tc.choose_mode(frame)
+        plan = _tc.build_memory_plan(frame, mode)
+        assert plan.retrieve_relational is False
+        assert plan.top_k_by_lane["relational"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -259,3 +259,28 @@ def test_urgency_override_boundary_provenance_lock():
     assert _urg("please handle this urgent matter now") > 0.7                    # urgent + now crosses
     assert _urg("please handle this urgent matter now!") == pytest.approx(0.9)
     assert _urg("please handle this urgent matter now!") > 0.7
+
+
+def test_retrieval_verb_routes_to_retrieval_via_memory_need():
+    # v0.1.0e: a plain retrieval-verb request (no archive/identity/tool
+    # confounds) sets memory_need=True but not tool_need, so it routes to
+    # RETRIEVAL mode and ANSWER — never TOOL/USE_TOOL — through the existing
+    # memory_need path, which also enables the MemoryPlan relational lane.
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Search the wiki for the onboarding guide.")
+    assert result.task_frame.memory_need is True
+    assert result.task_frame.tool_need is False
+    assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
+    assert result.action_decision.action == ActionType.ANSWER
+    assert result.memory_plan.retrieve_relational is True
+
+
+def test_retrieval_verb_with_execution_phrase_still_routes_to_tool():
+    # Guard: the retrieval->memory_need mapping does NOT suppress real tool
+    # intent. A retrieval verb alongside an explicit execution signal still
+    # routes to TOOL / USE_TOOL (tool_need wins mode and action priority).
+    ctl = ThinkingController()
+    result = ctl.think("default", "ryuki", "Find the answer and run code to verify it.")
+    assert result.task_frame.tool_need is True
+    assert result.mode_decision.chosen_mode == CognitiveMode.TOOL
+    assert result.action_decision.action == ActionType.USE_TOOL
