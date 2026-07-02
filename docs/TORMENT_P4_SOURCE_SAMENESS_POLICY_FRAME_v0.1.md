@@ -37,8 +37,6 @@ refreshed green (`3f4545b` / §0 closure `2b6931d`). No P4 mechanics are authori
   contract-wide **non-coercion invariant**, and the values-layer **`diagnostic_only` eligibility posture**
   for unprovable runtime source-sameness (§9 of the contract). This frame adds only the *definition +
   evidence model* layer the contract left as a "family-bound adequacy standard."
-- *(Bookkeeping: §0's HEAD line names `3f4545b` while the pushed edge is `2b6931d`; not corrected here —
-  this slice edits no §0.)*
 
 ## 2. Why source-sameness is needed (the exact problem)
 
