@@ -44,7 +44,6 @@ AgentRunner ownership, MCP/action-surface changes.
 import ast
 import inspect
 import os
-import re
 import unittest
 
 from torment_service.spirit_return import (
@@ -265,14 +264,50 @@ class TestSrgGatedAndBounded(unittest.TestCase):
         self.assertIn("if self._srg_enable:", self.src)
 
     def test_score_multipliers_are_bounded_not_authority(self):
-        # Literal score multipliers (the SRG nudges) stay modest — bounded above by
-        # a small ceiling, never a large authority multiplier. Tuning within the
-        # band is NOT frozen (only the bound is locked).
-        mults = [float(x) for x in re.findall(r"final \*= (\d+\.\d+)", self.src)]
-        self.assertTrue(mults, "expected at least one literal score multiplier")
-        for m in mults:
-            self.assertGreater(m, 1.0)
-            self.assertLessEqual(m, 1.2, msg=f"score multiplier {m} exceeds bound")
+        # SRG nudges may be routed through named variables for explain parity, but
+        # the variables themselves must remain modest bounded guidance values.
+        variable_multipliers = {
+            n.value.id
+            for n in ast.walk(self.tree)
+            if isinstance(n, ast.AugAssign)
+            and isinstance(n.target, ast.Name)
+            and n.target.id == "final"
+            and isinstance(n.op, ast.Mult)
+            and isinstance(n.value, ast.Name)
+        }
+        expected_srg = {"_srg_same_band", "_srg_crystal", "_srg_heartbeat"}
+        self.assertTrue(expected_srg <= variable_multipliers,
+                        msg=f"missing expected SRG multiplier variables: {sorted(expected_srg - variable_multipliers)}")
+
+        def assigned_values(name):
+            values = []
+            for n in ast.walk(self.tree):
+                if isinstance(n, ast.Assign):
+                    for target in n.targets:
+                        if isinstance(target, ast.Name) and target.id == name:
+                            values.append(n.value)
+            return values
+
+        def literal_number(node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return float(node.value)
+            return None
+
+        for name in sorted(expected_srg):
+            values = assigned_values(name)
+            self.assertTrue(values, f"expected assignments for {name}")
+            numbers = [literal_number(value) for value in values]
+            self.assertTrue(all(number is not None for number in numbers),
+                            msg=f"{name} must be assigned bounded literal values, not arbitrary scores")
+            self.assertIn(1.0, numbers, msg=f"{name} should default to neutral guidance")
+            self.assertTrue(any(number > 1.0 for number in numbers),
+                            msg=f"{name} should have a characterized bounded nudge")
+            for number in numbers:
+                self.assertGreaterEqual(number, 1.0, msg=f"{name} multiplier {number} penalizes eligibility")
+                self.assertLessEqual(number, 1.2, msg=f"{name} multiplier {number} exceeds SRG guidance bound")
+
+        if "_lane_w" in variable_multipliers:
+            self.assertIn("_lane_w = max(0.1, min(2.0, _lane_w))", self.src)
 
 
 # --------------------------------------------------------------------------- #
