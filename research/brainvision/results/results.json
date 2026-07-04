@@ -1,0 +1,38 @@
+{
+  "accuracies": {
+    "descriptor_only": 1.0,
+    "frame_diff": 0.8291666666666668,
+    "plain_fft": 0.9333333333333332,
+    "psi": 0.6041666666666667,
+    "psi_shuffled_label": 0.22916666666666666,
+    "psi_time_shuffled": 0.5291666666666666,
+    "random_mapping": 0.8916666666666668
+  },
+  "chance": 0.2,
+  "classes": [
+    "CONTINUITY",
+    "DISRUPTION",
+    "NOISE",
+    "PULSE",
+    "RECURRENCE"
+  ],
+  "descriptor_only": 1.0,
+  "frame_diff": 0.8291666666666668,
+  "n_fixtures": 72,
+  "plain_fft": 0.9333333333333332,
+  "psi": 0.6041666666666667,
+  "psi_feature_dim": 16,
+  "psi_shuffled_label": 0.22916666666666666,
+  "psi_time_shuffled": 0.5291666666666666,
+  "random_mapping": 0.8916666666666668,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ]
+}

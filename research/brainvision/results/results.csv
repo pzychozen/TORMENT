@@ -1,0 +1,8 @@
+method,balanced_accuracy
+descriptor_only,1.000000
+frame_diff,0.829167
+plain_fft,0.933333
+psi,0.604167
+psi_shuffled_label,0.229167
+psi_time_shuffled,0.529167
+random_mapping,0.891667
