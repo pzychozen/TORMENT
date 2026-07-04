@@ -1,10 +1,10 @@
 """Offline Brainvision falsifier runner.
 
 Modes: v0.1 coarse, v0.2 marginal-matched, v0.3 spectrum-matched (RPSR), v0.4 psi_time_recursive (ΨTRS).
-Generates deterministic fixtures, extracts PsiBV / PsiBV-RPSR / BV-ΨTRS and baseline features, scores
-regime separability with a leave-one-out nearest-centroid balanced accuracy, prints a compact report, and
-optionally writes local results. OFFLINE ONLY. stdlib + numpy. No torment_service imports. A negative
-result ("does not beat baselines") is a valid closure.
+Also prints the v0.4.1 BV-ΨTRS-SAG symmetry-amplification-gain probe. Generates deterministic fixtures,
+extracts PsiBV / PsiBV-RPSR / BV-ΨTRS and baseline features, scores regime separability with a leave-one
+-out nearest-centroid balanced accuracy, prints a compact report, and optionally writes local results.
+OFFLINE ONLY. stdlib + numpy. No torment_service imports. A negative result is a valid closure.
 
 Run:  python research/brainvision/run_falsifier.py
 """
@@ -23,6 +23,7 @@ import metrics
 import psi_mapping
 import psi_trs
 import rpsr
+import symmetry_gain
 
 _MODULE_DIR = os.path.dirname(os.path.realpath(__file__))
 _DEFAULT_OUT = os.path.join(_MODULE_DIR, "results")
@@ -146,6 +147,7 @@ def report_all(seeds=range(8), do_write=False, out_dir=None):
         if do_write:
             res["out_dir"] = write_results(res, os.path.join(out_dir or _DEFAULT_OUT, label))
         all_results[label] = res
+    print(symmetry_gain.report())
     return all_results
 
 
