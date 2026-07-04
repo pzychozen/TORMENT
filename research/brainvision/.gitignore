@@ -1,3 +1,6 @@
-# Generated offline research artifacts — do not commit raw runs.
+# Generated offline research artifacts and local media — do not commit.
 results/
 __pycache__/
+local_inputs/
+real_video_manifest.json
+*.npz
