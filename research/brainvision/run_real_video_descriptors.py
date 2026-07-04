@@ -1,8 +1,9 @@
 """BV-ΨTRS-RVD runner: evaluate Brainvision methods on real prerecorded descriptor sequences (offline).
 
 Accepts local .npz paths or a manifest. Computes low-level descriptors, runs the existing methods and a
-SAG probe, and prints a compact offline report. Writes only into research/brainvision/ (gitignored). No
-camera/screen/sensor capture; real media is converted to .npz outside this harness. stdlib + numpy.
+multi-window SAG probe, and prints a compact offline report. Writes only into research/brainvision/
+(gitignored). No camera/screen/sensor capture; real media is converted to .npz outside this harness.
+stdlib + numpy.
 
 Manifest format (local, gitignored -- real_video_manifest.json):
 [
@@ -62,13 +63,45 @@ def evaluate_true_vs_shuffled(windows, seed=0):
     return out
 
 
-def evaluate_sag_real(windows, steps=60, kappa=3.0):
-    """SAG paired-mirror gain using a real descriptor window as the base field; kappa=0 vs kappa>0."""
-    base = windows[0]
-    g0 = symmetry_gain.symmetry_gain(base, 0.0, steps=steps)
-    gk = symmetry_gain.symmetry_gain(base, kappa, steps=steps)
-    return {"G_k0": float(g0), "G_kpos": float(gk),
-            "amplifies": bool(np.isfinite(gk) and gk > g0 + 0.2 and g0 < 1.1)}
+def _summary(a):
+    a = np.asarray(a, float)
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return {"mean": float("nan"), "median": float("nan"), "min": float("nan"), "max": float("nan")}
+    return {"mean": float(a.mean()), "median": float(np.median(a)),
+            "min": float(a.min()), "max": float(a.max())}
+
+
+def evaluate_sag_real(windows, steps=60, kappa=3.0, margin=0.2):
+    """Multi-window SAG: paired-mirror gain over EVERY descriptor window (not just windows[0]).
+
+    A single window can swing the verdict, so we report per-window G(k=0)/G(k>0), summaries, and how many
+    windows genuinely amplify (k>0 exceeds a coherent k=0 baseline). Most-windows-amplify => stronger
+    recursive-time evidence; one-window => fragility.
+    """
+    per = []
+    for i, w in enumerate(windows):
+        g0 = symmetry_gain.symmetry_gain(w, 0.0, steps=steps)
+        gk = symmetry_gain.symmetry_gain(w, kappa, steps=steps)
+        per.append({"window": i, "G_k0": float(g0), "G_kpos": float(gk),
+                    "delta": float(gk - g0), "ratio": float(gk / (g0 + 1e-12))})
+    n = len(per)
+    n_amp = sum(1 for p in per if np.isfinite(p["G_kpos"]) and p["G_k0"] < 1.1 and p["G_kpos"] > p["G_k0"] + margin)
+    g0s = _summary([p["G_k0"] for p in per])
+    gks = _summary([p["G_kpos"] for p in per])
+    return {
+        "n_windows": n,
+        "per_window": per,
+        "n_amplifying": int(n_amp),
+        "frac_amplifying": float(n_amp / n) if n else 0.0,
+        "amplifies_any": bool(n_amp >= 1),
+        "amplifies_most": bool(n_amp > n / 2.0),
+        "G_k0_summary": g0s,
+        "G_kpos_summary": gks,
+        "G_k0": g0s["mean"],        # backward-compatible single values (means)
+        "G_kpos": gks["mean"],
+        "amplifies": bool(n_amp > n / 2.0),
+    }
 
 
 def evaluate_segments(windows, labels):
@@ -126,8 +159,16 @@ def format_report(clip_id, res) -> str:
             lines.append(f"    {n:<18s} {a:.3f}")
     if "sag" in res:
         s = res["sag"]
-        lines.append(f"  SAG on real descriptor field: G(k=0)={s['G_k0']:.3f}  G(k>0)={s['G_kpos']:.3f}  "
-                     f"amplifies={s['amplifies']}")
+        g0, gk = s["G_k0_summary"], s["G_kpos_summary"]
+        lines.append(f"  SAG on real descriptor field ({s['n_windows']} windows, per-window paired-mirror gain):")
+        lines.append(f"    G(k=0):  mean={g0['mean']:.3f} median={g0['median']:.3f} min={g0['min']:.3f} max={g0['max']:.3f}")
+        lines.append(f"    G(k>0):  mean={gk['mean']:.3f} median={gk['median']:.3f} min={gk['min']:.3f} max={gk['max']:.3f}")
+        lines.append(f"    windows amplifying (k>0 > k0+0.2, k0 coherent): {s['n_amplifying']}/{s['n_windows']} "
+                     f"(frac {s['frac_amplifying']:.2f})")
+        verdict = ("recursive-time SURVIVES (most windows amplify)" if s["amplifies_most"]
+                   else "FRAGILE (only some/one window amplifies)" if s["amplifies_any"]
+                   else "no amplification on real descriptors")
+        lines.append(f"    verdict: {verdict}")
     if "segments" in res:
         lines.append("  segment classification (balanced acc; secondary, do not overclaim):")
         for n, a in sorted(res["segments"].items(), key=lambda kv: -kv[1]):
