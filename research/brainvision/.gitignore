@@ -1,0 +1,3 @@
+# Generated offline research artifacts — do not commit raw runs.
+results/
+__pycache__/

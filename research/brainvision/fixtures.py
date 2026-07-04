@@ -4,9 +4,14 @@ OFFLINE RESEARCH ONLY. No torment_service imports. No camera/screen/sensor/strea
 Each generator returns a primitive descriptor array of shape (T, 3): channels [luminance, contrast,
 color]. Regime groups are the classification target.
 
-v0.1 "coarse" families differ in amplitude AND temporal structure (amplitude marginals leak the class).
-v0.2 "marginal_matched" families share, per channel, an identical target value multiset, so classes have
-matched amplitude histograms/mean/variance and differ ONLY in temporal arrangement.
+Modes:
+  coarse (v0.1)            : classes differ in amplitude AND temporal structure (amplitude marginal leaks).
+  marginal_matched (v0.2)  : classes share an identical per-channel amplitude multiset; differ only in
+                             temporal order (removes the amplitude-marginal shortcut).
+  spectrum_matched (v0.3)  : classes are IAAFT surrogates forced to one fixed target power spectrum
+                             (|FFT| identical across classes -> plain-FFT magnitude cannot separate),
+                             differing only in phase / return geometry, which PsiBV-RPSR reads.
+  psi_time_recursive (v0.4): alias of spectrum_matched fixtures, used with BV-ΨTRS.
 
 stdlib + numpy only.
 """
@@ -18,6 +23,7 @@ import numpy as np
 
 T = 64
 N_PRIMITIVE = 3
+_SIGMA = 0.02
 
 FAMILY_GROUP = {
     "stable_field": "CONTINUITY",
@@ -33,7 +39,6 @@ FAMILY_GROUP = {
 }
 CLASS_FAMILIES = [f for f, g in FAMILY_GROUP.items() if g != "CONTROL"]
 FAMILIES = list(FAMILY_GROUP.keys())
-_SIGMA = 0.02
 
 
 def _seed_for(name: str, seed: int) -> int:
@@ -54,6 +59,7 @@ def _sigmoid(center, width):
     return 1.0 / (1.0 + np.exp(-(t - center) / width))
 
 
+# --- v0.1 coarse ------------------------------------------------------------
 def generate(name, seed):
     if name not in FAMILY_GROUP:
         raise ValueError(f"unknown fixture family: {name!r}")
@@ -103,15 +109,8 @@ def generate(name, seed):
     return np.stack([lum, con, col], axis=1)
 
 
-# --- v0.2 marginal-matched families -----------------------------------------
-# All marginal-matched families share, per channel, an IDENTICAL target value multiset. Classes therefore
-# have matched amplitude histograms / mean / variance / order-statistics by construction, and differ ONLY
-# in temporal arrangement. This removes the amplitude shortcut that made v0.1 trivial for descriptor_only.
-_MM_TARGETS = {
-    0: np.linspace(0.20, 0.80, T),
-    1: np.linspace(0.10, 0.60, T),
-    2: np.linspace(0.30, 0.70, T),
-}
+# --- v0.2 marginal-matched --------------------------------------------------
+_MM_TARGETS = {0: np.linspace(0.20, 0.80, T), 1: np.linspace(0.10, 0.60, T), 2: np.linspace(0.30, 0.70, T)}
 MM_FAMILY_GROUP = {
     "mm_smooth": "CONTINUITY_MM",
     "mm_recurrence": "RECURRENCE_MM",
@@ -122,14 +121,12 @@ MM_CLASS_FAMILIES = list(MM_FAMILY_GROUP.keys())
 
 
 def _rank_match(base, target):
-    """Return an array with EXACTLY target's values, ordered by base's rank order."""
-    order = np.argsort(np.argsort(base))
-    return np.asarray(target)[order]
+    return np.asarray(target)[np.argsort(np.argsort(base))]
 
 
 def _mm_base(name, channel, rng):
     t = np.arange(T, dtype=float)
-    jitter = rng.normal(0.0, 0.08, T)  # tiny rank-perturbing jitter for within-class variety
+    jitter = rng.normal(0.0, 0.08, T)
     if name == "mm_smooth":
         base = t / T
     elif name == "mm_recurrence":
@@ -140,30 +137,103 @@ def _mm_base(name, channel, rng):
         cut = int(T * 0.5 + rng.uniform(-3, 3))
         base = np.where(t < cut, 0.0, 1.0).astype(float)
     elif name == "mm_oscillation":
-        freq = 0.42 + 0.03 * channel
-        base = np.sin(2 * np.pi * freq * t)
+        base = np.sin(2 * np.pi * (0.42 + 0.03 * channel) * t)
     else:
-        raise ValueError(f"unknown mm family: {name!r}")
+        raise ValueError(name)
     return base + jitter
 
 
 def generate_mm(name, seed):
     if name not in MM_FAMILY_GROUP:
-        raise ValueError(f"unknown mm family: {name!r}")
+        raise ValueError(name)
     rng = np.random.default_rng(_seed_for(name, int(seed)))
-    chans = [_rank_match(_mm_base(name, c, rng), _MM_TARGETS[c]) for c in range(N_PRIMITIVE)]
+    return np.stack([_rank_match(_mm_base(name, c, rng), _MM_TARGETS[c]) for c in range(N_PRIMITIVE)], axis=1)
+
+
+# --- v0.3 spectrum-matched (RPSR) -------------------------------------------
+SM_FAMILY_GROUP = {
+    "sm_continuity": "CONT_SM",
+    "sm_short_return": "SHORT_SM",
+    "sm_long_return": "LONG_SM",
+    "sm_inverted_return": "INV_SM",
+    "sm_reset": "RESET_SM",
+}
+SM_CLASS_FAMILIES = list(SM_FAMILY_GROUP.keys())
+_SM_TARGET_SORTED = np.sort(np.random.default_rng(12345).normal(0.0, 1.0, T))
+
+
+def _sm_target_amp():
+    nb = T // 2 + 1
+    amp = 1.0 / (1.0 + np.arange(nb, dtype=float))
+    amp[0] = 0.0
+    return amp
+
+
+def _sm_base(name, rng):
+    t = np.arange(T, dtype=float)
+
+    def motif(c, w=2.5, h=1.0):
+        return h * np.exp(-((t - c) ** 2) / (2.0 * w ** 2))
+
+    j = rng.uniform(-2.0, 2.0)
+    # Homogeneous two-event bases (unit height, no level shifts) so amplitude extremes match too; classes
+    # differ only in the RETURN RELATION between the two events (carried by phase after spectrum matching).
+    if name == "sm_continuity":
+        c = T * 0.5 + j
+        base = motif(c - 1) + motif(c + 1)
+    elif name == "sm_short_return":
+        c = T * 0.35 + j
+        base = motif(c) + motif(c + 5)
+    elif name == "sm_long_return":
+        c = T * 0.20 + j
+        base = motif(c) + motif(c + 24)
+    elif name == "sm_inverted_return":
+        c = T * 0.30 + j
+        base = motif(c) - motif(c + 10)
+    elif name == "sm_reset":
+        c = T * 0.30 + j
+        base = motif(c) + motif(c + 15)
+        base[int(c + 18):] *= -1.0
+    else:
+        raise ValueError(name)
+    return base
+
+
+def _iaaft(base, target_amp, target_sorted, n_iter=25):
+    """IAAFT surrogate: alternately impose target power spectrum and target marginal, seeded by base's
+    phase. Ends on the SPECTRUM step so |FFT| == target exactly (plain-FFT magnitude -> chance). Marginal
+    is matched in mean/variance (Parseval) and closely in higher moments; a residual remains because
+    matching BOTH marginal and spectrum exactly is only possible for the shift/reversal group."""
+    ph = np.angle(np.fft.rfft(base))
+    x = np.fft.irfft(target_amp * np.exp(1j * ph), n=T)
+    for _ in range(n_iter):
+        x = target_sorted[np.argsort(np.argsort(x))]
+        ph = np.angle(np.fft.rfft(x))
+        x = np.fft.irfft(target_amp * np.exp(1j * ph), n=T)
+    return x
+
+
+def generate_sm(name, seed):
+    if name not in SM_FAMILY_GROUP:
+        raise ValueError(name)
+    rng = np.random.default_rng(_seed_for(name, int(seed)))
+    target_amp = _sm_target_amp()
+    chans = [_iaaft(_sm_base(name, rng) + rng.normal(0.0, 0.01, T), target_amp, _SM_TARGET_SORTED)
+             for _c in range(N_PRIMITIVE)]
     return np.stack(chans, axis=1)
 
 
 def dataset(seeds, mode="coarse"):
-    """Yield (name, group, seed, array). mode in {"coarse" (v0.1), "marginal_matched" (v0.2)}."""
+    """Yield (name, group, seed, array). mode in {coarse, marginal_matched, spectrum_matched,
+    psi_time_recursive}. psi_time_recursive reuses the spectrum-matched fixtures (v0.4 ΨTRS)."""
     if mode == "coarse":
-        for name in CLASS_FAMILIES:
-            for s in seeds:
-                yield name, FAMILY_GROUP[name], int(s), generate(name, int(s))
+        gen, fam, grp = generate, CLASS_FAMILIES, FAMILY_GROUP
     elif mode == "marginal_matched":
-        for name in MM_CLASS_FAMILIES:
-            for s in seeds:
-                yield name, MM_FAMILY_GROUP[name], int(s), generate_mm(name, int(s))
+        gen, fam, grp = generate_mm, MM_CLASS_FAMILIES, MM_FAMILY_GROUP
+    elif mode in ("spectrum_matched", "psi_time_recursive"):
+        gen, fam, grp = generate_sm, SM_CLASS_FAMILIES, SM_FAMILY_GROUP
     else:
         raise ValueError(f"unknown mode: {mode!r}")
+    for name in fam:
+        for s in seeds:
+            yield name, grp[name], int(s), gen(name, int(s))
