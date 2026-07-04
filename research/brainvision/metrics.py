@@ -8,13 +8,23 @@ from __future__ import annotations
 import numpy as np
 
 _EPS = 1e-8
+_CONST_TOL = 1e-9
 
 
 def standardize(X: np.ndarray) -> np.ndarray:
+    """Z-score columns; near-constant columns are zeroed (they carry no information).
+
+    Zeroing constant columns is important: otherwise dividing a ~0 spread by a ~0 std amplifies pure
+    floating-point noise into spurious structure (e.g. marginal-matched features would look informative
+    when they carry no class information at all).
+    """
     X = np.asarray(X, dtype=float)
     mu = X.mean(axis=0, keepdims=True)
     sd = X.std(axis=0, keepdims=True)
-    return (X - mu) / (sd + _EPS)
+    out = np.zeros_like(X)
+    good = (sd > _CONST_TOL).ravel()
+    out[:, good] = (X[:, good] - mu[:, good]) / (sd[:, good] + _EPS)
+    return out
 
 
 def loo_nearest_centroid_balanced_accuracy(X: np.ndarray, y) -> float:

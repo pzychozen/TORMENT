@@ -1,4 +1,4 @@
-"""Offline Brainvision descriptor->psi falsifier runner.
+"""Offline Brainvision descriptor->psi falsifier runner (v0.1 coarse + v0.2 marginal-matched).
 
 Generates deterministic fixtures, extracts PsiBV and baseline features, scores regime separability with a
 leave-one-out nearest-centroid balanced accuracy, prints a compact report, and (optionally) writes local
@@ -26,10 +26,15 @@ import psi_mapping
 _MODULE_DIR = os.path.dirname(os.path.realpath(__file__))
 _DEFAULT_OUT = os.path.join(_MODULE_DIR, "results")
 
+MODES = (
+    ("coarse", "v0.1_coarse"),
+    ("marginal_matched", "v0.2_marginal_matched"),
+)
 
-def build_dataset(seeds):
+
+def build_dataset(seeds, mode="coarse"):
     prims, groups, seed_list = [], [], []
-    for name, group, seed, arr in fixtures.dataset(seeds):
+    for name, group, seed, arr in fixtures.dataset(seeds, mode=mode):
         prims.append(arr)
         groups.append(group)
         seed_list.append(seed)
@@ -44,9 +49,9 @@ def _feature_matrix(fn, prims):
     return np.array([fn(p) for p in prims], dtype=float)
 
 
-def run(seeds=range(8)):
+def run(seeds=range(8), mode="coarse"):
     seeds = list(seeds)
-    prims, y, seed_list = build_dataset(seeds)
+    prims, y, seed_list = build_dataset(seeds, mode=mode)
 
     methods = {
         "psi": _feature_matrix(_psi_features, prims),
@@ -58,12 +63,9 @@ def run(seeds=range(8)):
         "plain_fft": _feature_matrix(baselines.plain_fft_features, prims),
         "random_mapping": _feature_matrix(baselines.random_mapping_features, prims),
     }
-
     accuracies = {
         name: metrics.loo_nearest_centroid_balanced_accuracy(X, y) for name, X in methods.items()
     }
-
-    # shuffled-label control: PsiBV features but with permuted labels -> chance floor.
     rng = np.random.default_rng(2024)
     y_shuffled = y.copy()
     rng.shuffle(y_shuffled)
@@ -72,6 +74,7 @@ def run(seeds=range(8)):
     )
 
     results = {
+        "mode": mode,
         "accuracies": {k: float(v) for k, v in accuracies.items()},
         "chance": float(metrics.chance_level(y)),
         "n_fixtures": int(len(prims)),
@@ -84,20 +87,19 @@ def run(seeds=range(8)):
 
 
 def format_report(results) -> str:
-    lines = []
-    lines.append("Brainvision descriptor->psi falsifier — offline report")
+    lines = [f"Brainvision falsifier — mode={results['mode']}"]
     lines.append(f"  fixtures: {results['n_fixtures']}  classes: {results['classes']}  "
-                 f"chance: {results['chance']:.3f}")
-    lines.append(f"  psi feature dim: {results['psi_feature_dim']}")
+                 f"chance: {results['chance']:.3f}  psi_dim: {results['psi_feature_dim']}")
     lines.append("  balanced accuracy (leave-one-out nearest centroid):")
     for name, acc in sorted(results["accuracies"].items(), key=lambda kv: -kv[1]):
         lines.append(f"    {name:<20s} {acc:.3f}")
     psi = results["accuracies"]["psi"]
     fd = results["accuracies"]["frame_diff"]
     fft = results["accuracies"]["plain_fft"]
+    do = results["accuracies"]["descriptor_only"]
     verdict = "psi ABOVE frame-diff & plain-fft" if (psi > fd and psi > fft) else \
-              "psi does NOT beat both baselines (valid closure)"
-    lines.append(f"  verdict: {verdict}")
+              "psi does NOT beat temporal baselines (valid closure)"
+    lines.append(f"  amplitude-shortcut (descriptor_only): {do:.3f}  |  verdict: {verdict}")
     lines.append("  NOTE: offline research artifact only; authorizes no runtime/memory/action contact.")
     return "\n".join(lines)
 
@@ -115,8 +117,9 @@ def write_results(results, out_dir=None) -> str:
     return out_dir
 
 
-def main(seeds=range(8), do_write=False, out_dir=None):
-    results = run(seeds)
+def main(seeds=range(8), do_write=False, out_dir=None, mode="coarse"):
+    """Single-mode run (backwards compatible). Returns one results dict."""
+    results = run(seeds, mode=mode)
     print(format_report(results))
     if do_write:
         results["out_dir"] = write_results(results, out_dir)
@@ -124,5 +127,19 @@ def main(seeds=range(8), do_write=False, out_dir=None):
     return results
 
 
+def report_all(seeds=range(8), do_write=False, out_dir=None):
+    """Run and report BOTH v0.1 coarse and v0.2 marginal-matched fixtures."""
+    all_results = {}
+    for mode, label in MODES:
+        res = run(seeds, mode=mode)
+        print(format_report(res))
+        print()
+        if do_write:
+            sub = os.path.join(out_dir or _DEFAULT_OUT, label)
+            res["out_dir"] = write_results(res, sub)
+        all_results[label] = res
+    return all_results
+
+
 if __name__ == "__main__":
-    main(seeds=range(8), do_write=True)
+    report_all(seeds=range(8), do_write=True)
