@@ -79,16 +79,15 @@ though `psi_spec_norm` clears it. **This was not tuned toward a win.**
 
 ## 4. First-pass interpretation
 
-The pooled-control evidence is decisive and matches H1 exactly. `time_shuffled` is the **only** control that
+The pooled-control evidence strongly matches the H1 roughness/spread reading. `time_shuffled` is the **only** control that
 raises every roughness measure (`delta_rms` 0.656→1.370, `spectral_centroid` 0.094→0.257, `psi_spec_norm`
 6.454→16.332) and drops continuity (0.765→−0.023), and it is the **only** control whose gain explodes
 (8.4→147.7). `time_reversed` reproduces true's roughness stats **exactly** (reversal preserves the multiset of
 adjacent deltas) and its gain sits at 6.4 ≈ true; `circular_shift` preserves adjacency up to one wrap point
 and sits at 8.0 ≈ true. So the v1.0 failure is **not** "any temporal scramble beats true" — it is specific to
-the one transform (shuffle) that whitens the temporal spectrum. This is the cleanest possible statement that
-the gain tracks **roughness, not order**.
+the one transform (shuffle) that whitens the temporal spectrum. This is strong evidence that the current gain is more aligned with roughness/spread than temporal order.
 
-The per-field table shows the same mechanism at the field level: the effect is concentrated in the
+The per-field table shows the same pattern at the field level: the effect is concentrated in the
 temporally-**smooth** fields (`lowpass`, `sine`, `sine_phase_shift`, `smooth_ramp`) — exactly where shuffling
 *raises* roughness — and is absent in the already-rough fields (`spike`, `tiny_noise`, `white_noise`), where
 shuffling barely changes roughness and the gain barely moves. Direction is consistent with H1 everywhere.
@@ -110,8 +109,7 @@ spike EXCLUDED        +0.684     +0.708    +0.700     -0.700
 With `spike` excluded, **every** roughness-family member clears 0.5 and continuity flips to −0.70, exactly as
 H1 predicts. `psi_spec_norm` is the strongest *global* correlate because it is the operator's own bounded
 2-D spectral quantity — the thing the state-dependent clock literally reads — and is far less distorted by the
-spike outlier than the raw frame-delta. The mechanism reading is robust; only the single predeclared summary
-statistic is dragged down by one pathological field.
+spike outlier than the raw frame-delta. The exploratory spike-excluded breakdown strengthens the roughness/spread interpretation, but it remains non-predeclared and does not change the H1_PARTIAL verdict.
 
 ## 5. Does this suggest a future v1.2 diagnostic? (direction only — NOT built here)
 
@@ -120,8 +118,8 @@ v1.2 would therefore have to remove that confound *before* it could isolate orde
 to review (predeclare, do not implement yet):
 
 1. **Roughness/spectral equalization before scoring** — whiten or match the temporal power spectrum of `true`
-   and each control so all windows carry equal roughness; any residual `true` > `control` gain would then be
-   attributable to order rather than spread. Risk: whitening may destroy the very temporal structure a
+   and each control so all windows carry equal roughness; any residual `true` > `control` gain would be
+   a stronger candidate order-specific signal, pending controls. Risk: whitening may destroy the very temporal structure a
    vision claim would need, i.e. it could equalize away the signal along with the confound.
 2. **Score ordered recurrence/continuity directly** — replace the max-separation gain with a measure that
    rewards ordered continuity/recurrence and that shuffle **cannot** inflate (shuffle should score low, not
