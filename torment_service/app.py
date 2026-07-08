@@ -1252,12 +1252,13 @@ class ArchiveQueryReq(BaseModel):
 
 
 @app.post("/archive/ingest_document")
-def ingest_document(req: IngestDocumentReq) -> Dict[str, Any]:
+def ingest_document(req: IngestDocumentReq, request: Request) -> Dict[str, Any]:
     """Ingest a document into archive memory (NOT core identity).
 
     Chunks the text and stores embeddings in the archive lane.
     This never touches motifs, kernel, drift, or character state.
     """
+    resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     store = _get_archive_store(req.workspace_id, req.agent_id)
     return store.ingest_document(
         text=req.text,
@@ -1272,8 +1273,9 @@ def ingest_document(req: IngestDocumentReq) -> Dict[str, Any]:
 
 
 @app.post("/archive/query")
-def archive_query(req: ArchiveQueryReq) -> Dict[str, Any]:
+def archive_query(req: ArchiveQueryReq, request: Request) -> Dict[str, Any]:
     """Query archive memory by cosine similarity (no physics, no identity)."""
+    resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     store = _get_archive_store(req.workspace_id, req.agent_id)
     results = store.retrieve(
         query=req.query,
@@ -1285,16 +1287,18 @@ def archive_query(req: ArchiveQueryReq) -> Dict[str, Any]:
 
 
 @app.get("/archive/{workspace_id}/{agent_id}/documents")
-def archive_list_documents(workspace_id: str, agent_id: str) -> Dict[str, Any]:
+def archive_list_documents(workspace_id: str, agent_id: str, request: Request) -> Dict[str, Any]:
     """List all documents in an agent's archive memory."""
+    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     docs = store.list_documents()
     return {"documents": docs, "count": len(docs)}
 
 
 @app.get("/archive/{workspace_id}/{agent_id}/document/{doc_id}")
-def archive_get_document(workspace_id: str, agent_id: str, doc_id: str) -> Dict[str, Any]:
+def archive_get_document(workspace_id: str, agent_id: str, doc_id: str, request: Request) -> Dict[str, Any]:
     """Get a specific document and its chunks."""
+    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     doc = store.get_document(doc_id)
     if not doc:
@@ -1304,8 +1308,9 @@ def archive_get_document(workspace_id: str, agent_id: str, doc_id: str) -> Dict[
 
 
 @app.delete("/archive/{workspace_id}/{agent_id}/document/{doc_id}")
-def archive_delete_document(workspace_id: str, agent_id: str, doc_id: str) -> Dict[str, Any]:
+def archive_delete_document(workspace_id: str, agent_id: str, doc_id: str, request: Request) -> Dict[str, Any]:
     """Delete a document from archive memory. Safe — never affects core identity."""
+    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     ok = store.delete_document(doc_id)
     if not ok:
