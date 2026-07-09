@@ -1904,10 +1904,16 @@ class TormentFabric:
             st["updated_ts"] = int(time.time())
             self._persist_job('clone', job_id)
     
-        self._log.info("clone start job_id=%s src=%s tgt=%s include_private=%s include_shared=%s reembed=%s reembed_mode=%s",
-                       _safe_log_value(job_id), _safe_log_value(source_workspace_id),
-                       _safe_log_value(target_workspace_id), include_private, include_shared, reembed,
-                       _safe_log_value(reembed_mode))
+        self._log.info(
+            "clone start job_id=%s src=%s tgt=%s include_private=%s include_shared=%s reembed=%s reembed_mode=%s",
+            _safe_log_value(job_id),
+            _safe_log_value(source_workspace_id),
+            _safe_log_value(target_workspace_id),
+            _safe_log_value(include_private),
+            _safe_log_value(include_shared),
+            _safe_log_value(reembed),
+            _safe_log_value(reembed_mode),
+        )
     
         try:
             src_root = _ws_root(self.data_dir, source_workspace_id)
