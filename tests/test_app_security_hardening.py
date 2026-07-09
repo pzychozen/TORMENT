@@ -231,8 +231,10 @@ def test_cognition_success_scrubs_internal_error_field(monkeypatch):
     response = _run_cognition_with_result(monkeypatch, result)
 
     assert response["final_answer"] == "normal answer"
-    assert response["normal"] == {"kept": True}
-    assert response["error"] == "Cognition pipeline failed"
+    # allowlist response builder: non-safe top-level fields are DROPPED, not returned (stronger than scrubbing)
+    assert "error" not in response
+    assert "status" not in response
+    assert "normal" not in response
     encoded = json.dumps(response)
     assert "SECRET" not in encoded
     assert "TRACE" not in encoded
@@ -244,9 +246,11 @@ def test_cognition_success_scrubs_traceback_stack_like_fields(monkeypatch):
         "final_answer": "normal answer",
         "traceback": "LEAKME traceback",
         "stack": "LEAKME stack",
-        "nested": {
+        # diagnostics nested under ALLOWLISTED fields must still be recursively scrubbed
+        "memory_effects": [{"proposal_id": "p", "exception": "LEAKME exception"}],
+        "routing": {
+            "effective_aperture": "wide",
             "stacktrace": "LEAKME stacktrace",
-            "items": [{"exception": "LEAKME exception"}],
             "kept": "safe value",
         },
     }
@@ -254,12 +258,161 @@ def test_cognition_success_scrubs_traceback_stack_like_fields(monkeypatch):
     response = _run_cognition_with_result(monkeypatch, result)
 
     assert response["final_answer"] == "normal answer"
-    assert response["traceback"] == "Cognition pipeline failed"
-    assert response["stack"] == "Cognition pipeline failed"
-    assert response["nested"]["stacktrace"] == "Cognition pipeline failed"
-    assert response["nested"]["items"][0]["exception"] == "Cognition pipeline failed"
-    assert response["nested"]["kept"] == "safe value"
+    # top-level diagnostic keys dropped by the allowlist
+    assert "traceback" not in response
+    assert "stack" not in response
+    # allowlisted nested structures are preserved but their diagnostic keys are scrubbed
+    assert response["memory_effects"][0]["proposal_id"] == "p"
+    assert "exception" not in response["memory_effects"][0]   # allowlist rebuilder drops raw exception
+    assert response["routing"]["stacktrace"] == "Cognition pipeline failed"
+    assert response["routing"]["kept"] == "safe value"
     assert "LEAKME" not in json.dumps(response)
+
+
+class TestCognitionResponseAllowlist(unittest.TestCase):
+    """/cognition/run returns an ALLOWLISTED, scrubbed response — no diagnostic egress.
+
+    The success path builds the client response from an explicit allowlist of known-safe fields, recursively
+    scrubbing internal diagnostic keys and dropping unknown/non-serialisable objects. This proves the CodeQL
+    py/stack-trace-exposure sink at `return _build_cognition_response(result)` cannot leak internal fields.
+    """
+
+    def test_top_level_diagnostic_fields_not_returned(self):
+        from torment_service.app import _build_cognition_response
+        result = {
+            "ok": True, "task_id": "t1", "final_answer": "hi",
+            "error": "boom\nTraceback (most recent call last): secret",
+            "exception": "ValueError: secret", "traceback": "line 1\nline 2",
+            "stack": "frame", "stacktrace": "frames", "debug_internal": "leak me",
+        }
+        out = _build_cognition_response(result)
+        for k in ("error", "exception", "traceback", "stack", "stacktrace", "debug_internal"):
+            self.assertNotIn(k, out, k)
+        self.assertNotIn("secret", str(out))
+        self.assertNotIn("Traceback", str(out))
+
+    def test_nested_diagnostic_fields_scrubbed(self):
+        from torment_service.app import _build_cognition_response
+        result = {
+            "ok": True,
+            "memory_effects": [
+                {"proposal_id": "p1", "ingested": False, "error": "boom\nTraceback: secret"},
+                {"proposal_id": "p2", "ingested": True},
+            ],
+            "routing": {"effective_aperture": "wide", "traceback": "nested\nsecret"},
+        }
+        out = _build_cognition_response(result)
+        self.assertNotIn("secret", str(out))
+        self.assertNotIn("Traceback", str(out))
+        self.assertEqual(out["memory_effects"][0]["proposal_id"], "p1")
+        self.assertNotIn("error", out["memory_effects"][0])   # allowlist rebuilder drops raw error entirely
+        self.assertEqual(out["routing"]["traceback"], "Cognition pipeline failed")
+
+    def test_list_contained_diagnostic_fields_scrubbed(self):
+        from torment_service.app import _build_cognition_response
+        result = {
+            "ok": True,
+            "role_summaries": [
+                {"role": "skeptic", "summary": "ok"},
+                {"role": "engineer", "stacktrace": "deep\nsecret trace"},
+            ],
+        }
+        out = _build_cognition_response(result)
+        self.assertNotIn("secret", str(out))
+        self.assertEqual(out["role_summaries"][1]["stacktrace"], "Cognition pipeline failed")
+
+    def test_normal_safe_fields_preserved(self):
+        from torment_service.app import _build_cognition_response
+        result = {
+            "ok": True, "task_id": "t9", "final_answer": "answer",
+            "merged_findings": ["f1", "f2"], "dissent": [], "memory_effects": [],
+            "drift_report": None, "governance_rejections": [],
+            "role_summaries": [{"role": "skeptic", "summary": "s", "confidence": 0.9}],
+            "routing": {"effective_aperture": "narrow", "roles_activated": ["skeptic"]},
+        }
+        out = _build_cognition_response(result)
+        self.assertEqual(out["ok"], True)
+        self.assertEqual(out["task_id"], "t9")
+        self.assertEqual(out["final_answer"], "answer")
+        self.assertEqual(out["merged_findings"], ["f1", "f2"])
+        self.assertEqual(out["role_summaries"][0]["confidence"], 0.9)
+        self.assertEqual(out["routing"]["effective_aperture"], "narrow")
+
+    def test_drift_report_reasons_do_not_leak_internal_trace(self):
+        from torment_service.app import _build_cognition_response
+        result = {
+            "ok": True,
+            "drift_report": {
+                "total_drift": 0.9, "zone": "red", "governance_breach": False,
+                "reasons": ["Live drift check failed: SECRET_TRACE", "coherence below threshold"],
+            },
+        }
+        out = _build_cognition_response(result)
+        self.assertNotIn("SECRET_TRACE", str(out))
+        # structured drift fields preserved; failure reason replaced generically; legitimate reason kept
+        self.assertEqual(out["drift_report"]["zone"], "red")
+        self.assertEqual(out["drift_report"]["reasons"][0], "Live drift check failed (details withheld)")
+        self.assertEqual(out["drift_report"]["reasons"][1], "coherence below threshold")
+
+    def test_non_serialisable_objects_dropped(self):
+        from torment_service.app import _build_cognition_response
+
+        class _Leaky:
+            def __init__(self):
+                self.traceback = "secret internal frames"
+
+        result = {"ok": True, "final_answer": "ok", "memory_effects": [_Leaky(), ("t", "u")], "weird": _Leaky()}
+        out = _build_cognition_response(result)
+        self.assertNotIn("weird", out)                 # unknown top-level field dropped by allowlist
+        self.assertNotIn("secret", str(out))           # custom object dropped, not stringified
+        self.assertIsNone(out["memory_effects"][0])    # custom object -> None
+        self.assertEqual(out["memory_effects"][1], ["t", "u"])  # tuple -> list, scrubbed
+
+
+class TestCognitionRunGenericErrorStatus(unittest.TestCase):
+    """A pipeline result with status == 'error' still yields a generic HTTP 500 (no diagnostic egress)."""
+
+    def test_status_error_returns_generic_500(self):
+        import importlib
+        import os
+        import tempfile
+        from fastapi.testclient import TestClient
+
+        d = tempfile.mkdtemp(prefix="torment_cog_err_")
+        prev = {k: os.environ.get(k) for k in ("TORMENT_DATA_DIR", "TORMENT_AUTH_ENABLE", "TORMENT_EMBED_PROVIDER")}
+        os.environ["TORMENT_DATA_DIR"] = d
+        os.environ["TORMENT_AUTH_ENABLE"] = "0"
+        os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
+        try:
+            import torment_service.app as appmod
+            appmod = importlib.reload(appmod)
+            client = TestClient(appmod.app)
+            client.post("/workspace/create", json={"workspace_id": "wsE"})
+            client.post("/agent/create", json={"workspace_id": "wsE", "agent_id": "agE"})
+
+            import cognition.pipeline as pipemod
+            _orig = pipemod.run_cognition_pipeline
+            pipemod.run_cognition_pipeline = lambda **kw: {
+                "ok": True, "status": "error", "error": "boom\nTraceback: secret", "task_id": "t",
+            }
+            try:
+                resp = client.post("/cognition/run", json={"workspace_id": "wsE", "agent_id": "agE", "user_input": "hi"})
+            finally:
+                pipemod.run_cognition_pipeline = _orig
+                client.close()
+            self.assertEqual(resp.status_code, 500, resp.text)
+            self.assertEqual(resp.json().get("detail"), "Cognition pipeline failed")
+            self.assertNotIn("secret", resp.text)
+        finally:
+            for k, v in prev.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            import torment_service.app as appmod
+            importlib.reload(appmod)
 
 
 if __name__ == "__main__":

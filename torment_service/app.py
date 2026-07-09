@@ -2266,9 +2266,26 @@ class CognitionRunReq(BaseModel):
 
 _COGNITION_ERROR_KEYS = {"error", "exception", "traceback", "stack", "stacktrace"}
 
+# Explicit allowlist of client-safe top-level fields the /cognition/run success response may return.
+# Any other top-level field (including internal diagnostics) is dropped by the response builder below.
+_COGNITION_SAFE_KEYS = (
+    "ok", "task_id", "final_answer", "merged_findings", "dissent",
+    "memory_effects", "drift_report", "governance_rejections",
+    "role_summaries", "routing",
+)
+
+# JSON-serialisable primitive types that pass through the scrubber unchanged.
+_COGNITION_SAFE_SCALARS = (str, int, float, bool, type(None))
+
 
 def _sanitize_cognition_response(value: Any) -> Any:
-    """Scrub internal exception fields from cognition responses."""
+    """Recursively scrub internal diagnostic fields from a value.
+
+    - dict: denylisted keys (error/exception/traceback/stack/stacktrace) -> generic string; recurse others.
+    - list/tuple: recurse each element (always returns a list).
+    - primitives (str/int/float/bool/None): returned unchanged.
+    - any other object (custom object, dataclass, set, etc.): dropped (None) so it cannot leak internals.
+    """
     if isinstance(value, dict):
         out: Dict[str, Any] = {}
         for key, item in value.items():
@@ -2277,9 +2294,70 @@ def _sanitize_cognition_response(value: Any) -> Any:
             else:
                 out[key] = _sanitize_cognition_response(item)
         return out
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_sanitize_cognition_response(item) for item in value]
-    return value
+    if isinstance(value, _COGNITION_SAFE_SCALARS):
+        return value
+    return None
+
+
+# Allowlisted keys for each memory-effect entry; anything else (e.g. raw "error"/"exception") is dropped.
+_MEMORY_EFFECT_SAFE_KEYS = (
+    "proposal_id", "ingested", "rejected", "rejection_reason", "parent_eids",
+    "source_role", "target_domain", "memory_type", "provenance_write_path",
+)
+
+
+def _safe_memory_effects(effects: Any) -> Any:
+    """Rebuild each memory-effect entry from an allowlist; drop raw diagnostic keys (error/exception/etc.)."""
+    if not isinstance(effects, (list, tuple)):
+        return []
+    out = []
+    for eff in effects:
+        if isinstance(eff, dict):
+            out.append({k: _sanitize_cognition_response(eff[k]) for k in _MEMORY_EFFECT_SAFE_KEYS if k in eff})
+        else:
+            out.append(_sanitize_cognition_response(eff))
+    return out
+
+
+def _safe_drift_reason(reason: Any) -> str:
+    """Withhold internals in free-form drift reasons. The live drift-check FAILURE fallback embeds str(e)
+    (cognition/drift.py) -> replace with a generic client-safe reason; other reasons pass through as text."""
+    text = str(reason)
+    if text.startswith("Live drift check failed"):
+        return "Live drift check failed (details withheld)"
+    return text
+
+
+def _safe_drift_report(dr: Any) -> Any:
+    """Keep the structured drift fields but never pass free-form reasons blindly (they can embed str(e))."""
+    scrubbed = _sanitize_cognition_response(dr)
+    if isinstance(scrubbed, dict) and isinstance(scrubbed.get("reasons"), list):
+        scrubbed["reasons"] = [_safe_drift_reason(r) for r in scrubbed["reasons"]]
+    return scrubbed
+
+
+def _build_cognition_response(result: Any) -> Dict[str, Any]:
+    """Build the /cognition/run client response from an explicit ALLOWLIST of known-safe fields.
+
+    Returns only the fields in _COGNITION_SAFE_KEYS (each recursively scrubbed). Unknown/diagnostic top-level
+    fields are omitted entirely, so the client never receives arbitrary pipeline-produced diagnostic data and
+    never a top-level key named error/exception/traceback/stack/stacktrace. Structured nested fields that can
+    carry free-form internal text (drift_report.reasons, memory_effects entries) are rebuilt field-by-field.
+    """
+    src = result if isinstance(result, dict) else {}
+    out: Dict[str, Any] = {}
+    for key in _COGNITION_SAFE_KEYS:
+        if key not in src:
+            continue
+        if key == "drift_report":
+            out[key] = _safe_drift_report(src[key])
+        elif key == "memory_effects":
+            out[key] = _safe_memory_effects(src[key])
+        else:
+            out[key] = _sanitize_cognition_response(src[key])
+    return out
 
 
 @app.post("/cognition/run")
@@ -2410,7 +2488,7 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
             detail="Cognition pipeline failed",
         )
 
-    return _sanitize_cognition_response(result)
+    return _build_cognition_response(result)
 
 
 # ---------------------------------------------------------------------------
