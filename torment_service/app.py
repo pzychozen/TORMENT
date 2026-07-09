@@ -2264,6 +2264,24 @@ class CognitionRunReq(BaseModel):
     priority: str = Field(default="normal")  # low | normal | high
 
 
+_COGNITION_ERROR_KEYS = {"error", "exception", "traceback", "stack", "stacktrace"}
+
+
+def _sanitize_cognition_response(value: Any) -> Any:
+    """Scrub internal exception fields from cognition responses."""
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).lower() in _COGNITION_ERROR_KEYS:
+                out[key] = "Cognition pipeline failed"
+            else:
+                out[key] = _sanitize_cognition_response(item)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_cognition_response(item) for item in value]
+    return value
+
+
 @app.post("/cognition/run")
 def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     """Execute the Agent Spine cognition pipeline.
@@ -2378,7 +2396,11 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
         lane_provider=_lane_provider,
     )
 
-    if not result.get("ok", False):
+    result_failed = (
+        isinstance(result, dict)
+        and (not result.get("ok", False) or str(result.get("status", "")).lower() == "error")
+    )
+    if result_failed:
         _log.warning(
             "cognition pipeline failed: %s",
             _safe_log_value(result.get("error", "Cognition pipeline failed")),
@@ -2388,7 +2410,7 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
             detail="Cognition pipeline failed",
         )
 
-    return result
+    return _sanitize_cognition_response(result)
 
 
 # ---------------------------------------------------------------------------

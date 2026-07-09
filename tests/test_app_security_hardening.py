@@ -10,9 +10,14 @@ Covers:
 import os
 import sys
 import unittest
+import json
+from types import SimpleNamespace
+
+import pytest
 
 # We import the helpers directly from the app module.
 # _safe_join_data_dir and _safe_log_value are module-level functions.
+import torment_service.app as appmod
 from torment_service.app import (
     _validate_path_component,
     _safe_join_data_dir,
@@ -175,6 +180,86 @@ class TestSafeLogValue(unittest.TestCase):
         """_safe_log_value should handle non-string input via str() coercion."""
         result = _safe_log_value(12345)
         self.assertEqual(result, "12345")
+
+
+class _CognitionDummyFabric:
+    private_graphs = {}
+
+    def get_workspace(self, workspace_id):
+        return SimpleNamespace(domains=[])
+
+    def create_agent(self, workspace_id, agent_id):
+        return SimpleNamespace(seed={}, overlay={}, agent_id=agent_id)
+
+    def ingest(self, *args, **kwargs):
+        return {"ok": True}
+
+    def _agent_key(self, workspace_id, agent_id):
+        return f"{workspace_id}:{agent_id}"
+
+
+def _run_cognition_with_result(monkeypatch, result):
+    import cognition.pipeline as pipeline
+
+    monkeypatch.setattr(appmod, "fabric", _CognitionDummyFabric())
+    monkeypatch.setattr(pipeline, "run_cognition_pipeline", lambda **kwargs: result)
+    req = appmod.CognitionRunReq(workspace_id="ws", agent_id="agent", user_input="hello")
+    return appmod.cognition_run(req)
+
+
+def test_cognition_status_error_returns_generic_pipeline_failure(monkeypatch):
+    result = {"ok": False, "status": "error", "error": "SECRET\nTRACE"}
+
+    with pytest.raises(HTTPException) as ctx:
+        _run_cognition_with_result(monkeypatch, result)
+
+    assert ctx.value.status_code == 500
+    assert ctx.value.detail == "Cognition pipeline failed"
+    assert "SECRET" not in str(ctx.value.detail)
+    assert "TRACE" not in str(ctx.value.detail)
+
+
+def test_cognition_success_scrubs_internal_error_field(monkeypatch):
+    result = {
+        "ok": True,
+        "status": "partial",
+        "final_answer": "normal answer",
+        "error": "SECRET\nTRACE",
+        "normal": {"kept": True},
+    }
+
+    response = _run_cognition_with_result(monkeypatch, result)
+
+    assert response["final_answer"] == "normal answer"
+    assert response["normal"] == {"kept": True}
+    assert response["error"] == "Cognition pipeline failed"
+    encoded = json.dumps(response)
+    assert "SECRET" not in encoded
+    assert "TRACE" not in encoded
+
+
+def test_cognition_success_scrubs_traceback_stack_like_fields(monkeypatch):
+    result = {
+        "ok": True,
+        "final_answer": "normal answer",
+        "traceback": "LEAKME traceback",
+        "stack": "LEAKME stack",
+        "nested": {
+            "stacktrace": "LEAKME stacktrace",
+            "items": [{"exception": "LEAKME exception"}],
+            "kept": "safe value",
+        },
+    }
+
+    response = _run_cognition_with_result(monkeypatch, result)
+
+    assert response["final_answer"] == "normal answer"
+    assert response["traceback"] == "Cognition pipeline failed"
+    assert response["stack"] == "Cognition pipeline failed"
+    assert response["nested"]["stacktrace"] == "Cognition pipeline failed"
+    assert response["nested"]["items"][0]["exception"] == "Cognition pipeline failed"
+    assert response["nested"]["kept"] == "safe value"
+    assert "LEAKME" not in json.dumps(response)
 
 
 if __name__ == "__main__":
