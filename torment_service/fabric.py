@@ -47,6 +47,10 @@ class _JobCancelled(Exception):
     pass
 
 
+def _safe_log_value(value: Any) -> str:
+    """Return a single-line representation for user-derived log fields."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
 
 def _proposal_allowed(
     ident: "AgentIdentity",
@@ -1268,7 +1272,12 @@ class TormentFabric:
                 "counts": dict(counts),
             })
 
-        self._repair_log.info("repair_embeddings start workspace=%s mode=%s graphs=%d", workspace_id, mode, total_graphs)
+        self._repair_log.info(
+            "repair_embeddings start workspace=%s mode=%s graphs=%d",
+            _safe_log_value(workspace_id),
+            _safe_log_value(mode),
+            total_graphs,
+        )
         _push_progress("", 0)
 
         for gi, gdir in enumerate(graph_dirs, start=1):
@@ -1280,7 +1289,12 @@ class TormentFabric:
             objs: List[Dict[str, Any]] = []
             modified = False
 
-            self._repair_log.info("repair_embeddings graph %d/%d %s", gi, total_graphs, gdir)
+            self._repair_log.info(
+                "repair_embeddings graph %d/%d %s",
+                gi,
+                total_graphs,
+                _safe_log_value(gdir),
+            )
             _push_progress(gdir, gi)
 
             with open(nodes_path, "r", encoding="utf-8") as nf:
@@ -1363,7 +1377,12 @@ class TormentFabric:
             if max_nodes is not None and processed >= max_nodes:
                 break
 
-        self._repair_log.info("repair_embeddings done workspace=%s mode=%s processed=%d", workspace_id, mode, processed)
+        self._repair_log.info(
+            "repair_embeddings done workspace=%s mode=%s processed=%d",
+            _safe_log_value(workspace_id),
+            _safe_log_value(mode),
+            processed,
+        )
         _push_progress("", total_graphs)
 
         # Persist fast workspace-level embedding health index.
@@ -1886,7 +1905,9 @@ class TormentFabric:
             self._persist_job('clone', job_id)
     
         self._log.info("clone start job_id=%s src=%s tgt=%s include_private=%s include_shared=%s reembed=%s reembed_mode=%s",
-                       job_id, source_workspace_id, target_workspace_id, include_private, include_shared, reembed, reembed_mode)
+                       _safe_log_value(job_id), _safe_log_value(source_workspace_id),
+                       _safe_log_value(target_workspace_id), include_private, include_shared, reembed,
+                       _safe_log_value(reembed_mode))
     
         try:
             src_root = _ws_root(self.data_dir, source_workspace_id)
@@ -1972,7 +1993,11 @@ class TormentFabric:
                         return
                     regenerated["graphs"] += 1
                     local_count = 0
-                    self._log.info("clone job_id=%s reembed graph=%s", job_id, graph_dir)
+                    self._log.info(
+                        "clone job_id=%s reembed graph=%s",
+                        _safe_log_value(job_id),
+                        _safe_log_value(graph_dir),
+                    )
                     objs: List[Dict[str, Any]] = []
                     modified_nodes = False
                     with open(nodes_path, "r", encoding="utf-8") as nf:
@@ -2018,7 +2043,12 @@ class TormentFabric:
                                 local_count += 1
                                 if local_count % int(max(1, self._clone_log_every)) == 0:
                                     _prog(embeddings_done=regenerated["embeddings"])
-                                    self._log.info("clone job_id=%s progress graph=%s embeddings=%d", job_id, graph_dir, regenerated["embeddings"])
+                                    self._log.info(
+                                        "clone job_id=%s progress graph=%s embeddings=%d",
+                                        _safe_log_value(job_id),
+                                        _safe_log_value(graph_dir),
+                                        regenerated["embeddings"],
+                                    )
                             else:
                                 regenerated.setdefault("skipped", 0)
                                 regenerated["skipped"] += 1
@@ -2076,7 +2106,11 @@ class TormentFabric:
                     embedder={"provider": meta.get("embed_provider", ""), "model": meta.get("embed_model", ""), "dim": meta.get("embed_dim", 0)},
                 )
             except Exception as e:
-                self._log.debug("Failed to write embedding audit for workspace_id=%s: %s", target_workspace_id, e)
+                self._log.debug(
+                    "Failed to write embedding audit for workspace_id=%s: %s",
+                    _safe_log_value(target_workspace_id),
+                    _safe_log_value(e),
+                )
 
             return {
                 "ok": True,
@@ -2118,7 +2152,12 @@ class TormentFabric:
             try:
                 _ = self.role_store.load(workspace_id, agent_id)
             except Exception as e:
-                self._log.debug("Failed to load role_store for workspace_id=%s agent_id=%s: %s", workspace_id, agent_id, e)
+                self._log.debug(
+                    "Failed to load role_store for workspace_id=%s agent_id=%s: %s",
+                    _safe_log_value(workspace_id),
+                    _safe_log_value(agent_id),
+                    _safe_log_value(e),
+                )
             # init kernel state if needed — route character seed through oscillator physics
             if ak not in self.agent_states:
                 char_mod = None
@@ -6251,7 +6290,11 @@ class TormentFabric:
                         auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
                     )
                 except Exception as e:
-                    self._log.debug("group proposal motif entropy update failed for domain=%s: %s", domain_id, e)
+                    self._log.debug(
+                        "group proposal motif entropy update failed for domain=%s: %s",
+                        _safe_log_value(domain_id),
+                        _safe_log_value(e),
+                    )
 
                 # mark all proposals in group approved
                 for k in group:

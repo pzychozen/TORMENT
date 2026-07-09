@@ -2379,9 +2379,13 @@ def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
     )
 
     if not result.get("ok", False):
+        _log.warning(
+            "cognition pipeline failed: %s",
+            _safe_log_value(result.get("error", "Cognition pipeline failed")),
+        )
         raise HTTPException(
             status_code=500,
-            detail=result.get("error", "Cognition pipeline failed"),
+            detail="Cognition pipeline failed",
         )
 
     return result

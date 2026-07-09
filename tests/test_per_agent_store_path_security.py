@@ -6,8 +6,8 @@ JSON stores hardened in this slice:
   - RoleStore            (roles.py)
   - ReingestTracker      (collective_policy.py)
 
-Each store now validates its dynamic path components via pathing.safe_slug and
-contains the resulting path via pathing.ensure_within_base, instead of relying
+Each store now validates its dynamic path components via centralized pathing
+builders and contains the resolved path beneath base_dir, instead of relying
 only on upstream caller validation. These tests assert: valid identifiers work
 unchanged, traversal / separator / absolute forms fail closed with ValueError,
 and resolved paths remain beneath base_dir.
@@ -38,10 +38,12 @@ def base_dir():
 
 _BAD_COMPONENTS = [
     "../evil",        # traversal
+    "..\\evil",       # Windows traversal
     "..",             # parent
     "a/b",            # forward slash component
     "a\\b",           # backslash component
     "/etc/passwd",    # absolute / leading slash
+    "C:\\escape",     # Windows absolute path
 ]
 
 

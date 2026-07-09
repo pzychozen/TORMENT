@@ -4,7 +4,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 import json, os, time
 
-from .pathing import ensure_within_base, safe_slug
+from .pathing import approved_subdir, stable_filename
 
 
 def _now_ts() -> int:
@@ -56,7 +56,7 @@ class AgentIdentity:
 class IdentityStore:
     """Persists agent identities as JSON files."""
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.realpath(data_dir)
         os.makedirs(self.data_dir, exist_ok=True)
 
     def _path(self, workspace_id: str, agent_id: str) -> str:
@@ -64,10 +64,20 @@ class IdentityStore:
         # resulting path beneath data_dir at the path-builder, so every sink
         # (load/save/create) is reached only via a contained path rather than
         # relying solely on upstream caller validation.
-        ws = safe_slug(workspace_id, "workspace_id")
-        ag = safe_slug(agent_id, "agent_id")
-        p = os.path.join(self.data_dir, "workspaces", ws, "agents", ag, "identity.json")
-        return ensure_within_base(p, self.data_dir)
+        agent_dir = approved_subdir(
+            self.data_dir,
+            "workspaces",
+            workspace_id,
+            "agents",
+            agent_id,
+            mkdir=False,
+        )
+        p = stable_filename(agent_dir, "identity.json")
+        base = os.path.realpath(self.data_dir)
+        resolved = os.path.realpath(p)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError(f"Identity path escapes data directory: {resolved!r}")
+        return resolved
 
     def load(self, workspace_id: str, agent_id: str) -> Optional[AgentIdentity]:
         p = self._path(workspace_id, agent_id)

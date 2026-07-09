@@ -124,6 +124,14 @@ class TestNoRawExceptionInResponses(unittest.TestCase):
             f"raw exception text should not be exposed in JSON responses",
         )
 
+    def test_cognition_run_returns_generic_pipeline_failure(self):
+        """The cognition endpoint must not pass pipeline error text to clients."""
+        import inspect
+
+        source = inspect.getsource(sys.modules['torment_service.app'])
+        self.assertNotIn('detail=result.get("error"', source)
+        self.assertIn('detail="Cognition pipeline failed"', source)
+
     def test_no_f_string_exc_in_http_detail(self):
         """Check that f-string interpolation of {exc} is not used in HTTPException detail."""
         import inspect

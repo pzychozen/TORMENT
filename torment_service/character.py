@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .motifs import cosine
-from .pathing import ensure_within_base, safe_slug
+from .pathing import approved_subdir, stable_filename
 
 log = logging.getLogger("torment.character")
 
@@ -199,19 +199,26 @@ class CharacterStore:
     """Persists character seeds and runtime state as JSON."""
 
     def __init__(self, data_dir: str) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.realpath(data_dir)
 
     # -- Seed paths --
 
     def _seed_path(self, workspace_id: str, seed_id: str) -> str:
         # Defense-in-depth: validate components + contain beneath data_dir.
-        ws = safe_slug(workspace_id, "workspace_id")
-        sid = safe_slug(seed_id, "seed_id")
-        p = os.path.join(
-            self.data_dir, "workspaces", ws,
-            "seeds", sid, "seed.json",
+        seed_dir = approved_subdir(
+            self.data_dir,
+            "workspaces",
+            workspace_id,
+            "seeds",
+            seed_id,
+            mkdir=False,
         )
-        return ensure_within_base(p, self.data_dir)
+        p = stable_filename(seed_dir, "seed.json")
+        base = os.path.realpath(self.data_dir)
+        resolved = os.path.realpath(p)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError(f"Character seed path escapes data directory: {resolved!r}")
+        return resolved
 
     def load_seed(self, workspace_id: str, seed_id: str) -> Optional[CharacterSeed]:
         p = self._seed_path(workspace_id, seed_id)
@@ -230,13 +237,20 @@ class CharacterStore:
 
     def _state_path(self, workspace_id: str, agent_id: str) -> str:
         # Defense-in-depth: validate components + contain beneath data_dir.
-        ws = safe_slug(workspace_id, "workspace_id")
-        ag = safe_slug(agent_id, "agent_id")
-        p = os.path.join(
-            self.data_dir, "workspaces", ws,
-            "agents", ag, "character_state.json",
+        agent_dir = approved_subdir(
+            self.data_dir,
+            "workspaces",
+            workspace_id,
+            "agents",
+            agent_id,
+            mkdir=False,
         )
-        return ensure_within_base(p, self.data_dir)
+        p = stable_filename(agent_dir, "character_state.json")
+        base = os.path.realpath(self.data_dir)
+        resolved = os.path.realpath(p)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError(f"Character state path escapes data directory: {resolved!r}")
+        return resolved
 
     def load_state(self, workspace_id: str, agent_id: str) -> Optional[CharacterState]:
         p = self._state_path(workspace_id, agent_id)
