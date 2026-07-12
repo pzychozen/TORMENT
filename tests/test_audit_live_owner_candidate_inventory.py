@@ -48,6 +48,13 @@ _OWNER_REL = "torment_service/audit_private_generation_owner.py"
 # for the same-turn memory path. NOT audit-owner terrain; called nowhere in production.
 _ORCH = "memory_context_orchestrator.py"
 _ORCH_REL = "torment_service/memory_context_orchestrator.py"
+# The non-Spine LLM runtime: a dormant, separately gated model-bearing surface that reaches the
+# model-completion boundary via its own provider adapter. It is admissible in this inventory ONLY
+# because it is NOT IMPORTED BY ANY PRODUCTION MODULE (asserted below) -- its presence in the
+# complete() caller set records a dormant boundary, and authorizes no provider wiring and no live
+# model path.
+_NON_SPINE = "non_spine_llm_runtime.py"
+_NON_SPINE_REL = "torment_service/non_spine_llm_runtime.py"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
 
 # The five owner-relevant call sites this inventory tracks.
@@ -306,11 +313,46 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
                          {"agent_loop.py"})
 
     def test_model_completion_caller_inventory(self):
-        # The model-completion boundary is reached by the runner and the private
-        # generation owner (design shape A; unwired, tests-only). No endpoint or
-        # other service module.
+        # The model-completion boundary is reached by the runner, the private generation owner
+        # (design shape A; unwired, tests-only), and the dormant non-Spine LLM runtime
+        # (separately gated; imported by no production module -- see the admissibility test
+        # below). No endpoint or other service module.
         self.assertEqual(_service_callers_of("complete"),
-                         {"agent_loop.py", _OWNER})
+                         {"agent_loop.py", _OWNER, _NON_SPINE})
+
+    def test_non_spine_runtime_completion_caller_is_admissible_because_unimported(self):
+        """Why _NON_SPINE may appear above: no production module imports it (AST + source).
+
+        Its presence in the complete() caller set records a DORMANT, separately gated boundary.
+        It authorizes NO provider wiring, NO live model path, and NO endpoint reachability.
+        """
+        importers = []
+        for dp, dns, fns in os.walk(_service_dir()):
+            dns[:] = [d for d in dns
+                      if d not in _SKIP_DIRS and not d.startswith("do_not_touch")]
+            for fn in fns:
+                if not fn.endswith(".py") or fn == _NON_SPINE:
+                    continue
+                ab = os.path.join(dp, fn)
+                try:
+                    tree = _parse(ab)
+                except (SyntaxError, ValueError):
+                    continue
+                imported = set()
+                for n in ast.walk(tree):
+                    if isinstance(n, ast.ImportFrom) and n.module:
+                        imported.add(n.module.split(".")[-1])
+                        imported.update(a.name for a in n.names)
+                    elif isinstance(n, ast.Import):
+                        imported.update(a.name.split(".")[-1] for a in n.names)
+                with open(ab, "rb") as fh:
+                    src = fh.read()
+                if "non_spine_llm_runtime" in imported or b"non_spine_llm_runtime" in src:
+                    importers.append(os.path.relpath(ab, _service_dir()).replace("\\", "/"))
+        self.assertEqual(importers, [],
+                         "the non-Spine LLM runtime must be imported by NO production module; "
+                         "its complete() caller presence is a dormant boundary only and authorizes "
+                         f"no provider wiring or live model path; importers: {importers}")
 
     def test_inventory_snapshot_is_exact(self):
         # One explicit snapshot for the next gate's A-vs-B comparison.
@@ -322,7 +364,7 @@ class TestInvariant3CandidateOwnerInventory(unittest.TestCase):
             "run_turn_with_selected_items_observation": [],
             "_build_llm_prompt_request": ["agent_loop.py"],
             "_build_system_prompt": ["agent_loop.py"],
-            "complete": ["agent_loop.py", _OWNER],
+            "complete": sorted(["agent_loop.py", _OWNER, _NON_SPINE]),
         })
 
 
