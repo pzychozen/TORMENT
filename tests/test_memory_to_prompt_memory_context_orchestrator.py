@@ -153,6 +153,66 @@ class TestOrchestratorBoundaries(unittest.TestCase):
         self.assertEqual(importers, [],
                          f"orchestrator must be called nowhere in production; importers: {importers}")
 
+    # ---------------------------------------------------------------- approved-caller drift --- #
+    # The caller-set guards elsewhere close NEW-caller drift (a new production module calling
+    # run_turn). These three close APPROVED-caller drift: an already-permitted run_turn caller
+    # beginning to supply memory_context_text=. Tests-only; authorizes no wiring, no runtime
+    # memory use, and no prompt integration.
+
+    # A ``**kwargs`` expansion has ``k.arg is None``; it is recorded as this sentinel rather than
+    # dropped, so that opaque keyword expansion FAILS CLOSED -- a dict could hide memory_context_text.
+    OPAQUE_KWARGS = "<opaque **kwargs>"
+
+    def _run_turn_keyword_sites(self):
+        """{module filename: [sorted keyword names of each run_turn(...) call]} across production."""
+        sites = {}
+        for dp, dns, fns in os.walk(self._service_dir()):
+            dns[:] = [d for d in dns if d != "__pycache__" and not d.startswith("do_not_touch")]
+            for fn in fns:
+                if not fn.endswith(".py"):
+                    continue
+                with open(os.path.join(dp, fn), "rb") as fh:
+                    tree = ast.parse(fh.read().replace(b"\x00", b""))
+                for n in ast.walk(tree):
+                    if not isinstance(n, ast.Call):
+                        continue
+                    f = n.func
+                    name = f.attr if isinstance(f, ast.Attribute) else (
+                        f.id if isinstance(f, ast.Name) else None)
+                    if name == "run_turn":
+                        sites.setdefault(fn, []).append(
+                            sorted(k.arg if k.arg else self.OPAQUE_KWARGS for k in n.keywords))
+        return sites
+
+    def test_no_production_run_turn_call_uses_opaque_kwargs_expansion(self):
+        offenders = sorted(fn for fn, calls in self._run_turn_keyword_sites().items()
+                           if any(self.OPAQUE_KWARGS in kws for kws in calls))
+        self.assertEqual(offenders, [],
+                         "no production run_turn(...) call may use **kwargs expansion: an opaque "
+                         "dict could hide memory_context_text and defeat the supplier guard; "
+                         f"offenders: {offenders}")
+
+    def test_memory_context_text_is_a_run_turn_keyword_only_in_the_orchestrator(self):
+        suppliers = sorted(fn for fn, calls in self._run_turn_keyword_sites().items()
+                           if any("memory_context_text" in kws for kws in calls))
+        self.assertEqual(suppliers, ["memory_context_orchestrator.py"],
+                         "memory_context_text may be passed into run_turn ONLY by the dormant "
+                         f"orchestrator; suppliers found: {suppliers}")
+
+    def test_selected_items_bridge_passes_no_memory_context_text_into_run_turn(self):
+        calls = self._run_turn_keyword_sites().get("audit_selected_items_runner_bridge.py", [])
+        self.assertTrue(calls, "the approved bridge must still call run_turn")
+        for kws in calls:
+            self.assertNotIn("memory_context_text", kws,
+                             "the selected-items bridge must not supply memory context to run_turn")
+
+    def test_agent_loop_self_call_passes_no_memory_context_text_into_run_turn(self):
+        calls = self._run_turn_keyword_sites().get("agent_loop.py", [])
+        self.assertTrue(calls, "agent_loop must still contain its reflex run_turn self-call")
+        for kws in calls:
+            self.assertNotIn("memory_context_text", kws,
+                             "the AgentRunner reflex self-call must stay memory-blind")
+
 
 if __name__ == "__main__":
     unittest.main()
