@@ -19,7 +19,7 @@
 
 **Method:** five candidate carrier-shape families (§4) are compared at requirement level against: the Q1 carrier-property set; the Q2 crossing-record obligations; the Q3 floor-binding obligations; the Q4/Q5/Q6 relation-exposure obligations; and the pre-carrier representation constraints envelope (P-1…P-9 required properties, A-1…A-8 anti-properties). The comparison labels are descriptive: SATISFIES / CANNOT / PARTIAL-with-named-gap. No weights, no total score, no ranking, no winner. F5 (the null/minimal carrier) is included as the falsification baseline: if existing evidence satisfies Q1 without a carrier, the carrier question ends.
 
-All inputs were read read-only from the committed tree at `9f61cd2`. Precedent artifacts are cited as *evidence of shape feasibility only*, never as targets.
+All inputs were read read-only from the committed tree at `9f61cd2`. Precedent artifacts are cited as *evidence of shape feasibility only*, never as targets. F1-F5 are a survey set, not a closed universe; omission is not rejection; any future selection frame may add or justify excluding additional family shapes.
 
 ## §3 Requirement extraction (input; pinned from the read-only extraction pass)
 
@@ -96,7 +96,7 @@ Legend: **S** = satisfies at requirement level; **C** = cannot satisfy; **P(gap)
 | Q1-6 non-authority / non-coercion | P (must be designed inert; A-3 tension) | P (record-as-authorization tension) | P (P-9 must hold) | P (A-3/A-6 tension) | S (adds no surface) |
 | Q1-7 operator-floor compatibility | S (neutral) | S (evidences floor; never satisfies it) | S (sole-exit supports floor) | S (neutral) | S |
 | Q1-8 containment compatibility | C (not a boundary) | P (ledger itself must not be a side-path) | S (structural containment) | C (lives inside ordinary memory) | S (adds nothing) |
-| Q1-9 determinism / stability | S | S | P | S | C (reconstruction unstable; see §9) |
+| Q1-9 determinism / stability | S | S | P | S | P (not shown satisfied; completeness/replay-order convention unselected; see §9) |
 | Q1-10 carrier/substrate-agnosticism | S | S | S | C (bound to current row substrate) | S |
 | Q2 crossing-record obligations (cluster) | C | S (near-complete; subject-source reference P — needs Q1-1-type capability) | P (pre/post containment-state evidence only) | P (row-level subject reference only) | C (no crossing record exists) |
 | Q3 floor-binding obligations (cluster) | C | P (evidenced-via-Q2 support only; binding itself C) | P (non-bypassability *support* via sole-exit only; binding itself C) | C | C |
@@ -106,7 +106,7 @@ Legend: **S** = satisfies at requirement level; **C** = cannot satisfy; **P(gap)
 ## §6 Constraint-envelope check (P-1…P-9 / A-1…A-8 per family)
 
 - **F1:** clean on P-1/P-5/P-7 (it is not a boundary and must never substitute for one). Tensions: **A-3** (a source reference must never become retrieval/prompt/MemoryPlan-visible as authority signal); **A-4** ("a reference layer exists" must not imply a store/ID scheme was chosen); **A-6** (a resolvable reference confers nothing). Q1's own forbidden readings apply: no source-id field, versioning token, hash, or matcher is implied.
-- **F2:** tensions: **A-4** ("recorded" ≠ store/schema selected; fsync/transactional questions are Q7 Stage-B blockers, untouched); **A-7** (a ledger entry must never become "inspected → auto-admit"); Q3 freshness/non-replay (a recorded past authorization must never be replayable); **A-6** (row presence confers nothing). P-3 contestability is a natural fit.
+- **F2:** tensions: **A-4** ("recorded" ≠ store/schema selected; fsync/transactional questions are Q7 Stage-B blockers, untouched); **A-7** (a ledger entry must never become "inspected → auto-admit"); Q3 freshness/non-replay (a recorded past authorization must never be replayable); **A-6** (row presence confers nothing). P-3 contestability is one relation this family shape can describe; this is not a preference.
 - **F3:** P-side fit for P-1/P-5/P-6/P-7 at shape level. Tensions: **A-1** (enclosure silently becoming ordinary memory); **A-5** (containment must be structural, never tag-honored — the enclosure must not be "rows with a `contained` tag"); **A-4** (enclosure ≠ store/API by implication); Q6 governed-crossing subjecthood (staged items get no privileged path). P-8/P-9 must hold for its inspection surface.
 - **F4:** anti-property tensions include: **A-3** (annotations ride retrieval-visible rows); **A-5** (annotation-shaped exclusion is tag-honoring by construction); **A-8** (stamps flow through writer surfaces); **A-6/H3** (a stamp must never launder a force-promoted row into apparent legitimacy — H3 force-bypass terrain per the `6a4da8f` inventory stays parked and un-weakened). These are described as gaps/tensions, not a verdict on the family.
 - **F5:** adds no new carrier surface by construction. The risk is epistemic: overclaiming that existing evidence suffices, against the Q1 doctrine that reusable local `eid` presence is insufficient.
@@ -121,7 +121,7 @@ Legend: **S** = satisfies at requirement level; **C** = cannot satisfy; **P(gap)
 
 ## §8 Wall-seam affinity (informative only; no seam selected)
 
-- **F3** has natural affinity with **Seam A** (producer-side containment boundary).
+- **F3** can be discussed in relation to **Seam A** because both concern producer-side containment; this is not a preference for F3 or Seam A.
 - **F2** could later *evidence* crossings for any seam; it enforces none.
 - **F1** is seam-neutral (a denotation capability, not an enforcement point).
 - **F4** aligns with none cleanly; **Seam C** (writer-authority gate) is class-bound rejection, not annotation-honoring — A-5 forbids reading F4 as a Seam C implementation.
@@ -133,13 +133,13 @@ The enforcement-path proposal selected no seam; this survey inherits and preserv
 
 **Question:** does existing durable evidence satisfy Q1 without any carrier?
 
-**Requirement-level analysis from source-known facts:** the live substrate exposes reusable local `eid` slots; `update_payload` performs canonical-last reappend, so the row behind an `eid` is a moving target; private/core and shared/relational stores have independent `eid` spaces (cross-lane `eid` collision is a recorded operational fact); existing provenance (ProvenanceV1 / `affect_attribution`) attributes *row and value lineage at write time* but does not denote *sources* stably across reappend/reuse. Consequently, at requirement level:
+**Requirement-level analysis from source-known facts:** the live substrate exposes reusable local `eid` slots; `update_payload` performs canonical-last reappend, so the row behind an `eid` is a moving target; private/core and shared/relational stores are separate local-eid terrains, so local eid alone cannot be promoted into global source identity; existing provenance (ProvenanceV1 / `affect_attribution`) attributes *row and value lineage at write time* but does not denote *sources* stably across reappend/reuse. Consequently, at requirement level:
 
 - **Q1-1:** partially reconstructable only where a source's rows were never reappended or reused — exactly the easy cases. Fails in general.
 - **Q1-2:** fails: after canonical-last reappend plus `eid` reuse, no existing evidence deterministically re-binds a reference to its source; Q1's doctrine line ("presence of a reusable local `eid` is insufficient") states this terrain directly.
-- **Q1-9:** fails: reconstruction from logs/envelopes depends on log completeness and replay order; identical queries at different times can yield different determinations.
+- **Q1-9:** not shown satisfied by F5 in this survey: reconstruction from existing logs/envelopes would require an already-selected completeness/replay-order convention, and none is selected here. This is a null-baseline limitation, not a new replay/determinism finding.
 
-**Baseline verdict (requirement-level, descriptive):** F5, as currently evidenced, does **not** satisfy Q1-1/Q1-2/Q1-9; therefore the carrier question remains live. This is not a finding that a carrier is required, that any specific capability is needed, or that any family should be selected. Per the hardening constraint, this verdict justifies **only** the continued existence of the question. It does not select, prefer, or recommend any family, and it does not authorize building anything. If a future pass shows this analysis wrong (existing evidence suffices), the carrier question closes and HOLD stands.
+**Baseline verdict (requirement-level, descriptive):** F5, as currently evidenced, does **not** satisfy Q1-1/Q1-2 and has **not shown** Q1-9 satisfied; therefore the carrier question remains live. This is not a finding that a carrier is required, that any specific capability is needed, or that any family should be selected. Per the hardening constraint, this verdict justifies **only** the continued existence of the question. It does not select, prefer, or recommend any family, and it does not authorize building anything. If a future pass shows this analysis wrong (existing evidence suffices), the carrier question closes and HOLD stands.
 
 ## §10 Composition observation (recorded, not decided)
 
@@ -170,6 +170,6 @@ No family is preferred, ranked, or recommended. No composition is named or sketc
 
 1. **HOLD** — file this survey as evidence and return to FORMAL HOLD; nothing decays.
 2. **Codex challenge** — adversarial review of this survey (especially the §5 matrix cells and the §9 baseline analysis) before anything further.
-3. **Separately authorized selection frame** — a future docs-only frame, opened only by explicit Hilmir authorization after a Codex challenge, that would decide whether/which family or composition proceeds to design. Not opened here.
+3. **Separately authorized selection frame** — a future docs-only frame, opened only by explicit Hilmir authorization after a Codex challenge, that would decide whether/which surveyed-or-newly-named family, or whether any composition question, proceeds toward a later design frame. Not opened here.
 
 *End of survey. Docs-only; non-authorizing; non-selecting; FORMAL HOLD preserved.*
