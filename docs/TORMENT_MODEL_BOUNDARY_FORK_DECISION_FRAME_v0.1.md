@@ -29,16 +29,17 @@ Inherited by reference, binding, and **not re-decided here**:
 
 ### M1 — Deterministic-as-standing-state
 
-**Meaning:** live generation does not belong in TORMENT; the Spine stays deterministic; the dormant machinery is re-labeled **preserved evidence, not future load-bearing**. Recorded as a standing state, revisitable only by a fresh standalone Hilmir decision record — deliberately distinct from `3e4bc2d`'s Option E (permanent rejection), which the prior frame assessed as too strong; E remains available but must be separately argued in its own record.
+**Meaning:** live generation does not belong in TORMENT; the Spine stays deterministic; the dormant machinery is re-labeled **preserved evidence, not future load-bearing**. Recorded as a standing state, revisitable only by a fresh standalone Hilmir decision record — deliberately distinct from `3e4bc2d`'s Option E (permanent rejection), which the `3e4bc2d` frame's recorded non-selecting lean assessed as too strong (inherited here as evidence, not adopted as this frame's judgment). **Option E is not selected, not recommended, and not silently contained in M1 or M2**; it remains only an older, stronger, separately argued possibility requiring its own standalone record.
 **Does not confer:** deletion of the dormant machinery (removal would be its own separately gated decision); closure of the fork against a future fresh record.
 **Consequences:** the memory-to-prompt live-caller question dissolves (seam/orchestrator become fenced museum pieces; drift locks stay as regression fences); the generative side of the autonomy ladder is effectively pinned to Mode 0; the inhabitant-voice question is largely mooted for generation while M1 stands.
-**Disambiguation requirement:** a record choosing M1 must state explicitly what TORMENT then is — a complete memory-fabric system with a deterministic voice is a coherent end state, but it is a different thing from a habitat awaiting a live inhabitant, and the record must say which is being chosen so future readers do not inherit the ambiguity. This requirement expresses no preference between the two.
+**Disambiguation requirement (applies equally to M1 and M2):** a record choosing either terminal standing state (M1 or M2) must state explicitly what TORMENT then is — a complete memory-fabric system with a deterministic voice, a system whose only live voice is external and operator-gated, or a habitat awaiting a live inhabitant are all coherent but different end states, and the record must say which is being chosen so future readers do not inherit the ambiguity. This requirement expresses no preference among them.
 
 ### M2 — External-model-first-forever
 
 **Meaning:** the current doctrine made permanent: external, operator-gated model calls are the only admissible live-generation form, ever; no internal hosted runtime, ever; the non-Spine runtime remains the sole legal shape for external calls.
 **Does not confer:** any actual call (each remains per-use operator-gated exactly as today); any live wiring; any caller.
 **Consequences:** memory-to-prompt stays meaningful but gated as now; the autonomy ladder's premise survives in external-gated form; the dormant machinery becomes the permanent sole legal shape; the inhabitant-voice question stays live for the external-gated path.
+**Disambiguation and revisitability:** the M1 disambiguation requirement applies equally here; M2 is a terminal standing state, distinct from any stronger permanent rejection/foreclosure claim (Option E is not contained in it), and remains revisitable by fresh standalone record.
 
 ### M3 — Future-gated-live-model
 
