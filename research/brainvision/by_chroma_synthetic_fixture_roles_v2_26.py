@@ -183,8 +183,8 @@ def _build_roles():
                                    "a confound neither controls it nor removes it"),
             "reporting_focus": "generic_proxy_confound_focus",
             "non_claim_constraints": [
-                "the standing presumption holds: an apparent residual IS a generic chroma proxy effect until a "
-                "reporting-only distinction shows otherwise, and no such showing exists",
+                ("the standing presumption holds: an apparent residual IS a generic chroma proxy effect until a "
+                 + "reporting-only distinction shows otherwise, and no such showing exists"),
                 "naming a confound is not controlling it, not ruling it out, and not measuring it",
             ],
             "forbidden_interpretations": [

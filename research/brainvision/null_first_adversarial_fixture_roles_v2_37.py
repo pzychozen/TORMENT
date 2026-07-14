@@ -187,10 +187,10 @@ def _build_roles():
                 "must not be read as a comparison that was run",
             ],
             "non_claim_constraints": [
-                "naming a confound neither controls it nor removes it; proxy_ruled_out and confound_controlled stay "
-                "False",
-                "the presumption that an apparent structure IS a proxy effect stands, and no account exists that "
-                "says otherwise",
+                ("naming a confound neither controls it nor removes it; proxy_ruled_out and confound_controlled stay "
+                 + "False"),
+                ("the presumption that an apparent structure IS a proxy effect stands, and no account exists that "
+                 + "says otherwise"),
             ],
             "role_generated": True,
             "role_validated": False,
@@ -211,10 +211,10 @@ def _build_roles():
                 "must not be read as a quantity, a degree of mixing, or a resolution state",
             ],
             "non_claim_constraints": [
-                "entanglement is a conceptual POSSIBILITY, never a measured quantity; entanglement_resolved stays "
-                "False",
-                "reporting it asserts nothing and supports nothing, and it must never be costlier to report than any "
-                "other outcome",
+                ("entanglement is a conceptual POSSIBILITY, never a measured quantity; entanglement_resolved stays "
+                 + "False"),
+                ("reporting it asserts nothing and supports nothing, and it must never be costlier to report than any "
+                 + "other outcome"),
             ],
             "role_generated": True,
             "role_validated": False,
@@ -259,12 +259,12 @@ def _build_roles():
                 "must not be read as the else-branch of the other roles",
             ],
             "non_claim_constraints": [
-                "candidate structure remains ONLY A FUTURE QUESTION; its emptiness is a legitimate permanent state, "
-                "not a shortfall",
-                "candidate_structure_validated, candidate_structure_survived, and candidate_structure_detected all "
-                "stay False",
-                "this role is kept so that A-E are not exhaustive by construction; it names a burden, not an "
-                "entitlement",
+                ("candidate structure remains ONLY A FUTURE QUESTION; its emptiness is a legitimate permanent state, "
+                 + "not a shortfall"),
+                ("candidate_structure_validated, candidate_structure_survived, and candidate_structure_detected all "
+                 + "stay False"),
+                ("this role is kept so that A-E are not exhaustive by construction; it names a burden, not an "
+                 + "entitlement"),
             ],
             "role_generated": True,
             "role_validated": False,
