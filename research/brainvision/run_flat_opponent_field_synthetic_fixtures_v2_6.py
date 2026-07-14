@@ -212,7 +212,6 @@ def run():
     clean = (len(breaches) == 0)
 
     family_reporting = {}
-    outcome_label, outcome = None, None
     if clean:
         family_reporting = {k: {"reported": True, "claims_validation": False} for k in FIXTURE_FAMILIES}
         outcome_label = "FLAT_OPPONENT_FIELD_SYNTHETIC_FIXTURE_REPORTING_GENERATED"

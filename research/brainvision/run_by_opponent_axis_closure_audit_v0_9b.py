@@ -51,7 +51,6 @@ def run():
 
     by_share = round(len([s for s in BY_FEATURES if s in MATCHED_STATS]) / len(MATCHED_STATS), 4)
     panels, offset_criteria = {}, {}
-    outcome_label, outcome = None, None
 
     # required panel values must be finite (non-finite is not admissible evidence)
     if not breaches:

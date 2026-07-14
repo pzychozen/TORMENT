@@ -104,7 +104,6 @@ def run():
 
     clean = (len(breaches) == 0)
     obligation_conformance = {}
-    outcome_label, outcome = None, None
 
     if clean:
         obligation_conformance = {k: bool(panels[k].get("conformant", True)) if k != "F_non_authorizing_guard"

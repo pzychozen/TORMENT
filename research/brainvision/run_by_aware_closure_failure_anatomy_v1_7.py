@@ -92,7 +92,6 @@ def run():
     anatomy_panels = {}
     bounded_lever_identified = False
     candidate_lever, recommended_next = None, None
-    outcome_label, outcome = None, None
 
     if clean:
         A = spine["A_signed_offset"]

@@ -74,7 +74,6 @@ def run():
     clean = (len(breaches) == 0)
     primary_spine, support_reporting, reporting_obligations, panels = {}, {}, {}, {}
     by_wall_persists = False
-    outcome_label, outcome = None, None
 
     if clean:
         A = src_panels["A_signed_offset"]                            # signed BY offset (+ magnitude_frac_TOL, offset_vs_tol_gate False)

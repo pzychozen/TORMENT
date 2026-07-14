@@ -84,7 +84,6 @@ def run():
     clean = (len(breaches) == 0)
     panels, obligations, gap_criteria = {}, {}, {}
     by_wall_persists = False
-    outcome_label, outcome = None, None
 
     if clean:
         A = src_panels["A_signed_offset"]
