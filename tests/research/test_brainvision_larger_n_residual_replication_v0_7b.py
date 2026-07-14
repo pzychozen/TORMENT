@@ -15,7 +15,6 @@ BV_DIR = os.path.realpath(os.path.join(HERE, "..", "..", "research", "brainvisio
 if BV_DIR not in sys.path:
     sys.path.insert(0, BV_DIR)
 
-import run_color_structure_v0_8 as cs                                   # noqa: E402
 import run_all_shortcuts_closed_synthetic_v0_3 as v3                    # noqa: E402
 import run_matched_generative_search_v0_4d as m4d                       # noqa: E402
 import run_residual_sufficiency_v0_6a as m6a                            # noqa: E402
