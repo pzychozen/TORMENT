@@ -148,11 +148,13 @@ def run():
         # --- Mechanism E: current trajectory/winder-canceller abstraction appears insufficient ---
         # E is derived: if A/C/D each require a forbidden op AND the evidence sits on a single family (B), then the
         # persistence is abstraction-level, not a fixture-metric lever -> pivot signal.
-        no_fixture_lever = not (panel_A["is_bounded_lever"] or panel_C["is_bounded_lever"] or panel_D["is_bounded_lever"])
-        e_observed = bool(no_fixture_lever and b_observed)
+        bounded_fixture_lever_observed = (
+            panel_A["is_bounded_lever"] or panel_C["is_bounded_lever"] or panel_D["is_bounded_lever"]
+        )
+        e_observed = bool(not bounded_fixture_lever_observed and b_observed)
         panel_E = {
             "question": "Does the trajectory/winder-canceller abstraction appear insufficient for screen-like vision?",
-            "evidence": {"no_representable_fixture_lever": no_fixture_lever,
+            "evidence": {"no_representable_fixture_lever": not bounded_fixture_lever_observed,
                          "single_matching_family": b_observed,
                          "acd_would_require": {"A": panel_A["would_require_to_close"],
                                                "C": panel_C["would_require_to_close"],
