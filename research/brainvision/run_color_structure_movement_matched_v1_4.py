@@ -247,7 +247,6 @@ def run():
 
 
 if __name__ == "__main__":
-    import json
     r = run()
     print("verdict", r["verdict"], "| anti_proxy_ok", r["anti_proxy_ok"], "| in_scope_ok",
           "%d/%d" % (r["in_scope_ok"], r["in_scope_n"]), "| neutral_ok", r["neutral_ok"],

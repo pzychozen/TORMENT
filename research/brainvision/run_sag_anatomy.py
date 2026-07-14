@@ -9,8 +9,6 @@ imports; no runtime/camera/sensor/prompt/context/memory/action/render-body/auton
 """
 from __future__ import annotations
 
-import os
-
 import numpy as np
 
 import run_real_video_descriptors as rvd
