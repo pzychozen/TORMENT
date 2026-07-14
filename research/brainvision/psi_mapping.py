@@ -56,7 +56,6 @@ def compute_psi(descriptors: np.ndarray) -> np.ndarray:
 
 def derive_scalars(psi: np.ndarray) -> dict:
     """Return {H_bv, m0_bv, J_bv, v_bv} time series from a PsiBV tensor."""
-    T = psi.shape[0]
     band_energy = (psi ** 2).sum(axis=(1, 3))  # (T, M)
     row = band_energy.sum(axis=1, keepdims=True) + _EPS
     p = band_energy / row

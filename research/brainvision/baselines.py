@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import numpy as np
 
-_EPS = 1e-8
 _N_FFT_BANDS = 6
 
 
