@@ -3,7 +3,7 @@
 **Status:** P0 artifact. Anti-drift reference. NOT doctrine, NOT a schema,
 NOT implementation authorization. Every later engine phase cites this
 document; no later phase silently amends it.
-**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9) · amended 2026-06-13 (Seed-Governance Blueprint v0.1 promotion and closure registration — docs-only; see §N10) · amended 2026-06-13 (Bounded Defensive Availability / No-Corner Invariant v0.1 promotion and closure registration — docs-only; see §N11) · amended 2026-06-14 (Database/Substrate Doctrine Reconciliation Against Pre-Substrate Architecture v0.1 promotion and closure registration — docs-only; see §N12) · amended 2026-06-15 (Matched P2.5 Writer / P4 Reader Reconciliation v0.1 promotion and closure registration — docs-only; see §N13) · amended 2026-06-15 (gravity_correction Automatic-Canon Audit-First Reconciliation v0.1 promotion and closure registration — docs-only; see §N14) · amended 2026-06-15 (Governed-Memory Substrate Programme — Free-Design Council Framing (pre-Stage-B) v0.1 promotion and closure registration — docs-only; see §N15) · amended 2026-06-15 (Governed-Memory Substrate Programme — Free-Design Council Outcome (pre-Stage-B) v0.1 promotion and closure registration — docs-only; see §N16)
+**Date:** 2026-06-06 · amended 2026-06-07 (P1 closure amendment — docs-only Slice B; see §N1) · amended 2026-06-07 (P2 closure amendment — docs-only Slice B; see §N2) · amended 2026-06-07 (P2.5 closure registration — docs-only; see §N3) · amended 2026-06-07 (pre-P4 reader-dependency trace registration — docs-only; see §N4) · amended 2026-06-09 (P4 contract promotion and closure registration — docs-only; see §N5) · amended 2026-06-09 (Stage A recovery/reconciliation semantics contract promotion and closure registration — docs-only; see §N6) · amended 2026-06-09 (thinking-layer archaeology: ratified soft-state continuity postures + parked private-thinking-layer seam — docs-only; see §N7) · amended 2026-06-13 (Document A — Candidate Containment and Writer-Authority Contract promotion and closure registration — docs-only; see §N8) · amended 2026-06-13 (Document B — Private Cognition and Unified Reflection Blueprint promotion and closure registration — docs-only; see §N9) · amended 2026-06-13 (Seed-Governance Blueprint v0.1 promotion and closure registration — docs-only; see §N10) · amended 2026-06-13 (Bounded Defensive Availability / No-Corner Invariant v0.1 promotion and closure registration — docs-only; see §N11) · amended 2026-06-14 (Database/Substrate Doctrine Reconciliation Against Pre-Substrate Architecture v0.1 promotion and closure registration — docs-only; see §N12) · amended 2026-06-15 (Matched P2.5 Writer / P4 Reader Reconciliation v0.1 promotion and closure registration — docs-only; see §N13) · amended 2026-06-15 (gravity_correction Automatic-Canon Audit-First Reconciliation v0.1 promotion and closure registration — docs-only; see §N14) · amended 2026-06-15 (Governed-Memory Substrate Programme — Free-Design Council Framing (pre-Stage-B) v0.1 promotion and closure registration — docs-only; see §N15) · amended 2026-06-15 (Governed-Memory Substrate Programme — Free-Design Council Outcome (pre-Stage-B) v0.1 promotion and closure registration — docs-only; see §N16) · amended 2026-07-13 (L2 Stage-B-to-framing opening and current-rest registration + §H carrier-sense disambiguation — docs-only documentation-currency; see §N17)
 **Lineage:** Eight-report design-archaeology arc (R1 roadmap recovery; R2
 deep pressure; KA kernel anatomy; KP kernel-persistence addendum; SRG-A SRG
 runtime/ethics/era audit; C-SRG Codex SRG review; DP-A deep-projection
@@ -17,7 +17,7 @@ plus tracked docs by path.
 | | |
 |---|---|
 | **Active gate** | none — P0, P1, P2, P2.5 closed; P4 contract promoted and closed at `dbdbc30`; Governed-Memory Substrate Programme Stage A Recovery and Reconciliation Semantics Contract promoted and closed at `2bf3b29` |
-| **Next gate** | unselected — Stage A is closed; no next gate is auto-opened. Stage B mechanics and database design remain unopened. Selecting any next active slice requires deliberate trio steering and the Issue #54 clean-checkpoint boundary |
+| **Next gate** | unselected — Stage A is closed; no next gate is auto-opened. Bounded **Stage-B-to-framing** was opened by operator decision `f309b0a` (2026-06-17, cognition-layer-first) and **now rests**; recording rest does not schedule wake (see §N17). Stage B mechanics and database design remain unopened. Selecting any next active slice requires deliberate trio steering and the Issue #54 clean-checkpoint boundary |
 | **Registry classes** | FACT · POSTURE · DOCTRINE · OPERATOR INTENT · PARKED QUESTION · RESEARCH HYPOTHESIS |
 | **Current graph** | P0 → P1 → P2 → P2.5 → P4 → P3 → P5a → P6 → P7 → P8a → P9 → P10 → P11 |
 | **Side lanes** | P5b (after P5a, alongside P6) · P8b (after P8a, non-blocking) · maintenance (separately authorized) |
@@ -454,6 +454,24 @@ semantics are not pre-decided here) · **DeepFold** (research-only/future —
 not current runtime semantics; DeepMemoryEcho names what exists today) ·
 ReturnPath (future; evidence: return events are durably unlogged [KP §E]) ·
 RSB-regime object · dynamic RGD state · geometric page layout.
+
+**Carrier — two disciplined senses (2026-07-13 amendment; disambiguation
+only, no new noun):** the word "carrier" appears in two distinct,
+both-disciplined senses across the corpus, and any cross-citation must
+state which sense it uses:
+
+- **Memory Engine sense (this registry, §H/§I):** an engine-internal
+  identity/attribution mechanism — e.g. the P2 revision-fingerprint
+  carrier question and the P6 "identity carriers / revision fingerprints"
+  phase. Governed by this registry.
+- **Document-A sense (admission-crossing lane):** a durable
+  substrate-root shape for admission crossings — the surveyed,
+  non-selected F1–F5 carrier-shape families of
+  `docs/TORMENT_CARRIER_SUBSTRATE_ROOT_SURVEY_v0.1.md` and its decision
+  chain. Governed by the Document A lineage, not by this registry.
+
+Neither sense's documents may be read as the other's; this row selects no
+carrier in either sense, promotes nothing, and adds no first-class noun.
 
 Rule: new nouns enter only by registry amendment.
 
@@ -1029,6 +1047,22 @@ This registration **records this closure only** and **makes no registry amendmen
 
 This registration **records this closure only** and **makes no registry amendment beyond it**: it confers **no implementation authority, no Stage B opening, no database design, no schema / store / field / carrier / ID / fingerprint / allocator / serialization / enum / migration / storage-product selection, no runtime or enforcement mechanics, no authority-gate or writer-authority implementation, no Seed-Governance mechanics, no P4 runtime conformance, no MCP action surface, and no autonomy.** It **amends no upstream contract** (P1 / P2 / P2.5 / P4 / Document A / Document B / Seed-Governance / No-Corner / Stage A / Cluster 2 / Ledger / MCP boundary). It changes registry classification **only** where listed: the amendment-date line, the footer, and this §N16 record. It does not amend the recorded dependency graph or any prior contract text.
 
+**N17. L2 Stage B Opening Decision — bounded Stage-B-to-framing opening and current-rest registration (2026-07-13, docs-only documentation-currency).**
+
+`docs/TORMENT_L2_STAGE_B_OPENING_DECISION_RECORD_v0.1.md` (committed `f309b0a`, 2026-06-17) is registered as an **operator-authorized bounded opening of Stage-B-to-framing only**, with the load-bearing operator intent recorded in that decision: the purpose was **cognition-layer-first** — finishing ratification and sequencing of dream / cognition / thinking / private-state / guided-memory items — not database mechanics. The decision superseded the proposed packet (`731a7a4`, corrected `46110b1`) and opened **no mechanics, no construction, no implementation, and no database/schema/storage/carriers/migration**. The framing lane subsequently proceeded as separately gated passes and **now rests**; at registration time the board is in decided rest under FORMAL HOLD and Mode 0 (rest-state integrity verification receipt committed at `e12de72`).
+
+**Why registered:** this registration corrects registry currency only. The §N15/§N16 statements "next gate **unselected**" and "Stage B Opening Decision gate is **label-only**" were true when written (2026-06-15) and were superseded two days later by the `f309b0a` operator decision, which did not amend this registry; the quick-reference "Next gate" cell is corrected by this amendment to record that supersession. Registration is retrospective bookkeeping of an operator decision that already occurred through its own legitimate authority; it neither ratifies, reopens, nor re-litigates that decision.
+
+**Guard language (binding for this amendment):** This amendment is documentation-currency only. It records a past bounded Stage-B-to-framing decision and current rest; recording rest does not schedule wake. It authorizes no implementation, tests, Stage-B mechanics, database design, carrier/store/schema/substrate/product selection, migration, live surface, H3/Gate B work, caller-ownership work, MCP/action/movement, Brainvision, audio, autonomy, or runtime path. Evidence is not authorization; registration is not ripeness; registry currency is not momentum. FORMAL HOLD and Mode 0 remain active.
+
+**Not registered here (deliberate):** the carrier-root operator decision (`ab5a3a2`) and the composition admissibility decision (`cf41f2c`) are **not** registered by this amendment (Codex-modified scope); their standing statuses live in their own decision records and the orientation map §0. Their omission here is scope discipline, not demotion, doubt, or supersession.
+
+**Review lineage:** D2 registry-currency read-only scan (chat-only; accepted 2026-07-13) → Codex adversarial challenge (**JUSTIFIED WITH MODIFIED SCOPE**: register `f309b0a`; add the §H carrier-sense disambiguation; make only the minimal quick-reference correction; `ab5a3a2` / `cf41f2c` excluded) → Hilmir authorization of this bounded slice. The scan itself remains non-load-bearing evidence.
+
+**Programme state after N17:** active gate **none**; next gate **unselected**; bounded Stage-B-to-framing opened 2026-06-17 and **resting**; Stage B mechanics, database design, P6 carrier design, family write-site conformance, P4/P5a/P9 mechanics, and migration all remain unopened/unselected; each requires its own bounded decision; no follow-on artifact is owed by this registration.
+
+This registration **records the above only** and **makes no registry amendment beyond it**: it confers **no implementation authority, no Stage B opening or reopening, no database design, no schema / store / field / carrier / ID / fingerprint / allocator / serialization / enum / migration / storage-product selection, no runtime or enforcement mechanics, no authority-gate or writer-authority implementation, no MCP action surface, and no autonomy.** It **amends no upstream contract** (P1 / P2 / P2.5 / P4 / Document A / Document B / Seed-Governance / No-Corner / Stage A / Cluster 2 / Ledger / MCP boundary) and does not amend the `f309b0a` decision record itself. It changes registry classification **only** where listed: the amendment-date line, the quick-reference "Next gate" cell, the §H carrier-sense disambiguation row, the footer, and this §N17 record. It does not amend the recorded dependency graph or any prior contract text.
+
 ---
 *End v0.1 as amended 2026-06-07 (N1 P1 closure; N2 P2 closure; N3 P2.5
 closure registration; N4 pre-P4 reader-dependency trace registration) and
@@ -1041,4 +1075,4 @@ unified-reflection blueprint promotion and closure registration; N10 Seed-Govern
 Blueprint v0.1 promotion and closure registration; N11 Bounded Defensive Availability /
 No-Corner Invariant v0.1 promotion and closure registration) and 2026-06-14 (N12
 Database/Substrate Doctrine Reconciliation Against Pre-Substrate Architecture v0.1 promotion
-and closure registration) and 2026-06-15 (N13 Matched P2.5 Writer / P4 Reader Reconciliation v0.1 promotion and closure registration; N14 gravity_correction Automatic-Canon Audit-First Reconciliation v0.1 promotion and closure registration; N15 Governed-Memory Substrate Programme — Free-Design Council Framing (pre-Stage-B) v0.1 promotion and closure registration; N16 Governed-Memory Substrate Programme — Free-Design Council Outcome (pre-Stage-B) v0.1 promotion and closure registration). Amendments are small docs slices with trio sign-off.*
+and closure registration) and 2026-06-15 (N13 Matched P2.5 Writer / P4 Reader Reconciliation v0.1 promotion and closure registration; N14 gravity_correction Automatic-Canon Audit-First Reconciliation v0.1 promotion and closure registration; N15 Governed-Memory Substrate Programme — Free-Design Council Framing (pre-Stage-B) v0.1 promotion and closure registration; N16 Governed-Memory Substrate Programme — Free-Design Council Outcome (pre-Stage-B) v0.1 promotion and closure registration) and 2026-07-13 (N17 L2 Stage-B-to-framing opening and current-rest registration + §H carrier-sense disambiguation — docs-only documentation-currency). Amendments are small docs slices with trio sign-off.*
