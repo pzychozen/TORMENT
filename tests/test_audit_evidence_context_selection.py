@@ -131,6 +131,49 @@ class TestAssembledTextNotUsed(unittest.TestCase):
         self.assertEqual({e.get("eid") for e in selected_admitted_items(ctx2)}, {1})
 
 
+_GUARDED_TOKENS = ("audit_evidence_context", "selected_admitted_items")
+# Dynamic-access callees whose STRING arguments count as executable references
+# (guard hardening, 2026-07-14, tests-only, Codex-required): __import__ /
+# import_module reach the guarded module by path string; getattr / hasattr /
+# delattr reach the guarded helper by name string. String literals anywhere
+# else (docstrings, comments, plain data) are NOT scanned — this is not a
+# reintroduced substring scan.
+_DYNAMIC_ACCESS_CALLEES = {"__import__", "import_module", "getattr", "hasattr", "delattr"}
+
+
+def _executable_references(tree, guarded=_GUARDED_TOKENS):
+    """Executable references to guarded names: static imports, identifier /
+    attribute / keyword-arg use, plus dynamic import/attribute access whose
+    string argument names a guarded token. Docstrings and comments never
+    count."""
+    hits = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for n in node.names:
+                hits.update(p for p in n.name.split(".") if p in guarded)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                hits.update(p for p in node.module.split(".") if p in guarded)
+            hits.update(n.name for n in node.names if n.name in guarded)
+        elif isinstance(node, ast.Name) and node.id in guarded:
+            hits.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in guarded:
+            hits.add(node.attr)
+        elif isinstance(node, ast.keyword) and node.arg in guarded:
+            hits.add(node.arg)
+        elif isinstance(node, ast.Call):
+            f = node.func
+            callee = (f.id if isinstance(f, ast.Name)
+                      else f.attr if isinstance(f, ast.Attribute) else None)
+            if callee in _DYNAMIC_ACCESS_CALLEES:
+                for a in list(node.args) + [k.value for k in node.keywords]:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        for g in guarded:
+                            if g in a.value:
+                                hits.add(g)
+    return hits
+
+
 class TestSourceGuards(unittest.TestCase):
     """AST/source guards. The import allowlist is airtight: importing only
     ``typing`` / ``__future__`` means the helper cannot reach fabric / retrieval /
@@ -176,6 +219,19 @@ class TestSourceGuards(unittest.TestCase):
         #     tests only.
         # No live production surface (endpoint / AgentRunner self-call / /retrieve /
         # model / writer / persistence) may reference it.
+        # Guard reconciliation (2026-07-14, tests-only). The dormant memory-context
+        # orchestrator (landed `b3b5647` as candidate 6; imported/called by NO
+        # production module — fenced in
+        # tests/test_memory_to_prompt_memory_context_orchestrator.py) names
+        # ``selected_admitted_items`` in its module DOCSTRING as a NEGATIVE promise
+        # (the list of routes it must never import). The prior raw substring scan
+        # misread that promise as a reference. Detection is now AST-based
+        # (imports / names / attributes / keyword args), matching this class's own
+        # stated no-substring policy: executable references still fail; docstrings
+        # and comments do not. This reconciles the guard with the accepted dormant
+        # landing only — it sanctions NO new module (the orchestrator stays
+        # non-sanctioned and must never reference the helper executably) and
+        # authorizes NO live caller ownership.
         svc_dir = _torment_service_dir()
         sanctioned = {
             "audit_evidence_context.py",
@@ -184,12 +240,19 @@ class TestSourceGuards(unittest.TestCase):
             "audit_private_generation_owner.py",
         }
         offenders = []
-        for fn in os.listdir(svc_dir):
+        for fn in sorted(os.listdir(svc_dir)):
             if not fn.endswith(".py") or fn in sanctioned:
                 continue
-            with open(os.path.join(svc_dir, fn), "r", encoding="utf-8") as fh:
-                content = fh.read()
-            if "audit_evidence_context" in content or "selected_admitted_items" in content:
+            with open(os.path.join(svc_dir, fn), "rb") as fh:
+                raw = fh.read()
+            try:
+                tree = ast.parse(raw.replace(b"\x00", b""))
+            except (SyntaxError, ValueError):
+                offenders.append(fn)  # unparseable production file: fail closed
+                continue
+            # Hardened (Codex-required): identifier-level AND dynamic
+            # import/getattr string forms — see _executable_references.
+            if _executable_references(tree):
                 offenders.append(fn)
         self.assertEqual(offenders, [],
                          msg=f"referenced by non-sanctioned production: {offenders}")
@@ -294,6 +357,53 @@ class TestPacketBuilderCompatibilitySeparateStages(unittest.TestCase):
         # Stage 2: builder drops the identity_context item, keeps the relational fact.
         packet = build_audit_evidence_packet("resp", items)
         self.assertEqual({e.get("eid") for e in packet["evidence_items"]}, {1})
+
+
+class TestGuardTeethDynamicAccess(unittest.TestCase):
+    """Teeth (Codex-required): dynamic executable access forms are detected;
+    docstrings / comments / plain data strings are not. Synthetic sources
+    only — no production code involved."""
+
+    def test_dunder_import_detected(self):
+        tree = ast.parse('__import__("torment_service.audit_evidence_context")\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_importlib_import_module_detected(self):
+        tree = ast.parse(
+            'import importlib\n'
+            'importlib.import_module("torment_service.audit_evidence_context")\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_bare_import_module_detected(self):
+        tree = ast.parse(
+            'from importlib import import_module\n'
+            'import_module("torment_service.audit_evidence_context")\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_getattr_selected_admitted_items_detected(self):
+        tree = ast.parse('x = getattr(m, "selected_admitted_items")\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_getattr_module_name_detected(self):
+        tree = ast.parse('x = getattr(pkg, "audit_evidence_context")\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_static_import_still_detected(self):
+        tree = ast.parse(
+            'from torment_service.audit_evidence_context '
+            'import selected_admitted_items\n')
+        self.assertTrue(_executable_references(tree))
+
+    def test_docstring_mention_not_detected(self):
+        tree = ast.parse(
+            '"""docstring naming selected_admitted_items only."""\nx = 1\n')
+        self.assertEqual(_executable_references(tree), set())
+
+    def test_plain_string_literal_not_detected(self):
+        # A bare string (not an argument of a dynamic-access call) is data,
+        # not an executable reference — and NOT a reintroduced substring scan.
+        tree = ast.parse('s = "selected_admitted_items"\n')
+        self.assertEqual(_executable_references(tree), set())
 
 
 if __name__ == "__main__":

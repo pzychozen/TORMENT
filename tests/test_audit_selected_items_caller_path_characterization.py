@@ -38,6 +38,7 @@ No forbidden wording is introduced (the set below is a quoted guard list).
 
 import ast
 import os
+import tempfile
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -168,22 +169,121 @@ def _call_receivers(func_node, var_name):
     return receivers
 
 
+def _alias_sets(tree, targets):
+    """Guard hardening (2026-07-14, tests-only, Codex-required): local names
+    bound (transitively) to each target — ``from ... import X as y`` plus
+    ``y = obj.X`` / ``z = y`` rebinding chains, resolved to a fixpoint per
+    module. Aliasing must not evade the both-halves guard."""
+    alias = {t: {t} for t in targets}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            for x in n.names:
+                if x.name in alias:
+                    alias[x.name].add(x.asname or x.name)
+    changed = True
+    while changed:
+        changed = False
+        for n in ast.walk(tree):
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name)):
+                tgt = n.targets[0].id
+                v = n.value
+                for t, names in alias.items():
+                    bound = ((isinstance(v, ast.Attribute) and v.attr == t)
+                             or (isinstance(v, ast.Name) and v.id in names))
+                    if bound and tgt not in names:
+                        names.add(tgt)
+                        changed = True
+    return alias
+
+
+def _called_targets(func_node, alias):
+    """Which alias-set targets this function calls — directly (``X(...)`` /
+    ``obj.X(...)``) or through any alias name from ``_alias_sets``."""
+    called = set()
+    for n in ast.walk(func_node):
+        if isinstance(n, ast.Call):
+            f = n.func
+            for t, names in alias.items():
+                if ((isinstance(f, ast.Name) and f.id in names)
+                        or (isinstance(f, ast.Attribute) and f.attr == t)):
+                    called.add(t)
+    return called
+
+
+def _orchestrator_importers(root):
+    """Recursive, fail-closed dormancy scan (guard hardening, 2026-07-14,
+    Codex-required): every ``.py`` under ``root`` (skipping caches /
+    do_not_touch), reported by root-relative path, whose source bytes mention
+    the dormant orchestrator module name — excluding the module itself."""
+    importers = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames
+                       if d not in {"__pycache__", ".git", ".mypy_cache",
+                                    ".pytest_cache", ".venv", "node_modules"}
+                       and not d.startswith("do_not_touch")]
+        for fn in sorted(filenames):
+            if not fn.endswith(".py") or fn == "memory_context_orchestrator.py":
+                continue
+            path = os.path.join(dirpath, fn)
+            with open(path, "rb") as fh:
+                if b"memory_context_orchestrator" in fh.read():
+                    importers.append(
+                        os.path.relpath(path, root).replace("\\", "/"))
+    return sorted(importers)
+
+
 # --------------------------------------------------------------------------- #
 # Source / AST characterization
 # --------------------------------------------------------------------------- #
 
 class TestNoProductionCallerOwnsBothHalves(unittest.TestCase):
 
+    # Guard reconciliation (2026-07-14, tests-only), after the dormant
+    # memory-context orchestrator landing (`b3b5647`, candidate 6). Exactly ONE
+    # production-directory function is recognized as owning both halves IN SHAPE
+    # ONLY. It is NOT a live caller path: the module is imported and called by
+    # no production module (proven below and fenced in
+    # tests/test_memory_to_prompt_memory_context_orchestrator.py). This
+    # recognition authorizes NO live caller ownership and must NOT be
+    # generalized: the exemption is one module:function, valid only while the
+    # module stays dormant.
+    _DORMANT_ORCHESTRATOR_FILE = "memory_context_orchestrator.py"
+    _DORMANT_BOTH_HALVES_SHAPE = (
+        "memory_context_orchestrator.py:run_turn_with_memory_context"
+    )
+
+    def _orchestrator_production_importers(self):
+        """Service modules (besides the orchestrator itself) that mention the
+        orchestrator module name at all — fail-closed dormancy evidence.
+        RECURSIVE under torment_service/ (Codex-required): subpackage
+        references are reported service-relative."""
+        return _orchestrator_importers(_torment_service_dir())
+
     def test_no_function_calls_assemble_context_and_run_turn(self):
         offenders = []
         for fn, tree in _iter_service_trees():
+            # Alias-aware (Codex-required): module-level or local rebinding of
+            # either half (``ac = assemble_context`` / ``rt = runner.run_turn``
+            # / import-as) must not evade detection.
+            alias = _alias_sets(tree, ("assemble_context", "run_turn"))
             for func in _all_functions(tree):
-                calls = _called_names(func)
-                if "assemble_context" in calls and "run_turn" in calls:
+                called = _called_targets(func, alias)
+                if "assemble_context" in called and "run_turn" in called:
                     offenders.append(f"{fn}:{func.name}")
+        # The exemption below holds ONLY while the orchestrator is proven
+        # dormant; any production reference voids it and this test goes red.
         self.assertEqual(
-            offenders, [],
-            msg=f"production function owns both assemble_context + run_turn: {offenders}",
+            self._orchestrator_production_importers(), [],
+            msg="dormant-orchestrator exemption void: production references the "
+                "orchestrator; both-halves ownership is no longer shape-only",
+        )
+        # Exactly the pinned dormant candidate shape — nothing else, ever,
+        # without a fresh, separately authorized reconciliation.
+        self.assertEqual(
+            offenders, [self._DORMANT_BOTH_HALVES_SHAPE],
+            msg=("production function owns both assemble_context + run_turn "
+                 f"beyond the pinned dormant candidate shape: {offenders}"),
         )
 
     def test_only_approved_bridge_passes_audit_items_into_run_turn(self):
@@ -460,6 +560,82 @@ class TestSupplyingAbsentItemsIsNonControl(unittest.TestCase):
         self.assertNotIn(_ABSENT_ITEM, (result.execution_outcome.response_text or ""))
         self.assertNotIn(_ABSENT_ITEM, str(result.metadata))
         self.assertIsNone(result.audit_evidence_packet)
+
+
+class TestGuardTeethAliasedBothHalves(unittest.TestCase):
+    """Teeth (Codex-required): aliased / rebound halves are detected as
+    both-halves ownership; a single half is not flagged. Synthetic sources
+    only — no production code involved."""
+
+    def _called(self, src):
+        tree = ast.parse(src)
+        alias = _alias_sets(tree, ("assemble_context", "run_turn"))
+        func = _all_functions(tree)[0]
+        return _called_targets(func, alias)
+
+    def test_local_rebinding_of_both_halves_detected(self):
+        src = (
+            "def f(runner, ctx):\n"
+            "    rt = runner.run_turn\n"
+            "    ac = assemble_context\n"
+            "    ac(ctx)\n"
+            "    rt()\n"
+        )
+        self.assertEqual(self._called(src), {"assemble_context", "run_turn"})
+
+    def test_imported_alias_of_assemble_context_detected(self):
+        src = (
+            "from torment_service.retrieval_assembler "
+            "import assemble_context as ac\n"
+            "def f(runner, ctx):\n"
+            "    rt = runner.run_turn\n"
+            "    ac(ctx)\n"
+            "    rt()\n"
+        )
+        self.assertEqual(self._called(src), {"assemble_context", "run_turn"})
+
+    def test_transitive_rebinding_detected(self):
+        src = (
+            "def f(runner, ctx):\n"
+            "    rt = runner.run_turn\n"
+            "    rt2 = rt\n"
+            "    ac = assemble_context\n"
+            "    ac2 = ac\n"
+            "    ac2(ctx)\n"
+            "    rt2()\n"
+        )
+        self.assertEqual(self._called(src), {"assemble_context", "run_turn"})
+
+    def test_one_half_only_not_flagged_as_both(self):
+        src = (
+            "def f(runner, ctx):\n"
+            "    rt = runner.run_turn\n"
+            "    rt()\n"
+        )
+        self.assertEqual(self._called(src), {"run_turn"})
+
+
+class TestGuardTeethRecursiveImporterScan(unittest.TestCase):
+    """Teeth (Codex-required): the dormancy importer scan is recursive and
+    reports root-relative paths; the orchestrator itself never counts."""
+
+    def test_subpackage_reference_detected(self):
+        with tempfile.TemporaryDirectory() as root:
+            sub = os.path.join(root, "some_subdir")
+            os.makedirs(sub)
+            with open(os.path.join(sub, "sneaky.py"), "w", encoding="utf-8") as fh:
+                fh.write("from torment_service import memory_context_orchestrator\n")
+            self.assertEqual(_orchestrator_importers(root),
+                             ["some_subdir/sneaky.py"])
+
+    def test_module_itself_and_clean_files_ignored(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "memory_context_orchestrator.py"),
+                      "w", encoding="utf-8") as fh:
+                fh.write("# self\n")
+            with open(os.path.join(root, "clean.py"), "w", encoding="utf-8") as fh:
+                fh.write("x = 1\n")
+            self.assertEqual(_orchestrator_importers(root), [])
 
 
 if __name__ == "__main__":

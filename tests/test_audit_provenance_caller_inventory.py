@@ -20,6 +20,7 @@ C) actual wiring, or D) stop/branch because no honest live caller path exists ye
 
 import ast
 import os
+import tempfile
 import unittest
 from functools import lru_cache
 
@@ -56,10 +57,23 @@ def _parse_bytes(raw):
 # own category so the live/endpoint/runner-owner negatives stay intact.
 _APPROVED_BRIDGE_REL = "torment_service/audit_selected_items_runner_bridge.py"
 
+# The dormant memory-context orchestrator (landed `b3b5647` as candidate 6): a
+# production-directory-resident, TEST-FENCED module that calls ``run_turn`` by
+# design but is imported and called by NO production module (fenced in
+# tests/test_memory_to_prompt_memory_context_orchestrator.py; dormancy is also
+# re-proven inside the classifier test below). Guard reconciliation
+# (2026-07-14, tests-only): it gets its own category so the live
+# production-service negative stays meaningful. This recognizes recorded
+# dormant status only; it authorizes NO live caller ownership, NO wiring, and
+# NO audit-items supply.
+_DORMANT_ORCHESTRATOR_REL = "torment_service/memory_context_orchestrator.py"
+
 
 def _category(rel):
     if rel == _APPROVED_BRIDGE_REL:
         return "approved_bridge"
+    if rel == _DORMANT_ORCHESTRATOR_REL:
+        return "dormant_candidate"
     if rel == "torment_service/app.py":
         return "endpoint"
     if rel == "torment_service/agent_loop.py":
@@ -71,12 +85,47 @@ def _category(rel):
     return "example_or_script"
 
 
-def _is_run_turn_call(node):
+def _run_turn_aliases(tree):
+    """Local names bound (transitively) to ``run_turn`` in this module:
+    ``from ... import run_turn as rt`` plus ``rt = runner.run_turn`` /
+    ``rt2 = rt`` rebinding chains, resolved to a fixpoint. Guard hardening
+    (2026-07-14, tests-only, Codex-required): aliased calls must not evade
+    the caller inventory."""
+    aliases = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            for x in n.names:
+                if x.name == "run_turn":
+                    aliases.add(x.asname or x.name)
+    changed = True
+    while changed:
+        changed = False
+        for n in ast.walk(tree):
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name)):
+                tgt = n.targets[0].id
+                v = n.value
+                bound = ((isinstance(v, ast.Attribute) and v.attr == "run_turn")
+                         or (isinstance(v, ast.Name)
+                             and (v.id == "run_turn" or v.id in aliases)))
+                if bound and tgt not in aliases:
+                    aliases.add(tgt)
+                    changed = True
+    return aliases
+
+
+def _is_run_turn_call(node, aliases=frozenset()):
     if not isinstance(node, ast.Call):
         return False
     f = node.func
-    return ((isinstance(f, ast.Name) and f.id == "run_turn")
+    return ((isinstance(f, ast.Name) and (f.id == "run_turn" or f.id in aliases))
             or (isinstance(f, ast.Attribute) and f.attr == "run_turn"))
+
+
+def _calls_run_turn(tree):
+    """True iff this module calls run_turn directly or via alias (teeth hook)."""
+    aliases = _run_turn_aliases(tree)
+    return any(_is_run_turn_call(n, aliases) for n in ast.walk(tree))
 
 
 @lru_cache(maxsize=1)
@@ -112,7 +161,8 @@ def _scan():
             except (SyntaxError, ValueError):
                 continue
             parsed.add(rel)
-            calls = [n for n in ast.walk(tree) if _is_run_turn_call(n)]
+            aliases = _run_turn_aliases(tree)
+            calls = [n for n in ast.walk(tree) if _is_run_turn_call(n, aliases)]
             if not calls:
                 continue
             run_turn_callers[rel] = calls
@@ -134,6 +184,27 @@ def _scan():
 
 def _torment_service_dir():
     return os.path.join(_repo_root(), "torment_service")
+
+
+def _orchestrator_importers(root):
+    """Recursive, fail-closed dormancy scan (guard hardening, 2026-07-14,
+    Codex-required): every ``.py`` under ``root`` (skipping caches /
+    do_not_touch), reported by root-relative path, whose SOURCE BYTES mention
+    the dormant orchestrator module name — excluding the orchestrator itself.
+    Subpackage references must not evade the dormancy proof."""
+    importers = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames
+                       if d not in _SKIP_DIRS and not d.startswith("do_not_touch")]
+        for fn in sorted(filenames):
+            if not fn.endswith(".py") or fn == "memory_context_orchestrator.py":
+                continue
+            path = os.path.join(dirpath, fn)
+            with open(path, "rb") as fh:
+                if b"memory_context_orchestrator" in fh.read():
+                    importers.append(
+                        os.path.relpath(path, root).replace("\\", "/"))
+    return sorted(importers)
 
 
 def _parse_service(filename):
@@ -295,8 +366,11 @@ class TestNoHonestLiveCallerSuppliesItems(unittest.TestCase):
 
 class TestRunTurnCallerInventory(unittest.TestCase):
     """Enumerate + classify every run_turn caller. Encodes the conclusion: the
-    only callers are the runner-owner self-call, the demo/example, and tests —
-    there is NO honest live (endpoint / production-service) caller path today."""
+    only callers are the runner-owner self-call, the demo/example, tests, the
+    single approved private bridge, and the DORMANT test-fenced orchestrator
+    candidate (recognized in shape only; imported/called by no production
+    module) — there is NO honest live (endpoint / production-service) caller
+    path today."""
 
     def test_classify_run_turn_callers(self):
         scan = _scan()
@@ -309,6 +383,7 @@ class TestRunTurnCallerInventory(unittest.TestCase):
         owner = by_cat.get("runner_owner", set())
         examples = by_cat.get("example_or_script", set())
         approved = by_cat.get("approved_bridge", set())
+        dormant = by_cat.get("dormant_candidate", set())
 
         # No endpoint and no (non-owner) production-service caller exists.
         self.assertEqual(endpoint, set(), f"endpoint calls run_turn: {sorted(endpoint)}")
@@ -321,6 +396,22 @@ class TestRunTurnCallerInventory(unittest.TestCase):
         # MAY supply audit items; it resolves to exactly the bridge file.
         self.assertEqual(approved, {_APPROVED_BRIDGE_REL},
                          f"approved-bridge run_turn callers: {sorted(approved)}")
+        # Guard reconciliation (2026-07-14, tests-only): the dormant orchestrator
+        # is the one recognized dormant candidate that calls run_turn by design
+        # (candidate 6, `b3b5647`). Recognition is valid ONLY while it stays
+        # dormant: imported/called by no production module and supplying no
+        # audit items. This is not authorization of live caller ownership.
+        self.assertEqual(dormant, {_DORMANT_ORCHESTRATOR_REL},
+                         f"dormant-candidate run_turn callers: {sorted(dormant)}")
+        self.assertNotIn(_DORMANT_ORCHESTRATOR_REL, scan["audit_kw_callers"],
+                         "the dormant orchestrator must never supply "
+                         "audit_admitted_context_items")
+        # Recursive under torment_service/ (Codex-required): subpackage
+        # references cannot evade the dormancy proof.
+        importers = _orchestrator_importers(_torment_service_dir())
+        self.assertEqual(importers, [],
+                         "dormant-candidate recognition void: production "
+                         f"references the orchestrator: {importers}")
         for rel in examples:
             self.assertNotIn(rel, scan["audit_kw_callers"],
                              msg=f"example/demo {rel} passes audit_admitted_context_items")
@@ -349,6 +440,56 @@ class TestObservationSinkPreserved(unittest.TestCase):
             isinstance(fld.value, ast.Constant) and fld.value.value is None,
             "audit_evidence_packet should default to None (observation sink)",
         )
+
+
+class TestGuardTeethAliasedRunTurn(unittest.TestCase):
+    """Teeth (Codex-required): aliased ``run_turn`` calls are detected — the
+    inventory cannot be evaded by rebinding. Synthetic sources only."""
+
+    def test_attribute_alias_call_detected(self):
+        tree = ast.parse("rt = runner.run_turn\nrt(workspace_id='w')\n")
+        self.assertTrue(_calls_run_turn(tree))
+
+    def test_imported_alias_call_detected(self):
+        tree = ast.parse(
+            "from torment_service.agent_loop import run_turn as rt\nrt(1)\n")
+        self.assertTrue(_calls_run_turn(tree))
+
+    def test_transitive_rebinding_detected(self):
+        tree = ast.parse("rt = runner.run_turn\nrt2 = rt\nrt2()\n")
+        self.assertTrue(_calls_run_turn(tree))
+
+    def test_direct_forms_still_detected(self):
+        self.assertTrue(_calls_run_turn(ast.parse("runner.run_turn()\n")))
+        self.assertTrue(_calls_run_turn(ast.parse("run_turn()\n")))
+
+    def test_unrelated_alias_not_detected(self):
+        tree = ast.parse("rt = runner.other_method\nrt()\n")
+        self.assertFalse(_calls_run_turn(tree))
+
+
+class TestGuardTeethRecursiveOrchestratorScan(unittest.TestCase):
+    """Teeth (Codex-required): the dormancy scan is recursive — a subpackage
+    reference to the orchestrator is caught and reported root-relative; the
+    orchestrator itself never counts."""
+
+    def test_subdir_reference_detected(self):
+        with tempfile.TemporaryDirectory() as root:
+            sub = os.path.join(root, "some_subdir")
+            os.makedirs(sub)
+            with open(os.path.join(sub, "sneaky.py"), "w", encoding="utf-8") as fh:
+                fh.write("import torment_service.memory_context_orchestrator\n")
+            self.assertEqual(_orchestrator_importers(root),
+                             ["some_subdir/sneaky.py"])
+
+    def test_module_itself_and_clean_files_ignored(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "memory_context_orchestrator.py"),
+                      "w", encoding="utf-8") as fh:
+                fh.write("# the module itself does not count\n")
+            with open(os.path.join(root, "clean.py"), "w", encoding="utf-8") as fh:
+                fh.write("x = 1\n")
+            self.assertEqual(_orchestrator_importers(root), [])
 
 
 if __name__ == "__main__":
