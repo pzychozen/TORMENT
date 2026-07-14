@@ -24,7 +24,6 @@ import os
 import numpy as np
 
 import baselines
-import descriptors  # noqa: F401  (kept for parity / z-score reuse via real_video)
 import metrics
 import psi_mapping
 import psi_trs
