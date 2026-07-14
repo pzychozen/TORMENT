@@ -11,6 +11,7 @@ NEVER closure_achieved; non-finite values / a broken guard can never become evid
 with verdict HOLD. Offline; no torment_service.
 """
 import ast
+import math
 import os
 import sys
 
@@ -134,7 +135,7 @@ def test_obligation_A_magnitude_relative_to_tol_no_gate():
     assert A["offset_vs_tol_gate"] is False                           # magnitude is DESCRIPTIVE, not a gate
     for s in m8a.BY_FEATURES:
         m = A[s]["magnitude_frac_TOL"]
-        assert isinstance(m, float) and m == m                        # finite (not NaN)
+        assert isinstance(m, float) and math.isfinite(m)              # finite (not NaN)
 
 
 def test_obligation_guards_no_binding_no_family_expansion_no_hidden_closure():
