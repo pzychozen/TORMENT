@@ -35,7 +35,6 @@ import numpy as np
 
 import run_color_structure_v0_8 as cs
 import run_color_structure_fixture_bank_v1_1 as fb
-import run_color_structure_movement_matched_v1_4 as mm
 
 # frozen surfaces reused verbatim (NOT redefined)
 T = cs.T

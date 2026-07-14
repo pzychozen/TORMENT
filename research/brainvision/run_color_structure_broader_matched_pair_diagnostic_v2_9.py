@@ -36,11 +36,8 @@ from __future__ import annotations
 import numpy as np
 
 import run_color_structure_v0_8 as cs
-import run_color_structure_fixture_bank_v1_1 as fb
-import run_color_structure_movement_matched_v1_4 as mm
 import run_color_structure_spectral_std_blocker_v1_9 as v9
 import run_color_structure_by_std_residual_v2_0 as v20
-import run_color_structure_integrated_residual_map_v2_1 as v21
 import run_color_structure_directional_spectral_audit_v2_4 as v24
 
 # frozen surfaces reused verbatim (NOT redefined)
