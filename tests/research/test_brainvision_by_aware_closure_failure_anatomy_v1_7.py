@@ -53,14 +53,16 @@ def test_reuses_v1_5_spine_by_identity():
     assert m17.V11A_GUARD_FLAGS is m15.V11A_GUARD_FLAGS
     r = m17.run()
     assert r["reuses_v1_5_spine_by_identity"] is True
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     assert "m15.run()" in src
 
 
 def test_no_sample_replacement_no_new_seeds_families():
     r = m17.run()
     assert r["new_family_or_axis"] is False
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("def _f1_", "def _f2_", "def _f3_", "def _f4_", "def _f5_", "def _winders(", "def _candidates(",
                 "REPLICATION_SEEDS", "REPLICATION_WINDER", "DEVELOPMENT_SEEDS"):
         assert tok not in src, tok
@@ -205,6 +207,7 @@ def test_claim_locks_and_verdict_hold():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

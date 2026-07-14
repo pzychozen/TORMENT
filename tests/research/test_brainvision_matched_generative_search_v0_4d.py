@@ -132,7 +132,8 @@ def test_selection_is_min_residual_over_feasible_only():
 
 def test_no_decision_or_baseline_objective_in_search_selection():
     # the search-phase selection must not consult evaluator/baseline/label/S_best_threshold scores
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     search_fn = src.split("def _search_phase", 1)[1].split("\ndef ", 1)[0]
     for forbidden in ("color_ba", "S_best_threshold", "balanced_accuracy", "_group_sep_ba",
                       "_color_predict", "label_accuracy", "evaluator_ba"):
@@ -208,6 +209,7 @@ def test_outcome_is_one_of_four():
 
 
 def test_no_recurrence_or_temporal_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

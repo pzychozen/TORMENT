@@ -60,7 +60,8 @@ def test_reproduces_v0_7b_no_sample_change():
     # uses the sealed v0.7b enumeration constants (unchanged) and its generator surfaces (no new family)
     assert m7b.REPLICATION_SEEDS == (20260723, 20260724, 20260725)
     assert m7b.SEALED_TOTAL_EVALUATIONS == 1278
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for reused in ("m7b._winders", "m7b._candidates", "m7b.REPLICATION_WINDER_SPEEDS", "m4d._feat",
                    "m4d._safe_feat", "m4d._residual"):
         assert reused in src, reused
@@ -149,6 +150,7 @@ def test_claim_locks_and_verdict_hold():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

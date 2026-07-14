@@ -78,7 +78,8 @@ def test_imports_only_stdlib_no_torment():
 
 def test_no_forbidden_implementation_tokens_in_source():
     # code-construct tokens only (the non-claims docstring legitimately mentions camera / screen / pixels in prose)
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("import numpy", "import cv2", "import torch", "tensorflow", "np.", "cv2.", "torch.",
                 "coordinate_grid", "def _descriptor", "def _patchify", "def _grid(", "np.array", "PIL",
                 "imread", "VideoCapture"):
@@ -329,6 +330,7 @@ def test_claim_locks_and_verdict_hold():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

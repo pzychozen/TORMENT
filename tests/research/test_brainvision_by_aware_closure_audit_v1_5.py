@@ -58,7 +58,8 @@ def test_reuses_records_by_identity():
     r = m15.run()
     assert r["reuses_v0_7b_v0_8a_v0_9b_v1_0b_v1_2_records"] is True
     assert r["reuses_v1_2_by_identity"] is True
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     assert "m12.run()" in src
 
 
@@ -79,7 +80,8 @@ def test_spine_values_match_v1_2_by_identity():
 def test_no_sample_replacement_no_new_seeds_families():
     r = m15.run()
     assert r["new_family_or_axis"] is False
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("def _f1_", "def _f2_", "def _f3_", "def _f4_", "def _f5_", "def _winders(", "def _candidates(",
                 "REPLICATION_SEEDS", "REPLICATION_WINDER", "DEVELOPMENT_SEEDS"):
         assert tok not in src, tok
@@ -271,6 +273,7 @@ def test_spectral_audit_note_only():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

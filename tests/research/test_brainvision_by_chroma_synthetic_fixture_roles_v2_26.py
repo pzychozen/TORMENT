@@ -77,7 +77,8 @@ def test_stdlib_only_imports():
 
 
 def test_no_numeric_or_vision_libs_in_source():
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("import numpy", "import cv2", "import torch", "tensorflow", "np.", "cv2.", "torch.",
                 "imread(", "VideoCapture", "pygame"):
         assert tok not in src, tok

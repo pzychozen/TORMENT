@@ -82,7 +82,8 @@ def test_seeds_counts_pairing_match_v0_7a():
 def test_only_existing_generator_surfaces_no_new_family_or_axis():
     r = m7b.run()
     assert r["new_family_or_axis"] is False
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     # v0.7b defines NO family generator of its own -- it reuses the frozen m4d._f1.._f5 functions
     for tok in ("def _f1_", "def _f2_", "def _f3_", "def _f4_", "def _f5_"):
         assert tok not in src, tok
@@ -115,7 +116,8 @@ def test_spectral_audit_note_only():
 
 # ---- single deterministic pass: no search-until-pass / rerun / redraw ----
 def test_no_search_until_pass_or_rerun_path():
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     # structural guard: a search-until-pass loop would be a While node -> assert there are NO while-loops.
     # (Token checks on prose are avoided: the docstring legitimately DESCRIBES "no retries/redraws".)
     tree = ast.parse(src)
@@ -181,6 +183,7 @@ def test_claim_locks_and_verdict_hold():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

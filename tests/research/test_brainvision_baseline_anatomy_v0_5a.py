@@ -85,7 +85,8 @@ def test_no_generator_family_grid_seed_or_envelope_change():
     assert m4d.HELDOUT_TARGETS == ("winder_ph3.14", "winder_r0.7", "winder_r0.5")
     assert m4d.SEALED_TOTAL_EVALUATIONS == 283
     # v0.5a defines NO generator family of its own (reuses m4d): source has no candidate-family factory
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("def _f1_", "def _f2_", "def _f3_", "def _f4_", "def _f5_", "def candidates("):
         assert tok not in src, tok
     # v0.5a reuses the sealed held-out search verbatim
@@ -163,6 +164,7 @@ def test_outcome_is_one_of_four():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok

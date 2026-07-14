@@ -61,7 +61,8 @@ def test_tol_unchanged_no_new_threshold():
     # the robustness lens is a descriptive ratio to the NATURAL boundary 1.0 (no invented numeric threshold)
     assert "descriptive" in r["robustness_lens"].lower()
     # actively forbid any unregistered tiny-SMD / BA-saturation cutoff in the source
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for bad in ("0.1 * TOL", "0.1*TOL", ">= 0.999", ">=0.999", "tiny_smd"):
         assert bad not in src, bad
 
@@ -86,7 +87,8 @@ def test_preserves_v0_4d_pairs_and_envelope():
     assert m4d.HELDOUT_TARGETS == ("winder_ph3.14", "winder_r0.7", "winder_r0.5")
     assert m4d.SEALED_TOTAL_EVALUATIONS == 283
     # v0.6a defines NO generator family of its own
-    src = open(SRC, encoding="utf-8").read()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read()
     for tok in ("def _f1_", "def _f2_", "def _f3_", "def _f4_", "def _f5_", "def candidates("):
         assert tok not in src, tok
 
@@ -180,6 +182,7 @@ def test_claim_locks_and_verdict_hold():
 
 
 def test_no_temporal_or_recurrence_features():
-    src = open(SRC, encoding="utf-8").read().lower()
+    with open(SRC, encoding="utf-8") as fh:
+        src = fh.read().lower()
     for tok in ("recurrence", "arrow_of_time", "time_reversed", "laminarity", "rqa", "diagonal_length"):
         assert tok not in src, tok
