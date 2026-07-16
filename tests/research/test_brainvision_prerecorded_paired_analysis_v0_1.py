@@ -197,7 +197,8 @@ def test_no_inferential_tokens_outside_non_claim():
 def test_default_execution_writes_no_files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     canned = ppa._jsonable(ppa.build_result([]))
-    monkeypatch.setattr(ppa, "analyze_paths", lambda paths, include_sag=True: canned)
+    monkeypatch.setattr(ppa, "analyze_paths",
+                        lambda paths, include_sag=True, with_companion=False: canned)
     before = set(os.listdir(tmp_path))
     rc = ppa.main(["fake_clip.npz"])          # printing only; analyze_paths mocked (no real .npz needed)
     after = set(os.listdir(tmp_path))

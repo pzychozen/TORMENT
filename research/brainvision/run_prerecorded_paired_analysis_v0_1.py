@@ -54,6 +54,12 @@ DESCRIPTOR_NAMES: Tuple[str, ...] = (
     "psi", "rpsr", "psi_trs", "psi_trs_k0",
 )
 
+# Boundary-neutral companion (v0.7 O1+A3 contract; v0.8 opt-in). Structurally restricted descriptor domain;
+# never widen this to any other analyzer descriptor.
+D_COMPANION: Tuple[str, ...] = ("psi_trs", "psi_trs_k0")
+COMPANION_OFFSET_POLICY = "O1 — all 64 starts"
+COMPANION_AGGREGATION_POLICY = "A3 — mean normalized response across matched starts"
+
 FEASIBILITY_STANDING = "DESCRIPTIVE PAIRED ANALYSIS"
 FEASIBILITY_REASONS = (
     "source provenance is absent",
@@ -530,10 +536,162 @@ def sag_control_analysis(block_caches):
     }
 
 
+# ----------------------------- boundary-neutral companion (v0.7 O1+A3; v0.8 opt-in) -----------------------------
+def _finite_or_none(x):
+    """Available (float) only when finite; otherwise semantically UNAVAILABLE, represented as Python None so
+    the existing JSON-safe layer serializes it as `null`. None is never treated as a number."""
+    try:
+        xf = float(x)
+    except (TypeError, ValueError):
+        return None
+    return xf if math.isfinite(xf) else None
+
+
+def _sub_if_available(a, b):
+    """a - b, available only when BOTH operands are available and finite AND the computed result is finite.
+    Otherwise unavailable (None). Unavailable values are never substituted with zero or used in arithmetic."""
+    if a is None or b is None:
+        return None
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return None
+    r = a - b
+    return r if math.isfinite(r) else None
+
+
+def _companion_summarize(per_start, denominators, valid_flags):
+    """Build one companion descriptor record + its companion scalar from its 64 matched starts.
+
+    Response-distribution fields are computed over the COMPLETE 64-value multiset only when every start is
+    valid (nonfinite_count == 0); they are never finite-filtered. Denominator diagnostics summarize the
+    finite raw denominators n_d(s) = ||f_d(T_s)||_2 (NOT the epsilon-floored effective denominator) and may
+    still be emitted from their finite subset when the response scalar is unavailable."""
+    finite_count = int(sum(1 for v in valid_flags if v))
+    nonfinite_count = int(BLOCK_LEN - finite_count)
+    offending = [int(s) for s in range(BLOCK_LEN) if not valid_flags[s]]
+
+    if nonfinite_count == 0:
+        qs = [per_start[s] for s in range(BLOCK_LEN)]          # all finite floats
+        mean = _finite_or_none(float(np.mean(qs)))
+        median = _finite_or_none(float(np.median(qs)))
+        q75, q25 = np.percentile(qs, [75.0, 25.0])
+        iqr = _finite_or_none(float(q75 - q25))
+        minimum = _finite_or_none(float(np.min(qs)))
+        maximum = _finite_or_none(float(np.max(qs)))
+        mean_median_ratio = (_finite_or_none(mean / median)
+                             if (mean is not None and median is not None and median != 0.0) else None)
+        companion_response = mean                              # A3: arithmetic mean of all 64 (itself finite)
+    else:
+        mean = median = iqr = minimum = maximum = mean_median_ratio = companion_response = None
+
+    finite_denoms = [n for n in denominators if math.isfinite(n)]   # raw n_d(s), NOT the epsilon floor
+    minimum_denominator = _finite_or_none(min(finite_denoms)) if finite_denoms else None
+    maximum_denominator = _finite_or_none(max(finite_denoms)) if finite_denoms else None
+
+    record = {
+        "per_start_responses": list(per_start),
+        "finite_count": finite_count,
+        "nonfinite_count": nonfinite_count,
+        "offending_nonfinite_offsets": offending,
+        "mean": mean,
+        "median": median,
+        "IQR": iqr,
+        "minimum": minimum,
+        "maximum": maximum,
+        "mean_median_ratio": mean_median_ratio,
+        "epsilon_hit_count": int(sum(1 for n in finite_denoms if n <= EPSILON)),
+        "near_epsilon_hit_count": int(sum(1 for n in finite_denoms if n <= NEAR_EPSILON_THRESHOLD)),
+        "minimum_denominator": minimum_denominator,
+        "maximum_denominator": maximum_denominator,
+        "number_of_starts": BLOCK_LEN,
+        "offset_policy": COMPANION_OFFSET_POLICY,
+        "aggregation_policy": COMPANION_AGGREGATION_POLICY,
+    }
+    return record, companion_response
+
+
+def _companion_evaluate_block_control(companion_fns, x_true, x_control):
+    """Evaluate every descriptor in D_companion over all 64 matched circular starts of one (block, control).
+
+    For each start s: T_s = np.roll(x_true, -s, axis=0) and C_s = np.roll(x_control, -s, axis=0) are created
+    EXACTLY ONCE and the SAME rotated objects are supplied to every companion descriptor (no descriptor
+    re-rotates, canonicalizes, or regenerates different values). s=0 is recomputed independently here
+    (np.roll(., 0) returns a fresh copy); no raw output is reused. Source arrays are never mutated, and every
+    rotation is a separate observation (duplicate rotations keep full multiplicity). Returns
+    {name: (record, companion_response)}."""
+    names = list(companion_fns.keys())
+    per_start = {name: [] for name in names}
+    denoms = {name: [] for name in names}
+    valids = {name: [] for name in names}
+    for s in range(BLOCK_LEN):
+        t_s = np.roll(x_true, -s, axis=0)            # created once for this start ...
+        c_s = np.roll(x_control, -s, axis=0)
+        for name in names:                            # ... and supplied identically to every companion descriptor
+            fn = companion_fns[name]
+            f_true = np.asarray(fn(t_s), dtype=float)
+            f_control = np.asarray(fn(c_s), dtype=float)
+            n = float(np.linalg.norm(f_true.reshape(-1)))            # n_d(s) = ||f_d(T_s)||_2 (raw denominator)
+            eff = max(n, EPSILON)
+            num = float(np.linalg.norm((f_control - f_true).reshape(-1)))
+            q = num / eff
+            valid = bool(
+                np.all(np.isfinite(f_true)) and np.all(np.isfinite(f_control))
+                and math.isfinite(n) and math.isfinite(eff) and math.isfinite(q))
+            denoms[name].append(n)
+            valids[name].append(valid)
+            per_start[name].append(float(q) if valid else None)
+    return {name: _companion_summarize(per_start[name], denoms[name], valids[name]) for name in names}
+
+
+def boundary_neutral_companion(block_caches, per_responses, recursive_delta_result,
+                               extractors: Optional[Dict[str, Callable]] = None):
+    """Isolated boundary-neutral companion under the complete v0.7 O1+A3 contract (v0.8 opt-in).
+
+    Evaluated independently for every block x control x descriptor in D_companion = (psi_trs, psi_trs_k0);
+    every result retains explicit block identity. NO cross-block or clip-level aggregation is performed: the
+    six derived scalars live inside each block/control record. Raw fixed-start results are untouched;
+    raw_minus_companion_* are derived only from the historical raw per-block/control values. The existing raw
+    descriptor_responses() helper is not widened, and no descriptor outside D_companion is companion-evaluated."""
+    extractors = extractors if extractors is not None else default_extractors()
+    companion_fns = {name: extractors[name] for name in D_COMPANION}     # structural domain restriction
+    per_control: Dict[str, object] = {}
+    for control in CONTROLS:
+        per_block = []
+        for b, blk in enumerate(block_caches):
+            x_true = blk["cache"]["true"]["array"]
+            x_control = blk["cache"][control]["array"]
+            evaluated = _companion_evaluate_block_control(companion_fns, x_true, x_control)
+            rec_psi, resp_psi = evaluated["psi_trs"]
+            rec_k0, resp_k0 = evaluated["psi_trs_k0"]
+            crd = _sub_if_available(resp_psi, resp_k0)
+            raw_psi = per_responses["psi_trs"][control][b]
+            raw_k0 = per_responses["psi_trs_k0"][control][b]
+            raw_rec = recursive_delta_result["per_control"][control]["per_block"][b]
+            per_block.append({
+                "block": int(b),
+                "psi_trs": rec_psi,
+                "psi_trs_k0": rec_k0,
+                "companion_response_psi_trs": resp_psi,
+                "companion_response_psi_trs_k0": resp_k0,
+                "companion_recursive_delta": crd,
+                "raw_minus_companion_psi_trs": _sub_if_available(raw_psi, resp_psi),
+                "raw_minus_companion_psi_trs_k0": _sub_if_available(raw_k0, resp_k0),
+                "raw_minus_companion_recursive_delta": _sub_if_available(raw_rec, crd),
+            })
+        per_control[control] = {"per_block": per_block}
+    return {
+        "included": True,
+        "descriptor_domain": list(D_COMPANION),
+        "offset_policy": COMPANION_OFFSET_POLICY,
+        "aggregation_policy": COMPANION_AGGREGATION_POLICY,
+        "per_control": per_control,
+    }
+
+
 # ----------------------------- per-clip + top-level assembly -----------------------------
 def analyze_descriptor_field(field: np.ndarray, clip_ordinal: int, clip_name: str,
                              source: Optional[str] = None, include_sag: bool = True,
-                             extractors: Optional[Dict[str, Callable]] = None):
+                             extractors: Optional[Dict[str, Callable]] = None,
+                             with_companion: bool = False):
     block_caches, info = compute_block_caches(field, clip_ordinal)
 
     cache_summary = []
@@ -561,7 +719,7 @@ def analyze_descriptor_field(field: np.ndarray, clip_ordinal: int, clip_name: st
     norm_diag = build_normalization_diagnostics(
         clip_name, descriptor_names, CONTROLS, len(block_caches),
         raw_responses["true_feature_norms"], raw_responses["raw_numerators"], per_responses)
-    return {
+    result = {
         "clip_name": clip_name,
         "clip_ordinal": int(clip_ordinal),
         "source": source,
@@ -577,6 +735,12 @@ def analyze_descriptor_field(field: np.ndarray, clip_ordinal: int, clip_name: st
         "response_normalization_diagnostics": norm_diag,
         "finite_summary": {"finite": finite, "nonfinite": nonfinite, "total": finite + nonfinite},
     }
+    # Additive, opt-in only: with the flag absent no companion key or stub is emitted and the raw-only
+    # default result is byte-for-byte unchanged.
+    if with_companion:
+        result["boundary_neutral_companion"] = boundary_neutral_companion(
+            block_caches, per_responses, rec, extractors=extractors)
+    return result
 
 
 def build_result(clip_results) -> Dict[str, object]:
@@ -608,7 +772,8 @@ def build_result(clip_results) -> Dict[str, object]:
     }
 
 
-def analyze_paths(npz_paths: Sequence[str], include_sag: bool = True) -> Dict[str, object]:
+def analyze_paths(npz_paths: Sequence[str], include_sag: bool = True,
+                  with_companion: bool = False) -> Dict[str, object]:
     """Analyze explicitly supplied .npz paths. Loads frames via the existing loader; writes nothing."""
     clip_results = []
     for ordinal, path in enumerate(npz_paths):
@@ -616,7 +781,7 @@ def analyze_paths(npz_paths: Sequence[str], include_sag: bool = True) -> Dict[st
         field = extract_descriptor_field(frames)
         clip_results.append(analyze_descriptor_field(
             field, clip_ordinal=ordinal, clip_name=os.path.basename(path), source=path,
-            include_sag=include_sag))
+            include_sag=include_sag, with_companion=with_companion))
     return _jsonable(build_result(clip_results))
 
 
@@ -627,6 +792,43 @@ def _fmt(x) -> str:
     if isinstance(x, float):
         return "nan" if not math.isfinite(x) else "{:.4f}".format(x)
     return str(x)
+
+
+def _format_companion_lines(clip, comp, controls):
+    """Human companion summary: every block and control separately (never all 64 per-start values). Raw and
+    companion are kept structurally separate; wording stays descriptive with no interpretation claims."""
+    lines = ["  BOUNDARY-NEUTRAL COMPANION (O1 all 64 starts; A3 mean normalized matched response):"]
+    resp = clip["descriptor_responses"]
+    rec = clip["recursive_delta"]["per_control"]
+    for control in controls:
+        pc = comp["per_control"].get(control)
+        if pc is None:
+            continue
+        for entry in pc["per_block"]:
+            b = entry["block"]
+            lines.append("    block={} control={}".format(b, control))
+            lines.append("      psi_trs    raw={} companion={} raw_minus={}".format(
+                _fmt(resp["psi_trs"][control]["per_block"][b]),
+                _fmt(entry["companion_response_psi_trs"]), _fmt(entry["raw_minus_companion_psi_trs"])))
+            lines.append("      psi_trs_k0 raw={} companion={} raw_minus={}".format(
+                _fmt(resp["psi_trs_k0"][control]["per_block"][b]),
+                _fmt(entry["companion_response_psi_trs_k0"]), _fmt(entry["raw_minus_companion_psi_trs_k0"])))
+            lines.append("      recursive_delta raw={} companion={} raw_minus={}".format(
+                _fmt(rec[control]["per_block"][b]), _fmt(entry["companion_recursive_delta"]),
+                _fmt(entry["raw_minus_companion_recursive_delta"])))
+            for d in ("psi_trs", "psi_trs_k0"):
+                r = entry[d]
+                lines.append(
+                    "      [{}] finite/nonfinite={}/{} offending={} mean={} median={} IQR={} min={} max={} "
+                    "ratio={} eps={} near_eps={} denom[min,max]=[{}, {}]".format(
+                        d, r["finite_count"], r["nonfinite_count"], r["offending_nonfinite_offsets"],
+                        _fmt(r["mean"]), _fmt(r["median"]), _fmt(r["IQR"]), _fmt(r["minimum"]),
+                        _fmt(r["maximum"]), _fmt(r["mean_median_ratio"]), r["epsilon_hit_count"],
+                        r["near_epsilon_hit_count"], _fmt(r["minimum_denominator"]),
+                        _fmt(r["maximum_denominator"])))
+    lines.append("    Full per-start responses are emitted by JSON-format output. Rerun with --format json "
+                 "or --format both to emit the complete 64-start lists.")
+    return lines
 
 
 def format_report(result: Dict[str, object]) -> str:
@@ -665,6 +867,9 @@ def format_report(result: Dict[str, object]) -> str:
                 lines.append("  SAG ties: {}".format(sag["ties"]))
         lines.append("  finite/nonfinite: {}/{}".format(
             clip["finite_summary"]["finite"], clip["finite_summary"]["nonfinite"]))
+        comp = clip.get("boundary_neutral_companion")
+        if comp is not None:
+            lines.extend(_format_companion_lines(clip, comp, result["controls"]))
     nd = result.get("response_normalization_diagnostics")
     if nd is not None:
         lines.append("")
@@ -703,6 +908,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("npz_paths", nargs="*",
                         help="explicit .npz descriptor clip paths (no repository asset is required).")
     parser.add_argument("--no-sag", action="store_true", help="skip the SAG control-rank reuse stage.")
+    parser.add_argument("--with-boundary-neutral-companion", action="store_true",
+                        help="opt in to the boundary-neutral companion (v0.7 O1+A3; additive, off by default; "
+                             "orthogonal to --no-sag and --format).")
     parser.add_argument("--format", choices=["json", "human", "both"], default="both",
                         help="what to print to stdout (default: both).")
     return parser
@@ -714,7 +922,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("no .npz paths supplied; nothing to analyze (this analyzer operates only on explicit paths).",
               file=sys.stderr)
         return 0
-    result = analyze_paths(ns.npz_paths, include_sag=not ns.no_sag)
+    result = analyze_paths(ns.npz_paths, include_sag=not ns.no_sag,
+                           with_companion=ns.with_boundary_neutral_companion)
     if ns.format in ("json", "both"):
         print(json.dumps(result, sort_keys=True, indent=2))
     if ns.format in ("human", "both"):
