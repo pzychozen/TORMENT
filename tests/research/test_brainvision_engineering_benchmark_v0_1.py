@@ -419,3 +419,82 @@ def test_main_returns_nonzero_on_benchmark_error(monkeypatch):
 
     monkeypatch.setattr(bench, "run_benchmark", boom)
     assert bench.main([]) == 2
+
+
+# ----------------------------- 27-32: UTF-8 child portability (Windows cp1252 psi defect) -----------------------------
+UTF8_ENV = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+PSI = "Ψ"  # Greek capital psi -- the scientific symbol that broke cp1252 child stdout on Windows
+
+
+def test_child_env_sets_utf8_portability_vars():
+    env = bench.build_child_env()
+    for key, value in UTF8_ENV.items():
+        assert env[key] == value
+
+
+def test_every_child_job_receives_utf8_environment(monkeypatch, tmp_path):
+    # Uniform env across ALL five job types (3 core + 2 optional), independent of the parent's env.
+    _patch_env_ok(monkeypatch)
+    _make_local_inputs(tmp_path, {"clip1.npz": b"x"})  # enables the two optional jobs
+    captured = []
+
+    def capture_run_job(job, repo_root, env, input_sha256):
+        captured.append((job.job_id, job.category, dict(env)))
+        return _ok_record(job, repo_root)
+
+    monkeypatch.setattr(bench, "run_job", capture_run_job)
+    report, code = bench.run_benchmark(repo_root=tmp_path, include_local_inputs=True)
+    assert len(captured) == 5
+    assert {category for _, category, _ in captured} == {"core", "optional"}  # includes optional jobs
+    for _job_id, _category, env in captured:
+        for key, value in UTF8_ENV.items():
+            assert env[key] == value
+
+
+def test_environment_section_records_utf8_vars(monkeypatch, tmp_path):
+    _patch_clean_run(monkeypatch)
+    report, _code = bench.run_benchmark(repo_root=tmp_path)
+    env = report["environment"]
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTHONUTF8"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_unicode_child_succeeds_through_run_job(tmp_path):
+    # A lightweight child that prints psi must succeed through the SAME run_job path the harness uses,
+    # under the harness UTF-8 child environment. It executes no Brainvision calculation.
+    job = bench.JobSpec(
+        job_id="unicode_probe", title="unicode probe", category="core",
+        purpose="portability probe", scientific_standing="ENGINEERING_REPLAY_ONLY",
+        argv=[sys.executable, "-c", 'print("Ψ")'],
+    )
+    rec = bench.run_job(job, tmp_path, bench.build_child_env(), {})
+    assert rec["exit_code"] == 0
+    assert rec["succeeded"] is True
+    assert rec["stdout_decode_ok"] is True
+    assert PSI in rec["stdout_tail"]                       # retained correctly
+    assert "�" not in rec["stdout_tail"] and "?" not in rec["stdout_tail"]
+
+
+def test_run_job_strict_utf8_preserves_psi_and_hashes_raw_bytes(monkeypatch, tmp_path):
+    psi_bytes = PSI.encode("utf-8") + b"\n"               # actual UTF-8 bytes of the child's stdout
+    monkeypatch.setattr(bench.subprocess, "run",
+                        lambda *a, **k: _FakeCP(0, psi_bytes, b""))
+    job = bench.build_jobs(tmp_path, include_local_inputs=False)[1]
+    rec = bench.run_job(job, tmp_path, bench.build_child_env(), {})
+    assert rec["succeeded"] is True and rec["stdout_decode_ok"] is True
+    assert rec["stdout_tail"] == PSI                       # strict decode kept psi, no ? / replacement
+    assert "�" not in rec["stdout_tail"]
+    assert rec["stdout_sha256"] == hashlib.sha256(psi_bytes).hexdigest()  # hash over the real bytes
+
+
+def test_run_job_marks_undecodable_output_as_failed(monkeypatch, tmp_path):
+    bad = b"\xff\xfe\xfa"                                 # not valid UTF-8; must NOT be silently concealed
+    monkeypatch.setattr(bench.subprocess, "run",
+                        lambda *a, **k: _FakeCP(0, bad, b""))
+    job = bench.build_jobs(tmp_path, include_local_inputs=False)[1]
+    rec = bench.run_job(job, tmp_path, bench.build_child_env(), {})
+    assert rec["stdout_decode_ok"] is False
+    assert rec["succeeded"] is False                      # exit 0 but undecodable -> failed job
+    assert "not decodable" in rec["stdout_tail"]          # bounded, explicit error note (not corruption)
+    assert rec["stdout_sha256"] == hashlib.sha256(bad).hexdigest()  # raw-byte hash preserved

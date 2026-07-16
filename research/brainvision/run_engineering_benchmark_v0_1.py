@@ -277,21 +277,34 @@ def build_jobs(repo_root: Path, include_local_inputs: bool) -> List[JobSpec]:
 
 
 # ----------------------------- environment discipline -----------------------------
+# Child-process environment overrides applied UNIFORMLY to EVERY benchmark job. PYTHONUTF8 /
+# PYTHONIOENCODING force child stdout/stderr to UTF-8 regardless of the parent console code page: on
+# Windows the default cp1252 child stdout raised UnicodeEncodeError when an existing report contained a
+# scientific symbol such as the Greek capital psi. The harness makes child execution portable itself and
+# does not depend on the parent command prompt already exporting UTF-8 variables.
+CHILD_ENV_OVERRIDES = {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8",
+}
+
+
 def build_child_env() -> Dict[str, str]:
-    """Child env inherits the parent's but forces bytecode writes off (no .pyc side effects)."""
+    """Child env inherits the parent's, then forces bytecode-off + UTF-8 child I/O (portable output)."""
     env = dict(os.environ)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.update(CHILD_ENV_OVERRIDES)
     return env
 
 
 def environment_report() -> Dict[str, object]:
     """Minimal, non-secret environment record (never the whole environment)."""
-    return {
+    report: Dict[str, object] = {
         "python_executable": sys.executable,
         "python_version": platform.python_version(),
         "platform": platform.platform(),
-        "PYTHONDONTWRITEBYTECODE": "1",
     }
+    report.update(CHILD_ENV_OVERRIDES)  # PYTHONDONTWRITEBYTECODE / PYTHONUTF8 / PYTHONIOENCODING
+    return report
 
 
 # ----------------------------- git (read-only, fatal on safety-critical failure) -----------------------------
@@ -403,6 +416,22 @@ def build_repository_section(repo_root: Path, ident: Dict[str, Optional[str]],
 
 
 # ----------------------------- job execution -----------------------------
+def _decode_stream(stream_name: str, data: bytes):
+    """Strict UTF-8 decode of captured child output.
+
+    Successful child output is expected to be UTF-8 (the harness forces UTF-8 child I/O), so decoding is
+    STRICT: it never replacement-decodes, which would silently conceal an encoding defect behind '?'/U+FFFD.
+    On an unexpected decode failure it returns a bounded, explicit error note and ok=False, so the job is
+    represented as failed rather than as corrupted text. Raw-byte hashing is done by the caller on the
+    original bytes and is unaffected. Returns (text_or_None, ok, line_count, bounded_tail)."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        note = "<" + stream_name + " not decodable as UTF-8 (strict): " + str(exc) + ">"
+        return None, False, 0, note[:TAIL_MAX_CHARS]
+    return text, True, line_count(text), bounded_tail(text)
+
+
 def run_job(job: JobSpec, repo_root: Path, env: Dict[str, str],
             input_sha256: Dict[str, str]) -> Dict[str, object]:
     """Execute one job as an argument-vector subprocess with repo-root cwd; record it fully."""
@@ -421,8 +450,10 @@ def run_job(job: JobSpec, repo_root: Path, env: Dict[str, str],
 
     out_bytes = cp.stdout or b""
     err_bytes = cp.stderr or b""
-    out_text = out_bytes.decode("utf-8", errors="replace")
-    err_text = err_bytes.decode("utf-8", errors="replace")
+    # Raw bytes are hashed as-is; text is decoded STRICTLY (a decode failure fails the job, never hides).
+    out_text, out_decode_ok, out_lines, out_tail = _decode_stream("stdout", out_bytes)
+    err_text, err_decode_ok, err_lines, err_tail = _decode_stream("stderr", err_bytes)
+    succeeded = cp.returncode == 0 and out_decode_ok and err_decode_ok
 
     return {
         "job_id": job.job_id,
@@ -437,13 +468,15 @@ def run_job(job: JobSpec, repo_root: Path, env: Dict[str, str],
         "finished_utc": finished.isoformat(),
         "elapsed_seconds": round(elapsed, 6),
         "exit_code": cp.returncode,
-        "succeeded": cp.returncode == 0,
+        "succeeded": succeeded,
         "stdout_sha256": sha256_bytes(out_bytes),
         "stderr_sha256": sha256_bytes(err_bytes),
-        "stdout_line_count": line_count(out_text),
-        "stderr_line_count": line_count(err_text),
-        "stdout_tail": bounded_tail(out_text),
-        "stderr_tail": bounded_tail(err_text),
+        "stdout_decode_ok": out_decode_ok,
+        "stderr_decode_ok": err_decode_ok,
+        "stdout_line_count": out_lines,
+        "stderr_line_count": err_lines,
+        "stdout_tail": out_tail,
+        "stderr_tail": err_tail,
         "input_paths": list(job.input_paths),
         "input_sha256": {p: input_sha256[p] for p in job.input_paths if p in input_sha256},
     }
