@@ -1171,7 +1171,9 @@ verifier blob mismatch
 verifier local-byte mismatch
 serializer blob mismatch
 serializer local-byte mismatch
-invalid local configuration
+runner source symlink or path escape
+verifier source symlink or path escape
+serializer source symlink or path escape
 missing input
 input symlink
 wrong size
