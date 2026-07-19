@@ -769,8 +769,23 @@ def test_runner_performs_no_witness_mathematics():
         assert not hasattr(runner, banned)
 
 
-def test_real_results_directory_is_untouched_by_this_suite():
-    """The default root resolves inside the repository, and no test ever publishes into it."""
+def test_test_suite_never_uses_implicit_real_results_root():
+    """Every direct runner operation in this module is bound to an injected temporary results root."""
     assert runner.default_results_root().endswith(os.path.join("research", "brainvision", "results"))
-    assert not os.path.exists(os.path.join(runner.default_results_root(), runner.FINAL_DIRECTORY_NAME))
-    assert not os.path.exists(os.path.join(runner.default_results_root(), runner.STAGING_DIRECTORY_NAME))
+
+    with open(__file__, "r", encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+
+    direct_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        owner = node.func.value
+        if isinstance(owner, ast.Name) and owner.id == "runner" and node.func.attr == "run_operation":
+            direct_calls.append(node)
+
+    assert direct_calls
+    assert all(
+        any(keyword.arg == "results_root" for keyword in call.keywords)
+        for call in direct_calls
+    )
