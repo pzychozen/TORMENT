@@ -89,8 +89,8 @@ S1B_SOURCE_IDENTITIES: Tuple[Dict[str, str], ...] = (
     {
         "artifact_role": "freeze_library",
         "source_path": "research/brainvision/independent_order_sensitive_synthetic_fixture_freeze_v0_1.py",
-        "git_blob": "a06a80ac1a253a6b85f2c3e6bf4bf712b0d78d8a",
-        "raw_sha256": "ef78cc21a3a6e139a781ce4f8c356c88b9a132ab89771d8250dc57ea375b2fca",
+        "git_blob": "9f69e3610ced5bb8f3e90986e9b12f808a78bed2",
+        "raw_sha256": "8f934e8615c0f6b599fe00e8f6425c1bf0e13c44aa27853885b4c7546cda2cde",
     },
     {
         "artifact_role": "verifier_test",
@@ -101,8 +101,8 @@ S1B_SOURCE_IDENTITIES: Tuple[Dict[str, str], ...] = (
     {
         "artifact_role": "generator_freeze_test",
         "source_path": "research/brainvision/test_brainvision_independent_order_sensitive_synthetic_fixture_freeze_v0_1.py",
-        "git_blob": "a7774cfc49e05e75c1d49355a28166fd2375abae",
-        "raw_sha256": "a02c613f2620755611c3e86914458c4f72bfa2a7d3cfce55f94748bafef0fa0c",
+        "git_blob": "d90a95016dcd20e49b35c6039efd46fbcde1d779",
+        "raw_sha256": "ab669740f6489dc7e726363811360d51797f9e96900cbde43082bed159b881e7",
     },
 )
 

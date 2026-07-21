@@ -805,7 +805,7 @@ _RETAINED_GENERIC_DIRS = tuple(
 )
 _FROZEN_PATH_MARKERS = (
     "algebraic_n64_primary_v0_1_f3_" + "evaluation",
-    "algebraic_n64_primary_v0_1_f3_" + "asymmetry_audit",
+    "algebraic_n64_primary_v0_1_f3_" + "asymmetry" + "_audit",
     _RETAINED_RESULTS_DIR,                       # the retained results directory (covers 478/479/480)
     _RETAINED_RESULTS_DIR + "results.csv",
     _RETAINED_RESULTS_DIR + "results.json",

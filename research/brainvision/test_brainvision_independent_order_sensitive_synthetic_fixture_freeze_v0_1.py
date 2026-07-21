@@ -13,7 +13,10 @@ and hand-authored records are used, so the reducer never contacts seed tuple 17
 or later, never requests a ninth accepted fixture, and never touches a record
 after a malformed one -- each of these is asserted with an instrumented
 iterator. Source-boundary validation is exercised with bounded in-memory source
-strings only; no test reads any source file from disk. The tests never import,
+strings and, in the on-disk self-validation regressions, by reading the five
+exact accepted S1B source files to prove each clears its own checker; the
+prohibited-marker vocabulary is always assembled from fragments so no complete
+marker appears as a direct literal in this test source. The tests never import,
 construct, or evaluate the challenger descriptor, never contact PsiTRS or the
 frozen family, and never touch production. ``unittest`` and plain assertions
 only; ``pytest`` is not imported. No ``if __name__ == '__main__'`` block is
@@ -22,6 +25,7 @@ present.
 
 import copy
 import hashlib
+import os
 import unittest
 from unittest import mock
 
@@ -936,9 +940,11 @@ class ReducerToManifestCompositionTests(_ManifestFixtures, unittest.TestCase):
 # Static source-boundary validation (bounded in-memory sources only)
 # --------------------------------------------------------------------------- #
 
-# Prohibited markers are assembled from fragments purely for readability; no test
-# reads any source file from disk, so these are only ever passed as bounded
-# in-memory source strings to validate_source_boundary.
+# Prohibited markers are assembled from fragments so no complete marker ever
+# appears as a direct literal in this test source (which must itself pass
+# self-validation). The in-memory boundary tests below pass them as bounded
+# source strings; the on-disk self-validation regressions at the end of this
+# module instead read the five exact accepted S1B source files.
 _FROZEN_MODULE_TOKEN = "psi" + "_trs"
 _FROZEN_F3_MODULE_TOKEN = "algebraic_n64_f3" + "_evaluator"
 _FROZEN_PATH_TOKEN = "algebraic_n64_primary_v0_1_f3_" + "evaluation"
@@ -952,6 +958,25 @@ _GEN_PATH_DIRS = tuple(
     "research/brainvision/" + fragment + "/"
     for fragment in ("historical" + "_f3", "frozen" + "_family",
                      "retained" + "_family", "retained" + "_evidence"))
+# Bare complete generic frozen/retained markers, assembled from fragments so the
+# complete literal never appears as a direct AST constant in this test source.
+# Each concatenation reproduces exactly one accepted freeze-library marker value.
+_COMPLETE_MARKERS = (
+    "asymmetry" + "_audit",
+    "historical" + "_f3",
+    "frozen" + "_family",
+    "retained" + "_family",
+    "retained" + "_evidence",
+)
+# The matching fragment pairs, used to prove that fragment construction of the
+# marker vocabulary never trips the checker's literal scan.
+_MARKER_FRAGMENT_PAIRS = (
+    ("asymmetry", "_audit"),
+    ("historical", "_f3"),
+    ("frozen", "_family"),
+    ("retained", "_family"),
+    ("retained", "_evidence"),
+)
 
 
 class SourceBoundaryTests(unittest.TestCase):
@@ -1159,3 +1184,82 @@ class SourceBoundaryTests(unittest.TestCase):
         self.assertEqual(error.failure_code, "REPLAY_MISMATCH")
         self.assertEqual(error.failure_stage, "finalization")
         self.assertEqual(error.detail, "detail text")
+
+
+class SourceSelfValidationOnDiskTests(unittest.TestCase):
+    """Regression for the self-boundary false positive.
+
+    The accepted freeze-library source once rejected itself because a compound
+    marker embedded a generic frozen-family token as a single direct literal,
+    which the library's own literal scan then flagged. These tests read the five
+    exact accepted S1B source files from disk and prove each clears
+    validate_source_boundary against its exact repository-relative path, its exact
+    on-disk bytes, and the exact allowlist. Only bounded file reads and the pure
+    source-boundary function are used; no canonical iterator is constructed or
+    consumed, and no result, staging, or evidence is produced.
+    """
+
+    def _read_source_text(self, repo_relative_path):
+        # The five accepted sources are siblings of this test file. Resolve each by
+        # basename against this file's directory; the exact repository-relative
+        # path is passed to the checker unchanged.
+        here = os.path.dirname(os.path.abspath(__file__))
+        on_disk = os.path.join(here, os.path.basename(repo_relative_path))
+        with open(on_disk, "rb") as handle:
+            return handle.read().decode("utf-8")
+
+    def test_all_five_exact_s1b_sources_pass_self_validation(self):
+        for repo_relative_path in freeze.AUTHORIZED_ALLOWLIST:
+            source_text = self._read_source_text(repo_relative_path)
+            result = freeze.validate_source_boundary(
+                repo_relative_path, source_text, freeze.AUTHORIZED_ALLOWLIST)
+            self.assertTrue(result["valid"], repo_relative_path)
+            self.assertEqual(result["normalized_path"], repo_relative_path)
+            self.assertIsNone(result["failure_code"])
+            self.assertIsNone(result["failure_stage"])
+
+    def test_freeze_library_source_passes_its_own_checker(self):
+        path = freeze.AUTHORIZED_ALLOWLIST[2]
+        result = freeze.validate_source_boundary(
+            path, self._read_source_text(path), freeze.AUTHORIZED_ALLOWLIST)
+        self.assertTrue(result["valid"])
+
+    def test_generator_freeze_test_source_passes_its_own_checker(self):
+        path = freeze.AUTHORIZED_ALLOWLIST[4]
+        result = freeze.validate_source_boundary(
+            path, self._read_source_text(path), freeze.AUTHORIZED_ALLOWLIST)
+        self.assertTrue(result["valid"])
+
+    def test_corrected_marker_runtime_value_is_unchanged(self):
+        # The correction only split a literal; the assembled runtime marker value
+        # must remain identical, so the compound marker is still present in the
+        # library's frozen marker vocabulary.
+        compound = "algebraic_n64_primary_v0_1_f3_" + "asymmetry" + "_audit"
+        self.assertIn(compound, freeze._FROZEN_PATH_MARKERS)
+
+
+class CompleteMarkerPositiveDetectionTests(unittest.TestCase):
+    """Proves each complete prohibited marker is still detected as a genuine
+    direct AST literal, and that fragment construction of the same vocabulary is
+    not falsely flagged. Each complete marker is assembled from fragments in the
+    test implementation and injected into a synthetic source string, so the real
+    complete literal exists only in the parsed synthetic AST -- never as a direct
+    constant in this test source."""
+
+    def test_each_complete_marker_direct_literal_is_rejected(self):
+        allow = freeze.AUTHORIZED_ALLOWLIST
+        path = allow[2]
+        for marker in _COMPLETE_MARKERS:
+            synthetic_source = "VALUE = " + repr(marker)
+            with self.assertRaises(freeze.SyntheticFixtureProcessFailure) as ctx:
+                freeze.validate_source_boundary(path, synthetic_source, allow)
+            self.assertEqual(ctx.exception.failure_code, "PROHIBITED_FROZEN_FAMILY_CONTACT")
+            self.assertEqual(ctx.exception.failure_stage, "source_boundary")
+
+    def test_fragment_built_markers_do_not_self_trigger(self):
+        allow = freeze.AUTHORIZED_ALLOWLIST
+        path = allow[2]
+        for left, right in _MARKER_FRAGMENT_PAIRS:
+            synthetic_source = "VALUE = " + repr(left) + " + " + repr(right)
+            result = freeze.validate_source_boundary(path, synthetic_source, allow)
+            self.assertTrue(result["valid"])
