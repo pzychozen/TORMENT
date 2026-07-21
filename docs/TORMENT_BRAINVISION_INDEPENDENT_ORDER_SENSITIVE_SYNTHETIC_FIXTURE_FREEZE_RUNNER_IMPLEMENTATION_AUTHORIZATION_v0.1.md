@@ -347,6 +347,150 @@ No configuration value is left to runtime choice. This implementation authorizat
 
 ---
 
+## 8A. Runner constants and execution-authorization binding contract
+
+This section freezes the runner's fixed constants and the machine-readable binding that the future S1C execution-authorization document must embed. This document defines the contract; the future execution-authorization document embeds the block.
+
+### 8A.1 Exact runner CLI shape
+
+The runner is invoked in exactly one shape:
+
+```text
+python research/brainvision/run_independent_order_sensitive_synthetic_fixture_freeze_v0_1.py
+```
+
+No positional arguments, options, flags, environment gates, configuration files, stdin input, or caller-supplied identity values are accepted. Any argument, any option, any non-empty stdin, or any attempt to supply identity or configuration values through the environment or a file is a `UNAUTHORIZED_EXECUTION / pre_contact` refusal. The runner reads no environment variable as an input to its decisions.
+
+### 8A.2 Frozen execution-envelope constants
+
+The runner emits exactly these constant envelope values (binding the top-level fields of Section 10):
+
+```text
+envelope_schema = "torment-brainvision-independent-order-sensitive-synthetic-fixture-freeze-execution-envelope-v0.1"
+envelope_version = "0.1"
+operation_identity = "independent-order-sensitive-synthetic-fixture-freeze-v0.1"
+authoritative_operation = true
+```
+
+These are literal constants; they are never derived at runtime, taken from the environment, or supplied by a caller.
+
+### 8A.3 Exact future execution-authorization document path
+
+```text
+docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_EXECUTION_AUTHORIZATION_v0.1.md
+```
+
+The runner treats exactly this repository-relative path as the execution-authorization document. No other path, and no caller-supplied path, is accepted.
+
+### 8A.4 Embedded authorization-binding block
+
+The future execution-authorization document must embed exactly one machine-readable binding block. The block is delimited by exactly one begin marker line and exactly one end marker line, each on its own line:
+
+```text
+BEGIN-SYNTHETIC-FIXTURE-FREEZE-AUTHORIZATION-BINDING-v0.1
+END-SYNTHETIC-FIXTURE-FREEZE-AUTHORIZATION-BINDING-v0.1
+```
+
+Between the markers there are exactly seven field lines, in exactly this order, one field per line:
+
+```text
+authorization_schema
+authorization_version
+runner_git_blob
+runner_raw_sha256
+runner_test_git_blob
+runner_test_raw_sha256
+configuration_sha256
+```
+
+Exact template (to-be-frozen hexadecimal shown as placeholders; the execution authorization freezes the real values):
+
+```text
+BEGIN-SYNTHETIC-FIXTURE-FREEZE-AUTHORIZATION-BINDING-v0.1
+authorization_schema=torment-brainvision-independent-order-sensitive-synthetic-fixture-freeze-authorization-binding-v0.1
+authorization_version=0.1
+runner_git_blob=<40-lowercase-hex>
+runner_raw_sha256=<64-lowercase-hex>
+runner_test_git_blob=<40-lowercase-hex>
+runner_test_raw_sha256=<64-lowercase-hex>
+configuration_sha256=<64-lowercase-hex>
+END-SYNTHETIC-FIXTURE-FREEZE-AUTHORIZATION-BINDING-v0.1
+```
+
+Resolution of the document self-identity cycle: neither `authorization_document_git_blob` nor `repository_execution_head` is embedded in the block, because both are self-referential to the commit whose tree contains this document — the execution-authorization document cannot canonically contain and verify its own Git blob or its own containing-commit hash without a fixed point. Both are therefore resolved by the runner independently through read-only Git and recorded into the envelope; neither is supplied by, nor compared against, an embedded binding value.
+
+Non-circular execution-HEAD authorization rule. Before the project-module import and any canonical contact, the runner performs, in this exact order:
+
+```text
+resolve HEAD
+resolve origin/main
+require HEAD == origin/main
+require the exact execution-authorization path to exist in HEAD
+resolve the latest commit affecting that exact path
+require that path commit == HEAD
+resolve the authorization document Git blob from HEAD
+record HEAD as repository_execution_head
+record the resolved document blob as authorization_document_git_blob
+```
+
+The latest-path-commit check uses an exact frozen read-only Git operation equivalent to:
+
+```text
+git log -1 --format=%H -- docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_EXECUTION_AUTHORIZATION_v0.1.md
+```
+
+A missing result, a malformed result, or a result unequal to HEAD maps to `UNAUTHORIZED_EXECUTION / pre_contact`. A malformed resolved Git blob maps according to the existing identity rules (`HASH_IDENTITY_FAILURE / pre_contact`). This proves the current HEAD is the exact commit that established the execution authorization: because the latest commit that touched the execution-authorization path must equal HEAD, a later unrelated commit fails closed even when the authorization document itself is byte-unchanged.
+
+### 8A.5 Block line grammar, validation, and parsing-failure mapping
+
+Line grammar and validation (deterministic, standard-library string handling only; the document content is never executed, imported, or evaluated):
+
+```text
+each field line is exactly key=value with no spaces around "="
+one field per line; LF line endings
+exactly one begin marker and exactly one end marker
+the block content is exactly the lines strictly between the markers
+exactly the seven declared field keys, each appearing exactly once, in the declared order
+authorization_schema value = the exact literal above
+authorization_version value = "0.1"
+runner_git_blob, runner_test_git_blob = exactly 40 lowercase hex
+runner_raw_sha256, runner_test_raw_sha256, configuration_sha256 = exactly 64 lowercase hex
+```
+
+Rejection rules:
+
+```text
+a duplicated field key rejects
+a missing field key rejects
+an extra field key rejects
+any line between the markers not matching key=value in the declared order rejects
+any content between the markers beyond the seven declared field lines rejects
+any hexadecimal value with wrong length, uppercase, or non-hex characters rejects
+missing, duplicated, or out-of-order markers reject
+```
+
+Parsing-failure mapping:
+
+```text
+malformed / missing / duplicated / extra-field / marker / grammar / hex-format defect
+-> UNAUTHORIZED_EXECUTION / pre_contact
+a well-formed binding whose runner blob, runner raw hash, runner-test blob, runner-test raw
+  hash, or configuration SHA-256 does not match the runner's independently computed value
+-> HASH_IDENTITY_FAILURE / pre_contact
+```
+
+Parsing is a pure deterministic read over the committed document bytes obtained through an exact read-only Git operation (not the working-tree copy, so no working-tree newline conversion can affect it): the runner locates the single marker pair, splits the enclosed lines, and validates them as strings. It never imports, executes, or evaluates the document.
+
+### 8A.6 Read order
+
+The runner reads and parses the execution-authorization binding block only after the following checks succeed: repository ownership (execution begins from the authoritative repository root), branch is `main`, `HEAD == origin/main`, working tree clean, the exact document path (Section 8A.3), the document exists in committed HEAD, and the non-circular execution-HEAD authorization rule of Section 8A.4 (latest commit affecting the exact execution-authorization path equals HEAD). The binding read occurs before the project-module import (Section 6.1) and before any canonical contact. The frozen Git-blob, Windows raw-SHA-256, and configuration-identity checks of Sections 6.1 and 7 then draw their expected runner, runner-test, and configuration values from this binding; the five S1B source identities continue to come from Section 3 of this document. `repository_execution_head` and `authorization_document_git_blob` are resolved independently from read-only Git per Section 8A.4 and recorded into the envelope; they are not embedded in the binding and are not compared against any embedded value.
+
+### 8A.7 Sole-source rule
+
+The committed authorization binding is the sole source of exactly these five expected values: `runner_git_blob`, `runner_raw_sha256`, `runner_test_git_blob`, `runner_test_raw_sha256`, and `configuration_sha256`. None of these may be supplied through the CLI, environment variables, stdin, external files, or runtime choices. `repository_execution_head` and `authorization_document_git_blob` are not embedded in the binding at all: both are resolved independently by the runner through read-only Git (Section 8A.4) and are neither supplied by nor compared against an embedded binding value. Nothing in this section opens runner-execution authority: it authorizes runner implementation and bounded mocked tests only — no runner invocation, no canonical-iterator consumption, no fixture discovery, no family freeze, no manifest publication, no challenger contact, no frozen-F3 contact, no PsiTRS contact, no kernel or production contact, and no third file.
+
+---
+
 ## 9. Exact two-pass architecture
 
 The runner's sole authoritative operation is a deterministic two-pass freeze-with-replay. Each pass must independently perform, from scratch:
@@ -1169,6 +1313,25 @@ finalization_status = COMPLETE for successful positive finalization
 finalization_status = FAILED only when positive finalization was attempted and failed
 replay mismatch never invokes finalize_authoritative_manifest
 replay mismatch never produces finalization_status = FAILED
+exact CLI shape: any argument, option, or non-empty stdin refuses UNAUTHORIZED_EXECUTION / pre_contact
+frozen envelope constants (envelope_schema, envelope_version, operation_identity, authoritative_operation)
+authorization-binding read occurs only after repo/branch/HEAD/clean/path/existence and the
+  path-commit==HEAD rule succeed, and before project-module import
+binding parse rejects: duplicate field, missing field, extra field, bad markers, wrong field order,
+  uppercase or wrong-length hex -> UNAUTHORIZED_EXECUTION / pre_contact (mocked document text)
+the embedded binding has exactly seven fields; neither repository_execution_head nor
+  authorization_document_git_blob appears in the embedded binding
+binding identity mismatch (runner or runner-test blob/raw-hash, or configuration SHA-256)
+  -> HASH_IDENTITY_FAILURE / pre_contact
+the five bound values come only from the binding, never from CLI / env / stdin / external files
+authorization path commit == HEAD passes
+authorization path commit != HEAD refuses UNAUTHORIZED_EXECUTION / pre_contact
+missing path history refuses UNAUTHORIZED_EXECUTION / pre_contact
+malformed path-commit identity refuses UNAUTHORIZED_EXECUTION / pre_contact
+malformed resolved authorization-document blob -> HASH_IDENTITY_FAILURE / pre_contact
+authorization_document_git_blob is independently resolved (mocked read-only Git) and recorded
+repository_execution_head is independently resolved (mocked read-only Git) and recorded
+a later unrelated HEAD (path commit != HEAD) is rejected even when the document is byte-unchanged
 ```
 
 Runner tests must not:
