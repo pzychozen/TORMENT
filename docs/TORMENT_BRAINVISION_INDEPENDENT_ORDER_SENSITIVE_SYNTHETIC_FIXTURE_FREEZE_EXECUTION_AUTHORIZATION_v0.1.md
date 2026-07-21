@@ -34,6 +34,7 @@ docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_DESCRIPTOR_CHALLENGER_SPECI
 docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_SPECIFICATION_v0.1.md
 docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_IMPLEMENTATION_AUTHORIZATION_v0.1.md
 docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_RUNNER_IMPLEMENTATION_AUTHORIZATION_v0.1.md
+docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_SELF_BOUNDARY_CORRECTION_AUTHORIZATION_v0.1.md
 ```
 
 Section 8A of the runner-implementation authorization is authoritative for the execution-authorization binding, the exact execution-authorization document path, the exact invocation and CLI boundary, the non-circular execution-HEAD rule, the binding parsing grammar and rejection mapping, and the sole-source identity rule. This document conforms to Section 8A; where any wording here appears looser than Section 8A, Section 8A governs.
@@ -45,7 +46,18 @@ S1A specifications accepted
 S1B verifier / generator / freeze library implemented and accepted
 S1B bounded tests implemented and accepted (focused suite green)
 S1C runner and runner test implemented and accepted (runner-implementation authorization closed)
+self-boundary correction authorized
+three-file correction implemented and accepted
+authoritative Windows Python 3.11.15 verification completed
+256 bounded tests passed:
+  generator/freeze = 82
+  runner = 131
+  verifier = 43
+corrected dependency identities verified before and after commit
+runner identity resolved from the committed implementation
 ```
+
+No scientific result or fixture-discovery claim follows from these tests.
 
 The accepted synthetic-fixture branch has no retained candidate stream. The authoritative operation scans the canonical seed space directly under the frozen configuration; no retained-stream facts from the earlier algebraic freezer branch are carried into this branch.
 
@@ -53,26 +65,54 @@ The accepted synthetic-fixture branch has no retained candidate stream. The auth
 
 ## 2. Reviewed repository baseline
 
-This authorization was prepared against the completed runner-implementation checkpoint:
+This authorization was refreshed against the corrected implementation checkpoint (the accepted self-boundary correction):
 
 ```text
 branch = main
-HEAD = 74a27ad8e0899405c8839081daae9b9143a08860
-origin/main = 74a27ad8e0899405c8839081daae9b9143a08860
+HEAD = d084a6def90329dd275df403c9e75e7fefcc7bdf
+origin/main = d084a6def90329dd275df403c9e75e7fefcc7bdf
 working tree = clean
-commit subject = research(brainvision): implement synthetic fixture freeze runner
+commit subject = research(brainvision): correct synthetic fixture self-boundary
 Python version required for execution = 3.11.15
 ```
 
-This reviewed baseline HEAD is the completed runner-implementation checkpoint. It is not the future execution HEAD.
+This reviewed baseline HEAD is the corrected implementation checkpoint. It is not the future execution HEAD.
 
-The future execution HEAD will be the docs-only commit that adds this authorization document as its sole changed file. That future commit identity must not be guessed, precomputed, or embedded anywhere in this document. It is resolved non-circularly by the runner through read-only Git at execution time (Section 7).
+The future execution HEAD will be the later docs-only commit that modifies this authorization document as its sole changed file. That future commit identity must not be guessed, precomputed, or embedded anywhere in this document. It is resolved non-circularly by the runner through read-only Git at execution time (Section 7).
 
 ```text
 the execution-authorization commit identity must not be guessed or precomputed
 the eventual execution HEAD must not be guessed or precomputed
 each exact commit identity is recorded only after that commit and push
 ```
+
+### 2.1 Correction lineage and authority status
+
+The accepted correction lineage is:
+
+```text
+f22e9943d9f8668858e3aea5d6a8584159b4abcb
+docs(research): authorize synthetic fixture self-boundary correction
+
+d084a6def90329dd275df403c9e75e7fefcc7bdf
+research(brainvision): correct synthetic fixture self-boundary
+```
+
+Truthful record of the prior execution attempt and current status:
+
+```text
+the earlier invocation at authorization HEAD 9ad6086 was a fail-closed pre-contact refusal
+the refusal was caused by the freeze library rejecting its own source
+no staging or final evidence was created
+the authoritative pass-1 canonical iterator was never requested
+the one-run execution authority was not consumed
+the self-boundary defect is corrected and boundedly verified
+the old execution authorization is closed by the later commits
+```
+
+This closure is consistent with the non-circular execution-HEAD rule (Section 7): the later correction commits changed HEAD, so the previously committed execution authorization is no longer the latest commit affecting the authorization path, and its authority is closed. Renewed authority requires this refreshed document to be committed as the sole changed file and become the authorization HEAD.
+
+Scope note on the bounded laziness test: the pre-existing bounded laziness test consumes exactly the first five canonical tuples. It performs no full scan, contacts nothing at or after tuple 17, discovers no fixture, begins no authoritative pass, and consumes no execution authority. The one-run authority is consumed only at the first real canonical-iterator contact in an authoritative pass 1 (Section 9), which has never occurred.
 
 ---
 
@@ -86,8 +126,8 @@ Runner
 artifact role = runner
 artifact id = independent-order-sensitive-synthetic-fixture-freeze-runner-v0.1
 path = research/brainvision/run_independent_order_sensitive_synthetic_fixture_freeze_v0_1.py
-Git blob = 2af5e43e978fdfb31ecb531bc896b9faca8a0aad
-Windows raw SHA-256 = 5b4a146401557cd7037e12ace4a408e8d6c85d72d147daf5e286a34353b57549
+Git blob = fa9d63764b68e92111386fd71f35ee339c787130
+Windows raw SHA-256 = 3b62a026d9ca42d3641e02cd2c07890166267ae25a2e9d99a0213e442d549210
 ```
 
 Runner test
@@ -106,7 +146,50 @@ Configuration
 configuration SHA-256 = 5f3a568bc4286136a93d9b9bac74985af4b68202373a56210eddbcfbf2625263
 ```
 
-The five accepted S1B implementation-file identities remain frozen exactly as recorded in Section 3 of the runner-implementation authorization (verifier, generator, freeze library, verifier test, generator/freeze test). That section is their normative authorization source, and the exact values are compiled into the committed runner constants. At execution time, the runner reads the runner, runner-test, and configuration expected identities from the machine-readable binding in Section 6 of this document.
+The five current S1B implementation-file execution identities are recorded explicitly below. The self-boundary correction changed the freeze library and the generator/freeze test, so their identities are refreshed; the verifier, generator, and verifier test are unchanged. Git-object identity and Windows raw-file SHA-256 identity are separate and mandatory for each file.
+
+```text
+verifier
+path = research/brainvision/independent_order_sensitive_synthetic_fixture_verifier_v0_1.py
+Git blob = 74e25002db4e45870ee20397cbc9e5416f108cb0
+Windows raw SHA-256 = 15e31e50319daaf8e45704c5e3b339e876a0e2949927365928b32f5c412ba95c
+
+generator
+path = research/brainvision/independent_order_sensitive_synthetic_fixture_generator_v0_1.py
+Git blob = 77bc2e319e1283ce5d00b283f99a1d1d56732d83
+Windows raw SHA-256 = 001317367d5f8e3c06ae3da177901b88f94560ae555eeca54247464e2cb9ed78
+
+freeze_library
+path = research/brainvision/independent_order_sensitive_synthetic_fixture_freeze_v0_1.py
+Git blob = 9f69e3610ced5bb8f3e90986e9b12f808a78bed2
+Windows raw SHA-256 = 8f934e8615c0f6b599fe00e8f6425c1bf0e13c44aa27853885b4c7546cda2cde
+
+verifier_test
+path = research/brainvision/test_brainvision_independent_order_sensitive_synthetic_fixture_verifier_v0_1.py
+Git blob = 97f2605284c53dedfec43d8e65112d30418877a8
+Windows raw SHA-256 = af0a798d5195e78ad2e051cc0ec2846ec82d20c8d796f448e355f77ec4d76032
+
+generator_freeze_test
+path = research/brainvision/test_brainvision_independent_order_sensitive_synthetic_fixture_freeze_v0_1.py
+Git blob = d90a95016dcd20e49b35c6039efd46fbcde1d779
+Windows raw SHA-256 = ab669740f6489dc7e726363811360d51797f9e96900cbde43082bed159b881e7
+```
+
+Governing relationship:
+
+```text
+the runner-implementation authorization remains governing for architecture,
+behavior, boundaries, and binding structure
+
+the self-boundary correction authorization plus the accepted implementation
+checkpoint supersede only the two corrected S1B identity pairs and the resulting
+runner identity
+
+the exact current S1B execution identities are the five values listed in this
+refreshed execution authorization and compiled into the committed runner
+```
+
+The stale pre-correction freeze-library and generator/freeze-test identities recorded in Section 3 of the runner-implementation authorization are no longer normative; the five values above are the current execution identities. At execution time, the runner reads the runner, runner-test, and configuration expected identities from the machine-readable binding in Section 6 of this document, and validates the five S1B source identities against the values compiled into the committed runner.
 
 Identity doctrine:
 
@@ -116,19 +199,19 @@ Neither substitutes for the other.
 A mismatch in either identity blocks execution authorization (HASH_IDENTITY_FAILURE / pre_contact).
 ```
 
-Any change to the runner, the runner test, the frozen S1B sources, or the configuration invalidates this authorization and requires a new review and a new authorization document.
+Any change to the runner, the runner test, the frozen S1B sources, or the configuration invalidates this authorization and requires a new review and a refreshed execution-authorization commit at this same frozen document path.
 
 ---
 
 ## 4. Docs-only authorization-commit boundary
 
-The commit that carries execution authority must add exactly one documentation file and nothing else:
+The commit that carries renewed execution authority must contain exactly one changed file and nothing else:
 
 ```text
 docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_FIXTURE_FREEZE_EXECUTION_AUTHORIZATION_v0.1.md
 ```
 
-That commit must not create, modify, rename, or delete any source, test, result, evidence, staging, configuration, helper, or other documentation file, including but not limited to:
+That sole change is a modification of the existing execution-authorization document at its frozen path. The commit carries exactly this one documentation-file modification and must not create, modify, rename, or delete any source, test, result, evidence, staging, configuration, helper, or other documentation file, including but not limited to:
 
 ```text
 the committed runner and runner test
@@ -177,8 +260,8 @@ Exactly one copy of the following binding block is embedded in this document. Th
 BEGIN-SYNTHETIC-FIXTURE-FREEZE-AUTHORIZATION-BINDING-v0.1
 authorization_schema=torment-brainvision-independent-order-sensitive-synthetic-fixture-freeze-authorization-binding-v0.1
 authorization_version=0.1
-runner_git_blob=2af5e43e978fdfb31ecb531bc896b9faca8a0aad
-runner_raw_sha256=5b4a146401557cd7037e12ace4a408e8d6c85d72d147daf5e286a34353b57549
+runner_git_blob=fa9d63764b68e92111386fd71f35ee339c787130
+runner_raw_sha256=3b62a026d9ca42d3641e02cd2c07890166267ae25a2e9d99a0213e442d549210
 runner_test_git_blob=5184b3cfc4091270951b10de296cbc9db3b15ece
 runner_test_raw_sha256=18f85d446f2af22240a2d8921a5390328774d04fa9b2107b502f2ac68da0be27
 configuration_sha256=5f3a568bc4286136a93d9b9bac74985af4b68202373a56210eddbcfbf2625263
@@ -197,7 +280,9 @@ runner_test_raw_sha256
 configuration_sha256
 ```
 
-The binding is the sole source of exactly these five expected values: `runner_git_blob`, `runner_raw_sha256`, `runner_test_git_blob`, `runner_test_raw_sha256`, and `configuration_sha256`. None of these may be supplied through the CLI, environment variables, stdin, external files, or runtime choices. The five S1B source identities continue to come from Section 3 of the runner-implementation authorization.
+The binding is the sole source of exactly these five expected values: `runner_git_blob`, `runner_raw_sha256`, `runner_test_git_blob`, `runner_test_raw_sha256`, and `configuration_sha256`. None of these may be supplied through the CLI, environment variables, stdin, external files, or runtime choices. The five S1B source identities are checked against the exact constants compiled into the committed runner. Their current authoritative execution values are listed explicitly in Section 3 of this refreshed execution authorization.
+
+The runner-implementation authorization remains governing for architecture, behavior, boundaries, and binding structure; the accepted self-boundary correction supersedes only the two corrected S1B identity pairs and the resulting runner identity. The five S1B source identities are not added to the seven-field machine-readable binding; they remain checked through the committed runner constants.
 
 Two fields are deliberately NOT in the binding:
 
@@ -510,6 +595,11 @@ EXECUTION_AUTHORIZATION_DOCUMENT_DRAFTED = True
 COMMITTED_AUTHORIZATION_HEAD_ESTABLISHED = False
 RUNNER_EXECUTION_AUTHORIZED_BY_COMMITTED_DOCUMENT = False
 FINAL_OPERATOR_INVOCATION_ORDER_GIVEN = False
+
+PREVIOUS_PRE_CONTACT_REFUSAL_CONFIRMED = True
+PREVIOUS_PRE_CONTACT_REFUSAL_CONSUMED_AUTHORITY = False
+AUTHORITATIVE_CANONICAL_ITERATOR_CONTACTED = False
+
 CANONICAL_SEED_SCAN_COMPLETED = False
 ACTUAL_FIRST_EIGHT_DISCOVERED = False
 FAMILY_FROZEN = False
@@ -522,6 +612,8 @@ PRODUCTION_INTEGRATION_AUTHORIZED = False
 TORMENT_MEMORY_INTEGRATION_AUTHORIZED = False
 KERNEL_MODIFICATION_AUTHORIZED = False
 ```
+
+`AUTHORITATIVE_CANONICAL_ITERATOR_CONTACTED = False` refers specifically to the authoritative freeze operation's pass-1 canonical-iterator contact. It does not deny the pre-existing bounded laziness test, which consumes exactly the first five canonical tuples, performs no full scan, contacts nothing at or after tuple 17, discovers no fixture, begins no authoritative pass, and consumes no execution authority.
 
 This document may authorize the future one-run operation once it becomes the committed authorization HEAD (Section 7) and Hilmir gives the separate explicit final invocation instruction. Preparation of the draft does not itself make the uncommitted working-tree document executable authority.
 
