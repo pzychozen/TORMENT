@@ -9,6 +9,7 @@ callables; those seams are not exposed through CLI flags or environment values.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 import os
@@ -97,6 +98,10 @@ EXPECTED_MANIFEST_PATH = (
     "independent_order_sensitive_synthetic_fixture_freeze_v0_1/"
     "independent_order_sensitive_synthetic_fixture_freeze_manifest_v0_1.json"
 )
+AUTHORIZATION_DOCUMENT_PATH = (
+    "docs/TORMENT_BRAINVISION_INDEPENDENT_ORDER_SENSITIVE_SYNTHETIC_VALIDATION_"
+    "V0_2_EXECUTION_AUTHORIZATION_v0.1.md"
+)
 
 EXECUTION_ARMING_PATH = (
     "research/brainvision/results/"
@@ -142,6 +147,103 @@ AUTHORITATIVE_IDENTITIES: Mapping[str, str] = {
     "expected_manifest_payload_sha256": UNBOUND,
     "v0_2_configuration_identity": UNBOUND,
 }
+
+BINDING_BEGIN = (
+    "BEGIN-SYNTHETIC-VALIDATION-V0-2-EXECUTION-AUTHORIZATION-BINDING-v0.1"
+)
+BINDING_END = (
+    "END-SYNTHETIC-VALIDATION-V0-2-EXECUTION-AUTHORIZATION-BINDING-v0.1"
+)
+BINDING_SCHEMA = (
+    "TORMENT_BRAINVISION_SYNTHETIC_VALIDATION_EXECUTION_AUTHORIZATION_BINDING"
+)
+BINDING_VERSION = "v0.2"
+BINDING_FIELDS: Tuple[str, ...] = (
+    "authorization_schema",
+    "authorization_version",
+    "later_execution_authorization_identity",
+    "runner_git_blob",
+    "runner_raw_sha256",
+    "runner_test_git_blob",
+    "runner_test_raw_sha256",
+    "schema_contract_git_blob",
+    "schema_contract_raw_sha256",
+    "v0_2_configuration_identity",
+    "expected_manifest_external_sha256",
+    "expected_manifest_payload_sha256",
+)
+AUTHORIZATION_IDENTITY_FIELD_ORDER: Tuple[str, ...] = (
+    "authorization_schema",
+    "authorization_version",
+    "runner_git_blob",
+    "runner_raw_sha256",
+    "runner_test_git_blob",
+    "runner_test_raw_sha256",
+    "schema_contract_git_blob",
+    "schema_contract_raw_sha256",
+    "v0_2_configuration_identity",
+    "expected_manifest_external_sha256",
+    "expected_manifest_payload_sha256",
+)
+AUTHORIZATION_IDENTITY_PAYLOAD_FIELDS: Tuple[str, ...] = (
+    "domain_label",
+    "authorization_document_path",
+    "begin_marker",
+    "end_marker",
+    "field_order_without_later_execution_authorization_identity",
+    "authorization_schema",
+    "authorization_version",
+    "runner_path",
+    "runner_git_blob",
+    "runner_raw_sha256",
+    "runner_test_path",
+    "runner_test_git_blob",
+    "runner_test_raw_sha256",
+    "schema_contract_path",
+    "schema_contract_git_blob",
+    "schema_contract_raw_sha256",
+    "v0_2_configuration_identity",
+    "expected_manifest_external_sha256",
+    "expected_manifest_payload_sha256",
+)
+AUTHORIZATION_IDENTITY_DOMAIN_LABEL = (
+    "TORMENT_BRAINVISION_S3B_V0_2_EXECUTION_AUTHORIZATION_BINDING_IDENTITY_v0.1"
+)
+EXPECTED_V0_2_CONFIGURATION_IDENTITY = (
+    "fff90bf53f1c5a45a6c6fe5532208db479e4e153469aed3707accce2a8653be9"
+)
+EXPECTED_MANIFEST_EXTERNAL_SHA256 = (
+    "05ce02af1c1a4b508e9a6566c9ff638849039df5caa45479858e634e2a117404"
+)
+EXPECTED_MANIFEST_PAYLOAD_SHA256 = (
+    "56a141bd13937caa6ac800ab8c9c12229f6bf75ee97ab490a26844664a65b4b9"
+)
+_HEX40_FIELDS: Tuple[str, ...] = (
+    "runner_git_blob",
+    "runner_test_git_blob",
+    "schema_contract_git_blob",
+)
+_HEX64_FIELDS: Tuple[str, ...] = (
+    "later_execution_authorization_identity",
+    "runner_raw_sha256",
+    "runner_test_raw_sha256",
+    "schema_contract_raw_sha256",
+    "v0_2_configuration_identity",
+    "expected_manifest_external_sha256",
+    "expected_manifest_payload_sha256",
+)
+_IMPLEMENTATION_IDENTITY_PATHS: Tuple[Tuple[str, str, str], ...] = (
+    ("runner", RUNNER_SOURCE_PATH, "runner_git_blob"),
+    ("runner-test", RUNNER_TEST_SOURCE_PATH, "runner_test_git_blob"),
+    ("schema-contract", SCHEMA_CONTRACT_SOURCE_PATH, "schema_contract_git_blob"),
+)
+_PROHIBITED_AUTHORIZATION_ENVIRONMENT_NAMES: Tuple[str, ...] = (
+    "TORMENT_SYNTHETIC_VALIDATION_IDENTITY",
+    "TORMENT_SYNTHETIC_VALIDATION_AUTHORIZATION_PATH",
+    "TORMENT_SYNTHETIC_VALIDATION_AUTHORIZATION_DOCUMENT",
+    "TORMENT_SYNTHETIC_VALIDATION_AUTHORIZATION_DOCUMENT_PATH",
+    "TORMENT_SYNTHETIC_VALIDATION_MANIFEST_PATH",
+)
 
 
 class PreContactRefusal(Exception):
@@ -200,6 +302,12 @@ class RepositoryState:
     head: str
     origin_main: str
     python_version: str
+
+
+@dataclass(frozen=True)
+class PreContactContext:
+    repository_state: RepositoryState
+    identities: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -1448,6 +1556,166 @@ def run_bounded_validation(config: BoundedRunConfig) -> RunOutcome:
         )
 
 
+def _is_lower_hex(value: Any, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _binding_failure(detail: str) -> PreContactRefusal:
+    return PreContactRefusal(FAIL_PRECONTACT_AUTHORIZATION, detail)
+
+
+def _is_key_token(value: str) -> bool:
+    if not value:
+        return False
+    return all(
+        character == "_" or character.isalpha() or character.isdigit()
+        for character in value
+    )
+
+
+def _outside_binding_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped in (BINDING_BEGIN, BINDING_END):
+        return True
+    key, separator, _value = stripped.partition("=")
+    if separator != "=":
+        return False
+    key = key.strip()
+    if key in BINDING_FIELDS or key == "authorization_schema":
+        return True
+    return _is_key_token(key)
+
+
+def parse_authorization_binding(document_bytes: bytes) -> Dict[str, str]:
+    if not isinstance(document_bytes, (bytes, bytearray)):
+        raise _binding_failure("authorization document is not bytes")
+    try:
+        text = bytes(document_bytes).decode("utf-8")
+    except UnicodeDecodeError:
+        raise _binding_failure("authorization document is not UTF-8")
+    if "\r" in text:
+        raise _binding_failure("authorization document contains CR")
+    lines = text.split("\n")
+    begins = [index for index, line in enumerate(lines) if line == BINDING_BEGIN]
+    ends = [index for index, line in enumerate(lines) if line == BINDING_END]
+    if len(begins) != 1:
+        raise _binding_failure("binding begin marker missing or duplicated")
+    if len(ends) != 1:
+        raise _binding_failure("binding end marker missing or duplicated")
+    if ends[0] <= begins[0]:
+        raise _binding_failure("binding markers out of order")
+    outside = lines[:begins[0]] + lines[ends[0] + 1:]
+    if any(_outside_binding_line(line) for line in outside):
+        raise _binding_failure("binding-like content outside block")
+    body = lines[begins[0] + 1:ends[0]]
+    if len(body) != len(BINDING_FIELDS):
+        raise _binding_failure("binding field count invalid")
+    parsed: Dict[str, str] = {}
+    for index, line in enumerate(body):
+        if line != line.strip() or line.count("=") != 1:
+            raise _binding_failure("binding line malformed")
+        key, _separator, value = line.partition("=")
+        if key != BINDING_FIELDS[index]:
+            raise _binding_failure("binding key order invalid")
+        if key in parsed:
+            raise _binding_failure("binding key duplicated")
+        if value != value.strip() or value == "":
+            raise _binding_failure("binding value invalid")
+        parsed[key] = value
+    if parsed["authorization_schema"] != BINDING_SCHEMA:
+        raise _binding_failure("authorization schema invalid")
+    if parsed["authorization_version"] != BINDING_VERSION:
+        raise _binding_failure("authorization version invalid")
+    for key in _HEX40_FIELDS:
+        if not _is_lower_hex(parsed[key], 40):
+            raise _binding_failure("%s is not lowercase 40-hex" % key)
+    for key in _HEX64_FIELDS:
+        if not _is_lower_hex(parsed[key], 64):
+            raise _binding_failure("%s is not lowercase 64-hex" % key)
+    return parsed
+
+
+def authorization_identity_payload(binding: Mapping[str, str]) -> Dict[str, Any]:
+    payload = {
+        "domain_label": AUTHORIZATION_IDENTITY_DOMAIN_LABEL,
+        "authorization_document_path": AUTHORIZATION_DOCUMENT_PATH,
+        "begin_marker": BINDING_BEGIN,
+        "end_marker": BINDING_END,
+        "field_order_without_later_execution_authorization_identity": list(
+            AUTHORIZATION_IDENTITY_FIELD_ORDER
+        ),
+        "authorization_schema": BINDING_SCHEMA,
+        "authorization_version": BINDING_VERSION,
+        "runner_path": RUNNER_SOURCE_PATH,
+        "runner_git_blob": binding["runner_git_blob"],
+        "runner_raw_sha256": binding["runner_raw_sha256"],
+        "runner_test_path": RUNNER_TEST_SOURCE_PATH,
+        "runner_test_git_blob": binding["runner_test_git_blob"],
+        "runner_test_raw_sha256": binding["runner_test_raw_sha256"],
+        "schema_contract_path": SCHEMA_CONTRACT_SOURCE_PATH,
+        "schema_contract_git_blob": binding["schema_contract_git_blob"],
+        "schema_contract_raw_sha256": binding["schema_contract_raw_sha256"],
+        "v0_2_configuration_identity": binding["v0_2_configuration_identity"],
+        "expected_manifest_external_sha256": binding["expected_manifest_external_sha256"],
+        "expected_manifest_payload_sha256": binding["expected_manifest_payload_sha256"],
+    }
+    if tuple(payload.keys()) != AUTHORIZATION_IDENTITY_PAYLOAD_FIELDS:
+        raise PreContactRefusal(FAIL_PRECONTACT_AUTHORIZATION, "authorization payload order invalid")
+    return payload
+
+
+def canonical_authorization_identity_bytes(binding: Mapping[str, str]) -> bytes:
+    text = json.dumps(
+        authorization_identity_payload(binding),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        sort_keys=False,
+    )
+    return text.encode("utf-8") + b"\n"
+
+
+def authorization_binding_identity(binding: Mapping[str, str]) -> str:
+    return hashlib.sha256(canonical_authorization_identity_bytes(binding)).hexdigest()
+
+
+def _verify_runner_owned_anchors(binding: Mapping[str, str]) -> None:
+    expected = (
+        ("v0_2_configuration_identity", EXPECTED_V0_2_CONFIGURATION_IDENTITY),
+        ("expected_manifest_external_sha256", EXPECTED_MANIFEST_EXTERNAL_SHA256),
+        ("expected_manifest_payload_sha256", EXPECTED_MANIFEST_PAYLOAD_SHA256),
+    )
+    for key, value in expected:
+        if binding.get(key) != value:
+            raise PreContactRefusal(
+                FAIL_PRECONTACT_IDENTITY,
+                "%s does not match runner-owned anchor" % key,
+            )
+
+
+def _verify_authorization_binding_identity(binding: Mapping[str, str]) -> None:
+    if binding.get("later_execution_authorization_identity") != authorization_binding_identity(binding):
+        raise PreContactRefusal(
+            FAIL_PRECONTACT_AUTHORIZATION,
+            "later execution authorization identity mismatch",
+        )
+
+
+def _decode_git_single_line(payload: bytes) -> str:
+    text = payload.decode("utf-8", "replace")
+    if text.endswith("\r\n"):
+        text = text[:-2]
+    elif text.endswith("\n"):
+        text = text[:-1]
+    if "\r" in text or "\n" in text:
+        raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "git output is not one line")
+    return text
+
+
 def _run_git(args: Sequence[str]) -> str:
     completed = subprocess.run(
         ["git"] + list(args),
@@ -1460,17 +1728,138 @@ def _run_git(args: Sequence[str]) -> str:
             FAIL_PRECONTACT_REPOSITORY_STATE,
             completed.stderr.decode("utf-8", "replace").strip()[:180],
         )
-    return completed.stdout.decode("utf-8", "replace").strip()
+    return _decode_git_single_line(completed.stdout)
+
+
+def _run_git_status_porcelain() -> str:
+    completed = subprocess.run(
+        ["git", "status", "--porcelain"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise PreContactRefusal(
+            FAIL_PRECONTACT_REPOSITORY_STATE,
+            completed.stderr.decode("utf-8", "replace").strip()[:180],
+        )
+    return completed.stdout.decode("utf-8", "replace")
+
+
+def _repository_path(repository_root: str, relative_path: str) -> str:
+    if os.path.isabs(relative_path):
+        raise PreContactRefusal(FAIL_PRECONTACT_BOUNDARY, "repository path is absolute")
+    normalized_relative = relative_path.replace("/", os.sep)
+    candidate = os.path.abspath(os.path.join(repository_root, normalized_relative))
+    root_abs = os.path.abspath(repository_root)
+    root_real = os.path.normcase(os.path.realpath(root_abs))
+    candidate_real = os.path.normcase(os.path.realpath(candidate))
+    try:
+        if os.path.commonpath([root_real, candidate_real]) != root_real:
+            raise PreContactRefusal(FAIL_PRECONTACT_BOUNDARY, "repository path escapes root")
+    except ValueError:
+        raise PreContactRefusal(FAIL_PRECONTACT_BOUNDARY, "repository path drive mismatch")
+    return candidate
+
+
+def _read_repository_file_bytes(repository_root: str, relative_path: str) -> bytes:
+    path = _repository_path(repository_root, relative_path)
+    if not os.path.isfile(path):
+        raise PreContactRefusal(FAIL_PRECONTACT_BOUNDARY, "%s is not a regular file" % relative_path)
+    with open(path, "rb") as handle:
+        return handle.read()
+
+
+def _raw_sha256_for_path(repository_root: str, relative_path: str) -> str:
+    return hashlib.sha256(_read_repository_file_bytes(repository_root, relative_path)).hexdigest()
+
+
+def _git_blob_for_path(relative_path: str) -> str:
+    blob = _run_git(["rev-parse", "HEAD:%s" % relative_path])
+    if not _is_lower_hex(blob, 40):
+        raise PreContactRefusal(FAIL_PRECONTACT_IDENTITY, "%s Git blob malformed" % relative_path)
+    return blob
+
+
+def _latest_commit_for_authorization_path() -> str:
+    latest = _run_git(["log", "-1", "--format=%H", "--", AUTHORIZATION_DOCUMENT_PATH])
+    if not _is_lower_hex(latest, 40):
+        raise PreContactRefusal(
+            FAIL_PRECONTACT_AUTHORIZATION,
+            "authorization path history missing",
+        )
+    return latest
+
+
+def _validate_repository_root(repository_root: str) -> None:
+    if not repository_root or not os.path.exists(os.path.join(repository_root, ".git")):
+        raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "unsupported repository root")
+    for relative_path in (
+            AUTHORIZATION_DOCUMENT_PATH,
+            RUNNER_SOURCE_PATH,
+            RUNNER_TEST_SOURCE_PATH,
+            SCHEMA_CONTRACT_SOURCE_PATH):
+        _repository_path(repository_root, relative_path)
+
+
+def _verify_latest_authorization_commit(state: RepositoryState) -> None:
+    latest = _latest_commit_for_authorization_path()
+    if latest != state.head:
+        raise PreContactRefusal(
+            FAIL_PRECONTACT_AUTHORIZATION,
+            "authorization path latest commit is not HEAD",
+        )
+
+
+def _verify_implementation_identities(repository_root: str,
+                                      binding: Mapping[str, str]) -> None:
+    for label, relative_path, blob_key in _IMPLEMENTATION_IDENTITY_PATHS:
+        raw_key = blob_key.replace("_git_blob", "_raw_sha256")
+        observed_blob = _git_blob_for_path(relative_path)
+        observed_raw = _raw_sha256_for_path(repository_root, relative_path)
+        if observed_blob != binding[blob_key]:
+            raise PreContactRefusal(FAIL_PRECONTACT_IDENTITY, "%s Git blob mismatch" % label)
+        if observed_raw != binding[raw_key]:
+            raise PreContactRefusal(FAIL_PRECONTACT_IDENTITY, "%s raw SHA-256 mismatch" % label)
+
+
+def _reject_authoritative_overrides(argv: Sequence[str], stdin_bytes: bytes) -> None:
+    if len(argv) != 1:
+        raise PreContactRefusal(FAIL_PRECONTACT_CLI, "unexpected CLI arguments")
+    if stdin_bytes:
+        raise PreContactRefusal(FAIL_PRECONTACT_STDIN, "stdin is not empty")
+    for name in _PROHIBITED_AUTHORIZATION_ENVIRONMENT_NAMES:
+        if name in os.environ:
+            raise PreContactRefusal(
+                FAIL_PRECONTACT_AUTHORIZATION,
+                "authorization environment override is prohibited",
+            )
+
+
+def _validate_identity_seam(identities: Mapping[str, str]) -> Dict[str, str]:
+    parsed = dict(identities)
+    for name in BINDING_FIELDS:
+        if name not in parsed or parsed[name] == UNBOUND:
+            raise PreContactRefusal(FAIL_PRECONTACT_IDENTITY, "%s is UNBOUND" % name)
+    _verify_runner_owned_anchors(parsed)
+    return parsed
+
+
+def _load_authorization_identities(repository_root: str,
+                                   state: RepositoryState) -> Dict[str, str]:
+    document_bytes = _read_repository_file_bytes(repository_root, AUTHORIZATION_DOCUMENT_PATH)
+    binding = parse_authorization_binding(document_bytes)
+    _verify_runner_owned_anchors(binding)
+    _verify_authorization_binding_identity(binding)
+    _verify_latest_authorization_commit(state)
+    _verify_implementation_identities(repository_root, binding)
+    return binding
 
 
 def observe_repository_state() -> RepositoryState:
     root = _run_git(["rev-parse", "--show-toplevel"])
-    branch_header = _run_git(["status", "--short", "--branch"]).splitlines()
-    if not branch_header:
-        raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "git status missing")
-    branch_line = branch_header[0]
-    clean = len(branch_header) == 1
-    branch = "main" if branch_line.startswith("## main") else branch_line[3:]
+    branch = _run_git(["symbolic-ref", "--short", "HEAD"])
+    clean = _run_git_status_porcelain() == ""
     head = _run_git(["rev-parse", "HEAD"])
     origin_main = _run_git(["rev-parse", "origin/main"])
     python_version = "%d.%d.%d" % sys.version_info[:3]
@@ -1480,43 +1869,25 @@ def observe_repository_state() -> RepositoryState:
 def perform_precontact_validation(argv: Sequence[str],
                                   stdin_bytes: bytes,
                                   repository_state: Optional[RepositoryState] = None,
-                                  identities: Mapping[str, str] = AUTHORITATIVE_IDENTITIES,
+                                  identities: Optional[Mapping[str, str]] = None,
                                   paths: Optional[ExecutionPaths] = None
-                                  ) -> RepositoryState:
+                                  ) -> PreContactContext:
     paths = default_authoritative_paths() if paths is None else paths
+    _reject_authoritative_overrides(argv, stdin_bytes)
     state = repository_state if repository_state is not None else observe_repository_state()
+    _validate_repository_root(state.repository_root)
     if state.branch != "main" or not state.clean or state.head != state.origin_main:
         raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "repository not synchronized")
+    if not _is_lower_hex(state.head, 40) or not _is_lower_hex(state.origin_main, 40):
+        raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "repository HEAD malformed")
     if state.python_version != "3.11.15":
         raise PreContactRefusal(FAIL_PRECONTACT_REPOSITORY_STATE, "unsupported Python version")
 
-    if identities.get("later_execution_authorization_identity") == UNBOUND:
-        raise PreContactRefusal(
-            FAIL_PRECONTACT_AUTHORIZATION,
-            "later v0.2 execution authorization identity is UNBOUND",
-        )
-    identity_names = (
-        "runner_git_blob",
-        "runner_raw_sha256",
-        "runner_test_git_blob",
-        "runner_test_raw_sha256",
-        "schema_contract_git_blob",
-        "schema_contract_raw_sha256",
-        "v0_2_configuration_identity",
+    authorized_identities = (
+        _load_authorization_identities(state.repository_root, state)
+        if identities is None
+        else _validate_identity_seam(identities)
     )
-    for name in identity_names:
-        if identities.get(name) == UNBOUND:
-            raise PreContactRefusal(FAIL_PRECONTACT_IDENTITY, "%s is UNBOUND" % name)
-    manifest_identity_names = (
-        "expected_manifest_external_sha256",
-        "expected_manifest_payload_sha256",
-    )
-    for name in manifest_identity_names:
-        if identities.get(name) == UNBOUND:
-            raise PreContactRefusal(
-                FAIL_PRECONTACT_MANIFEST_EXPECTATION,
-                "%s is UNBOUND" % name,
-            )
     if schema.FIXED_MEMBER_BINARY_KEYS != (
             schema.FIXED_FIXTURE_KEYS[4],
             schema.FIXED_FIXTURE_KEYS[5],
@@ -1527,10 +1898,6 @@ def perform_precontact_validation(argv: Sequence[str],
             schema.ACCEPTED_FIXTURE_KEYS[8],
     ):
         raise PreContactRefusal(FAIL_PRECONTACT_SCHEMA_CONTRACT, "accepted field contract invalid")
-    if len(argv) != 1:
-        raise PreContactRefusal(FAIL_PRECONTACT_CLI, "unexpected CLI arguments")
-    if stdin_bytes:
-        raise PreContactRefusal(FAIL_PRECONTACT_STDIN, "stdin is not empty")
     for output_path in (
             paths.execution_arming_path,
             paths.execution_journal_dir,
@@ -1547,7 +1914,7 @@ def perform_precontact_validation(argv: Sequence[str],
             paths.scientific_result_staging_dir,
             paths.final_publication_dir):
         raise PreContactRefusal(FAIL_PRECONTACT_BOUNDARY, "v0.1 staging path reused")
-    return state
+    return PreContactContext(state, authorized_identities)
 
 
 def authoritative_manifest_reader(manifest_path: str = EXPECTED_MANIFEST_PATH
@@ -1582,12 +1949,12 @@ def construct_authoritative_run_config(
 def run_authoritative(argv: Optional[Sequence[str]] = None,
                       stdin_bytes: bytes = b"",
                       repository_state: Optional[RepositoryState] = None,
-                      identities: Mapping[str, str] = AUTHORITATIVE_IDENTITIES,
+                      identities: Optional[Mapping[str, str]] = None,
                       paths: Optional[ExecutionPaths] = None) -> RunOutcome:
     argv = list(sys.argv if argv is None else argv)
     paths = default_authoritative_paths() if paths is None else paths
     try:
-        repository_state = perform_precontact_validation(
+        precontact = perform_precontact_validation(
             argv,
             stdin_bytes,
             repository_state=repository_state,
@@ -1602,7 +1969,11 @@ def run_authoritative(argv: Optional[Sequence[str]] = None,
             terminal_status=TERMINAL_STATUS_REFUSED_PRE_CONTACT,
             failure_code=exc.failure_code,
         )
-    config = construct_authoritative_run_config(repository_state, identities, paths)
+    config = construct_authoritative_run_config(
+        precontact.repository_state,
+        precontact.identities,
+        paths,
+    )
     return run_bounded_validation(config)
 
 

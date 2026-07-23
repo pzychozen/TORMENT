@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import builtins
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,130 @@ def _paths(tmp_path: Path) -> runner.ExecutionPaths:
         str(tmp_path / "synthetic-validation-v0-2.staging"),
         str(tmp_path / "synthetic-validation-v0-2.final"),
     )
+
+
+def _assert_no_precontact_artifacts(paths: runner.ExecutionPaths):
+    assert not Path(paths.execution_arming_path).exists()
+    assert not Path(paths.execution_journal_dir).exists()
+    assert not Path(paths.scientific_result_staging_dir).exists()
+    assert not Path(paths.final_publication_dir).exists()
+
+
+def _git(repo: Path, *args: str, check: bool = True, capture: bool = True) -> str:
+    completed = subprocess.run(
+        ["git"] + list(args),
+        cwd=str(repo),
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+        check=False,
+    )
+    if check and completed.returncode != 0:
+        detail = "" if completed.stderr is None else completed.stderr.decode("utf-8", "replace")
+        raise AssertionError(detail)
+    if completed.stdout is None:
+        return ""
+    return completed.stdout.decode("utf-8", "replace").strip()
+
+
+def _commit_all(repo: Path, message: str):
+    _git(repo, "add", "-A", capture=False)
+    _git(repo, "commit", "-m", message, capture=False)
+
+
+def _raw_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_repo_file(repo: Path, relative_path: str, payload: bytes):
+    path = repo / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def _binding_for_repo(repo: Path, overrides=None, recompute_later=True):
+    binding = {
+        "authorization_schema": runner.BINDING_SCHEMA,
+        "authorization_version": runner.BINDING_VERSION,
+        "later_execution_authorization_identity": "0" * 64,
+        "runner_git_blob": _git(repo, "rev-parse", "HEAD:%s" % runner.RUNNER_SOURCE_PATH),
+        "runner_raw_sha256": _raw_sha256(repo / runner.RUNNER_SOURCE_PATH),
+        "runner_test_git_blob": _git(repo, "rev-parse", "HEAD:%s" % runner.RUNNER_TEST_SOURCE_PATH),
+        "runner_test_raw_sha256": _raw_sha256(repo / runner.RUNNER_TEST_SOURCE_PATH),
+        "schema_contract_git_blob": _git(repo, "rev-parse", "HEAD:%s" % runner.SCHEMA_CONTRACT_SOURCE_PATH),
+        "schema_contract_raw_sha256": _raw_sha256(repo / runner.SCHEMA_CONTRACT_SOURCE_PATH),
+        "v0_2_configuration_identity": runner.EXPECTED_V0_2_CONFIGURATION_IDENTITY,
+        "expected_manifest_external_sha256": runner.EXPECTED_MANIFEST_EXTERNAL_SHA256,
+        "expected_manifest_payload_sha256": runner.EXPECTED_MANIFEST_PAYLOAD_SHA256,
+    }
+    if overrides:
+        binding.update(overrides)
+    if recompute_later:
+        binding["later_execution_authorization_identity"] = runner.authorization_binding_identity(binding)
+    return binding
+
+
+def _authorization_document_bytes(binding) -> bytes:
+    lines = [
+        "# Stage S3B v0.2 execution authorization",
+        "ordinary prose outside the machine block",
+        runner.BINDING_BEGIN,
+    ]
+    lines.extend("%s=%s" % (key, binding[key]) for key in runner.BINDING_FIELDS)
+    lines.extend([
+        runner.BINDING_END,
+        "more ordinary prose",
+        "",
+    ])
+    return "\n".join(lines).encode("utf-8")
+
+
+def _make_authorized_repo(tmp_path: Path, overrides=None, recompute_later=True):
+    repo = tmp_path / "authorization-repo"
+    repo.mkdir()
+    _git(repo, "init", capture=False)
+    _git(repo, "config", "user.email", "codex@example.invalid", capture=False)
+    _git(repo, "config", "user.name", "Codex", capture=False)
+    _git(repo, "checkout", "-b", "main", capture=False)
+    _write_repo_file(repo, runner.RUNNER_SOURCE_PATH, b"runner implementation\n")
+    _write_repo_file(repo, runner.RUNNER_TEST_SOURCE_PATH, b"runner tests\n")
+    _write_repo_file(repo, runner.SCHEMA_CONTRACT_SOURCE_PATH, b"schema contract\n")
+    _commit_all(repo, "implementation")
+    binding = _binding_for_repo(repo, overrides=overrides, recompute_later=recompute_later)
+    _write_repo_file(repo, runner.AUTHORIZATION_DOCUMENT_PATH, _authorization_document_bytes(binding))
+    _commit_all(repo, "authorization")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD", capture=False)
+    return repo, binding
+
+
+def _precontact_in_repo(monkeypatch, repo: Path, paths: runner.ExecutionPaths):
+    monkeypatch.chdir(repo)
+    return runner.perform_precontact_validation(["runner"], b"", paths=paths)
+
+
+def _valid_identity_seam():
+    return {
+        "authorization_schema": runner.BINDING_SCHEMA,
+        "authorization_version": runner.BINDING_VERSION,
+        "later_execution_authorization_identity": "1" * 64,
+        "runner_git_blob": "a" * 40,
+        "runner_raw_sha256": "b" * 64,
+        "runner_test_git_blob": "c" * 40,
+        "runner_test_raw_sha256": "d" * 64,
+        "schema_contract_git_blob": "e" * 40,
+        "schema_contract_raw_sha256": "f" * 64,
+        "expected_manifest_external_sha256": runner.EXPECTED_MANIFEST_EXTERNAL_SHA256,
+        "expected_manifest_payload_sha256": runner.EXPECTED_MANIFEST_PAYLOAD_SHA256,
+        "v0_2_configuration_identity": runner.EXPECTED_V0_2_CONFIGURATION_IDENTITY,
+    }
+
+
+def _parser_binding(overrides=None):
+    binding = _valid_identity_seam()
+    binding["schema_contract_git_blob"] = "a" * 40
+    binding["schema_contract_raw_sha256"] = "b" * 64
+    if overrides:
+        binding.update(overrides)
+    return binding
 
 
 def _manifest_bytes(manifest=None) -> bytes:
@@ -689,8 +814,7 @@ def test_source_boundary_has_no_top_level_exit_main_or_mutation_calls():
         assert ("sys" + ".exit(") not in source
 
 
-def test_unbound_authoritative_preflight_refuses_before_paths_or_manifest(monkeypatch, tmp_path):
-    monkeypatch.setenv("TORMENT_SYNTHETIC_VALIDATION_IDENTITY", "replacement")
+def test_authoritative_preflight_rejects_cli_override_before_paths_or_manifest(tmp_path):
     paths = _paths(tmp_path)
     with pytest.raises(runner.PreContactRefusal) as excinfo:
         runner.perform_precontact_validation(
@@ -699,11 +823,23 @@ def test_unbound_authoritative_preflight_refuses_before_paths_or_manifest(monkey
             repository_state=_repo_state(),
             paths=paths,
         )
+    assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_CLI
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_authoritative_preflight_rejects_environment_override_before_paths_or_manifest(monkeypatch, tmp_path):
+    monkeypatch.setenv("TORMENT_SYNTHETIC_VALIDATION_IDENTITY", "replacement")
+    paths = _paths(tmp_path)
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        runner.perform_precontact_validation(
+            ["runner"],
+            b"",
+            repository_state=_repo_state(),
+            identities=_valid_identity_seam(),
+            paths=paths,
+        )
     assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_AUTHORIZATION
-    assert not Path(paths.execution_arming_path).exists()
-    assert not Path(paths.execution_journal_dir).exists()
-    assert not Path(paths.scientific_result_staging_dir).exists()
-    assert not Path(paths.final_publication_dir).exists()
+    _assert_no_precontact_artifacts(paths)
 
 
 def test_run_authoritative_unbound_refuses_before_dependency_construction(monkeypatch, tmp_path):
@@ -721,30 +857,17 @@ def test_run_authoritative_unbound_refuses_before_dependency_construction(monkey
         ["runner"],
         b"",
         repository_state=_repo_state(),
+        identities=runner.AUTHORITATIVE_IDENTITIES,
         paths=paths,
     )
     assert outcome.exit_code == runner.EXIT_PRECONTACT_REFUSAL
-    assert outcome.failure_code == runner.FAIL_PRECONTACT_AUTHORIZATION
-    assert not Path(paths.execution_arming_path).exists()
-    assert not Path(paths.execution_journal_dir).exists()
-    assert not Path(paths.scientific_result_staging_dir).exists()
-    assert not Path(paths.final_publication_dir).exists()
+    assert outcome.failure_code == runner.FAIL_PRECONTACT_IDENTITY
+    _assert_no_precontact_artifacts(paths)
 
 
 def test_authoritative_route_is_dormantly_wired_after_future_identity_binding(monkeypatch, tmp_path):
     paths = _paths(tmp_path)
-    identities = {
-        "later_execution_authorization_identity": "bound",
-        "runner_git_blob": "bound",
-        "runner_raw_sha256": "bound",
-        "runner_test_git_blob": "bound",
-        "runner_test_raw_sha256": "bound",
-        "schema_contract_git_blob": "bound",
-        "schema_contract_raw_sha256": "bound",
-        "expected_manifest_external_sha256": "e" * 64,
-        "expected_manifest_payload_sha256": "f" * 64,
-        "v0_2_configuration_identity": "bound",
-    }
+    identities = _valid_identity_seam()
     captured = {}
 
     def fake_core(config):
@@ -762,10 +885,238 @@ def test_authoritative_route_is_dormantly_wired_after_future_identity_binding(mo
     assert outcome.exit_code == runner.EXIT_PRECONTACT_REFUSAL
     assert captured["config"].paths == paths
     assert captured["config"].descriptor_callable is runner.default_descriptor_callable
-    assert captured["config"].expected_external_manifest_sha256 == "e" * 64
-    assert captured["config"].expected_manifest_payload_sha256 == "f" * 64
-    assert not Path(paths.execution_arming_path).exists()
-    assert not Path(paths.execution_journal_dir).exists()
+    assert captured["config"].expected_external_manifest_sha256 == runner.EXPECTED_MANIFEST_EXTERNAL_SHA256
+    assert captured["config"].expected_manifest_payload_sha256 == runner.EXPECTED_MANIFEST_PAYLOAD_SHA256
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_valid_authorization_binding_parses_with_exact_order():
+    binding = _parser_binding()
+    parsed = runner.parse_authorization_binding(_authorization_document_bytes(binding))
+    assert tuple(parsed.keys()) == runner.BINDING_FIELDS
+    assert parsed == binding
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda lines: lines.__setitem__(2, "BROKEN-BEGIN"),
+        lambda lines: lines.__setitem__(-3, "BROKEN-END"),
+        lambda lines: lines.insert(0, runner.BINDING_BEGIN),
+        lambda lines: lines.append(runner.BINDING_END),
+        lambda lines: lines.insert(5, runner.BINDING_BEGIN),
+        lambda lines: lines.insert(0, "runner_git_blob=" + "a" * 40),
+        lambda lines: lines.insert(0, "unknown_key=value"),
+        lambda lines: lines.insert(0, "runner_git_blob = " + "a" * 40),
+        lambda lines: lines.insert(0, "unknown_key = value"),
+        lambda lines: lines.__setitem__(5, "runner_git_blob=" + "a" * 40),
+        lambda lines: lines.insert(5, "unknown_key=value"),
+        lambda lines: lines.pop(5),
+        lambda lines: lines.__setitem__(4, "runner_git_blob=" + "a" * 40),
+        lambda lines: lines.__setitem__(6, "runner_git_blob="),
+        lambda lines: lines.__setitem__(6, "runner_git_blob " + "a" * 40),
+        lambda lines: lines.__setitem__(6, "runner_git_blob=" + "A" * 40),
+        lambda lines: lines.__setitem__(6, "runner_git_blob=" + "a" * 39),
+        lambda lines: lines.__setitem__(0, "ordinary prose\r"),
+    ],
+)
+def test_authorization_binding_parser_rejects_malformed_variants(mutator):
+    lines = _authorization_document_bytes(_parser_binding()).decode("utf-8").split("\n")
+    mutator(lines)
+    with pytest.raises(runner.PreContactRefusal):
+        runner.parse_authorization_binding("\n".join(lines).encode("utf-8"))
+
+
+def test_authorization_identity_payload_order_types_bytes_and_self_exclusion():
+    binding = _parser_binding()
+    digest_one = runner.authorization_binding_identity(binding)
+    binding_with_other_self = dict(binding)
+    binding_with_other_self["later_execution_authorization_identity"] = "f" * 64
+    assert runner.authorization_binding_identity(binding_with_other_self) == digest_one
+    payload = runner.authorization_identity_payload(binding)
+    assert tuple(payload.keys()) == runner.AUTHORIZATION_IDENTITY_PAYLOAD_FIELDS
+    assert all(isinstance(value, str) for key, value in payload.items()
+               if key != "field_order_without_later_execution_authorization_identity")
+    assert payload["field_order_without_later_execution_authorization_identity"] == list(
+        runner.AUTHORIZATION_IDENTITY_FIELD_ORDER
+    )
+    expected = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        sort_keys=False,
+    ).encode("utf-8") + b"\n"
+    actual = runner.canonical_authorization_identity_bytes(binding)
+    assert actual == expected
+    assert actual.endswith(b"\n")
+    assert actual.count(b"\n") == 1
+    assert b"\r" not in actual
+    assert b" " not in actual
+    assert digest_one == hashlib.sha256(actual).hexdigest()
+    assert len(digest_one) == 64
+    assert digest_one == digest_one.lower()
+
+
+def test_authorization_identity_digest_is_sensitive_to_each_bound_payload_field():
+    binding = _parser_binding()
+    baseline = runner.authorization_binding_identity(binding)
+    mutable_payload_fields = [
+        key for key in runner.AUTHORIZATION_IDENTITY_FIELD_ORDER
+        if key not in {"authorization_schema", "authorization_version"}
+    ]
+    for key in mutable_payload_fields:
+        mutated = dict(binding)
+        if key.endswith("git_blob"):
+            mutated[key] = ("f" if binding[key] != "f" * 40 else "e") * 40
+        elif key.endswith("sha256") or key == "v0_2_configuration_identity":
+            mutated[key] = ("f" if binding[key] != "f" * 64 else "e") * 64
+        else:
+            mutated[key] = binding[key] + "_mutated"
+        assert runner.authorization_binding_identity(mutated) != baseline, key
+
+
+def test_valid_authorization_document_accepts_precontact_gate(monkeypatch, tmp_path):
+    repo, binding = _make_authorized_repo(tmp_path)
+    paths = _paths(tmp_path / "paths")
+    precontact = _precontact_in_repo(monkeypatch, repo, paths)
+    assert precontact.repository_state.branch == "main"
+    assert precontact.identities == binding
+    _assert_no_precontact_artifacts(paths)
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_detail",
+    [
+        ({"runner_git_blob": "f" * 40}, "runner Git blob mismatch"),
+        ({"runner_raw_sha256": "f" * 64}, "runner raw SHA-256 mismatch"),
+        ({"runner_test_git_blob": "f" * 40}, "runner-test Git blob mismatch"),
+        ({"runner_test_raw_sha256": "f" * 64}, "runner-test raw SHA-256 mismatch"),
+        ({"schema_contract_git_blob": "f" * 40}, "schema-contract Git blob mismatch"),
+        ({"schema_contract_raw_sha256": "f" * 64}, "schema-contract raw SHA-256 mismatch"),
+    ],
+)
+def test_implementation_identity_mismatches_refuse_precontact(monkeypatch, tmp_path, overrides, expected_detail):
+    repo, _binding = _make_authorized_repo(tmp_path, overrides=overrides)
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        _precontact_in_repo(monkeypatch, repo, paths)
+    assert expected_detail in excinfo.value.detail
+    _assert_no_precontact_artifacts(paths)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"v0_2_configuration_identity": "0" * 64},
+        {"expected_manifest_external_sha256": "1" * 64},
+        {"expected_manifest_payload_sha256": "2" * 64},
+    ],
+)
+def test_runner_owned_anchor_mismatches_refuse_precontact(monkeypatch, tmp_path, overrides):
+    repo, _binding = _make_authorized_repo(tmp_path, overrides=overrides)
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        _precontact_in_repo(monkeypatch, repo, paths)
+    assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_IDENTITY
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_wrong_later_execution_authorization_identity_refuses_precontact(monkeypatch, tmp_path):
+    repo, _binding = _make_authorized_repo(
+        tmp_path,
+        overrides={"later_execution_authorization_identity": "0" * 64},
+        recompute_later=False,
+    )
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        _precontact_in_repo(monkeypatch, repo, paths)
+    assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_AUTHORIZATION
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_latest_authorization_path_commit_at_head_is_required(monkeypatch, tmp_path):
+    repo, _binding = _make_authorized_repo(tmp_path)
+    _write_repo_file(repo, "README.md", b"later unrelated commit\n")
+    _commit_all(repo, "later unrelated")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD", capture=False)
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        _precontact_in_repo(monkeypatch, repo, paths)
+    assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_AUTHORIZATION
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_missing_authorization_path_history_refuses(tmp_path, monkeypatch):
+    repo = tmp_path / "missing-history-repo"
+    repo.mkdir()
+    _git(repo, "init", capture=False)
+    _git(repo, "config", "user.email", "codex@example.invalid", capture=False)
+    _git(repo, "config", "user.name", "Codex", capture=False)
+    _git(repo, "checkout", "-b", "main", capture=False)
+    _write_repo_file(repo, runner.RUNNER_SOURCE_PATH, b"runner implementation\n")
+    _write_repo_file(repo, runner.RUNNER_TEST_SOURCE_PATH, b"runner tests\n")
+    _write_repo_file(repo, runner.SCHEMA_CONTRACT_SOURCE_PATH, b"schema contract\n")
+    _commit_all(repo, "implementation")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD", capture=False)
+    monkeypatch.chdir(repo)
+    with pytest.raises(runner.PreContactRefusal):
+        runner._latest_commit_for_authorization_path()
+
+
+def test_repository_state_refusals_keep_authority_unconsumed(tmp_path):
+    paths = _paths(tmp_path)
+    identities = _valid_identity_seam()
+    cases = [
+        runner.RepositoryState(str(REPO_ROOT), "feature", True, "a" * 40, "a" * 40, "3.11.15"),
+        runner.RepositoryState(str(REPO_ROOT), "main", False, "a" * 40, "a" * 40, "3.11.15"),
+        runner.RepositoryState(str(REPO_ROOT), "main", True, "a" * 40, "b" * 40, "3.11.15"),
+        runner.RepositoryState(str(REPO_ROOT), "main", True, "not-hex", "not-hex", "3.11.15"),
+        runner.RepositoryState(str(tmp_path / "not-a-repo"), "main", True, "a" * 40, "a" * 40, "3.11.15"),
+    ]
+    for state in cases:
+        with pytest.raises(runner.PreContactRefusal):
+            runner.perform_precontact_validation(
+                ["runner"],
+                b"",
+                repository_state=state,
+                identities=identities,
+                paths=paths,
+            )
+        _assert_no_precontact_artifacts(paths)
+
+
+def test_dirty_working_tree_refuses_before_manifest_contact(monkeypatch, tmp_path):
+    repo, _binding = _make_authorized_repo(tmp_path)
+    (repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal) as excinfo:
+        _precontact_in_repo(monkeypatch, repo, paths)
+    assert excinfo.value.failure_code == runner.FAIL_PRECONTACT_REPOSITORY_STATE
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_wrong_branch_refuses_before_manifest_contact(monkeypatch, tmp_path):
+    repo, _binding = _make_authorized_repo(tmp_path)
+    _git(repo, "checkout", "-b", "feature", capture=False)
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD", capture=False)
+    paths = _paths(tmp_path / "paths")
+    with pytest.raises(runner.PreContactRefusal):
+        _precontact_in_repo(monkeypatch, repo, paths)
+    _assert_no_precontact_artifacts(paths)
+
+
+def test_missing_origin_main_refuses(monkeypatch, tmp_path):
+    repo, _binding = _make_authorized_repo(tmp_path)
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main", capture=False)
+    monkeypatch.chdir(repo)
+    with pytest.raises(runner.PreContactRefusal):
+        runner.observe_repository_state()
+
+
+def test_repository_relative_path_rejects_traversal(tmp_path):
+    with pytest.raises(runner.PreContactRefusal):
+        runner._repository_path(str(tmp_path), "../outside.txt")
 
 
 def test_bounded_precontact_refusal_is_exit_2_and_unconsumed(tmp_path):
