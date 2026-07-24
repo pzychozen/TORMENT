@@ -14,6 +14,9 @@ SUBSTRATE_MODULES = (
     "durable_evidence_windows_adapter_v0_3",
     "durable_evidence_primary_writer_v0_3",
     "durable_evidence_replay_v0_3",
+    "durable_evidence_durability_v0_3",
+    "durable_evidence_authority_v0_3",
+    "durable_evidence_scientific_result_v0_3",
 )
 
 FORBIDDEN_IMPORT_PREFIXES = (
@@ -24,6 +27,7 @@ FORBIDDEN_IMPORT_PREFIXES = (
     "run_independent_order_sensitive_synthetic_validation_v0_1",
     "run_independent_order_sensitive_synthetic_validation_v0_2",
     "psi_trs",
+    "subprocess",
 )
 
 FORBIDDEN_CALLABLE_TOKENS = (
@@ -33,6 +37,7 @@ FORBIDDEN_CALLABLE_TOKENS = (
     "publish",
     "publication_project",
     "retry",
+    "callback",
 )
 
 
@@ -112,3 +117,6 @@ def test_source_contains_no_mutable_authoritative_pointer_or_replace_transition(
         assert "os.replace" not in source
         assert ".replace(" not in source
         assert "current_state.json" not in source
+        assert "__import__" not in source
+        assert "importlib" not in source
+        assert "subprocess" not in source
