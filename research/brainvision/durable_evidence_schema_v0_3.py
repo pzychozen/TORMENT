@@ -151,6 +151,58 @@ PUBLICATION_RECOVERY_CHAIN_IDENTITY_KEYS = (
     "original_publication_chain_identity",
     "publication_recovery_authorization_identity",
 )
+PUBLICATION_PROJECTION_IDENTITY_KEYS = (
+    "execution_identity",
+    "bundle_payload_sha256",
+    "scientific_completion_logical_record_sha256",
+    "publication_recipe_identity",
+    "publication_utility_identities",
+)
+
+PUBLICATION_RESULT_ARTIFACT_SCHEMA = (
+    "torment-brainvision-synthetic-validation-result-v0.3"
+)
+PUBLICATION_EXECUTION_ENVELOPE_SCHEMA = (
+    "torment-brainvision-synthetic-validation-execution-envelope-v0.3"
+)
+PUBLICATION_RESULT_ARTIFACT_FILENAME = "iososv_v0_3_result.json"
+PUBLICATION_EXECUTION_ENVELOPE_FILENAME = "iososv_v0_3_execution_envelope.json"
+PUBLICATION_SUMMARY_FILENAME = "iososv_v0_3_summary.txt"
+PUBLICATION_ARTIFACT_FILENAMES = (
+    PUBLICATION_RESULT_ARTIFACT_FILENAME,
+    PUBLICATION_EXECUTION_ENVELOPE_FILENAME,
+    PUBLICATION_SUMMARY_FILENAME,
+)
+PUBLICATION_RESULT_ARTIFACT_KEYS = (
+    "schema",
+    "result_kind",
+    "scientific_evaluation_reached",
+    "descriptor_evaluation_reached",
+    "pass_bundle_sha256",
+    "strong_order_hypothesis",
+    "formal_hold",
+    "mode",
+)
+PUBLICATION_EXECUTION_ENVELOPE_KEYS = (
+    "schema",
+    "authority_consumed",
+    "current_state",
+    "repository_execution_head",
+    "branch",
+    "python_version",
+    "runner_identity",
+    "runner_test_identity",
+    "schema_contract_identity",
+    "descriptor_identity",
+    "scientific_result_kind",
+    "pass_bundle",
+)
+
+FORMAL_HOLD_VALUE = "active"
+MODE_VALUE = "Mode_0"
+STRONG_ORDER_HYPOTHESIS_VALUE = (
+    "STRONG_ORDER_HYPOTHESIS_NOT_SUPPORTED_BY_FROZEN_FAMILY"
+)
 
 SOURCE_IDENTITY_KEYS = ("source_path", "git_blob", "raw_sha256")
 MANIFEST_IDENTITIES_KEYS = ("manifest_external_sha256", "manifest_payload_sha256")
@@ -280,6 +332,14 @@ class BundlePayloadIdentityError(EvidenceValidationError):
 
 
 class StoredBundleIdentityError(EvidenceValidationError):
+    pass
+
+
+class PublicationArtifactError(EvidenceValidationError):
+    pass
+
+
+class PublicationArtifactHashError(PublicationArtifactError):
     pass
 
 
@@ -652,6 +712,37 @@ def publication_chain_identity(
     return sha256_hex(canonical_json_bytes(payload))
 
 
+def _publication_projection_identity(
+    *,
+    execution_identity: str,
+    bundle_payload_sha256: str,
+    scientific_completion_logical_record_sha256: str,
+    publication_recipe_identity: str,
+    publication_utility_identities: Mapping[str, Any],
+) -> str:
+    _require_hex64(execution_identity, "execution_identity")
+    _require_hex64(bundle_payload_sha256, "bundle_payload_sha256")
+    _require_hex64(
+        scientific_completion_logical_record_sha256,
+        "scientific_completion_logical_record_sha256",
+    )
+    _require_hex64(publication_recipe_identity, "publication_recipe_identity")
+    if not isinstance(publication_utility_identities, Mapping):
+        raise EvidenceValidationError("publication_utility_identities must be an object")
+    validate_json_domain(publication_utility_identities)
+    payload = {
+        "execution_identity": execution_identity,
+        "bundle_payload_sha256": bundle_payload_sha256,
+        "scientific_completion_logical_record_sha256": (
+            scientific_completion_logical_record_sha256
+        ),
+        "publication_recipe_identity": publication_recipe_identity,
+        "publication_utility_identities": dict(publication_utility_identities),
+    }
+    _require_key_order(payload, PUBLICATION_PROJECTION_IDENTITY_KEYS, "projection identity")
+    return sha256_hex(canonical_json_bytes(payload))
+
+
 def publication_recovery_chain_identity(
     *,
     original_publication_chain_identity: str,
@@ -669,6 +760,74 @@ def publication_recovery_chain_identity(
         "publication_recovery_authorization_identity": publication_recovery_authorization_identity,
     }
     return sha256_hex(canonical_json_bytes(payload))
+
+
+def publication_artifact_byte_map_for_bundle(
+    bundle_payload: Mapping[str, Any],
+) -> dict[str, bytes]:
+    validate_bundle_payload(bundle_payload)
+    artifacts = {
+        PUBLICATION_RESULT_ARTIFACT_FILENAME: canonical_json_bytes(
+            _publication_result_artifact(bundle_payload)
+        ),
+        PUBLICATION_EXECUTION_ENVELOPE_FILENAME: canonical_json_bytes(
+            _publication_execution_envelope(bundle_payload)
+        ),
+        PUBLICATION_SUMMARY_FILENAME: _publication_summary_bytes(bundle_payload),
+    }
+    _require_exact_artifact_keys(artifacts.keys())
+    return artifacts
+
+
+def publication_artifact_sha256s_for_bundle(
+    bundle_payload: Mapping[str, Any],
+) -> dict[str, str]:
+    return {
+        name: sha256_hex(payload)
+        for name, payload in publication_artifact_byte_map_for_bundle(
+            bundle_payload
+        ).items()
+    }
+
+
+def validate_publication_artifact_byte_map(
+    artifact_bytes_by_name: Mapping[str, bytes],
+    *,
+    bundle_payload: Mapping[str, Any],
+    expected_artifact_sha256s: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    if not isinstance(artifact_bytes_by_name, Mapping):
+        raise PublicationArtifactError("artifact byte map must be an object")
+    _require_exact_artifact_keys(artifact_bytes_by_name.keys())
+    if expected_artifact_sha256s is not None:
+        _require_exact_artifact_keys(expected_artifact_sha256s.keys())
+        for name in PUBLICATION_ARTIFACT_FILENAMES:
+            _require_hex64(expected_artifact_sha256s[name], "%s sha256" % name)
+    expected = publication_artifact_byte_map_for_bundle(bundle_payload)
+    observed_hashes: dict[str, str] = {}
+    for name in PUBLICATION_ARTIFACT_FILENAMES:
+        payload = artifact_bytes_by_name[name]
+        if not isinstance(payload, bytes):
+            raise PublicationArtifactError("%s payload must be bytes" % name)
+        _validate_publication_artifact_payload_shape(name, payload)
+        observed_hash = sha256_hex(payload)
+        observed_hashes[name] = observed_hash
+        if (
+            expected_artifact_sha256s is not None
+            and observed_hash != expected_artifact_sha256s[name]
+        ):
+            raise PublicationArtifactHashError("%s SHA-256 mismatch" % name)
+        if payload != expected[name]:
+            raise PublicationArtifactError("%s bytes mismatch" % name)
+    return observed_hashes
+
+
+def validate_publication_artifact_sha256s(
+    artifact_sha256s: Mapping[str, str],
+) -> None:
+    _require_exact_artifact_keys(artifact_sha256s.keys())
+    for name in PUBLICATION_ARTIFACT_FILENAMES:
+        _require_hex64(artifact_sha256s[name], "%s sha256" % name)
 
 
 def record_authorization_identity(record: Mapping[str, Any]) -> str:
@@ -923,6 +1082,139 @@ def _validate_publication_projection_source(
     if computed_pass_bundle_sha256 != pass_bundle_sha256:
         raise BundlePayloadIdentityError("pass_bundle_sha256 mismatch")
     _require_hex64(value["publication_recipe_identity"], "publication_recipe_identity")
+
+
+def _publication_result_artifact(bundle_payload: Mapping[str, Any]) -> dict[str, Any]:
+    result = {
+        "schema": PUBLICATION_RESULT_ARTIFACT_SCHEMA,
+        "result_kind": bundle_payload["scientific_result_kind"],
+        "scientific_evaluation_reached": True,
+        "descriptor_evaluation_reached": True,
+        "pass_bundle_sha256": bundle_payload["pass_bundle_sha256"],
+        "strong_order_hypothesis": STRONG_ORDER_HYPOTHESIS_VALUE,
+        "formal_hold": FORMAL_HOLD_VALUE,
+        "mode": MODE_VALUE,
+    }
+    _require_key_order(result, PUBLICATION_RESULT_ARTIFACT_KEYS, "result artifact")
+    return result
+
+
+def _publication_execution_envelope(
+    bundle_payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    repository_context = bundle_payload["repository_execution_context"]
+    implementation_identities = bundle_payload["implementation_identities"]
+    projection_source = bundle_payload["publication_projection_source"]
+    envelope = {
+        "schema": PUBLICATION_EXECUTION_ENVELOPE_SCHEMA,
+        "authority_consumed": True,
+        "current_state": projection_source["current_state_snapshot"],
+        "repository_execution_head": repository_context["head"],
+        "branch": repository_context["branch"],
+        "python_version": repository_context["python_version"],
+        "runner_identity": implementation_identities["runner_identity"],
+        "runner_test_identity": implementation_identities["runner_test_identity"],
+        "schema_contract_identity": implementation_identities[
+            "schema_contract_identity"
+        ],
+        "descriptor_identity": bundle_payload["descriptor_identity"],
+        "scientific_result_kind": bundle_payload["scientific_result_kind"],
+        "pass_bundle": projection_source["canonical_pass_bundle"],
+    }
+    _require_key_order(
+        envelope, PUBLICATION_EXECUTION_ENVELOPE_KEYS, "execution envelope"
+    )
+    return envelope
+
+
+def _publication_summary_bytes(bundle_payload: Mapping[str, Any]) -> bytes:
+    summary = (
+        "Stage S3B v0.3 synthetic validation\n"
+        "result_kind = %s\n"
+        "FORMAL_HOLD = active\n"
+        "Mode_0 = active\n"
+        "STRONG_ORDER_HYPOTHESIS_NOT_SUPPORTED_BY_FROZEN_FAMILY\n"
+    ) % bundle_payload["scientific_result_kind"]
+    payload = summary.encode("ascii")
+    if payload.count(b"\n") != 5 or not payload.endswith(b"\n") or b"\r" in payload:
+        raise PublicationArtifactError("summary byte envelope is invalid")
+    return payload
+
+
+def _require_exact_artifact_keys(keys: Any) -> None:
+    observed = tuple(keys)
+    if observed != PUBLICATION_ARTIFACT_FILENAMES:
+        raise PublicationArtifactError("publication artifact inventory mismatch")
+
+
+def _validate_publication_artifact_payload_shape(name: str, payload: bytes) -> None:
+    if name == PUBLICATION_SUMMARY_FILENAME:
+        try:
+            payload.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise PublicationArtifactError("summary is not ASCII") from exc
+        if b"\r" in payload or not payload.endswith(b"\n"):
+            raise PublicationArtifactError("summary terminal newline mismatch")
+        return
+    try:
+        value = load_canonical_json_bytes(payload)
+        if name == PUBLICATION_RESULT_ARTIFACT_FILENAME:
+            _require_key_order(
+                value, PUBLICATION_RESULT_ARTIFACT_KEYS, "result artifact"
+            )
+            _require_constant(
+                value["schema"], PUBLICATION_RESULT_ARTIFACT_SCHEMA, "result schema"
+            )
+            _require_bool_true(
+                value["scientific_evaluation_reached"],
+                "scientific_evaluation_reached",
+            )
+            _require_bool_true(
+                value["descriptor_evaluation_reached"],
+                "descriptor_evaluation_reached",
+            )
+            _require_scientific_result_kind(value["result_kind"])
+            _require_hex64(value["pass_bundle_sha256"], "pass_bundle_sha256")
+            _require_constant(
+                value["strong_order_hypothesis"],
+                STRONG_ORDER_HYPOTHESIS_VALUE,
+                "strong_order_hypothesis",
+            )
+            _require_constant(value["formal_hold"], FORMAL_HOLD_VALUE, "formal_hold")
+            _require_constant(value["mode"], MODE_VALUE, "mode")
+            return
+        if name == PUBLICATION_EXECUTION_ENVELOPE_FILENAME:
+            _require_key_order(
+                value, PUBLICATION_EXECUTION_ENVELOPE_KEYS, "execution envelope"
+            )
+            _require_constant(
+                value["schema"],
+                PUBLICATION_EXECUTION_ENVELOPE_SCHEMA,
+                "execution envelope schema",
+            )
+            _require_bool_true(value["authority_consumed"], "authority_consumed")
+            _validate_current_state_snapshot(value["current_state"])
+            _require_hex40(
+                value["repository_execution_head"], "repository_execution_head"
+            )
+            _require_ascii_printable(value["branch"], "branch")
+            _require_ascii_printable(value["python_version"], "python_version")
+            _validate_source_identity(value["runner_identity"], "runner_identity")
+            _validate_source_identity(
+                value["runner_test_identity"], "runner_test_identity"
+            )
+            _validate_source_identity(
+                value["schema_contract_identity"], "schema_contract_identity"
+            )
+            _validate_source_identity(
+                value["descriptor_identity"], "descriptor_identity"
+            )
+            _require_scientific_result_kind(value["scientific_result_kind"])
+            _validate_pass_bundle(value["pass_bundle"], value["scientific_result_kind"])
+            return
+    except (EvidenceValidationError, KeyError, TypeError) as exc:
+        raise PublicationArtifactError("%s payload shape is invalid" % name) from exc
+    raise PublicationArtifactError("unsupported artifact filename")
 
 
 def _validate_current_state_snapshot(value: Mapping[str, Any]) -> None:

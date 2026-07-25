@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 
 import pytest
@@ -84,8 +85,22 @@ def _stored_recovery(attempt: str):
 
 def _write(path: Path, stored_object: dict):
     destination = path / writer.record_storage_filename(stored_object)
-    destination.write_bytes(schema.canonical_json_bytes(stored_object))
+    with open(_windows_api_path(destination), "wb") as handle:
+        handle.write(schema.canonical_json_bytes(stored_object))
     return destination
+
+
+def _windows_api_path(path: Path) -> str:
+    text = os.path.abspath(str(path))
+    if os.name != "nt":
+        return text
+    prefix = "\\\\?\\"
+    unc_prefix = "\\\\?\\UNC\\"
+    if text.startswith(prefix):
+        return text
+    if text.startswith("\\\\"):
+        return unc_prefix + text[2:]
+    return prefix + text
 
 
 def _two_record_scientific_chain():

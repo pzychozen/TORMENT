@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import os
 
 import durable_evidence_schema_v0_3 as schema
 
@@ -63,7 +64,7 @@ def replay_chain(
     rejected: list[RejectedObject] = []
     for path in sorted(Path(chain_directory_path).glob("*.json"), key=lambda item: item.name):
         try:
-            raw = path.read_bytes()
+            raw = _read_bytes(path)
             stored_object = schema.load_canonical_json_bytes(
                 raw, max_bytes=schema.MAX_STORED_RECORD_OBJECT_BYTES
             )
@@ -243,3 +244,21 @@ def _instance_sort_key(instance: StoredRecordInstance) -> tuple[str, str, str]:
         instance.stored_object_sha256,
         instance.path,
     )
+
+
+def _read_bytes(path: Path) -> bytes:
+    with open(_windows_api_path(path), "rb") as handle:
+        return handle.read()
+
+
+def _windows_api_path(path: Path) -> str:
+    text = os.path.abspath(str(path))
+    if os.name != "nt":
+        return text
+    prefix = "\\\\?\\"
+    unc_prefix = "\\\\?\\UNC\\"
+    if text.startswith(prefix):
+        return text
+    if text.startswith("\\\\"):
+        return unc_prefix + text[2:]
+    return prefix + text

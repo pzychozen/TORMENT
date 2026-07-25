@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+import os
 
 import durable_evidence_primary_writer_v0_3 as primary_writer
 import durable_evidence_schema_v0_3 as schema
@@ -152,13 +153,13 @@ def _validate_write_result(
     if write_result.readback_verified is not True:
         raise DurabilityEvidenceError("write read-back was not verified")
     path = Path(write_result.path)
-    if not path.exists() or not path.is_file():
-        raise DurabilityEvidenceError("durability evidence path does not exist")
     if path.name != expected_name:
         raise DurabilityEvidenceError("path filename does not match stored identity")
     stored_object_sha256 = stored_object[stored_object_hash_key]
     _require_hex64(stored_object_sha256, stored_object_hash_key)
-    raw = path.read_bytes()
+    if not _is_file(path):
+        raise DurabilityEvidenceError("durability evidence path does not exist")
+    raw = _read_bytes(path)
     if len(raw) != write_result.byte_length:
         raise DurabilityEvidenceError("write-result byte length mismatch")
     if schema.sha256_hex(raw) != write_result.sha256:
@@ -199,3 +200,25 @@ def _require_hex64(value: object, label: str) -> None:
         raise DurabilityEvidenceError("%s must be lowercase 64-hex" % label)
     if any(char not in "0123456789abcdef" for char in value):
         raise DurabilityEvidenceError("%s must be lowercase 64-hex" % label)
+
+
+def _is_file(path: Path) -> bool:
+    return os.path.isfile(_windows_api_path(path))
+
+
+def _read_bytes(path: Path) -> bytes:
+    with open(_windows_api_path(path), "rb") as handle:
+        return handle.read()
+
+
+def _windows_api_path(path: Path) -> str:
+    text = os.path.abspath(str(path))
+    if os.name != "nt":
+        return text
+    prefix = "\\\\?\\"
+    unc_prefix = "\\\\?\\UNC\\"
+    if text.startswith(prefix):
+        return text
+    if text.startswith("\\\\"):
+        return unc_prefix + text[2:]
+    return prefix + text

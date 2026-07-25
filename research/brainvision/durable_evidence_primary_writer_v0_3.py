@@ -95,13 +95,13 @@ def _write_immutable_bytes(
     adapter = durability_adapter or windows_adapter.FailClosedWindowsDurabilityAdapter()
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with destination.open("xb") as handle:
+        with open(_windows_api_path(destination), "xb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
     except FileExistsError as exc:
         raise ImmutableWriteError("immutable destination already exists") from exc
-    readback = destination.read_bytes()
+    readback = _read_bytes(destination)
     if readback != payload:
         raise ImmutableWriteError("read-back byte verification failed")
     observed_sha256 = schema.sha256_hex(readback)
@@ -120,3 +120,21 @@ def _write_immutable_bytes(
         durability_status=durability.status,
         authoritative_status=authoritative_status,
     )
+
+
+def _read_bytes(path: Path) -> bytes:
+    with open(_windows_api_path(path), "rb") as handle:
+        return handle.read()
+
+
+def _windows_api_path(path: Path) -> str:
+    text = os.path.abspath(str(path))
+    if os.name != "nt":
+        return text
+    prefix = "\\\\?\\"
+    unc_prefix = "\\\\?\\UNC\\"
+    if text.startswith(prefix):
+        return text
+    if text.startswith("\\\\"):
+        return unc_prefix + text[2:]
+    return prefix + text
