@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 
@@ -26,6 +29,65 @@ MAX_NESTING_DEPTH = 32
 MAX_CONTAINER_MEMBER_COUNT = 4096
 MAX_STORED_RECORD_OBJECT_BYTES = 65536
 MAX_STORED_BUNDLE_OBJECT_BYTES = 4194304
+
+MAX_RESOURCE_NESTING_DEPTH = MAX_NESTING_DEPTH
+MAX_RESOURCE_CONTAINER_MEMBERS_PER_CONTAINER = MAX_CONTAINER_MEMBER_COUNT
+MAX_RESOURCE_TOTAL_NODE_COUNT = 16384
+MAX_RESOURCE_SINGLE_STRING_ASCII_BYTES = 1048576
+MAX_RESOURCE_TOTAL_STRING_ASCII_BYTES = 4194304
+MAX_RESOURCE_INTEGER_ABS = 9223372036854775807
+MAX_PUBLICATION_SOURCE_BUNDLE_BYTES = 4194304
+
+MAX_PUBLICATION_ARTIFACT_COUNT = 3
+MAX_PUBLICATION_RESULT_ARTIFACT_BYTES = 16384
+MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES = 8388608
+MAX_PUBLICATION_SUMMARY_BYTES = 1024
+MAX_PUBLICATION_ARTIFACT_SET_BYTES = 8406016
+MAX_PUBLICATION_STAGING_WRITE_BYTES = 8406016
+MAX_PUBLICATION_RECOVERY_VERIFICATION_BYTES = 8406016
+
+RESOURCE_ADMISSIBILITY_POLICY_SCHEMA = (
+    "durable-evidence-resource-admissibility-policy-v0.3"
+)
+RESOURCE_ADMISSIBILITY_POLICY_DECLARATION_KEYS = (
+    "policy_schema_identity",
+    "max_resource_nesting_depth",
+    "max_resource_container_members_per_container",
+    "max_stored_record_object_bytes",
+    "max_stored_bundle_object_bytes",
+    "max_resource_total_node_count",
+    "max_resource_single_string_ascii_bytes",
+    "max_resource_total_string_ascii_bytes",
+    "max_resource_integer_abs",
+    "max_publication_source_bundle_bytes",
+    "max_publication_artifact_count",
+    "max_publication_result_artifact_bytes",
+    "max_publication_execution_envelope_bytes",
+    "max_publication_summary_bytes",
+    "max_publication_artifact_set_bytes",
+    "max_publication_staging_write_bytes",
+    "max_publication_recovery_verification_bytes",
+)
+RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_KEYS = (
+    "policy_schema_identity",
+    "policy_sha256",
+)
+
+RESOURCE_LIMIT_EXCEEDED = "RESOURCE_LIMIT_EXCEEDED"
+ARTIFACT_SIZE_LIMIT_EXCEEDED = "ARTIFACT_SIZE_LIMIT_EXCEEDED"
+ARTIFACT_SET_SIZE_LIMIT_EXCEEDED = "ARTIFACT_SET_SIZE_LIMIT_EXCEEDED"
+SUMMARY_SIZE_LIMIT_EXCEEDED = "SUMMARY_SIZE_LIMIT_EXCEEDED"
+CANONICAL_STRUCTURE_LIMIT_EXCEEDED = "CANONICAL_STRUCTURE_LIMIT_EXCEEDED"
+STRING_SIZE_LIMIT_EXCEEDED = "STRING_SIZE_LIMIT_EXCEEDED"
+INTEGER_MAGNITUDE_LIMIT_EXCEEDED = "INTEGER_MAGNITUDE_LIMIT_EXCEEDED"
+RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH = (
+    "RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH"
+)
+STAGING_SPACE_BUDGET_UNAVAILABLE = "STAGING_SPACE_BUDGET_UNAVAILABLE"
+RESOURCE_ADMISSIBILITY_INDETERMINATE = "RESOURCE_ADMISSIBILITY_INDETERMINATE"
+RECOVERY_VERIFICATION_BUDGET_EXCEEDED = "RECOVERY_VERIFICATION_BUDGET_EXCEEDED"
+RECOVERY_ARTIFACT_TYPE_INVALID = "RECOVERY_ARTIFACT_TYPE_INVALID"
+RECOVERY_ARTIFACT_READ_INDETERMINATE = "RECOVERY_ARTIFACT_READ_INDETERMINATE"
 
 SCIENTIFIC_RESULT_KINDS = frozenset(
     ("SYNTHETIC_GATE_PASSED", "SYNTHETIC_GATE_FAILED")
@@ -343,6 +405,64 @@ class PublicationArtifactHashError(PublicationArtifactError):
     pass
 
 
+class ResourceAdmissibilityError(EvidenceValidationError):
+    failure_code = RESOURCE_LIMIT_EXCEEDED
+
+
+class ResourceStructureLimitError(ResourceAdmissibilityError):
+    def __init__(
+        self,
+        detail: str,
+        failure_code: str = RESOURCE_LIMIT_EXCEEDED,
+    ) -> None:
+        self.failure_code = failure_code
+        super().__init__(detail)
+
+
+class ResourceStringLimitError(ResourceAdmissibilityError):
+    failure_code = STRING_SIZE_LIMIT_EXCEEDED
+
+
+class ResourceIntegerLimitError(ResourceAdmissibilityError):
+    failure_code = INTEGER_MAGNITUDE_LIMIT_EXCEEDED
+
+
+class PublicationArtifactSizeLimitError(ResourceAdmissibilityError):
+    failure_code = ARTIFACT_SIZE_LIMIT_EXCEEDED
+
+    def __init__(
+        self,
+        detail: str,
+        failure_code: str = ARTIFACT_SIZE_LIMIT_EXCEEDED,
+    ) -> None:
+        self.failure_code = failure_code
+        super().__init__(detail)
+
+
+class PublicationArtifactSetSizeLimitError(ResourceAdmissibilityError):
+    failure_code = ARTIFACT_SET_SIZE_LIMIT_EXCEEDED
+
+
+class RecoveryVerificationBudgetError(ResourceAdmissibilityError):
+    failure_code = RECOVERY_VERIFICATION_BUDGET_EXCEEDED
+
+
+class ResourceAdmissibilityIndeterminateError(ResourceAdmissibilityError):
+    failure_code = RESOURCE_ADMISSIBILITY_INDETERMINATE
+
+
+class ResourcePolicyIdentityMismatchError(ResourceAdmissibilityError):
+    failure_code = RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH
+
+
+class RecoveryArtifactTypeInvalidError(ResourceAdmissibilityError):
+    failure_code = RECOVERY_ARTIFACT_TYPE_INVALID
+
+
+class RecoveryArtifactReadIndeterminateError(ResourceAdmissibilityError):
+    failure_code = RECOVERY_ARTIFACT_READ_INDETERMINATE
+
+
 def sha256_hex(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -355,6 +475,182 @@ def canonical_json_bytes(value: Any, *, max_bytes: int | None = None) -> bytes:
         + b"\n"
     )
     _validate_canonical_byte_envelope(payload, max_bytes=max_bytes)
+    return payload
+
+
+def resource_admissibility_policy_declaration() -> dict[str, Any]:
+    declaration = {
+        "policy_schema_identity": RESOURCE_ADMISSIBILITY_POLICY_SCHEMA,
+        "max_resource_nesting_depth": MAX_RESOURCE_NESTING_DEPTH,
+        "max_resource_container_members_per_container": (
+            MAX_RESOURCE_CONTAINER_MEMBERS_PER_CONTAINER
+        ),
+        "max_stored_record_object_bytes": MAX_STORED_RECORD_OBJECT_BYTES,
+        "max_stored_bundle_object_bytes": MAX_STORED_BUNDLE_OBJECT_BYTES,
+        "max_resource_total_node_count": MAX_RESOURCE_TOTAL_NODE_COUNT,
+        "max_resource_single_string_ascii_bytes": (
+            MAX_RESOURCE_SINGLE_STRING_ASCII_BYTES
+        ),
+        "max_resource_total_string_ascii_bytes": MAX_RESOURCE_TOTAL_STRING_ASCII_BYTES,
+        "max_resource_integer_abs": MAX_RESOURCE_INTEGER_ABS,
+        "max_publication_source_bundle_bytes": MAX_PUBLICATION_SOURCE_BUNDLE_BYTES,
+        "max_publication_artifact_count": MAX_PUBLICATION_ARTIFACT_COUNT,
+        "max_publication_result_artifact_bytes": (
+            MAX_PUBLICATION_RESULT_ARTIFACT_BYTES
+        ),
+        "max_publication_execution_envelope_bytes": (
+            MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES
+        ),
+        "max_publication_summary_bytes": MAX_PUBLICATION_SUMMARY_BYTES,
+        "max_publication_artifact_set_bytes": MAX_PUBLICATION_ARTIFACT_SET_BYTES,
+        "max_publication_staging_write_bytes": MAX_PUBLICATION_STAGING_WRITE_BYTES,
+        "max_publication_recovery_verification_bytes": (
+            MAX_PUBLICATION_RECOVERY_VERIFICATION_BYTES
+        ),
+    }
+    _require_key_order(
+        declaration,
+        RESOURCE_ADMISSIBILITY_POLICY_DECLARATION_KEYS,
+        "resource admissibility policy",
+    )
+    return declaration
+
+
+def resource_admissibility_policy_sha256() -> str:
+    return sha256_hex(canonical_json_bytes(resource_admissibility_policy_declaration()))
+
+
+def resource_admissibility_policy_identity() -> dict[str, str]:
+    identity = {
+        "policy_schema_identity": RESOURCE_ADMISSIBILITY_POLICY_SCHEMA,
+        "policy_sha256": resource_admissibility_policy_sha256(),
+    }
+    _require_key_order(
+        identity,
+        RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_KEYS,
+        "resource admissibility policy identity",
+    )
+    return identity
+
+
+def validate_resource_admissibility_policy_identity(value: Any) -> None:
+    try:
+        _require_key_order(
+            value,
+            RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_KEYS,
+            "resource admissibility policy identity",
+        )
+        _require_constant(
+            value["policy_schema_identity"],
+            RESOURCE_ADMISSIBILITY_POLICY_SCHEMA,
+            "resource admissibility policy schema",
+        )
+        _require_hex64(value["policy_sha256"], "resource policy sha256")
+        if value["policy_sha256"] != resource_admissibility_policy_sha256():
+            raise ResourcePolicyIdentityMismatchError(
+                "resource admissibility policy identity mismatch"
+            )
+    except ResourcePolicyIdentityMismatchError:
+        raise
+    except (EvidenceValidationError, KeyError, TypeError) as exc:
+        raise ResourcePolicyIdentityMismatchError(
+            "resource admissibility policy identity mismatch"
+        ) from exc
+
+
+def validate_resource_domain(value: Any) -> None:
+    state = {"nodes": 0, "string_bytes": 0}
+    _validate_resource_value(value, "$", 0, state)
+
+
+def canonical_json_bytes_bounded(value: Any, max_bytes: int) -> bytes:
+    _require_strict_nonnegative_int(max_bytes, "max_bytes")
+    try:
+        validate_resource_domain(value)
+        payload = canonical_json_bytes(value)
+    except (MemoryError, OverflowError) as exc:
+        raise ResourceAdmissibilityIndeterminateError(
+            "resource admissibility became indeterminate"
+        ) from exc
+    if len(payload) > max_bytes:
+        raise ResourceStructureLimitError(
+            "canonical payload exceeds byte limit",
+            CANONICAL_STRUCTURE_LIMIT_EXCEEDED,
+        )
+    return payload
+
+
+def validate_publication_artifact_resource_map(
+    artifact_bytes_by_name: Mapping[str, bytes],
+) -> int:
+    if not isinstance(artifact_bytes_by_name, Mapping):
+        raise PublicationArtifactSetSizeLimitError("artifact byte map must be an object")
+    if len(artifact_bytes_by_name) != MAX_PUBLICATION_ARTIFACT_COUNT:
+        raise PublicationArtifactSetSizeLimitError("publication artifact count mismatch")
+    _require_exact_artifact_keys(artifact_bytes_by_name.keys())
+    total = 0
+    for name in PUBLICATION_ARTIFACT_FILENAMES:
+        payload = artifact_bytes_by_name[name]
+        if not isinstance(payload, bytes):
+            raise PublicationArtifactSizeLimitError("%s payload must be bytes" % name)
+        limit = _publication_artifact_byte_limit(name)
+        if len(payload) > limit:
+            code = ARTIFACT_SIZE_LIMIT_EXCEEDED
+            if name == PUBLICATION_SUMMARY_FILENAME:
+                code = SUMMARY_SIZE_LIMIT_EXCEEDED
+            raise PublicationArtifactSizeLimitError(
+                "%s exceeds resource byte limit" % name,
+                code,
+            )
+        total += len(payload)
+        if total > MAX_PUBLICATION_ARTIFACT_SET_BYTES:
+            raise PublicationArtifactSetSizeLimitError(
+                "publication artifact set exceeds byte limit"
+            )
+    return total
+
+
+def read_file_bytes_bounded(
+    path: str | Path,
+    max_bytes: int,
+    *,
+    over_limit_code: str = ARTIFACT_SIZE_LIMIT_EXCEEDED,
+) -> bytes:
+    _require_strict_nonnegative_int(max_bytes, "max_bytes")
+    target = Path(path)
+    try:
+        before = os.lstat(target)
+    except OSError as exc:
+        raise RecoveryArtifactReadIndeterminateError(
+            "artifact lstat was indeterminate"
+        ) from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise RecoveryArtifactTypeInvalidError("artifact is not a regular file")
+    try:
+        with target.open("rb") as handle:
+            after = os.fstat(handle.fileno())
+            if not stat.S_ISREG(after.st_mode):
+                raise RecoveryArtifactTypeInvalidError(
+                    "opened artifact is not a regular file"
+                )
+            if not os.path.samestat(before, after):
+                raise RecoveryArtifactReadIndeterminateError(
+                    "artifact identity changed during read admission"
+                )
+            payload = handle.read(max_bytes + 1)
+    except RecoveryArtifactTypeInvalidError:
+        raise
+    except RecoveryArtifactReadIndeterminateError:
+        raise
+    except OSError as exc:
+        raise RecoveryArtifactReadIndeterminateError(
+            "artifact read was indeterminate"
+        ) from exc
+    if len(payload) > max_bytes:
+        raise PublicationArtifactSizeLimitError(
+            "artifact exceeds bounded read limit",
+            over_limit_code,
+        )
     return payload
 
 
@@ -767,15 +1063,18 @@ def publication_artifact_byte_map_for_bundle(
 ) -> dict[str, bytes]:
     validate_bundle_payload(bundle_payload)
     artifacts = {
-        PUBLICATION_RESULT_ARTIFACT_FILENAME: canonical_json_bytes(
-            _publication_result_artifact(bundle_payload)
+        PUBLICATION_RESULT_ARTIFACT_FILENAME: canonical_json_bytes_bounded(
+            _publication_result_artifact(bundle_payload),
+            MAX_PUBLICATION_RESULT_ARTIFACT_BYTES,
         ),
-        PUBLICATION_EXECUTION_ENVELOPE_FILENAME: canonical_json_bytes(
-            _publication_execution_envelope(bundle_payload)
+        PUBLICATION_EXECUTION_ENVELOPE_FILENAME: canonical_json_bytes_bounded(
+            _publication_execution_envelope(bundle_payload),
+            MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES,
         ),
         PUBLICATION_SUMMARY_FILENAME: _publication_summary_bytes(bundle_payload),
     }
     _require_exact_artifact_keys(artifacts.keys())
+    validate_publication_artifact_resource_map(artifacts)
     return artifacts
 
 
@@ -799,6 +1098,7 @@ def validate_publication_artifact_byte_map(
     if not isinstance(artifact_bytes_by_name, Mapping):
         raise PublicationArtifactError("artifact byte map must be an object")
     _require_exact_artifact_keys(artifact_bytes_by_name.keys())
+    validate_publication_artifact_resource_map(artifact_bytes_by_name)
     if expected_artifact_sha256s is not None:
         _require_exact_artifact_keys(expected_artifact_sha256s.keys())
         for name in PUBLICATION_ARTIFACT_FILENAMES:
@@ -917,6 +1217,69 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise DuplicateKeyError("duplicate key: %s" % key)
         result[key] = value
     return result
+
+
+def _validate_resource_value(
+    value: Any,
+    path: str,
+    depth: int,
+    state: dict[str, int],
+) -> None:
+    if depth > MAX_RESOURCE_NESTING_DEPTH:
+        raise ResourceStructureLimitError("maximum resource nesting depth exceeded")
+    if value is None:
+        raise EvidenceValidationError("null is prohibited at %s" % path)
+    if type(value) is bool:
+        _count_resource_node(state)
+        return
+    if type(value) is int:
+        if abs(value) > MAX_RESOURCE_INTEGER_ABS:
+            raise ResourceIntegerLimitError("integer magnitude exceeds resource limit")
+        _count_resource_node(state)
+        return
+    if type(value) is float:
+        raise EvidenceValidationError("float is prohibited at %s" % path)
+    if isinstance(value, str):
+        _require_ascii_printable(value, path)
+        _count_resource_node(state)
+        _count_resource_string(value, state)
+        return
+    if isinstance(value, list):
+        if len(value) > MAX_RESOURCE_CONTAINER_MEMBERS_PER_CONTAINER:
+            raise ResourceStructureLimitError("container member count exceeds limit")
+        _count_resource_node(state)
+        for index, item in enumerate(value):
+            _validate_resource_value(item, "%s[%d]" % (path, index), depth + 1, state)
+        return
+    if isinstance(value, Mapping):
+        if len(value) > MAX_RESOURCE_CONTAINER_MEMBERS_PER_CONTAINER:
+            raise ResourceStructureLimitError("container member count exceeds limit")
+        _count_resource_node(state)
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise EvidenceValidationError("object key is not a string at %s" % path)
+            _require_ascii_printable(key, "%s.<key>" % path)
+            _count_resource_string(key, state)
+            _validate_resource_value(item, "%s.%s" % (path, key), depth + 1, state)
+        return
+    raise EvidenceValidationError(
+        "unsupported JSON-domain value at %s: %s" % (path, type(value).__name__)
+    )
+
+
+def _count_resource_node(state: dict[str, int]) -> None:
+    state["nodes"] += 1
+    if state["nodes"] > MAX_RESOURCE_TOTAL_NODE_COUNT:
+        raise ResourceStructureLimitError("resource node count exceeds limit")
+
+
+def _count_resource_string(value: str, state: dict[str, int]) -> None:
+    byte_length = len(value.encode("ascii"))
+    if byte_length > MAX_RESOURCE_SINGLE_STRING_ASCII_BYTES:
+        raise ResourceStringLimitError("single string exceeds resource byte limit")
+    state["string_bytes"] += byte_length
+    if state["string_bytes"] > MAX_RESOURCE_TOTAL_STRING_ASCII_BYTES:
+        raise ResourceStringLimitError("total string bytes exceed resource limit")
 
 
 def _validate_canonical_byte_envelope(
@@ -1138,6 +1501,11 @@ def _publication_summary_bytes(bundle_payload: Mapping[str, Any]) -> bytes:
     payload = summary.encode("ascii")
     if payload.count(b"\n") != 5 or not payload.endswith(b"\n") or b"\r" in payload:
         raise PublicationArtifactError("summary byte envelope is invalid")
+    if len(payload) > MAX_PUBLICATION_SUMMARY_BYTES:
+        raise PublicationArtifactSizeLimitError(
+            "summary exceeds resource byte limit",
+            SUMMARY_SIZE_LIMIT_EXCEEDED,
+        )
     return payload
 
 
@@ -1145,6 +1513,16 @@ def _require_exact_artifact_keys(keys: Any) -> None:
     observed = tuple(keys)
     if observed != PUBLICATION_ARTIFACT_FILENAMES:
         raise PublicationArtifactError("publication artifact inventory mismatch")
+
+
+def _publication_artifact_byte_limit(name: str) -> int:
+    if name == PUBLICATION_RESULT_ARTIFACT_FILENAME:
+        return MAX_PUBLICATION_RESULT_ARTIFACT_BYTES
+    if name == PUBLICATION_EXECUTION_ENVELOPE_FILENAME:
+        return MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES
+    if name == PUBLICATION_SUMMARY_FILENAME:
+        return MAX_PUBLICATION_SUMMARY_BYTES
+    raise PublicationArtifactError("unsupported artifact filename")
 
 
 def _validate_publication_artifact_payload_shape(name: str, payload: bytes) -> None:

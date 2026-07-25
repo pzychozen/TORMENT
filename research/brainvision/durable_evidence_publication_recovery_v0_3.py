@@ -43,6 +43,54 @@ PUBLICATION_RECOVERY_EVIDENCE_WRITE_FAILED = (
     "PUBLICATION_RECOVERY_EVIDENCE_WRITE_FAILED"
 )
 PUBLICATION_RECOVERY_CHAIN_FORK = "PUBLICATION_RECOVERY_CHAIN_FORK"
+PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED = (
+    "PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED"
+)
+PUBLICATION_RECOVERY_VERIFICATION_BUDGET_EXCEEDED = (
+    "PUBLICATION_RECOVERY_VERIFICATION_BUDGET_EXCEEDED"
+)
+PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_INDETERMINATE = (
+    "PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_INDETERMINATE"
+)
+
+_J2_RESOURCE_CLASSIFICATIONS = {
+    schema.RESOURCE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.ARTIFACT_SIZE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.SUMMARY_SIZE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.CANONICAL_STRUCTURE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.STRING_SIZE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.INTEGER_MAGNITUDE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.ARTIFACT_SET_SIZE_LIMIT_EXCEEDED: (
+        PUBLICATION_RECOVERY_VERIFICATION_BUDGET_EXCEEDED
+    ),
+    schema.RECOVERY_VERIFICATION_BUDGET_EXCEEDED: (
+        PUBLICATION_RECOVERY_VERIFICATION_BUDGET_EXCEEDED
+    ),
+    schema.RESOURCE_ADMISSIBILITY_INDETERMINATE: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_INDETERMINATE
+    ),
+    schema.RECOVERY_ARTIFACT_TYPE_INVALID: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_INDETERMINATE
+    ),
+    schema.RECOVERY_ARTIFACT_READ_INDETERMINATE: (
+        PUBLICATION_RECOVERY_RESOURCE_ADMISSIBILITY_INDETERMINATE
+    ),
+}
 
 PUBLICATION_CHAIN_ROOT = ".iososv_v0_3.publication_chain"
 PUBLICATION_FINAL_ROOT = "iososv_v0_3.publication"
@@ -123,6 +171,8 @@ class PublicationRecoveryResult:
     paths: PublicationRecoveryPaths | None = None
     authority_state: str = PUBLICATION_RECOVERY_AUTHORITY_NOT_ATTEMPTED
     original_publication_completed_normally: bool = False
+    resource_failure_code: str | None = None
+    resource_policy_identity: dict[str, Any] | None = None
 
 
 class SyntheticPublicationRecoveryContext:
@@ -277,6 +327,11 @@ def verify_publication_recovery(
     expected_publication_recovery_chain_identity: str | None = None,
     synthetic_fault_point: str | None = None,
 ) -> PublicationRecoveryResult:
+    if _has_null_policy_identity(publication_recovery_utility_identity):
+        return _pre_anchor_resource_result(
+            schema.RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH,
+            "resource admissibility policy identity mismatch",
+        )
     try:
         anchor = validate_publication_recovery_anchor(
             bundle_payload=bundle_payload,
@@ -401,6 +456,29 @@ def verify_publication_recovery(
         )
     record_writes.append(attempted)
 
+    try:
+        policy_identity = _recovery_policy_identity(publication_recovery_utility_identity)
+        schema.canonical_json_bytes_bounded(
+            bundle_payload,
+            schema.MAX_PUBLICATION_SOURCE_BUNDLE_BYTES,
+        )
+    except schema.ResourceAdmissibilityError as exc:
+        return _resource_result(
+            _failure_code(exc),
+            str(exc),
+            anchor,
+            paths,
+            record_writes=record_writes,
+        )
+    except (MemoryError, OverflowError):
+        return _resource_result(
+            schema.RESOURCE_ADMISSIBILITY_INDETERMINATE,
+            "publication recovery resource admission became indeterminate",
+            anchor,
+            paths,
+            record_writes=record_writes,
+        )
+
     if not paths.original_publication_chain_directory.exists():
         return _result(
             PUBLICATION_RECOVERY_ORIGINAL_CHAIN_MISMATCH,
@@ -408,6 +486,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     original_replay = _classify_original_publication_chain(paths, anchor)
     if original_replay.classification in (
@@ -422,6 +501,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     if len(original_replay.accepted_records) < 2:
         return _result(
@@ -430,6 +510,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     if not paths.final_publication_directory.exists():
         return _result(
@@ -438,6 +519,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     try:
         final_bytes = _read_final_artifact_directory(paths.final_publication_directory)
@@ -453,6 +535,16 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+        )
+    except schema.ResourceAdmissibilityError as exc:
+        return _resource_result(
+            _failure_code(exc),
+            str(exc),
+            anchor,
+            paths,
+            record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     except schema.PublicationArtifactError as exc:
         return _result(
@@ -461,6 +553,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
 
     if synthetic_fault_point == "publication_recovery_artifacts_verified_write_failure":
@@ -471,6 +564,7 @@ def verify_publication_recovery(
             paths,
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     artifacts_verified_record = build_recovery_artifacts_verified_logical_record(
         anchor=anchor,
@@ -495,6 +589,7 @@ def verify_publication_recovery(
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes
             + ([artifacts_verified] if artifacts_verified is not None else []),
+            resource_policy_identity=policy_identity,
         )
     record_writes.append(artifacts_verified)
     if synthetic_fault_point == "publication_recovery_evidence_completed_write_failure":
@@ -505,6 +600,7 @@ def verify_publication_recovery(
             paths,
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
         )
     evidence_completed_record = build_recovery_evidence_completed_logical_record(
         anchor=anchor,
@@ -527,6 +623,7 @@ def verify_publication_recovery(
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes
             + ([evidence_completed] if evidence_completed is not None else []),
+            resource_policy_identity=policy_identity,
         )
     record_writes.append(evidence_completed)
     return _result(
@@ -539,6 +636,7 @@ def verify_publication_recovery(
         original_publication_completed_normally=(
             original_replay.classification == publication_replay.PUBLICATION_COMPLETED
         ),
+        resource_policy_identity=policy_identity,
     )
 
 
@@ -805,10 +903,28 @@ def _read_final_artifact_directory(directory_path: Path) -> dict[str, bytes]:
     expected = tuple(sorted(schema.PUBLICATION_ARTIFACT_FILENAMES))
     if names != expected:
         raise schema.PublicationArtifactError("final publication inventory mismatch")
-    return {
-        name: (directory_path / name).read_bytes()
-        for name in schema.PUBLICATION_ARTIFACT_FILENAMES
-    }
+    artifacts: dict[str, bytes] = {}
+    cumulative = 0
+    for name in schema.PUBLICATION_ARTIFACT_FILENAMES:
+        limit = schema.MAX_PUBLICATION_RESULT_ARTIFACT_BYTES
+        over_limit_code = schema.ARTIFACT_SIZE_LIMIT_EXCEEDED
+        if name == schema.PUBLICATION_EXECUTION_ENVELOPE_FILENAME:
+            limit = schema.MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES
+        elif name == schema.PUBLICATION_SUMMARY_FILENAME:
+            limit = schema.MAX_PUBLICATION_SUMMARY_BYTES
+            over_limit_code = schema.SUMMARY_SIZE_LIMIT_EXCEEDED
+        payload = schema.read_file_bytes_bounded(
+            directory_path / name,
+            limit,
+            over_limit_code=over_limit_code,
+        )
+        cumulative += len(payload)
+        if cumulative > schema.MAX_PUBLICATION_RECOVERY_VERIFICATION_BYTES:
+            raise schema.RecoveryVerificationBudgetError(
+                "publication recovery verification budget exceeded"
+            )
+        artifacts[name] = payload
+    return artifacts
 
 
 def _write_recovery_record(
@@ -893,6 +1009,7 @@ def _result(
     verified_artifact_sha256s: dict[str, str] | None = None,
     record_writes: Sequence[PublicationRecoveryRecordWriteEvidence] = (),
     original_publication_completed_normally: bool = False,
+    resource_policy_identity: dict[str, Any] | None = None,
 ) -> PublicationRecoveryResult:
     return PublicationRecoveryResult(
         classification=classification,
@@ -910,7 +1027,89 @@ def _result(
         original_publication_completed_normally=(
             original_publication_completed_normally
         ),
+        resource_policy_identity=resource_policy_identity,
     )
+
+
+def _resource_result(
+    failure_code: str,
+    detail: str,
+    anchor: Mapping[str, str],
+    paths: PublicationRecoveryPaths,
+    *,
+    verified_artifact_sha256s: dict[str, str] | None = None,
+    record_writes: Sequence[PublicationRecoveryRecordWriteEvidence] = (),
+    resource_policy_identity: dict[str, Any] | None = None,
+) -> PublicationRecoveryResult:
+    classification = _J2_RESOURCE_CLASSIFICATIONS[failure_code]
+    return PublicationRecoveryResult(
+        classification=classification,
+        detail=_bounded_detail(detail),
+        publication_recovery_chain_identity=anchor[
+            "publication_recovery_chain_identity"
+        ],
+        original_publication_chain_identity=anchor[
+            "original_publication_chain_identity"
+        ],
+        verified_artifact_sha256s=verified_artifact_sha256s,
+        record_writes=tuple(record_writes),
+        paths=paths,
+        authority_state=PUBLICATION_RECOVERY_AUTHORITY_CONSUMED,
+        resource_failure_code=failure_code,
+        resource_policy_identity=(
+            resource_policy_identity or schema.resource_admissibility_policy_identity()
+        ),
+    )
+
+
+def _recovery_policy_identity(
+    publication_recovery_utility_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        identity = publication_recovery_utility_identity[
+            "resource_admissibility_policy_identity"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise schema.ResourcePolicyIdentityMismatchError(
+            "resource admissibility policy identity mismatch"
+        ) from exc
+    schema.validate_resource_admissibility_policy_identity(identity)
+    return dict(identity)
+
+
+def _has_null_policy_identity(publication_recovery_utility_identity: Any) -> bool:
+    return (
+        isinstance(publication_recovery_utility_identity, Mapping)
+        and "resource_admissibility_policy_identity"
+        in publication_recovery_utility_identity
+        and publication_recovery_utility_identity.get(
+            "resource_admissibility_policy_identity"
+        )
+        is None
+    )
+
+
+def _pre_anchor_resource_result(
+    failure_code: str,
+    detail: str,
+) -> PublicationRecoveryResult:
+    return PublicationRecoveryResult(
+        classification=_J2_RESOURCE_CLASSIFICATIONS[failure_code],
+        detail=_bounded_detail(detail),
+        resource_failure_code=failure_code,
+        resource_policy_identity=schema.resource_admissibility_policy_identity(),
+    )
+
+
+def _failure_code(exc: schema.ResourceAdmissibilityError) -> str:
+    return getattr(exc, "failure_code", schema.RESOURCE_LIMIT_EXCEEDED)
+
+
+def _bounded_detail(detail: str) -> str:
+    text = str(detail)
+    if len(text) > 200:
+        return text[:200]
+    return text
 
 
 def _validated_root(root_path: str | Path) -> Path:

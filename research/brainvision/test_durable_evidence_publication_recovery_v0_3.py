@@ -31,6 +31,9 @@ def recovery_utility_identity():
         "publication_recovery_schema_identity": source_identity(
             "research/brainvision/durable_evidence_schema_v0_3.py"
         ),
+        "resource_admissibility_policy_identity": (
+            schema.resource_admissibility_policy_identity()
+        ),
     }
 
 

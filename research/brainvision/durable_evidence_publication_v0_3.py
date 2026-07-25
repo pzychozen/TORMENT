@@ -42,6 +42,49 @@ PUBLICATION_ARTIFACTS_VERIFIED_PUBLICATION_COMPLETED_RECORD_FAILED = (
     "PUBLICATION_ARTIFACTS_VERIFIED_PUBLICATION_COMPLETED_RECORD_FAILED"
 )
 PUBLICATION_TERMINAL_STATUS_WRITE_FAILED = "PUBLICATION_TERMINAL_STATUS_WRITE_FAILED"
+PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED = (
+    "PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED"
+)
+PUBLICATION_STAGING_SPACE_BUDGET_UNAVAILABLE = (
+    "PUBLICATION_STAGING_SPACE_BUDGET_UNAVAILABLE"
+)
+PUBLICATION_RESOURCE_ADMISSIBILITY_INDETERMINATE = (
+    "PUBLICATION_RESOURCE_ADMISSIBILITY_INDETERMINATE"
+)
+
+STAGING_CAPACITY_CONFIRMED = "STAGING_CAPACITY_CONFIRMED"
+STAGING_CAPACITY_UNAVAILABLE = "STAGING_CAPACITY_UNAVAILABLE"
+STAGING_CAPACITY_INDETERMINATE = "STAGING_CAPACITY_INDETERMINATE"
+_STAGING_CAPACITY_RESPONSE_KEYS = (
+    "status",
+    "required_bytes",
+    "available_bytes",
+    "detail",
+)
+_J1_RESOURCE_CLASSIFICATIONS = {
+    schema.RESOURCE_LIMIT_EXCEEDED: PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED,
+    schema.ARTIFACT_SIZE_LIMIT_EXCEEDED: PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED,
+    schema.ARTIFACT_SET_SIZE_LIMIT_EXCEEDED: (
+        PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.SUMMARY_SIZE_LIMIT_EXCEEDED: PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED,
+    schema.CANONICAL_STRUCTURE_LIMIT_EXCEEDED: (
+        PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.STRING_SIZE_LIMIT_EXCEEDED: PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED,
+    schema.INTEGER_MAGNITUDE_LIMIT_EXCEEDED: (
+        PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH: (
+        PUBLICATION_RESOURCE_ADMISSIBILITY_FAILED
+    ),
+    schema.STAGING_SPACE_BUDGET_UNAVAILABLE: (
+        PUBLICATION_STAGING_SPACE_BUDGET_UNAVAILABLE
+    ),
+    schema.RESOURCE_ADMISSIBILITY_INDETERMINATE: (
+        PUBLICATION_RESOURCE_ADMISSIBILITY_INDETERMINATE
+    ),
+}
 
 PUBLICATION_CHAIN_ROOT = ".iososv_v0_3.publication_chain"
 PUBLICATION_STAGING_ROOT = ".iososv_v0_3.publication_staging"
@@ -91,6 +134,28 @@ class PublicationProjectionResult:
     paths: PublicationPaths | None = None
     record_writes: tuple[PublicationRecordWriteEvidence, ...] = ()
     authority_state: str = PUBLICATION_AUTHORITY_NOT_ATTEMPTED
+    resource_failure_code: str | None = None
+    resource_policy_identity: dict[str, Any] | None = None
+    required_staging_bytes: int | None = None
+    available_staging_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class StagingCapacityAdmission:
+    status: str
+    required_bytes: int
+    available_bytes: int | None
+    detail: str
+
+
+class FailClosedStagingCapacityAdapter:
+    def check_staging_capacity(self, *, required_bytes: int) -> dict[str, Any]:
+        return {
+            "status": STAGING_CAPACITY_INDETERMINATE,
+            "required_bytes": required_bytes,
+            "available_bytes": None,
+            "detail": "staging capacity was not explicitly confirmed",
+        }
 
 
 class SyntheticPublicationContext:
@@ -316,6 +381,7 @@ def project_publication(
     context: SyntheticPublicationContext,
     durability_adapter: windows_adapter.WindowsDurabilityAdapter | None = None,
     promotion_adapter: windows_adapter.SameVolumeNoReplacePromotionAdapter | None = None,
+    staging_capacity_adapter: object | None = None,
     writer_attempt_identities: Sequence[str] = (
         "0" * 32,
         "1" * 32,
@@ -326,6 +392,11 @@ def project_publication(
     expected_publication_chain_identity: str | None = None,
     synthetic_fault_point: str | None = None,
 ) -> PublicationProjectionResult:
+    if _has_null_policy_identity(publication_utility_identities):
+        return _pre_anchor_resource_result(
+            schema.RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH,
+            "resource admissibility policy identity mismatch",
+        )
     try:
         anchor = validate_publication_anchor(
             bundle_payload=bundle_payload,
@@ -454,8 +525,56 @@ def project_publication(
         )
     record_writes.append(attempted)
 
+    try:
+        policy_identity = _publication_policy_identity(publication_utility_identities)
+        schema.canonical_json_bytes_bounded(
+            bundle_payload,
+            schema.MAX_PUBLICATION_SOURCE_BUNDLE_BYTES,
+        )
+        artifacts = schema.publication_artifact_byte_map_for_bundle(bundle_payload)
+        required_staging_bytes = schema.validate_publication_artifact_resource_map(
+            artifacts
+        )
+    except schema.ResourceAdmissibilityError as exc:
+        return _resource_result(
+            _failure_code(exc),
+            str(exc),
+            anchor,
+            paths,
+            record_writes=record_writes,
+        )
+    except (MemoryError, OverflowError) as exc:
+        return _resource_result(
+            schema.RESOURCE_ADMISSIBILITY_INDETERMINATE,
+            "publication resource admission became indeterminate",
+            anchor,
+            paths,
+            record_writes=record_writes,
+        )
+
+    capacity = _validate_staging_capacity_admission(
+        staging_capacity_adapter,
+        required_staging_bytes,
+    )
+    if capacity.status != STAGING_CAPACITY_CONFIRMED:
+        failure_code = schema.RESOURCE_ADMISSIBILITY_INDETERMINATE
+        if capacity.status == STAGING_CAPACITY_UNAVAILABLE:
+            failure_code = schema.STAGING_SPACE_BUDGET_UNAVAILABLE
+        return _resource_result(
+            failure_code,
+            capacity.detail,
+            anchor,
+            paths,
+            artifact_sha256s=None,
+            record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
+        )
+
     staging_result = _stage_publication_artifacts(
         paths.staging_directory,
+        artifact_bytes_by_name=artifacts,
         bundle_payload=bundle_payload,
         synthetic_fault_point=synthetic_fault_point,
     )
@@ -466,6 +585,9 @@ def project_publication(
             anchor,
             paths,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     staging_hashes = staging_result[2]
     staging_durability = (
@@ -482,6 +604,9 @@ def project_publication(
             paths,
             artifact_sha256s=staging_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     if paths.final_directory.exists():
         return _result(
@@ -491,6 +616,9 @@ def project_publication(
             paths,
             artifact_sha256s=staging_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     adapter = (
         promotion_adapter
@@ -511,6 +639,9 @@ def project_publication(
             paths,
             artifact_sha256s=staging_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     try:
         final_bytes = _read_artifact_directory(paths.final_directory)
@@ -527,6 +658,9 @@ def project_publication(
             paths,
             artifact_sha256s=staging_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
 
     if synthetic_fault_point == "publication_completed_write_failure":
@@ -537,6 +671,9 @@ def project_publication(
             paths,
             artifact_sha256s=final_hashes,
             record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     completed_record = build_publication_completed_logical_record(
         execution_identity=anchor["execution_identity"],
@@ -565,6 +702,9 @@ def project_publication(
             artifact_sha256s=final_hashes,
             record_writes=record_writes
             + ([completed] if completed is not None else []),
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
         )
     record_writes.append(completed)
     return _result(
@@ -574,6 +714,9 @@ def project_publication(
         paths,
         artifact_sha256s=final_hashes,
         record_writes=record_writes,
+        resource_policy_identity=policy_identity,
+        required_staging_bytes=capacity.required_bytes,
+        available_staging_bytes=capacity.available_bytes,
     )
 
 
@@ -649,6 +792,7 @@ def validate_publication_anchor(
 def _stage_publication_artifacts(
     staging_directory: Path,
     *,
+    artifact_bytes_by_name: Mapping[str, bytes],
     bundle_payload: Mapping[str, Any],
     synthetic_fault_point: str | None,
 ) -> tuple[str, str, dict[str, str] | None]:
@@ -666,7 +810,7 @@ def _stage_publication_artifacts(
             "staging directory already exists",
             None,
         )
-    artifacts = schema.publication_artifact_byte_map_for_bundle(bundle_payload)
+    artifacts = dict(artifact_bytes_by_name)
     for index, (name, payload) in enumerate(artifacts.items()):
         if synthetic_fault_point == "staging_verification_failure" and index == 2:
             payload = b"synthetic invalid publication artifact\n"
@@ -710,10 +854,24 @@ def _read_artifact_directory(directory_path: Path) -> dict[str, bytes]:
     expected = tuple(sorted(schema.PUBLICATION_ARTIFACT_FILENAMES))
     if names != expected:
         raise schema.PublicationArtifactError("publication artifact inventory mismatch")
-    return {
-        name: (directory_path / name).read_bytes()
-        for name in schema.PUBLICATION_ARTIFACT_FILENAMES
-    }
+    artifacts: dict[str, bytes] = {}
+    for name in schema.PUBLICATION_ARTIFACT_FILENAMES:
+        limit = schema.MAX_PUBLICATION_RESULT_ARTIFACT_BYTES
+        over_limit_code = schema.ARTIFACT_SIZE_LIMIT_EXCEEDED
+        if name == schema.PUBLICATION_EXECUTION_ENVELOPE_FILENAME:
+            limit = schema.MAX_PUBLICATION_EXECUTION_ENVELOPE_BYTES
+        elif name == schema.PUBLICATION_SUMMARY_FILENAME:
+            limit = schema.MAX_PUBLICATION_SUMMARY_BYTES
+            over_limit_code = schema.SUMMARY_SIZE_LIMIT_EXCEEDED
+        try:
+            artifacts[name] = schema.read_file_bytes_bounded(
+                directory_path / name,
+                limit,
+                over_limit_code=over_limit_code,
+            )
+        except schema.ResourceAdmissibilityError as exc:
+            raise schema.PublicationArtifactError(str(exc)) from exc
+    return artifacts
 
 
 def _write_publication_record(
@@ -793,6 +951,9 @@ def _result(
     *,
     artifact_sha256s: dict[str, str] | None = None,
     record_writes: Sequence[PublicationRecordWriteEvidence] = (),
+    resource_policy_identity: dict[str, Any] | None = None,
+    required_staging_bytes: int | None = None,
+    available_staging_bytes: int | None = None,
 ) -> PublicationProjectionResult:
     return PublicationProjectionResult(
         classification=classification,
@@ -803,7 +964,183 @@ def _result(
         paths=paths,
         record_writes=tuple(record_writes),
         authority_state=PUBLICATION_AUTHORITY_CONSUMED,
+        resource_policy_identity=resource_policy_identity,
+        required_staging_bytes=required_staging_bytes,
+        available_staging_bytes=available_staging_bytes,
     )
+
+
+def _resource_result(
+    failure_code: str,
+    detail: str,
+    anchor: Mapping[str, str],
+    paths: PublicationPaths,
+    *,
+    artifact_sha256s: dict[str, str] | None = None,
+    record_writes: Sequence[PublicationRecordWriteEvidence] = (),
+    resource_policy_identity: dict[str, Any] | None = None,
+    required_staging_bytes: int | None = None,
+    available_staging_bytes: int | None = None,
+) -> PublicationProjectionResult:
+    classification = _J1_RESOURCE_CLASSIFICATIONS[failure_code]
+    return PublicationProjectionResult(
+        classification=classification,
+        detail=_bounded_detail(detail),
+        publication_projection_identity=anchor["publication_projection_identity"],
+        publication_chain_identity=anchor["publication_chain_identity"],
+        artifact_sha256s=artifact_sha256s,
+        paths=paths,
+        record_writes=tuple(record_writes),
+        authority_state=PUBLICATION_AUTHORITY_CONSUMED,
+        resource_failure_code=failure_code,
+        resource_policy_identity=(
+            resource_policy_identity or schema.resource_admissibility_policy_identity()
+        ),
+        required_staging_bytes=required_staging_bytes,
+        available_staging_bytes=available_staging_bytes,
+    )
+
+
+def _publication_policy_identity(
+    publication_utility_identities: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        identity = publication_utility_identities[
+            "resource_admissibility_policy_identity"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise schema.ResourcePolicyIdentityMismatchError(
+            "resource admissibility policy identity mismatch"
+        ) from exc
+    schema.validate_resource_admissibility_policy_identity(identity)
+    return dict(identity)
+
+
+def _has_null_policy_identity(publication_utility_identities: Any) -> bool:
+    return (
+        isinstance(publication_utility_identities, Mapping)
+        and "resource_admissibility_policy_identity" in publication_utility_identities
+        and publication_utility_identities.get(
+            "resource_admissibility_policy_identity"
+        )
+        is None
+    )
+
+
+def _pre_anchor_resource_result(failure_code: str, detail: str) -> PublicationProjectionResult:
+    return PublicationProjectionResult(
+        classification=_J1_RESOURCE_CLASSIFICATIONS[failure_code],
+        detail=_bounded_detail(detail),
+        resource_failure_code=failure_code,
+        resource_policy_identity=schema.resource_admissibility_policy_identity(),
+    )
+
+
+def _validate_staging_capacity_admission(
+    staging_capacity_adapter: object | None,
+    required_bytes: int,
+) -> StagingCapacityAdmission:
+    if staging_capacity_adapter is None:
+        staging_capacity_adapter = FailClosedStagingCapacityAdapter()
+    if not hasattr(staging_capacity_adapter, "check_staging_capacity"):
+        return StagingCapacityAdmission(
+            STAGING_CAPACITY_INDETERMINATE,
+            required_bytes,
+            None,
+            "staging capacity adapter is malformed",
+        )
+    try:
+        response = staging_capacity_adapter.check_staging_capacity(
+            required_bytes=required_bytes
+        )
+    except (MemoryError, OverflowError):
+        return StagingCapacityAdmission(
+            STAGING_CAPACITY_INDETERMINATE,
+            required_bytes,
+            None,
+            "staging capacity admission became indeterminate",
+        )
+    return _validate_staging_capacity_response(response, required_bytes)
+
+
+def _validate_staging_capacity_response(
+    response: Any,
+    required_bytes: int,
+) -> StagingCapacityAdmission:
+    if not isinstance(response, Mapping):
+        return StagingCapacityAdmission(
+            STAGING_CAPACITY_INDETERMINATE,
+            required_bytes,
+            None,
+            "staging capacity response is malformed",
+        )
+    if tuple(response.keys()) != _STAGING_CAPACITY_RESPONSE_KEYS:
+        return StagingCapacityAdmission(
+            STAGING_CAPACITY_INDETERMINATE,
+            required_bytes,
+            None,
+            "staging capacity response field set is malformed",
+        )
+    status = response["status"]
+    returned_required = response["required_bytes"]
+    available = response["available_bytes"]
+    detail = response["detail"]
+    if status not in (
+        STAGING_CAPACITY_CONFIRMED,
+        STAGING_CAPACITY_UNAVAILABLE,
+        STAGING_CAPACITY_INDETERMINATE,
+    ):
+        return _indeterminate_capacity(required_bytes, "unknown staging capacity status")
+    if type(returned_required) is not int or returned_required < 0:
+        return _indeterminate_capacity(required_bytes, "invalid required staging bytes")
+    if returned_required != required_bytes:
+        return _indeterminate_capacity(required_bytes, "required staging bytes mismatch")
+    if not isinstance(detail, str):
+        return _indeterminate_capacity(required_bytes, "invalid staging capacity detail")
+    bounded_detail = _bounded_detail(detail)
+    if status == STAGING_CAPACITY_INDETERMINATE:
+        if available is not None:
+            return _indeterminate_capacity(
+                required_bytes,
+                "indeterminate capacity must not report available bytes",
+            )
+        return StagingCapacityAdmission(status, required_bytes, None, bounded_detail)
+    if type(available) is not int or available < 0:
+        return _indeterminate_capacity(required_bytes, "invalid available staging bytes")
+    if status == STAGING_CAPACITY_CONFIRMED and available < required_bytes:
+        return _indeterminate_capacity(
+            required_bytes,
+            "confirmed capacity is below required bytes",
+        )
+    if status == STAGING_CAPACITY_UNAVAILABLE and available >= required_bytes:
+        return _indeterminate_capacity(
+            required_bytes,
+            "unavailable capacity is not below required bytes",
+        )
+    return StagingCapacityAdmission(status, required_bytes, available, bounded_detail)
+
+
+def _indeterminate_capacity(
+    required_bytes: int,
+    detail: str,
+) -> StagingCapacityAdmission:
+    return StagingCapacityAdmission(
+        STAGING_CAPACITY_INDETERMINATE,
+        required_bytes,
+        None,
+        detail,
+    )
+
+
+def _failure_code(exc: schema.ResourceAdmissibilityError) -> str:
+    return getattr(exc, "failure_code", schema.RESOURCE_LIMIT_EXCEEDED)
+
+
+def _bounded_detail(detail: str) -> str:
+    text = str(detail)
+    if len(text) > 200:
+        return text[:200]
+    return text
 
 
 def _validated_root(root_path: str | Path) -> Path:

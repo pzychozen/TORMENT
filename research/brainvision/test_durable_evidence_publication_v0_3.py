@@ -28,6 +28,16 @@ class ConfirmedSyntheticAdapter(windows_adapter.WindowsDurabilityAdapter):
         )
 
 
+class PositiveTestStagingCapacityAdapter:
+    def check_staging_capacity(self, *, required_bytes: int):
+        return {
+            "status": publication.STAGING_CAPACITY_CONFIRMED,
+            "required_bytes": required_bytes,
+            "available_bytes": required_bytes,
+            "detail": "pytest-local synthetic staging capacity",
+        }
+
+
 class PositiveTmpPromotionAdapter(
     windows_adapter.SameVolumeNoReplacePromotionAdapter
 ):
@@ -203,6 +213,9 @@ def publication_utility_identities():
         "publication_schema_identity": source_identity(
             "research/brainvision/durable_evidence_schema_v0_3.py"
         ),
+        "resource_admissibility_policy_identity": (
+            schema.resource_admissibility_policy_identity()
+        ),
     }
 
 
@@ -212,6 +225,7 @@ def project(
     publication_authority: str = PUBLICATION_AUTHORITY,
     promotion_adapter=None,
     durability_adapter=None,
+    staging_capacity_adapter=None,
     context=None,
     synthetic_fault_point=None,
 ):
@@ -225,6 +239,9 @@ def project(
         context=context or publication.SyntheticPublicationContext(),
         durability_adapter=durability_adapter or ConfirmedSyntheticAdapter(),
         promotion_adapter=promotion_adapter,
+        staging_capacity_adapter=(
+            staging_capacity_adapter or PositiveTestStagingCapacityAdapter()
+        ),
         synthetic_fault_point=synthetic_fault_point,
     )
     return result, bundle_payload, completion
@@ -365,6 +382,7 @@ def test_staging_and_final_directory_collisions_fail_closed(tmp_path):
         context=publication.SyntheticPublicationContext(),
         durability_adapter=ConfirmedSyntheticAdapter(),
         promotion_adapter=PositiveTmpPromotionAdapter(tmp_path),
+        staging_capacity_adapter=PositiveTestStagingCapacityAdapter(),
     )
     assert staging_result.classification == (
         publication.PUBLICATION_STAGING_DIRECTORY_COLLISION
@@ -385,6 +403,7 @@ def test_staging_and_final_directory_collisions_fail_closed(tmp_path):
         context=publication.SyntheticPublicationContext(),
         durability_adapter=ConfirmedSyntheticAdapter(),
         promotion_adapter=PositiveTmpPromotionAdapter(other_root),
+        staging_capacity_adapter=PositiveTestStagingCapacityAdapter(),
     )
     assert final_result.classification == publication.PUBLICATION_FINAL_DIRECTORY_COLLISION
 
