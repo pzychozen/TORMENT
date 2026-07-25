@@ -28,10 +28,16 @@ CHAIN_RECORD_NAMES = (
 
 
 class ConfirmedSyntheticAdapter(windows_adapter.WindowsDurabilityAdapter):
-    def sync_directory_entry(self, directory_path: str):
+    def sync_directory_entry(self, directory_path: str, *, context=None):
         return windows_adapter.DirectoryDurabilityResult(
-            windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
-            "synthetic scientific-result recognition test double",
+            status=windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
+            detail="synthetic scientific-result recognition test double",
+            adapter_policy_identity=schema.directory_durability_policy_identity(),
+            target_role=(
+                context.target_role
+                if context is not None
+                else schema.ARTIFACT_PARENT_DIRECTORY
+            ),
         )
 
 

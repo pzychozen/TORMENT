@@ -153,7 +153,12 @@ def replay_publication_chain(
             publication_chain_identity=publication_chain_identity,
         )
     for instance in chain.accepted_instances[: completed_index + 1]:
-        if not evidence.has_record_object(instance.stored_object_sha256):
+        if not evidence.has_record_object(
+            instance.stored_object_sha256,
+            directory_durability_policy_identity=(
+                schema.directory_durability_policy_identity()
+            ),
+        ):
             return PublicationReplayResult(
                 classification=PUBLICATION_CHAIN_DURABILITY_UNCONFIRMED,
                 detail="publication record durability is unconfirmed",
@@ -166,7 +171,12 @@ def replay_publication_chain(
             )
     if len(chain.accepted_instances) > completed_index + 1:
         terminal_instance = chain.accepted_instances[completed_index + 1]
-        if not evidence.has_record_object(terminal_instance.stored_object_sha256):
+        if not evidence.has_record_object(
+            terminal_instance.stored_object_sha256,
+            directory_durability_policy_identity=(
+                schema.directory_durability_policy_identity()
+            ),
+        ):
             return PublicationReplayResult(
                 classification=PUBLICATION_CHAIN_DURABILITY_UNCONFIRMED,
                 detail="publication terminal durability is unconfirmed",
@@ -222,7 +232,12 @@ def replay_publication_authority_state(
             and record["predecessor_logical_record_sha256"]
             == schema.GENESIS_PREDECESSOR_LOGICAL_RECORD_SHA256
         ):
-            if evidence.has_record_object(first.stored_object_sha256):
+            if evidence.has_record_object(
+                first.stored_object_sha256,
+                directory_durability_policy_identity=(
+                    schema.directory_durability_policy_identity()
+                ),
+            ):
                 return PublicationAuthorityReplayResult(
                     state=PUBLICATION_AUTHORITY_CONSUMED,
                     reusable=False,

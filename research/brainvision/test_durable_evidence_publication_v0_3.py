@@ -21,10 +21,54 @@ SECOND_PUBLICATION_AUTHORITY = "b" * 64
 
 
 class ConfirmedSyntheticAdapter(windows_adapter.WindowsDurabilityAdapter):
-    def sync_directory_entry(self, directory_path: str):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def sync_directory_entry(self, directory_path: str, *, context=None):
+        target_role = (
+            context.target_role
+            if context is not None
+            else schema.ARTIFACT_PARENT_DIRECTORY
+        )
+        self.calls.append((target_role, directory_path))
         return windows_adapter.DirectoryDurabilityResult(
-            windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
-            "synthetic publication test adapter",
+            status=windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
+            detail="synthetic publication test adapter",
+            adapter_policy_identity=schema.directory_durability_policy_identity(),
+            target_role=target_role,
+        )
+
+
+class RoleStatusSyntheticAdapter(ConfirmedSyntheticAdapter):
+    def __init__(
+        self,
+        status_by_role: dict[str, tuple[str, str | None]],
+        *,
+        default_status: str = windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
+        default_failure_code: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.status_by_role = dict(status_by_role)
+        self.default_status = default_status
+        self.default_failure_code = default_failure_code
+
+    def sync_directory_entry(self, directory_path: str, *, context=None):
+        target_role = (
+            context.target_role
+            if context is not None
+            else schema.ARTIFACT_PARENT_DIRECTORY
+        )
+        status, failure_code = self.status_by_role.get(
+            target_role,
+            (self.default_status, self.default_failure_code),
+        )
+        self.calls.append((target_role, directory_path))
+        return windows_adapter.DirectoryDurabilityResult(
+            status=status,
+            detail="synthetic role-specific publication test adapter",
+            failure_code=failure_code,
+            adapter_policy_identity=schema.directory_durability_policy_identity(),
+            target_role=target_role,
         )
 
 
@@ -216,6 +260,9 @@ def publication_utility_identities():
         "resource_admissibility_policy_identity": (
             schema.resource_admissibility_policy_identity()
         ),
+        "directory_durability_policy_identity": (
+            schema.directory_durability_policy_identity()
+        ),
     }
 
 
@@ -303,6 +350,46 @@ def test_publication_projects_exact_three_artifacts_and_replays(tmp_path):
         durability_evidence=ledger_from_publication(result),
     )
     assert replayed.classification == publication_replay.PUBLICATION_COMPLETED
+
+
+def test_publication_directory_durability_roles_are_ordered(tmp_path):
+    adapter = ConfirmedSyntheticAdapter()
+    result, _, _ = project(
+        tmp_path,
+        promotion_adapter=PositiveTmpPromotionAdapter(tmp_path),
+        durability_adapter=adapter,
+    )
+    assert result.classification == publication.PUBLICATION_COMPLETED
+    assert [role for role, _ in adapter.calls] == [
+        schema.ARTIFACT_PARENT_DIRECTORY,
+        schema.ARTIFACT_PARENT_DIRECTORY,
+        schema.STAGING_PARENT_DIRECTORY,
+        schema.STAGING_DIRECTORY,
+        schema.ARTIFACT_PARENT_DIRECTORY,
+    ]
+
+
+def test_staged_set_directory_durability_withholds_completion(tmp_path):
+    adapter = RoleStatusSyntheticAdapter(
+        {
+            schema.STAGING_DIRECTORY: (
+                schema.DIRECTORY_DURABILITY_DENIED,
+                schema.DIRECTORY_FLUSH_DENIED,
+            )
+        }
+    )
+    result, _, _ = project(
+        tmp_path,
+        promotion_adapter=PositiveTmpPromotionAdapter(tmp_path),
+        durability_adapter=adapter,
+    )
+    assert result.classification == publication.PUBLICATION_STAGING_DURABILITY_UNCONFIRMED
+    assert result.directory_durability_failure_code == schema.DIRECTORY_FLUSH_DENIED
+    assert not result.paths.final_directory.exists()
+    assert all(
+        item.logical_record["record_kind"] != "PUBLICATION_COMPLETED"
+        for item in result.record_writes
+    )
 
 
 def test_projection_artifact_bytes_are_deterministic_across_independent_roots(tmp_path):

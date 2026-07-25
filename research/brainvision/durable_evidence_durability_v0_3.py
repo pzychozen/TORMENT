@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 import os
 
 import durable_evidence_primary_writer_v0_3 as primary_writer
@@ -25,6 +25,7 @@ class VerifiedDurabilityEntry:
     path: str
     byte_length: int
     byte_sha256: str
+    directory_durability_policy_identity: dict[str, str]
 
 
 @dataclass(frozen=True, init=False)
@@ -43,9 +44,19 @@ class VerifiedDurabilityEvidence:
         *,
         record_writes: Iterable[object] = (),
         bundle_writes: Iterable[object] = (),
+        expected_directory_durability_policy_identity: (
+            Mapping[str, str] | None
+        ) = None,
     ) -> "VerifiedDurabilityEvidence":
-        record_entries = tuple(_record_entry(item) for item in record_writes)
-        bundle_entries = tuple(_bundle_entry(item) for item in bundle_writes)
+        expected_policy = _coerce_directory_policy_identity(
+            expected_directory_durability_policy_identity
+        )
+        record_entries = tuple(
+            _record_entry(item, expected_policy) for item in record_writes
+        )
+        bundle_entries = tuple(
+            _bundle_entry(item, expected_policy) for item in bundle_writes
+        )
         _reject_duplicate_conflicts(record_entries, "record")
         _reject_duplicate_conflicts(bundle_entries, "bundle")
         instance = cls.__new__(cls)
@@ -72,11 +83,35 @@ class VerifiedDurabilityEvidence:
         object.__setattr__(instance, "_bundle_hashes", frozenset())
         return instance
 
-    def has_record_object(self, stored_object_sha256: str) -> bool:
-        return stored_object_sha256 in self._record_hashes
+    def has_record_object(
+        self,
+        stored_object_sha256: str,
+        *,
+        directory_durability_policy_identity: Mapping[str, str] | None = None,
+    ) -> bool:
+        policy_identity = _coerce_directory_policy_identity(
+            directory_durability_policy_identity
+        )
+        return any(
+            entry.stored_object_sha256 == stored_object_sha256
+            and entry.directory_durability_policy_identity == policy_identity
+            for entry in self._record_entries
+        )
 
-    def has_bundle_object(self, stored_bundle_object_sha256: str) -> bool:
-        return stored_bundle_object_sha256 in self._bundle_hashes
+    def has_bundle_object(
+        self,
+        stored_bundle_object_sha256: str,
+        *,
+        directory_durability_policy_identity: Mapping[str, str] | None = None,
+    ) -> bool:
+        policy_identity = _coerce_directory_policy_identity(
+            directory_durability_policy_identity
+        )
+        return any(
+            entry.stored_object_sha256 == stored_bundle_object_sha256
+            and entry.directory_durability_policy_identity == policy_identity
+            for entry in self._bundle_entries
+        )
 
     @property
     def record_entries(self) -> tuple[VerifiedDurabilityEntry, ...]:
@@ -87,7 +122,10 @@ class VerifiedDurabilityEvidence:
         return self._bundle_entries
 
 
-def _record_entry(item: object) -> VerifiedDurabilityEntry:
+def _record_entry(
+    item: object,
+    expected_policy_identity: dict[str, str],
+) -> VerifiedDurabilityEntry:
     stored_object, write_result = _coerce_evidence_pair(
         item, "stored_record_object", "record"
     )
@@ -100,10 +138,14 @@ def _record_entry(item: object) -> VerifiedDurabilityEntry:
         expected_name=expected_name,
         max_bytes=schema.MAX_STORED_RECORD_OBJECT_BYTES,
         stored_object_hash_key="stored_object_sha256",
+        expected_policy_identity=expected_policy_identity,
     )
 
 
-def _bundle_entry(item: object) -> VerifiedDurabilityEntry:
+def _bundle_entry(
+    item: object,
+    expected_policy_identity: dict[str, str],
+) -> VerifiedDurabilityEntry:
     stored_object, write_result = _coerce_evidence_pair(
         item, "stored_bundle_object", "bundle"
     )
@@ -116,6 +158,7 @@ def _bundle_entry(item: object) -> VerifiedDurabilityEntry:
         expected_name=expected_name,
         max_bytes=schema.MAX_STORED_BUNDLE_OBJECT_BYTES,
         stored_object_hash_key="stored_bundle_object_sha256",
+        expected_policy_identity=expected_policy_identity,
     )
 
 
@@ -140,6 +183,7 @@ def _validate_write_result(
     expected_name: str,
     max_bytes: int,
     stored_object_hash_key: str,
+    expected_policy_identity: dict[str, str],
 ) -> VerifiedDurabilityEntry:
     if not isinstance(write_result, primary_writer.ImmutableWriteResult):
         raise DurabilityEvidenceError("write evidence must be ImmutableWriteResult")
@@ -150,6 +194,13 @@ def _validate_write_result(
         != windows_adapter.DIRECTORY_DURABILITY_CONFIRMED
     ):
         raise DurabilityEvidenceError("directory durability was not confirmed")
+    observed_policy_identity = _coerce_directory_policy_identity(
+        write_result.directory_durability_policy_identity
+    )
+    if observed_policy_identity != expected_policy_identity:
+        raise DurabilityEvidenceError("directory durability policy mismatch")
+    if write_result.directory_durability_failure_code is not None:
+        raise DurabilityEvidenceError("confirmed directory durability has failure code")
     if write_result.readback_verified is not True:
         raise DurabilityEvidenceError("write read-back was not verified")
     path = Path(write_result.path)
@@ -179,6 +230,7 @@ def _validate_write_result(
         path=str(path),
         byte_length=len(raw),
         byte_sha256=schema.sha256_hex(raw),
+        directory_durability_policy_identity=observed_policy_identity,
     )
 
 
@@ -193,6 +245,24 @@ def _reject_duplicate_conflicts(
                 "duplicate-conflicting %s durability evidence" % label
             )
         path_to_hash[entry.path] = entry.stored_object_sha256
+
+
+def _coerce_directory_policy_identity(
+    value: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if value is None:
+        return schema.directory_durability_policy_identity()
+    if not isinstance(value, Mapping):
+        raise DurabilityEvidenceError("directory durability policy identity is invalid")
+    if tuple(value.keys()) != schema.DIRECTORY_DURABILITY_POLICY_IDENTITY_KEYS:
+        raise DurabilityEvidenceError("directory durability policy identity is invalid")
+    if value["policy_schema_identity"] != schema.DIRECTORY_DURABILITY_POLICY_SCHEMA:
+        raise DurabilityEvidenceError("directory durability policy identity is invalid")
+    _require_hex64(value["policy_sha256"], "directory policy sha256")
+    return {
+        "policy_schema_identity": value["policy_schema_identity"],
+        "policy_sha256": value["policy_sha256"],
+    }
 
 
 def _require_hex64(value: object, label: str) -> None:

@@ -173,6 +173,8 @@ class PublicationRecoveryResult:
     original_publication_completed_normally: bool = False
     resource_failure_code: str | None = None
     resource_policy_identity: dict[str, Any] | None = None
+    directory_durability_policy_identity: dict[str, Any] | None = None
+    directory_durability_failure_code: str | None = None
 
 
 class SyntheticPublicationRecoveryContext:
@@ -355,6 +357,9 @@ def verify_publication_recovery(
             ),
         )
         attempts = _writer_attempts(writer_attempt_identities, 4)
+        directory_policy_identity = _recovery_directory_policy_identity(
+            publication_recovery_utility_identity
+        )
         paths = recovery_paths(
             root_path,
             original_publication_chain_identity=original_publication_chain_identity,
@@ -386,6 +391,7 @@ def verify_publication_recovery(
             "synthetic recovery genesis write failure",
             anchor,
             paths,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     if paths.recovery_chain_directory.exists():
         return _result(
@@ -393,6 +399,7 @@ def verify_publication_recovery(
             "publication recovery chain directory already exists",
             anchor,
             paths,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     try:
         paths.recovery_chain_directory.mkdir(parents=True, exist_ok=False)
@@ -402,6 +409,7 @@ def verify_publication_recovery(
             "publication recovery chain directory already exists",
             anchor,
             paths,
+            directory_durability_policy_identity=directory_policy_identity,
         )
 
     record_writes: list[PublicationRecoveryRecordWriteEvidence] = []
@@ -424,6 +432,8 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes + ([genesis] if genesis is not None else []),
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=_write_failure_code(genesis),
         )
     record_writes.append(genesis)
     if synthetic_fault_point == "publication_recovery_attempted_write_failure":
@@ -433,6 +443,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     attempted_record = build_recovery_attempted_logical_record(
         anchor=anchor,
@@ -453,6 +464,8 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes + ([attempted] if attempted is not None else []),
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=_write_failure_code(attempted),
         )
     record_writes.append(attempted)
 
@@ -469,6 +482,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     except (MemoryError, OverflowError):
         return _resource_result(
@@ -477,6 +491,7 @@ def verify_publication_recovery(
             anchor,
             paths,
             record_writes=record_writes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
 
     if not paths.original_publication_chain_directory.exists():
@@ -487,6 +502,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     original_replay = _classify_original_publication_chain(paths, anchor)
     if original_replay.classification in (
@@ -502,6 +518,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     if len(original_replay.accepted_records) < 2:
         return _result(
@@ -511,6 +528,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     if not paths.final_publication_directory.exists():
         return _result(
@@ -520,6 +538,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     try:
         final_bytes = _read_final_artifact_directory(paths.final_publication_directory)
@@ -536,6 +555,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     except schema.ResourceAdmissibilityError as exc:
         return _resource_result(
@@ -545,6 +565,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     except schema.PublicationArtifactError as exc:
         return _result(
@@ -554,6 +575,7 @@ def verify_publication_recovery(
             paths,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
 
     if synthetic_fault_point == "publication_recovery_artifacts_verified_write_failure":
@@ -565,6 +587,7 @@ def verify_publication_recovery(
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     artifacts_verified_record = build_recovery_artifacts_verified_logical_record(
         anchor=anchor,
@@ -590,6 +613,8 @@ def verify_publication_recovery(
             record_writes=record_writes
             + ([artifacts_verified] if artifacts_verified is not None else []),
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=_write_failure_code(artifacts_verified),
         )
     record_writes.append(artifacts_verified)
     if synthetic_fault_point == "publication_recovery_evidence_completed_write_failure":
@@ -601,6 +626,7 @@ def verify_publication_recovery(
             verified_artifact_sha256s=verified_hashes,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     evidence_completed_record = build_recovery_evidence_completed_logical_record(
         anchor=anchor,
@@ -624,6 +650,8 @@ def verify_publication_recovery(
             record_writes=record_writes
             + ([evidence_completed] if evidence_completed is not None else []),
             resource_policy_identity=policy_identity,
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=_write_failure_code(evidence_completed),
         )
     record_writes.append(evidence_completed)
     return _result(
@@ -637,6 +665,7 @@ def verify_publication_recovery(
             original_replay.classification == publication_replay.PUBLICATION_COMPLETED
         ),
         resource_policy_identity=policy_identity,
+        directory_durability_policy_identity=directory_policy_identity,
     )
 
 
@@ -686,6 +715,7 @@ def validate_publication_recovery_anchor(
             "publication_recovery_utility_identity must be an object"
         )
     schema.validate_json_domain(publication_recovery_utility_identity)
+    _recovery_directory_policy_identity(publication_recovery_utility_identity)
     recovery_chain_identity = schema.publication_recovery_chain_identity(
         original_publication_chain_identity=original_publication_chain_identity,
         publication_recovery_authorization_identity=(
@@ -997,7 +1027,20 @@ def _writer_attempts(values: Sequence[str], required: int) -> tuple[str, ...]:
 
 
 def _durable(evidence: PublicationRecoveryRecordWriteEvidence) -> bool:
-    return evidence.write_result.authoritative_status == primary_writer.DURABLE_ACCEPTED
+    return (
+        evidence.write_result.authoritative_status == primary_writer.DURABLE_ACCEPTED
+        and _directory_policy_identity_matches(
+            evidence.write_result.directory_durability_policy_identity
+        )
+    )
+
+
+def _write_failure_code(
+    evidence: PublicationRecoveryRecordWriteEvidence | None,
+) -> str | None:
+    if evidence is None:
+        return None
+    return evidence.write_result.directory_durability_failure_code
 
 
 def _result(
@@ -1010,6 +1053,8 @@ def _result(
     record_writes: Sequence[PublicationRecoveryRecordWriteEvidence] = (),
     original_publication_completed_normally: bool = False,
     resource_policy_identity: dict[str, Any] | None = None,
+    directory_durability_policy_identity: dict[str, Any] | None = None,
+    directory_durability_failure_code: str | None = None,
 ) -> PublicationRecoveryResult:
     return PublicationRecoveryResult(
         classification=classification,
@@ -1028,6 +1073,8 @@ def _result(
             original_publication_completed_normally
         ),
         resource_policy_identity=resource_policy_identity,
+        directory_durability_policy_identity=directory_durability_policy_identity,
+        directory_durability_failure_code=directory_durability_failure_code,
     )
 
 
@@ -1040,6 +1087,8 @@ def _resource_result(
     verified_artifact_sha256s: dict[str, str] | None = None,
     record_writes: Sequence[PublicationRecoveryRecordWriteEvidence] = (),
     resource_policy_identity: dict[str, Any] | None = None,
+    directory_durability_policy_identity: dict[str, Any] | None = None,
+    directory_durability_failure_code: str | None = None,
 ) -> PublicationRecoveryResult:
     classification = _J2_RESOURCE_CLASSIFICATIONS[failure_code]
     return PublicationRecoveryResult(
@@ -1059,6 +1108,8 @@ def _resource_result(
         resource_policy_identity=(
             resource_policy_identity or schema.resource_admissibility_policy_identity()
         ),
+        directory_durability_policy_identity=directory_durability_policy_identity,
+        directory_durability_failure_code=directory_durability_failure_code,
     )
 
 
@@ -1075,6 +1126,29 @@ def _recovery_policy_identity(
         ) from exc
     schema.validate_resource_admissibility_policy_identity(identity)
     return dict(identity)
+
+
+def _recovery_directory_policy_identity(
+    publication_recovery_utility_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        identity = publication_recovery_utility_identity[
+            "directory_durability_policy_identity"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise schema.DirectoryDurabilityPolicyIdentityMismatchError(
+            "directory durability policy identity mismatch"
+        ) from exc
+    schema.validate_directory_durability_policy_identity(identity)
+    return dict(identity)
+
+
+def _directory_policy_identity_matches(value: Mapping[str, Any] | None) -> bool:
+    try:
+        schema.validate_directory_durability_policy_identity(value)
+    except schema.EvidenceValidationError:
+        return False
+    return dict(value) == schema.directory_durability_policy_identity()
 
 
 def _has_null_policy_identity(publication_recovery_utility_identity: Any) -> bool:

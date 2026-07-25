@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,29 @@ def _write_record(path: Path, logical_record: dict, attempt: str):
 def _ledger(*pairs):
     return durability.VerifiedDurabilityEvidence.from_immutable_write_results(
         record_writes=pairs
+    )
+
+
+def _foreign_directory_policy_identity():
+    return {
+        "policy_schema_identity": schema.DIRECTORY_DURABILITY_POLICY_SCHEMA,
+        "policy_sha256": "f" * 64,
+    }
+
+
+def _ledger_under_directory_policy(result, directory_policy_identity):
+    return durability.VerifiedDurabilityEvidence.from_immutable_write_results(
+        record_writes=tuple(
+            (
+                item.stored_record_object,
+                replace(
+                    item.write_result,
+                    directory_durability_policy_identity=directory_policy_identity,
+                ),
+            )
+            for item in result.record_writes
+        ),
+        expected_directory_durability_policy_identity=directory_policy_identity,
     )
 
 
@@ -188,6 +212,32 @@ def test_publication_replay_requires_verified_durability(tmp_path):
         ],
         expected_artifact_sha256s=result.artifact_sha256s,
         durability_evidence=durability.VerifiedDurabilityEvidence.empty(),
+    )
+    assert replayed.classification == (
+        publication_replay.PUBLICATION_CHAIN_DURABILITY_UNCONFIRMED
+    )
+
+
+def test_publication_replay_rejects_foreign_directory_policy_evidence(tmp_path):
+    result, bundle_payload, completion = project(
+        tmp_path,
+        promotion_adapter=PositiveTmpPromotionAdapter(tmp_path),
+    )
+    replayed = publication_replay.replay_publication_chain(
+        result.paths.chain_directory,
+        expected_execution_identity=EXECUTION_IDENTITY,
+        publication_projection_authorization_identity=PUBLICATION_AUTHORITY,
+        publication_chain_identity=result.publication_chain_identity,
+        publication_projection_identity=result.publication_projection_identity,
+        bundle_payload_sha256=bundle_payload["bundle_payload_sha256"],
+        scientific_completion_logical_record_sha256=completion[
+            "logical_record_sha256"
+        ],
+        expected_artifact_sha256s=result.artifact_sha256s,
+        durability_evidence=_ledger_under_directory_policy(
+            result,
+            _foreign_directory_policy_identity(),
+        ),
     )
     assert replayed.classification == (
         publication_replay.PUBLICATION_CHAIN_DURABILITY_UNCONFIRMED

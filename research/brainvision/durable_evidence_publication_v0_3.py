@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 import os
+import sys
 
 import durable_evidence_primary_writer_v0_3 as primary_writer
 import durable_evidence_schema_v0_3 as schema
@@ -138,6 +139,8 @@ class PublicationProjectionResult:
     resource_policy_identity: dict[str, Any] | None = None
     required_staging_bytes: int | None = None
     available_staging_bytes: int | None = None
+    directory_durability_policy_identity: dict[str, Any] | None = None
+    directory_durability_failure_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -527,6 +530,9 @@ def project_publication(
 
     try:
         policy_identity = _publication_policy_identity(publication_utility_identities)
+        directory_policy_identity = _publication_directory_policy_identity(
+            publication_utility_identities
+        )
         schema.canonical_json_bytes_bounded(
             bundle_payload,
             schema.MAX_PUBLICATION_SOURCE_BUNDLE_BYTES,
@@ -570,12 +576,14 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
 
     staging_result = _stage_publication_artifacts(
         paths.staging_directory,
         artifact_bytes_by_name=artifacts,
         bundle_payload=bundle_payload,
+        durability_adapter=durability_adapter,
         synthetic_fault_point=synthetic_fault_point,
     )
     if staging_result[0] != PUBLICATION_COMPLETED:
@@ -588,25 +596,46 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=staging_result[3],
         )
-    staging_hashes = staging_result[2]
-    staging_durability = (
-        durability_adapter or windows_adapter.FailClosedWindowsDurabilityAdapter()
-    ).sync_directory_entry(str(paths.staging_directory))
-    if (
-        staging_durability.status
-        != windows_adapter.DIRECTORY_DURABILITY_CONFIRMED
-    ):
+    staging_durability = _sync_directory_target(
+        durability_adapter,
+        paths.staging_directory,
+        schema.STAGING_DIRECTORY,
+    )
+    if not _directory_durability_confirmed(staging_durability):
         return _result(
             PUBLICATION_STAGING_DURABILITY_UNCONFIRMED,
             "staging directory durability was not confirmed",
             anchor,
             paths,
-            artifact_sha256s=staging_hashes,
+            artifact_sha256s=None,
             record_writes=record_writes,
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
+            directory_durability_failure_code=(
+                _directory_durability_failure_code(staging_durability)
+            ),
+        )
+    try:
+        observed = _read_artifact_directory(paths.staging_directory)
+        staging_hashes = schema.validate_publication_artifact_byte_map(
+            observed, bundle_payload=bundle_payload
+        )
+    except schema.PublicationArtifactError as exc:
+        return _result(
+            PUBLICATION_VERIFICATION_FAILED,
+            str(exc),
+            anchor,
+            paths,
+            record_writes=record_writes,
+            resource_policy_identity=policy_identity,
+            required_staging_bytes=capacity.required_bytes,
+            available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     if paths.final_directory.exists():
         return _result(
@@ -619,6 +648,7 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     adapter = (
         promotion_adapter
@@ -642,6 +672,7 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     try:
         final_bytes = _read_artifact_directory(paths.final_directory)
@@ -661,6 +692,7 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
 
     if synthetic_fault_point == "publication_completed_write_failure":
@@ -674,6 +706,7 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     completed_record = build_publication_completed_logical_record(
         execution_identity=anchor["execution_identity"],
@@ -705,6 +738,7 @@ def project_publication(
             resource_policy_identity=policy_identity,
             required_staging_bytes=capacity.required_bytes,
             available_staging_bytes=capacity.available_bytes,
+            directory_durability_policy_identity=directory_policy_identity,
         )
     record_writes.append(completed)
     return _result(
@@ -717,6 +751,7 @@ def project_publication(
         resource_policy_identity=policy_identity,
         required_staging_bytes=capacity.required_bytes,
         available_staging_bytes=capacity.available_bytes,
+        directory_durability_policy_identity=directory_policy_identity,
     )
 
 
@@ -745,6 +780,7 @@ def validate_publication_anchor(
     if not isinstance(publication_utility_identities, Mapping):
         raise PublicationEvidenceError("publication_utility_identities must be an object")
     schema.validate_json_domain(publication_utility_identities)
+    _publication_directory_policy_identity(publication_utility_identities)
     _validate_completion_payload_matches_bundle(completion_payload, bundle_payload)
     publication_recipe_identity = bundle_payload["publication_projection_source"][
         "publication_recipe_identity"
@@ -794,12 +830,14 @@ def _stage_publication_artifacts(
     *,
     artifact_bytes_by_name: Mapping[str, bytes],
     bundle_payload: Mapping[str, Any],
+    durability_adapter: windows_adapter.WindowsDurabilityAdapter | None,
     synthetic_fault_point: str | None,
-) -> tuple[str, str, dict[str, str] | None]:
+) -> tuple[str, str, dict[str, str] | None, str | None]:
     if staging_directory.exists():
         return (
             PUBLICATION_STAGING_DIRECTORY_COLLISION,
             "staging directory already exists",
+            None,
             None,
         )
     try:
@@ -809,6 +847,19 @@ def _stage_publication_artifacts(
             PUBLICATION_STAGING_DIRECTORY_COLLISION,
             "staging directory already exists",
             None,
+            None,
+        )
+    parent_durability = _sync_directory_target(
+        durability_adapter,
+        staging_directory.parent,
+        schema.STAGING_PARENT_DIRECTORY,
+    )
+    if not _directory_durability_confirmed(parent_durability):
+        return (
+            PUBLICATION_STAGING_DURABILITY_UNCONFIRMED,
+            "staging parent directory durability was not confirmed",
+            None,
+            _directory_durability_failure_code(parent_durability),
         )
     artifacts = dict(artifact_bytes_by_name)
     for index, (name, payload) in enumerate(artifacts.items()):
@@ -821,14 +872,20 @@ def _stage_publication_artifacts(
                 handle.flush()
                 os.fsync(handle.fileno())
         except OSError as exc:
-            return (PUBLICATION_STAGING_INCOMPLETE, str(exc), None)
+            return (PUBLICATION_STAGING_INCOMPLETE, str(exc), None, None)
         readback = destination.read_bytes()
         if readback != payload:
-            return (PUBLICATION_STAGING_INCOMPLETE, "staging read-back mismatch", None)
+            return (
+                PUBLICATION_STAGING_INCOMPLETE,
+                "staging read-back mismatch",
+                None,
+                None,
+            )
         if synthetic_fault_point == "failure_after_one_artifact" and index == 0:
             return (
                 PUBLICATION_STAGING_INCOMPLETE,
                 "synthetic failure after one artifact",
+                None,
                 None,
             )
     if synthetic_fault_point == "failure_after_all_artifacts_before_verification":
@@ -836,15 +893,9 @@ def _stage_publication_artifacts(
             PUBLICATION_STAGING_INCOMPLETE,
             "synthetic failure before staging verification",
             None,
+            None,
         )
-    try:
-        observed = _read_artifact_directory(staging_directory)
-        hashes = schema.validate_publication_artifact_byte_map(
-            observed, bundle_payload=bundle_payload
-        )
-    except schema.PublicationArtifactError as exc:
-        return (PUBLICATION_VERIFICATION_FAILED, str(exc), None)
-    return (PUBLICATION_COMPLETED, "staging artifacts verified", hashes)
+    return (PUBLICATION_COMPLETED, "staging artifacts written", None, None)
 
 
 def _read_artifact_directory(directory_path: Path) -> dict[str, bytes]:
@@ -940,7 +991,12 @@ def _writer_attempts(values: Sequence[str], required: int) -> tuple[str, ...]:
 
 
 def _durable(evidence: PublicationRecordWriteEvidence) -> bool:
-    return evidence.write_result.authoritative_status == primary_writer.DURABLE_ACCEPTED
+    return (
+        evidence.write_result.authoritative_status == primary_writer.DURABLE_ACCEPTED
+        and _directory_policy_identity_matches(
+            evidence.write_result.directory_durability_policy_identity
+        )
+    )
 
 
 def _result(
@@ -954,6 +1010,8 @@ def _result(
     resource_policy_identity: dict[str, Any] | None = None,
     required_staging_bytes: int | None = None,
     available_staging_bytes: int | None = None,
+    directory_durability_policy_identity: dict[str, Any] | None = None,
+    directory_durability_failure_code: str | None = None,
 ) -> PublicationProjectionResult:
     return PublicationProjectionResult(
         classification=classification,
@@ -967,6 +1025,10 @@ def _result(
         resource_policy_identity=resource_policy_identity,
         required_staging_bytes=required_staging_bytes,
         available_staging_bytes=available_staging_bytes,
+        directory_durability_policy_identity=(
+            directory_durability_policy_identity
+        ),
+        directory_durability_failure_code=directory_durability_failure_code,
     )
 
 
@@ -981,6 +1043,8 @@ def _resource_result(
     resource_policy_identity: dict[str, Any] | None = None,
     required_staging_bytes: int | None = None,
     available_staging_bytes: int | None = None,
+    directory_durability_policy_identity: dict[str, Any] | None = None,
+    directory_durability_failure_code: str | None = None,
 ) -> PublicationProjectionResult:
     classification = _J1_RESOURCE_CLASSIFICATIONS[failure_code]
     return PublicationProjectionResult(
@@ -998,6 +1062,10 @@ def _resource_result(
         ),
         required_staging_bytes=required_staging_bytes,
         available_staging_bytes=available_staging_bytes,
+        directory_durability_policy_identity=(
+            directory_durability_policy_identity
+        ),
+        directory_durability_failure_code=directory_durability_failure_code,
     )
 
 
@@ -1014,6 +1082,69 @@ def _publication_policy_identity(
         ) from exc
     schema.validate_resource_admissibility_policy_identity(identity)
     return dict(identity)
+
+
+def _publication_directory_policy_identity(
+    publication_utility_identities: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        identity = publication_utility_identities[
+            "directory_durability_policy_identity"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise schema.DirectoryDurabilityPolicyIdentityMismatchError(
+            "directory durability policy identity mismatch"
+        ) from exc
+    schema.validate_directory_durability_policy_identity(identity)
+    return dict(identity)
+
+
+def _sync_directory_target(
+    durability_adapter: windows_adapter.WindowsDurabilityAdapter | None,
+    directory_path: Path,
+    target_role: str,
+) -> windows_adapter.DirectoryDurabilityResult:
+    adapter = durability_adapter or windows_adapter.FailClosedWindowsDurabilityAdapter()
+    context = windows_adapter.DirectoryDurabilityContext(target_role=target_role)
+    try:
+        return adapter.sync_directory_entry(str(directory_path), context=context)
+    except Exception as exc:
+        return windows_adapter.DirectoryDurabilityResult(
+            status=schema.DIRECTORY_DURABILITY_INDETERMINATE,
+            detail=str(exc),
+            failure_code=schema.UNEXPECTED_EXCEPTION,
+            platform=sys.platform,
+            adapter_policy_identity=schema.directory_durability_policy_identity(),
+            target_role=target_role,
+        )
+
+
+def _directory_durability_confirmed(
+    result: windows_adapter.DirectoryDurabilityResult,
+) -> bool:
+    return (
+        result.status == windows_adapter.DIRECTORY_DURABILITY_CONFIRMED
+        and result.failure_code is None
+        and _directory_policy_identity_matches(result.adapter_policy_identity)
+    )
+
+
+def _directory_durability_failure_code(
+    result: windows_adapter.DirectoryDurabilityResult,
+) -> str | None:
+    if result.failure_code is not None:
+        return result.failure_code
+    if not _directory_policy_identity_matches(result.adapter_policy_identity):
+        return schema.POLICY_IDENTITY_MISMATCH
+    return None
+
+
+def _directory_policy_identity_matches(value: Mapping[str, Any] | None) -> bool:
+    try:
+        schema.validate_directory_durability_policy_identity(value)
+    except schema.EvidenceValidationError:
+        return False
+    return dict(value) == schema.directory_durability_policy_identity()
 
 
 def _has_null_policy_identity(publication_utility_identities: Any) -> bool:

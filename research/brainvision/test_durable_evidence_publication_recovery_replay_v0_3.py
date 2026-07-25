@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,29 @@ def _write_record(path: Path, logical_record: dict, attempt: str):
 def _ledger(*pairs):
     return durability.VerifiedDurabilityEvidence.from_immutable_write_results(
         record_writes=pairs
+    )
+
+
+def _foreign_directory_policy_identity():
+    return {
+        "policy_schema_identity": schema.DIRECTORY_DURABILITY_POLICY_SCHEMA,
+        "policy_sha256": "f" * 64,
+    }
+
+
+def _ledger_under_directory_policy(result, directory_policy_identity):
+    return durability.VerifiedDurabilityEvidence.from_immutable_write_results(
+        record_writes=tuple(
+            (
+                item.stored_record_object,
+                replace(
+                    item.write_result,
+                    directory_durability_policy_identity=directory_policy_identity,
+                ),
+            )
+            for item in result.record_writes
+        ),
+        expected_directory_durability_policy_identity=directory_policy_identity,
     )
 
 
@@ -215,6 +239,30 @@ def test_recovery_replay_requires_verified_durability(tmp_path):
         publication_recovery_chain_identity=recovered.publication_recovery_chain_identity,
         original_publication_chain_identity=publication_result.publication_chain_identity,
         durability_evidence=durability.VerifiedDurabilityEvidence.empty(),
+    )
+    assert replayed.classification == (
+        recovery_replay.PUBLICATION_RECOVERY_CHAIN_DURABILITY_UNCONFIRMED
+    )
+
+
+def test_recovery_replay_rejects_foreign_directory_policy_evidence(tmp_path):
+    publication_result, bundle_payload, completion = (
+        setup_final_artifacts_with_incomplete_publication_chain(tmp_path)
+    )
+    recovered = run_recovery(
+        tmp_path, publication_result, bundle_payload, completion
+    )
+    replayed = recovery_replay.replay_publication_recovery_chain(
+        recovered.paths.recovery_chain_directory,
+        expected_execution_identity=EXECUTION_IDENTITY,
+        publication_recovery_authorization_identity=RECOVERY_AUTHORITY,
+        publication_recovery_chain_identity=recovered.publication_recovery_chain_identity,
+        original_publication_chain_identity=publication_result.publication_chain_identity,
+        expected_final_artifact_sha256s=publication_result.artifact_sha256s,
+        durability_evidence=_ledger_under_directory_policy(
+            recovered,
+            _foreign_directory_policy_identity(),
+        ),
     )
     assert replayed.classification == (
         recovery_replay.PUBLICATION_RECOVERY_CHAIN_DURABILITY_UNCONFIRMED

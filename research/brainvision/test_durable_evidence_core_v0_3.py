@@ -16,10 +16,16 @@ WRITER_ATTEMPT = "3f2a1c9e77b4402db8e6a15c0d99e412"
 
 
 class ConfirmedSyntheticAdapter(windows_adapter.WindowsDurabilityAdapter):
-    def sync_directory_entry(self, directory_path: str):
+    def sync_directory_entry(self, directory_path: str, *, context=None):
         return windows_adapter.DirectoryDurabilityResult(
-            windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
-            "synthetic test adapter",
+            status=windows_adapter.DIRECTORY_DURABILITY_CONFIRMED,
+            detail="synthetic test adapter",
+            adapter_policy_identity=schema.directory_durability_policy_identity(),
+            target_role=(
+                context.target_role
+                if context is not None
+                else schema.ARTIFACT_PARENT_DIRECTORY
+            ),
         )
 
 
@@ -428,5 +434,6 @@ def test_fail_closed_platform_stubs_do_not_claim_validation():
         windows_adapter.FailClosedSameVolumeNoReplacePromotionAdapter()
         .promote_verified_directory_no_replace("synthetic_staging", "synthetic_final")
     )
-    assert durability.status == windows_adapter.DIRECTORY_DURABILITY_UNCONFIRMED
+    assert durability.status == windows_adapter.DIRECTORY_DURABILITY_UNSUPPORTED
+    assert durability.failure_code == schema.ADAPTER_ABSENT
     assert promotion.status == windows_adapter.PROMOTION_UNCONFIRMED

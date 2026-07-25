@@ -46,6 +46,112 @@ MAX_PUBLICATION_ARTIFACT_SET_BYTES = 8406016
 MAX_PUBLICATION_STAGING_WRITE_BYTES = 8406016
 MAX_PUBLICATION_RECOVERY_VERIFICATION_BYTES = 8406016
 
+DIRECTORY_DURABILITY_POLICY_SCHEMA = (
+    "durable-evidence-windows-directory-durability-policy-v0.1"
+)
+DIRECTORY_DURABILITY_ADAPTER_IDENTITY = (
+    "durable_evidence_windows_adapter_v0_3.Win32DirectoryDurabilityAdapter"
+)
+DIRECTORY_DURABILITY_OPERATION_IDENTITY = (
+    "win32-createfilew-flushfilebuffers-directory-entry-v0.1"
+)
+DIRECTORY_DURABILITY_FAILURE_MAPPING_VERSION = (
+    "windows-directory-durability-failure-mapping-v0.1"
+)
+DIRECTORY_DURABILITY_VALIDATION_PROFILE_IDENTITY = (
+    "windows-10-11-local-fixed-ntfs-pytest-tmp-directory-v0.1"
+)
+ARTIFACT_PARENT_DIRECTORY = "ARTIFACT_PARENT_DIRECTORY"
+STAGING_PARENT_DIRECTORY = "STAGING_PARENT_DIRECTORY"
+STAGING_DIRECTORY = "STAGING_DIRECTORY"
+FINAL_PARENT_DIRECTORY = "FINAL_PARENT_DIRECTORY"
+DIRECTORY_DURABILITY_TARGET_ROLES = (
+    ARTIFACT_PARENT_DIRECTORY,
+    STAGING_PARENT_DIRECTORY,
+    STAGING_DIRECTORY,
+    FINAL_PARENT_DIRECTORY,
+)
+DIRECTORY_DURABILITY_CONFIRMED = "DIRECTORY_DURABILITY_CONFIRMED"
+DIRECTORY_DURABILITY_UNSUPPORTED = "DIRECTORY_DURABILITY_UNSUPPORTED"
+DIRECTORY_DURABILITY_DENIED = "DIRECTORY_DURABILITY_DENIED"
+DIRECTORY_DURABILITY_INDETERMINATE = "DIRECTORY_DURABILITY_INDETERMINATE"
+DIRECTORY_DURABILITY_TARGET_INVALID = "DIRECTORY_DURABILITY_TARGET_INVALID"
+DIRECTORY_DURABILITY_IDENTITY_CHANGED = "DIRECTORY_DURABILITY_IDENTITY_CHANGED"
+DIRECTORY_DURABILITY_OPERATION_FAILED = "DIRECTORY_DURABILITY_OPERATION_FAILED"
+DIRECTORY_DURABILITY_STATUS_TAXONOMY = (
+    DIRECTORY_DURABILITY_CONFIRMED,
+    DIRECTORY_DURABILITY_UNSUPPORTED,
+    DIRECTORY_DURABILITY_DENIED,
+    DIRECTORY_DURABILITY_INDETERMINATE,
+    DIRECTORY_DURABILITY_TARGET_INVALID,
+    DIRECTORY_DURABILITY_IDENTITY_CHANGED,
+    DIRECTORY_DURABILITY_OPERATION_FAILED,
+)
+ADAPTER_ABSENT = "ADAPTER_ABSENT"
+NON_WINDOWS_PLATFORM = "NON_WINDOWS_PLATFORM"
+WINDOWS_VERSION_UNSUPPORTED = "WINDOWS_VERSION_UNSUPPORTED"
+DRIVE_TYPE_UNSUPPORTED = "DRIVE_TYPE_UNSUPPORTED"
+FILESYSTEM_UNSUPPORTED = "FILESYSTEM_UNSUPPORTED"
+TARGET_NOT_ABSOLUTE = "TARGET_NOT_ABSOLUTE"
+TARGET_INVALID = "TARGET_INVALID"
+TARGET_MISSING = "TARGET_MISSING"
+TARGET_NOT_DIRECTORY = "TARGET_NOT_DIRECTORY"
+TARGET_REPARSE_POINT = "TARGET_REPARSE_POINT"
+TARGET_IDENTITY_UNAVAILABLE = "TARGET_IDENTITY_UNAVAILABLE"
+TARGET_IDENTITY_CHANGED = "TARGET_IDENTITY_CHANGED"
+DIRECTORY_OPEN_UNSUPPORTED = "DIRECTORY_OPEN_UNSUPPORTED"
+DIRECTORY_OPEN_DENIED = "DIRECTORY_OPEN_DENIED"
+DIRECTORY_OPEN_FAILED = "DIRECTORY_OPEN_FAILED"
+DIRECTORY_FLUSH_UNSUPPORTED = "DIRECTORY_FLUSH_UNSUPPORTED"
+DIRECTORY_FLUSH_DENIED = "DIRECTORY_FLUSH_DENIED"
+DIRECTORY_FLUSH_FAILED = "DIRECTORY_FLUSH_FAILED"
+DIRECTORY_CLOSE_INDETERMINATE = "DIRECTORY_CLOSE_INDETERMINATE"
+UNKNOWN_NATIVE_ERROR = "UNKNOWN_NATIVE_ERROR"
+UNEXPECTED_EXCEPTION = "UNEXPECTED_EXCEPTION"
+POLICY_IDENTITY_MISMATCH = "POLICY_IDENTITY_MISMATCH"
+DIRECTORY_DURABILITY_FAILURE_CODES = (
+    ADAPTER_ABSENT,
+    NON_WINDOWS_PLATFORM,
+    WINDOWS_VERSION_UNSUPPORTED,
+    DRIVE_TYPE_UNSUPPORTED,
+    FILESYSTEM_UNSUPPORTED,
+    TARGET_NOT_ABSOLUTE,
+    TARGET_INVALID,
+    TARGET_MISSING,
+    TARGET_NOT_DIRECTORY,
+    TARGET_REPARSE_POINT,
+    TARGET_IDENTITY_UNAVAILABLE,
+    TARGET_IDENTITY_CHANGED,
+    DIRECTORY_OPEN_UNSUPPORTED,
+    DIRECTORY_OPEN_DENIED,
+    DIRECTORY_OPEN_FAILED,
+    DIRECTORY_FLUSH_UNSUPPORTED,
+    DIRECTORY_FLUSH_DENIED,
+    DIRECTORY_FLUSH_FAILED,
+    DIRECTORY_CLOSE_INDETERMINATE,
+    UNKNOWN_NATIVE_ERROR,
+    UNEXPECTED_EXCEPTION,
+    POLICY_IDENTITY_MISMATCH,
+)
+DIRECTORY_DURABILITY_POLICY_DECLARATION_KEYS = (
+    "policy_schema_identity",
+    "adapter_identity",
+    "operation_identity",
+    "supported_windows_profile",
+    "supported_filesystem_profile",
+    "target_role_declaration",
+    "status_taxonomy",
+    "failure_mapping_version",
+    "failure_code_vocabulary",
+    "path_normalization_policy",
+    "reparse_point_policy",
+    "validation_profile_identity",
+)
+DIRECTORY_DURABILITY_POLICY_IDENTITY_KEYS = (
+    "policy_schema_identity",
+    "policy_sha256",
+)
+
 RESOURCE_ADMISSIBILITY_POLICY_SCHEMA = (
     "durable-evidence-resource-admissibility-policy-v0.3"
 )
@@ -455,6 +561,10 @@ class ResourcePolicyIdentityMismatchError(ResourceAdmissibilityError):
     failure_code = RESOURCE_ADMISSIBILITY_POLICY_IDENTITY_MISMATCH
 
 
+class DirectoryDurabilityPolicyIdentityMismatchError(EvidenceValidationError):
+    failure_code = POLICY_IDENTITY_MISMATCH
+
+
 class RecoveryArtifactTypeInvalidError(ResourceAdmissibilityError):
     failure_code = RECOVERY_ARTIFACT_TYPE_INVALID
 
@@ -476,6 +586,92 @@ def canonical_json_bytes(value: Any, *, max_bytes: int | None = None) -> bytes:
     )
     _validate_canonical_byte_envelope(payload, max_bytes=max_bytes)
     return payload
+
+
+def directory_durability_policy_declaration() -> dict[str, Any]:
+    declaration = {
+        "policy_schema_identity": DIRECTORY_DURABILITY_POLICY_SCHEMA,
+        "adapter_identity": DIRECTORY_DURABILITY_ADAPTER_IDENTITY,
+        "operation_identity": DIRECTORY_DURABILITY_OPERATION_IDENTITY,
+        "supported_windows_profile": {
+            "windows_versions": ["Windows 10", "Windows 11"],
+            "windows_product_type": "workstation",
+            "drive_type": "local fixed volume",
+        },
+        "supported_filesystem_profile": {
+            "filesystem": "NTFS",
+            "directory": "ordinary non-reparse directory",
+            "material": "pytest temporary-directory material",
+        },
+        "target_role_declaration": list(DIRECTORY_DURABILITY_TARGET_ROLES),
+        "status_taxonomy": list(DIRECTORY_DURABILITY_STATUS_TAXONOMY),
+        "failure_mapping_version": DIRECTORY_DURABILITY_FAILURE_MAPPING_VERSION,
+        "failure_code_vocabulary": list(DIRECTORY_DURABILITY_FAILURE_CODES),
+        "path_normalization_policy": {
+            "absolute_path_required": True,
+            "windows_extended_length_path_for_win32_calls": True,
+            "unc_paths": "unsupported",
+            "mapped_or_network_roots": "unsupported",
+            "volatile_absolute_roots": "evidence_only_not_policy_material",
+        },
+        "reparse_point_policy": {
+            "directory_symlink": "rejected",
+            "junction": "rejected",
+            "mount_point": "rejected",
+            "unknown_reparse_point": "rejected",
+        },
+        "validation_profile_identity": (
+            DIRECTORY_DURABILITY_VALIDATION_PROFILE_IDENTITY
+        ),
+    }
+    _require_key_order(
+        declaration,
+        DIRECTORY_DURABILITY_POLICY_DECLARATION_KEYS,
+        "directory durability policy",
+    )
+    return declaration
+
+
+def directory_durability_policy_sha256() -> str:
+    return sha256_hex(canonical_json_bytes(directory_durability_policy_declaration()))
+
+
+def directory_durability_policy_identity() -> dict[str, str]:
+    identity = {
+        "policy_schema_identity": DIRECTORY_DURABILITY_POLICY_SCHEMA,
+        "policy_sha256": directory_durability_policy_sha256(),
+    }
+    _require_key_order(
+        identity,
+        DIRECTORY_DURABILITY_POLICY_IDENTITY_KEYS,
+        "directory durability policy identity",
+    )
+    return identity
+
+
+def validate_directory_durability_policy_identity(value: Any) -> None:
+    try:
+        _require_key_order(
+            value,
+            DIRECTORY_DURABILITY_POLICY_IDENTITY_KEYS,
+            "directory durability policy identity",
+        )
+        _require_constant(
+            value["policy_schema_identity"],
+            DIRECTORY_DURABILITY_POLICY_SCHEMA,
+            "directory durability policy schema",
+        )
+        _require_hex64(value["policy_sha256"], "directory policy sha256")
+        if value["policy_sha256"] != directory_durability_policy_sha256():
+            raise DirectoryDurabilityPolicyIdentityMismatchError(
+                "directory durability policy identity mismatch"
+            )
+    except DirectoryDurabilityPolicyIdentityMismatchError:
+        raise
+    except (EvidenceValidationError, KeyError, TypeError) as exc:
+        raise DirectoryDurabilityPolicyIdentityMismatchError(
+            "directory durability policy identity mismatch"
+        ) from exc
 
 
 def resource_admissibility_policy_declaration() -> dict[str, Any]:

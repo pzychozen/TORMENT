@@ -15,6 +15,7 @@ from test_durable_evidence_publication_v0_3 import (
     EXECUTION_IDENTITY,
     PUBLICATION_AUTHORITY,
     PositiveTmpPromotionAdapter,
+    RoleStatusSyntheticAdapter,
     project,
     source_identity,
 )
@@ -33,6 +34,9 @@ def recovery_utility_identity():
         ),
         "resource_admissibility_policy_identity": (
             schema.resource_admissibility_policy_identity()
+        ),
+        "directory_durability_policy_identity": (
+            schema.directory_durability_policy_identity()
         ),
     }
 
@@ -78,6 +82,7 @@ def run_recovery(
     recovery_authority=RECOVERY_AUTHORITY,
     expected_hashes=None,
     original_projection_identity=None,
+    durability_adapter=None,
     synthetic_fault_point=None,
 ):
     return recovery.verify_publication_recovery(
@@ -96,7 +101,7 @@ def run_recovery(
         ),
         publication_recovery_utility_identity=recovery_utility_identity(),
         context=context or recovery.SyntheticPublicationRecoveryContext(),
-        durability_adapter=ConfirmedSyntheticAdapter(),
+        durability_adapter=durability_adapter or ConfirmedSyntheticAdapter(),
         synthetic_fault_point=synthetic_fault_point,
     )
 
@@ -129,6 +134,33 @@ def test_recovery_verifies_existing_final_artifacts_without_claiming_normal_comp
     )
     assert replayed.classification == (
         recovery_replay.PUBLICATION_RECOVERY_EVIDENCE_COMPLETED
+    )
+
+
+def test_recovery_directory_durability_withholds_j2_completion(tmp_path):
+    publication_result, bundle_payload, completion = (
+        setup_final_artifacts_with_incomplete_publication_chain(tmp_path)
+    )
+    adapter = RoleStatusSyntheticAdapter(
+        {},
+        default_status=schema.DIRECTORY_DURABILITY_DENIED,
+        default_failure_code=schema.DIRECTORY_OPEN_DENIED,
+    )
+    recovered = run_recovery(
+        tmp_path,
+        publication_result,
+        bundle_payload,
+        completion,
+        durability_adapter=adapter,
+    )
+    assert recovered.classification == (
+        recovery.PUBLICATION_RECOVERY_CHAIN_GENESIS_WRITE_FAILED
+    )
+    assert recovered.directory_durability_failure_code == schema.DIRECTORY_OPEN_DENIED
+    assert all(
+        item.logical_record["record_kind"]
+        != "PUBLICATION_RECOVERY_EVIDENCE_COMPLETED"
+        for item in recovered.record_writes
     )
 
 
