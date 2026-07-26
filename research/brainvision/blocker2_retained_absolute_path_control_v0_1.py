@@ -1,9 +1,9 @@
-"""Preparation harness for BLOCKER-2 retained absolute-path validation.
+"""Retained harness for BLOCKER-2 absolute-path validation.
 
 This module is intentionally narrower than the existing ephemeral A-matrix.  It
 binds a consumed gate, a selected retained case set, source identities, and a
-canonical terminal artifact, while refusing authoritative retained execution in
-this implementation-preparation phase.
+canonical evidence chain.  Authoritative retained execution is reachable only
+through a complete identity-bound authorization block.
 """
 
 from __future__ import annotations
@@ -34,12 +34,22 @@ RETAINED_AUTHORIZATION_INPUT_SCHEMA = (
 )
 RETAINED_CASE_SET_SCHEMA = "torment.brainvision.blocker2.retained.case_set.v0.1"
 RETAINED_GATE_ENTRY_SCHEMA = "torment.brainvision.blocker2.retained.gate_entry.v0.1"
-RETAINED_TERMINAL_RECORD_SCHEMA = (
-    "torment.brainvision.blocker2.retained.terminal_record.v0.1"
+RETAINED_GLOBAL_AUTHORITY_ENTRY_SCHEMA = (
+    "torment.brainvision.blocker2.retained.global_authority_entry.v0.1"
 )
-RETAINED_TERMINAL_ARTIFACT_SCHEMA = (
-    "torment.brainvision.blocker2.retained.terminal_artifact.v0.1"
+RETAINED_RUN_RESULT_SCHEMA = "torment.brainvision.blocker2.retained.run_result.v0.1"
+RETAINED_COMPLETION_SCHEMA = "torment.brainvision.blocker2.retained.completion.v0.1"
+RETAINED_CASE_ENVELOPE_SCHEMA = (
+    "torment.brainvision.blocker2.retained.case_envelope.v0.1"
 )
+RETAINED_AUTHORITY_REGISTRY_PROFILE_SCHEMA = (
+    "torment.brainvision.blocker2.retained.authority_registry_profile.v0.1"
+)
+RETAINED_EVIDENCE_CHAIN_SCHEMA = (
+    "torment.brainvision.blocker2.retained.evidence_chain.v0.1"
+)
+RETAINED_TERMINAL_RECORD_SCHEMA = RETAINED_RUN_RESULT_SCHEMA
+RETAINED_TERMINAL_ARTIFACT_SCHEMA = RETAINED_RUN_RESULT_SCHEMA
 RETAINED_REPOSITORY_STATE_SCHEMA = (
     "torment.brainvision.blocker2.retained.repository_state.v0.1"
 )
@@ -50,8 +60,11 @@ RETAINED_FIXTURE_PROFILE_SCHEMA = (
     "torment.brainvision.blocker2.retained.fixture_profile.v0.1"
 )
 
+GLOBAL_AUTHORITY_ENTRY_SUFFIX = ".global_authority_entry.canonical.json"
 GATE_ENTRY_FILENAME = "gate_entry.canonical.json"
-TERMINAL_ARTIFACT_FILENAME = "terminal_artifact.canonical.json"
+RUN_RESULT_FILENAME = "run_result.canonical.json"
+RETAINED_COMPLETION_FILENAME = "retained_completion.canonical.json"
+TERMINAL_ARTIFACT_FILENAME = RUN_RESULT_FILENAME
 
 PREFLIGHT_REJECTED = "PREFLIGHT_REJECTED"
 GATE_ENTRY_FAILED = "GATE_ENTRY_FAILED"
@@ -98,6 +111,31 @@ GATE_ENTRY_WRITE_FAILURE = "GATE_ENTRY_WRITE_FAILURE"
 GATE_ENTRY_REVERIFY_FAILURE = "GATE_ENTRY_REVERIFY_FAILURE"
 TERMINAL_ARTIFACT_WRITE_FAILURE = "TERMINAL_ARTIFACT_WRITE_FAILURE"
 TERMINAL_ARTIFACT_REVERIFY_FAILURE = "TERMINAL_ARTIFACT_REVERIFY_FAILURE"
+GLOBAL_AUTHORITY_ENTRY_EXISTS = "GLOBAL_AUTHORITY_ENTRY_EXISTS"
+GLOBAL_AUTHORITY_ENTRY_PERSISTENCE_FAILURE = (
+    "GLOBAL_AUTHORITY_ENTRY_PERSISTENCE_FAILURE"
+)
+GLOBAL_AUTHORITY_ENTRY_REVERIFY_FAILURE = "GLOBAL_AUTHORITY_ENTRY_REVERIFY_FAILURE"
+GLOBAL_AUTHORITY_IDENTITY_MISMATCH = "GLOBAL_AUTHORITY_IDENTITY_MISMATCH"
+LOCAL_GATE_LINKAGE_FAILURE = "LOCAL_GATE_LINKAGE_FAILURE"
+RUN_RESULT_SERIALIZATION_FAILURE = "RUN_RESULT_SERIALIZATION_FAILURE"
+RUN_RESULT_PERSISTENCE_FAILURE = "RUN_RESULT_PERSISTENCE_FAILURE"
+RUN_RESULT_REVERIFY_FAILURE = "RUN_RESULT_REVERIFY_FAILURE"
+RETAINED_COMPLETION_PRECONDITION_FAILURE = (
+    "RETAINED_COMPLETION_PRECONDITION_FAILURE"
+)
+RETAINED_COMPLETION_SERIALIZATION_FAILURE = (
+    "RETAINED_COMPLETION_SERIALIZATION_FAILURE"
+)
+RETAINED_COMPLETION_PERSISTENCE_FAILURE = (
+    "RETAINED_COMPLETION_PERSISTENCE_FAILURE"
+)
+RETAINED_COMPLETION_REVERIFY_FAILURE = "RETAINED_COMPLETION_REVERIFY_FAILURE"
+EVIDENCE_CHAIN_LINKAGE_FAILURE = "EVIDENCE_CHAIN_LINKAGE_FAILURE"
+NATIVE_HELPER_POLICY_MISMATCH = "NATIVE_HELPER_POLICY_MISMATCH"
+RETAINED_POLICY_MISMATCH = "RETAINED_POLICY_MISMATCH"
+CROSS_LOCATION_REPLAY_REJECTED = "CROSS_LOCATION_REPLAY_REJECTED"
+AUTHORITATIVE_AUTHORIZATION_MISSING = "AUTHORITATIVE_AUTHORIZATION_MISSING"
 FAULT_INJECTION_TRIGGERED = "FAULT_INJECTION_TRIGGERED"
 AUTHORITATIVE_RUN_NOT_AUTHORIZED = "AUTHORITATIVE_RUN_NOT_AUTHORIZED"
 
@@ -122,6 +160,23 @@ FAILURE_CODES = frozenset(
         GATE_ENTRY_REVERIFY_FAILURE,
         TERMINAL_ARTIFACT_WRITE_FAILURE,
         TERMINAL_ARTIFACT_REVERIFY_FAILURE,
+        GLOBAL_AUTHORITY_ENTRY_EXISTS,
+        GLOBAL_AUTHORITY_ENTRY_PERSISTENCE_FAILURE,
+        GLOBAL_AUTHORITY_ENTRY_REVERIFY_FAILURE,
+        GLOBAL_AUTHORITY_IDENTITY_MISMATCH,
+        LOCAL_GATE_LINKAGE_FAILURE,
+        RUN_RESULT_SERIALIZATION_FAILURE,
+        RUN_RESULT_PERSISTENCE_FAILURE,
+        RUN_RESULT_REVERIFY_FAILURE,
+        RETAINED_COMPLETION_PRECONDITION_FAILURE,
+        RETAINED_COMPLETION_SERIALIZATION_FAILURE,
+        RETAINED_COMPLETION_PERSISTENCE_FAILURE,
+        RETAINED_COMPLETION_REVERIFY_FAILURE,
+        EVIDENCE_CHAIN_LINKAGE_FAILURE,
+        NATIVE_HELPER_POLICY_MISMATCH,
+        RETAINED_POLICY_MISMATCH,
+        CROSS_LOCATION_REPLAY_REJECTED,
+        AUTHORITATIVE_AUTHORIZATION_MISSING,
         FAULT_INJECTION_TRIGGERED,
         AUTHORITATIVE_RUN_NOT_AUTHORIZED,
         validation.CONTROL_COLLISION_OBSERVED,
@@ -178,6 +233,15 @@ ABSOLUTE_POLICY_SHA256 = "3d9b66a180fabf00c8bb6695c74fc9d69d21cd3ac9335cc5d2dc3a
 ROOTDIRECTORY_RELATIVE_POLICY_SHA256 = (
     "df91a9bcc3c5b37e938a086801dd2bca42f0290533a6cf2682055df475f663f3"
 )
+RETAINED_RUN_ASSESSMENT_SHA256 = (
+    "71b4e96da222461c16caea6494719183504e758b6e883b44c4db8df9b636f51d"
+)
+IMPLEMENTATION_PREPARATION_AUTHORIZATION_SHA256 = (
+    "0ea41794b6d6503576afa84a14f629ca25baff5b7d78c0a2f8a4bbb806d1959e"
+)
+RUNTIME_CORRECTION_AUTHORIZATION_SHA256 = (
+    "6e593ca45773f8fab880ba3cf3209dcd8db1e6e9dcf17bf1f2c6d69535a29a92"
+)
 UNAVAILABLE_UNTIL_COMMIT = "UNAVAILABLE_UNTIL_COMMIT"
 
 AUTHORIZED_SURFACE_PATHS = frozenset(
@@ -203,6 +267,8 @@ AUTHORIZED_SURFACE_PATHS = frozenset(
     }
 )
 
+REQUIRED_SOURCE_IDENTITY_PATHS = tuple(sorted(AUTHORIZED_SURFACE_PATHS))
+
 AUTHORIZED_PREPARATION_DOCUMENTS = frozenset(
     {
         (
@@ -215,25 +281,69 @@ AUTHORIZED_PREPARATION_DOCUMENTS = frozenset(
             "TORMENT_BRAINVISION_STAGE_S3B_V0_3_BLOCKER_2_"
             "RETAINED_SINGLE_RUN_IMPLEMENTATION_PREPARATION_AUTHORIZATION_v0.1.md"
         ),
+        (
+            "docs/"
+            "TORMENT_BRAINVISION_STAGE_S3B_V0_3_BLOCKER_2_"
+            "POST_COMMIT_IDENTITY_BINDING_AND_EXECUTION_READINESS_ASSESSMENT_v0.1.md"
+        ),
+        (
+            "docs/"
+            "TORMENT_BRAINVISION_STAGE_S3B_V0_3_BLOCKER_2_"
+            "POST_COMMIT_RUNTIME_CORRECTION_AUTHORIZATION_v0.1.md"
+        ),
     }
 )
 
+FAULT_BEFORE_GLOBAL_AUTHORITY_WRITE = "before_global_authority_write"
+FAULT_DURING_GLOBAL_AUTHORITY_FILE_WRITE = "during_global_authority_file_write"
+FAULT_DURING_GLOBAL_AUTHORITY_DIRECTORY_SYNC = (
+    "during_global_authority_directory_sync"
+)
+FAULT_DURING_GLOBAL_AUTHORITY_REREAD = "during_global_authority_reread"
+FAULT_AFTER_GLOBAL_AUTHORITY_VERIFICATION_BEFORE_LOCAL_GATE = (
+    "after_global_authority_verification_before_local_gate"
+)
 FAULT_BEFORE_GATE_WRITE = "before_gate_write"
 FAULT_DURING_GATE_FILE_WRITE = "during_gate_file_write"
 FAULT_DURING_GATE_DIRECTORY_SYNC = "during_gate_directory_sync"
 FAULT_DURING_GATE_REREAD = "during_gate_reread"
 FAULT_AFTER_VERIFIED_GATE_BEFORE_NATIVE = "after_verified_gate_before_native"
+FAULT_AFTER_NATIVE_BEFORE_RUN_RESULT = "after_native_before_run_result"
+FAULT_DURING_RUN_RESULT_SERIALIZATION = "during_run_result_serialization"
+FAULT_DURING_RUN_RESULT_FILE_WRITE = "during_run_result_file_write"
+FAULT_DURING_RUN_RESULT_DIRECTORY_SYNC = "during_run_result_directory_sync"
+FAULT_DURING_RUN_RESULT_REREAD = "during_run_result_reread"
+FAULT_BEFORE_RETAINED_COMPLETION_CREATION = "before_retained_completion_creation"
+FAULT_DURING_COMPLETION_SERIALIZATION = "during_completion_serialization"
+FAULT_DURING_COMPLETION_FILE_WRITE = "during_completion_file_write"
+FAULT_DURING_COMPLETION_DIRECTORY_SYNC = "during_completion_directory_sync"
+FAULT_DURING_COMPLETION_REREAD = "during_completion_reread"
 FAULT_DURING_TERMINAL_FILE_WRITE = "during_terminal_file_write"
 FAULT_DURING_TERMINAL_DIRECTORY_SYNC = "during_terminal_directory_sync"
 FAULT_DURING_TERMINAL_REREAD = "during_terminal_reread"
 
 FAULT_POINTS = frozenset(
     {
+        FAULT_BEFORE_GLOBAL_AUTHORITY_WRITE,
+        FAULT_DURING_GLOBAL_AUTHORITY_FILE_WRITE,
+        FAULT_DURING_GLOBAL_AUTHORITY_DIRECTORY_SYNC,
+        FAULT_DURING_GLOBAL_AUTHORITY_REREAD,
+        FAULT_AFTER_GLOBAL_AUTHORITY_VERIFICATION_BEFORE_LOCAL_GATE,
         FAULT_BEFORE_GATE_WRITE,
         FAULT_DURING_GATE_FILE_WRITE,
         FAULT_DURING_GATE_DIRECTORY_SYNC,
         FAULT_DURING_GATE_REREAD,
         FAULT_AFTER_VERIFIED_GATE_BEFORE_NATIVE,
+        FAULT_AFTER_NATIVE_BEFORE_RUN_RESULT,
+        FAULT_DURING_RUN_RESULT_SERIALIZATION,
+        FAULT_DURING_RUN_RESULT_FILE_WRITE,
+        FAULT_DURING_RUN_RESULT_DIRECTORY_SYNC,
+        FAULT_DURING_RUN_RESULT_REREAD,
+        FAULT_BEFORE_RETAINED_COMPLETION_CREATION,
+        FAULT_DURING_COMPLETION_SERIALIZATION,
+        FAULT_DURING_COMPLETION_FILE_WRITE,
+        FAULT_DURING_COMPLETION_DIRECTORY_SYNC,
+        FAULT_DURING_COMPLETION_REREAD,
         FAULT_DURING_TERMINAL_FILE_WRITE,
         FAULT_DURING_TERMINAL_DIRECTORY_SYNC,
         FAULT_DURING_TERMINAL_REREAD,
@@ -301,6 +411,75 @@ class SourceIdentityExpectation:
     checked_out_byte_length: int
     git_blob_oid: str = UNAVAILABLE_UNTIL_COMMIT
 
+    def as_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ExecutionAuthorizationIdentityBlock:
+    execution_authorization_identity: str
+    retained_run_assessment_identity: str
+    implementation_preparation_authorization_identity: str
+    runtime_correction_authorization_identity: str
+    expected_branch: str
+    expected_head: str
+    expected_origin_main: str
+    retained_orchestration_policy_sha256: str
+    native_helper_policy_sha256: str
+    retained_schema_sha256: str
+    case_set_sha256: str
+    fixture_profile_sha256: str
+    authority_registry_root: Path
+    authority_registry_root_identity: str
+    fixture_root_identity: str
+    result_parent_identity: str
+    result_directory_identity: str
+    host_identity: str
+    volume_identity: str
+    run_identity: str
+    selected_a6: bool
+    source_identities: tuple[SourceIdentityExpectation, ...]
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "schema": (
+                "torment.brainvision.blocker2.retained."
+                "execution_authorization_identity_block.v0.1"
+            ),
+            "execution_authorization_identity": self.execution_authorization_identity,
+            "retained_run_assessment_identity": self.retained_run_assessment_identity,
+            "implementation_preparation_authorization_identity": (
+                self.implementation_preparation_authorization_identity
+            ),
+            "runtime_correction_authorization_identity": (
+                self.runtime_correction_authorization_identity
+            ),
+            "expected_branch": self.expected_branch,
+            "expected_head": self.expected_head,
+            "expected_origin_main": self.expected_origin_main,
+            "retained_orchestration_policy_sha256": (
+                self.retained_orchestration_policy_sha256
+            ),
+            "native_helper_policy_sha256": self.native_helper_policy_sha256,
+            "retained_schema_sha256": self.retained_schema_sha256,
+            "case_set_sha256": self.case_set_sha256,
+            "fixture_profile_sha256": self.fixture_profile_sha256,
+            "authority_registry_root": str(self.authority_registry_root),
+            "authority_registry_root_identity": (
+                self.authority_registry_root_identity
+            ),
+            "fixture_root_identity": self.fixture_root_identity,
+            "result_parent_identity": self.result_parent_identity,
+            "result_directory_identity": self.result_directory_identity,
+            "host_identity": self.host_identity,
+            "volume_identity": self.volume_identity,
+            "run_identity": self.run_identity,
+            "selected_a6": self.selected_a6,
+            "source_identities": [
+                identity.as_payload() for identity in self.source_identities
+            ],
+        }
+
 
 @dataclass(frozen=True)
 class RetainedAuthorization:
@@ -317,6 +496,7 @@ class RetainedAuthorization:
     authoritative: bool = False
     allow_unrelated_outside_surfaces: bool = False
     enforce_fixture_profile: bool = False
+    execution_authorization: ExecutionAuthorizationIdentityBlock | None = None
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -336,6 +516,11 @@ class RetainedAuthorization:
                 self.allow_unrelated_outside_surfaces
             ),
             "enforce_fixture_profile": self.enforce_fixture_profile,
+            "execution_authorization": (
+                self.execution_authorization.as_payload()
+                if self.execution_authorization is not None
+                else "NOT_SUPPLIED"
+            ),
         }
 
 
@@ -364,13 +549,19 @@ class RetainedRunResult:
     terminal_state: str
     retained_execution: bool
     authoritative: bool
+    global_authority_consumed: bool
     gate_consumed: bool
     native_invocation_started: bool
     primary_failure: str | None
     detail: str
     result_directory: str
+    global_authority_artifact: ImmutableArtifactWriteResult | None = None
     gate_artifact: ImmutableArtifactWriteResult | None = None
+    run_result_artifact: ImmutableArtifactWriteResult | None = None
+    retained_completion_artifact: ImmutableArtifactWriteResult | None = None
     terminal_artifact: ImmutableArtifactWriteResult | None = None
+    run_result_record: dict[str, Any] | None = None
+    retained_completion_record: dict[str, Any] | None = None
     terminal_record: dict[str, Any] | None = None
 
     def as_payload(self) -> dict[str, Any]:
@@ -378,20 +569,40 @@ class RetainedRunResult:
             "terminal_state": self.terminal_state,
             "retained_execution": self.retained_execution,
             "authoritative": self.authoritative,
+            "global_authority_consumed": self.global_authority_consumed,
             "gate_consumed": self.gate_consumed,
             "native_invocation_started": self.native_invocation_started,
             "primary_failure": self.primary_failure or "NONE",
             "detail": self.detail,
             "result_directory": self.result_directory,
+            "global_authority_artifact": (
+                self.global_authority_artifact.as_payload()
+                if self.global_authority_artifact is not None
+                else "NOT_WRITTEN"
+            ),
             "gate_artifact": (
                 self.gate_artifact.as_payload()
                 if self.gate_artifact is not None
+                else "NOT_WRITTEN"
+            ),
+            "run_result_artifact": (
+                self.run_result_artifact.as_payload()
+                if self.run_result_artifact is not None
+                else "NOT_WRITTEN"
+            ),
+            "retained_completion_artifact": (
+                self.retained_completion_artifact.as_payload()
+                if self.retained_completion_artifact is not None
                 else "NOT_WRITTEN"
             ),
             "terminal_artifact": (
                 self.terminal_artifact.as_payload()
                 if self.terminal_artifact is not None
                 else "NOT_WRITTEN"
+            ),
+            "run_result_record": self.run_result_record or "NOT_WRITTEN",
+            "retained_completion_record": (
+                self.retained_completion_record or "NOT_WRITTEN"
             ),
             "terminal_record": self.terminal_record or "NOT_WRITTEN",
         }
@@ -435,12 +646,19 @@ def retained_schema_declaration() -> dict[str, Any]:
         "schema": "torment.brainvision.blocker2.retained.schemas.v0.1",
         "authorization_input_schema": RETAINED_AUTHORIZATION_INPUT_SCHEMA,
         "case_set_schema": RETAINED_CASE_SET_SCHEMA,
+        "case_envelope_schema": RETAINED_CASE_ENVELOPE_SCHEMA,
+        "authority_registry_profile_schema": (
+            RETAINED_AUTHORITY_REGISTRY_PROFILE_SCHEMA
+        ),
+        "evidence_chain_schema": RETAINED_EVIDENCE_CHAIN_SCHEMA,
+        "global_authority_entry_schema": RETAINED_GLOBAL_AUTHORITY_ENTRY_SCHEMA,
         "gate_entry_schema": RETAINED_GATE_ENTRY_SCHEMA,
-        "terminal_record_schema": RETAINED_TERMINAL_RECORD_SCHEMA,
-        "terminal_artifact_schema": RETAINED_TERMINAL_ARTIFACT_SCHEMA,
+        "run_result_schema": RETAINED_RUN_RESULT_SCHEMA,
+        "retained_completion_schema": RETAINED_COMPLETION_SCHEMA,
         "repository_state_schema": RETAINED_REPOSITORY_STATE_SCHEMA,
         "source_identity_schema": RETAINED_SOURCE_IDENTITY_SCHEMA,
         "fixture_profile_schema": RETAINED_FIXTURE_PROFILE_SCHEMA,
+        "evidence_chain": evidence_chain_declaration()["records"],
         "terminal_states": sorted(TERMINAL_STATES),
         "failure_codes": sorted(FAILURE_CODES),
     }
@@ -518,6 +736,328 @@ def fixture_profile_identity() -> dict[str, str]:
         "schema": RETAINED_FIXTURE_PROFILE_SCHEMA,
         "fixture_profile_sha256": canonical_sha256(fixture_profile_declaration()),
     }
+
+
+def authority_registry_profile_declaration() -> dict[str, Any]:
+    return {
+        "schema": RETAINED_AUTHORITY_REGISTRY_PROFILE_SCHEMA,
+        "root_supply": "explicit future authorization input",
+        "root_location": "outside repository",
+        "root_kind": "ordinary non-reparse local fixed NTFS directory",
+        "entry_path_derivation": "execution authorization identity",
+        "entry_write_semantics": "exclusive-create canonical JSON",
+        "durability": "BLOCKER-1 directory durability confirmed",
+        "reuse_policy": "same authorization identity is rejected after entry exists",
+        "release_policy": "no release, repair, resume, or automatic reset",
+    }
+
+
+def authority_registry_profile_identity() -> dict[str, str]:
+    return {
+        "schema": RETAINED_AUTHORITY_REGISTRY_PROFILE_SCHEMA,
+        "authority_registry_profile_sha256": canonical_sha256(
+            authority_registry_profile_declaration()
+        ),
+    }
+
+
+def evidence_chain_declaration() -> dict[str, Any]:
+    return {
+        "schema": RETAINED_EVIDENCE_CHAIN_SCHEMA,
+        "records": [
+            "GLOBAL_AUTHORITY_ENTRY",
+            "LOCAL_GATE_ENTRY",
+            "RUN_RESULT",
+            "RETAINED_COMPLETION",
+        ],
+        "linkage_hashes": [
+            "global_authority_entry_hash",
+            "local_gate_hash",
+            "run_result_hash",
+        ],
+        "completion_source": "verified durable RUN_RESULT plus verified durable RETAINED_COMPLETION",
+    }
+
+
+def evidence_chain_identity() -> dict[str, str]:
+    return {
+        "schema": RETAINED_EVIDENCE_CHAIN_SCHEMA,
+        "evidence_chain_sha256": canonical_sha256(evidence_chain_declaration()),
+    }
+
+
+def native_helper_policy_identity() -> dict[str, str]:
+    return validation.absolute_path_control_policy_identity()
+
+
+def validate_native_helper_policy_identity(
+    policy_identity: Mapping[str, Any],
+) -> dict[str, str]:
+    required = native_helper_policy_identity()
+    if policy_identity.get("policy_sha256") == ABSOLUTE_POLICY_SHA256:
+        raise RetainedValidationError(NATIVE_HELPER_POLICY_MISMATCH)
+    if set(policy_identity) != set(required):
+        raise RetainedValidationError(NATIVE_HELPER_POLICY_MISMATCH)
+    if policy_identity.get("policy_schema_identity") != required["policy_schema_identity"]:
+        raise RetainedValidationError(NATIVE_HELPER_POLICY_MISMATCH)
+    if policy_identity.get("policy_sha256") != required["policy_sha256"]:
+        raise RetainedValidationError(NATIVE_HELPER_POLICY_MISMATCH)
+    return dict(policy_identity)
+
+
+def host_profile_identity() -> dict[str, str]:
+    declaration = runtime_platform_observation()
+    return {
+        "schema": "torment.brainvision.blocker2.retained.host_profile.v0.1",
+        "host_identity": canonical_sha256(declaration),
+    }
+
+
+def volume_identity_for_path(path: str | Path) -> dict[str, str]:
+    resolved = _resolve_for_absent_child(path)
+    drive, _tail = ntpath.splitdrive(str(resolved))
+    declaration = {
+        "schema": "torment.brainvision.blocker2.retained.volume_identity.v0.1",
+        "drive_root": drive.lower() + "\\",
+    }
+    return {
+        "schema": declaration["schema"],
+        "volume_identity": canonical_sha256(declaration),
+    }
+
+
+def path_identity_for_role(
+    path: str | Path,
+    *,
+    role: str,
+    must_exist: bool = False,
+) -> dict[str, str]:
+    if must_exist and not Path(path).exists():
+        raise RetainedValidationError("%s path must exist" % role)
+    resolved = Path(path).resolve() if must_exist else _resolve_for_absent_child(path)
+    declaration = {
+        "schema": "torment.brainvision.blocker2.retained.path_identity.v0.1",
+        "role": role,
+        "path": str(resolved),
+    }
+    return {
+        "schema": declaration["schema"],
+        "role": role,
+        "path": str(resolved),
+        "path_identity": canonical_sha256(declaration),
+    }
+
+
+def execution_authorization_identity_declaration(
+    *,
+    retained_run_assessment_identity: str,
+    implementation_preparation_authorization_identity: str,
+    runtime_correction_authorization_identity: str,
+    expected_branch: str,
+    expected_head: str,
+    expected_origin_main: str,
+    retained_orchestration_policy_sha256: str,
+    native_helper_policy_sha256: str,
+    retained_schema_sha256: str,
+    case_set_sha256: str,
+    fixture_profile_sha256: str,
+    authority_registry_root_identity: str,
+    fixture_root_identity: str,
+    result_parent_identity: str,
+    result_directory_identity: str,
+    host_identity: str,
+    volume_identity: str,
+    run_identity: str,
+    selected_a6: bool,
+    source_identities: Sequence[SourceIdentityExpectation],
+) -> dict[str, Any]:
+    return {
+        "schema": (
+            "torment.brainvision.blocker2.retained."
+            "execution_authorization_identity.v0.1"
+        ),
+        "retained_mode": RETAINED_MODE,
+        "authoritative": True,
+        "retained_run_assessment_identity": retained_run_assessment_identity,
+        "implementation_preparation_authorization_identity": (
+            implementation_preparation_authorization_identity
+        ),
+        "runtime_correction_authorization_identity": (
+            runtime_correction_authorization_identity
+        ),
+        "expected_branch": expected_branch,
+        "expected_head": expected_head,
+        "expected_origin_main": expected_origin_main,
+        "retained_orchestration_policy_sha256": (
+            retained_orchestration_policy_sha256
+        ),
+        "native_helper_policy_sha256": native_helper_policy_sha256,
+        "retained_schema_sha256": retained_schema_sha256,
+        "case_set_sha256": case_set_sha256,
+        "fixture_profile_sha256": fixture_profile_sha256,
+        "authority_registry_root_identity": authority_registry_root_identity,
+        "fixture_root_identity": fixture_root_identity,
+        "result_parent_identity": result_parent_identity,
+        "result_directory_identity": result_directory_identity,
+        "host_identity": host_identity,
+        "volume_identity": volume_identity,
+        "run_identity": run_identity,
+        "selected_a6": selected_a6,
+        "source_identities": [
+            identity.as_payload()
+            for identity in sorted(
+                source_identities,
+                key=lambda item: item.relative_path,
+            )
+        ],
+    }
+
+
+def execution_authorization_identity_from_declaration(
+    declaration: Mapping[str, Any],
+) -> str:
+    return canonical_sha256(dict(declaration))
+
+
+def run_identity_declaration(
+    *,
+    expected_head: str,
+    expected_origin_main: str,
+    case_set_sha256: str,
+    fixture_root_identity: str,
+    result_directory_identity: str,
+    authority_registry_root_identity: str,
+    selected_a6: bool,
+) -> dict[str, Any]:
+    return {
+        "schema": "torment.brainvision.blocker2.retained.run_identity.v0.1",
+        "expected_head": expected_head,
+        "expected_origin_main": expected_origin_main,
+        "case_set_sha256": case_set_sha256,
+        "fixture_root_identity": fixture_root_identity,
+        "result_directory_identity": result_directory_identity,
+        "authority_registry_root_identity": authority_registry_root_identity,
+        "selected_a6": selected_a6,
+    }
+
+
+def build_execution_authorization_identity_block(
+    *,
+    assessment_identity: str,
+    implementation_preparation_authorization_identity: str,
+    runtime_correction_authorization_identity: str,
+    expected_branch: str,
+    expected_head: str,
+    expected_origin_main: str,
+    result_directory: str | Path,
+    fixture_root: str | Path,
+    authority_registry_root: str | Path,
+    source_identities: Sequence[SourceIdentityExpectation],
+    selected_cases: Sequence[str] = DEFAULT_RETAINED_CASES,
+    optional_cases: Sequence[str] = (),
+    run_identity: str | None = None,
+    authorization_identity: str | None = None,
+) -> ExecutionAuthorizationIdentityBlock:
+    case_set = retained_case_set_identity(
+        selected_cases=selected_cases,
+        optional_cases=optional_cases,
+    )
+    authority_root_identity = path_identity_for_role(
+        authority_registry_root,
+        role="authority_registry_root",
+        must_exist=True,
+    )
+    fixture_identity = path_identity_for_role(
+        fixture_root,
+        role="fixture_root",
+        must_exist=False,
+    )
+    result_dir = _resolve_for_absent_child(result_directory)
+    result_parent_identity = path_identity_for_role(
+        result_dir.parent,
+        role="result_parent",
+        must_exist=True,
+    )
+    result_directory_identity = path_identity_for_role(
+        result_dir,
+        role="result_directory",
+        must_exist=False,
+    )
+    derived_run_identity = canonical_sha256(
+        run_identity_declaration(
+            expected_head=expected_head,
+            expected_origin_main=expected_origin_main,
+            case_set_sha256=case_set["case_set_sha256"],
+            fixture_root_identity=fixture_identity["path_identity"],
+            result_directory_identity=result_directory_identity["path_identity"],
+            authority_registry_root_identity=authority_root_identity["path_identity"],
+            selected_a6=A6 in optional_cases,
+        )
+    )
+    if run_identity is not None and run_identity != derived_run_identity:
+        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    identity_declaration = execution_authorization_identity_declaration(
+        retained_run_assessment_identity=assessment_identity,
+        implementation_preparation_authorization_identity=(
+            implementation_preparation_authorization_identity
+        ),
+        runtime_correction_authorization_identity=(
+            runtime_correction_authorization_identity
+        ),
+        expected_branch=expected_branch,
+        expected_head=expected_head,
+        expected_origin_main=expected_origin_main,
+        retained_orchestration_policy_sha256=ABSOLUTE_POLICY_SHA256,
+        native_helper_policy_sha256=native_helper_policy_identity()["policy_sha256"],
+        retained_schema_sha256=retained_schema_identity()["schema_sha256"],
+        case_set_sha256=case_set["case_set_sha256"],
+        fixture_profile_sha256=fixture_profile_identity()["fixture_profile_sha256"],
+        authority_registry_root_identity=authority_root_identity["path_identity"],
+        fixture_root_identity=fixture_identity["path_identity"],
+        result_parent_identity=result_parent_identity["path_identity"],
+        result_directory_identity=result_directory_identity["path_identity"],
+        host_identity=host_profile_identity()["host_identity"],
+        volume_identity=volume_identity_for_path(result_directory)["volume_identity"],
+        run_identity=derived_run_identity,
+        selected_a6=A6 in optional_cases,
+        source_identities=source_identities,
+    )
+    derived_authorization_identity = (
+        execution_authorization_identity_from_declaration(identity_declaration)
+    )
+    if (
+        authorization_identity is not None
+        and authorization_identity != derived_authorization_identity
+    ):
+        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    return ExecutionAuthorizationIdentityBlock(
+        execution_authorization_identity=derived_authorization_identity,
+        retained_run_assessment_identity=assessment_identity,
+        implementation_preparation_authorization_identity=(
+            implementation_preparation_authorization_identity
+        ),
+        runtime_correction_authorization_identity=(
+            runtime_correction_authorization_identity
+        ),
+        expected_branch=expected_branch,
+        expected_head=expected_head,
+        expected_origin_main=expected_origin_main,
+        retained_orchestration_policy_sha256=ABSOLUTE_POLICY_SHA256,
+        native_helper_policy_sha256=native_helper_policy_identity()["policy_sha256"],
+        retained_schema_sha256=retained_schema_identity()["schema_sha256"],
+        case_set_sha256=case_set["case_set_sha256"],
+        fixture_profile_sha256=fixture_profile_identity()["fixture_profile_sha256"],
+        authority_registry_root=Path(authority_registry_root),
+        authority_registry_root_identity=authority_root_identity["path_identity"],
+        fixture_root_identity=fixture_identity["path_identity"],
+        result_parent_identity=result_parent_identity["path_identity"],
+        result_directory_identity=result_directory_identity["path_identity"],
+        host_identity=host_profile_identity()["host_identity"],
+        volume_identity=volume_identity_for_path(result_directory)["volume_identity"],
+        run_identity=derived_run_identity,
+        selected_a6=A6 in optional_cases,
+        source_identities=tuple(source_identities),
+    )
 
 
 def validate_case_selection(
@@ -714,6 +1254,178 @@ def admit_source_identities(
     return admitted
 
 
+def validate_execution_authorization_identity_block(
+    authorization: RetainedAuthorization,
+    block: ExecutionAuthorizationIdentityBlock,
+    *,
+    repo_root: Path,
+    source_observations: Mapping[str, SourceIdentity],
+) -> dict[str, Any]:
+    _require_hex64(block.execution_authorization_identity, "execution_authorization_identity")
+    _require_hex64(
+        block.retained_run_assessment_identity,
+        "retained_run_assessment_identity",
+    )
+    _require_hex64(
+        block.implementation_preparation_authorization_identity,
+        "implementation_preparation_authorization_identity",
+    )
+    _require_hex64(
+        block.runtime_correction_authorization_identity,
+        "runtime_correction_authorization_identity",
+    )
+    _require_hex64(block.run_identity, "run_identity")
+    if block.execution_authorization_identity != authorization.authorization_identity:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if block.retained_run_assessment_identity != authorization.assessment_identity:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if block.retained_run_assessment_identity != RETAINED_RUN_ASSESSMENT_SHA256:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if (
+        block.implementation_preparation_authorization_identity
+        != IMPLEMENTATION_PREPARATION_AUTHORIZATION_SHA256
+    ):
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if (
+        block.runtime_correction_authorization_identity
+        != RUNTIME_CORRECTION_AUTHORIZATION_SHA256
+    ):
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if block.expected_branch != authorization.expected_branch:
+        raise RetainedValidationError(REPOSITORY_STATE_INVALID)
+    if block.expected_head != authorization.expected_head:
+        raise RetainedValidationError(REPOSITORY_STATE_INVALID)
+    if block.expected_origin_main != authorization.expected_origin_main:
+        raise RetainedValidationError(REPOSITORY_STATE_INVALID)
+    if block.retained_orchestration_policy_sha256 != ABSOLUTE_POLICY_SHA256:
+        raise RetainedValidationError(RETAINED_POLICY_MISMATCH)
+    if (
+        block.native_helper_policy_sha256
+        != native_helper_policy_identity()["policy_sha256"]
+    ):
+        raise RetainedValidationError(NATIVE_HELPER_POLICY_MISMATCH)
+    if block.retained_schema_sha256 != retained_schema_identity()["schema_sha256"]:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    expected_case_set = retained_case_set_identity(
+        selected_cases=authorization.selected_cases,
+        optional_cases=authorization.optional_cases,
+    )["case_set_sha256"]
+    if block.case_set_sha256 != expected_case_set:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if (
+        block.fixture_profile_sha256
+        != fixture_profile_identity()["fixture_profile_sha256"]
+    ):
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    if block.selected_a6 is not (A6 in authorization.optional_cases):
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    _admit_authority_registry_root(block.authority_registry_root, repo_root=repo_root)
+    computed = build_execution_authorization_identity_block(
+        authorization_identity=authorization.authorization_identity,
+        assessment_identity=authorization.assessment_identity,
+        implementation_preparation_authorization_identity=(
+            block.implementation_preparation_authorization_identity
+        ),
+        runtime_correction_authorization_identity=(
+            block.runtime_correction_authorization_identity
+        ),
+        expected_branch=authorization.expected_branch,
+        expected_head=authorization.expected_head,
+        expected_origin_main=authorization.expected_origin_main,
+        result_directory=authorization.result_directory,
+        fixture_root=authorization.fixture_root,
+        authority_registry_root=block.authority_registry_root,
+        source_identities=block.source_identities,
+        selected_cases=authorization.selected_cases,
+        optional_cases=authorization.optional_cases,
+        run_identity=block.run_identity,
+    )
+    expected_path_identities = {
+        "authority_registry_root_identity": computed.authority_registry_root_identity,
+        "fixture_root_identity": computed.fixture_root_identity,
+        "result_parent_identity": computed.result_parent_identity,
+        "result_directory_identity": computed.result_directory_identity,
+        "host_identity": computed.host_identity,
+        "volume_identity": computed.volume_identity,
+    }
+    observed_path_identities = {
+        key: getattr(block, key) for key in expected_path_identities
+    }
+    if observed_path_identities != expected_path_identities:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    expected_source_paths = {identity.relative_path for identity in block.source_identities}
+    if expected_source_paths != set(REQUIRED_SOURCE_IDENTITY_PATHS):
+        raise RetainedValidationError("complete source identity set required")
+    for expectation in block.source_identities:
+        if expectation.git_blob_oid == UNAVAILABLE_UNTIL_COMMIT:
+            raise RetainedValidationError("precommit placeholders rejected")
+        _require_head_oid(expectation.git_blob_oid, "source Git blob identity")
+    admitted_sources = admit_source_identities(
+        block.source_identities,
+        source_observations,
+    )
+    return {
+        "schema": (
+            "torment.brainvision.blocker2.retained."
+            "execution_authorization_identity_block.admitted.v0.1"
+        ),
+        "identity_block": block.as_payload(),
+        "source_identities": admitted_sources,
+        "path_identities": expected_path_identities,
+    }
+
+
+def global_authority_entry_path(
+    authorization: RetainedAuthorization,
+) -> Path:
+    block = authorization.execution_authorization
+    if block is None:
+        raise RetainedValidationError(AUTHORITATIVE_AUTHORIZATION_MISSING)
+    root = Path(block.authority_registry_root).resolve()
+    return root / (authorization.authorization_identity + GLOBAL_AUTHORITY_ENTRY_SUFFIX)
+
+
+def _authorization_path_bindings_match(
+    authorization: RetainedAuthorization,
+) -> bool:
+    block = authorization.execution_authorization
+    if block is None:
+        return False
+    try:
+        computed = build_execution_authorization_identity_block(
+            authorization_identity=authorization.authorization_identity,
+            assessment_identity=authorization.assessment_identity,
+            implementation_preparation_authorization_identity=(
+                block.implementation_preparation_authorization_identity
+            ),
+            runtime_correction_authorization_identity=(
+                block.runtime_correction_authorization_identity
+            ),
+            expected_branch=authorization.expected_branch,
+            expected_head=authorization.expected_head,
+            expected_origin_main=authorization.expected_origin_main,
+            result_directory=authorization.result_directory,
+            fixture_root=authorization.fixture_root,
+            authority_registry_root=block.authority_registry_root,
+            source_identities=block.source_identities,
+            selected_cases=authorization.selected_cases,
+            optional_cases=authorization.optional_cases,
+            run_identity=block.run_identity,
+        )
+    except RetainedValidationError:
+        return False
+    return (
+        block.fixture_root_identity == computed.fixture_root_identity
+        and block.result_parent_identity == computed.result_parent_identity
+        and block.result_directory_identity == computed.result_directory_identity
+        and block.authority_registry_root_identity
+        == computed.authority_registry_root_identity
+        and block.host_identity == computed.host_identity
+        and block.volume_identity == computed.volume_identity
+        and block.selected_a6 is (A6 in authorization.optional_cases)
+    )
+
+
 def preflight_retained_authorization(
     authorization: RetainedAuthorization,
     *,
@@ -731,8 +1443,6 @@ def preflight_retained_authorization(
     _require_head_oid(authorization.expected_origin_main, "expected_origin_main")
     validate_case_selection(authorization.selected_cases, authorization.optional_cases)
     validate_policy_identity(authorized_absolute_path_control_policy_identity())
-    if authorization.authoritative:
-        raise RetainedValidationError(AUTHORITATIVE_RUN_NOT_AUTHORIZED)
     if require_case_executor:
         case_executor_present = True
     else:
@@ -747,22 +1457,40 @@ def preflight_retained_authorization(
         raise RetainedValidationError(RESULT_DIRECTORY_INSIDE_REPOSITORY)
     if _is_relative_to(fixture_root, root):
         raise RetainedValidationError("fixture root must be outside repository")
+    observed_sources = source_observations or {}
+    execution_identity: dict[str, Any] | str = "NOT_AUTHORITATIVE"
+    if authorization.authoritative:
+        if authorization.execution_authorization is None:
+            raise RetainedValidationError(AUTHORITATIVE_AUTHORIZATION_MISSING)
+        execution_identity = validate_execution_authorization_identity_block(
+            authorization,
+            authorization.execution_authorization,
+            repo_root=root,
+            source_observations=observed_sources,
+        )
+        admitted_sources = execution_identity["source_identities"]
+    else:
+        admitted_sources = admit_source_identities(
+            source_expectations,
+            observed_sources,
+        )
     if result_dir.exists():
         raise RetainedValidationError(RESULT_DIRECTORY_NOT_ABSENT)
     if result_dir.parent.exists() and _is_reparse_point(result_dir.parent):
         raise RetainedValidationError(RESULT_DIRECTORY_REPARSE_POINT)
     if fixture_root.exists() and _is_reparse_point(fixture_root):
         raise RetainedValidationError(FIXTURE_PROFILE_UNSUPPORTED)
-    admitted_sources = admit_source_identities(
-        source_expectations,
-        source_observations or {},
-    )
     return {
         "schema": "torment.brainvision.blocker2.retained.preflight.v0.1",
         "authorization": authorization.as_payload(),
+        "execution_authorization": execution_identity,
         "policy_identity": validate_policy_identity(
             authorized_absolute_path_control_policy_identity()
         ),
+        "native_helper_policy_identity": validate_native_helper_policy_identity(
+            native_helper_policy_identity()
+        ),
+        "schema_identity": retained_schema_identity(),
         "case_set_identity": retained_case_set_identity(
             selected_cases=authorization.selected_cases,
             optional_cases=authorization.optional_cases,
@@ -790,6 +1518,27 @@ def run_retained_single_run(
         raise RetainedValidationError("unknown retained fault point")
     adapter = durability_adapter or _default_durability_adapter()
     result_dir = _resolve_for_absent_child(authorization.result_directory)
+    if authorization.authoritative and authorization.execution_authorization is not None:
+        try:
+            authority_path = global_authority_entry_path(authorization)
+            if authority_path.exists():
+                replay_failure = (
+                    GLOBAL_AUTHORITY_ENTRY_EXISTS
+                    if _authorization_path_bindings_match(authorization)
+                    else CROSS_LOCATION_REPLAY_REJECTED
+                )
+                return _run_result(
+                    terminal_state=PREFLIGHT_REJECTED,
+                    authorization=authorization,
+                    result_directory=result_dir,
+                    global_authority_consumed=True,
+                    gate_consumed=False,
+                    native_invocation_started=False,
+                    primary_failure=replay_failure,
+                    detail="global authority entry already exists",
+                )
+        except RetainedValidationError:
+            pass
     try:
         preflight = preflight_retained_authorization(
             authorization,
@@ -804,6 +1553,7 @@ def run_retained_single_run(
             terminal_state=PREFLIGHT_REJECTED,
             authorization=authorization,
             result_directory=result_dir,
+            global_authority_consumed=False,
             gate_consumed=False,
             native_invocation_started=False,
             primary_failure=_failure_from_exception(exc),
@@ -813,11 +1563,96 @@ def run_retained_single_run(
         authorization.selected_cases,
         authorization.optional_cases,
     )
-    if fault_point == FAULT_BEFORE_GATE_WRITE:
+    global_authority_artifact: ImmutableArtifactWriteResult | None = None
+    global_authority_consumed = False
+    if fault_point == FAULT_BEFORE_GLOBAL_AUTHORITY_WRITE:
+        return _run_result(
+            terminal_state=PREFLIGHT_REJECTED,
+            authorization=authorization,
+            result_directory=result_dir,
+            global_authority_consumed=False,
+            gate_consumed=False,
+            native_invocation_started=False,
+            primary_failure=FAULT_INJECTION_TRIGGERED,
+            detail="fault injected before durable global authority write",
+        )
+    if authorization.authoritative:
+        try:
+            authority_path = global_authority_entry_path(authorization)
+            if authority_path.exists():
+                return _run_result(
+                    terminal_state=PREFLIGHT_REJECTED,
+                    authorization=authorization,
+                    result_directory=result_dir,
+                    global_authority_consumed=True,
+                    gate_consumed=False,
+                    native_invocation_started=False,
+                    primary_failure=GLOBAL_AUTHORITY_ENTRY_EXISTS,
+                    detail="global authority entry already exists",
+                )
+            global_record = build_global_authority_entry_record(
+                authorization=authorization,
+                preflight=preflight,
+            )
+            validate_global_authority_entry_record(global_record)
+            global_authority_artifact = _write_canonical_file(
+                authority_path,
+                global_record,
+                adapter=adapter,
+                fault_point=fault_point,
+                fault_file_write=FAULT_DURING_GLOBAL_AUTHORITY_FILE_WRITE,
+                fault_directory_sync=FAULT_DURING_GLOBAL_AUTHORITY_DIRECTORY_SYNC,
+                fault_reread=FAULT_DURING_GLOBAL_AUTHORITY_REREAD,
+            )
+            validate_global_authority_artifact(authority_path)
+            global_authority_consumed = True
+        except ArtifactPersistenceError as exc:
+            return _run_result(
+                terminal_state=GATE_ENTRY_FAILED,
+                authorization=authorization,
+                result_directory=result_dir,
+                global_authority_consumed=False,
+                gate_consumed=False,
+                native_invocation_started=False,
+                primary_failure=exc.failure_code,
+                detail=exc.detail,
+            )
+        except (OSError, RetainedValidationError) as exc:
+            return _run_result(
+                terminal_state=GATE_ENTRY_FAILED,
+                authorization=authorization,
+                result_directory=result_dir,
+                global_authority_consumed=False,
+                gate_consumed=False,
+                native_invocation_started=False,
+                primary_failure=GLOBAL_AUTHORITY_ENTRY_PERSISTENCE_FAILURE,
+                detail=str(exc),
+            )
+    if (
+        authorization.authoritative
+        and fault_point
+        in {
+            FAULT_AFTER_GLOBAL_AUTHORITY_VERIFICATION_BEFORE_LOCAL_GATE,
+            FAULT_BEFORE_GATE_WRITE,
+        }
+    ):
         return _run_result(
             terminal_state=GATE_ENTRY_FAILED,
             authorization=authorization,
             result_directory=result_dir,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=False,
+            native_invocation_started=False,
+            primary_failure=FAULT_INJECTION_TRIGGERED,
+            detail="fault injected after durable global authority verification",
+            global_authority_artifact=global_authority_artifact,
+        )
+    if not authorization.authoritative and fault_point == FAULT_BEFORE_GATE_WRITE:
+        return _run_result(
+            terminal_state=GATE_ENTRY_FAILED,
+            authorization=authorization,
+            result_directory=result_dir,
+            global_authority_consumed=False,
             gate_consumed=False,
             native_invocation_started=False,
             primary_failure=FAULT_INJECTION_TRIGGERED,
@@ -829,6 +1664,7 @@ def run_retained_single_run(
         gate_record = build_gate_entry_record(
             authorization=authorization,
             preflight=preflight,
+            global_authority_artifact=global_authority_artifact,
         )
         validate_gate_entry_record(gate_record)
         gate_artifact = _write_canonical_file(
@@ -846,26 +1682,33 @@ def run_retained_single_run(
             terminal_state=GATE_ENTRY_FAILED,
             authorization=authorization,
             result_directory=result_dir,
+            global_authority_consumed=global_authority_consumed,
             gate_consumed=False,
             native_invocation_started=False,
             primary_failure=exc.failure_code,
             detail=exc.detail,
+            global_authority_artifact=global_authority_artifact,
         )
     except (OSError, RetainedValidationError) as exc:
         return _run_result(
             terminal_state=GATE_ENTRY_FAILED,
             authorization=authorization,
             result_directory=result_dir,
+            global_authority_consumed=global_authority_consumed,
             gate_consumed=False,
             native_invocation_started=False,
             primary_failure=GATE_ENTRY_WRITE_FAILURE,
             detail=str(exc),
+            global_authority_artifact=global_authority_artifact,
         )
     if fault_point == FAULT_AFTER_VERIFIED_GATE_BEFORE_NATIVE:
         return _terminalized_result(
             authorization=authorization,
             result_directory=result_dir,
             adapter=adapter,
+            preflight=preflight,
+            global_authority_artifact=global_authority_artifact,
+            global_authority_consumed=global_authority_consumed,
             gate_artifact=gate_artifact,
             terminal_state=RUN_FAILED,
             gate_consumed=True,
@@ -883,6 +1726,19 @@ def run_retained_single_run(
             case_results,
             optional_cases=authorization.optional_cases,
         )
+        if fault_point == FAULT_AFTER_NATIVE_BEFORE_RUN_RESULT:
+            return _run_result(
+                terminal_state=RUN_FAILED,
+                authorization=authorization,
+                result_directory=result_dir,
+                global_authority_consumed=global_authority_consumed,
+                gate_consumed=True,
+                native_invocation_started=True,
+                primary_failure=FAULT_INJECTION_TRIGGERED,
+                detail="fault injected after native cases before RUN_RESULT",
+                global_authority_artifact=global_authority_artifact,
+                gate_artifact=gate_artifact,
+            )
         terminal_state = RUN_COMPLETE if case_outcomes["gating_satisfied"] else RUN_FAILED
         primary_failure = (
             "NONE"
@@ -899,6 +1755,9 @@ def run_retained_single_run(
             authorization=authorization,
             result_directory=result_dir,
             adapter=adapter,
+            preflight=preflight,
+            global_authority_artifact=global_authority_artifact,
+            global_authority_consumed=global_authority_consumed,
             gate_artifact=gate_artifact,
             terminal_state=RUN_INTERRUPTED,
             gate_consumed=True,
@@ -913,6 +1772,9 @@ def run_retained_single_run(
             authorization=authorization,
             result_directory=result_dir,
             adapter=adapter,
+            preflight=preflight,
+            global_authority_artifact=global_authority_artifact,
+            global_authority_consumed=global_authority_consumed,
             gate_artifact=gate_artifact,
             terminal_state=RUN_FAILED,
             gate_consumed=True,
@@ -926,6 +1788,9 @@ def run_retained_single_run(
         authorization=authorization,
         result_directory=result_dir,
         adapter=adapter,
+        preflight=preflight,
+        global_authority_artifact=global_authority_artifact,
+        global_authority_consumed=global_authority_consumed,
         gate_artifact=gate_artifact,
         terminal_state=terminal_state,
         gate_consumed=True,
@@ -969,6 +1834,115 @@ def execute_existing_absolute_path_retained_case_set(
     return tuple(results)
 
 
+def retained_case_envelope(
+    result: validation.ValidationCaseResult,
+    *,
+    short_case: str,
+    satisfied: bool,
+) -> dict[str, Any]:
+    native_policy = validate_native_helper_policy_identity(result.policy_identity or {})
+    retained_policy = validate_policy_identity(
+        authorized_absolute_path_control_policy_identity()
+    )
+    raw_numeric_error: int | str = (
+        result.native_error_code
+        if result.native_error_code is not None
+        else "NOT_RECORDED"
+    )
+    raw_symbolic_error = result.native_error_name or "NOT_RECORDED"
+    identity_continuity = {
+        "source_identity_before": _strip_none(
+            asdict(result.source_identity_before)
+            if result.source_identity_before is not None
+            else "NOT_RECORDED"
+        ),
+        "retained_handle_identity_after": _strip_none(
+            asdict(result.retained_handle_identity_after)
+            if result.retained_handle_identity_after is not None
+            else "NOT_RECORDED"
+        ),
+        "final_identity_after": _strip_none(
+            asdict(result.final_identity_after)
+            if result.final_identity_after is not None
+            else "NOT_RECORDED"
+        ),
+    }
+    content_continuity = {
+        "manifest_before_sha256": result.manifest_before_sha256 or "NOT_RECORDED",
+        "manifest_after_sha256": result.manifest_after_sha256 or "NOT_RECORDED",
+        "content_manifest_preserved": (
+            result.manifest_before_sha256 is not None
+            and result.manifest_before_sha256 == result.manifest_after_sha256
+        ),
+    }
+    preservation = {
+        "source_exists_after_native_failure": (
+            result.source_exists_after_native_failure
+            if result.source_exists_after_native_failure is not None
+            else "NOT_RECORDED"
+        ),
+        "final_exists_after_native_failure": (
+            result.final_exists_after_native_failure
+            if result.final_exists_after_native_failure is not None
+            else "NOT_RECORDED"
+        ),
+    }
+    return {
+        "schema": RETAINED_CASE_ENVELOPE_SCHEMA,
+        "case_short": short_case,
+        "case_id": result.case_id,
+        "case_identity": canonical_sha256(
+            {
+                "schema": "torment.brainvision.blocker2.retained.case_identity.v0.1",
+                "case_short": short_case,
+                "case_id": result.case_id,
+            }
+        ),
+        "fixture_identity": fixture_profile_identity()["fixture_profile_sha256"],
+        "native_helper_policy_identity": native_policy,
+        "retained_orchestration_policy_identity": retained_policy,
+        "raw_native_observation": _case_result_payload(result),
+        "retained_case_classification": {
+            "gating": short_case in COMPLETION_GATING_CASES,
+            "satisfied": satisfied,
+            "status": result.status,
+        },
+        "source_final_preservation_evidence": preservation,
+        "identity_continuity_evidence": identity_continuity,
+        "content_continuity_evidence": content_continuity,
+        "raw_numeric_error": raw_numeric_error,
+        "raw_symbolic_error": raw_symbolic_error,
+    }
+
+
+def validate_retained_case_envelope(envelope: Mapping[str, Any]) -> None:
+    required = {
+        "schema",
+        "case_short",
+        "case_id",
+        "case_identity",
+        "fixture_identity",
+        "native_helper_policy_identity",
+        "retained_orchestration_policy_identity",
+        "raw_native_observation",
+        "retained_case_classification",
+        "source_final_preservation_evidence",
+        "identity_continuity_evidence",
+        "content_continuity_evidence",
+        "raw_numeric_error",
+        "raw_symbolic_error",
+    }
+    if set(envelope) != required:
+        raise RetainedValidationError("retained case envelope has unexpected fields")
+    if envelope["schema"] != RETAINED_CASE_ENVELOPE_SCHEMA:
+        raise RetainedValidationError("retained case envelope schema mismatch")
+    validate_native_helper_policy_identity(envelope["native_helper_policy_identity"])
+    validate_policy_identity(envelope["retained_orchestration_policy_identity"])
+    if envelope["fixture_identity"] != fixture_profile_identity()["fixture_profile_sha256"]:
+        raise RetainedValidationError("retained case fixture identity mismatch")
+    _require_hex64(str(envelope["case_identity"]), "case_identity")
+
+
 def evaluate_case_results(
     case_results: Sequence[validation.ValidationCaseResult],
     *,
@@ -997,6 +1971,21 @@ def evaluate_case_results(
         for case in optional_cases
         if case in result_by_short
     }
+    envelopes = [
+        retained_case_envelope(
+            result_by_short[case],
+            short_case=case,
+            satisfied=(
+                gating_satisfied_by_case[case]
+                if case in COMPLETION_GATING_CASES
+                else False
+            ),
+        )
+        for case in expected
+        if case in result_by_short
+    ]
+    for envelope in envelopes:
+        validate_retained_case_envelope(envelope)
     return {
         "schema": "torment.brainvision.blocker2.retained.case_outcomes.v0.1",
         "selected_cases": [CASE_SHORT_TO_ID[case] for case in expected],
@@ -1006,11 +1995,7 @@ def evaluate_case_results(
         "gating_satisfied_by_case": gating_satisfied_by_case,
         "gating_satisfied": all(gating_satisfied_by_case.values()),
         "optional_outcomes": optional_outcomes,
-        "case_results": [
-            _case_result_payload(result_by_short[case])
-            for case in expected
-            if case in result_by_short
-        ],
+        "case_results": envelopes,
     }
 
 
@@ -1032,20 +2017,139 @@ def empty_case_outcomes(case_order: Sequence[str]) -> dict[str, Any]:
     }
 
 
-def build_gate_entry_record(
+def build_global_authority_entry_record(
     *,
     authorization: RetainedAuthorization,
     preflight: Mapping[str, Any],
 ) -> dict[str, Any]:
+    block = authorization.execution_authorization
+    if block is None:
+        raise RetainedValidationError(AUTHORITATIVE_AUTHORIZATION_MISSING)
+    return {
+        "schema": RETAINED_GLOBAL_AUTHORITY_ENTRY_SCHEMA,
+        "record_type": "GLOBAL_AUTHORITY_ENTRY",
+        "execution_authorization_identity": authorization.authorization_identity,
+        "assessment_identity": authorization.assessment_identity,
+        "implementation_preparation_authorization_identity": (
+            block.implementation_preparation_authorization_identity
+        ),
+        "runtime_correction_authorization_identity": (
+            block.runtime_correction_authorization_identity
+        ),
+        "repository_state": dict(preflight["repository_state"]),
+        "source_identities": list(preflight["source_identities"]),
+        "retained_orchestration_policy_identity": validate_policy_identity(
+            authorized_absolute_path_control_policy_identity()
+        ),
+        "native_helper_policy_identity": validate_native_helper_policy_identity(
+            native_helper_policy_identity()
+        ),
+        "schema_identity": retained_schema_identity(),
+        "case_set_identity": retained_case_set_identity(
+            selected_cases=authorization.selected_cases,
+            optional_cases=authorization.optional_cases,
+        ),
+        "fixture_profile_identity": fixture_profile_identity(),
+        "path_identities": dict(preflight["execution_authorization"]["path_identities"]),
+        "authority_registry_entry_path": str(global_authority_entry_path(authorization)),
+        "run_identity": block.run_identity,
+        "selected_a6": block.selected_a6,
+        "authoritative": True,
+        "retained_execution": False,
+        "native_invocation_started": False,
+        "terminal_completion": "ABSENT",
+    }
+
+
+def validate_global_authority_entry_record(record: Mapping[str, Any]) -> None:
+    required = {
+        "schema",
+        "record_type",
+        "execution_authorization_identity",
+        "assessment_identity",
+        "implementation_preparation_authorization_identity",
+        "runtime_correction_authorization_identity",
+        "repository_state",
+        "source_identities",
+        "retained_orchestration_policy_identity",
+        "native_helper_policy_identity",
+        "schema_identity",
+        "case_set_identity",
+        "fixture_profile_identity",
+        "path_identities",
+        "authority_registry_entry_path",
+        "run_identity",
+        "selected_a6",
+        "authoritative",
+        "retained_execution",
+        "native_invocation_started",
+        "terminal_completion",
+    }
+    if set(record) != required:
+        raise RetainedValidationError("global authority entry has unexpected fields")
+    if record["schema"] != RETAINED_GLOBAL_AUTHORITY_ENTRY_SCHEMA:
+        raise RetainedValidationError("global authority schema mismatch")
+    if record["record_type"] != "GLOBAL_AUTHORITY_ENTRY":
+        raise RetainedValidationError("global authority record type mismatch")
+    _require_hex64(
+        str(record["execution_authorization_identity"]),
+        "execution_authorization_identity",
+    )
+    _require_hex64(str(record["assessment_identity"]), "assessment_identity")
+    _require_hex64(str(record["run_identity"]), "run_identity")
+    validate_policy_identity(record["retained_orchestration_policy_identity"])
+    validate_native_helper_policy_identity(record["native_helper_policy_identity"])
+    if record["schema_identity"] != retained_schema_identity():
+        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    if record["fixture_profile_identity"] != fixture_profile_identity():
+        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    if record["authoritative"] is not True:
+        raise RetainedValidationError("global authority must be authoritative")
+    if record["retained_execution"] is not False:
+        raise RetainedValidationError("global authority cannot claim completion")
+    if record["native_invocation_started"] is not False:
+        raise RetainedValidationError("native invocation cannot precede local gate")
+    if record["terminal_completion"] != "ABSENT":
+        raise RetainedValidationError("global authority completion must be absent")
+
+
+def validate_global_authority_artifact(path: str | Path) -> dict[str, Any]:
+    payload = Path(path).read_bytes()
+    record = load_canonical_json_bytes(payload)
+    validate_global_authority_entry_record(record)
+    return record
+
+
+def build_gate_entry_record(
+    *,
+    authorization: RetainedAuthorization,
+    preflight: Mapping[str, Any],
+    global_authority_artifact: ImmutableArtifactWriteResult | None = None,
+) -> dict[str, Any]:
     return {
         "schema": RETAINED_GATE_ENTRY_SCHEMA,
+        "record_type": "LOCAL_GATE_ENTRY",
         "authorization_identity": authorization.authorization_identity,
         "assessment_identity": authorization.assessment_identity,
         "mode": authorization.mode,
         "control_mode": validation.ABSOLUTE_PATH_CONTROL_MODE,
+        "authoritative": authorization.authoritative,
+        "global_authority_state": (
+            {
+                "path": global_authority_artifact.path,
+                "sha256": global_authority_artifact.sha256,
+                "byte_length": global_authority_artifact.byte_length,
+            }
+            if global_authority_artifact is not None
+            else "NOT_AUTHORITATIVE"
+        ),
         "policy_identity": validate_policy_identity(
             authorized_absolute_path_control_policy_identity()
         ),
+        "native_helper_policy_identity": validate_native_helper_policy_identity(
+            native_helper_policy_identity()
+        ),
+        "schema_identity": retained_schema_identity(),
         "case_set_identity": retained_case_set_identity(
             selected_cases=authorization.selected_cases,
             optional_cases=authorization.optional_cases,
@@ -1063,11 +2167,16 @@ def build_gate_entry_record(
 def validate_gate_entry_record(record: Mapping[str, Any]) -> None:
     required = {
         "schema",
+        "record_type",
         "authorization_identity",
         "assessment_identity",
         "mode",
         "control_mode",
+        "authoritative",
+        "global_authority_state",
         "policy_identity",
+        "native_helper_policy_identity",
+        "schema_identity",
         "case_set_identity",
         "fixture_profile_identity",
         "preflight_sha256",
@@ -1081,10 +2190,23 @@ def validate_gate_entry_record(record: Mapping[str, Any]) -> None:
         raise RetainedValidationError("gate entry has unexpected schema fields")
     if record["schema"] != RETAINED_GATE_ENTRY_SCHEMA:
         raise RetainedValidationError("gate entry schema mismatch")
+    if record["record_type"] != "LOCAL_GATE_ENTRY":
+        raise RetainedValidationError("gate entry record type mismatch")
     require_retained_mode(str(record["mode"]))
     if record["control_mode"] != validation.ABSOLUTE_PATH_CONTROL_MODE:
         raise RetainedValidationError("gate entry control mode mismatch")
     validate_policy_identity(record["policy_identity"])
+    validate_native_helper_policy_identity(record["native_helper_policy_identity"])
+    if record["schema_identity"] != retained_schema_identity():
+        raise RetainedValidationError(LOCAL_GATE_LINKAGE_FAILURE)
+    if record["authoritative"] is True:
+        global_state = _require_mapping(
+            record["global_authority_state"],
+            "global_authority_state",
+        )
+        _require_hex64(str(global_state.get("sha256")), "global authority hash")
+    elif record["global_authority_state"] != "NOT_AUTHORITATIVE":
+        raise RetainedValidationError("non-authoritative gate cannot bind authority")
     _require_hex64(str(record["authorization_identity"]), "authorization_identity")
     _require_hex64(str(record["assessment_identity"]), "assessment_identity")
     _require_hex64(str(record["preflight_sha256"]), "preflight_sha256")
@@ -1117,24 +2239,45 @@ def build_terminal_record(
     case_outcomes: Mapping[str, Any],
     gate_artifact: ImmutableArtifactWriteResult | None,
     artifact_state: Mapping[str, Any],
+    preflight: Mapping[str, Any] | None = None,
+    global_authority_artifact: ImmutableArtifactWriteResult | None = None,
     fault_point: str | None = None,
 ) -> dict[str, Any]:
+    preflight_payload = preflight or {}
     return {
-        "schema": RETAINED_TERMINAL_RECORD_SCHEMA,
+        "schema": RETAINED_RUN_RESULT_SCHEMA,
+        "record_type": "RUN_RESULT",
         "authorization_identity": authorization.authorization_identity,
         "assessment_identity": authorization.assessment_identity,
         "mode": authorization.mode,
         "control_mode": validation.ABSOLUTE_PATH_CONTROL_MODE,
         "authoritative": authorization.authoritative,
         "preparation_phase": RETAINED_PREPARATION_PHASE,
-        "policy_identity": validate_policy_identity(
+        "repository_state": dict(
+            preflight_payload.get("repository_state", {"state": "NOT_RECORDED"})
+        ),
+        "source_identities": list(preflight_payload.get("source_identities", [])),
+        "retained_orchestration_policy_identity": validate_policy_identity(
             authorized_absolute_path_control_policy_identity()
         ),
+        "native_helper_policy_identity": validate_native_helper_policy_identity(
+            native_helper_policy_identity()
+        ),
+        "schema_identity": retained_schema_identity(),
         "case_set_identity": retained_case_set_identity(
             selected_cases=authorization.selected_cases,
             optional_cases=authorization.optional_cases,
         ),
         "fixture_profile_identity": fixture_profile_identity(),
+        "global_authority_state": (
+            {
+                "path": global_authority_artifact.path,
+                "sha256": global_authority_artifact.sha256,
+                "byte_length": global_authority_artifact.byte_length,
+            }
+            if global_authority_artifact is not None
+            else "NOT_AUTHORITATIVE"
+        ),
         "native_boundary": native_boundary_declaration(),
         "gate_state": {
             "consumed": gate_consumed,
@@ -1148,6 +2291,7 @@ def build_terminal_record(
         "native_invocation_started": native_invocation_started,
         "case_outcomes": dict(case_outcomes),
         "artifact_state": dict(artifact_state),
+        "completion_receipt": "ABSENT",
         "fault_injection": {
             "active": fault_point is not None,
             "fault_point": fault_point or "NONE",
@@ -1163,20 +2307,27 @@ def build_terminal_record(
 def validate_terminal_record(record: Mapping[str, Any]) -> None:
     required = {
         "schema",
+        "record_type",
         "authorization_identity",
         "assessment_identity",
         "mode",
         "control_mode",
         "authoritative",
         "preparation_phase",
-        "policy_identity",
+        "repository_state",
+        "source_identities",
+        "retained_orchestration_policy_identity",
+        "native_helper_policy_identity",
+        "schema_identity",
         "case_set_identity",
         "fixture_profile_identity",
+        "global_authority_state",
         "native_boundary",
         "gate_state",
         "native_invocation_started",
         "case_outcomes",
         "artifact_state",
+        "completion_receipt",
         "fault_injection",
         "primary_failure",
         "detail",
@@ -1184,13 +2335,18 @@ def validate_terminal_record(record: Mapping[str, Any]) -> None:
         "retained_execution",
     }
     if set(record) != required:
-        raise RetainedValidationError("terminal record has unexpected schema fields")
-    if record["schema"] != RETAINED_TERMINAL_RECORD_SCHEMA:
-        raise RetainedValidationError("terminal schema mismatch")
+        raise RetainedValidationError("RUN_RESULT has unexpected schema fields")
+    if record["schema"] != RETAINED_RUN_RESULT_SCHEMA:
+        raise RetainedValidationError("RUN_RESULT schema mismatch")
+    if record["record_type"] != "RUN_RESULT":
+        raise RetainedValidationError("RUN_RESULT record type mismatch")
     require_retained_mode(str(record["mode"]))
     if record["control_mode"] != validation.ABSOLUTE_PATH_CONTROL_MODE:
-        raise RetainedValidationError("terminal control mode mismatch")
-    validate_policy_identity(record["policy_identity"])
+        raise RetainedValidationError("RUN_RESULT control mode mismatch")
+    validate_policy_identity(record["retained_orchestration_policy_identity"])
+    validate_native_helper_policy_identity(record["native_helper_policy_identity"])
+    if record["schema_identity"] != retained_schema_identity():
+        raise RetainedValidationError("RUN_RESULT schema identity mismatch")
     _require_hex64(str(record["authorization_identity"]), "authorization_identity")
     _require_hex64(str(record["assessment_identity"]), "assessment_identity")
     terminal_state = record["terminal_state"]
@@ -1202,6 +2358,18 @@ def validate_terminal_record(record: Mapping[str, Any]) -> None:
         raise RetainedValidationError("retained execution flag must be boolean")
     if not isinstance(record["authoritative"], bool):
         raise RetainedValidationError("authoritative flag must be boolean")
+    if record["retained_execution"] is not False:
+        raise RetainedValidationError("RUN_RESULT cannot claim retained execution")
+    if record["completion_receipt"] != "ABSENT":
+        raise RetainedValidationError("RUN_RESULT completion receipt must be absent")
+    if record["authoritative"] is True:
+        global_state = _require_mapping(
+            record["global_authority_state"],
+            "global_authority_state",
+        )
+        _require_hex64(str(global_state.get("sha256")), "global authority hash")
+    elif record["global_authority_state"] != "NOT_AUTHORITATIVE":
+        raise RetainedValidationError("non-authoritative RUN_RESULT cannot bind authority")
     gate_state = _require_mapping(record["gate_state"], "gate_state")
     if gate_state.get("consumed") is False and record["native_invocation_started"]:
         raise RetainedValidationError("native invocation cannot start before gate")
@@ -1211,29 +2379,12 @@ def validate_terminal_record(record: Mapping[str, Any]) -> None:
     fault_injection = _require_mapping(record["fault_injection"], "fault_injection")
     if terminal_state == RUN_COMPLETE and not case_outcomes.get("gating_satisfied"):
         raise RetainedValidationError("RUN_COMPLETE requires satisfied gating cases")
-    if record["retained_execution"]:
-        if record["authoritative"] is not True:
-            raise RetainedValidationError("retained execution requires authority")
-        if terminal_state != RUN_COMPLETE:
-            raise RetainedValidationError("retained execution requires RUN_COMPLETE")
-        if gate_state.get("consumed") is not True:
-            raise RetainedValidationError("retained execution requires consumed gate")
-        if record["native_invocation_started"] is not True:
-            raise RetainedValidationError("retained execution requires native call")
-        if fault_injection.get("active") is not False:
-            raise RetainedValidationError("fault injection cannot be authoritative")
-        for key in (
-            "terminal_record_serialized",
-            "terminal_artifact_written",
-            "file_flush_completed",
-            "directory_entry_durability_completed",
-            "reread_verified",
-            "hash_verified",
-        ):
-            if artifact_state.get(key) is not True:
-                raise RetainedValidationError(
-                    "retained execution requires admitted terminal artifact"
-                )
+    if terminal_state == RUN_COMPLETE and record["native_invocation_started"] is not True:
+        raise RetainedValidationError("RUN_COMPLETE requires native invocation")
+    if fault_injection.get("active") is True and terminal_state == RUN_COMPLETE:
+        if artifact_state.get("terminal_artifact_written") is True:
+            raise RetainedValidationError("fault injection cannot complete RUN_RESULT")
+    _require_mapping(artifact_state, "artifact_state")
 
 
 def build_artifact_wrapper(terminal_record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1247,9 +2398,26 @@ def build_artifact_wrapper(terminal_record: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
+def validate_run_result_artifact(path: str | Path) -> dict[str, Any]:
+    payload = Path(path).read_bytes()
+    record = load_canonical_json_bytes(payload)
+    validate_terminal_record(record)
+    return record
+
+
 def validate_terminal_artifact(path: str | Path) -> dict[str, Any]:
     payload = Path(path).read_bytes()
-    wrapper = load_canonical_json_bytes(payload)
+    loaded = load_canonical_json_bytes(payload)
+    if isinstance(loaded, Mapping) and loaded.get("record_type") == "RUN_RESULT":
+        validate_terminal_record(loaded)
+        terminal_bytes = canonical_json_bytes(loaded)
+        return {
+            "schema": RETAINED_TERMINAL_ARTIFACT_SCHEMA,
+            "terminal_record": dict(loaded),
+            "terminal_record_byte_length": len(terminal_bytes),
+            "terminal_record_sha256": hashlib.sha256(terminal_bytes).hexdigest(),
+        }
+    wrapper = loaded
     required = {
         "schema",
         "terminal_record",
@@ -1268,6 +2436,139 @@ def validate_terminal_artifact(path: str | Path) -> dict[str, Any]:
     if wrapper["terminal_record_sha256"] != hashlib.sha256(terminal_bytes).hexdigest():
         raise RetainedValidationError("terminal record SHA-256 mismatch")
     return wrapper
+
+
+def build_retained_completion_record(
+    *,
+    authorization: RetainedAuthorization,
+    run_result_record: Mapping[str, Any],
+    run_result_artifact: ImmutableArtifactWriteResult,
+    gate_artifact: ImmutableArtifactWriteResult,
+    global_authority_artifact: ImmutableArtifactWriteResult,
+) -> dict[str, Any]:
+    validate_terminal_record(run_result_record)
+    if authorization.execution_authorization is None:
+        raise RetainedValidationError(AUTHORITATIVE_AUTHORIZATION_MISSING)
+    if authorization.authoritative is not True:
+        raise RetainedValidationError(RETAINED_COMPLETION_PRECONDITION_FAILURE)
+    if run_result_record["terminal_state"] != RUN_COMPLETE:
+        raise RetainedValidationError(RETAINED_COMPLETION_PRECONDITION_FAILURE)
+    if run_result_record["case_outcomes"]["gating_satisfied"] is not True:
+        raise RetainedValidationError(RETAINED_COMPLETION_PRECONDITION_FAILURE)
+    if run_result_artifact.reread_verified is not True:
+        raise RetainedValidationError(RETAINED_COMPLETION_PRECONDITION_FAILURE)
+    return {
+        "schema": RETAINED_COMPLETION_SCHEMA,
+        "record_type": "RETAINED_COMPLETION",
+        "execution_authorization_identity": authorization.authorization_identity,
+        "assessment_identity": authorization.assessment_identity,
+        "mode": authorization.mode,
+        "authoritative": True,
+        "retained_execution": True,
+        "global_authority_entry_hash": global_authority_artifact.sha256,
+        "local_gate_hash": gate_artifact.sha256,
+        "run_result_hash": run_result_artifact.sha256,
+        "run_result_byte_length": run_result_artifact.byte_length,
+        "repository_state": dict(
+            run_result_record.get("repository_state", "NOT_RECORDED")
+            if isinstance(run_result_record.get("repository_state"), Mapping)
+            else {"state": "BOUND_BY_GLOBAL_AUTHORITY_ENTRY"}
+        ),
+        "retained_orchestration_policy_identity": validate_policy_identity(
+            authorized_absolute_path_control_policy_identity()
+        ),
+        "native_helper_policy_identity": validate_native_helper_policy_identity(
+            native_helper_policy_identity()
+        ),
+        "schema_identity": retained_schema_identity(),
+        "case_set_identity": retained_case_set_identity(
+            selected_cases=authorization.selected_cases,
+            optional_cases=authorization.optional_cases,
+        ),
+        "fixture_profile_identity": fixture_profile_identity(),
+        "path_identities": (
+            authorization.execution_authorization.as_payload()
+        ),
+        "run_identity": authorization.execution_authorization.run_identity,
+        "all_gating_outcomes_satisfied": True,
+        "a5_identity_continuity_satisfied": (
+            run_result_record["case_outcomes"]["gating_satisfied_by_case"][A5]
+        ),
+        "a2_a3_preservation_satisfied": (
+            run_result_record["case_outcomes"]["gating_satisfied_by_case"][A2]
+            and run_result_record["case_outcomes"]["gating_satisfied_by_case"][A3]
+        ),
+        "content_continuity_satisfied": True,
+        "run_result_durability_verified": True,
+        "run_result_reread_verified": run_result_artifact.reread_verified,
+        "run_result_hash_verified": run_result_artifact.hash_verified,
+    }
+
+
+def validate_retained_completion_record(record: Mapping[str, Any]) -> None:
+    required = {
+        "schema",
+        "record_type",
+        "execution_authorization_identity",
+        "assessment_identity",
+        "mode",
+        "authoritative",
+        "retained_execution",
+        "global_authority_entry_hash",
+        "local_gate_hash",
+        "run_result_hash",
+        "run_result_byte_length",
+        "repository_state",
+        "retained_orchestration_policy_identity",
+        "native_helper_policy_identity",
+        "schema_identity",
+        "case_set_identity",
+        "fixture_profile_identity",
+        "path_identities",
+        "run_identity",
+        "all_gating_outcomes_satisfied",
+        "a5_identity_continuity_satisfied",
+        "a2_a3_preservation_satisfied",
+        "content_continuity_satisfied",
+        "run_result_durability_verified",
+        "run_result_reread_verified",
+        "run_result_hash_verified",
+    }
+    if set(record) != required:
+        raise RetainedValidationError("retained completion has unexpected fields")
+    if record["schema"] != RETAINED_COMPLETION_SCHEMA:
+        raise RetainedValidationError("retained completion schema mismatch")
+    if record["record_type"] != "RETAINED_COMPLETION":
+        raise RetainedValidationError("retained completion record type mismatch")
+    require_retained_mode(str(record["mode"]))
+    if record["authoritative"] is not True:
+        raise RetainedValidationError("retained completion requires authority")
+    if record["retained_execution"] is not True:
+        raise RetainedValidationError("completion must declare retained execution")
+    for key in ("global_authority_entry_hash", "local_gate_hash", "run_result_hash"):
+        _require_hex64(str(record[key]), key)
+    validate_policy_identity(record["retained_orchestration_policy_identity"])
+    validate_native_helper_policy_identity(record["native_helper_policy_identity"])
+    if record["schema_identity"] != retained_schema_identity():
+        raise RetainedValidationError("completion schema identity mismatch")
+    for key in (
+        "all_gating_outcomes_satisfied",
+        "a5_identity_continuity_satisfied",
+        "a2_a3_preservation_satisfied",
+        "content_continuity_satisfied",
+        "run_result_durability_verified",
+        "run_result_reread_verified",
+        "run_result_hash_verified",
+    ):
+        if record[key] is not True:
+            raise RetainedValidationError(RETAINED_COMPLETION_PRECONDITION_FAILURE)
+
+
+def validate_retained_completion_artifact(path: str | Path) -> dict[str, Any]:
+    payload = Path(path).read_bytes()
+    record = load_canonical_json_bytes(payload)
+    validate_retained_completion_record(record)
+    return record
 
 
 def pending_artifact_state() -> dict[str, Any]:
@@ -1349,6 +2650,9 @@ def _terminalized_result(
     authorization: RetainedAuthorization,
     result_directory: Path,
     adapter: windows_adapter.WindowsDurabilityAdapter,
+    preflight: Mapping[str, Any],
+    global_authority_artifact: ImmutableArtifactWriteResult | None,
+    global_authority_consumed: bool,
     gate_artifact: ImmutableArtifactWriteResult,
     terminal_state: str,
     gate_consumed: bool,
@@ -1358,70 +2662,233 @@ def _terminalized_result(
     case_outcomes: Mapping[str, Any],
     fault_point: str | None,
 ) -> RetainedRunResult:
-    retained_execution = False
-    terminal_record = build_terminal_record(
+    effective_fault_point = _normalize_run_result_fault_point(fault_point)
+    run_result_record = build_terminal_record(
         authorization=authorization,
         terminal_state=terminal_state,
         gate_consumed=gate_consumed,
         native_invocation_started=native_invocation_started,
-        retained_execution=retained_execution,
+        retained_execution=False,
         primary_failure=primary_failure,
         detail=detail,
         case_outcomes=case_outcomes,
         gate_artifact=gate_artifact,
         artifact_state=pending_artifact_state(),
-        fault_point=fault_point,
+        preflight=preflight,
+        global_authority_artifact=global_authority_artifact,
+        fault_point=effective_fault_point,
     )
-    validate_terminal_record(terminal_record)
-    try:
-        wrapper = build_artifact_wrapper(terminal_record)
-        terminal_artifact = _write_canonical_file(
-            result_directory / TERMINAL_ARTIFACT_FILENAME,
-            wrapper,
-            adapter=adapter,
-            fault_point=fault_point,
-            fault_file_write=FAULT_DURING_TERMINAL_FILE_WRITE,
-            fault_directory_sync=FAULT_DURING_TERMINAL_DIRECTORY_SYNC,
-            fault_reread=FAULT_DURING_TERMINAL_REREAD,
+    if effective_fault_point == FAULT_DURING_RUN_RESULT_SERIALIZATION:
+        return _run_result(
+            terminal_state=ARTIFACT_PERSISTENCE_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=RUN_RESULT_SERIALIZATION_FAILURE,
+            detail="fault injected during RUN_RESULT serialization",
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_record=run_result_record,
         )
-        validate_terminal_artifact(result_directory / TERMINAL_ARTIFACT_FILENAME)
+    validate_terminal_record(run_result_record)
+    try:
+        run_result_artifact = _write_canonical_file(
+            result_directory / RUN_RESULT_FILENAME,
+            run_result_record,
+            adapter=adapter,
+            fault_point=effective_fault_point,
+            fault_file_write=FAULT_DURING_RUN_RESULT_FILE_WRITE,
+            fault_directory_sync=FAULT_DURING_RUN_RESULT_DIRECTORY_SYNC,
+            fault_reread=FAULT_DURING_RUN_RESULT_REREAD,
+        )
+        validate_run_result_artifact(result_directory / RUN_RESULT_FILENAME)
     except ArtifactPersistenceError as exc:
         return _run_result(
             terminal_state=ARTIFACT_PERSISTENCE_FAILED
-            if exc.failure_code == TERMINAL_ARTIFACT_WRITE_FAILURE
+            if exc.failure_code == RUN_RESULT_PERSISTENCE_FAILURE
             else ARTIFACT_REVERIFY_FAILED,
             authorization=authorization,
             result_directory=result_directory,
+            global_authority_consumed=global_authority_consumed,
             gate_consumed=gate_consumed,
             native_invocation_started=native_invocation_started,
             primary_failure=exc.failure_code,
             detail=exc.detail,
+            global_authority_artifact=global_authority_artifact,
             gate_artifact=gate_artifact,
-            terminal_record=terminal_record,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
         )
     except RetainedValidationError as exc:
         return _run_result(
             terminal_state=ARTIFACT_REVERIFY_FAILED,
             authorization=authorization,
             result_directory=result_directory,
+            global_authority_consumed=global_authority_consumed,
             gate_consumed=gate_consumed,
             native_invocation_started=native_invocation_started,
-            primary_failure=TERMINAL_ARTIFACT_REVERIFY_FAILURE,
+            primary_failure=RUN_RESULT_REVERIFY_FAILURE,
             detail=str(exc),
+            global_authority_artifact=global_authority_artifact,
             gate_artifact=gate_artifact,
-            terminal_record=terminal_record,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    if (
+        authorization.authoritative is not True
+        or terminal_state != RUN_COMPLETE
+        or primary_failure != "NONE"
+        or effective_fault_point is not None
+    ):
+        return _run_result(
+            terminal_state=terminal_state,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=primary_failure,
+            detail=detail,
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    if global_authority_artifact is None:
+        return _run_result(
+            terminal_state=ARTIFACT_PERSISTENCE_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=EVIDENCE_CHAIN_LINKAGE_FAILURE,
+            detail="authoritative completion requires global authority artifact",
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    if fault_point == FAULT_BEFORE_RETAINED_COMPLETION_CREATION:
+        return _run_result(
+            terminal_state=ARTIFACT_PERSISTENCE_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=FAULT_INJECTION_TRIGGERED,
+            detail="fault injected before RETAINED_COMPLETION creation",
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    if fault_point == FAULT_DURING_COMPLETION_SERIALIZATION:
+        return _run_result(
+            terminal_state=ARTIFACT_PERSISTENCE_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=RETAINED_COMPLETION_SERIALIZATION_FAILURE,
+            detail="fault injected during RETAINED_COMPLETION serialization",
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    try:
+        completion_record = build_retained_completion_record(
+            authorization=authorization,
+            run_result_record=run_result_record,
+            run_result_artifact=run_result_artifact,
+            gate_artifact=gate_artifact,
+            global_authority_artifact=global_authority_artifact,
+        )
+        validate_retained_completion_record(completion_record)
+        completion_artifact = _write_canonical_file(
+            result_directory / RETAINED_COMPLETION_FILENAME,
+            completion_record,
+            adapter=adapter,
+            fault_point=fault_point,
+            fault_file_write=FAULT_DURING_COMPLETION_FILE_WRITE,
+            fault_directory_sync=FAULT_DURING_COMPLETION_DIRECTORY_SYNC,
+            fault_reread=FAULT_DURING_COMPLETION_REREAD,
+        )
+        validate_retained_completion_artifact(
+            result_directory / RETAINED_COMPLETION_FILENAME
+        )
+    except ArtifactPersistenceError as exc:
+        return _run_result(
+            terminal_state=ARTIFACT_PERSISTENCE_FAILED
+            if exc.failure_code == RETAINED_COMPLETION_PERSISTENCE_FAILURE
+            else ARTIFACT_REVERIFY_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=exc.failure_code,
+            detail=exc.detail,
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
+        )
+    except RetainedValidationError as exc:
+        return _run_result(
+            terminal_state=ARTIFACT_REVERIFY_FAILED,
+            authorization=authorization,
+            result_directory=result_directory,
+            retained_execution=False,
+            global_authority_consumed=global_authority_consumed,
+            gate_consumed=gate_consumed,
+            native_invocation_started=native_invocation_started,
+            primary_failure=RETAINED_COMPLETION_REVERIFY_FAILURE,
+            detail=str(exc),
+            global_authority_artifact=global_authority_artifact,
+            gate_artifact=gate_artifact,
+            run_result_artifact=run_result_artifact,
+            terminal_artifact=run_result_artifact,
+            run_result_record=run_result_record,
+            terminal_record=run_result_record,
         )
     return _run_result(
         terminal_state=terminal_state,
         authorization=authorization,
         result_directory=result_directory,
+        retained_execution=completion_record["retained_execution"],
+        global_authority_consumed=global_authority_consumed,
         gate_consumed=gate_consumed,
         native_invocation_started=native_invocation_started,
         primary_failure=primary_failure,
         detail=detail,
+        global_authority_artifact=global_authority_artifact,
         gate_artifact=gate_artifact,
-        terminal_artifact=terminal_artifact,
-        terminal_record=terminal_record,
+        run_result_artifact=run_result_artifact,
+        retained_completion_artifact=completion_artifact,
+        terminal_artifact=run_result_artifact,
+        run_result_record=run_result_record,
+        retained_completion_record=completion_record,
+        terminal_record=run_result_record,
     )
 
 
@@ -1501,27 +2968,40 @@ def _run_result(
     terminal_state: str,
     authorization: RetainedAuthorization,
     result_directory: Path,
+    global_authority_consumed: bool,
+    retained_execution: bool = False,
     gate_consumed: bool,
     native_invocation_started: bool,
     primary_failure: str | None,
     detail: str,
+    global_authority_artifact: ImmutableArtifactWriteResult | None = None,
     gate_artifact: ImmutableArtifactWriteResult | None = None,
+    run_result_artifact: ImmutableArtifactWriteResult | None = None,
+    retained_completion_artifact: ImmutableArtifactWriteResult | None = None,
     terminal_artifact: ImmutableArtifactWriteResult | None = None,
+    run_result_record: dict[str, Any] | None = None,
+    retained_completion_record: dict[str, Any] | None = None,
     terminal_record: dict[str, Any] | None = None,
 ) -> RetainedRunResult:
     if terminal_state not in TERMINAL_STATES:
         raise RetainedValidationError("unknown terminal state")
     return RetainedRunResult(
         terminal_state=terminal_state,
-        retained_execution=False,
+        retained_execution=retained_execution,
         authoritative=authorization.authoritative,
+        global_authority_consumed=global_authority_consumed,
         gate_consumed=gate_consumed,
         native_invocation_started=native_invocation_started,
         primary_failure=primary_failure,
         detail=detail,
         result_directory=str(result_directory),
+        global_authority_artifact=global_authority_artifact,
         gate_artifact=gate_artifact,
+        run_result_artifact=run_result_artifact,
+        retained_completion_artifact=retained_completion_artifact,
         terminal_artifact=terminal_artifact,
+        run_result_record=run_result_record,
+        retained_completion_record=retained_completion_record,
         terminal_record=terminal_record,
     )
 
@@ -1574,7 +3054,7 @@ def _collision_case_satisfied(result: validation.ValidationCaseResult) -> bool:
 
 def _case_policy_is_authorized(result: validation.ValidationCaseResult) -> bool:
     try:
-        validate_policy_identity(result.policy_identity or {})
+        validate_native_helper_policy_identity(result.policy_identity or {})
     except RetainedValidationError:
         return False
     return True
@@ -1652,6 +3132,22 @@ def _admit_result_directory_for_creation(result_dir: Path) -> None:
         raise RetainedValidationError("result directory parent must exist")
     if _is_reparse_point(result_dir.parent):
         raise RetainedValidationError(RESULT_DIRECTORY_REPARSE_POINT)
+
+
+def _admit_authority_registry_root(
+    authority_root: str | Path,
+    *,
+    repo_root: Path,
+) -> Path:
+    root = Path(authority_root).resolve()
+    _admit_drive_qualified_dos_path(root)
+    if not root.exists() or not root.is_dir():
+        raise RetainedValidationError("authority registry root must exist")
+    if _is_relative_to(root, repo_root):
+        raise RetainedValidationError("authority registry root must be outside repository")
+    if _is_reparse_point(root):
+        raise RetainedValidationError("authority registry root must not be reparse")
+    return root
 
 
 def _admit_drive_qualified_dos_path(path: Path) -> None:
@@ -1791,7 +3287,10 @@ def _validate_json_domain(value: Any) -> None:
 def _failure_from_exception(exc: RetainedValidationError) -> str:
     text = str(exc)
     for failure_code in FAILURE_CODES:
-        if text == failure_code or failure_code in text:
+        if text == failure_code:
+            return failure_code
+    for failure_code in sorted(FAILURE_CODES, key=len, reverse=True):
+        if failure_code in text:
             return failure_code
     if "policy" in text.lower():
         return POLICY_MISMATCH
@@ -1807,15 +3306,44 @@ def _failure_from_exception(exc: RetainedValidationError) -> str:
 
 
 def _write_failure_code_for(path: Path) -> str:
+    if path.name.endswith(GLOBAL_AUTHORITY_ENTRY_SUFFIX):
+        return GLOBAL_AUTHORITY_ENTRY_PERSISTENCE_FAILURE
     if path.name == GATE_ENTRY_FILENAME:
         return GATE_ENTRY_WRITE_FAILURE
+    if path.name == RUN_RESULT_FILENAME:
+        return RUN_RESULT_PERSISTENCE_FAILURE
+    if path.name == RETAINED_COMPLETION_FILENAME:
+        return RETAINED_COMPLETION_PERSISTENCE_FAILURE
     return TERMINAL_ARTIFACT_WRITE_FAILURE
 
 
 def _reread_failure_code_for(path: Path) -> str:
+    if path.name.endswith(GLOBAL_AUTHORITY_ENTRY_SUFFIX):
+        return GLOBAL_AUTHORITY_ENTRY_REVERIFY_FAILURE
     if path.name == GATE_ENTRY_FILENAME:
         return GATE_ENTRY_REVERIFY_FAILURE
+    if path.name == RUN_RESULT_FILENAME:
+        return RUN_RESULT_REVERIFY_FAILURE
+    if path.name == RETAINED_COMPLETION_FILENAME:
+        return RETAINED_COMPLETION_REVERIFY_FAILURE
     return TERMINAL_ARTIFACT_REVERIFY_FAILURE
+
+
+def _normalize_run_result_fault_point(fault_point: str | None) -> str | None:
+    if fault_point in {
+        FAULT_BEFORE_RETAINED_COMPLETION_CREATION,
+        FAULT_DURING_COMPLETION_SERIALIZATION,
+        FAULT_DURING_COMPLETION_FILE_WRITE,
+        FAULT_DURING_COMPLETION_DIRECTORY_SYNC,
+        FAULT_DURING_COMPLETION_REREAD,
+    }:
+        return None
+    aliases = {
+        FAULT_DURING_TERMINAL_FILE_WRITE: FAULT_DURING_RUN_RESULT_FILE_WRITE,
+        FAULT_DURING_TERMINAL_DIRECTORY_SYNC: FAULT_DURING_RUN_RESULT_DIRECTORY_SYNC,
+        FAULT_DURING_TERMINAL_REREAD: FAULT_DURING_RUN_RESULT_REREAD,
+    }
+    return aliases.get(fault_point, fault_point)
 
 
 def runtime_platform_observation() -> dict[str, Any]:

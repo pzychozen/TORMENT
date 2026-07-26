@@ -18,7 +18,11 @@ WINDOWS_ONLY = pytest.mark.skipif(
 )
 
 AUTH_IDENTITY = "a" * 64
-ASSESSMENT_IDENTITY = "b" * 64
+ASSESSMENT_IDENTITY = retained.RETAINED_RUN_ASSESSMENT_SHA256
+IMPLEMENTATION_PREPARATION_AUTH_IDENTITY = (
+    retained.IMPLEMENTATION_PREPARATION_AUTHORIZATION_SHA256
+)
+RUNTIME_CORRECTION_AUTH_IDENTITY = retained.RUNTIME_CORRECTION_AUTHORIZATION_SHA256
 SYNTHETIC_HEAD = "0" * 40
 MANIFEST_SHA = "c" * 64
 
@@ -62,6 +66,73 @@ def make_authorization(tmp_path: Path, **overrides) -> retained.RetainedAuthoriz
     return retained.RetainedAuthorization(**values)
 
 
+def source_identity_bundle():
+    observations = {}
+    expectations = []
+    for index, relative_path in enumerate(retained.REQUIRED_SOURCE_IDENTITY_PATHS, 1):
+        content = ("synthetic source %s\n" % relative_path).encode("ascii")
+        observed = retained.synthetic_source_identity(
+            relative_path,
+            content=content,
+            git_blob_oid=("%040x" % index),
+        )
+        observations[observed.relative_path] = observed
+        expectations.append(
+            retained.SourceIdentityExpectation(
+                relative_path=observed.relative_path,
+                checked_out_byte_sha256=observed.checked_out_byte_sha256,
+                checked_out_byte_length=observed.checked_out_byte_length,
+                git_blob_oid=observed.git_blob_oid,
+            )
+        )
+    return tuple(expectations), observations
+
+
+def make_authoritative_authorization(
+    tmp_path: Path,
+    **overrides,
+) -> tuple[retained.RetainedAuthorization, dict[str, retained.SourceIdentity]]:
+    authority_root = overrides.pop("authority_registry_root", tmp_path / "authority")
+    authority_root.mkdir(exist_ok=True)
+    source_expectations, source_observations = source_identity_bundle()
+    requested_authorization_identity = overrides.pop("authorization_identity", None)
+    values = {
+        "mode": retained.RETAINED_MODE,
+        "assessment_identity": ASSESSMENT_IDENTITY,
+        "expected_branch": "main",
+        "expected_head": SYNTHETIC_HEAD,
+        "expected_origin_main": SYNTHETIC_HEAD,
+        "result_directory": tmp_path / "authoritative-result",
+        "fixture_root": tmp_path / "authoritative-fixture",
+        "selected_cases": retained.DEFAULT_RETAINED_CASES,
+        "optional_cases": (),
+        "authoritative": True,
+        "allow_unrelated_outside_surfaces": False,
+        "enforce_fixture_profile": False,
+    }
+    values.update(overrides)
+    block = retained.build_execution_authorization_identity_block(
+        assessment_identity=values["assessment_identity"],
+        implementation_preparation_authorization_identity=(
+            IMPLEMENTATION_PREPARATION_AUTH_IDENTITY
+        ),
+        runtime_correction_authorization_identity=RUNTIME_CORRECTION_AUTH_IDENTITY,
+        expected_branch=values["expected_branch"],
+        expected_head=values["expected_head"],
+        expected_origin_main=values["expected_origin_main"],
+        result_directory=values["result_directory"],
+        fixture_root=values["fixture_root"],
+        authority_registry_root=authority_root,
+        source_identities=source_expectations,
+        selected_cases=values["selected_cases"],
+        optional_cases=values["optional_cases"],
+        authorization_identity=requested_authorization_identity,
+    )
+    values["authorization_identity"] = block.execution_authorization_identity
+    values["execution_authorization"] = block
+    return retained.RetainedAuthorization(**values), source_observations
+
+
 def clean_repo_state() -> retained.RepositoryState:
     return retained.synthetic_clean_repository_state(
         branch="main",
@@ -85,7 +156,7 @@ def positive(case_id: str) -> validation.ValidationCaseResult:
         validation.CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE,
         "synthetic retained positive case",
         None,
-        policy_identity=retained.authorized_absolute_path_control_policy_identity(),
+        policy_identity=retained.native_helper_policy_identity(),
         source_identity_before=object_identity,
         retained_handle_identity_after=object_identity,
         final_identity_after=object_identity,
@@ -102,7 +173,7 @@ def collision(case_id: str) -> validation.ValidationCaseResult:
         None,
         native_error_code=validation.ERROR_ALREADY_EXISTS,
         native_error_name=validation.ERROR_NAMES[validation.ERROR_ALREADY_EXISTS],
-        policy_identity=retained.authorized_absolute_path_control_policy_identity(),
+        policy_identity=retained.native_helper_policy_identity(),
         source_exists_after_native_failure=True,
         final_exists_after_native_failure=True,
         manifest_before_sha256=MANIFEST_SHA,
@@ -126,7 +197,7 @@ def success_results(
             validation.NATIVE_RENAME_FAILED,
             native_error_code=validation.ERROR_INVALID_PARAMETER,
             native_error_name=validation.ERROR_NAMES[validation.ERROR_INVALID_PARAMETER],
-            policy_identity=retained.authorized_absolute_path_control_policy_identity(),
+            policy_identity=retained.native_helper_policy_identity(),
         ),
     }
     return tuple(by_case[case] for case in case_order)
@@ -137,6 +208,36 @@ def fake_gate_artifact() -> retained.ImmutableArtifactWriteResult:
         path="C:\\synthetic\\gate_entry.canonical.json",
         byte_length=10,
         sha256="d" * 64,
+        directory_sync={
+            "status": durable_schema.DIRECTORY_DURABILITY_CONFIRMED,
+            "detail": "synthetic",
+            "target_role": durable_schema.ARTIFACT_PARENT_DIRECTORY,
+        },
+        reread_verified=True,
+        hash_verified=True,
+    )
+
+
+def fake_global_artifact() -> retained.ImmutableArtifactWriteResult:
+    return retained.ImmutableArtifactWriteResult(
+        path="C:\\synthetic\\authority\\aaaaaaaa.global_authority_entry.canonical.json",
+        byte_length=10,
+        sha256="e" * 64,
+        directory_sync={
+            "status": durable_schema.DIRECTORY_DURABILITY_CONFIRMED,
+            "detail": "synthetic",
+            "target_role": durable_schema.ARTIFACT_PARENT_DIRECTORY,
+        },
+        reread_verified=True,
+        hash_verified=True,
+    )
+
+
+def fake_run_result_artifact() -> retained.ImmutableArtifactWriteResult:
+    return retained.ImmutableArtifactWriteResult(
+        path="C:\\synthetic\\run_result.canonical.json",
+        byte_length=10,
+        sha256="f" * 64,
         directory_sync={
             "status": durable_schema.DIRECTORY_DURABILITY_CONFIRMED,
             "detail": "synthetic",
@@ -164,6 +265,21 @@ def test_retained_mode_is_explicit_and_not_an_absolute_mode(tmp_path):
 
 
 def test_case_selection_binds_a1_a2_a3_a5_and_keeps_a6_optional():
+    assert retained.evidence_chain_declaration()["records"] == [
+        "GLOBAL_AUTHORITY_ENTRY",
+        "LOCAL_GATE_ENTRY",
+        "RUN_RESULT",
+        "RETAINED_COMPLETION",
+    ]
+    assert len(retained.evidence_chain_identity()["evidence_chain_sha256"]) == 64
+    assert (
+        len(
+            retained.authority_registry_profile_identity()[
+                "authority_registry_profile_sha256"
+            ]
+        )
+        == 64
+    )
     declaration = retained.retained_case_set_declaration()
     assert declaration["completion_gating_cases"] == ["A1", "A2", "A3", "A5"]
     assert declaration["native_execution_order"] == ["A1", "A2", "A3", "A5"]
@@ -188,6 +304,12 @@ def test_policy_identity_rejects_rootdirectory_relative_substitution():
         retained.authorized_absolute_path_control_policy_identity()
     )
     assert policy["policy_sha256"] == retained.ABSOLUTE_POLICY_SHA256
+    native = retained.validate_native_helper_policy_identity(
+        retained.native_helper_policy_identity()
+    )
+    assert native["policy_sha256"] == (
+        validation.absolute_path_control_policy_identity()["policy_sha256"]
+    )
 
     with pytest.raises(retained.RetainedValidationError):
         retained.validate_policy_identity(
@@ -200,6 +322,10 @@ def test_policy_identity_rejects_rootdirectory_relative_substitution():
         with pytest.raises(retained.RetainedValidationError):
             retained.validate_policy_identity(
                 validation.absolute_path_control_policy_identity()
+            )
+        with pytest.raises(retained.RetainedValidationError):
+            retained.validate_native_helper_policy_identity(
+                retained.authorized_absolute_path_control_policy_identity()
             )
 
 
@@ -268,35 +394,50 @@ def test_terminal_record_allows_false_complete_but_rejects_early_true(tmp_path):
     )
     retained.validate_terminal_record(non_authoritative)
 
-    authoritative_auth = make_authorization(tmp_path, authoritative=True)
-    admitted = retained.build_terminal_record(
+    authoritative_auth, _observations = make_authoritative_authorization(tmp_path)
+    run_result = retained.build_terminal_record(
         authorization=authoritative_auth,
         terminal_state=retained.RUN_COMPLETE,
         gate_consumed=True,
         native_invocation_started=True,
-        retained_execution=True,
+        retained_execution=False,
         primary_failure="NONE",
-        detail="synthetic admitted",
+        detail="synthetic run result",
         case_outcomes=outcomes,
         gate_artifact=fake_gate_artifact(),
         artifact_state=retained.completed_artifact_state(),
+        global_authority_artifact=fake_global_artifact(),
     )
-    retained.validate_terminal_record(admitted)
+    retained.validate_terminal_record(run_result)
 
-    no_native = dict(admitted)
+    early_true = dict(run_result)
+    early_true["retained_execution"] = True
+    with pytest.raises(retained.RetainedValidationError):
+        retained.validate_terminal_record(early_true)
+
+    completion = retained.build_retained_completion_record(
+        authorization=authoritative_auth,
+        run_result_record=run_result,
+        run_result_artifact=fake_run_result_artifact(),
+        gate_artifact=fake_gate_artifact(),
+        global_authority_artifact=fake_global_artifact(),
+    )
+    retained.validate_retained_completion_record(completion)
+    assert completion["retained_execution"] is True
+
+    no_native = dict(completion)
+    no_native["run_result_hash_verified"] = False
+    with pytest.raises(retained.RetainedValidationError):
+        retained.validate_retained_completion_record(no_native)
+
+    no_native = dict(run_result)
     no_native["native_invocation_started"] = False
     with pytest.raises(retained.RetainedValidationError):
         retained.validate_terminal_record(no_native)
 
-    pending_artifact = dict(admitted)
-    pending_artifact["artifact_state"] = retained.pending_artifact_state()
-    with pytest.raises(retained.RetainedValidationError):
-        retained.validate_terminal_record(pending_artifact)
-
-    failed_state = dict(admitted)
+    failed_state = dict(run_result)
     failed_state["terminal_state"] = retained.RUN_FAILED
-    with pytest.raises(retained.RetainedValidationError):
-        retained.validate_terminal_record(failed_state)
+    retained.validate_terminal_record(failed_state)
 
 
 @WINDOWS_ONLY
@@ -493,7 +634,7 @@ def test_run_refuses_authoritative_execution_and_missing_executor_before_gate(tm
         durability_adapter=ConfirmingDurabilityAdapter(),
     )
     assert authoritative.terminal_state == retained.PREFLIGHT_REJECTED
-    assert authoritative.primary_failure == retained.AUTHORITATIVE_RUN_NOT_AUTHORIZED
+    assert authoritative.primary_failure == retained.AUTHORITATIVE_AUTHORIZATION_MISSING
     assert not Path(authoritative.result_directory).exists()
 
     no_executor = retained.run_retained_single_run(
@@ -505,6 +646,222 @@ def test_run_refuses_authoritative_execution_and_missing_executor_before_gate(tm
     assert no_executor.terminal_state == retained.PREFLIGHT_REJECTED
     assert no_executor.primary_failure == retained.NATIVE_INVOCATION_NOT_CONFIGURED
     assert not Path(no_executor.result_directory).exists()
+
+
+@WINDOWS_ONLY
+def test_authoritative_identity_block_rejects_substituted_identities(tmp_path):
+    auth, observations = make_authoritative_authorization(tmp_path)
+    bad_schema = replace(
+        auth.execution_authorization,
+        retained_schema_sha256="0" * 64,
+    )
+    with pytest.raises(retained.RetainedValidationError):
+        retained.preflight_retained_authorization(
+            replace(auth, execution_authorization=bad_schema),
+            repository_state=clean_repo_state(),
+            source_observations=observations,
+        )
+
+    bad_correction = replace(
+        auth.execution_authorization,
+        runtime_correction_authorization_identity="1" * 64,
+    )
+    with pytest.raises(retained.RetainedValidationError):
+        retained.preflight_retained_authorization(
+            replace(auth, execution_authorization=bad_correction),
+            repository_state=clean_repo_state(),
+            source_observations=observations,
+        )
+
+    bad_placeholder = replace(
+        auth.execution_authorization,
+        source_identities=(
+            replace(
+                auth.execution_authorization.source_identities[0],
+                git_blob_oid=retained.UNAVAILABLE_UNTIL_COMMIT,
+            ),
+        )
+        + auth.execution_authorization.source_identities[1:],
+    )
+    with pytest.raises(retained.RetainedValidationError):
+        retained.preflight_retained_authorization(
+            replace(auth, execution_authorization=bad_placeholder),
+            repository_state=clean_repo_state(),
+            source_observations=observations,
+        )
+
+
+@WINDOWS_ONLY
+def test_authoritative_synthetic_path_persists_chain_and_blocks_replay(tmp_path):
+    calls = []
+
+    def executor(fixture_root: Path, case_order: tuple[str, ...]):
+        calls.append((fixture_root, case_order))
+        return success_results(fixture_root, case_order)
+
+    auth, observations = make_authoritative_authorization(tmp_path)
+    result = retained.run_retained_single_run(
+        auth,
+        case_executor=executor,
+        repository_state=clean_repo_state(),
+        source_observations=observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+    )
+
+    assert result.terminal_state == retained.RUN_COMPLETE
+    assert result.retained_execution is True
+    assert result.authoritative is True
+    assert result.global_authority_consumed is True
+    assert result.gate_consumed is True
+    assert result.native_invocation_started is True
+    assert calls == [(auth.fixture_root, retained.DEFAULT_RETAINED_CASES)]
+
+    authority_path = retained.global_authority_entry_path(auth)
+    global_entry = retained.validate_global_authority_artifact(authority_path)
+    assert global_entry["retained_execution"] is False
+    assert global_entry["native_invocation_started"] is False
+
+    result_dir = Path(result.result_directory)
+    gate = retained.validate_gate_artifact(result_dir / retained.GATE_ENTRY_FILENAME)
+    assert gate["global_authority_state"]["sha256"] == result.global_authority_artifact.sha256
+
+    run_result = retained.validate_run_result_artifact(
+        result_dir / retained.RUN_RESULT_FILENAME
+    )
+    assert run_result["record_type"] == "RUN_RESULT"
+    assert run_result["retained_execution"] is False
+    assert run_result["completion_receipt"] == "ABSENT"
+
+    completion = retained.validate_retained_completion_artifact(
+        result_dir / retained.RETAINED_COMPLETION_FILENAME
+    )
+    assert completion["record_type"] == "RETAINED_COMPLETION"
+    assert completion["retained_execution"] is True
+    assert completion["run_result_hash"] == result.run_result_artifact.sha256
+
+    second = retained.run_retained_single_run(
+        auth,
+        case_executor=executor,
+        repository_state=clean_repo_state(),
+        source_observations=observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+    )
+    assert second.terminal_state == retained.PREFLIGHT_REJECTED
+    assert second.primary_failure == retained.GLOBAL_AUTHORITY_ENTRY_EXISTS
+
+    r1_global_entry_bytes = authority_path.read_bytes()
+    r2_authority_root = tmp_path / "authority-r2"
+    r2_authority_root.mkdir()
+    r2_result_directory = tmp_path / "r2-result"
+    r2_legitimate_block = retained.build_execution_authorization_identity_block(
+        assessment_identity=auth.assessment_identity,
+        implementation_preparation_authorization_identity=(
+            IMPLEMENTATION_PREPARATION_AUTH_IDENTITY
+        ),
+        runtime_correction_authorization_identity=RUNTIME_CORRECTION_AUTH_IDENTITY,
+        expected_branch=auth.expected_branch,
+        expected_head=auth.expected_head,
+        expected_origin_main=auth.expected_origin_main,
+        result_directory=r2_result_directory,
+        fixture_root=auth.fixture_root,
+        authority_registry_root=r2_authority_root,
+        source_identities=auth.execution_authorization.source_identities,
+        selected_cases=auth.selected_cases,
+        optional_cases=auth.optional_cases,
+    )
+    assert r2_legitimate_block.execution_authorization_identity != (
+        auth.authorization_identity
+    )
+    forged_r2_block = replace(
+        r2_legitimate_block,
+        execution_authorization_identity=auth.authorization_identity,
+    )
+    forged_r2_auth = replace(
+        auth,
+        result_directory=r2_result_directory,
+        execution_authorization=forged_r2_block,
+    )
+    r2_calls = []
+
+    def r2_executor(fixture_root: Path, case_order: tuple[str, ...]):
+        r2_calls.append((fixture_root, case_order))
+        return success_results(fixture_root, case_order)
+
+    r2_replay = retained.run_retained_single_run(
+        forged_r2_auth,
+        case_executor=r2_executor,
+        repository_state=clean_repo_state(),
+        source_observations=observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+    )
+    r2_entry_path = retained.global_authority_entry_path(forged_r2_auth)
+    assert r2_replay.terminal_state == retained.PREFLIGHT_REJECTED
+    assert r2_replay.primary_failure == retained.GLOBAL_AUTHORITY_IDENTITY_MISMATCH
+    assert r2_replay.global_authority_consumed is False
+    assert r2_replay.gate_consumed is False
+    assert r2_replay.native_invocation_started is False
+    assert r2_calls == []
+    assert not r2_entry_path.exists()
+    assert not r2_result_directory.exists()
+    assert not (r2_result_directory / retained.GATE_ENTRY_FILENAME).exists()
+    assert not (r2_result_directory / retained.RUN_RESULT_FILENAME).exists()
+    assert not (r2_result_directory / retained.RETAINED_COMPLETION_FILENAME).exists()
+    assert authority_path.read_bytes() == r1_global_entry_bytes
+
+    replay_parent = tmp_path / "replay-parent"
+    replay_parent.mkdir()
+    replay = retained.run_retained_single_run(
+        replace(auth, result_directory=replay_parent / "result"),
+        case_executor=executor,
+        repository_state=clean_repo_state(),
+        source_observations=observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+    )
+    assert replay.terminal_state == retained.PREFLIGHT_REJECTED
+    assert replay.primary_failure == retained.CROSS_LOCATION_REPLAY_REJECTED
+
+    independent_r2_auth, independent_r2_observations = make_authoritative_authorization(
+        tmp_path,
+        authority_registry_root=r2_authority_root,
+        result_directory=r2_result_directory,
+    )
+    assert independent_r2_auth.authorization_identity == (
+        r2_legitimate_block.execution_authorization_identity
+    )
+    assert independent_r2_auth.authorization_identity != auth.authorization_identity
+    independent_r2 = retained.run_retained_single_run(
+        independent_r2_auth,
+        case_executor=r2_executor,
+        repository_state=clean_repo_state(),
+        source_observations=independent_r2_observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+    )
+    assert independent_r2.terminal_state == retained.RUN_COMPLETE
+    assert independent_r2.retained_execution is True
+    assert r2_calls == [
+        (independent_r2_auth.fixture_root, retained.DEFAULT_RETAINED_CASES)
+    ]
+
+
+@WINDOWS_ONLY
+def test_completion_fault_leaves_authority_consumed_and_result_incomplete(tmp_path):
+    auth, observations = make_authoritative_authorization(tmp_path)
+    result = retained.run_retained_single_run(
+        auth,
+        case_executor=success_results,
+        repository_state=clean_repo_state(),
+        source_observations=observations,
+        durability_adapter=ConfirmingDurabilityAdapter(),
+        fault_point=retained.FAULT_DURING_COMPLETION_REREAD,
+    )
+
+    assert result.terminal_state == retained.ARTIFACT_REVERIFY_FAILED
+    assert result.global_authority_consumed is True
+    assert result.gate_consumed is True
+    assert result.run_result_artifact is not None
+    assert result.retained_completion_artifact is None
+    assert result.retained_execution is False
+    assert result.primary_failure == retained.RETAINED_COMPLETION_REVERIFY_FAILURE
 
 
 @WINDOWS_ONLY
@@ -558,6 +915,12 @@ def test_successful_synthetic_run_consumes_gate_and_persists_terminal(tmp_path):
         result_dir / retained.TERMINAL_ARTIFACT_FILENAME
     )
     assert wrapper["terminal_record"]["retained_execution"] is False
+    run_result = retained.validate_run_result_artifact(
+        result_dir / retained.RUN_RESULT_FILENAME
+    )
+    assert run_result["record_type"] == "RUN_RESULT"
+    assert run_result["retained_execution"] is False
+    assert not (result_dir / retained.RETAINED_COMPLETION_FILENAME).exists()
 
     second = retained.run_retained_single_run(
         auth,
@@ -600,5 +963,5 @@ def test_terminal_artifact_reverify_fault_is_fail_closed_after_native(tmp_path):
     assert result.terminal_state == retained.ARTIFACT_REVERIFY_FAILED
     assert result.gate_consumed is True
     assert result.native_invocation_started is True
-    assert result.primary_failure == retained.TERMINAL_ARTIFACT_REVERIFY_FAILURE
+    assert result.primary_failure == retained.RUN_RESULT_REVERIFY_FAILURE
     assert result.retained_execution is False

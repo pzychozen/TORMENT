@@ -62,7 +62,7 @@ def positive(case_id: str) -> validation.ValidationCaseResult:
         validation.CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE,
         "synthetic integration positive",
         None,
-        policy_identity=retained.authorized_absolute_path_control_policy_identity(),
+        policy_identity=retained.native_helper_policy_identity(),
         source_identity_before=identity,
         retained_handle_identity_after=identity,
         final_identity_after=identity,
@@ -79,7 +79,7 @@ def collision(case_id: str) -> validation.ValidationCaseResult:
         None,
         native_error_code=validation.ERROR_ALREADY_EXISTS,
         native_error_name=validation.ERROR_NAMES[validation.ERROR_ALREADY_EXISTS],
-        policy_identity=retained.authorized_absolute_path_control_policy_identity(),
+        policy_identity=retained.native_helper_policy_identity(),
         source_exists_after_native_failure=True,
         final_exists_after_native_failure=True,
         manifest_before_sha256=MANIFEST_SHA,
@@ -146,9 +146,14 @@ def test_retained_preparation_persists_gate_and_terminal_without_authority(tmp_p
         result_dir / retained.TERMINAL_ARTIFACT_FILENAME
     )
     terminal = wrapper["terminal_record"]
+    run_result = retained.validate_run_result_artifact(
+        result_dir / retained.RUN_RESULT_FILENAME
+    )
+    assert run_result["record_type"] == "RUN_RESULT"
     assert terminal["terminal_state"] == retained.RUN_COMPLETE
     assert terminal["case_outcomes"]["gating_satisfied"] is True
     assert terminal["retained_execution"] is False
+    assert not (result_dir / retained.RETAINED_COMPLETION_FILENAME).exists()
     assert result.gate_artifact is not None
     assert result.gate_artifact.reread_verified is True
     assert result.terminal_artifact is not None
