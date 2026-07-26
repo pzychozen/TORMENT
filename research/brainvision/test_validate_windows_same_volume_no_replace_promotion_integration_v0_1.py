@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+import blocker2_retained_absolute_path_control_v0_1 as retained
 import validate_windows_same_volume_no_replace_promotion_v0_1 as validation
 
 
@@ -276,3 +277,8 @@ def test_a6_a7_a8_absolute_path_error_and_gating(tmp_path):
     )
     assert record["control_mode"] == validation.ABSOLUTE_PATH_CONTROL_MODE
     assert record["retained_execution"] is False
+    with pytest.raises(validation.ValidationError):
+        validation.run_absolute_path_control_matrix(
+            tmp_path,
+            mode=retained.RETAINED_MODE,
+        )

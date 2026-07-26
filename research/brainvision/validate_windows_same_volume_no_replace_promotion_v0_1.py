@@ -2450,6 +2450,9 @@ def characterize_absolute_control_failed_collision(
         native_error_code=execution.native_error_code,
         native_error_name=execution.native_error_name,
         policy_identity=policy_identity,
+        source_exists_after_native_failure=True,
+        final_exists_after_native_failure=Path(destination_path).exists(),
+        manifest_before_sha256=execution.manifest_before_sha256,
         manifest_after_sha256=source_manifest_after.manifest_sha256,
     )
 
@@ -3445,6 +3448,12 @@ def run_absolute_path_control_matrix(
             second_volume_root=second_volume_root,
         ),
     )
+
+
+def run_blocker2_retained_single_run(*args: Any, **kwargs: Any) -> Any:
+    import blocker2_retained_absolute_path_control_v0_1 as retained
+
+    return retained.run_retained_single_run(*args, **kwargs)
 
 
 def run_validation_matrix(

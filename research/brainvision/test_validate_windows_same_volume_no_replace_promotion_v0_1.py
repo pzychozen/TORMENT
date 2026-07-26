@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import blocker2_retained_absolute_path_control_v0_1 as retained
 import validate_windows_same_volume_no_replace_promotion_v0_1 as validation
 
 
@@ -229,10 +230,40 @@ def test_absolute_path_control_mode_is_explicit(tmp_path):
             validation.ROOTDIRECTORY_RELATIVE_MODE
         )
     with pytest.raises(validation.ValidationError):
+        validation.require_absolute_path_control_mode(retained.RETAINED_MODE)
+    with pytest.raises(validation.ValidationError):
         validation.run_absolute_path_control_matrix(
             tmp_path,
             mode=validation.ROOTDIRECTORY_RELATIVE_MODE,
         )
+    with pytest.raises(validation.ValidationError):
+        validation.run_absolute_path_control_matrix(
+            tmp_path,
+            mode=retained.RETAINED_MODE,
+        )
+
+
+def test_retained_single_run_wiring_delegates_without_mode_alias(monkeypatch):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"delegated": True}
+
+    monkeypatch.setattr(retained, "run_retained_single_run", fake_run)
+
+    result = validation.run_blocker2_retained_single_run(
+        "synthetic-authorization",
+        case_executor="synthetic-executor",
+    )
+
+    assert result == {"delegated": True}
+    assert calls == [
+        (
+            ("synthetic-authorization",),
+            {"case_executor": "synthetic-executor"},
+        )
+    ]
 
 
 def test_absolute_path_control_matrix_routes_a_cases_without_retained_run(
