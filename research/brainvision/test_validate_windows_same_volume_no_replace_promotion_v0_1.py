@@ -21,6 +21,40 @@ def test_validation_policy_identity_is_canonical_and_stable():
     )
     assert first["policy_sha256"].islower()
     assert len(first["policy_sha256"]) == 64
+    assert (
+        first["policy_sha256"]
+        == "df91a9bcc3c5b37e938a086801dd2bca42f0290533a6cf2682055df475f663f3"
+    )
+
+
+def test_absolute_path_control_policy_identity_is_canonical_and_distinct():
+    declaration = validation.absolute_path_control_policy_declaration()
+    first = validation.absolute_path_control_policy_identity()
+    second = validation.absolute_path_control_policy_identity()
+
+    assert first == second
+    assert (
+        first["policy_schema_identity"]
+        == validation.ABSOLUTE_PATH_CONTROL_POLICY_SCHEMA
+    )
+    assert first["policy_sha256"] == validation.sha256_hex(
+        validation.canonical_json_bytes(declaration)
+    )
+    assert first["policy_sha256"] != validation.validation_policy_identity()[
+        "policy_sha256"
+    ]
+    assert declaration["control_mode"] == validation.ABSOLUTE_PATH_CONTROL_MODE
+    assert declaration["native_contract"]["root_directory"] is None
+    assert (
+        declaration["file_rename_info_buffer_policy"][
+            "file_name_length_excludes_terminating_nul"
+        ]
+        is True
+    )
+    assert (
+        declaration["prior_rootdirectory_relative_policy_identity"]
+        == validation.validation_policy_identity()
+    )
 
 
 def test_canonical_json_sorts_keys_and_rejects_nan():
@@ -91,6 +125,34 @@ def test_file_rename_info_buffer_layout_and_utf16_bytes():
     )
 
 
+def test_absolute_path_file_rename_info_buffer_uses_null_root_and_utf16_path():
+    absolute_destination = "C:\\TORMENT\\codex_pytest_tmp_abs_control\\dest\\final"
+    buffer = validation.build_absolute_path_file_rename_info_buffer(
+        absolute_destination_path=absolute_destination,
+    )
+    offsets = buffer.offsets
+    raw = buffer.as_bytes()
+    encoded = absolute_destination.encode("utf-16-le")
+
+    assert buffer.final_name == absolute_destination
+    assert buffer.encoded_name == encoded
+    assert buffer.size == offsets.file_name + len(encoded) + 2
+    assert raw[offsets.file_name : offsets.file_name + len(encoded)] == encoded
+    assert raw[offsets.file_name + len(encoded) :] == b"\x00\x00"
+    assert (
+        ctypes.c_uint32.from_buffer_copy(
+            raw,
+            offsets.replace_if_exists_or_flags,
+        ).value
+        == 0
+    )
+    assert ctypes.c_void_p.from_buffer_copy(raw, offsets.root_directory).value is None
+    assert (
+        ctypes.c_uint32.from_buffer_copy(raw, offsets.file_name_length).value
+        == len(encoded)
+    )
+
+
 def test_file_rename_info_buffer_rejects_overlong_name():
     name = "x" * ((validation.MAX_FINAL_NAME_UTF16_BYTES // 2) + 1)
     with pytest.raises(validation.ValidationError):
@@ -98,6 +160,226 @@ def test_file_rename_info_buffer_rejects_overlong_name():
             root_directory_handle=1,
             final_name=name,
         )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "relative\\final",
+        "C:relative",
+        "C:/slash/final",
+        "C:\\",
+        "C:\\root\\..\\escape",
+        "C:\\root\\.\\final",
+        "C:\\root\\stream:name",
+        "C:\\root\\*",
+        "\\\\server\\share\\final",
+        "\\\\?\\C:\\root\\final",
+        "\\\\??\\C:\\root\\final",
+        "\\\\.\\C:\\root\\final",
+        "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\final",
+        "C:\\root\\x\x00y",
+    ],
+)
+def test_absolute_path_validation_rejects_unsafe_forms(path):
+    result = validation.validate_absolute_win32_dos_path_text(path)
+    assert result.accepted is False
+    assert result.reason
+
+
+def test_absolute_path_destination_derivation_is_component_bounded(tmp_path):
+    if not validation._is_windows():
+        pytest.skip("absolute Win32 DOS path derivation is Windows-only")
+    root = tmp_path / "fixture"
+    root.mkdir()
+    destination_parent = root / "dest"
+    destination_parent.mkdir()
+
+    final_path, absolute_text = validation.derive_absolute_control_destination(
+        fixture_root=root,
+        destination_parent=destination_parent,
+        final_name="final",
+    )
+
+    assert final_path == destination_parent.resolve(strict=True) / "final"
+    assert "\\" in absolute_text
+    assert not absolute_text.startswith("\\\\?\\")
+    assert validation.validate_absolute_win32_dos_path_text(absolute_text).accepted
+
+    sibling = tmp_path / "fixture_sibling"
+    sibling.mkdir()
+    with pytest.raises(validation.FixtureInvalidError):
+        validation.derive_absolute_control_destination(
+            fixture_root=root,
+            destination_parent=sibling,
+            final_name="final",
+        )
+
+
+def test_absolute_path_control_mode_is_explicit(tmp_path):
+    assert (
+        validation.require_absolute_path_control_mode(
+            validation.ABSOLUTE_PATH_CONTROL_MODE
+        )
+        == validation.ABSOLUTE_PATH_CONTROL_MODE
+    )
+    with pytest.raises(validation.ValidationError):
+        validation.require_absolute_path_control_mode(
+            validation.ROOTDIRECTORY_RELATIVE_MODE
+        )
+    with pytest.raises(validation.ValidationError):
+        validation.run_absolute_path_control_matrix(
+            tmp_path,
+            mode=validation.ROOTDIRECTORY_RELATIVE_MODE,
+        )
+
+
+def test_absolute_path_control_matrix_routes_a_cases_without_retained_run(
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+    policy_identity = validation.absolute_path_control_policy_identity()
+
+    def case(case_id):
+        return validation._case_result(
+            case_id,
+            validation.CONTROL_FIXTURE_INVALID,
+            "stubbed unit matrix case",
+            validation.CONTROL_FIXTURE_INVALID,
+            policy_identity=policy_identity,
+        )
+
+    def one(case_id):
+        def run(fixture_root):
+            calls.append(case_id)
+            assert fixture_root == tmp_path
+            return case(case_id)
+
+        return run
+
+    monkeypatch.setattr(
+        validation,
+        "validate_a1_absolute_path_positive",
+        one("A1_POSITIVE_ABSOLUTE_PATH_RENAME"),
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a2_existing_destination_directory_absolute_path",
+        one("A2_EXISTING_DESTINATION_DIRECTORY"),
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a3_existing_destination_file_absolute_path",
+        one("A3_EXISTING_DESTINATION_FILE"),
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a4_coordinated_destination_claim_absolute_path",
+        one("A4_COORDINATED_DESTINATION_CLAIM"),
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a5_absolute_path_identity_continuity",
+        one("A5_SOURCE_TO_FINAL_IDENTITY_CONTINUITY"),
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a6_absolute_path_native_error_characterization",
+        one("A6_NATIVE_ERROR_CHARACTERIZATION"),
+    )
+
+    def a7(fixture_root):
+        calls.append("A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED")
+        assert fixture_root == tmp_path
+        return (
+            case("A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED"),
+        )
+
+    def a8(fixture_root, *, second_volume_root=None):
+        calls.append("A8_SAME_VOLUME_MISMATCH_REJECTED")
+        assert fixture_root == tmp_path
+        assert second_volume_root is None
+        return case("A8_SAME_VOLUME_MISMATCH_REJECTED")
+
+    monkeypatch.setattr(
+        validation,
+        "validate_a7_invalid_or_escaping_absolute_destinations",
+        a7,
+    )
+    monkeypatch.setattr(
+        validation,
+        "validate_a8_same_volume_mismatch_rejected",
+        a8,
+    )
+
+    matrix = validation.run_absolute_path_control_matrix(
+        tmp_path,
+        mode=validation.ABSOLUTE_PATH_CONTROL_MODE,
+    )
+
+    assert calls == [
+        "A1_POSITIVE_ABSOLUTE_PATH_RENAME",
+        "A2_EXISTING_DESTINATION_DIRECTORY",
+        "A3_EXISTING_DESTINATION_FILE",
+        "A4_COORDINATED_DESTINATION_CLAIM",
+        "A5_SOURCE_TO_FINAL_IDENTITY_CONTINUITY",
+        "A6_NATIVE_ERROR_CHARACTERIZATION",
+        "A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED",
+        "A8_SAME_VOLUME_MISMATCH_REJECTED",
+    ]
+    assert [result.case_id for result in matrix] == calls
+    record = validation.build_absolute_path_control_record(case_results=matrix)
+    assert record["retained_execution"] is False
+
+
+def test_absolute_path_control_support_and_native_status_taxonomy():
+    unsupported_volume = validation.SupportProfile(
+        supported=False,
+        status=validation.UNSUPPORTED,
+        detail="source and destination are not on the same volume",
+        failure_code=validation.UNSUPPORTED_VOLUME_RELATIONSHIP,
+    )
+
+    assert (
+        validation._absolute_control_support_status(unsupported_volume)
+        == validation.CONTROL_SAME_VOLUME_REJECTED
+    )
+    assert (
+        validation._absolute_control_native_failure_status(
+            validation.ERROR_INVALID_PARAMETER
+        )
+        == validation.CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE
+    )
+    assert (
+        validation._absolute_control_native_failure_status(
+            validation.ERROR_NOT_SUPPORTED
+        )
+        == validation.CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL
+    )
+    assert (
+        validation._absolute_control_native_failure_status(
+            validation.ERROR_ACCESS_DENIED
+        )
+        == validation.CONTROL_ACCESS_REJECTED
+    )
+    assert (
+        validation._absolute_control_native_failure_status(999999)
+        == validation.CONTROL_NATIVE_ERROR_INDETERMINATE
+    )
+
+
+def test_absolute_path_control_fault_points_are_fail_closed():
+    for fault_point in validation.ABSOLUTE_PATH_CONTROL_FAULT_POINTS:
+        fault = validation.derive_absolute_control_fault_point_result(fault_point)
+        assert fault.status == validation.CONTROL_FAULT_INJECTED
+        assert fault.failure_code == validation.CONTROL_FAULT_INJECTED
+        assert fault.native_error_code is None
+
+    unknown = validation.derive_absolute_control_fault_point_result("A_FAULT_UNKNOWN")
+    assert unknown.status == validation.CONTROL_FIXTURE_INVALID
+    assert unknown.failure_code == validation.CONTROL_FAULT_INJECTED
 
 
 def test_fixture_containment_rejects_outside_git_and_repo_root(tmp_path):

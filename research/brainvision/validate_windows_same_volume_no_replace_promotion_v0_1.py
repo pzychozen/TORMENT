@@ -25,16 +25,34 @@ VALIDATION_POLICY_SCHEMA = (
     "torment-brainvision-stage-s3b-blocker-2-windows-same-volume-"
     "no-replace-directory-promotion-validation-policy-v0.1"
 )
+ABSOLUTE_PATH_CONTROL_VERSION = "v0.1"
+ABSOLUTE_PATH_CONTROL_MODE = "ABSOLUTE_PATH_CONTROL"
+ROOTDIRECTORY_RELATIVE_MODE = "ROOTDIRECTORY_RELATIVE"
+ABSOLUTE_PATH_CONTROL_POLICY_SCHEMA = (
+    "torment-brainvision-stage-s3b-blocker-2-windows-same-volume-"
+    "no-replace-directory-promotion-absolute-path-control-policy-v0.1"
+)
 PRIMITIVE_OPERATION_IDENTITY = (
     "win32-setfileinformationbyhandle-file-rename-info-rootdirectory-"
     "no-replace-directory-promotion-v0.1"
+)
+ABSOLUTE_PATH_CONTROL_OPERATION_IDENTITY = (
+    "win32-setfileinformationbyhandle-file-rename-info-rootdirectory-null-"
+    "absolute-path-no-replace-directory-promotion-control-v0.1"
 )
 VALIDATION_PROFILE_IDENTITY = (
     "windows-10-11-workstation-local-fixed-ntfs-same-volume-"
     "pytest-tmp-directory-promotion-v0.1"
 )
+ABSOLUTE_PATH_CONTROL_PROFILE_IDENTITY = (
+    "windows-10-11-workstation-local-fixed-ntfs-same-volume-"
+    "pytest-tmp-directory-absolute-path-promotion-control-v0.1"
+)
 IMPLEMENTATION_SURFACE_IDENTITY = (
     "blocker-2-bounded-windows-promotion-primitive-validation-three-file-surface-v0.1"
+)
+ABSOLUTE_PATH_CONTROL_AUTHORIZATION_COMMIT = (
+    "e34d3d47bf2311c9443020fb85704f3cdbf85f82"
 )
 IMPLEMENTATION_VERDICT = "IMPLEMENTATION_BLOCKED_AND_HELD"
 HELD_OUTCOME_WORDING = (
@@ -56,6 +74,28 @@ DESTINATION_REPLACED = "DESTINATION_REPLACED"
 CROSS_VOLUME_COPY_DETECTED = "CROSS_VOLUME_COPY_DETECTED"
 DURABILITY_UNCONFIRMED = "DURABILITY_UNCONFIRMED"
 
+CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE = (
+    "CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE"
+)
+CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE = (
+    "CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE"
+)
+CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL = (
+    "CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL"
+)
+CONTROL_ACCESS_REJECTED = "CONTROL_ACCESS_REJECTED"
+CONTROL_COLLISION_OBSERVED = "CONTROL_COLLISION_OBSERVED"
+CONTROL_FIXTURE_INVALID = "CONTROL_FIXTURE_INVALID"
+CONTROL_SAME_VOLUME_REJECTED = "CONTROL_SAME_VOLUME_REJECTED"
+CONTROL_REPARSE_REJECTED = "CONTROL_REPARSE_REJECTED"
+CONTROL_CONTAINMENT_REJECTED = "CONTROL_CONTAINMENT_REJECTED"
+CONTROL_SKIPPED_FIXTURE_UNAVAILABLE = "CONTROL_SKIPPED_FIXTURE_UNAVAILABLE"
+CONTROL_NATIVE_ERROR_INDETERMINATE = "CONTROL_NATIVE_ERROR_INDETERMINATE"
+CONTROL_FAULT_INJECTED = "CONTROL_FAULT_INJECTED"
+CONTROL_IDENTITY_MISMATCH = "CONTROL_IDENTITY_MISMATCH"
+CONTROL_CONTENT_MISMATCH = "CONTROL_CONTENT_MISMATCH"
+CONTROL_DESTINATION_REPLACED = "CONTROL_DESTINATION_REPLACED"
+
 STATUS_TAXONOMY = (
     PRIMITIVE_VALIDATION_CONFIRMED,
     FAILED,
@@ -68,6 +108,24 @@ STATUS_TAXONOMY = (
     DESTINATION_REPLACED,
     CROSS_VOLUME_COPY_DETECTED,
     DURABILITY_UNCONFIRMED,
+)
+
+CONTROL_STATUS_TAXONOMY = (
+    CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE,
+    CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE,
+    CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL,
+    CONTROL_ACCESS_REJECTED,
+    CONTROL_COLLISION_OBSERVED,
+    CONTROL_FIXTURE_INVALID,
+    CONTROL_SAME_VOLUME_REJECTED,
+    CONTROL_REPARSE_REJECTED,
+    CONTROL_CONTAINMENT_REJECTED,
+    CONTROL_SKIPPED_FIXTURE_UNAVAILABLE,
+    CONTROL_NATIVE_ERROR_INDETERMINATE,
+    CONTROL_FAULT_INJECTED,
+    CONTROL_IDENTITY_MISMATCH,
+    CONTROL_CONTENT_MISMATCH,
+    CONTROL_DESTINATION_REPLACED,
 )
 
 NAME_INVALID = "NAME_INVALID"
@@ -125,7 +183,19 @@ FAULT_POINTS = (
     "F6_AFTER_DURABILITY_BEFORE_RESULT",
 )
 
+ABSOLUTE_PATH_CONTROL_FAULT_POINTS = (
+    "A_FAULT_AFTER_FIXTURE_ADMISSION",
+    "A_FAULT_AFTER_SOURCE_HANDLE_OPEN",
+    "A_FAULT_AFTER_DESTINATION_PARENT_EVIDENCE",
+    "A_FAULT_AFTER_ABSOLUTE_PATH_DERIVATION",
+    "A_FAULT_AFTER_BUFFER_CONSTRUCTION",
+    "A_FAULT_BEFORE_NATIVE_CALL",
+    "A_FAULT_AFTER_NATIVE_SUCCESS",
+    "A_FAULT_BEFORE_POST_TRANSITION_VERIFICATION",
+)
+
 MAX_FINAL_NAME_UTF16_BYTES = 240
+MAX_ABSOLUTE_CONTROL_PATH_UTF16_BYTES = 4096
 MAX_MANIFEST_ENTRIES = 64
 MAX_MANIFEST_FILE_BYTES = 1024 * 1024
 MAX_MANIFEST_TOTAL_BYTES = 4 * 1024 * 1024
@@ -481,6 +551,119 @@ def validation_policy_identity() -> dict[str, str]:
     }
 
 
+def absolute_path_control_policy_declaration() -> dict[str, Any]:
+    return {
+        "policy_schema_identity": ABSOLUTE_PATH_CONTROL_POLICY_SCHEMA,
+        "control_version": ABSOLUTE_PATH_CONTROL_VERSION,
+        "control_mode": ABSOLUTE_PATH_CONTROL_MODE,
+        "authorization_commit": ABSOLUTE_PATH_CONTROL_AUTHORIZATION_COMMIT,
+        "implementation_surface_identity": IMPLEMENTATION_SURFACE_IDENTITY,
+        "authorized_implementation_files": list(_authorized_control_files()),
+        "implementation_file_identities": _authorized_control_file_identities(),
+        "prior_rootdirectory_relative_policy_identity": validation_policy_identity(),
+        "native_contract": {
+            "api": "SetFileInformationByHandle",
+            "file_information_class": "FileRenameInfo",
+            "structure": "FILE_RENAME_INFO",
+            "replace_if_exists": False,
+            "root_directory": None,
+            "file_name": (
+                "canonical fully qualified drive-qualified Win32 DOS absolute "
+                "destination path"
+            ),
+            "copy_delete_fallback": False,
+        },
+        "file_rename_info_buffer_policy": {
+            "file_name_length_utf16le_bytes": True,
+            "file_name_length_excludes_terminating_nul": True,
+            "absolute_path_allocation_terminating_nul": True,
+            "rootdirectory_relative_buffer_unchanged": True,
+        },
+        "source_handle_contract": {
+            "desired_access": "DELETE",
+            "share_mode": [
+                "FILE_SHARE_READ",
+                "FILE_SHARE_WRITE",
+                "FILE_SHARE_DELETE",
+            ],
+            "creation_disposition": "OPEN_EXISTING",
+            "flags": [
+                "FILE_FLAG_BACKUP_SEMANTICS",
+                "FILE_FLAG_OPEN_REPARSE_POINT",
+            ],
+        },
+        "path_policy": {
+            "derived_from_fixture_objects_only": True,
+            "fully_qualified": True,
+            "drive_qualified": True,
+            "local_win32_dos_form": True,
+            "reject_unc": True,
+            "reject_device_paths": True,
+            "reject_nt_object_manager_paths": True,
+            "reject_volume_guid_paths": True,
+            "reject_extended_length_prefix": True,
+            "component_boundary_containment": True,
+            "max_utf16le_bytes": MAX_ABSOLUTE_CONTROL_PATH_UTF16_BYTES,
+        },
+        "fixture_admission_policy": {
+            "os": "windows",
+            "minimum_major_version": 10,
+            "product_type": "workstation",
+            "drive_type": "DRIVE_FIXED",
+            "filesystem": "NTFS",
+            "same_volume_required": True,
+            "reject_repository_root": True,
+            "reject_git_component": True,
+            "reject_reparse_entries": True,
+        },
+        "same_volume_policy": {
+            "textual_drive_letter_only_is_insufficient": True,
+            "volume_serial_evidence": True,
+            "filesystem_name_evidence": True,
+            "drive_type_evidence": True,
+            "source_identity_evidence": True,
+            "destination_parent_identity_evidence": True,
+        },
+        "case_matrix": [
+            "A1_POSITIVE_ABSOLUTE_PATH_RENAME",
+            "A2_EXISTING_DESTINATION_DIRECTORY",
+            "A3_EXISTING_DESTINATION_FILE",
+            "A4_COORDINATED_DESTINATION_CLAIM",
+            "A5_SOURCE_TO_FINAL_IDENTITY_CONTINUITY",
+            "A6_NATIVE_ERROR_CHARACTERIZATION",
+            "A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED",
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+        ],
+        "result_taxonomy": list(CONTROL_STATUS_TAXONOMY),
+        "native_error_classification": {
+            "ERROR_INVALID_PARAMETER": (
+                "CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE"
+            ),
+            "ERROR_NOT_SUPPORTED": "CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL",
+            "ERROR_ACCESS_DENIED": "CONTROL_ACCESS_REJECTED",
+            "collision_error_codes": "CONTROL_COLLISION_OBSERVED",
+            "unknown_native_error": "CONTROL_NATIVE_ERROR_INDETERMINATE",
+        },
+        "fault_points": list(ABSOLUTE_PATH_CONTROL_FAULT_POINTS),
+        "test_authority": [
+            "focused ephemeral unit tests",
+            "focused ephemeral Windows integration tests",
+            "relevant BLOCKER-1 regressions where needed",
+        ],
+        "retained_execution_prohibition": True,
+        "validation_profile_identity": ABSOLUTE_PATH_CONTROL_PROFILE_IDENTITY,
+    }
+
+
+def absolute_path_control_policy_identity() -> dict[str, str]:
+    return {
+        "policy_schema_identity": ABSOLUTE_PATH_CONTROL_POLICY_SCHEMA,
+        "policy_sha256": sha256_hex(
+            canonical_json_bytes(absolute_path_control_policy_declaration())
+        ),
+    }
+
+
 def validate_final_name(name: str) -> FinalNameValidation:
     if not isinstance(name, str):
         return FinalNameValidation(False, "", "name is not a string")
@@ -510,6 +693,52 @@ def validate_final_name(name: str) -> FinalNameValidation:
     return FinalNameValidation(True, name)
 
 
+def validate_absolute_win32_dos_path_text(path: str | Path) -> FinalNameValidation:
+    if not isinstance(path, (str, Path)):
+        return FinalNameValidation(False, "", "path is not string-like")
+    text = str(path)
+    if text == "":
+        return FinalNameValidation(False, text, "absolute path is empty")
+    if "\x00" in text:
+        return FinalNameValidation(False, text, "absolute path contains embedded NUL")
+    if "/" in text:
+        return FinalNameValidation(False, text, "absolute path contains non-DOS separator")
+    if text.startswith("\\\\?\\"):
+        return FinalNameValidation(False, text, "extended-length path is forbidden")
+    if text.startswith("\\??\\"):
+        return FinalNameValidation(False, text, "NT object-manager path is forbidden")
+    if text.startswith("\\\\.\\"):
+        return FinalNameValidation(False, text, "device path is forbidden")
+    if text.startswith("\\\\"):
+        return FinalNameValidation(False, text, "UNC path is forbidden")
+    drive, tail = ntpath.splitdrive(text)
+    if len(drive) != 2 or drive[1] != ":" or not drive[0].isalpha():
+        return FinalNameValidation(False, text, "path is not drive-qualified")
+    if not ntpath.isabs(text):
+        return FinalNameValidation(False, text, "path is not fully qualified")
+    parts = tail.split("\\")
+    if parts[:1] != [""]:
+        return FinalNameValidation(False, text, "path root is malformed")
+    components = parts[1:]
+    if not components:
+        return FinalNameValidation(False, text, "path has no final component")
+    for component in components:
+        if component in ("", ".", ".."):
+            return FinalNameValidation(False, text, "path contains traversal or empty component")
+        if ":" in component:
+            return FinalNameValidation(False, text, "path contains stream syntax")
+        if any(char in component for char in "*?"):
+            return FinalNameValidation(False, text, "path contains wildcard syntax")
+        if any(char in component for char in '<>|"'):
+            return FinalNameValidation(False, text, "path contains invalid syntax")
+    encoded = text.encode("utf-16-le")
+    if len(encoded) == 0:
+        return FinalNameValidation(False, text, "path encodes to zero bytes")
+    if len(encoded) > MAX_ABSOLUTE_CONTROL_PATH_UTF16_BYTES:
+        return FinalNameValidation(False, text, "path exceeds bounded byte length")
+    return FinalNameValidation(True, text)
+
+
 def rename_info_offsets() -> RenameInfoOffsets:
     return RenameInfoOffsets(
         replace_if_exists_or_flags=_FILE_RENAME_INFO_PROBE.replace_or_flags.offset,
@@ -521,15 +750,23 @@ def rename_info_offsets() -> RenameInfoOffsets:
     )
 
 
-def build_file_rename_info_buffer(
+def _root_directory_buffer_value(root_directory_handle: int | None) -> int | None:
+    if root_directory_handle is None:
+        return None
+    value = int(root_directory_handle)
+    if value == 0:
+        return None
+    return value
+
+
+def _build_file_rename_info_buffer_from_text(
     *,
-    root_directory_handle: int,
-    final_name: str,
+    root_directory_handle: int | None,
+    file_name_text: str,
+    append_nul_terminator: bool = False,
 ) -> RenameInfoBuffer:
-    validation = validate_final_name(final_name)
-    if not validation.accepted:
-        raise ValidationError(validation.reason or "invalid final name")
-    encoded = final_name.encode("utf-16-le")
+    encoded = file_name_text.encode("utf-16-le")
+    terminator = b"\x00\x00" if append_nul_terminator else b""
     offsets = rename_info_offsets()
     if offsets.replace_if_exists_or_flags != 0:
         raise ValidationError("FILE_RENAME_INFO union offset is invalid")
@@ -539,7 +776,7 @@ def build_file_rename_info_buffer(
         raise ValidationError("FileNameLength DWORD width is invalid")
     if offsets.file_name <= offsets.file_name_length:
         raise ValidationError("FileName offset does not follow FileNameLength")
-    size = offsets.file_name + len(encoded)
+    size = offsets.file_name + len(encoded) + len(terminator)
     if size <= offsets.file_name:
         raise ValidationError("FILE_RENAME_INFO allocation size is invalid")
     buffer = ctypes.create_string_buffer(size)
@@ -547,26 +784,65 @@ def build_file_rename_info_buffer(
         buffer,
         offsets.replace_if_exists_or_flags,
     ).value = 0
-    ctypes.c_void_p.from_buffer(buffer, offsets.root_directory).value = int(
-        root_directory_handle
+    ctypes.c_void_p.from_buffer(buffer, offsets.root_directory).value = (
+        _root_directory_buffer_value(root_directory_handle)
     )
     ctypes.c_uint32.from_buffer(buffer, offsets.file_name_length).value = len(encoded)
     ctypes.memmove(ctypes.addressof(buffer) + offsets.file_name, encoded, len(encoded))
+    if terminator:
+        ctypes.memmove(
+            ctypes.addressof(buffer) + offsets.file_name + len(encoded),
+            terminator,
+            len(terminator),
+        )
     result = RenameInfoBuffer(
         buffer=buffer,
         size=size,
-        final_name=final_name,
+        final_name=file_name_text,
         encoded_name=encoded,
         offsets=offsets,
     )
-    validate_file_rename_info_buffer(result, root_directory_handle=root_directory_handle)
+    validate_file_rename_info_buffer(
+        result,
+        root_directory_handle=root_directory_handle,
+        allow_trailing_nul=append_nul_terminator,
+    )
     return result
+
+
+def build_file_rename_info_buffer(
+    *,
+    root_directory_handle: int,
+    final_name: str,
+) -> RenameInfoBuffer:
+    validation = validate_final_name(final_name)
+    if not validation.accepted:
+        raise ValidationError(validation.reason or "invalid final name")
+    return _build_file_rename_info_buffer_from_text(
+        root_directory_handle=root_directory_handle,
+        file_name_text=final_name,
+    )
+
+
+def build_absolute_path_file_rename_info_buffer(
+    *,
+    absolute_destination_path: str | Path,
+) -> RenameInfoBuffer:
+    validation = validate_absolute_win32_dos_path_text(absolute_destination_path)
+    if not validation.accepted:
+        raise ValidationError(validation.reason or "invalid absolute destination path")
+    return _build_file_rename_info_buffer_from_text(
+        root_directory_handle=None,
+        file_name_text=validation.name,
+        append_nul_terminator=True,
+    )
 
 
 def validate_file_rename_info_buffer(
     value: RenameInfoBuffer,
     *,
-    root_directory_handle: int,
+    root_directory_handle: int | None,
+    allow_trailing_nul: bool = False,
 ) -> None:
     raw = value.as_bytes()
     offsets = value.offsets
@@ -579,7 +855,8 @@ def validate_file_rename_info_buffer(
     if replace_value != 0:
         raise ValidationError("ReplaceIfExists is not FALSE")
     observed_root = ctypes.c_void_p.from_buffer_copy(raw, offsets.root_directory).value
-    if observed_root != int(root_directory_handle):
+    expected_root = _root_directory_buffer_value(root_directory_handle)
+    if observed_root != expected_root:
         raise ValidationError("RootDirectory handle mismatch")
     observed_length = ctypes.c_uint32.from_buffer_copy(
         raw,
@@ -587,9 +864,15 @@ def validate_file_rename_info_buffer(
     ).value
     if observed_length != len(value.encoded_name):
         raise ValidationError("FileNameLength byte length mismatch")
-    if raw[offsets.file_name :] != value.encoded_name:
+    expected_end = offsets.file_name + len(value.encoded_name)
+    if raw[offsets.file_name : expected_end] != value.encoded_name:
         raise ValidationError("FileName payload mismatch")
-    if value.size != offsets.file_name + len(value.encoded_name):
+    if allow_trailing_nul:
+        if value.size != expected_end + 2:
+            raise ValidationError("buffer trailing NUL size mismatch")
+        if raw[expected_end:] != b"\x00\x00":
+            raise ValidationError("buffer trailing NUL mismatch")
+    elif value.size != expected_end:
         raise ValidationError("buffer contains trailing data")
     alignment = ctypes.alignment(_FILE_RENAME_INFO_PROBE)
     if alignment > 1 and value.pointer % alignment != 0:
@@ -685,6 +968,25 @@ def _document_identity_map() -> dict[str, dict[str, Any]]:
     return result
 
 
+def _authorized_control_files() -> tuple[str, ...]:
+    return (
+        "research/brainvision/validate_windows_same_volume_no_replace_promotion_v0_1.py",
+        "research/brainvision/test_validate_windows_same_volume_no_replace_promotion_v0_1.py",
+        (
+            "research/brainvision/"
+            "test_validate_windows_same_volume_no_replace_promotion_integration_v0_1.py"
+        ),
+    )
+
+
+def _authorized_control_file_identities() -> dict[str, str | None]:
+    repo = _repo_root()
+    return {
+        relative: file_sha256(repo / relative) if (repo / relative).exists() else None
+        for relative in _authorized_control_files()
+    }
+
+
 def validate_fixture_root(path: str | Path) -> Path:
     raw = Path(path)
     if raw.is_absolute() and raw.exists() and _is_reparse_point(raw):
@@ -738,6 +1040,47 @@ def _ensure_inside(candidate: Path, root: Path) -> None:
         candidate.relative_to(root)
     except ValueError as exc:
         raise FixtureInvalidError("path is outside fixture root") from exc
+
+
+def _ensure_existing_ancestors_non_reparse(candidate: Path, root: Path) -> None:
+    current = candidate if candidate.exists() else candidate.parent
+    while True:
+        _ensure_inside(current, root)
+        if _is_reparse_point(current):
+            raise FixtureInvalidError("path ancestor is a reparse point")
+        if current == root:
+            break
+        parent = current.parent
+        if parent == current:
+            raise FixtureInvalidError("path escaped before fixture root")
+        current = parent
+
+
+def derive_absolute_control_destination(
+    *,
+    fixture_root: str | Path,
+    destination_parent: str | Path,
+    final_name: str,
+) -> tuple[Path, str]:
+    final_name_validation = validate_final_name(final_name)
+    if not final_name_validation.accepted:
+        raise FixtureInvalidError(final_name_validation.reason or "invalid final name")
+    root = validate_fixture_root(fixture_root)
+    dest_parent = validate_child_path(
+        destination_parent,
+        fixture_root=root,
+        must_exist=True,
+    )
+    _validate_ordinary_directory(dest_parent)
+    _ensure_existing_ancestors_non_reparse(dest_parent, root)
+    final_path = _canonical_path(dest_parent / final_name, must_exist=False)
+    _ensure_inside(final_path, root)
+    _ensure_inside(final_path, dest_parent)
+    absolute_text = str(final_path)
+    path_validation = validate_absolute_win32_dos_path_text(absolute_text)
+    if not path_validation.accepted:
+        raise FixtureInvalidError(path_validation.reason or "invalid absolute path")
+    return final_path, path_validation.name
 
 
 def _repo_root() -> Path:
@@ -1110,6 +1453,428 @@ def build_content_manifest(root: str | Path) -> ContentManifest:
         entry_count=len(entries_tuple),
         total_file_bytes=total_bytes,
         manifest_sha256=sha256_hex(canonical_json_bytes(preimage)),
+    )
+
+
+def require_absolute_path_control_mode(mode: str) -> str:
+    if mode != ABSOLUTE_PATH_CONTROL_MODE:
+        raise ValidationError("absolute-path control mode must be explicitly selected")
+    return mode
+
+
+def build_absolute_path_control_record(
+    *,
+    case_results: tuple[ValidationCaseResult, ...],
+) -> dict[str, Any]:
+    return {
+        "schema": "blocker-2-absolute-path-promotion-control-record-v0.1",
+        "authorization_commit": ABSOLUTE_PATH_CONTROL_AUTHORIZATION_COMMIT,
+        "control_mode": ABSOLUTE_PATH_CONTROL_MODE,
+        "control_policy_identity": absolute_path_control_policy_identity(),
+        "case_results": [case.as_payload() for case in case_results],
+        "retained_execution": False,
+    }
+
+
+def derive_absolute_control_fault_point_result(fault_point: str) -> ValidationCaseResult:
+    if fault_point not in ABSOLUTE_PATH_CONTROL_FAULT_POINTS:
+        return _case_result(
+            "A_FAULT_POINT",
+            CONTROL_FIXTURE_INVALID,
+            "unknown absolute-path control fault point",
+            CONTROL_FAULT_INJECTED,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    return _case_result(
+        fault_point,
+        CONTROL_FAULT_INJECTED,
+        "synthetic absolute-path control fault point retained fail-closed result",
+        CONTROL_FAULT_INJECTED,
+        policy_identity=absolute_path_control_policy_identity(),
+    )
+
+
+def _absolute_fault_result_if_requested(
+    fault_point: str | None,
+    checkpoint: str,
+) -> ValidationCaseResult | None:
+    if fault_point is None:
+        return None
+    if fault_point not in ABSOLUTE_PATH_CONTROL_FAULT_POINTS:
+        return derive_absolute_control_fault_point_result(fault_point)
+    if fault_point == checkpoint:
+        return derive_absolute_control_fault_point_result(fault_point)
+    return None
+
+
+def _absolute_control_fixture_status(detail: str) -> str:
+    lowered = detail.lower()
+    if "reparse" in lowered or "symlink" in lowered or "junction" in lowered:
+        return CONTROL_REPARSE_REJECTED
+    if "outside fixture root" in lowered or "escaped" in lowered:
+        return CONTROL_CONTAINMENT_REJECTED
+    if "same volume" in lowered:
+        return CONTROL_SAME_VOLUME_REJECTED
+    return CONTROL_FIXTURE_INVALID
+
+
+def _absolute_control_support_status(profile: SupportProfile) -> str:
+    if profile.failure_code == UNSUPPORTED_VOLUME_RELATIONSHIP:
+        return CONTROL_SAME_VOLUME_REJECTED
+    if profile.status == SKIPPED:
+        return CONTROL_SKIPPED_FIXTURE_UNAVAILABLE
+    return CONTROL_FIXTURE_INVALID
+
+
+def _absolute_control_native_failure_status(error_code: int | None) -> str:
+    if error_code == ERROR_INVALID_PARAMETER:
+        return CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE
+    if error_code == ERROR_NOT_SUPPORTED:
+        return CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL
+    if error_code == ERROR_ACCESS_DENIED:
+        return CONTROL_ACCESS_REJECTED
+    if error_code in COLLISION_ERROR_CODES:
+        return CONTROL_COLLISION_OBSERVED
+    return CONTROL_NATIVE_ERROR_INDETERMINATE
+
+
+def _absolute_control_native_failure_detail(error_code: int | None) -> str:
+    if error_code == ERROR_INVALID_PARAMETER:
+        return (
+            "absolute-path FileRenameInfo control returned ERROR_INVALID_PARAMETER; "
+            "cause remains indeterminate"
+        )
+    if error_code == ERROR_NOT_SUPPORTED:
+        return "absolute-path FileRenameInfo control returned ERROR_NOT_SUPPORTED"
+    if error_code == ERROR_ACCESS_DENIED:
+        return "absolute-path FileRenameInfo control was access-rejected"
+    if error_code in COLLISION_ERROR_CODES:
+        return "absolute-path FileRenameInfo control observed no-replace collision"
+    return "absolute-path FileRenameInfo control returned an indeterminate native error"
+
+
+def derive_absolute_control_success_status(
+    *,
+    source_identity_before: ObjectIdentity,
+    retained_handle_identity_after: ObjectIdentity,
+    final_identity_after: ObjectIdentity,
+    manifest_before: ContentManifest,
+    manifest_after: ContentManifest,
+) -> str:
+    if retained_handle_identity_after != source_identity_before:
+        return CONTROL_IDENTITY_MISMATCH
+    if final_identity_after != source_identity_before:
+        return CONTROL_IDENTITY_MISMATCH
+    if manifest_before.manifest_sha256 != manifest_after.manifest_sha256:
+        return CONTROL_CONTENT_MISMATCH
+    return CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE
+
+
+def execute_absolute_path_control(
+    *,
+    fixture_root: str | Path,
+    source_directory: str | Path,
+    destination_parent: str | Path,
+    final_name: str,
+    mode: str,
+    allow_existing_destination_for_negative: bool = False,
+    fault_point: str | None = None,
+) -> ValidationCaseResult:
+    require_absolute_path_control_mode(mode)
+    policy_identity = absolute_path_control_policy_identity()
+    final_name_validation = validate_final_name(final_name)
+    if not final_name_validation.accepted:
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            CONTROL_FIXTURE_INVALID,
+            final_name_validation.reason or "invalid final name",
+            NAME_INVALID,
+            policy_identity=policy_identity,
+        )
+    try:
+        root = validate_fixture_root(fixture_root)
+        source = validate_child_path(
+            source_directory,
+            fixture_root=root,
+            must_exist=True,
+        )
+        dest_parent = validate_child_path(
+            destination_parent,
+            fixture_root=root,
+            must_exist=True,
+        )
+        _validate_ordinary_directory(source)
+        _validate_ordinary_directory(dest_parent)
+        _ensure_existing_ancestors_non_reparse(source, root)
+        _ensure_existing_ancestors_non_reparse(dest_parent, root)
+        final_path, absolute_destination_text = derive_absolute_control_destination(
+            fixture_root=root,
+            destination_parent=dest_parent,
+            final_name=final_name,
+        )
+    except FixtureInvalidError as exc:
+        detail = str(exc)
+        status = _absolute_control_fixture_status(detail)
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            status,
+            detail,
+            status,
+            policy_identity=policy_identity,
+        )
+    if final_path.exists() and not allow_existing_destination_for_negative:
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            CONTROL_FIXTURE_INVALID,
+            "destination already exists in positive profile",
+            DESTINATION_ALREADY_EXISTS,
+            policy_identity=policy_identity,
+        )
+    fault = _absolute_fault_result_if_requested(
+        fault_point,
+        "A_FAULT_AFTER_FIXTURE_ADMISSION",
+    )
+    if fault is not None:
+        return fault
+    support = admit_support_profile(
+        fixture_root=root,
+        source_directory=source,
+        destination_parent=dest_parent,
+    )
+    if not support.supported:
+        status = _absolute_control_support_status(support)
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            status,
+            support.detail,
+            status,
+            policy_identity=policy_identity,
+            support_profile=support,
+            skip_reason=support.failure_code
+            if status == CONTROL_SKIPPED_FIXTURE_UNAVAILABLE
+            else None,
+        )
+    fault = _absolute_fault_result_if_requested(
+        fault_point,
+        "A_FAULT_AFTER_ABSOLUTE_PATH_DERIVATION",
+    )
+    if fault is not None:
+        return fault
+    try:
+        manifest_before = build_content_manifest(source)
+        if manifest_before.entry_count == 0:
+            return _case_result(
+                "A_NATIVE_EXECUTION",
+                CONTROL_FIXTURE_INVALID,
+                "source directory is empty",
+                SOURCE_EMPTY,
+                policy_identity=policy_identity,
+                support_profile=support,
+            )
+        source_parent_before = identity_from_path(source.parent)
+        dest_parent_before = identity_from_path(dest_parent)
+        source_path_identity_before = identity_from_path(source)
+    except FixtureInvalidError as exc:
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            _absolute_control_fixture_status(str(exc)),
+            str(exc),
+            SOURCE_MANIFEST_BOUNDS_EXCEEDED,
+            policy_identity=policy_identity,
+            support_profile=support,
+        )
+    except OSError as exc:
+        error_code = getattr(exc, "winerror", None)
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            _absolute_control_native_failure_status(error_code),
+            "pre-operation identity capture failed",
+            NATIVE_IDENTITY_FAILED,
+            native_error_code=error_code,
+            native_error_name=_error_name(error_code),
+            policy_identity=policy_identity,
+            support_profile=support,
+        )
+
+    source_handle = _open_directory_handle(source, desired_access=DELETE)
+    if isinstance(source_handle, NativePromotionOutcome):
+        status = _absolute_control_native_failure_status(source_handle.native_error_code)
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            status,
+            source_handle.detail,
+            NATIVE_OPEN_FAILED,
+            native_error_code=source_handle.native_error_code,
+            native_error_name=source_handle.native_error_name,
+            policy_identity=policy_identity,
+            support_profile=support,
+        )
+    fault = _absolute_fault_result_if_requested(
+        fault_point,
+        "A_FAULT_AFTER_SOURCE_HANDLE_OPEN",
+    )
+    if fault is not None:
+        source_handle.close()
+        return fault
+
+    dest_access = (
+        FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_READ_ATTRIBUTES
+    )
+    dest_parent_handle = _open_directory_handle(dest_parent, desired_access=dest_access)
+    if isinstance(dest_parent_handle, NativePromotionOutcome):
+        source_handle.close()
+        status = _absolute_control_native_failure_status(
+            dest_parent_handle.native_error_code
+        )
+        return _case_result(
+            "A_NATIVE_EXECUTION",
+            status,
+            dest_parent_handle.detail,
+            NATIVE_OPEN_FAILED,
+            native_error_code=dest_parent_handle.native_error_code,
+            native_error_name=dest_parent_handle.native_error_name,
+            policy_identity=policy_identity,
+            support_profile=support,
+        )
+
+    with source_handle, dest_parent_handle:
+        fault = _absolute_fault_result_if_requested(
+            fault_point,
+            "A_FAULT_AFTER_DESTINATION_PARENT_EVIDENCE",
+        )
+        if fault is not None:
+            return fault
+        try:
+            retained_before = identity_from_handle(source_handle.handle)
+            if retained_before != source_path_identity_before:
+                return _case_result(
+                    "A_NATIVE_EXECUTION",
+                    CONTROL_IDENTITY_MISMATCH,
+                    "retained source handle does not match source path before rename",
+                    NATIVE_IDENTITY_FAILED,
+                    policy_identity=policy_identity,
+                    support_profile=support,
+                    source_identity_before=source_path_identity_before,
+                )
+            rename_buffer = build_absolute_path_file_rename_info_buffer(
+                absolute_destination_path=absolute_destination_text,
+            )
+        except (ValidationError, OSError) as exc:
+            return _case_result(
+                "A_NATIVE_EXECUTION",
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+                "absolute-path buffer or retained identity capture failed: %s"
+                % type(exc).__name__,
+                NATIVE_IDENTITY_FAILED,
+                policy_identity=policy_identity,
+                support_profile=support,
+                source_identity_before=source_path_identity_before,
+            )
+        fault = _absolute_fault_result_if_requested(
+            fault_point,
+            "A_FAULT_AFTER_BUFFER_CONSTRUCTION",
+        )
+        if fault is not None:
+            return fault
+        fault = _absolute_fault_result_if_requested(
+            fault_point,
+            "A_FAULT_BEFORE_NATIVE_CALL",
+        )
+        if fault is not None:
+            return fault
+        kernel32 = _kernel32()
+        ok = bool(
+            kernel32.SetFileInformationByHandle(
+                source_handle.handle,
+                FileRenameInfo,
+                ctypes.cast(rename_buffer.buffer, ctypes.c_void_p),
+                rename_buffer.size,
+            )
+        )
+        if not ok:
+            error_code = int(kernel32.GetLastError())
+            status = _absolute_control_native_failure_status(error_code)
+            manifest_after_sha256 = None
+            if source.exists():
+                try:
+                    manifest_after_sha256 = build_content_manifest(source).manifest_sha256
+                except FixtureInvalidError:
+                    manifest_after_sha256 = None
+            return _case_result(
+                "A_NATIVE_EXECUTION",
+                status,
+                _absolute_control_native_failure_detail(error_code),
+                NATIVE_RENAME_FAILED,
+                native_error_code=error_code,
+                native_error_name=_error_name(error_code),
+                policy_identity=policy_identity,
+                support_profile=support,
+                source_identity_before=source_path_identity_before,
+                source_parent_identity_before=source_parent_before,
+                destination_parent_identity_before=dest_parent_before,
+                source_exists_after_native_failure=source.exists(),
+                final_exists_after_native_failure=final_path.exists(),
+                manifest_before_sha256=manifest_before.manifest_sha256,
+                manifest_after_sha256=manifest_after_sha256,
+            )
+        fault = _absolute_fault_result_if_requested(
+            fault_point,
+            "A_FAULT_AFTER_NATIVE_SUCCESS",
+        )
+        if fault is not None:
+            return fault
+        fault = _absolute_fault_result_if_requested(
+            fault_point,
+            "A_FAULT_BEFORE_POST_TRANSITION_VERIFICATION",
+        )
+        if fault is not None:
+            return fault
+        try:
+            retained_after = identity_from_handle(source_handle.handle)
+            final_identity_after = identity_from_path(final_path)
+            source_parent_after = identity_from_path(source.parent)
+            dest_parent_after = identity_from_path(dest_parent)
+            manifest_after = build_content_manifest(final_path)
+        except (FixtureInvalidError, OSError) as exc:
+            return _case_result(
+                "A_NATIVE_EXECUTION",
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+                "post-operation validation failed: %s" % type(exc).__name__,
+                NATIVE_IDENTITY_FAILED,
+                policy_identity=policy_identity,
+                support_profile=support,
+                source_identity_before=source_path_identity_before,
+                manifest_before_sha256=manifest_before.manifest_sha256,
+            )
+
+    status = derive_absolute_control_success_status(
+        source_identity_before=source_path_identity_before,
+        retained_handle_identity_after=retained_after,
+        final_identity_after=final_identity_after,
+        manifest_before=manifest_before,
+        manifest_after=manifest_after,
+    )
+    failure_code = (
+        None
+        if status == CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE
+        else status
+    )
+    return _case_result(
+        "A_NATIVE_EXECUTION",
+        status,
+        "absolute-path FileRenameInfo diagnostic control completed",
+        failure_code,
+        policy_identity=policy_identity,
+        support_profile=support,
+        source_identity_before=source_path_identity_before,
+        retained_handle_identity_after=retained_after,
+        final_identity_after=final_identity_after,
+        source_parent_identity_before=source_parent_before,
+        source_parent_identity_after=source_parent_after,
+        destination_parent_identity_before=dest_parent_before,
+        destination_parent_identity_after=dest_parent_after,
+        manifest_before_sha256=manifest_before.manifest_sha256,
+        manifest_after_sha256=manifest_after.manifest_sha256,
     )
 
 
@@ -1501,6 +2266,186 @@ def characterize_failed_collision(
         case_id,
         PRIMITIVE_VALIDATION_CONFIRMED,
         "no-replace collision preserved source and destination",
+        None,
+        native_error_code=execution.native_error_code,
+        native_error_name=execution.native_error_name,
+        policy_identity=policy_identity,
+        manifest_after_sha256=source_manifest_after.manifest_sha256,
+    )
+
+
+def _absolute_control_contract_rejection_gated(
+    result: ValidationCaseResult,
+) -> bool:
+    if (
+        result.status == CONTROL_REJECTED_ERROR_INVALID_PARAMETER_INDETERMINATE
+        and result.native_error_code == ERROR_INVALID_PARAMETER
+    ):
+        return True
+    return (
+        result.status == CONTROL_UNSUPPORTED_EXPLICIT_NATIVE_SIGNAL
+        and result.native_error_code == ERROR_NOT_SUPPORTED
+    )
+
+
+def characterize_absolute_control_failed_collision(
+    *,
+    case_id: str,
+    execution: ValidationCaseResult,
+    source_directory: str | Path,
+    destination_path: str | Path,
+    destination_before: ObjectIdentity | None,
+    destination_manifest_before: ContentManifest | None,
+) -> ValidationCaseResult:
+    policy_identity = absolute_path_control_policy_identity()
+    if _absolute_control_contract_rejection_gated(execution):
+        return _case_result(
+            case_id,
+            execution.status,
+            (
+                "absolute-path no-replace collision characterization was not "
+                "reached after native control rejection"
+            ),
+            execution.failure_code,
+            native_error_code=execution.native_error_code,
+            native_error_name=execution.native_error_name,
+            policy_identity=policy_identity,
+            support_profile=execution.support_profile,
+            source_identity_before=execution.source_identity_before,
+            source_parent_identity_before=execution.source_parent_identity_before,
+            destination_parent_identity_before=(
+                execution.destination_parent_identity_before
+            ),
+            source_exists_after_native_failure=(
+                execution.source_exists_after_native_failure
+            ),
+            final_exists_after_native_failure=(
+                execution.final_exists_after_native_failure
+            ),
+            manifest_before_sha256=execution.manifest_before_sha256,
+            manifest_after_sha256=execution.manifest_after_sha256,
+        )
+    if execution.native_error_code is None and execution.status in (
+        CONTROL_VALIDATED_FOR_BOUNDED_EPHEMERAL_PROFILE,
+        CONTROL_IDENTITY_MISMATCH,
+        CONTROL_CONTENT_MISMATCH,
+    ):
+        try:
+            destination_preserved = True
+            if destination_before is not None:
+                destination_preserved = (
+                    identity_from_path(destination_path) == destination_before
+                )
+            if destination_manifest_before is not None:
+                destination_preserved = destination_preserved and (
+                    build_content_manifest(destination_path).manifest_sha256
+                    == destination_manifest_before.manifest_sha256
+                )
+        except (FixtureInvalidError, OSError):
+            destination_preserved = False
+        if destination_preserved and execution.status in (
+            CONTROL_IDENTITY_MISMATCH,
+            CONTROL_CONTENT_MISMATCH,
+        ):
+            return _case_result(
+                case_id,
+                execution.status,
+                (
+                    "absolute-path control completed without a native failure "
+                    "but did not confirm the requested existing destination identity"
+                ),
+                execution.failure_code or execution.status,
+                policy_identity=policy_identity,
+                support_profile=execution.support_profile,
+                source_identity_before=execution.source_identity_before,
+                retained_handle_identity_after=(
+                    execution.retained_handle_identity_after
+                ),
+                final_identity_after=execution.final_identity_after,
+                source_parent_identity_before=execution.source_parent_identity_before,
+                source_parent_identity_after=execution.source_parent_identity_after,
+                destination_parent_identity_before=(
+                    execution.destination_parent_identity_before
+                ),
+                destination_parent_identity_after=(
+                    execution.destination_parent_identity_after
+                ),
+                manifest_before_sha256=execution.manifest_before_sha256,
+                manifest_after_sha256=execution.manifest_after_sha256,
+            )
+        return _case_result(
+            case_id,
+            CONTROL_DESTINATION_REPLACED,
+            "absolute-path control completed against an existing destination",
+            CONTROL_DESTINATION_REPLACED,
+            policy_identity=policy_identity,
+        )
+    if execution.status not in (
+        CONTROL_COLLISION_OBSERVED,
+        CONTROL_NATIVE_ERROR_INDETERMINATE,
+        CONTROL_ACCESS_REJECTED,
+    ):
+        return _case_result(
+            case_id,
+            CONTROL_DESTINATION_REPLACED,
+            "absolute-path control unexpectedly succeeded against an existing destination",
+            CONTROL_DESTINATION_REPLACED,
+            policy_identity=policy_identity,
+        )
+    if execution.native_error_code not in COLLISION_ERROR_CODES:
+        return _case_result(
+            case_id,
+            execution.status,
+            "native failure was not characterized as a no-replace collision",
+            NATIVE_RENAME_FAILED,
+            native_error_code=execution.native_error_code,
+            native_error_name=execution.native_error_name,
+            policy_identity=policy_identity,
+        )
+    try:
+        source_manifest_after = build_content_manifest(source_directory)
+        if destination_before is not None:
+            destination_after = identity_from_path(destination_path)
+            if destination_after != destination_before:
+                return _case_result(
+                    case_id,
+                    CONTROL_DESTINATION_REPLACED,
+                    "destination identity changed after no-replace failure",
+                    CONTROL_DESTINATION_REPLACED,
+                    native_error_code=execution.native_error_code,
+                    native_error_name=execution.native_error_name,
+                    policy_identity=policy_identity,
+                )
+        if destination_manifest_before is not None:
+            destination_manifest_after = build_content_manifest(destination_path)
+            if (
+                destination_manifest_after.manifest_sha256
+                != destination_manifest_before.manifest_sha256
+            ):
+                return _case_result(
+                    case_id,
+                    CONTROL_DESTINATION_REPLACED,
+                    "destination content changed after no-replace failure",
+                    CONTROL_DESTINATION_REPLACED,
+                    native_error_code=execution.native_error_code,
+                    native_error_name=execution.native_error_name,
+                    policy_identity=policy_identity,
+                )
+    except (FixtureInvalidError, OSError) as exc:
+        return _case_result(
+            case_id,
+            CONTROL_NATIVE_ERROR_INDETERMINATE,
+            "collision characterization became indeterminate: %s"
+            % type(exc).__name__,
+            NATIVE_IDENTITY_FAILED,
+            native_error_code=execution.native_error_code,
+            native_error_name=execution.native_error_name,
+            policy_identity=policy_identity,
+        )
+    return _case_result(
+        case_id,
+        CONTROL_COLLISION_OBSERVED,
+        "absolute-path no-replace collision preserved source and destination",
         None,
         native_error_code=execution.native_error_code,
         native_error_name=execution.native_error_name,
@@ -2036,6 +2981,472 @@ def validate_v12_native_error_retention(fixture_root: str | Path) -> ValidationC
     )
 
 
+def validate_a1_absolute_path_positive(fixture_root: str | Path) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a1"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    result = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+    )
+    return _replace_case_id(result, "A1_POSITIVE_ABSOLUTE_PATH_RENAME")
+
+
+def validate_a2_existing_destination_directory_absolute_path(
+    fixture_root: str | Path,
+) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a2"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    destination = make_bounded_source_tree(destination_parent, "final")
+    destination_before = identity_from_path(destination) if _is_windows() else None
+    destination_manifest_before = build_content_manifest(destination)
+    execution = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+        allow_existing_destination_for_negative=True,
+    )
+    return characterize_absolute_control_failed_collision(
+        case_id="A2_EXISTING_DESTINATION_DIRECTORY",
+        execution=execution,
+        source_directory=source,
+        destination_path=destination,
+        destination_before=destination_before,
+        destination_manifest_before=destination_manifest_before,
+    )
+
+
+def validate_a3_existing_destination_file_absolute_path(
+    fixture_root: str | Path,
+) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a3"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    destination = destination_parent / "final"
+    destination_before = b"existing file\n"
+    destination.write_bytes(destination_before)
+    execution = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+        allow_existing_destination_for_negative=True,
+    )
+    if _absolute_control_contract_rejection_gated(execution):
+        return _replace_case_id(execution, "A3_EXISTING_DESTINATION_FILE")
+    if execution.status not in (
+        CONTROL_COLLISION_OBSERVED,
+        CONTROL_NATIVE_ERROR_INDETERMINATE,
+        CONTROL_ACCESS_REJECTED,
+    ):
+        return _case_result(
+            "A3_EXISTING_DESTINATION_FILE",
+            CONTROL_DESTINATION_REPLACED,
+            "absolute-path control unexpectedly succeeded over an existing file",
+            CONTROL_DESTINATION_REPLACED,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    if not destination.is_file() or destination.read_bytes() != destination_before:
+        return _case_result(
+            "A3_EXISTING_DESTINATION_FILE",
+            CONTROL_DESTINATION_REPLACED,
+            "existing file destination changed",
+            CONTROL_DESTINATION_REPLACED,
+            native_error_code=execution.native_error_code,
+            native_error_name=execution.native_error_name,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    if execution.native_error_code not in COLLISION_ERROR_CODES:
+        if execution.native_error_code is None and not source.exists():
+            return _case_result(
+                "A3_EXISTING_DESTINATION_FILE",
+                CONTROL_IDENTITY_MISMATCH,
+                (
+                    "absolute-path control moved the source without replacing "
+                    "the requested existing file destination"
+                ),
+                CONTROL_IDENTITY_MISMATCH,
+                policy_identity=absolute_path_control_policy_identity(),
+            )
+        return _case_result(
+            "A3_EXISTING_DESTINATION_FILE",
+            execution.status,
+            "native failure was not characterized as a no-replace file collision",
+            NATIVE_RENAME_FAILED,
+            native_error_code=execution.native_error_code,
+            native_error_name=execution.native_error_name,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    return _case_result(
+        "A3_EXISTING_DESTINATION_FILE",
+        CONTROL_COLLISION_OBSERVED,
+        "absolute-path no-replace collision preserved existing file destination",
+        None,
+        native_error_code=execution.native_error_code,
+        native_error_name=execution.native_error_name,
+        policy_identity=absolute_path_control_policy_identity(),
+    )
+
+
+def validate_a4_coordinated_destination_claim_absolute_path(
+    fixture_root: str | Path,
+) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a4"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    final_path = destination_parent / "final"
+    ready = threading.Event()
+    done = threading.Event()
+    error: list[BaseException] = []
+
+    def claim_destination() -> None:
+        ready.wait(timeout=5)
+        try:
+            final_path.mkdir()
+            (final_path / "owner.txt").write_bytes(b"competitor\n")
+        except BaseException as exc:  # pragma: no cover - defensive capture
+            error.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=claim_destination)
+    thread.start()
+    ready.set()
+    done.wait(timeout=5)
+    thread.join(timeout=5)
+    if error:
+        return _case_result(
+            "A4_COORDINATED_DESTINATION_CLAIM",
+            CONTROL_NATIVE_ERROR_INDETERMINATE,
+            "coordinated destination claim failed",
+            CONTROL_FAULT_INJECTED,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    destination_before = identity_from_path(final_path) if _is_windows() else None
+    destination_manifest_before = build_content_manifest(final_path)
+    execution = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+        allow_existing_destination_for_negative=True,
+    )
+    return characterize_absolute_control_failed_collision(
+        case_id="A4_COORDINATED_DESTINATION_CLAIM",
+        execution=execution,
+        source_directory=source,
+        destination_path=final_path,
+        destination_before=destination_before,
+        destination_manifest_before=destination_manifest_before,
+    )
+
+
+def validate_a5_absolute_path_identity_continuity(
+    fixture_root: str | Path,
+) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a5"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    result = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+    )
+    return _replace_case_id(result, "A5_SOURCE_TO_FINAL_IDENTITY_CONTINUITY")
+
+
+def validate_a6_absolute_path_native_error_characterization(
+    fixture_root: str | Path,
+) -> ValidationCaseResult:
+    case_root = Path(fixture_root) / "a6"
+    case_root.mkdir()
+    source = make_bounded_source_tree(case_root)
+    destination_parent = case_root / "dest"
+    destination_parent.mkdir()
+    destination = make_bounded_source_tree(destination_parent, "final")
+    destination_manifest_before = build_content_manifest(destination)
+    execution = execute_absolute_path_control(
+        fixture_root=fixture_root,
+        source_directory=source,
+        destination_parent=destination_parent,
+        final_name="final",
+        mode=ABSOLUTE_PATH_CONTROL_MODE,
+        allow_existing_destination_for_negative=True,
+    )
+    if execution.native_error_code is None:
+        try:
+            destination_manifest_after = build_content_manifest(destination)
+            preserved = (
+                destination_manifest_after.manifest_sha256
+                == destination_manifest_before.manifest_sha256
+            )
+        except FixtureInvalidError:
+            preserved = False
+        status = (
+            execution.status
+            if preserved
+            and execution.status
+            in (
+                CONTROL_IDENTITY_MISMATCH,
+                CONTROL_CONTENT_MISMATCH,
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+            )
+            else CONTROL_DESTINATION_REPLACED
+        )
+        failure_code = (
+            execution.failure_code
+            if preserved
+            and execution.status
+            in (
+                CONTROL_IDENTITY_MISMATCH,
+                CONTROL_CONTENT_MISMATCH,
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+            )
+            else CONTROL_DESTINATION_REPLACED
+        )
+        detail = (
+            (
+                "absolute-path control completed without a native failure but "
+                "did not confirm the requested existing destination identity"
+            )
+            if preserved
+            and execution.status
+            in (
+                CONTROL_IDENTITY_MISMATCH,
+                CONTROL_CONTENT_MISMATCH,
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+            )
+            else "absolute-path control completed against an existing destination"
+        )
+        return _case_result(
+            "A6_NATIVE_ERROR_CHARACTERIZATION",
+            status,
+            detail,
+            failure_code,
+            policy_identity=absolute_path_control_policy_identity(),
+        )
+    preserved = destination.exists() and build_content_manifest(destination).entry_count > 0
+    status = execution.status if preserved else CONTROL_DESTINATION_REPLACED
+    return _case_result(
+        "A6_NATIVE_ERROR_CHARACTERIZATION",
+        status,
+        "absolute-path native failure code and destination state were retained",
+        execution.failure_code if preserved else CONTROL_DESTINATION_REPLACED,
+        native_error_code=execution.native_error_code,
+        native_error_name=execution.native_error_name,
+        policy_identity=absolute_path_control_policy_identity(),
+    )
+
+
+def validate_a7_invalid_or_escaping_absolute_destinations(
+    fixture_root: str | Path,
+) -> tuple[ValidationCaseResult, ...]:
+    policy_identity = absolute_path_control_policy_identity()
+    invalid_names = (
+        "",
+        ".",
+        "..",
+        "a/b",
+        "a\\b",
+        "C:drive",
+        "stream:name",
+        "*",
+        "?",
+        "\\\\server",
+        "\\\\?\\C:\\x",
+        "x\x00y",
+    )
+    results: list[ValidationCaseResult] = []
+    for index, name in enumerate(invalid_names):
+        validation = validate_final_name(name)
+        accepted = validation.accepted
+        results.append(
+            _case_result(
+                "A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED_%02d"
+                % index,
+                CONTROL_FIXTURE_INVALID
+                if not accepted
+                else CONTROL_NATIVE_ERROR_INDETERMINATE,
+                validation.reason or "invalid destination was accepted",
+                NAME_INVALID,
+                policy_identity=policy_identity,
+            )
+        )
+
+    case_root = Path(fixture_root) / "a7_escape"
+    sibling = Path(str(case_root) + "_sibling")
+    case_root.mkdir()
+    sibling.mkdir()
+    try:
+        derive_absolute_control_destination(
+            fixture_root=case_root,
+            destination_parent=sibling,
+            final_name="final",
+        )
+    except FixtureInvalidError as exc:
+        status = _absolute_control_fixture_status(str(exc))
+        results.append(
+            _case_result(
+                "A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED_ESCAPE",
+                status,
+                str(exc),
+                status,
+                policy_identity=policy_identity,
+            )
+        )
+    else:
+        results.append(
+            _case_result(
+                "A7_INVALID_OR_ESCAPING_ABSOLUTE_DESTINATION_REJECTED_ESCAPE",
+                CONTROL_NATIVE_ERROR_INDETERMINATE,
+                "sibling-prefix destination escape was accepted",
+                PATH_OUTSIDE_FIXTURE_ROOT,
+                policy_identity=policy_identity,
+            )
+        )
+    return tuple(results)
+
+
+def validate_a8_same_volume_mismatch_rejected(
+    fixture_root: str | Path,
+    second_volume_root: str | Path | None = None,
+) -> ValidationCaseResult:
+    policy_identity = absolute_path_control_policy_identity()
+    if second_volume_root is None:
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            CONTROL_SKIPPED_FIXTURE_UNAVAILABLE,
+            "second local fixed NTFS fixture root was not injected",
+            SECOND_VOLUME_UNAVAILABLE,
+            skip_reason=SECOND_VOLUME_UNAVAILABLE,
+            policy_identity=policy_identity,
+        )
+    try:
+        root = validate_fixture_root(fixture_root)
+        second_root = validate_fixture_root(second_volume_root)
+        case_root = root / "a8"
+        case_root.mkdir()
+        source = make_bounded_source_tree(case_root)
+        destination_parent = second_root / "a8_dest"
+        destination_parent.mkdir()
+        source_drive_type, source_filesystem, source_volume = _volume_information(source)
+        (
+            destination_drive_type,
+            destination_filesystem,
+            destination_volume,
+        ) = _volume_information(destination_parent)
+    except FixtureInvalidError as exc:
+        status = _absolute_control_fixture_status(str(exc))
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            status,
+            str(exc),
+            status,
+            policy_identity=policy_identity,
+        )
+    except UnsupportedProfileError as exc:
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            CONTROL_SKIPPED_FIXTURE_UNAVAILABLE,
+            str(exc),
+            UNSUPPORTED_DRIVE_PROFILE,
+            skip_reason=UNSUPPORTED_DRIVE_PROFILE,
+            policy_identity=policy_identity,
+        )
+    except OSError as exc:
+        error_code = getattr(exc, "winerror", None)
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            CONTROL_NATIVE_ERROR_INDETERMINATE,
+            "volume evidence could not be determined",
+            UNSUPPORTED_DRIVE_PROFILE,
+            native_error_code=error_code,
+            native_error_name=_error_name(error_code),
+            policy_identity=policy_identity,
+        )
+    if source_volume != destination_volume:
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            CONTROL_SAME_VOLUME_REJECTED,
+            "source and absolute destination parent are not on the same volume",
+            UNSUPPORTED_VOLUME_RELATIONSHIP,
+            policy_identity=policy_identity,
+            support_profile=SupportProfile(
+                supported=False,
+                status=UNSUPPORTED,
+                detail="source and destination are not on the same volume",
+                failure_code=UNSUPPORTED_VOLUME_RELATIONSHIP,
+                drive_type=source_drive_type,
+                filesystem_name=source_filesystem,
+                source_volume_serial_number=source_volume,
+                destination_volume_serial_number=destination_volume,
+            ),
+        )
+    if (
+        source_drive_type != DRIVE_FIXED
+        or destination_drive_type != DRIVE_FIXED
+        or source_filesystem != "NTFS"
+        or destination_filesystem != "NTFS"
+    ):
+        return _case_result(
+            "A8_SAME_VOLUME_MISMATCH_REJECTED",
+            CONTROL_SKIPPED_FIXTURE_UNAVAILABLE,
+            "second volume fixture is not a local fixed NTFS profile",
+            UNSUPPORTED_DRIVE_PROFILE,
+            skip_reason=UNSUPPORTED_DRIVE_PROFILE,
+            policy_identity=policy_identity,
+        )
+    return _case_result(
+        "A8_SAME_VOLUME_MISMATCH_REJECTED",
+        CONTROL_FIXTURE_INVALID,
+        "second volume fixture resolved to the same volume",
+        SECOND_VOLUME_UNAVAILABLE,
+        policy_identity=policy_identity,
+    )
+
+
+def run_absolute_path_control_matrix(
+    fixture_root: str | Path,
+    *,
+    mode: str,
+    second_volume_root: str | Path | None = None,
+) -> tuple[ValidationCaseResult, ...]:
+    require_absolute_path_control_mode(mode)
+    return (
+        validate_a1_absolute_path_positive(fixture_root),
+        validate_a2_existing_destination_directory_absolute_path(fixture_root),
+        validate_a3_existing_destination_file_absolute_path(fixture_root),
+        validate_a4_coordinated_destination_claim_absolute_path(fixture_root),
+        validate_a5_absolute_path_identity_continuity(fixture_root),
+        validate_a6_absolute_path_native_error_characterization(fixture_root),
+        *validate_a7_invalid_or_escaping_absolute_destinations(fixture_root),
+        validate_a8_same_volume_mismatch_rejected(
+            fixture_root,
+            second_volume_root=second_volume_root,
+        ),
+    )
+
+
 def run_validation_matrix(
     fixture_root: str | Path,
     *,
@@ -2088,7 +3499,11 @@ def _case_result(
     manifest_after_sha256: str | None = None,
     durability_probes: tuple[DurabilityProbe, ...] = (),
 ) -> ValidationCaseResult:
-    if status not in STATUS_TAXONOMY and not status.startswith("DIRECTORY_DURABILITY_"):
+    if (
+        status not in STATUS_TAXONOMY
+        and status not in CONTROL_STATUS_TAXONOMY
+        and not status.startswith("DIRECTORY_DURABILITY_")
+    ):
         raise ValidationError("unknown status")
     return ValidationCaseResult(
         case_id=case_id,
