@@ -76,7 +76,6 @@ def make_payload(tmp_path: Path, monkeypatch, *, mode=wrapper.PREFLIGHT_ONLY):
     roots["authority"].mkdir(parents=True, exist_ok=True)
     roots["result_parent"].mkdir(parents=True, exist_ok=True)
     expectations, observations, inventory = _source_bundle()
-    result_dir = roots["result_parent"] / "pending"
     block = retained.build_execution_authorization_identity_block(
         assessment_identity=retained.RETAINED_RUN_ASSESSMENT_SHA256,
         implementation_preparation_authorization_identity=(
@@ -88,27 +87,14 @@ def make_payload(tmp_path: Path, monkeypatch, *, mode=wrapper.PREFLIGHT_ONLY):
         expected_branch="main",
         expected_head=HEAD,
         expected_origin_main=HEAD,
-        result_directory=result_dir,
         fixture_root=roots["fixture"],
         authority_registry_root=roots["authority"],
         source_identities=expectations,
+        result_parent=roots["result_parent"],
     )
-    result_dir = roots["result_parent"] / block.execution_authorization_identity
-    block = retained.build_execution_authorization_identity_block(
-        assessment_identity=retained.RETAINED_RUN_ASSESSMENT_SHA256,
-        implementation_preparation_authorization_identity=(
-            retained.IMPLEMENTATION_PREPARATION_AUTHORIZATION_SHA256
-        ),
-        runtime_correction_authorization_identity=(
-            retained.RUNTIME_CORRECTION_AUTHORIZATION_SHA256
-        ),
-        expected_branch="main",
-        expected_head=HEAD,
-        expected_origin_main=HEAD,
-        result_directory=result_dir,
-        fixture_root=roots["fixture"],
-        authority_registry_root=roots["authority"],
-        source_identities=expectations,
+    result_dir = retained.derive_result_directory(
+        roots["result_parent"],
+        block.execution_authorization_identity,
     )
     auth = retained.RetainedAuthorization(
         mode=retained.RETAINED_MODE,
@@ -198,6 +184,31 @@ def test_valid_canonical_input_round_trips(tmp_path, monkeypatch):
 
     assert loaded == payload
     assert wrapper.sha256_hex(raw)
+
+
+def test_stage_a_path_model_is_deterministic_and_identity_derived(
+    tmp_path,
+    monkeypatch,
+):
+    payload = make_payload(tmp_path, monkeypatch)
+    repeat = make_payload(tmp_path, monkeypatch)
+    auth_id = payload["retained_authorization"]["authorization_identity"]
+    result_parent = Path(payload["path_model"]["result_parent"])
+    expected_result = result_parent / auth_id
+
+    assert repeat["retained_authorization"]["authorization_identity"] == auth_id
+    assert repeat["execution_authorization_identity_block"]["run_identity"] == (
+        payload["execution_authorization_identity_block"]["run_identity"]
+    )
+    assert Path(payload["path_model"]["result_directory"]) == expected_result
+    assert Path(payload["retained_authorization"]["result_directory"]) == expected_result
+    assert payload["execution_authorization_identity_block"]["run_identity"] != auth_id
+    assert (
+        payload["execution_authorization_identity_block"][
+            "result_directory_identity"
+        ]
+        == retained.result_directory_identity(expected_result)["path_identity"]
+    )
 
 
 def test_noncanonical_input_rejected(tmp_path, monkeypatch):
@@ -352,6 +363,17 @@ def test_wrong_repo_source_document_runtime_and_path_identity_rejected(tmp_path,
 
     payload = make_payload(tmp_path, monkeypatch)
     payload["path_model"]["result_directory"] = str(tmp_path / "other")
+    payload = wrapper.with_computed_authorization_input_identity(payload)
+    with pytest.raises(wrapper.WrapperValidationError):
+        wrapper.validate_authorization_payload(
+            payload,
+            mode=wrapper.PREFLIGHT_ONLY,
+            file_identity_provider=_identity_provider(payload),
+            repository_state=clean_state(tmp_path),
+        )
+
+    payload = make_payload(tmp_path, monkeypatch)
+    payload["retained_authorization"]["result_directory"] = str(tmp_path / "other")
     payload = wrapper.with_computed_authorization_input_identity(payload)
     with pytest.raises(wrapper.WrapperValidationError):
         wrapper.validate_authorization_payload(

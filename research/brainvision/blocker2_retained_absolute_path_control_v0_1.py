@@ -59,6 +59,41 @@ RETAINED_SOURCE_IDENTITY_SCHEMA = (
 RETAINED_FIXTURE_PROFILE_SCHEMA = (
     "torment.brainvision.blocker2.retained.fixture_profile.v0.1"
 )
+RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_SCHEMA = (
+    "torment.brainvision.blocker2.retained.execution_authorization_identity.v0.2"
+)
+RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_BLOCK_SCHEMA = (
+    "torment.brainvision.blocker2.retained."
+    "execution_authorization_identity_block.v0.2"
+)
+RETAINED_RUN_IDENTITY_SCHEMA = (
+    "torment.brainvision.blocker2.retained.run_identity.v0.2"
+)
+RETAINED_RESULT_DIRECTORY_DERIVATION_RULE_SCHEMA = (
+    "torment.brainvision.blocker2.retained."
+    "result_directory_derivation_rule.v0.1"
+)
+RESULT_DIRECTORY_DERIVATION_RULE = (
+    "result_directory = result_parent / execution_authorization_identity"
+)
+OPERATOR_WRAPPER_AUTHORIZATION_INPUT_SCHEMA = (
+    "torment.brainvision.blocker2.operator_wrapper.authorization_input.v0.2"
+)
+OPERATOR_WRAPPER_AUTHORIZATION_INPUT_DECLARATION_SCHEMA = (
+    "torment.brainvision.blocker2.operator_wrapper."
+    "authorization_input_declaration.v0.2"
+)
+OPERATOR_WRAPPER_IDENTITY_SCHEMA = (
+    "torment.brainvision.blocker2.operator_wrapper.identity.v0.1"
+)
+OPERATOR_WRAPPER_VERSION = "v0.2"
+OPERATOR_IDENTITY = "Hilmir"
+SINGLE_PROCESS_DECLARATION = "one Windows Command Prompt process"
+SINGLE_ATTEMPT_DECLARATION = "one authoritative attempt"
+REAL_EXECUTOR_SELECTOR = "REAL_EXISTING_ABSOLUTE_PATH_A1_A2_A3_A5_V0_1"
+IDENTITY_DERIVATION_CYCLE_CORRECTION_AUTHORIZATION_SHA256 = (
+    "a8da21fc9884299d847b7cc29ba877987bc11c06baa77cbd9ebe10ad63e0aa68"
+)
 
 GLOBAL_AUTHORITY_ENTRY_SUFFIX = ".global_authority_entry.canonical.json"
 GATE_ENTRY_FILENAME = "gate_entry.canonical.json"
@@ -291,6 +326,11 @@ AUTHORIZED_PREPARATION_DOCUMENTS = frozenset(
             "TORMENT_BRAINVISION_STAGE_S3B_V0_3_BLOCKER_2_"
             "POST_COMMIT_RUNTIME_CORRECTION_AUTHORIZATION_v0.1.md"
         ),
+        (
+            "docs/"
+            "TORMENT_BRAINVISION_STAGE_S3B_V0_3_BLOCKER_2_"
+            "IDENTITY_DERIVATION_CYCLE_CORRECTION_AUTHORIZATION_v0.1.md"
+        ),
     }
 )
 
@@ -442,10 +482,7 @@ class ExecutionAuthorizationIdentityBlock:
 
     def as_payload(self) -> dict[str, Any]:
         return {
-            "schema": (
-                "torment.brainvision.blocker2.retained."
-                "execution_authorization_identity_block.v0.1"
-            ),
+            "schema": RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_BLOCK_SCHEMA,
             "execution_authorization_identity": self.execution_authorization_identity,
             "retained_run_assessment_identity": self.retained_run_assessment_identity,
             "implementation_preparation_authorization_identity": (
@@ -643,10 +680,20 @@ def require_retained_mode(mode: str) -> str:
 
 def retained_schema_declaration() -> dict[str, Any]:
     return {
-        "schema": "torment.brainvision.blocker2.retained.schemas.v0.1",
+        "schema": "torment.brainvision.blocker2.retained.schemas.v0.2",
         "authorization_input_schema": RETAINED_AUTHORIZATION_INPUT_SCHEMA,
         "case_set_schema": RETAINED_CASE_SET_SCHEMA,
         "case_envelope_schema": RETAINED_CASE_ENVELOPE_SCHEMA,
+        "execution_authorization_identity_schema": (
+            RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_SCHEMA
+        ),
+        "execution_authorization_identity_block_schema": (
+            RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_BLOCK_SCHEMA
+        ),
+        "run_identity_schema": RETAINED_RUN_IDENTITY_SCHEMA,
+        "result_directory_derivation_rule_schema": (
+            RETAINED_RESULT_DIRECTORY_DERIVATION_RULE_SCHEMA
+        ),
         "authority_registry_profile_schema": (
             RETAINED_AUTHORITY_REGISTRY_PROFILE_SCHEMA
         ),
@@ -848,11 +895,59 @@ def path_identity_for_role(
     }
 
 
+def result_directory_derivation_rule_declaration() -> dict[str, Any]:
+    return {
+        "schema": RETAINED_RESULT_DIRECTORY_DERIVATION_RULE_SCHEMA,
+        "rule": RESULT_DIRECTORY_DERIVATION_RULE,
+        "result_parent_input": "result_parent_identity",
+        "result_child_input": "execution_authorization_identity",
+        "caller_selectable": False,
+    }
+
+
+def derive_result_directory(
+    result_parent: str | Path,
+    execution_authorization_identity: str,
+) -> Path:
+    _require_hex64(
+        execution_authorization_identity,
+        "execution_authorization_identity",
+    )
+    return Path(result_parent).resolve() / execution_authorization_identity
+
+
+def result_directory_identity(result_directory: str | Path) -> dict[str, str]:
+    return path_identity_for_role(
+        result_directory,
+        role="result_directory",
+        must_exist=False,
+    )
+
+
+def operator_wrapper_identity() -> dict[str, str]:
+    declaration = {
+        "schema": OPERATOR_WRAPPER_IDENTITY_SCHEMA,
+        "authorization_input_schema": OPERATOR_WRAPPER_AUTHORIZATION_INPUT_SCHEMA,
+        "authorization_input_declaration_schema": (
+            OPERATOR_WRAPPER_AUTHORIZATION_INPUT_DECLARATION_SCHEMA
+        ),
+        "wrapper_version": OPERATOR_WRAPPER_VERSION,
+        "real_executor_selector": REAL_EXECUTOR_SELECTOR,
+    }
+    return {
+        "schema": OPERATOR_WRAPPER_IDENTITY_SCHEMA,
+        "operator_wrapper_sha256": canonical_sha256(declaration),
+    }
+
+
 def execution_authorization_identity_declaration(
     *,
     retained_run_assessment_identity: str,
     implementation_preparation_authorization_identity: str,
     runtime_correction_authorization_identity: str,
+    identity_derivation_cycle_correction_authorization_identity: str = (
+        IDENTITY_DERIVATION_CYCLE_CORRECTION_AUTHORIZATION_SHA256
+    ),
     expected_branch: str,
     expected_head: str,
     expected_origin_main: str,
@@ -864,18 +959,20 @@ def execution_authorization_identity_declaration(
     authority_registry_root_identity: str,
     fixture_root_identity: str,
     result_parent_identity: str,
-    result_directory_identity: str,
     host_identity: str,
     volume_identity: str,
-    run_identity: str,
+    case_execution_order: Sequence[str],
     selected_a6: bool,
     source_identities: Sequence[SourceIdentityExpectation],
+    result_directory_derivation_rule: Mapping[str, Any] | None = None,
+    operator_identity: str = OPERATOR_IDENTITY,
+    single_process_declaration: str = SINGLE_PROCESS_DECLARATION,
+    single_attempt_declaration: str = SINGLE_ATTEMPT_DECLARATION,
+    real_executor_selector: str = REAL_EXECUTOR_SELECTOR,
+    fault_injection_disabled: bool = True,
 ) -> dict[str, Any]:
     return {
-        "schema": (
-            "torment.brainvision.blocker2.retained."
-            "execution_authorization_identity.v0.1"
-        ),
+        "schema": RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_SCHEMA,
         "retained_mode": RETAINED_MODE,
         "authoritative": True,
         "retained_run_assessment_identity": retained_run_assessment_identity,
@@ -885,6 +982,21 @@ def execution_authorization_identity_declaration(
         "runtime_correction_authorization_identity": (
             runtime_correction_authorization_identity
         ),
+        "identity_derivation_cycle_correction_authorization_identity": (
+            identity_derivation_cycle_correction_authorization_identity
+        ),
+        "controlling_document_identities": {
+            "retained_run_assessment": retained_run_assessment_identity,
+            "implementation_preparation_authorization": (
+                implementation_preparation_authorization_identity
+            ),
+            "post_commit_runtime_correction_authorization": (
+                runtime_correction_authorization_identity
+            ),
+            "identity_derivation_cycle_correction_authorization": (
+                identity_derivation_cycle_correction_authorization_identity
+            ),
+        },
         "expected_branch": expected_branch,
         "expected_head": expected_head,
         "expected_origin_main": expected_origin_main,
@@ -898,10 +1010,21 @@ def execution_authorization_identity_declaration(
         "authority_registry_root_identity": authority_registry_root_identity,
         "fixture_root_identity": fixture_root_identity,
         "result_parent_identity": result_parent_identity,
-        "result_directory_identity": result_directory_identity,
+        "result_directory_derivation_rule": dict(
+            result_directory_derivation_rule
+            or result_directory_derivation_rule_declaration()
+        ),
+        "operator_wrapper_identity": operator_wrapper_identity()[
+            "operator_wrapper_sha256"
+        ],
+        "operator_identity": operator_identity,
+        "single_process_declaration": single_process_declaration,
+        "single_attempt_declaration": single_attempt_declaration,
+        "real_executor_selector": real_executor_selector,
+        "fault_injection_disabled": fault_injection_disabled,
         "host_identity": host_identity,
         "volume_identity": volume_identity,
-        "run_identity": run_identity,
+        "case_execution_order": list(case_execution_order),
         "selected_a6": selected_a6,
         "source_identities": [
             identity.as_payload()
@@ -921,24 +1044,42 @@ def execution_authorization_identity_from_declaration(
 
 def run_identity_declaration(
     *,
+    execution_authorization_identity: str,
+    expected_branch: str,
     expected_head: str,
     expected_origin_main: str,
     case_set_sha256: str,
+    case_execution_order: Sequence[str],
     fixture_root_identity: str,
+    result_parent_identity: str,
     result_directory_identity: str,
     authority_registry_root_identity: str,
+    operator_identity: str = OPERATOR_IDENTITY,
+    single_attempt_declaration: str = SINGLE_ATTEMPT_DECLARATION,
+    real_executor_selector: str = REAL_EXECUTOR_SELECTOR,
     selected_a6: bool,
 ) -> dict[str, Any]:
     return {
-        "schema": "torment.brainvision.blocker2.retained.run_identity.v0.1",
+        "schema": RETAINED_RUN_IDENTITY_SCHEMA,
+        "execution_authorization_identity": execution_authorization_identity,
+        "expected_branch": expected_branch,
         "expected_head": expected_head,
         "expected_origin_main": expected_origin_main,
         "case_set_sha256": case_set_sha256,
+        "case_execution_order": list(case_execution_order),
         "fixture_root_identity": fixture_root_identity,
+        "result_parent_identity": result_parent_identity,
         "result_directory_identity": result_directory_identity,
         "authority_registry_root_identity": authority_registry_root_identity,
+        "operator_identity": operator_identity,
+        "single_attempt_declaration": single_attempt_declaration,
+        "real_executor_selector": real_executor_selector,
         "selected_a6": selected_a6,
     }
+
+
+def run_identity_from_declaration(declaration: Mapping[str, Any]) -> str:
+    return canonical_sha256(dict(declaration))
 
 
 def build_execution_authorization_identity_block(
@@ -949,10 +1090,11 @@ def build_execution_authorization_identity_block(
     expected_branch: str,
     expected_head: str,
     expected_origin_main: str,
-    result_directory: str | Path,
     fixture_root: str | Path,
     authority_registry_root: str | Path,
     source_identities: Sequence[SourceIdentityExpectation],
+    result_parent: str | Path | None = None,
+    result_directory: str | Path | None = None,
     selected_cases: Sequence[str] = DEFAULT_RETAINED_CASES,
     optional_cases: Sequence[str] = (),
     run_identity: str | None = None,
@@ -962,6 +1104,11 @@ def build_execution_authorization_identity_block(
         selected_cases=selected_cases,
         optional_cases=optional_cases,
     )
+    case_declaration = retained_case_set_declaration(
+        selected_cases=selected_cases,
+        optional_cases=optional_cases,
+    )
+    case_execution_order = case_declaration["native_execution_order"]
     authority_root_identity = path_identity_for_role(
         authority_registry_root,
         role="authority_registry_root",
@@ -972,30 +1119,24 @@ def build_execution_authorization_identity_block(
         role="fixture_root",
         must_exist=False,
     )
-    result_dir = _resolve_for_absent_child(result_directory)
+    if result_parent is None:
+        if result_directory is None:
+            raise RetainedValidationError("result parent is required")
+        supplied_result_dir = _resolve_for_absent_child(result_directory)
+        result_parent_path = supplied_result_dir.parent
+    else:
+        result_parent_path = Path(result_parent).resolve()
+        supplied_result_dir = (
+            _resolve_for_absent_child(result_directory)
+            if result_directory is not None
+            else None
+        )
     result_parent_identity = path_identity_for_role(
-        result_dir.parent,
+        result_parent_path,
         role="result_parent",
         must_exist=True,
     )
-    result_directory_identity = path_identity_for_role(
-        result_dir,
-        role="result_directory",
-        must_exist=False,
-    )
-    derived_run_identity = canonical_sha256(
-        run_identity_declaration(
-            expected_head=expected_head,
-            expected_origin_main=expected_origin_main,
-            case_set_sha256=case_set["case_set_sha256"],
-            fixture_root_identity=fixture_identity["path_identity"],
-            result_directory_identity=result_directory_identity["path_identity"],
-            authority_registry_root_identity=authority_root_identity["path_identity"],
-            selected_a6=A6 in optional_cases,
-        )
-    )
-    if run_identity is not None and run_identity != derived_run_identity:
-        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    result_parent_volume_identity = volume_identity_for_path(result_parent_path)
     identity_declaration = execution_authorization_identity_declaration(
         retained_run_assessment_identity=assessment_identity,
         implementation_preparation_authorization_identity=(
@@ -1015,10 +1156,9 @@ def build_execution_authorization_identity_block(
         authority_registry_root_identity=authority_root_identity["path_identity"],
         fixture_root_identity=fixture_identity["path_identity"],
         result_parent_identity=result_parent_identity["path_identity"],
-        result_directory_identity=result_directory_identity["path_identity"],
         host_identity=host_profile_identity()["host_identity"],
-        volume_identity=volume_identity_for_path(result_directory)["volume_identity"],
-        run_identity=derived_run_identity,
+        volume_identity=result_parent_volume_identity["volume_identity"],
+        case_execution_order=case_execution_order,
         selected_a6=A6 in optional_cases,
         source_identities=source_identities,
     )
@@ -1029,6 +1169,32 @@ def build_execution_authorization_identity_block(
         authorization_identity is not None
         and authorization_identity != derived_authorization_identity
     ):
+        raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
+    derived_result_dir = derive_result_directory(
+        result_parent_path,
+        derived_authorization_identity,
+    )
+    if supplied_result_dir is not None and supplied_result_dir != derived_result_dir:
+        raise RetainedValidationError(IDENTITY_MISMATCH)
+    result_directory_identity_payload = result_directory_identity(derived_result_dir)
+    derived_run_identity = run_identity_from_declaration(
+        run_identity_declaration(
+            execution_authorization_identity=derived_authorization_identity,
+            expected_branch=expected_branch,
+            expected_head=expected_head,
+            expected_origin_main=expected_origin_main,
+            case_set_sha256=case_set["case_set_sha256"],
+            case_execution_order=case_execution_order,
+            fixture_root_identity=fixture_identity["path_identity"],
+            result_parent_identity=result_parent_identity["path_identity"],
+            result_directory_identity=(
+                result_directory_identity_payload["path_identity"]
+            ),
+            authority_registry_root_identity=authority_root_identity["path_identity"],
+            selected_a6=A6 in optional_cases,
+        )
+    )
+    if run_identity is not None and run_identity != derived_run_identity:
         raise RetainedValidationError(GLOBAL_AUTHORITY_IDENTITY_MISMATCH)
     return ExecutionAuthorizationIdentityBlock(
         execution_authorization_identity=derived_authorization_identity,
@@ -1051,9 +1217,9 @@ def build_execution_authorization_identity_block(
         authority_registry_root_identity=authority_root_identity["path_identity"],
         fixture_root_identity=fixture_identity["path_identity"],
         result_parent_identity=result_parent_identity["path_identity"],
-        result_directory_identity=result_directory_identity["path_identity"],
+        result_directory_identity=result_directory_identity_payload["path_identity"],
         host_identity=host_profile_identity()["host_identity"],
-        volume_identity=volume_identity_for_path(result_directory)["volume_identity"],
+        volume_identity=result_parent_volume_identity["volume_identity"],
         run_identity=derived_run_identity,
         selected_a6=A6 in optional_cases,
         source_identities=tuple(source_identities),
@@ -1367,7 +1533,7 @@ def validate_execution_authorization_identity_block(
     return {
         "schema": (
             "torment.brainvision.blocker2.retained."
-            "execution_authorization_identity_block.admitted.v0.1"
+            "execution_authorization_identity_block.admitted.v0.2"
         ),
         "identity_block": block.as_payload(),
         "source_identities": admitted_sources,

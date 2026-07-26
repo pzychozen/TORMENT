@@ -20,12 +20,9 @@ if str(MODULE_DIR) not in sys.path:
 import blocker2_retained_absolute_path_control_v0_1 as retained
 
 
-SCHEMA = "torment.brainvision.blocker2.operator_wrapper.authorization_input.v0.1"
-DECLARATION_SCHEMA = (
-    "torment.brainvision.blocker2.operator_wrapper."
-    "authorization_input_declaration.v0.1"
-)
-WRAPPER_VERSION = "v0.1"
+SCHEMA = retained.OPERATOR_WRAPPER_AUTHORIZATION_INPUT_SCHEMA
+DECLARATION_SCHEMA = retained.OPERATOR_WRAPPER_AUTHORIZATION_INPUT_DECLARATION_SCHEMA
+WRAPPER_VERSION = retained.OPERATOR_WRAPPER_VERSION
 
 PREPARE_PATHS = "PREPARE_PATHS"
 PREFLIGHT_ONLY = "PREFLIGHT_ONLY"
@@ -41,7 +38,7 @@ AUTHORITATIVE_RUN_INTERRUPTED_CONSUMED = "AUTHORITATIVE_RUN_INTERRUPTED_CONSUMED
 AUTHORITY_ALREADY_CONSUMED = "AUTHORITY_ALREADY_CONSUMED"
 INVALID_AUTHORIZATION_INPUT = "INVALID_AUTHORIZATION_INPUT"
 
-REAL_EXECUTOR_SELECTOR = "REAL_EXISTING_ABSOLUTE_PATH_A1_A2_A3_A5_V0_1"
+REAL_EXECUTOR_SELECTOR = retained.REAL_EXECUTOR_SELECTOR
 
 AUTHORITY_REGISTRY_ROOT = Path(r"C:\TORMENT\brainvision_authority\blocker2_s3b_v0_3")
 FIXTURE_ROOT = Path(r"C:\TORMENT\brainvision_authoritative_fixture\blocker2_s3b_v0_3")
@@ -299,7 +296,10 @@ def _require_drive_qualified_dos_path(path: Path) -> None:
 
 
 def derived_path_model(execution_authorization_identity: str) -> dict[str, str]:
-    result_directory = RESULT_PARENT / execution_authorization_identity
+    result_directory = retained.derive_result_directory(
+        RESULT_PARENT,
+        execution_authorization_identity,
+    )
     return {
         "authority_registry_root": _canonical_path_text(AUTHORITY_REGISTRY_ROOT),
         "fixture_root": _canonical_path_text(FIXTURE_ROOT),
@@ -770,6 +770,17 @@ def validate_authorization_payload(
         raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "retained case lock mismatch")
     if auth.authorization_identity != auth.execution_authorization.execution_authorization_identity:
         raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "authorization identity mismatch")
+    if _canonical_path_text(auth.result_directory.parent) != path_model["result_parent"]:
+        raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "retained result parent mismatch")
+    if _canonical_path_text(auth.result_directory) != path_model["result_directory"]:
+        raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "retained result directory mismatch")
+    if _canonical_path_text(auth.fixture_root) != path_model["fixture_root"]:
+        raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "retained fixture root mismatch")
+    if (
+        _canonical_path_text(auth.execution_authorization.authority_registry_root)
+        != path_model["authority_registry_root"]
+    ):
+        raise WrapperValidationError(INVALID_AUTHORIZATION_INPUT, "retained authority root mismatch")
     source_observations = {
         str(item["relative_path"]): _source_observation_from_payload(_require_mapping(item, "source observation"))
         for item in _require_list(payload["source_observations"], "source_observations")

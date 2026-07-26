@@ -88,12 +88,115 @@ def source_identity_bundle():
     return tuple(expectations), observations
 
 
+def stage_a_declaration_for_context(
+    *,
+    authority_root: Path,
+    fixture_root: Path,
+    result_parent: Path,
+    source_expectations: tuple[retained.SourceIdentityExpectation, ...],
+    selected_cases: tuple[str, ...] = retained.DEFAULT_RETAINED_CASES,
+    optional_cases: tuple[str, ...] = (),
+) -> dict[str, object]:
+    case_set = retained.retained_case_set_identity(
+        selected_cases=selected_cases,
+        optional_cases=optional_cases,
+    )
+    case_declaration = retained.retained_case_set_declaration(
+        selected_cases=selected_cases,
+        optional_cases=optional_cases,
+    )
+    return retained.execution_authorization_identity_declaration(
+        retained_run_assessment_identity=ASSESSMENT_IDENTITY,
+        implementation_preparation_authorization_identity=(
+            IMPLEMENTATION_PREPARATION_AUTH_IDENTITY
+        ),
+        runtime_correction_authorization_identity=(
+            RUNTIME_CORRECTION_AUTH_IDENTITY
+        ),
+        expected_branch="main",
+        expected_head=SYNTHETIC_HEAD,
+        expected_origin_main=SYNTHETIC_HEAD,
+        retained_orchestration_policy_sha256=retained.ABSOLUTE_POLICY_SHA256,
+        native_helper_policy_sha256=retained.native_helper_policy_identity()[
+            "policy_sha256"
+        ],
+        retained_schema_sha256=retained.retained_schema_identity()[
+            "schema_sha256"
+        ],
+        case_set_sha256=case_set["case_set_sha256"],
+        fixture_profile_sha256=retained.fixture_profile_identity()[
+            "fixture_profile_sha256"
+        ],
+        authority_registry_root_identity=retained.path_identity_for_role(
+            authority_root,
+            role="authority_registry_root",
+            must_exist=True,
+        )["path_identity"],
+        fixture_root_identity=retained.path_identity_for_role(
+            fixture_root,
+            role="fixture_root",
+            must_exist=False,
+        )["path_identity"],
+        result_parent_identity=retained.path_identity_for_role(
+            result_parent,
+            role="result_parent",
+            must_exist=True,
+        )["path_identity"],
+        host_identity=retained.host_profile_identity()["host_identity"],
+        volume_identity=retained.volume_identity_for_path(result_parent)[
+            "volume_identity"
+        ],
+        case_execution_order=case_declaration["native_execution_order"],
+        selected_a6=retained.A6 in optional_cases,
+        source_identities=source_expectations,
+    )
+
+
+def build_block_for_context(
+    *,
+    authority_root: Path,
+    fixture_root: Path,
+    result_parent: Path,
+    source_expectations: tuple[retained.SourceIdentityExpectation, ...],
+    selected_cases: tuple[str, ...] = retained.DEFAULT_RETAINED_CASES,
+    optional_cases: tuple[str, ...] = (),
+) -> retained.ExecutionAuthorizationIdentityBlock:
+    return retained.build_execution_authorization_identity_block(
+        assessment_identity=ASSESSMENT_IDENTITY,
+        implementation_preparation_authorization_identity=(
+            IMPLEMENTATION_PREPARATION_AUTH_IDENTITY
+        ),
+        runtime_correction_authorization_identity=(
+            RUNTIME_CORRECTION_AUTH_IDENTITY
+        ),
+        expected_branch="main",
+        expected_head=SYNTHETIC_HEAD,
+        expected_origin_main=SYNTHETIC_HEAD,
+        fixture_root=fixture_root,
+        authority_registry_root=authority_root,
+        source_identities=source_expectations,
+        result_parent=result_parent,
+        selected_cases=selected_cases,
+        optional_cases=optional_cases,
+    )
+
+
 def make_authoritative_authorization(
     tmp_path: Path,
     **overrides,
 ) -> tuple[retained.RetainedAuthorization, dict[str, retained.SourceIdentity]]:
     authority_root = overrides.pop("authority_registry_root", tmp_path / "authority")
     authority_root.mkdir(exist_ok=True)
+    requested_result_directory = overrides.pop("result_directory", None)
+    result_parent = overrides.pop(
+        "result_parent",
+        (
+            Path(requested_result_directory).parent
+            if requested_result_directory is not None
+            else tmp_path / "authoritative-results"
+        ),
+    )
+    Path(result_parent).mkdir(parents=True, exist_ok=True)
     source_expectations, source_observations = source_identity_bundle()
     requested_authorization_identity = overrides.pop("authorization_identity", None)
     values = {
@@ -102,7 +205,6 @@ def make_authoritative_authorization(
         "expected_branch": "main",
         "expected_head": SYNTHETIC_HEAD,
         "expected_origin_main": SYNTHETIC_HEAD,
-        "result_directory": tmp_path / "authoritative-result",
         "fixture_root": tmp_path / "authoritative-fixture",
         "selected_cases": retained.DEFAULT_RETAINED_CASES,
         "optional_cases": (),
@@ -120,15 +222,24 @@ def make_authoritative_authorization(
         expected_branch=values["expected_branch"],
         expected_head=values["expected_head"],
         expected_origin_main=values["expected_origin_main"],
-        result_directory=values["result_directory"],
         fixture_root=values["fixture_root"],
         authority_registry_root=authority_root,
         source_identities=source_expectations,
+        result_parent=result_parent,
+        result_directory=requested_result_directory,
         selected_cases=values["selected_cases"],
         optional_cases=values["optional_cases"],
         authorization_identity=requested_authorization_identity,
     )
     values["authorization_identity"] = block.execution_authorization_identity
+    values["result_directory"] = (
+        Path(requested_result_directory)
+        if requested_result_directory is not None
+        else retained.derive_result_directory(
+            result_parent,
+            block.execution_authorization_identity,
+        )
+    )
     values["execution_authorization"] = block
     return retained.RetainedAuthorization(**values), source_observations
 
@@ -139,6 +250,206 @@ def clean_repo_state() -> retained.RepositoryState:
         head=SYNTHETIC_HEAD,
         origin_main=SYNTHETIC_HEAD,
     )
+
+
+def test_execution_authorization_declaration_is_stage_a_only(tmp_path):
+    authority_root = tmp_path / "stage-a-authority"
+    authority_root.mkdir()
+    fixture_root = tmp_path / "stage-a-fixture"
+    result_parent = tmp_path / "stage-a-results"
+    result_parent.mkdir()
+    source_expectations, _observations = source_identity_bundle()
+
+    declaration = stage_a_declaration_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    block = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    result_dir = retained.derive_result_directory(
+        result_parent,
+        block.execution_authorization_identity,
+    )
+
+    assert declaration["schema"] == retained.RETAINED_EXECUTION_AUTHORIZATION_IDENTITY_SCHEMA
+    assert "result_directory_identity" not in declaration
+    assert "run_identity" not in declaration
+    assert declaration["result_directory_derivation_rule"]["rule"] == (
+        retained.RESULT_DIRECTORY_DERIVATION_RULE
+    )
+    assert block.execution_authorization_identity == (
+        retained.execution_authorization_identity_from_declaration(declaration)
+    )
+    assert result_dir == result_parent.resolve() / block.execution_authorization_identity
+    assert block.result_directory_identity == (
+        retained.result_directory_identity(result_dir)["path_identity"]
+    )
+
+    run_declaration = retained.run_identity_declaration(
+        execution_authorization_identity=block.execution_authorization_identity,
+        expected_branch=block.expected_branch,
+        expected_head=block.expected_head,
+        expected_origin_main=block.expected_origin_main,
+        case_set_sha256=block.case_set_sha256,
+        case_execution_order=retained.retained_case_set_declaration()[
+            "native_execution_order"
+        ],
+        fixture_root_identity=block.fixture_root_identity,
+        result_parent_identity=block.result_parent_identity,
+        result_directory_identity=block.result_directory_identity,
+        authority_registry_root_identity=block.authority_registry_root_identity,
+        selected_a6=block.selected_a6,
+    )
+    assert run_declaration["schema"] == retained.RETAINED_RUN_IDENTITY_SCHEMA
+    assert run_declaration["execution_authorization_identity"] == (
+        block.execution_authorization_identity
+    )
+    assert block.run_identity == retained.run_identity_from_declaration(
+        run_declaration
+    )
+
+
+def test_stage_a_mutations_and_run_only_context_are_separated(tmp_path):
+    authority_root = tmp_path / "authority"
+    authority_root.mkdir()
+    fixture_root = tmp_path / "fixture"
+    result_parent = tmp_path / "results"
+    result_parent.mkdir()
+    source_expectations, _observations = source_identity_bundle()
+
+    base_block = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    repeat_block = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    assert repeat_block.execution_authorization_identity == (
+        base_block.execution_authorization_identity
+    )
+    assert repeat_block.run_identity == base_block.run_identity
+
+    other_authority = tmp_path / "other-authority"
+    other_authority.mkdir()
+    authority_mutation = build_block_for_context(
+        authority_root=other_authority,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    assert authority_mutation.execution_authorization_identity != (
+        base_block.execution_authorization_identity
+    )
+
+    fixture_mutation = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=tmp_path / "other-fixture",
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    assert fixture_mutation.execution_authorization_identity != (
+        base_block.execution_authorization_identity
+    )
+
+    other_parent = tmp_path / "other-results"
+    other_parent.mkdir()
+    parent_mutation = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=other_parent,
+        source_expectations=source_expectations,
+    )
+    assert parent_mutation.execution_authorization_identity != (
+        base_block.execution_authorization_identity
+    )
+
+    base_declaration = stage_a_declaration_for_context(
+        authority_root=authority_root,
+        fixture_root=fixture_root,
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+    mutated_rule_declaration = dict(base_declaration)
+    mutated_rule = dict(base_declaration["result_directory_derivation_rule"])
+    mutated_rule["rule"] = "result_directory = operator_supplied_child"
+    mutated_rule_declaration["result_directory_derivation_rule"] = mutated_rule
+    assert retained.execution_authorization_identity_from_declaration(
+        mutated_rule_declaration
+    ) != retained.execution_authorization_identity_from_declaration(base_declaration)
+
+    run_declaration = retained.run_identity_declaration(
+        execution_authorization_identity=base_block.execution_authorization_identity,
+        expected_branch=base_block.expected_branch,
+        expected_head=base_block.expected_head,
+        expected_origin_main=base_block.expected_origin_main,
+        case_set_sha256=base_block.case_set_sha256,
+        case_execution_order=retained.retained_case_set_declaration()[
+            "native_execution_order"
+        ],
+        fixture_root_identity=base_block.fixture_root_identity,
+        result_parent_identity=base_block.result_parent_identity,
+        result_directory_identity=base_block.result_directory_identity,
+        authority_registry_root_identity=base_block.authority_registry_root_identity,
+        selected_a6=base_block.selected_a6,
+    )
+    changed_result_directory = dict(run_declaration)
+    changed_result_directory["result_directory_identity"] = "0" * 64
+    assert retained.run_identity_from_declaration(changed_result_directory) != (
+        base_block.run_identity
+    )
+    changed_attempt = dict(run_declaration)
+    changed_attempt["single_attempt_declaration"] = "second attempt"
+    assert retained.run_identity_from_declaration(changed_attempt) != (
+        base_block.run_identity
+    )
+    assert retained.execution_authorization_identity_from_declaration(
+        base_declaration
+    ) == base_block.execution_authorization_identity
+
+
+def test_arbitrary_result_directory_is_rejected_after_stage_a(tmp_path):
+    authority_root = tmp_path / "authority"
+    authority_root.mkdir()
+    result_parent = tmp_path / "results"
+    result_parent.mkdir()
+    source_expectations, _observations = source_identity_bundle()
+    block = build_block_for_context(
+        authority_root=authority_root,
+        fixture_root=tmp_path / "fixture",
+        result_parent=result_parent,
+        source_expectations=source_expectations,
+    )
+
+    with pytest.raises(retained.RetainedValidationError, match=retained.IDENTITY_MISMATCH):
+        retained.build_execution_authorization_identity_block(
+            assessment_identity=ASSESSMENT_IDENTITY,
+            implementation_preparation_authorization_identity=(
+                IMPLEMENTATION_PREPARATION_AUTH_IDENTITY
+            ),
+            runtime_correction_authorization_identity=(
+                RUNTIME_CORRECTION_AUTH_IDENTITY
+            ),
+            expected_branch="main",
+            expected_head=SYNTHETIC_HEAD,
+            expected_origin_main=SYNTHETIC_HEAD,
+            fixture_root=tmp_path / "fixture",
+            authority_registry_root=authority_root,
+            source_identities=source_expectations,
+            result_parent=result_parent,
+            result_directory=result_parent / "operator-child",
+            authorization_identity=block.execution_authorization_identity,
+        )
 
 
 def identity() -> validation.ObjectIdentity:
@@ -752,7 +1063,8 @@ def test_authoritative_synthetic_path_persists_chain_and_blocks_replay(tmp_path)
     r1_global_entry_bytes = authority_path.read_bytes()
     r2_authority_root = tmp_path / "authority-r2"
     r2_authority_root.mkdir()
-    r2_result_directory = tmp_path / "r2-result"
+    r2_result_parent = tmp_path / "r2-results"
+    r2_result_parent.mkdir()
     r2_legitimate_block = retained.build_execution_authorization_identity_block(
         assessment_identity=auth.assessment_identity,
         implementation_preparation_authorization_identity=(
@@ -762,12 +1074,16 @@ def test_authoritative_synthetic_path_persists_chain_and_blocks_replay(tmp_path)
         expected_branch=auth.expected_branch,
         expected_head=auth.expected_head,
         expected_origin_main=auth.expected_origin_main,
-        result_directory=r2_result_directory,
         fixture_root=auth.fixture_root,
         authority_registry_root=r2_authority_root,
         source_identities=auth.execution_authorization.source_identities,
+        result_parent=r2_result_parent,
         selected_cases=auth.selected_cases,
         optional_cases=auth.optional_cases,
+    )
+    r2_result_directory = retained.derive_result_directory(
+        r2_result_parent,
+        r2_legitimate_block.execution_authorization_identity,
     )
     assert r2_legitimate_block.execution_authorization_identity != (
         auth.authorization_identity
@@ -823,7 +1139,7 @@ def test_authoritative_synthetic_path_persists_chain_and_blocks_replay(tmp_path)
     independent_r2_auth, independent_r2_observations = make_authoritative_authorization(
         tmp_path,
         authority_registry_root=r2_authority_root,
-        result_directory=r2_result_directory,
+        result_parent=r2_result_parent,
     )
     assert independent_r2_auth.authorization_identity == (
         r2_legitimate_block.execution_authorization_identity
