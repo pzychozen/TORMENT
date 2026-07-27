@@ -3101,6 +3101,14 @@ def validate_a3_existing_destination_file_absolute_path(
         native_error_code=execution.native_error_code,
         native_error_name=execution.native_error_name,
         policy_identity=absolute_path_control_policy_identity(),
+        source_exists_after_native_failure=(
+            execution.source_exists_after_native_failure
+        ),
+        final_exists_after_native_failure=(
+            execution.final_exists_after_native_failure
+        ),
+        manifest_before_sha256=execution.manifest_before_sha256,
+        manifest_after_sha256=execution.manifest_after_sha256,
     )
 
 

@@ -685,6 +685,26 @@ def test_case_outcomes_require_collision_preservation_and_error_183():
     )
     assert retained.evaluate_case_results(bad)["gating_satisfied"] is False
 
+    for missing_field in (
+        {"source_exists_after_native_failure": None},
+        {"final_exists_after_native_failure": None},
+    ):
+        missing_recorded_evidence = replace(
+            collision(retained.A3_CASE_ID),
+            **missing_field,
+        )
+        bad = (
+            positive(retained.A1_CASE_ID),
+            collision(retained.A2_CASE_ID),
+            missing_recorded_evidence,
+            positive(retained.A5_CASE_ID),
+        )
+        outcomes = retained.evaluate_case_results(bad)
+        assert outcomes["gating_satisfied_by_case"][retained.A1] is True
+        assert outcomes["gating_satisfied_by_case"][retained.A5] is True
+        assert outcomes["gating_satisfied_by_case"][retained.A3] is False
+        assert outcomes["gating_satisfied"] is False
+
 
 def test_terminal_record_allows_false_complete_but_rejects_early_true(tmp_path):
     auth = make_authorization(tmp_path)

@@ -227,6 +227,14 @@ def test_a2_a3_a4_absolute_path_collisions(tmp_path):
     _absolute_control_confirmed_or_diagnostic(a3)
     if a3.status == validation.CONTROL_COLLISION_OBSERVED:
         assert a3.native_error_code in validation.COLLISION_ERROR_CODES
+        assert a3.native_error_name == validation.ERROR_NAMES[
+            validation.ERROR_ALREADY_EXISTS
+        ]
+        assert a3.source_exists_after_native_failure is True
+        assert a3.final_exists_after_native_failure is True
+        assert a3.manifest_before_sha256 is not None
+        assert a3.manifest_after_sha256 is not None
+        assert a3.manifest_before_sha256 == a3.manifest_after_sha256
 
     a4 = validation.validate_a4_coordinated_destination_claim_absolute_path(tmp_path)
     _absolute_control_confirmed_or_diagnostic(a4)

@@ -113,6 +113,67 @@ def durability_adapter_or_skip(tmp_path: Path) -> windows_adapter.Win32Directory
     return adapter
 
 
+def require_supported_absolute_path_profile(tmp_path: Path) -> None:
+    source = tmp_path / "_support_source"
+    destination = tmp_path / "_support_dest"
+    if not source.exists():
+        validation.make_bounded_source_tree(tmp_path, "_support_source")
+    destination.mkdir(exist_ok=True)
+    profile = validation.admit_support_profile(
+        fixture_root=tmp_path,
+        source_directory=source,
+        destination_parent=destination,
+    )
+    if not profile.supported:
+        pytest.skip(profile.detail)
+
+
+def test_real_a3_collision_evidence_satisfies_retained_gate(tmp_path):
+    require_supported_absolute_path_profile(tmp_path)
+
+    real_a3 = validation.validate_a3_existing_destination_file_absolute_path(tmp_path)
+    if real_a3.status != validation.CONTROL_COLLISION_OBSERVED:
+        pytest.skip("A3 collision was not observed: %s" % real_a3.status)
+
+    assert real_a3.native_error_code == validation.ERROR_ALREADY_EXISTS
+    assert real_a3.native_error_name == validation.ERROR_NAMES[
+        validation.ERROR_ALREADY_EXISTS
+    ]
+    assert real_a3.source_exists_after_native_failure is True
+    assert real_a3.final_exists_after_native_failure is True
+    assert real_a3.manifest_before_sha256 is not None
+    assert real_a3.manifest_after_sha256 is not None
+    assert real_a3.manifest_before_sha256 == real_a3.manifest_after_sha256
+
+    outcomes = retained.evaluate_case_results(
+        (
+            positive(retained.A1_CASE_ID),
+            collision(retained.A2_CASE_ID),
+            real_a3,
+            positive(retained.A5_CASE_ID),
+        )
+    )
+    a3_envelope = next(
+        case
+        for case in outcomes["case_results"]
+        if case["case_short"] == retained.A3
+    )
+
+    assert a3_envelope["source_final_preservation_evidence"] == {
+        "source_exists_after_native_failure": True,
+        "final_exists_after_native_failure": True,
+    }
+    assert a3_envelope["content_continuity_evidence"][
+        "manifest_before_sha256"
+    ] == real_a3.manifest_before_sha256
+    assert a3_envelope["content_continuity_evidence"][
+        "manifest_after_sha256"
+    ] == real_a3.manifest_after_sha256
+    assert a3_envelope["retained_case_classification"]["satisfied"] is True
+    assert outcomes["gating_satisfied_by_case"][retained.A3] is True
+    assert outcomes["gating_satisfied"] is True
+
+
 def test_retained_preparation_persists_gate_and_terminal_without_authority(tmp_path):
     adapter = durability_adapter_or_skip(tmp_path)
     auth = make_authorization(tmp_path)
