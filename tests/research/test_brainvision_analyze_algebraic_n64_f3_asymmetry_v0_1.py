@@ -73,8 +73,12 @@ def _real_path_protection(monkeypatch):
 
     monkeypatch.setattr(az, "write_derived_artifacts_exclusively", guarded_write)
     yield
-    assert not REAL_FINAL.exists(), "real audit final directory must remain absent"
-    assert not REAL_STAGING.exists(), "real audit staging directory must remain absent"
+    assert (
+        REAL_FINAL.exists() == _BV_REAL_FINAL_EXISTED_AT_IMPORT
+    ), "real audit final directory existence state changed during test"
+    assert (
+        REAL_STAGING.exists() == _BV_REAL_STAGING_EXISTED_AT_IMPORT
+    ), "real audit staging directory existence state changed during test"
 
 
 # --------------------------------------------------------------------------- #
@@ -297,7 +301,7 @@ def test_module_import_is_inert(tmp_path, capsys):
     out = capsys.readouterr()
     assert out.out == "" and out.err == ""
     assert REAL_FINAL.exists() == before_final
-    assert not REAL_STAGING.exists()
+    assert REAL_STAGING.exists() == _BV_REAL_STAGING_EXISTED_AT_IMPORT
 
 
 def test_no_forbidden_imports_and_stdlib_only():
@@ -1159,5 +1163,20 @@ def test_retained_canonical_preflight_only(monkeypatch):
     assert payload["family_verdict"] == az.REQUIRED_FAMILY_VERDICT
     assert payload["execution_commit_identity"] == az.INPUT_EXECUTION_COMMIT_IDENTITY
     assert payload["replay_record"]["byte_identical"] is True
-    assert not REAL_FINAL.exists()
-    assert not REAL_STAGING.exists()
+    assert REAL_FINAL.exists() == _BV_REAL_FINAL_EXISTED_AT_IMPORT
+    assert REAL_STAGING.exists() == _BV_REAL_STAGING_EXISTED_AT_IMPORT
+
+
+# --------------------------------------------------------------------------- #
+# Canonical result-path snapshot.
+#
+# The authorized algebraic N=64 runs legitimately created the canonical result
+# directories, so the earlier 'must remain absent' assertions are no longer
+# true. The protection they provided is preserved by comparing against the
+# existence state observed at import time instead: no test may create or
+# remove a canonical result directory. FINAL and STAGING are snapshotted
+# independently.
+# --------------------------------------------------------------------------- #
+
+_BV_REAL_FINAL_EXISTED_AT_IMPORT = REAL_FINAL.exists()
+_BV_REAL_STAGING_EXISTED_AT_IMPORT = REAL_STAGING.exists()
