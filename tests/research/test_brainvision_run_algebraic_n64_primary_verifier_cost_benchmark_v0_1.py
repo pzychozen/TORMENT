@@ -455,10 +455,10 @@ def _snapshot_after_rename(monkeypatch, results_root):
     def _watch(src, dst):
         real_rename(src, dst)
         if os.path.basename(dst) == bench.FINAL_DIRECTORY_NAME:
-            snapshot["result"] = hashlib.sha256(
-                open(os.path.join(dst, bench.RESULT_FILENAME), "rb").read()).hexdigest()
-            snapshot["summary"] = hashlib.sha256(
-                open(os.path.join(dst, bench.SUMMARY_FILENAME), "rb").read()).hexdigest()
+            with open(os.path.join(dst, bench.RESULT_FILENAME), "rb") as handle:
+                snapshot["result"] = hashlib.sha256(handle.read()).hexdigest()
+            with open(os.path.join(dst, bench.SUMMARY_FILENAME), "rb") as handle:
+                snapshot["summary"] = hashlib.sha256(handle.read()).hexdigest()
     monkeypatch.setattr(bench.os, "rename", _watch)
     return snapshot
 
