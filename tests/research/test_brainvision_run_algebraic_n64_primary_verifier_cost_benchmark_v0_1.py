@@ -481,10 +481,10 @@ def test_no_post_rename_artifact_write(clean_repo, results_root, monkeypatch):
     assert all(os.path.dirname(path) == _staging(results_root) for path in written_paths)
     assert all(os.path.dirname(path) != _final(results_root) for path in written_paths)
     # bytes captured at publication equal the bytes present after the run returned (no post-rename rewrite)
-    result_now = hashlib.sha256(
-        open(os.path.join(_final(results_root), bench.RESULT_FILENAME), "rb").read()).hexdigest()
-    summary_now = hashlib.sha256(
-        open(os.path.join(_final(results_root), bench.SUMMARY_FILENAME), "rb").read()).hexdigest()
+    with open(os.path.join(_final(results_root), bench.RESULT_FILENAME), "rb") as handle:
+        result_now = hashlib.sha256(handle.read()).hexdigest()
+    with open(os.path.join(_final(results_root), bench.SUMMARY_FILENAME), "rb") as handle:
+        summary_now = hashlib.sha256(handle.read()).hexdigest()
     assert snapshot["result"] == result_now
     assert snapshot["summary"] == summary_now
 
