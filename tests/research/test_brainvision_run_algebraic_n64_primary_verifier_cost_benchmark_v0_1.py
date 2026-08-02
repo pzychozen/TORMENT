@@ -766,10 +766,36 @@ def test_timed_region_contains_only_verify_candidate():
 # ============================================================= real-path protection
 def test_real_result_paths_never_created_by_this_suite():
     real_results = os.path.join(BV_DIR, "results")
-    assert not os.path.exists(os.path.join(real_results, bench.FINAL_DIRECTORY_NAME))
-    assert not os.path.exists(os.path.join(real_results, bench.STAGING_DIRECTORY_NAME))
+    assert (
+        os.path.exists(os.path.join(real_results, bench.FINAL_DIRECTORY_NAME))
+        == _BV_REAL_FINAL_EXISTED_AT_IMPORT
+    )
+    assert (
+        os.path.exists(os.path.join(real_results, bench.STAGING_DIRECTORY_NAME))
+        == _BV_REAL_STAGING_EXISTED_AT_IMPORT
+    )
 
 
 def test_default_repository_root_points_into_repo():
     root = bench._default_repository_root()
     assert os.path.isdir(os.path.join(root, "research", "brainvision"))
+
+
+# --------------------------------------------------------------------------- #
+# Canonical result-path snapshot.
+#
+# The authorized algebraic N=64 runs legitimately created the canonical result
+# directories, so the earlier 'must remain absent' assertions are no longer
+# true. The protection they provided is preserved by comparing against the
+# existence state observed at import time instead: no test may create or
+# remove a canonical result directory. FINAL and STAGING are snapshotted
+# independently.
+# --------------------------------------------------------------------------- #
+
+_BV_REAL_RESULTS_ROOT_AT_IMPORT = os.path.join(BV_DIR, "results")
+_BV_REAL_FINAL_EXISTED_AT_IMPORT = os.path.exists(
+    os.path.join(_BV_REAL_RESULTS_ROOT_AT_IMPORT, bench.FINAL_DIRECTORY_NAME)
+)
+_BV_REAL_STAGING_EXISTED_AT_IMPORT = os.path.exists(
+    os.path.join(_BV_REAL_RESULTS_ROOT_AT_IMPORT, bench.STAGING_DIRECTORY_NAME)
+)
