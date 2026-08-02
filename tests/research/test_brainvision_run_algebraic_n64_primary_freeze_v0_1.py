@@ -220,7 +220,8 @@ def test_positive_publishes_and_exits_zero(clean_repo, results_root, monkeypatch
     assert len(calls) == 1                                          # exactly one freezer call
     assert isinstance(calls[0]["head"], str) and len(calls[0]["head"]) == 40
     assert set(calls[0]["source_paths"]) == {"verifier", "serializer", "freeze"}
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "family_frozen = True" in summary
     assert "freezer invoked = True" in summary
     assert "outer replay performed = False" in summary
@@ -247,7 +248,8 @@ def test_valid_negative_exits_zero_and_preserves_greedy_language(clean_repo, res
     code, out, err = _run(clean_repo, results_root, monkeypatch, _valid_negative)
     assert code == runner.EXIT_PUBLISHED
     assert _published(results_root) == TWO_FILE_SET
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = VALID_NEGATIVE" in summary
     assert "greedy non-backtracking first-fit" in summary
     assert "FAMILY_NOT_FREEZABLE" in summary
@@ -259,7 +261,8 @@ def test_execution_invalid_result_publishes_but_exits_one(clean_repo, results_ro
     assert code == runner.EXIT_FAILURE
     assert _published(results_root) == TWO_FILE_SET                 # retained and published
     assert "execution-invalid freezer result REPLAY_MISMATCH" in err
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = EXECUTION_INVALID" in summary
 
 
@@ -269,7 +272,8 @@ def test_all_execution_invalid_codes_exit_one(clean_repo, results_root, monkeypa
                           lambda h, sp, ps: _execution_invalid(h, sp, ps, failure_code))
     assert rc == runner.EXIT_FAILURE
     assert _published(results_root) == TWO_FILE_SET                 # exact canonical result published
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = EXECUTION_INVALID" in summary
     assert "failure_code = %s" % failure_code in summary
 
@@ -284,7 +288,8 @@ def test_runner_invalid_result_retained_and_published_exit_one(clean_repo, resul
     assert code == runner.EXIT_FAILURE
     assert _published(results_root) == TWO_FILE_SET                 # runner-invalid is still published
     assert "RESULT_RUNNER_INVALID" in err
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = RUNNER_INVALID" in summary
     assert "runner_validation_failure = POSITIVE_ACCEPTED_INDEX_COUNT" in summary
 
