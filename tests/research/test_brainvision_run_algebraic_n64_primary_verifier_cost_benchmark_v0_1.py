@@ -536,10 +536,10 @@ def test_stdout_failure_preserves_final_bytes(clean_repo, results_root, monkeypa
                                stdout=_Raising(), stderr=err)
     assert code == bench.EXIT_FAILURE
     assert os.path.isdir(_final(results_root))
-    result_now = hashlib.sha256(
-        open(os.path.join(_final(results_root), bench.RESULT_FILENAME), "rb").read()).hexdigest()
-    summary_now = hashlib.sha256(
-        open(os.path.join(_final(results_root), bench.SUMMARY_FILENAME), "rb").read()).hexdigest()
+    with open(os.path.join(_final(results_root), bench.RESULT_FILENAME), "rb") as handle:
+        result_now = hashlib.sha256(handle.read()).hexdigest()
+    with open(os.path.join(_final(results_root), bench.SUMMARY_FILENAME), "rb") as handle:
+        summary_now = hashlib.sha256(handle.read()).hexdigest()
     assert snapshot["result"] == result_now                              # unchanged after stdout failure
     assert snapshot["summary"] == summary_now
 
