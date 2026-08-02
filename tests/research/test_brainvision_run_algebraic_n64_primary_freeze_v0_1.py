@@ -367,7 +367,8 @@ def test_false_result_structural_failures_are_runner_invalid(clean_repo, results
                            lambda h, sp, ps: _negative_with(h, sp, ps, **kwargs))
     assert code == runner.EXIT_FAILURE
     assert _published(results_root) == TWO_FILE_SET                 # exact canonical result still published
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = RUNNER_INVALID" in summary
     assert "runner_validation_failure = %s" % marker in summary
 
@@ -384,7 +385,8 @@ def test_positive_with_non_mapping_manifest_payload_is_runner_invalid(clean_repo
     code, _out, err = _run(clean_repo, results_root, monkeypatch, _bad_manifest)
     assert code == runner.EXIT_FAILURE
     assert _published(results_root) == TWO_FILE_SET
-    summary = open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)).read()
+    with open(os.path.join(_final(results_root), runner.SUMMARY_FILENAME)) as handle:
+        summary = handle.read()
     assert "classification = RUNNER_INVALID" in summary
     assert "runner_validation_failure = POSITIVE_MANIFEST_PAYLOAD_NOT_MAPPING" in summary
 
