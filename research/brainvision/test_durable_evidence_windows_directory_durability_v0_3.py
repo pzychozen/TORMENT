@@ -15,7 +15,6 @@ import durable_evidence_schema_v0_3 as schema
 import durable_evidence_windows_adapter_v0_3 as windows_adapter
 
 from test_durable_evidence_publication_recovery_v0_3 import (
-    RECOVERY_AUTHORITY,
     run_recovery,
     setup_final_artifacts_with_incomplete_publication_chain,
 )
