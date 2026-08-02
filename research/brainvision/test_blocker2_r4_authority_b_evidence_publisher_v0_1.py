@@ -478,7 +478,7 @@ def test_positive_absence_indeterminate_fails_before_contact(tmp_path):
             "RECORD_WRITE_PATH_FAILED",
         ),
         (
-            lambda: FakeCreateHandle(),
+            FakeCreateHandle,
             lambda fd: (_ for _ in ()).throw(OSError("fsync failed")),
             "RECORD_WRITE_PATH_FAILED",
         ),
