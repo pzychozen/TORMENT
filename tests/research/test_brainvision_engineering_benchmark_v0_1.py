@@ -49,7 +49,7 @@ def _ok_record(job, repo_root):
 def _patch_git_ok(monkeypatch):
     """Mock only the git surface (valid repo, clean & unchanged) so no real git runs. Leaves the
     protected-artifact snapshot and input hashing REAL so filesystem-level checks are exercised."""
-    monkeypatch.setattr(bench, "ensure_git_repository", lambda root: str(root))
+    monkeypatch.setattr(bench, "ensure_git_repository", str)
     monkeypatch.setattr(bench, "capture_repository_state",
                         lambda root: bench.RepoState("", "t", "s"))
     monkeypatch.setattr(bench, "repository_identity",
