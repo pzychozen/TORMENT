@@ -175,8 +175,9 @@ class TestSourceGuards(unittest.TestCase):
         # Post-extraction: the staged items now reach the audit-evidence helper
         # (which routes them only to the inclusion observer) and TurnResult.
         allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
-        self.assertTrue(
-            receivers <= allowed,
+        self.assertLessEqual(
+            receivers,
+            allowed,
             msg=f"items routed to unexpected call(s): {sorted(receivers - allowed)}",
         )
         self.assertIn("TurnResult", receivers)
@@ -195,8 +196,11 @@ class TestSourceGuards(unittest.TestCase):
                     f = n.func
                     helper_recv.add(f.id if isinstance(f, ast.Name)
                                     else f.attr if isinstance(f, ast.Attribute) else "?")
-        self.assertTrue(helper_recv <= {"observe_prompt_inclusion_packet"},
-                        msg=f"helper routes items to unexpected call(s): {sorted(helper_recv)}")
+        self.assertLessEqual(
+            helper_recv,
+            {"observe_prompt_inclusion_packet"},
+            msg=f"helper routes items to unexpected call(s): {sorted(helper_recv)}",
+        )
 
     def test_agent_loop_imports_observer_not_item_core_or_assembled_wrapper(self):
         tree = self._tree()
