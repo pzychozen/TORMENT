@@ -534,7 +534,8 @@ def test_source_bytes_differ_from_commit_refuses(clean_repo, results_root, monke
     # a fresh repo whose on-disk source differs from the committed blob (simulated via committed-then-edited)
     root = _build_repo(os.path.join(str(tmp_path), "repo"), stream_fixture["bytes"])
     path = os.path.join(root, "research", "brainvision", "witness_canonical_json_v0_1.py")
-    data = open(path, "rb").read()
+    with open(path, "rb") as handle:
+        data = handle.read()
     # edit working copy only, then restage nothing; but that dirties the tree, so instead swap after add.
     # Simplest deterministic route: leave tree clean but point blob check to a real id while bytes changed
     # is covered by the blob-id test; here assert byte-equality path via a targeted monkeypatch.

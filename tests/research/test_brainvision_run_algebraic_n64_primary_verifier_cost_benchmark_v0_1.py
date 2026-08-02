@@ -317,7 +317,8 @@ def test_corrupted_sample_index_refuses(tmp_path, stream_fixture, results_root, 
     root = _build_repo(os.path.join(str(tmp_path), "repo"), stream_fixture["bytes"])
     input_path = os.path.join(root, "research", "brainvision", "results", "algebraic_n64_primary_v0_1",
                               "algebraic_n64_primary_v0_1_candidate_stream.json")
-    envelope = json.loads(open(input_path, "rb").read().decode("utf-8"))
+    with open(input_path, "rb") as handle:
+        envelope = json.loads(handle.read().decode("utf-8"))
     envelope["candidate_stream"]["records"][2499]["candidate_generation_index"] = 123456
     rebuilt = cjson.envelope("candidate_stream", envelope["candidate_stream"])
     rebuilt_bytes = cjson.canonical_json_bytes(rebuilt)
