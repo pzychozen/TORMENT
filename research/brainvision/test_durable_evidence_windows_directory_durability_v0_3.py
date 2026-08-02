@@ -9,7 +9,6 @@ import pytest
 import durable_evidence_durability_v0_3 as durability
 import durable_evidence_primary_writer_v0_3 as writer
 import durable_evidence_publication_recovery_v0_3 as recovery
-import durable_evidence_publication_recovery_replay_v0_3 as recovery_replay
 import durable_evidence_publication_replay_v0_3 as publication_replay
 import durable_evidence_publication_v0_3 as publication
 import durable_evidence_schema_v0_3 as schema
