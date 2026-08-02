@@ -443,7 +443,10 @@ def test_every_child_job_receives_utf8_environment(monkeypatch, tmp_path):
         return _ok_record(job, repo_root)
 
     monkeypatch.setattr(bench, "run_job", capture_run_job)
-    report, code = bench.run_benchmark(repo_root=tmp_path, include_local_inputs=True)
+    bench.run_benchmark(
+        repo_root=tmp_path,
+        include_local_inputs=True,
+    )
     assert len(captured) == 5
     assert {category for _, category, _ in captured} == {"core", "optional"}  # includes optional jobs
     for _job_id, _category, env in captured:
