@@ -1309,7 +1309,7 @@ def render_operator_summary(audit_payload: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 def _exclusive_write(path: Path, data: bytes) -> None:
-    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)

@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -965,6 +966,18 @@ def test_publish_final_exists_raises(tmp_path):
     with pytest.raises(az.AuditProcessFailure) as exc:
         az.write_derived_artifacts_exclusively(final, tmp_path / ".stg", b"{}", b"s")
     assert exc.value.code == az.OUTPUT_PATH_EXISTS
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX mode bits do not reliably represent the effective Windows ACL",
+)
+def test_exclusive_write_restricts_group_and_other_permissions(tmp_path):
+    output = tmp_path / "audit-output.json"
+
+    az._exclusive_write(output, b"{}")
+
+    assert stat.S_IMODE(output.stat().st_mode) & 0o077 == 0
 
 
 def test_publish_evidence_bearing_staging_retained(tmp_path, monkeypatch):
