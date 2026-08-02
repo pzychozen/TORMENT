@@ -490,7 +490,7 @@ def _freeze_runner_configuration_payload():
                 try:
                     constants[target.id] = ast.literal_eval(node.value)
                 except ValueError:
-                    pass
+                    continue
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "build_configuration_payload":
             for child in ast.walk(node):
