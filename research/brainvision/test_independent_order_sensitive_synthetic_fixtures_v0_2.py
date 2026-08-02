@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import builtins
-import copy
 import hashlib
 import json
 import os

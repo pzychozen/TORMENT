@@ -8,7 +8,6 @@ it is NOT executed during the implementation phase.
 """
 import ast
 import json
-import math
 import os
 import sys
 

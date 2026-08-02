@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import independent_order_sensitive_descriptor_v0_1 as descriptor
 import independent_order_sensitive_synthetic_validation_schema_contract_v0_2 as schema
