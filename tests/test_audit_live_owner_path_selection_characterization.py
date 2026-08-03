@@ -329,8 +329,8 @@ class TestItemsRouteToObserverAndTurnResult(unittest.TestCase):
         # observation-only sink) and TurnResult in run_turn — never the prompt /
         # review / ingest / fabric path.
         allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
-        self.assertTrue(receivers <= allowed,
-                        msg=f"items routed unexpectedly: {sorted(receivers - allowed)}")
+        self.assertLessEqual(receivers, allowed,
+                             msg=f"items routed unexpectedly: {sorted(receivers - allowed)}")
         # Inside the helper, the admitted items route ONLY to the inclusion observer.
         helper = _method(self.runner, "_observe_audit_evidence_from_prompt_request")
         self.assertIsNotNone(helper, "audit-evidence helper not found")
@@ -343,8 +343,8 @@ class TestItemsRouteToObserverAndTurnResult(unittest.TestCase):
                     f = n.func
                     helper_recv.add(f.id if isinstance(f, ast.Name)
                                     else f.attr if isinstance(f, ast.Attribute) else "?")
-        self.assertTrue(helper_recv <= {"observe_prompt_inclusion_packet"},
-                        msg=f"helper routes items unexpectedly: {sorted(helper_recv)}")
+        self.assertLessEqual(helper_recv, {"observe_prompt_inclusion_packet"},
+                             msg=f"helper routes items unexpectedly: {sorted(helper_recv)}")
 
     def test_inclusion_observer_connected_in_live_path(self):
         # The observer that PROVES inclusion remains imported and module-visible.
