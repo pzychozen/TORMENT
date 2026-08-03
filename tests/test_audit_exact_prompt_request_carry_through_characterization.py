@@ -502,8 +502,8 @@ class TestNoPromptExposure(unittest.TestCase):
         run_turn = _runner_method("run_turn")
         self.assertIsNotNone(run_turn)
         receivers = _call_receivers_of(run_turn, _PROMPT_LOCAL)
-        self.assertTrue(receivers <= {_AUDIT_HELPER},
-                        msg=f"_prompt_request routed beyond the audit helper: {sorted(receivers)}")
+        self.assertLessEqual(receivers, {_AUDIT_HELPER},
+                             msg=f"_prompt_request routed beyond the audit helper: {sorted(receivers)}")
 
     def test_prompt_request_not_passed_to_turnresult(self):
         run_turn = _runner_method("run_turn")
@@ -549,8 +549,8 @@ class TestPacketInertness(unittest.TestCase):
     def test_built_packet_routes_only_to_turnresult(self):
         run_turn = _runner_method("run_turn")
         receivers = _call_receivers_of(run_turn, _BUILT_PACKET)
-        self.assertTrue(receivers <= {"TurnResult"},
-                        msg=f"built audit packet routed beyond TurnResult: {sorted(receivers)}")
+        self.assertLessEqual(receivers, {"TurnResult"},
+                             msg=f"built audit packet routed beyond TurnResult: {sorted(receivers)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -674,8 +674,9 @@ class TestNoForbiddenReachabilityFromTerrain(unittest.TestCase):
         # reconstruction builder, and constructs the pairing; it composes no audit
         # packet and reaches no writer/retrieval/owner of its own.
         carry = _runner_method(_CARRY)
-        self.assertTrue(
-            _called_names(carry) <= {_EXECUTE, _PROMPT_BUILDER, "_ExecutionWithPromptRequest"},
+        self.assertLessEqual(
+            _called_names(carry),
+            {_EXECUTE, _PROMPT_BUILDER, "_ExecutionWithPromptRequest"},
             msg=f"carry seam calls beyond the thin wrapper set: {sorted(_called_names(carry))}")
         idents = _idents(carry)
         self.assertNotIn(_OBSERVER, idents)
