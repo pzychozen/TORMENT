@@ -919,7 +919,10 @@ def assemble_character_context(
                 "Seed basin is structurally unstable — consider adding "
                 "reinforcing interactions."
             )
-        if drift_info.get("relational_count", 0) == 0:
+        if (
+            drift_info.get("relational_count", 0) == 0
+            and not tier_hits["relational"]
+        ):
             recommendations.append(
                 "No relational memories yet. Character is running on "
                 "seed identity alone — early interactions will shape personality."

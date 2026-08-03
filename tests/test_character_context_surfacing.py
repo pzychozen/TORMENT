@@ -39,15 +39,44 @@ from torment_service.character import assemble_character_context
 
 def _minimal_seed():
     """Minimal seed stub for assemble_character_context unit tests.
-    Only the four fields the function reads at the top-level (seed_text,
-    seed_id, character_name, relational_weight) are needed when hits=[]
-    so the tier_weight branch is never reached.
+    Includes the top-level identity fields plus tier weights used when
+    tests pass synthetic hits through tier_weight().
     """
     return SimpleNamespace(
         seed_text="A test character with a calm, careful voice.",
         seed_id="test_seed_v1",
         character_name="TestCharacter",
+        core_weight=0.50,
+        derived_weight=0.42,
         relational_weight=0.35,
+        situational_weight=0.15,
+    )
+
+
+def _hit(half_life: float, *, final_score: float = 1.0, payload=None):
+    return {
+        "half_life": half_life,
+        "final_score": final_score,
+        "payload": payload or {},
+    }
+
+
+def _base_drift_info(**overrides):
+    drift_info = {
+        "drift_score": 0.0,
+        "drift_direction": "stable",
+        "explanation": "",
+        "seed_basin_role": "plateau",
+        "relational_count": 0,
+    }
+    drift_info.update(overrides)
+    return drift_info
+
+
+def _has_no_relational_recommendation(result):
+    return any(
+        "No relational memories yet" in recommendation
+        for recommendation in result["recommendations"]
     )
 
 
@@ -135,6 +164,88 @@ class TestCharacterContextPassThrough(unittest.TestCase):
         self.assertEqual(result["drift_direction"], "stable")
         self.assertEqual(result["seed_basin_role"], "")
         self.assertEqual(result["relational_count"], 0)
+
+    def test_live_relational_hit_suppresses_seed_only_recommendation(self):
+        result = assemble_character_context(
+            graph=None,
+            seed=_minimal_seed(),
+            agent_id="ag",
+            hits=[_hit(30.0)],
+            drift_info=_base_drift_info(relational_count=0),
+        )
+
+        self.assertGreater(result["tier_breakdown"]["relational"], 0)
+        self.assertEqual(result["relational_count"], 0)
+        self.assertFalse(_has_no_relational_recommendation(result))
+
+    def test_zero_relational_count_without_live_relational_hit_recommends(self):
+        result = assemble_character_context(
+            graph=None,
+            seed=_minimal_seed(),
+            agent_id="ag",
+            hits=[_hit(3.0)],
+            drift_info=_base_drift_info(relational_count=0),
+        )
+
+        self.assertEqual(result["tier_breakdown"]["relational"], 0)
+        self.assertTrue(_has_no_relational_recommendation(result))
+
+    def test_mixed_hits_relational_hit_suppresses_only_false_recommendation(self):
+        result = assemble_character_context(
+            graph=None,
+            seed=_minimal_seed(),
+            agent_id="ag",
+            hits=[
+                _hit(400.0),
+                _hit(
+                    365.0,
+                    payload={"type": "identity_anchor", "canon": False},
+                ),
+                _hit(30.0),
+                _hit(3.0),
+            ],
+            drift_info=_base_drift_info(
+                drift_score=-0.4,
+                seed_basin_role="ridge",
+                relational_count=0,
+            ),
+        )
+
+        self.assertEqual(
+            result["tier_breakdown"],
+            {
+                "core_identity": 1,
+                "derived_identity": 1,
+                "relational": 1,
+                "situational": 1,
+            },
+        )
+        self.assertFalse(_has_no_relational_recommendation(result))
+        self.assertEqual(len(result["recommendations"]), 2)
+        self.assertTrue(
+            any(
+                "Character is drifting from seed identity" in recommendation
+                for recommendation in result["recommendations"]
+            )
+        )
+        self.assertTrue(
+            any(
+                "Seed basin is structurally unstable" in recommendation
+                for recommendation in result["recommendations"]
+            )
+        )
+
+    def test_positive_relational_count_keeps_recommendation_absent(self):
+        result = assemble_character_context(
+            graph=None,
+            seed=_minimal_seed(),
+            agent_id="ag",
+            hits=[],
+            drift_info=_base_drift_info(relational_count=3),
+        )
+
+        self.assertEqual(result["relational_count"], 3)
+        self.assertFalse(_has_no_relational_recommendation(result))
 
 
 # ---------------------------------------------------------------------------
