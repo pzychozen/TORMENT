@@ -1333,17 +1333,58 @@ def serialize_provider_response(
     }
 
 
+INGEST_OUTCOME_STORED = "ingest_stored"
+INGEST_OUTCOME_REINFORCED = "ingest_reinforced"
+INGEST_OUTCOME_NOT_STORED = "ingest_not_stored"
+INGEST_OUTCOME_UNKNOWN = "ingest_outcome_unknown"
+INGEST_OUTCOME_TRANSPORT_OR_SERVICE_FAILURE = "ingest_transport_or_service_failure"
+
+_INGEST_RESULT_CAPTURE_FIELDS = (
+    "ok",
+    "status",
+    "stored",
+    "eid",
+    "step",
+    "workspace_id",
+    "agent_id",
+    "scope",
+    "domain_id",
+    "reinforced",
+    "reason",
+    "path",
+    "escalated",
+    "result_code",
+    "decision_code",
+)
+
+
+def classify_ingest_outcome(
+    response: Optional[Mapping[str, Any]],
+    failure_stage: Optional[str] = None,
+) -> Optional[str]:
+    if failure_stage == "ingest":
+        return INGEST_OUTCOME_TRANSPORT_OR_SERVICE_FAILURE
+    if response is None or not isinstance(response, Mapping):
+        return None
+
+    if response.get("stored") is True:
+        return INGEST_OUTCOME_STORED
+    if response.get("reinforced") is True:
+        return INGEST_OUTCOME_REINFORCED
+    if response.get("stored") is False and response.get("reinforced") is False:
+        return INGEST_OUTCOME_NOT_STORED
+    return INGEST_OUTCOME_UNKNOWN
+
+
 def serialize_ingest_result(
     response: Optional[Mapping[str, Any]],
     environ: Optional[Mapping[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     if response is None:
         return None
-    return scalar_fields(
-        response,
-        ("ok", "status", "stored", "eid", "step", "workspace_id", "agent_id", "scope", "domain_id", "reinforced", "reason"),
-        environ,
-    )
+    out = scalar_fields(response, _INGEST_RESULT_CAPTURE_FIELDS, environ)
+    out["ingest_outcome"] = classify_ingest_outcome(response)
+    return out
 
 
 def format_memories(hits: List[Dict[str, Any]], top_k: int = DEFAULT_TOP_K, environ: Optional[Mapping[str, str]] = None) -> str:
@@ -1850,28 +1891,30 @@ class LivedUseSession:
         return outcome
 
     def _record_turn(self, outcome: TurnOutcome, user_text: str) -> None:
+        ingest_outcome = classify_ingest_outcome(outcome.ingest_result, outcome.failure_stage)
+        payload = {
+            "turn_id": outcome.turn_id,
+            "user_text": safe_string(user_text, self.environ),
+            "query_request": serialize_query_request(outcome.query_request, self.environ),
+            "query_response": serialize_query_response(outcome.query_response, self.environ),
+            "rendered_system_prompt": safe_scalar(outcome.rendered_system_prompt, self.environ),
+            "rendered_system_prompt_sha256": safe_scalar(outcome.rendered_system_prompt_sha256, self.environ),
+            "provider_messages": serialize_provider_messages(outcome.provider_messages, self.environ),
+            "provider_response": serialize_provider_response(outcome.provider_response, self.environ),
+            "assistant_text": safe_scalar(outcome.assistant_text, self.environ),
+            "ingest_summary": safe_scalar(outcome.ingest_summary, self.environ),
+            "ingest_result": serialize_ingest_result(outcome.ingest_result, self.environ),
+            "query_call_count": outcome.query_call_count,
+            "retrieve_call_count": outcome.retrieve_call_count,
+            "ingest_call_count": outcome.ingest_call_count,
+            "failure_stage": outcome.failure_stage,
+            "current_step": self.current_step,
+        }
+        if ingest_outcome is not None:
+            payload["ingest_outcome"] = ingest_outcome
         self._record(
             "turn",
-            self._base_event(
-                {
-                    "turn_id": outcome.turn_id,
-                    "user_text": safe_string(user_text, self.environ),
-                    "query_request": serialize_query_request(outcome.query_request, self.environ),
-                    "query_response": serialize_query_response(outcome.query_response, self.environ),
-                    "rendered_system_prompt": safe_scalar(outcome.rendered_system_prompt, self.environ),
-                    "rendered_system_prompt_sha256": safe_scalar(outcome.rendered_system_prompt_sha256, self.environ),
-                    "provider_messages": serialize_provider_messages(outcome.provider_messages, self.environ),
-                    "provider_response": serialize_provider_response(outcome.provider_response, self.environ),
-                    "assistant_text": safe_scalar(outcome.assistant_text, self.environ),
-                    "ingest_summary": safe_scalar(outcome.ingest_summary, self.environ),
-                    "ingest_result": serialize_ingest_result(outcome.ingest_result, self.environ),
-                    "query_call_count": outcome.query_call_count,
-                    "retrieve_call_count": outcome.retrieve_call_count,
-                    "ingest_call_count": outcome.ingest_call_count,
-                    "failure_stage": outcome.failure_stage,
-                    "current_step": self.current_step,
-                }
-            ),
+            self._base_event(payload),
         )
 
     def handle_operator_input(self, text: str) -> Optional[CommandOutcome]:

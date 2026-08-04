@@ -154,6 +154,47 @@ class IngestReq(BaseModel):
     supplied_summary: Optional[str] = None
     supplied_embedding: Optional[List[float]] = None
 
+
+_AGENT_INGEST_SPINE_RESPONSE_FIELDS = (
+    "path",
+    "escalated",
+    "result_code",
+    "decision_code",
+)
+_READ_ONLY_INGEST_RESULT_CODES = {"cognition", "no_op", "none"}
+
+
+def _project_agent_ingest_response(resp: Any) -> Dict[str, Any]:
+    """Return the legacy ingest result plus safe Spine outcome metadata."""
+    result = getattr(resp, "result", {})
+    projected: Dict[str, Any] = dict(result) if isinstance(result, dict) else {}
+
+    for field in _AGENT_INGEST_SPINE_RESPONSE_FIELDS:
+        value = getattr(resp, field, None)
+        if value is not None:
+            projected[field] = value
+
+    reason = getattr(resp, "reason", "")
+    if reason and "reason" not in projected:
+        projected["reason"] = reason
+
+    # Spine full-cognition ingest handling is read-only. Surface that
+    # as response metadata so clients need not equate HTTP 200 with storage.
+    if (
+        getattr(resp, "operation", "") == "ingest"
+        and "stored" not in projected
+        and "reinforced" not in projected
+        and (
+            getattr(resp, "path", "") == "full"
+            or getattr(resp, "result_code", "") in _READ_ONLY_INGEST_RESULT_CODES
+        )
+    ):
+        projected["stored"] = False
+        projected["reinforced"] = False
+
+    return projected
+
+
 class QueryReq(BaseModel):
     workspace_id: str = Field(default="default")
     agent_id: str
@@ -902,7 +943,7 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
     if not resp.ok:
         status = resp.http_status if resp.http_status else 500
         raise HTTPException(status_code=status, detail=resp.reason)
-    return resp.result
+    return _project_agent_ingest_response(resp)
 
 @app.post("/agent/query")
 def query(req: QueryReq) -> Dict[str, Any]:

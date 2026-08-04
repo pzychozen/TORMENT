@@ -310,6 +310,21 @@ def _query_response(seed_preamble="TORMENT-returned seed preamble."):
     }
 
 
+def _ingest_response(**overrides):
+    data = {
+        "ok": True,
+        "stored": True,
+        "reinforced": False,
+        "eid": 101,
+        "path": "fast",
+        "escalated": False,
+        "result_code": "stored",
+        "decision_code": "fast_allowed",
+    }
+    data.update(overrides)
+    return data
+
+
 class FakeTorment:
     def __init__(
         self,
@@ -325,6 +340,7 @@ class FakeTorment:
         agent_error=None,
         query_error=None,
         ingest_error=None,
+        ingest_response=None,
     ):
         self.health_response = health if health is not None else _health()
         self.config_response = config if config is not None else _config()
@@ -337,6 +353,7 @@ class FakeTorment:
         self.agent_error = agent_error
         self.query_error = query_error
         self.ingest_error = ingest_error
+        self.ingest_response = ingest_response
         self.calls = []
         self.query_payloads = []
         self.ingest_payloads = []
@@ -402,6 +419,11 @@ class FakeTorment:
                         raise error
             else:
                 raise self.ingest_error
+        if self.ingest_response is not None:
+            response = copy.deepcopy(self.ingest_response)
+            if "step" not in response:
+                response["step"] = payload["step"]
+            return response
         return {"ok": True, "stored": True, "eid": 101, "step": payload["step"]}
 
 
@@ -930,6 +952,183 @@ def test_existing_recent_step_17_next_ingest_uses_18():
     assert session.current_step == 18
 
 
+def test_a0_stored_ingest_capture_retains_safe_outcome_metadata():
+    recorder = MemoryRecorder()
+    response = _ingest_response(
+        eid=202,
+        reason="stored cleanly",
+        hidden_reasoning="do not retain",
+        raw_internal_result={"do": "not retain"},
+        provider_internals={"do": "not retain"},
+        api_key="sk-test-secret",
+        embedding=[0.1, 0.2],
+    )
+    session, _torment, _provider = _preflighted(
+        torment=FakeTorment(ingest_response=response),
+        recorder=recorder,
+    )
+
+    outcome = session.run_turn("capture stored metadata")
+
+    assert outcome.ok
+    turn = _events_of(recorder, "turn")[-1]
+    ingest = turn["ingest_result"]
+    assert turn["ingest_outcome"] == luc.INGEST_OUTCOME_STORED
+    assert ingest["ingest_outcome"] == luc.INGEST_OUTCOME_STORED
+    assert ingest["stored"] is True
+    assert ingest["reinforced"] is False
+    assert ingest["eid"] == 202
+    assert ingest["path"] == "fast"
+    assert ingest["escalated"] is False
+    assert ingest["result_code"] == "stored"
+    assert ingest["decision_code"] == "fast_allowed"
+    assert ingest["reason"] == "stored cleanly"
+    forbidden = json.dumps(ingest, ensure_ascii=False)
+    assert "hidden_reasoning" not in forbidden
+    assert "raw_internal_result" not in forbidden
+    assert "provider_internals" not in forbidden
+    assert "sk-test-secret" not in forbidden
+    assert "embedding" not in ingest
+
+
+def test_a0_reinforced_ingest_capture_is_distinct_from_new_store():
+    recorder = MemoryRecorder()
+    session, _torment, _provider = _preflighted(
+        torment=FakeTorment(
+            ingest_response=_ingest_response(
+                stored=False,
+                reinforced=True,
+                eid=303,
+                result_code="reinforced",
+            )
+        ),
+        recorder=recorder,
+    )
+
+    outcome = session.run_turn("capture reinforcement")
+
+    assert outcome.ok
+    turn = _events_of(recorder, "turn")[-1]
+    ingest = turn["ingest_result"]
+    assert turn["ingest_outcome"] == luc.INGEST_OUTCOME_REINFORCED
+    assert ingest["ingest_outcome"] == luc.INGEST_OUTCOME_REINFORCED
+    assert ingest["stored"] is False
+    assert ingest["reinforced"] is True
+    assert ingest["eid"] == 303
+
+
+def test_a0_explicit_non_write_capture_is_ingest_not_stored():
+    recorder = MemoryRecorder()
+    session, _torment, _provider = _preflighted(
+        torment=FakeTorment(
+            ingest_response=_ingest_response(
+                stored=False,
+                reinforced=False,
+                eid=None,
+                path="full",
+                escalated=True,
+                result_code="cognition",
+                decision_code="escalated_full",
+                reason="handled without durable write",
+            )
+        ),
+        recorder=recorder,
+    )
+
+    outcome = session.run_turn("capture explicit non-write")
+
+    assert outcome.ok
+    turn = _events_of(recorder, "turn")[-1]
+    ingest = turn["ingest_result"]
+    assert turn["ingest_outcome"] == luc.INGEST_OUTCOME_NOT_STORED
+    assert ingest["ingest_outcome"] == luc.INGEST_OUTCOME_NOT_STORED
+    assert ingest["stored"] is False
+    assert ingest["reinforced"] is False
+    assert ingest["path"] == "full"
+    assert ingest["escalated"] is True
+    assert ingest["result_code"] == "cognition"
+    assert ingest["decision_code"] == "escalated_full"
+
+
+def test_a0_generic_http_success_without_outcome_evidence_is_unknown():
+    recorder = MemoryRecorder()
+    session, torment, _provider = _preflighted(
+        torment=FakeTorment(recent=_recent(4), ingest_response={"ok": True, "status": "ok"}),
+        recorder=recorder,
+    )
+
+    outcome = session.run_turn("generic success")
+
+    assert outcome.ok
+    assert session.current_step == 5
+    assert torment.ingest_payloads[0]["step"] == 5
+    turn = _events_of(recorder, "turn")[-1]
+    ingest = turn["ingest_result"]
+    assert turn["ingest_outcome"] == luc.INGEST_OUTCOME_UNKNOWN
+    assert ingest["ingest_outcome"] == luc.INGEST_OUTCOME_UNKNOWN
+    assert "stored" not in ingest
+    assert "reinforced" not in ingest
+
+
+def test_a0_non_mapping_ingest_response_does_not_break_turn_capture():
+    class NonMappingIngestTorment(FakeTorment):
+        def ingest(self, payload):
+            self.calls.append(("ingest", copy.deepcopy(payload)))
+            self.ingest_payloads.append(copy.deepcopy(payload))
+            return []
+
+    recorder = MemoryRecorder()
+    torment = NonMappingIngestTorment(recent=_recent(4))
+    provider = FakeProvider(reply="visible after non-mapping ingest")
+    session, torment, provider = _preflighted(
+        torment=torment,
+        provider=provider,
+        recorder=recorder,
+    )
+
+    outcome = session.run_turn("non-mapping ingest response")
+
+    assert outcome.ok
+    assert outcome.assistant_text == "visible after non-mapping ingest"
+    assert len(provider.calls) == 1
+    assert len(torment.ingest_payloads) == 1
+    assert session.current_step == 5
+    assert session.history == [
+        {"role": "user", "content": "non-mapping ingest response"},
+        {"role": "assistant", "content": "visible after non-mapping ingest"},
+    ]
+    turn = _events_of(recorder, "turn")[-1]
+    assert turn["assistant_text"] == "visible after non-mapping ingest"
+    assert turn["ingest_call_count"] == 1
+    assert turn["current_step"] == 5
+    assert "ingest_outcome" not in turn
+    assert turn["ingest_result"].get("ingest_outcome") is None
+    assert turn["ingest_result"].get("stored") is not True
+    assert turn["ingest_result"].get("reinforced") is not True
+    assert turn["ingest_result"].get("ingest_outcome") != luc.INGEST_OUTCOME_NOT_STORED
+
+
+def test_ingest_observability_does_not_change_arguments_or_step_advancement():
+    def run(ingest_response):
+        torment = FakeTorment(ingest_response=ingest_response)
+        provider = FakeProvider(reply="same reply")
+        session = _session(torment=torment, provider=provider, recorder=MemoryRecorder())
+        session.preflight()
+        session.run_turn("same input")
+        return (
+            copy.deepcopy(torment.ingest_payloads),
+            copy.deepcopy(provider.calls),
+            session.current_step,
+        )
+
+    stored_ingests, stored_provider, stored_step = run(_ingest_response())
+    unknown_ingests, unknown_provider, unknown_step = run({"ok": True, "status": "ok"})
+
+    assert stored_ingests == unknown_ingests
+    assert stored_provider == unknown_provider
+    assert stored_step == unknown_step == 1
+
+
 def test_failed_ingest_does_not_consume_step_and_next_turn_reuses_it():
     torment = FakeTorment(recent=_recent(17), ingest_error=[RuntimeError("down"), None])
     session, torment, _provider = _preflighted(torment=torment)
@@ -1201,6 +1400,7 @@ def test_ingest_failure_preserves_visible_response_and_step():
     assert session.current_step == 4
     turn = _events_of(recorder, "turn")[-1]
     assert turn["failure_stage"] == "ingest"
+    assert turn["ingest_outcome"] == luc.INGEST_OUTCOME_TRANSPORT_OR_SERVICE_FAILURE
     assert turn["assistant_text"] == "visible response"
     assert turn["ingest_summary"] == outcome.ingest_summary
     assert turn["ingest_result"] is None
