@@ -35,6 +35,10 @@ exist, zero build.
     `TORMENT_PARTICIPATION_GUIDANCE_V1` (`8e4e27b`, `9e0cbca`; §0 record `d73c148`).
   - **D** motion-keeper — tests-only `query().explain` shape lock vs `trace()` decomposition (`022c86e`).
   - **A0** Gate D readiness review — **DEFER / NO-OPEN** recorded (`d8a65e3`).
+  - **A0 lived-use scientific checkpoint** — evidence correction recorded (`9f124648`, checkpoint
+    `docs/TORMENT_A0_LIVED_USE_SCIENTIFIC_CHECKPOINT_2026_08_04.md`): provider-visible replies
+    were valid; stored-memory persistence is supported for the small stored set; transformer/Spine
+    HTTP handling was initially mistaken for durable memory growth; observability corrected only.
   - **SRG R-surface authority-fencing inventory** — docs-only; existing `R` / `R_band` / `is_crystal` /
     `heartbeat_class` fenced as guidance/continuity, not authority; **R-field NOT opened**, tests not
     authorized (`d1b357b`; §0 record `93f6519`).
@@ -64,6 +68,7 @@ exist, zero build.
 | Dream / incubation / Regime-B | DEFERRED | Offline reflection; no runtime exists; explicitly deferred + substrate-coupled | Document B §5; pre-substrate §3 | none; last |
 | Private cognition / Document B chamber interior | FRAMED | Requirement doctrine **complete (promoted 2026-06-13)**; **zero runtime** | `TORMENT_PRIVATE_COGNITION_UNIFIED_REFLECTION_BLUEPRINT_v0.1.md` | tied to Gate D decision |
 | Guided memory layer | PARTIAL | Live retrieval/prompt-shaping + observability hardened; conformance of its automatic inputs only framed (Gate 4) | memory-to-prompt v0.2.x; `character_context`; guidance-without-coercion map | none clean (its open Q = Gate 4) |
+| A0 explicit ingest nullification / outcome-observability finding | OPEN | A0 did not show normal memory storage defective; stored-memory restart persistence is supported for the stored set; recent-memory index was correct; later large-corpus retrieval was not tested because the expected corpus was not written. Transformer/Spine outcome observability is corrected in `9f124648`; explicit-write semantics remain unresolved; behavioral routing correction not yet authorized | `docs/TORMENT_A0_LIVED_USE_SCIENTIFIC_CHECKPOINT_2026_08_04.md`; A0 capture audit; observability commit `9f124648` | Block retrieval-quality tuning from the frozen basin, large-corpus recall claims, A1 subsystem activation, and vision integration until explicit-write semantics are resolved and A0 is re-established |
 | Reader / projection safety (P4) | FRAMED | P4 contract framed + matched P2.5/P4 reconciliation closed; **runtime gates not built** | P4 contract; matched P2.5/P4 (§N13) | framing largely done; mechanics deferred |
 | P4 / source-sameness / diagnostic-only | DEFERRED | Requirement-level posture only; mechanics substrate-coupled | matched P2.5/P4 §5.2; Gate 4 derived-anchors frame (Q-D2) | none now |
 | Candidate store / governed admission | DEFERRED | Admission edge framed (Document A §8); carrier = Stage B/P6 | Document A §8/§11; reconciliation frame §8 | substrate-last |

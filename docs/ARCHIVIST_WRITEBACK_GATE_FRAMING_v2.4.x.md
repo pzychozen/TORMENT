@@ -69,6 +69,13 @@ Unpacked:
 
 The `app.py /cognition/run` endpoint DOES pass both (lines 2236-2237), with a correct `_lookup_memory_payload` pattern.
 
+**A0 correction note (2026-08-04):** The read-only Spine full-cognition rule was framed and ratified as a control on cognition-initiated writeback: the system should not remember its own cognition output unless that writeback path is deliberately authorized. The original framing did not evaluate the same read-only rule as a possible nullification path for an explicit user-authorized `ingest` operation. These are distinct cases:
+
+- **Cognition proposes or initiates a write:** archivist writeback, governed self-write, gate-controlled.
+- **An explicit ingest request already represents a write operation:** an external caller has asked TORMENT to store supplied content, and escalation may route the request through a read-only transformer/Spine path before any durable memory action occurs.
+
+The A0 observation does not choose the future explicit-write policy. Still unresolved: whether explicit ingest may escalate, whether escalation should still permit a write, whether escalation should visibly refuse, or whether behavior should vary by operation type.
+
 **Two candidate positions:**
 
 - **(a) Spine full-cognition is intentionally read-only.** Document it. MCP-surface cognition observes but does not self-write. Only the direct `/cognition/run` endpoint can produce writeback. This is the narrower, safer position — fewer write surfaces to audit.
@@ -138,7 +145,7 @@ The gate must be flippable back to `0` instantly without data loss. Writeback me
 
 Ratify these in order. Do not skip ahead. Do not flip the gate until all are ratified.
 
-**Decision 1 — Spine path divergence (§5.1). RATIFIED 2026-04-17: (a).** Spine full-cognition is intentionally read-only. The `_full_cognition()` path does not pass `lookup_fn` or `ingest_fn`, and this is by design — it keeps the write surface narrow and matches the current doctrine comment at `spine.py:1012-1028`. If Spine writeback is ever wanted, that is a separate ratification. **What this forecloses:** position (b) is closed. No `lookup_fn`/`ingest_fn` wiring in Spine for this pass. **Deliverable:** update the doctrine comment at `spine.py:1012-1028` from a question to a ratified stance.
+**Decision 1 — Spine path divergence (§5.1). RATIFIED 2026-04-17: (a).** Spine full-cognition is intentionally read-only for cognition-initiated writeback. The `_full_cognition()` path does not pass `lookup_fn` or `ingest_fn`, and this is by design — it keeps the self-write surface narrow and matches the current doctrine comment at `spine.py:1012-1028`. If Spine writeback is ever wanted, that is a separate ratification. **What this forecloses:** position (b) is closed for archivist writeback. No `lookup_fn`/`ingest_fn` wiring in Spine for this pass. **What this did not decide:** explicit-write semantics for an already requested `ingest` operation that escalates into the read-only path. **Deliverable:** update the doctrine comment at `spine.py:1012-1028` from a question to a ratified stance.
 
 **Decision 2 — Corpus verification scope (§5.2). RATIFIED 2026-04-17: (a).** Re-verify the recursion guard against every active workspace used with `TORMENT_CHARACTER_ENABLE=1`. The gate has been off for months; the cost of running the script is low; the cost of missing a malformed provenance shape is an incident. **What this forecloses:** positions (b) and (c). No partial verification. **Deliverable:** a re-verification script that outputs a pass/fail summary per workspace, run against all active workspaces with zero failures.
 

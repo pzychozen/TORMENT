@@ -241,6 +241,23 @@ Gravity correction only fires when **both** conditions are met:
 
 This means momentary drift that's recovering naturally is never corrected. The system only intervenes when drift is sustained and worsening.
 
+### Signed drift convention and A0 consumer note (2026-08-04)
+
+The implemented sign convention is:
+
+- **negative drift score:** movement away from the seed
+- **positive drift score:** convergence toward the seed
+
+The character layer interprets a strongly positive score as healthy or well-centered. In `assemble_character_context()`, `drift_score > 0.3` produces guidance equivalent to "Character is well-centered. Safe to explore new directions."
+
+A separate Spine consumer currently uses a symmetric magnitude check:
+
+```python
+abs(drift_score) > threshold
+```
+
+That consumer can therefore treat strong positive convergence as escalation-worthy even though the character layer treats it as healthy convergence. This note does not condemn or change the sign convention. It also does not claim the symmetric consumer is the sole cause of all earlier A0 non-write turns: identity-sensitive escalation also reached the same read-only full-cognition path before the step-25 drift event.
+
 ---
 
 ## Multi-Character / Hive-Mind Use

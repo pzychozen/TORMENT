@@ -162,6 +162,21 @@ Keyword banks:
 
 ---
 
+## A0 Ingest Outcome Observation (2026-08-04)
+
+A0 lived-use exposed a layer boundary that this overview did not make explicit enough:
+
+- **Provider/LLM response:** the generated assistant reply. A0 observed valid visible provider replies.
+- **Transformer/Spine response:** the service-level handling result for a request routed through the transformer/Spine boundary.
+- **Memory outcome:** the durable result of the memory layer: stored, reinforced, or no durable action.
+- **A0 client-local bookkeeping:** the local step counter and capture record maintained by the lived-use client.
+
+An explicit `/agent/ingest` operation may escalate. When escalation selects the full-cognition path, the currently selected path is read-only: it does not pass `lookup_fn` or `ingest_fn` into `run_cognition_pipeline()`. The transformer/Spine may therefore return a handled HTTP response without a durable memory action.
+
+HTTP 200 from the transformer/service boundary does not by itself prove a durable memory write. It proves that the service handled the request at that boundary. The memory outcome must be read from outcome metadata such as `stored`, `reinforced`, and `eid`, plus routing metadata such as `path`, `escalated`, `result_code`, `decision_code`, and `reason`.
+
+Commit `9f124648db493b3e43c48a72fd96eaf930fd17c4` corrected observability only: the A0 client can now distinguish provider response completion, transformer/Spine request handling, durable writes, reinforcement, explicit non-write, and unknown outcomes. It did not change routing, escalation, or memory write behavior, and it did not choose the final explicit-write policy.
+
 ## The Four Roles
 
 ### Interpreter
@@ -380,7 +395,7 @@ naturally to MCP tool exposure:
 1. **`torment_cognition_run`**: Wraps `POST /cognition/run`. Input: user_input,
    agent_id, workspace_id, mode. Output: the full reintegration result.
 
-2. **`torment_ingest`**: Wraps `POST /agent/ingest`. Direct memory write path.
+2. **`torment_ingest`**: Wraps `POST /agent/ingest`. This is the explicit ingest entry point, but the durable memory outcome must be observed from returned memory metadata; transformer/Spine HTTP success alone is not proof that storage occurred.
 
 3. **`torment_query`**: Wraps `POST /agent/query` (fabric.query). Memory retrieval.
 
