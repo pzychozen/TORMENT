@@ -15,10 +15,12 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import textwrap
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping as MappingABC
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Protocol
 
@@ -31,6 +33,11 @@ DEFAULT_TORMENT_URL = "http://127.0.0.1:8787"
 DEFAULT_TOP_K = 8
 DEFAULT_MAX_HISTORY_MESSAGES = 40
 DEFAULT_MAX_TOKENS = 1024
+DEFAULT_QWEN_SEED = 20260805
+QWEN_DEFAULT_TEMPERATURE = 0.7
+QWEN_DEFAULT_TOP_P = 0.8
+QWEN_DEFAULT_TOP_K = 20
+QWEN_DEFAULT_MIN_P = 0.0
 
 EXPECTED_WORKSPACE_ID = "lived_use_eira_voss_a0"
 EXPECTED_AGENT_ID = "eira_voss"
@@ -84,7 +91,13 @@ TORMENT_ENV_ALLOWLIST = (
     "TORMENT_TOP_K",
     "TORMENT_CHAT_PROVIDER",
     "TORMENT_CHAT_MODEL",
+    "TORMENT_CHAT_MODEL_PATH",
     "TORMENT_CHAT_BASE_URL",
+    "TORMENT_CHAT_QWEN_GREEDY",
+    "TORMENT_CHAT_SEED",
+    "TORMENT_TEST_CONDITION",
+    "TORMENT_EXPECTED_DATA_DIR",
+    "TORMENT_SERVER_LAUNCHER_PATH",
     "CLAUDE_MODEL",
     "OPENROUTER_MODEL",
     CAPTURE_ENV,
@@ -287,6 +300,7 @@ class TormentClientProtocol(Protocol):
     def thinking_debug(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
     def query(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
     def ingest(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
+    def ingest_route_probe(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
 
 
 class ChatProvider(Protocol):
@@ -310,6 +324,7 @@ class ProviderResult:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     thinking_tokens: Optional[int] = None
+    generation_parameters: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def visible_text_present(self) -> bool:
@@ -360,7 +375,14 @@ def redact_known_secrets(text: str, environ: Optional[Mapping[str, str]] = None)
 
 def _is_secretish_key(key: str) -> bool:
     upper = key.upper()
-    return any(part in upper for part in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
+    return (
+        "SECRET" in upper
+        or "PASSWORD" in upper
+        or "API_KEY" in upper
+        or upper in ("KEY", "TOKEN")
+        or upper.endswith("_KEY")
+        or upper.endswith("_TOKEN")
+    )
 
 
 def safe_scalar(value: Any, environ: Optional[Mapping[str, str]] = None) -> Any:
@@ -466,6 +488,25 @@ def scalar_list(values: Any, environ: Optional[Mapping[str, str]] = None) -> Lis
     return out
 
 
+def safe_capture_value(value: Any, environ: Optional[Mapping[str, str]] = None) -> Any:
+    scalar = safe_scalar(value, environ)
+    if scalar is not None or value is None:
+        return scalar
+    if isinstance(value, MappingABC):
+        return {
+            safe_string(key, environ): safe_capture_value(item, environ)
+            for key, item in value.items()
+            if isinstance(key, str) and not _is_secretish_key(key)
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [
+            item
+            for item in (safe_capture_value(entry, environ) for entry in value)
+            if item is not None
+        ]
+    return safe_string(value, environ)
+
+
 def filtered_torment_env(environ: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
     env = environ or os.environ
     out: Dict[str, str] = {}
@@ -473,6 +514,66 @@ def filtered_torment_env(environ: Optional[Mapping[str, str]] = None) -> Dict[st
         if key in env and not _is_secretish_key(key):
             out[key] = redact_known_secrets(str(env[key]), env)
     return out
+
+
+def file_sha256_info(path: Optional[Path], environ: Optional[Mapping[str, str]] = None) -> Optional[Dict[str, Any]]:
+    if path is None:
+        return None
+    p = Path(path)
+    info: Dict[str, Any] = {"path": safe_string(str(p), environ), "exists": p.exists()}
+    if not p.exists() or not p.is_file():
+        info["sha256"] = None
+        return info
+    digest = hashlib.sha256()
+    with p.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    info["sha256"] = digest.hexdigest()
+    return info
+
+
+def git_capture_snapshot(repo_root: Path = REPO_ROOT, environ: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    def run_git(args: List[str]) -> Optional[str]:
+        try:
+            proc = subprocess.run(
+                ["git"] + list(args),
+                cwd=str(repo_root),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.strip()
+
+    head = run_git(["rev-parse", "HEAD"])
+    branch = run_git(["branch", "--show-current"])
+    status = run_git(["status", "--short"])
+    dirty_paths: List[str] = []
+    if status:
+        for line in status.splitlines():
+            text = line.rstrip()
+            if not text:
+                continue
+            path = text[3:] if len(text) > 3 else text
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            dirty_paths.append(safe_string(path.strip(), environ))
+    return {
+        "head": safe_scalar(head, environ),
+        "branch": safe_scalar(branch, environ),
+        "dirty_paths": dirty_paths,
+    }
+
+
+def normalized_path_string(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return os.path.normcase(os.path.normpath(text))
 
 
 def load_dotenv_safely(
@@ -629,6 +730,9 @@ class TormentHttpClient:
     def ingest(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._post("/agent/ingest", payload)
 
+    def ingest_route_probe(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post("/agent/ingest/route_probe", payload)
+
 
 class AnthropicProvider:
     name = "anthropic"
@@ -660,7 +764,21 @@ class AnthropicProvider:
             return {"type": "disabled"}
         return None
 
-    def _parse_response(self, response: Any) -> ProviderResult:
+    def generation_parameters(self, max_tokens: int) -> Dict[str, Any]:
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "max_tokens": int(max_tokens),
+            "thinking": self._thinking_config(),
+            "random_seed": None,
+            "random_seed_supported": False,
+            "randomness": "provider_controlled",
+            "temperature": "provider_default_unset",
+            "top_p": "provider_default_unset",
+            "top_k": "provider_default_unset",
+        }
+
+    def _parse_response(self, response: Any, generation_parameters: Optional[Dict[str, Any]] = None) -> ProviderResult:
         content = get_field(response, "content")
         if not isinstance(content, list):
             content = []
@@ -681,6 +799,7 @@ class AnthropicProvider:
             input_tokens=usage_token(usage, "input_tokens"),
             output_tokens=usage_token(usage, "output_tokens"),
             thinking_tokens=usage_token(usage, "thinking_tokens", "reasoning_tokens"),
+            generation_parameters=generation_parameters or {},
         )
         return result_or_error(result, self.ACCEPTED_STOP_REASONS, self.name)
 
@@ -692,6 +811,7 @@ class AnthropicProvider:
         max_tokens: int,
     ) -> ProviderResult:
         thinking = self._thinking_config()
+        generation_parameters = self.generation_parameters(max_tokens)
         if self._sdk_client is not None:
             kwargs: Dict[str, Any] = {
                 "model": self.model,
@@ -705,7 +825,7 @@ class AnthropicProvider:
                 response = self._sdk_client.messages.create(**kwargs)
             except Exception:
                 raise ProviderError("anthropic SDK request failed") from None
-            return self._parse_response(response)
+            return self._parse_response(response, generation_parameters)
 
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -730,7 +850,7 @@ class AnthropicProvider:
             raise ProviderError("anthropic request failed before HTTP response") from None
         if response.status_code >= 400:
             raise ProviderError(f"anthropic request failed with HTTP {response.status_code}")
-        return self._parse_response(response.json())
+        return self._parse_response(response.json(), generation_parameters)
 
 
 class ChatCompletionsProvider:
@@ -761,7 +881,19 @@ class ChatCompletionsProvider:
             thinking_tokens=None,
         )
 
-    def _parse_response(self, data: Any) -> ProviderResult:
+    def generation_parameters(self, max_tokens: int) -> Dict[str, Any]:
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "max_tokens": int(max_tokens),
+            "temperature": "provider_default_unset",
+            "top_p": "provider_default_unset",
+            "top_k": "provider_default_unset",
+            "random_seed": None,
+            "random_seed_supported": False,
+        }
+
+    def _parse_response(self, data: Any, generation_parameters: Optional[Dict[str, Any]] = None) -> ProviderResult:
         if not isinstance(data, dict):
             raise ProviderResponseError(f"{self.name} response was malformed", self._missing_result())
         choices = data.get("choices")
@@ -798,6 +930,7 @@ class ChatCompletionsProvider:
             input_tokens=usage_token(usage, "prompt_tokens", "input_tokens"),
             output_tokens=usage_token(usage, "completion_tokens", "output_tokens"),
             thinking_tokens=usage_token(usage, "reasoning_tokens", "thinking_tokens"),
+            generation_parameters=generation_parameters or {},
         )
         return result_or_error(result, self.ACCEPTED_STOP_REASONS, self.name)
 
@@ -812,6 +945,7 @@ class ChatCompletionsProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         payload_messages = [{"role": "system", "content": system_prompt}] + list(messages)
+        generation_parameters = self.generation_parameters(max_tokens)
         try:
             response = self._http_post(
                 f"{self.base_url}/chat/completions",
@@ -827,7 +961,327 @@ class ChatCompletionsProvider:
             raise ProviderError(f"{self.name} request failed before HTTP response") from None
         if response.status_code >= 400:
             raise ProviderError(f"{self.name} request failed with HTTP {response.status_code}")
-        return self._parse_response(response.json())
+        return self._parse_response(response.json(), generation_parameters)
+
+
+def _first_token_sequence(token_ids: Any) -> List[int]:
+    if hasattr(token_ids, "tolist"):
+        token_ids = token_ids.tolist()
+    if isinstance(token_ids, tuple):
+        token_ids = list(token_ids)
+    if isinstance(token_ids, list) and token_ids and isinstance(token_ids[0], (list, tuple)):
+        return [int(token) for token in token_ids[0]]
+    if isinstance(token_ids, list):
+        return [int(token) for token in token_ids]
+    return [int(token) for token in list(token_ids)]
+
+
+def _token_sequence_length(token_ids: Any) -> int:
+    shape = getattr(token_ids, "shape", None)
+    if shape:
+        return int(shape[-1])
+    return len(_first_token_sequence(token_ids))
+
+
+def _token_id_values(value: Any) -> List[int]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        out: List[int] = []
+        for item in value:
+            found = safe_int(item)
+            if found is not None:
+                out.append(found)
+        return out
+    found = safe_int(value)
+    return [found] if found is not None else []
+
+
+class LocalQwenProvider:
+    name = "local_qwen"
+    ACCEPTED_STOP_REASONS = ("stop", "length")
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        model_path: Path,
+        do_sample: bool = True,
+        temperature: float = QWEN_DEFAULT_TEMPERATURE,
+        top_p: float = QWEN_DEFAULT_TOP_P,
+        top_k: int = QWEN_DEFAULT_TOP_K,
+        min_p: float = QWEN_DEFAULT_MIN_P,
+        seed: int = DEFAULT_QWEN_SEED,
+        torch_module: Any = None,
+        tokenizer_cls: Any = None,
+        model_cls: Any = None,
+    ):
+        self.model = str(model)
+        self.model_path = Path(model_path)
+        self.do_sample = bool(do_sample)
+        self.temperature = float(temperature)
+        self.top_p = float(top_p)
+        self.top_k = int(top_k)
+        self.min_p = float(min_p)
+        self.seed = int(seed)
+        self._torch_module = torch_module
+        self._tokenizer_cls = tokenizer_cls
+        self._model_cls = model_cls
+        self._tokenizer: Any = None
+        self._model: Any = None
+        self._last_eos_token_ids: List[int] = []
+
+    @property
+    def loaded(self) -> bool:
+        return self._tokenizer is not None and self._model is not None
+
+    def generation_parameters(
+        self,
+        max_tokens: int,
+        *,
+        eos_token_ids: Optional[Iterable[int]] = None,
+    ) -> Dict[str, Any]:
+        eos_ids = list(eos_token_ids if eos_token_ids is not None else self._last_eos_token_ids)
+        params: Dict[str, Any] = {
+            "provider": self.name,
+            "model": self.model,
+            "model_path": str(self.model_path),
+            "max_new_tokens": int(max_tokens),
+            "do_sample": bool(self.do_sample),
+            "seed": int(self.seed),
+            "eos_token_ids": [int(token) for token in eos_ids],
+        }
+        if self.do_sample:
+            params.update(
+                {
+                    "temperature": float(self.temperature),
+                    "top_p": float(self.top_p),
+                    "top_k": int(self.top_k),
+                    "min_p": float(self.min_p),
+                }
+            )
+        else:
+            params["greedy_override"] = True
+        return params
+
+    def _apply_seed(self, torch_module: Any) -> None:
+        manual_seed = getattr(torch_module, "manual_seed", None)
+        if callable(manual_seed):
+            manual_seed(int(self.seed))
+        cuda = getattr(torch_module, "cuda", None)
+        cuda_manual_seed_all = getattr(cuda, "manual_seed_all", None)
+        if callable(cuda_manual_seed_all):
+            cuda_manual_seed_all(int(self.seed))
+
+    def _torch(self) -> Any:
+        if self._torch_module is None:
+            try:
+                import torch  # type: ignore
+            except Exception:
+                raise ProviderError("local_qwen dependency import failed: torch") from None
+            self._torch_module = torch
+        return self._torch_module
+
+    def _transformers(self) -> tuple[Any, Any]:
+        if self._tokenizer_cls is None or self._model_cls is None:
+            try:
+                from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+            except Exception:
+                raise ProviderError("local_qwen dependency import failed: transformers") from None
+            if self._tokenizer_cls is None:
+                self._tokenizer_cls = AutoTokenizer
+            if self._model_cls is None:
+                self._model_cls = AutoModelForCausalLM
+        return self._tokenizer_cls, self._model_cls
+
+    @staticmethod
+    def _all_parameters_on_cuda(model: Any) -> bool:
+        try:
+            params = iter(model.parameters())
+        except Exception:
+            return False
+        seen = False
+        for param in params:
+            seen = True
+            if bool(getattr(param, "is_cuda", False)):
+                continue
+            device = str(getattr(param, "device", "")).lower()
+            if not device.startswith("cuda"):
+                return False
+        return seen
+
+    def _ensure_loaded(self) -> tuple[Any, Any, Any]:
+        if self.loaded:
+            return self._torch_module, self._tokenizer, self._model
+
+        torch_module = self._torch()
+        cuda = getattr(torch_module, "cuda", None)
+        is_available = getattr(cuda, "is_available", None)
+        if not callable(is_available) or not bool(is_available()):
+            raise ProviderError("local_qwen CUDA is unavailable")
+
+        tokenizer_cls, model_cls = self._transformers()
+        path = str(self.model_path)
+        try:
+            tokenizer = tokenizer_cls.from_pretrained(path, local_files_only=True)
+        except Exception:
+            raise ProviderError("local_qwen tokenizer load failed") from None
+        try:
+            model = model_cls.from_pretrained(
+                path,
+                local_files_only=True,
+                dtype=getattr(torch_module, "bfloat16", None),
+            )
+        except Exception:
+            raise ProviderError("local_qwen model load failed") from None
+        try:
+            moved = model.to("cuda")
+            if moved is not None:
+                model = moved
+        except Exception:
+            raise ProviderError("local_qwen CUDA placement failed") from None
+        if not self._all_parameters_on_cuda(model):
+            raise ProviderError("local_qwen model parameters are not resident on CUDA")
+        try:
+            model.eval()
+        except Exception:
+            raise ProviderError("local_qwen eval mode failed") from None
+
+        self._tokenizer = tokenizer
+        self._model = model
+        return torch_module, tokenizer, model
+
+    @staticmethod
+    def _eos_and_pad_ids(tokenizer: Any, model: Any) -> tuple[Any, Optional[int], set[int]]:
+        config = getattr(model, "config", None)
+        generation_config = getattr(model, "generation_config", None)
+        eos_values: List[int] = []
+        for value in (
+            getattr(tokenizer, "eos_token_id", None),
+            getattr(generation_config, "eos_token_id", None),
+            getattr(config, "eos_token_id", None),
+        ):
+            for token in _token_id_values(value):
+                if token not in eos_values:
+                    eos_values.append(token)
+        if not eos_values:
+            eos_token_id = None
+        elif len(eos_values) == 1:
+            eos_token_id = eos_values[0]
+        else:
+            eos_token_id = list(eos_values)
+        pad_token_id = getattr(tokenizer, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = getattr(generation_config, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = getattr(config, "pad_token_id", None)
+        if pad_token_id is None:
+            if eos_values:
+                pad_token_id = eos_values[0]
+        return eos_token_id, pad_token_id, set(eos_values)
+
+    @staticmethod
+    def _move_template_output_to_cuda(value: Any) -> Any:
+        if isinstance(value, MappingABC):
+            if hasattr(value, "to"):
+                return value.to("cuda")
+            return {
+                key: item.to("cuda") if hasattr(item, "to") else item
+                for key, item in value.items()
+            }
+        if hasattr(value, "to"):
+            return value.to("cuda")
+        raise TypeError("tokenizer did not return a tensor-like value")
+
+    @staticmethod
+    def _input_ids_from_template_output(value: Any) -> Any:
+        if isinstance(value, MappingABC):
+            input_ids = value.get("input_ids")
+            if input_ids is None:
+                raise TypeError("tokenizer mapping did not include input_ids")
+            return input_ids
+        return value
+
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        max_tokens: int,
+    ) -> ProviderResult:
+        try:
+            max_new_tokens = int(max_tokens)
+        except (TypeError, ValueError):
+            raise ProviderError("local_qwen max_tokens must be an integer") from None
+        if max_new_tokens <= 0:
+            raise ProviderError("local_qwen max_tokens must be positive")
+
+        torch_module, tokenizer, model = self._ensure_loaded()
+        conversation = [{"role": "system", "content": system_prompt}] + list(messages)
+        try:
+            input_ids = tokenizer.apply_chat_template(
+                conversation,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="pt",
+            )
+        except Exception:
+            raise ProviderError("local_qwen chat template application failed") from None
+        try:
+            model_inputs = self._move_template_output_to_cuda(input_ids)
+            input_id_tensor = self._input_ids_from_template_output(model_inputs)
+            input_token_count = _token_sequence_length(input_id_tensor)
+        except Exception:
+            raise ProviderError("local_qwen input tensor preparation failed") from None
+
+        eos_token_id, pad_token_id, eos_ids = self._eos_and_pad_ids(tokenizer, model)
+        self._last_eos_token_ids = sorted(int(token) for token in eos_ids)
+        self._apply_seed(torch_module)
+        generate_kwargs: Dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": bool(self.do_sample),
+        }
+        if self.do_sample:
+            generate_kwargs.update(
+                {
+                    "temperature": float(self.temperature),
+                    "top_p": float(self.top_p),
+                    "top_k": int(self.top_k),
+                    "min_p": float(self.min_p),
+                }
+            )
+        if eos_token_id is not None:
+            generate_kwargs["eos_token_id"] = eos_token_id
+        if pad_token_id is not None:
+            generate_kwargs["pad_token_id"] = pad_token_id
+        try:
+            with torch_module.inference_mode():
+                if isinstance(model_inputs, MappingABC):
+                    output_ids = model.generate(**model_inputs, **generate_kwargs)
+                else:
+                    output_ids = model.generate(model_inputs, **generate_kwargs)
+        except Exception:
+            raise ProviderError("local_qwen generation failed") from None
+
+        try:
+            output_sequence = _first_token_sequence(output_ids)
+            generated_tokens = output_sequence[input_token_count:]
+            text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        except Exception:
+            raise ProviderError("local_qwen decode failed") from None
+
+        stopped_on_eos = bool(eos_ids and any(token in eos_ids for token in generated_tokens))
+        stop_reason = "length" if len(generated_tokens) >= max_new_tokens else "stop" if stopped_on_eos else "stop"
+        result = ProviderResult(
+            text=str(text),
+            stop_reason=stop_reason,
+            content_block_types=["text"] if str(text).strip() else [],
+            input_tokens=input_token_count,
+            output_tokens=len(generated_tokens),
+            thinking_tokens=None,
+            generation_parameters=self.generation_parameters(max_new_tokens, eos_token_ids=self._last_eos_token_ids),
+        )
+        return result_or_error(result, self.ACCEPTED_STOP_REASONS, self.name)
 
 
 def build_provider_from_env(environ: Optional[Mapping[str, str]] = None) -> ChatProvider:
@@ -873,8 +1327,32 @@ def build_provider_from_env(environ: Optional[Mapping[str, str]] = None) -> Chat
             api_key=env.get("TORMENT_CHAT_API_KEY", ""),
         )
 
+    if provider == "local_qwen":
+        raw_path = env_value(env, "TORMENT_CHAT_MODEL_PATH", "")
+        if not raw_path:
+            raise ProviderConfigError("TORMENT_CHAT_MODEL_PATH is required for provider local_qwen")
+        try:
+            model_path = Path(raw_path).resolve(strict=True)
+        except OSError:
+            raise ProviderConfigError("TORMENT_CHAT_MODEL_PATH must resolve to an existing directory") from None
+        if not model_path.is_dir():
+            raise ProviderConfigError("TORMENT_CHAT_MODEL_PATH must resolve to an existing directory")
+        model = env_value(env, "TORMENT_CHAT_MODEL", "") or model_path.name
+        if not model:
+            raise ProviderConfigError("TORMENT_CHAT_MODEL is required for provider local_qwen")
+        seed = safe_int(env_value(env, "TORMENT_CHAT_SEED", str(DEFAULT_QWEN_SEED)))
+        if seed is None:
+            raise ProviderConfigError("TORMENT_CHAT_SEED must be an integer for provider local_qwen")
+        greedy = is_truthy(env_value(env, "TORMENT_CHAT_QWEN_GREEDY", "0"))
+        return LocalQwenProvider(
+            model=model,
+            model_path=model_path,
+            do_sample=not greedy,
+            seed=seed,
+        )
+
     raise ProviderConfigError(
-        "Unsupported TORMENT_CHAT_PROVIDER. Use anthropic, openrouter, or openai_compatible."
+        "Unsupported TORMENT_CHAT_PROVIDER. Use anthropic, openrouter, openai_compatible, or local_qwen."
     )
 
 
@@ -1029,6 +1507,9 @@ def serialize_metrics(response: Mapping[str, Any], environ: Optional[Mapping[str
             for key in METRICS_FEATURE_KEYS
             if key in features
         }
+    runtime_flags = response.get("companion_runtime_flags")
+    if isinstance(runtime_flags, dict):
+        out["companion_runtime_flags"] = safe_capture_value(runtime_flags, environ) or {}
     agents = response.get("agents")
     if isinstance(agents, dict):
         out["agents"] = {
@@ -1049,6 +1530,51 @@ def serialize_metrics(response: Mapping[str, Any], environ: Optional[Mapping[str
     else:
         out["collective"] = None
     return out
+
+
+ROUTE_PROBE_CAPTURE_FIELDS = (
+    "ok",
+    "operation",
+    "predicted_path",
+    "write_capable",
+    "would_escalate",
+    "would_refuse",
+    "refusal_reason",
+    "drift_score",
+    "drift_direction",
+    "relational_count",
+    "drift_status",
+    "decision_code",
+    "allowed",
+    "trust_tier",
+    "escalation_suppressed",
+)
+
+
+def serialize_route_probe(response: Mapping[str, Any], environ: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    out = scalar_fields(response, ROUTE_PROBE_CAPTURE_FIELDS, environ)
+    out["escalation_reasons"] = scalar_list(response.get("escalation_reasons"), environ)
+    return out
+
+
+def runtime_flag_effective_value(metrics: Mapping[str, Any], name: str) -> Any:
+    flags = metrics.get("companion_runtime_flags")
+    if not isinstance(flags, MappingABC):
+        return None
+    entry = flags.get(name)
+    if not isinstance(entry, MappingABC):
+        return None
+    return entry.get("effective_value")
+
+
+def config_effective_value(config: Mapping[str, Any], name: str) -> Any:
+    effective = config.get("effective")
+    if not isinstance(effective, MappingABC):
+        return None
+    entry = effective.get(name)
+    if not isinstance(entry, MappingABC):
+        return None
+    return entry.get("value")
 
 
 def serialize_workspace_create(response: Mapping[str, Any], environ: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
@@ -1317,6 +1843,28 @@ def serialize_provider_messages(messages: List[Dict[str, str]], environ: Optiona
     return out
 
 
+def provider_generation_parameters(
+    provider: ChatProvider,
+    max_tokens: int,
+    environ: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    getter = getattr(provider, "generation_parameters", None)
+    if callable(getter):
+        try:
+            return safe_capture_value(getter(int(max_tokens)), environ) or {}
+        except Exception:
+            return {
+                "provider": safe_scalar(getattr(provider, "name", ""), environ),
+                "model": safe_scalar(getattr(provider, "model", ""), environ),
+                "generation_parameters_error": "unavailable",
+            }
+    return {
+        "provider": safe_scalar(getattr(provider, "name", ""), environ),
+        "model": safe_scalar(getattr(provider, "model", ""), environ),
+        "max_tokens": int(max_tokens),
+    }
+
+
 def serialize_provider_response(
     response: Optional[ProviderResult],
     environ: Optional[Mapping[str, str]] = None,
@@ -1330,6 +1878,7 @@ def serialize_provider_response(
         "output_tokens": safe_scalar(response.output_tokens, environ),
         "thinking_tokens": safe_scalar(response.thinking_tokens, environ),
         "visible_text_present": bool(response.visible_text_present),
+        "generation_parameters": safe_capture_value(response.generation_parameters, environ) or {},
     }
 
 
@@ -1424,9 +1973,14 @@ def format_drift_note(char_ctx: Mapping[str, Any], environ: Optional[Mapping[str
         return ""
     drift = safe_float(char_ctx.get("drift_score", 0.0)) or 0.0
     drift_summary = safe_string(char_ctx.get("drift_summary", ""), environ).strip()
-    if abs(drift) < 0.1 and not drift_summary:
-        return ""
-    return f"[Drift: {drift:+.2f}] {drift_summary}"
+    if abs(drift) < 0.1:
+        return drift_summary
+    direction = safe_string(char_ctx.get("drift_direction", "stable"), environ).strip().lower()
+    if drift > 0:
+        return f"[Alignment: {drift:+.2f}] {drift_summary}".strip()
+    if direction:
+        return f"[Drift: {drift:+.2f} {direction}] {drift_summary}".strip()
+    return f"[Drift: {drift:+.2f}] {drift_summary}".strip()
 
 
 def render_system_prompt(
@@ -1523,6 +2077,8 @@ class LivedUseSession:
         top_k: int = DEFAULT_TOP_K,
         max_history_messages: int = DEFAULT_MAX_HISTORY_MESSAGES,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        character_file: Optional[Path] = None,
+        allow_non_writing_basin: bool = False,
         environ: Optional[Mapping[str, str]] = None,
     ):
         validate_a0_spec(character)
@@ -1534,6 +2090,8 @@ class LivedUseSession:
         self.top_k = int(top_k)
         self.max_history_messages = int(max_history_messages)
         self.max_tokens = int(max_tokens)
+        self.character_file = Path(character_file) if character_file is not None else DEFAULT_CHARACTER_PATH
+        self.allow_non_writing_basin = bool(allow_non_writing_basin)
         self.current_step: Optional[int] = None
         self.turn_id = 0
         self.history: List[Dict[str, str]] = []
@@ -1542,7 +2100,19 @@ class LivedUseSession:
         self.environ = environ or os.environ
         self._recorder_failed = False
         self._closed = False
-        self._record("session_start", self._base_event({"capture_enabled": bool(getattr(self.recorder, "active", False))}))
+        self._record(
+            "session_start",
+            self._base_event(
+                {
+                    "capture_enabled": bool(getattr(self.recorder, "active", False)),
+                    "client_provenance": self._client_provenance(),
+                    "provider_generation_parameters": provider_generation_parameters(
+                        self.provider, self.max_tokens, self.environ
+                    ),
+                    "non_writing_basin_override": self.allow_non_writing_basin,
+                }
+            ),
+        )
 
     @property
     def seed_id(self) -> str:
@@ -1561,6 +2131,17 @@ class LivedUseSession:
         if extra:
             payload.update(extra)
         return payload
+
+    def _client_provenance(self) -> Dict[str, Any]:
+        launcher_path = env_value(self.environ, "TORMENT_SERVER_LAUNCHER_PATH", "")
+        return {
+            "git": git_capture_snapshot(REPO_ROOT, self.environ),
+            "client_file_sha256": file_sha256_info(Path(__file__).resolve(), self.environ),
+            "server_launcher_sha256": file_sha256_info(Path(launcher_path), self.environ) if launcher_path else None,
+            "character_yaml_sha256": file_sha256_info(self.character_file, self.environ),
+            "condition_label": safe_scalar(env_value(self.environ, "TORMENT_TEST_CONDITION", ""), self.environ),
+            "server_launcher_path": safe_scalar(launcher_path, self.environ),
+        }
 
     def _record(self, event_type: str, payload: Dict[str, Any]) -> None:
         if self._recorder_failed:
@@ -1592,6 +2173,16 @@ class LivedUseSession:
                 "agent_create": None,
                 "identity": None,
                 "index_recent": None,
+                "server_data_directory": None,
+                "runtime_flags": None,
+                "ingest_route_probe": None,
+                "provider_generation_parameters": provider_generation_parameters(
+                    self.provider, self.max_tokens, self.environ
+                ),
+                "client_provenance": self._client_provenance(),
+                "condition_label": safe_scalar(env_value(self.environ, "TORMENT_TEST_CONDITION", ""), self.environ),
+                "non_writing_basin_override": self.allow_non_writing_basin,
+                "runtime_parity_verified": False,
                 "resumed_step": None,
                 "thinking_debug": None,
                 "failure_stage": None,
@@ -1607,6 +2198,43 @@ class LivedUseSession:
 
             metrics = self.torment.debug_metrics()
             record["metrics"] = serialize_metrics(metrics, self.environ)
+            if not isinstance(metrics.get("companion_runtime_flags"), dict):
+                raise PreflightError("Metrics response missing companion_runtime_flags")
+            record["runtime_flags"] = safe_capture_value(metrics.get("companion_runtime_flags"), self.environ) or {}
+            server_data_dir = runtime_flag_effective_value(metrics, "TORMENT_DATA_DIR")
+            if server_data_dir is None:
+                server_data_dir = config_effective_value(config, "TORMENT_DATA_DIR")
+            record["server_data_directory"] = safe_scalar(server_data_dir, self.environ)
+            server_condition = runtime_flag_effective_value(metrics, "TORMENT_TEST_CONDITION")
+            server_launcher_path = runtime_flag_effective_value(metrics, "TORMENT_SERVER_LAUNCHER_PATH")
+            if server_condition is not None:
+                record["condition_label"] = safe_scalar(server_condition, self.environ)
+
+            expected_data_dir = env_value(self.environ, "TORMENT_EXPECTED_DATA_DIR", "")
+            if expected_data_dir:
+                if not server_data_dir:
+                    raise PreflightError("Server data directory is unavailable for parity check")
+                if normalized_path_string(server_data_dir) != normalized_path_string(expected_data_dir):
+                    raise PreflightError(
+                        f"Server data directory mismatch: expected {expected_data_dir}, got {server_data_dir}"
+                    )
+
+            expected_condition = env_value(self.environ, "TORMENT_TEST_CONDITION", "")
+            if expected_condition:
+                if str(server_condition or "") != expected_condition:
+                    raise PreflightError(
+                        f"Server condition mismatch: expected {expected_condition}, got {server_condition or '<missing>'}"
+                    )
+                record["condition_label"] = safe_scalar(expected_condition, self.environ)
+
+            expected_launcher_path = env_value(self.environ, "TORMENT_SERVER_LAUNCHER_PATH", "")
+            if expected_launcher_path:
+                if not server_launcher_path:
+                    raise PreflightError("Server launcher path is unavailable for parity check")
+                if normalized_path_string(server_launcher_path) != normalized_path_string(expected_launcher_path):
+                    raise PreflightError(
+                        f"Server launcher mismatch: expected {expected_launcher_path}, got {server_launcher_path}"
+                    )
 
             profiles = self.torment.profiles()
             record["profiles"] = serialize_profiles(profiles, self.environ)
@@ -1629,6 +2257,40 @@ class LivedUseSession:
             self.current_step = resumed_step
             record["index_recent"] = serialize_recent_index(index_recent, self.environ)
             record["resumed_step"] = resumed_step
+
+            route_probe_payload = self._ingest_payload(
+                "A0 preflight representative companion summary.",
+                resumed_step + 1,
+            )
+            route_probe_payload["operation"] = "ingest"
+            route_probe = self.torment.ingest_route_probe(route_probe_payload)
+            record["ingest_route_probe"] = serialize_route_probe(route_probe, self.environ)
+            probe_line_parts = [
+                f"predicted_path={route_probe.get('predicted_path')}",
+                f"write_capable={str(bool(route_probe.get('write_capable'))).lower()}",
+                f"drift_score={route_probe.get('drift_score')}",
+                f"drift_direction={route_probe.get('drift_direction')}",
+                f"relational_count={route_probe.get('relational_count')}",
+            ]
+            if route_probe.get("write_capable") is True:
+                print("INGEST_WRITE_PATH_VERIFIED " + " ".join(probe_line_parts))
+                record["runtime_parity_verified"] = True
+            else:
+                reasons = route_probe.get("escalation_reasons") if isinstance(route_probe, MappingABC) else None
+                refusal_reason = route_probe.get("refusal_reason") if isinstance(route_probe, MappingABC) else None
+                print(
+                    "INGEST_WRITE_PATH_NOT_AVAILABLE "
+                    + " ".join(probe_line_parts)
+                    + f" escalation_reasons={reasons or []} refusal_reason={refusal_reason or ''}"
+                )
+                if self.allow_non_writing_basin:
+                    print("WARNING: --allow-non-writing-basin is active; durable writes may not occur.")
+                    record["runtime_parity_verified"] = False
+                else:
+                    record["failure_stage"] = "ingest_route_probe"
+                    raise PreflightError(
+                        f"Ingest route is not write-capable: predicted_path={route_probe.get('predicted_path')}"
+                    )
 
             if include_thinking_debug:
                 thinking = self.torment.thinking_debug(
@@ -1980,6 +2642,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Run the optional /thinking/debug observability probe once during preflight.",
     )
+    parser.add_argument(
+        "--allow-non-writing-basin",
+        action="store_true",
+        help="Diagnostic-only override that allows startup when durable ingest writes may not occur.",
+    )
     parser.add_argument("--character-file", type=Path, default=DEFAULT_CHARACTER_PATH)
     return parser.parse_args(argv)
 
@@ -2027,6 +2694,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         recorder=recorder,
         run_id=run_id,
         top_k=args.top_k,
+        character_file=args.character_file,
+        allow_non_writing_basin=bool(args.allow_non_writing_basin),
         environ=os.environ,
     )
     try:

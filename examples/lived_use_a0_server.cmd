@@ -6,6 +6,8 @@ cd /d "%~dp0\.."
 set TORMENT_PROFILE=companion
 
 set TORMENT_DATA_DIR=%CD%\data\lived_use\eira_voss\a0
+set TORMENT_TEST_CONDITION=a0
+set TORMENT_SERVER_LAUNCHER_PATH=%CD%\examples\lived_use_a0_server.cmd
 set TORMENT_SQLITE_INDEX_ENABLE=1
 
 set TORMENT_CHARACTER_ENABLE=1

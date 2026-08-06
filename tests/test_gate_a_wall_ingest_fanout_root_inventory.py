@@ -69,7 +69,7 @@ _APP_MUTATION_HANDLERS = frozenset({
     "decide_bridge", "decide_conflict", "decide_motif_merge", "decide_proposal",
     "deep_memory_query", "feedback", "index_rebuild", "ingest", "ingest_document",
     "memory_chain", "memory_trace_bundle", "memory_trace_full", "memory_trace_view",
-    "process_proposals", "process_spirit_reflections_endpoint",
+    "ingest_route_probe", "process_proposals", "process_spirit_reflections_endpoint",
     "promote_chunk_endpoint", "propose_share", "query", "retrieve_assembled",
     "set_governance_flags", "spine_submit_task", "thinking_debug",
     "tool_result_ingest", "trace", "trigger_compression", "workspace_clone",
@@ -89,6 +89,14 @@ _CLASSIFIED_PARKED = {
     "propose_share": ("app", "shared/proposal path"),
     "process_proposals": ("app", "proposal writer path"),
     "collective_reingest": ("app", "shared reingest path"),
+}
+
+_CLASSIFIED_READ_ONLY_POST_HANDLERS = {
+    "ingest_route_probe": {
+        "path": "/agent/ingest/route_probe",
+        "classification": "read-only route prediction; non-mutating; authenticated identically to ingest",
+        "evidence": "tests/test_ingest_route_probe_integration.py::test_positive_aligned_drift_route_probe_ingest_and_persistence",
+    },
 }
 
 
@@ -145,6 +153,24 @@ def _app_mutation_handlers(tree):
                 if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                         and d.func.attr in ("post", "put", "delete", "patch")):
                     out.add(n.name)
+    return out
+
+
+def _app_route_decorators(tree, name):
+    func = _top_func(tree, name)
+    if func is None:
+        return set()
+    out = set()
+    for d in func.decorator_list:
+        if not (
+            isinstance(d, ast.Call)
+            and isinstance(d.func, ast.Attribute)
+            and d.args
+            and isinstance(d.args[0], ast.Constant)
+            and isinstance(d.args[0].value, str)
+        ):
+            continue
+        out.add((d.func.attr, d.args[0].value))
     return out
 
 
@@ -246,6 +272,26 @@ class TestWriterSurfaceInventory(unittest.TestCase):
         at = _tree("app.py")
         self._assert_no_new(_app_mutation_handlers(at),
                             _APP_MUTATION_HANDLERS, "app.py mutation endpoints")
+
+    def test_route_probe_post_surface_is_explicitly_classified_read_only(self):
+        at = _tree("app.py")
+        classified = _CLASSIFIED_READ_ONLY_POST_HANDLERS["ingest_route_probe"]
+        probe = _top_func(at, "ingest_route_probe")
+        ingest = _top_func(at, "ingest")
+
+        self.assertEqual(set(_CLASSIFIED_READ_ONLY_POST_HANDLERS), {"ingest_route_probe"})
+        self.assertIn("ingest_route_probe", _APP_MUTATION_HANDLERS)
+        self.assertIn(("post", classified["path"]), _app_route_decorators(at, "ingest_route_probe"))
+        self.assertIsNotNone(probe)
+        self.assertIsNotNone(ingest)
+        self.assertIn("read-only route prediction", classified["classification"])
+        self.assertIn("non-mutating", classified["classification"])
+        self.assertIn("authenticated identically to ingest", classified["classification"])
+        self.assertIn("resolve_request_context", _called_names(probe))
+        self.assertIn("resolve_request_context", _called_names(ingest))
+        self.assertIn("preview_route_decision", _idents(probe))
+        self.assertNotIn("submit_task", _idents(probe))
+        self.assertNotIn("create_agent", _called_names(probe))
 
 
 # --------------------------------------------------------------------------- #

@@ -6,6 +6,8 @@ import os, json
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from . import spine as _spine_module
+from . import thinking_controller as _thinking_controller_module
 from .fabric import TormentFabric
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
@@ -63,12 +65,106 @@ def _safe_log_value(value: str) -> str:
 ACTIVE_PROFILE = os.environ.get("TORMENT_PROFILE", "").strip().lower() or None
 PROFILE_APPLIED = apply_profile_env(ACTIVE_PROFILE)
 PROFILE_KNOWN = bool(ACTIVE_PROFILE) and (ACTIVE_PROFILE in PROFILES)
+TEST_CONDITION = os.environ.get("TORMENT_TEST_CONDITION", "").strip()
+SERVER_LAUNCHER_PATH = os.environ.get("TORMENT_SERVER_LAUNCHER_PATH", "").strip()
 
 app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.4.7' )
 
 fabric = TormentFabric(data_dir=DATA_DIR)
 
 thinking_controller = ThinkingController()
+
+
+CANONICAL_COMPANION_RUNTIME_FLAGS = (
+    "TORMENT_THINKING_ADVISORY",
+    "TORMENT_SPINE_ENABLE",
+    "TORMENT_IDENTITY_SENSITIVE",
+    "TORMENT_ARCHIVE_RECALL",
+    "TORMENT_LIVE_SOCIAL",
+    "TORMENT_SRG_COGNITION",
+    "TORMENT_CONTEXTUAL_ABSTENTION",
+    "TORMENT_SQLITE_INDEX_ENABLE",
+    "TORMENT_COMPRESS_MIN_STEP",
+    "TORMENT_COGNITION_SHAPING_V2",
+    "TORMENT_COGNITION_CORE_SHAPING_V1",
+    "TORMENT_GEOMETRIC_MEMORY_SHAPING_V1",
+    "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1",
+    "TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1",
+    "TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1",
+    "TORMENT_PARTICIPATION_GUIDANCE_V1",
+)
+
+
+_THINKING_CONTROLLER_IMPORT_FLAGS = {
+    "TORMENT_SPINE_ENABLE": "_SPINE_ENABLE",
+    "TORMENT_IDENTITY_SENSITIVE": "_IDENTITY_SENSITIVE_ENABLE",
+    "TORMENT_ARCHIVE_RECALL": "_ARCHIVE_RECALL_ENABLE",
+    "TORMENT_LIVE_SOCIAL": "_LIVE_SOCIAL_ENABLE",
+    "TORMENT_SRG_COGNITION": "_SRG_COGNITION_ENABLE",
+    "TORMENT_COGNITION_SHAPING_V2": "_COGNITION_SHAPING_V2_ENABLE",
+    "TORMENT_COGNITION_CORE_SHAPING_V1": "_COGNITION_CORE_SHAPING_V1_ENABLE",
+    "TORMENT_GEOMETRIC_MEMORY_SHAPING_V1": "_GEOMETRIC_MEMORY_SHAPING_V1_ENABLE",
+    "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1": "_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE",
+    "TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1": "_RELATIONAL_AMBIGUITY_PROMINENCE_V1_ENABLE",
+    "TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1": "_AMBIGUITY_CONTEXT_DIVERSITY_V1_ENABLE",
+    "TORMENT_PARTICIPATION_GUIDANCE_V1": "_PARTICIPATION_GUIDANCE_V1_ENABLE",
+}
+
+
+def _runtime_flag_entry(value: Any, read_timing: str, source: str) -> Dict[str, Any]:
+    return {
+        "effective_value": value,
+        "read_timing": read_timing,
+        "source": source,
+    }
+
+
+def build_companion_runtime_flags() -> Dict[str, Dict[str, Any]]:
+    """Report the values loaded by the currently running process."""
+    flags: Dict[str, Dict[str, Any]] = {
+        "TORMENT_THINKING_ADVISORY": _runtime_flag_entry(
+            bool(_spine_module._THINKING_ADVISORY_ENABLE),
+            "import_time",
+            "torment_service.spine._THINKING_ADVISORY_ENABLE",
+        ),
+        "TORMENT_CONTEXTUAL_ABSTENTION": _runtime_flag_entry(
+            bool(_spine_module.contextual_abstention_enabled()),
+            "per_request",
+            "torment_service.spine.contextual_abstention_enabled()",
+        ),
+        "TORMENT_SQLITE_INDEX_ENABLE": _runtime_flag_entry(
+            bool(getattr(fabric, "_sqlite_enable", False)),
+            "service_start",
+            "torment_service.app.fabric._sqlite_enable",
+        ),
+        "TORMENT_COMPRESS_MIN_STEP": _runtime_flag_entry(
+            int(getattr(fabric, "_compress_min_step", 0)),
+            "service_start",
+            "torment_service.app.fabric._compress_min_step",
+        ),
+        "TORMENT_DATA_DIR": _runtime_flag_entry(
+            DATA_DIR,
+            "service_start",
+            "torment_service.app.DATA_DIR",
+        ),
+        "TORMENT_TEST_CONDITION": _runtime_flag_entry(
+            TEST_CONDITION,
+            "service_start",
+            "torment_service.app.TEST_CONDITION",
+        ),
+        "TORMENT_SERVER_LAUNCHER_PATH": _runtime_flag_entry(
+            SERVER_LAUNCHER_PATH,
+            "service_start",
+            "torment_service.app.SERVER_LAUNCHER_PATH",
+        ),
+    }
+    for env_name, attr_name in _THINKING_CONTROLLER_IMPORT_FLAGS.items():
+        flags[env_name] = _runtime_flag_entry(
+            bool(getattr(_thinking_controller_module, attr_name)),
+            "import_time",
+            f"torment_service.thinking_controller.{attr_name}",
+        )
+    return flags
 
 
 @app.get("/workspace/{workspace_id}/embed_audit")
@@ -155,13 +251,30 @@ class IngestReq(BaseModel):
     supplied_embedding: Optional[List[float]] = None
 
 
+class IngestRouteProbeReq(BaseModel):
+    workspace_id: str = Field(default="default")
+    agent_id: str
+    operation: str = Field(default="ingest")
+    text: str = Field(default="")
+    step: int = Field(default=0)
+    domain_id: Optional[str] = None
+    scope: str = Field(default="private")
+    supplied_summary: Optional[str] = None
+
+
 _AGENT_INGEST_SPINE_RESPONSE_FIELDS = (
+    "ok",
+    "allowed",
     "path",
     "escalated",
     "result_code",
     "decision_code",
+    "escalation_reasons",
 )
 _READ_ONLY_INGEST_RESULT_CODES = {"cognition", "no_op", "none"}
+_INGEST_READ_ONLY_FAILURE_REASON = (
+    "Explicit ingest resolved to read-only cognition path; no memory was written"
+)
 
 
 def _project_agent_ingest_response(resp: Any) -> Dict[str, Any]:
@@ -191,6 +304,11 @@ def _project_agent_ingest_response(resp: Any) -> Dict[str, Any]:
     ):
         projected["stored"] = False
         projected["reinforced"] = False
+        if bool(getattr(resp, "ok", False)):
+            projected["ok"] = False
+            projected["failure"] = True
+            projected["refused"] = True
+            projected.setdefault("reason", _INGEST_READ_ONLY_FAILURE_REASON)
 
     return projected
 
@@ -943,7 +1061,30 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
     if not resp.ok:
         status = resp.http_status if resp.http_status else 500
         raise HTTPException(status_code=status, detail=resp.reason)
-    return _project_agent_ingest_response(resp)
+    projected = _project_agent_ingest_response(resp)
+    if projected.get("failure") is True and projected.get("refused") is True:
+        raise HTTPException(status_code=409, detail=projected.get("reason", _INGEST_READ_ONLY_FAILURE_REASON))
+    return projected
+
+
+@app.post("/agent/ingest/route_probe")
+def ingest_route_probe(req: IngestRouteProbeReq, request: Request) -> Dict[str, Any]:
+    """Read-only route prediction for explicit ingest preflight."""
+    from .spine import SpineRequest, preview_route_decision
+    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    spine_req = SpineRequest(
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+        operation=req.operation,
+        payload={
+            "text": req.text,
+            "step": req.step,
+            "domain_id": req.domain_id,
+            "supplied_summary": req.supplied_summary,
+            "scope": req.scope,
+        },
+    )
+    return preview_route_decision(spine_req, fabric, ctx).to_dict()
 
 @app.post("/agent/query")
 def query(req: QueryReq) -> Dict[str, Any]:
@@ -2904,6 +3045,7 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
         "character_enable": fabric._character_enable,
         "checkpoint_enable": fabric._checkpoint_enable,
     }
+    result["companion_runtime_flags"] = build_companion_runtime_flags()
 
     # --- Workspace existence check ---
     ws = fabric.workspaces.get(workspace_id)

@@ -30,6 +30,7 @@ from torment_service.spine import (
     SpineRequest,
     SpineResponse,
     submit_task,
+    preview_route_decision,
     should_escalate,
     escalation_reasons,
     ESCALATION_IDENTITY_SENSITIVE,
@@ -59,6 +60,7 @@ from torment_service.spine import (
     get_exposed_operations,
 )
 from torment_service.fabric import TormentFabric
+from torment_service.character import CharacterState
 
 
 class TestSpineModels(unittest.TestCase):
@@ -115,17 +117,40 @@ class TestEscalationPolicy(unittest.TestCase):
         return RequestContext(client_id="test", trust_tier=trust,
                               workspace_id="ws1", agent_id="a1")
 
-    def test_identity_content_escalates(self):
-        self.assertTrue(should_escalate(
-            "ingest", {"text": "rewrite my identity seed"}, self._ctx()))
+    def test_identity_content_observed_for_ingest_but_does_not_redirect(self):
+        payload = {"text": "rewrite my identity seed"}
+        self.assertFalse(should_escalate("ingest", payload, self._ctx()))
+        self.assertIn(ESCALATION_IDENTITY_SENSITIVE, escalation_reasons("ingest", payload, self._ctx()))
 
-    def test_high_drift_escalates(self):
+    def test_negative_high_drift_escalates_general_operations(self):
         self.assertTrue(should_escalate(
-            "ingest", {"text": "hello"}, self._ctx(), drift_score=0.25))
+            "query_memory", {"query": "hello"}, self._ctx(trust=TRUST_OPERATOR), drift_score=-0.25))
+
+    def test_large_positive_aligned_drift_does_not_escalate(self):
+        self.assertFalse(should_escalate(
+            "query_memory", {"query": "hello"}, self._ctx(trust=TRUST_OPERATOR), drift_score=0.915931224822998))
+
+    def test_near_zero_drift_has_no_high_drift_reason(self):
+        reasons = escalation_reasons(
+            "query_memory", {"query": "hello"}, self._ctx(trust=TRUST_OPERATOR), drift_score=0.0
+        )
+        self.assertNotIn(ESCALATION_HIGH_DRIFT, reasons)
+
+    def test_moderate_negative_drift_has_no_high_drift_reason(self):
+        reasons = escalation_reasons(
+            "query_memory", {"query": "hello"}, self._ctx(trust=TRUST_OPERATOR), drift_score=-0.15
+        )
+        self.assertNotIn(ESCALATION_HIGH_DRIFT, reasons)
+
+    def test_negative_drift_beyond_threshold_has_high_drift_reason(self):
+        reasons = escalation_reasons(
+            "query_memory", {"query": "hello"}, self._ctx(trust=TRUST_OPERATOR), drift_score=-0.25
+        )
+        self.assertIn(ESCALATION_HIGH_DRIFT, reasons)
 
     def test_protected_memory_escalates(self):
         self.assertTrue(should_escalate(
-            "ingest", {"text": "x", "protected": True}, self._ctx()))
+            "query_memory", {"query": "x", "protected": True}, self._ctx(trust=TRUST_OPERATOR)))
 
     def test_normal_text_no_escalation(self):
         # Use trust well above minimum to avoid borderline trigger
@@ -147,6 +172,19 @@ class TestSpineEndToEnd(unittest.TestCase):
         self.fabric = TormentFabric(data_dir=self.tmp)
         self.fabric.get_workspace("ws1")
         self.fabric.create_agent("ws1", "atlas")
+
+    def _save_character_state(self, *, drift_score=0.0, drift_direction="stable", relational_count=0):
+        self.fabric.character_store.save_state(
+            "ws1",
+            CharacterState(
+                workspace_id="ws1",
+                agent_id="atlas",
+                seed_id="seed-test",
+                drift_score=drift_score,
+                drift_direction=drift_direction,
+                relational_count=relational_count,
+            ),
+        )
 
     # --- Trust enforcement ---
 
@@ -206,6 +244,107 @@ class TestSpineEndToEnd(unittest.TestCase):
         self.assertTrue(resp.ok)
         self.assertEqual(resp.path, "fast")
         self.assertFalse(resp.escalated)
+
+    def test_explicit_ingest_positive_aligned_drift_stays_write_capable(self):
+        self._save_character_state(
+            drift_score=0.915931224822998,
+            drift_direction="stable",
+            relational_count=22,
+        )
+        ctx = RequestContext(client_id="claude", trust_tier=TRUST_INGEST,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="ingest",
+            payload={"text": "Companion summary about a stable aligned turn.", "step": 9},
+            mode="auto",
+        )
+
+        route = preview_route_decision(req, self.fabric, ctx)
+        resp = submit_task(req, self.fabric, ctx)
+
+        self.assertTrue(route.write_capable)
+        self.assertEqual(route.predicted_path, PATH_FAST)
+        self.assertFalse(route.would_escalate)
+        self.assertTrue(resp.ok)
+        self.assertEqual(resp.path, PATH_FAST)
+        self.assertFalse(resp.escalated)
+        self.assertEqual(resp.result_code, RESULT_STORED)
+        self.assertIn("eid", resp.result)
+
+    def test_explicit_ingest_identity_words_do_not_become_read_only_success(self):
+        ctx = RequestContext(client_id="claude", trust_tier=TRUST_INGEST,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="ingest",
+            payload={"text": "Hilmir asked who am i and Eira answered from character identity seed.", "step": 10},
+            mode="auto",
+        )
+
+        resp = submit_task(req, self.fabric, ctx)
+
+        self.assertTrue(resp.ok)
+        self.assertEqual(resp.path, PATH_FAST)
+        self.assertFalse(resp.escalated)
+        self.assertEqual(resp.decision_code, DECISION_FAST_ALLOWED)
+        self.assertEqual(resp.result_code, RESULT_STORED)
+        self.assertIn(ESCALATION_IDENTITY_SENSITIVE, resp.escalation_reasons)
+        self.assertNotEqual(resp.result_code, "cognition")
+
+    def test_ingest_route_decision_exposes_suppressed_negative_drift_reason(self):
+        self._save_character_state(drift_score=-0.25, drift_direction="away_seed")
+        ctx = RequestContext(client_id="claude", trust_tier=TRUST_INGEST,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="ingest",
+            payload={"text": "memory under temporary away drift", "step": 11},
+            mode="auto",
+        )
+
+        route = preview_route_decision(req, self.fabric, ctx)
+
+        self.assertEqual(route.predicted_path, PATH_FAST)
+        self.assertTrue(route.write_capable)
+        self.assertFalse(route.would_escalate)
+        self.assertTrue(route.escalation_suppressed)
+        self.assertIn(ESCALATION_HIGH_DRIFT, route.escalation_reasons)
+
+    def test_query_memory_negative_drift_still_predicts_full_escalation(self):
+        self._save_character_state(drift_score=-0.25, drift_direction="away_seed")
+        ctx = RequestContext(client_id="viewer", trust_tier=TRUST_OPERATOR,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="query_memory",
+            payload={"query": "ordinary recall"},
+            mode="auto",
+        )
+
+        route = preview_route_decision(req, self.fabric, ctx)
+
+        self.assertEqual(route.predicted_path, PATH_FULL)
+        self.assertTrue(route.would_escalate)
+        self.assertFalse(route.write_capable)
+        self.assertIn(ESCALATION_HIGH_DRIFT, route.escalation_reasons)
+
+    def test_ingest_route_decision_hard_refusal_is_visible(self):
+        ctx = RequestContext(client_id="guest", trust_tier=TRUST_READ_ONLY,
+                             workspace_id="ws1", agent_id="atlas")
+        req = SpineRequest(
+            workspace_id="ws1", agent_id="atlas",
+            operation="ingest",
+            payload={"text": "unauthorized"},
+            mode="auto",
+        )
+
+        route = preview_route_decision(req, self.fabric, ctx)
+
+        self.assertFalse(route.ok)
+        self.assertTrue(route.would_refuse)
+        self.assertFalse(route.write_capable)
+        self.assertIn("Insufficient trust", route.refusal_reason)
 
     # --- Query State (fast path, read-only) ---
 
@@ -322,7 +461,7 @@ class TestEscalationReasonCodes(unittest.TestCase):
 
     def test_high_drift_reason_code(self):
         reasons = escalation_reasons(
-            "ingest", {"text": "hello"}, self._ctx(), drift_score=0.25)
+            "ingest", {"text": "hello"}, self._ctx(), drift_score=-0.25)
         self.assertIn(ESCALATION_HIGH_DRIFT, reasons)
 
     def test_protected_memory_reason_code(self):
@@ -341,7 +480,7 @@ class TestEscalationReasonCodes(unittest.TestCase):
             "ingest",
             {"text": "rewrite my identity seed", "protected": True},
             self._ctx(),
-            drift_score=0.30,
+            drift_score=-0.30,
         )
         self.assertIn(ESCALATION_IDENTITY_SENSITIVE, reasons)
         self.assertIn(ESCALATION_HIGH_DRIFT, reasons)
@@ -378,8 +517,8 @@ class TestSpineBlockedActions(unittest.TestCase):
         self.assertFalse(resp.ok)
         self.assertIn("Insufficient trust", resp.reason)
 
-    def test_escalation_reasons_in_response(self):
-        """Auto-escalated response should carry escalation_reasons list."""
+    def test_suppressed_ingest_escalation_reasons_in_response(self):
+        """Explicit ingest should carry observed reasons without route escalation."""
         ctx = RequestContext(client_id="claude", trust_tier=TRUST_INGEST,
                              workspace_id="ws1", agent_id="atlas")
         req = SpineRequest(
@@ -389,9 +528,9 @@ class TestSpineBlockedActions(unittest.TestCase):
             mode="auto",
         )
         resp = submit_task(req, self.fabric, ctx)
-        # Should succeed (escalated to full, which may or may not work fully,
-        # but escalation_reasons should be populated)
-        self.assertTrue(resp.escalated)
+        self.assertTrue(resp.ok)
+        self.assertEqual(resp.path, PATH_FAST)
+        self.assertFalse(resp.escalated)
         self.assertIn(ESCALATION_IDENTITY_SENSITIVE, resp.escalation_reasons)
 
     def test_non_escalated_has_empty_reasons(self):

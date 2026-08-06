@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from torment_service.request_context import RequestContext
 from torment_service.spine import SpineResponse
 
@@ -114,22 +117,38 @@ def test_agent_ingest_reinforced_response_is_distinct_from_new_store(monkeypatch
 
 
 def test_agent_ingest_escalated_handled_non_write_is_visible(monkeypatch):
-    payload, _captured, _fabric = _call_ingest(
-        monkeypatch,
+    with pytest.raises(HTTPException) as exc:
+        _call_ingest(
+            monkeypatch,
+            _response(
+                path="full",
+                escalated=True,
+                decision_code="escalated_full",
+                result_code="cognition",
+                result={"status": "handled"},
+            ),
+        )
+
+    assert exc.value.status_code == 409
+    assert "read-only cognition path" in str(exc.value.detail)
+
+
+def test_agent_ingest_projection_classifies_read_only_success_as_failure():
+    import torment_service.app as appmod
+
+    payload = appmod._project_agent_ingest_response(
         _response(
             path="full",
             escalated=True,
             decision_code="escalated_full",
             result_code="cognition",
             result={"status": "handled"},
-        ),
+        )
     )
 
-    assert payload["status"] == "handled"
-    assert payload["path"] == "full"
-    assert payload["escalated"] is True
-    assert payload["decision_code"] == "escalated_full"
-    assert payload["result_code"] == "cognition"
+    assert payload["ok"] is False
+    assert payload["failure"] is True
+    assert payload["refused"] is True
     assert payload["stored"] is False
     assert payload["reinforced"] is False
 

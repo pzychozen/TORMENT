@@ -69,9 +69,14 @@ def _resolve_capabilities() -> Optional[Dict[str, bool]]:
     the stance layer fully off.
     """
     caps: Dict[str, bool] = {}
-    if os.environ.get("TORMENT_CONTEXTUAL_ABSTENTION", "0").strip() == "1":
+    if contextual_abstention_enabled():
         caps["contextual_abstention"] = True
     return caps or None
+
+
+def contextual_abstention_enabled() -> bool:
+    """Return the per-request contextual-abstention flag used by advisory thinking."""
+    return os.environ.get("TORMENT_CONTEXTUAL_ABSTENTION", "0").strip() == "1"
 
 
 def _harvest_geometric_context(fabric, workspace_id: str, agent_id: str,
@@ -492,7 +497,10 @@ def should_escalate(
     Returns True if any escalation trigger fires.
     Use escalation_reasons() for structured reason codes.
     """
-    return len(escalation_reasons(operation, payload, ctx, drift_score, drift_direction)) > 0
+    return (
+        _auto_escalation_can_redirect(operation)
+        and len(escalation_reasons(operation, payload, ctx, drift_score, drift_direction)) > 0
+    )
 
 
 # Structured escalation reason codes
@@ -517,7 +525,7 @@ def escalation_reasons(
 
     Possible codes:
       - identity_sensitive:   payload touches seed/canon/identity keywords
-      - high_drift:           drift score exceeds 0.20 threshold
+      - high_drift:           drift score is below the -0.20 away-from-seed threshold
       - protected_memory:     protected or canon memory flag in payload
       - borderline_trust:     trust is within 0.1 of the required minimum
       - open_ended_request:   payload looks like open-ended reasoning (long text + question marks)
@@ -535,9 +543,9 @@ def escalation_reasons(
         logger.info("Escalating %s: identity-sensitive content detected", operation)
         reasons.append(ESCALATION_IDENTITY_SENSITIVE)
 
-    # Drift above threshold
-    if abs(drift_score) > 0.20:
-        logger.info("Escalating %s: drift_score=%.3f exceeds threshold", operation, drift_score)
+    # Negative drift is away-from-seed. Strong positive scores are aligned.
+    if drift_score < -0.20:
+        logger.info("Escalating %s: drift_score=%.3f is below threshold", operation, drift_score)
         reasons.append(ESCALATION_HIGH_DRIFT)
 
     # Protected memory in payload
@@ -646,10 +654,9 @@ class SpineResponse:
 
 def _classify_drift(drift_score: float) -> str:
     """Map numeric drift score to status label."""
-    abs_d = abs(drift_score)
-    if abs_d < 0.10:
+    if drift_score >= -0.10:
         return "green"
-    elif abs_d < 0.20:
+    elif drift_score >= -0.20:
         return "yellow"
     else:
         return "red"
@@ -1158,6 +1165,185 @@ def _audit_blocked(
 
 
 # ---------------------------------------------------------------------------
+# Shared route decision
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SpineRouteDecision:
+    """Read-only prediction of the route a SpineRequest will take."""
+
+    ok: bool
+    operation: str
+    predicted_path: str
+    write_capable: bool
+    would_escalate: bool
+    escalation_reasons: List[str] = field(default_factory=list)
+    would_refuse: bool = False
+    refusal_reason: str = ""
+    drift_score: float = 0.0
+    drift_direction: str = "stable"
+    relational_count: int = 0
+    drift_status: str = "green"
+    decision_code: str = ""
+    allowed: bool = True
+    trust_tier: float = 0.0
+    escalation_suppressed: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def _auto_escalation_can_redirect(operation: str) -> bool:
+    """Return whether ordinary auto-escalation may change this operation's path."""
+    return operation != "ingest"
+
+
+def _load_route_character_observables(fabric, workspace_id: str, agent_id: str) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "drift_score": 0.0,
+        "drift_direction": "stable",
+        "relational_count": 0,
+    }
+    try:
+        cstate = fabric.character_store.load_state(workspace_id, agent_id)
+    except Exception as e:
+        logger.debug("Failed to load drift state for route decision %s/%s: %s", workspace_id, agent_id, e)
+        return out
+    if cstate is None:
+        return out
+    try:
+        out["drift_score"] = float(cstate.drift_score)
+    except Exception:
+        out["drift_score"] = 0.0
+    out["drift_direction"] = str(getattr(cstate, "drift_direction", "") or "stable")
+    try:
+        out["relational_count"] = int(getattr(cstate, "relational_count", 0) or 0)
+    except Exception:
+        out["relational_count"] = 0
+    return out
+
+
+def preview_route_decision(
+    req: SpineRequest,
+    fabric,
+    ctx: RequestContext,
+) -> SpineRouteDecision:
+    """Predict routing without dispatching, ingesting, reinforcing, or mutating state."""
+    spec = OPERATION_REGISTRY.get(req.operation)
+    observables = _load_route_character_observables(fabric, req.workspace_id, req.agent_id)
+    drift_score = float(observables["drift_score"])
+    drift_direction = str(observables["drift_direction"])
+    relational_count = int(observables["relational_count"])
+    drift_status = _classify_drift(drift_score)
+
+    if spec is None:
+        return SpineRouteDecision(
+            ok=False,
+            operation=req.operation,
+            predicted_path="none",
+            write_capable=False,
+            would_escalate=False,
+            would_refuse=True,
+            refusal_reason=f"Unknown operation: {req.operation}",
+            drift_score=drift_score,
+            drift_direction=drift_direction,
+            relational_count=relational_count,
+            drift_status=drift_status,
+            decision_code=DECISION_BLOCKED_UNKNOWN_OP,
+            allowed=False,
+            trust_tier=ctx.trust_tier,
+        )
+
+    if ctx.trust_tier < spec.min_trust:
+        return SpineRouteDecision(
+            ok=False,
+            operation=req.operation,
+            predicted_path=spec.default_path,
+            write_capable=False,
+            would_escalate=False,
+            would_refuse=True,
+            refusal_reason=f"Insufficient trust: {ctx.trust_tier:.1f} < required {spec.min_trust:.1f}",
+            drift_score=drift_score,
+            drift_direction=drift_direction,
+            relational_count=relational_count,
+            drift_status=drift_status,
+            decision_code=DECISION_BLOCKED_TRUST,
+            allowed=False,
+            trust_tier=ctx.trust_tier,
+        )
+
+    if req.mode == MODE_FAST:
+        chosen_path = PATH_FAST
+    elif req.mode == MODE_FULL:
+        chosen_path = PATH_FULL
+    else:
+        chosen_path = spec.default_path
+
+    esc_reasons: List[str] = []
+    would_escalate = False
+    escalation_suppressed = False
+    if req.mode == MODE_AUTO and chosen_path == PATH_FAST and spec.can_escalate:
+        esc_reasons = escalation_reasons(req.operation, req.payload, ctx, drift_score, drift_direction)
+        if esc_reasons:
+            if _auto_escalation_can_redirect(req.operation):
+                chosen_path = PATH_FULL
+                would_escalate = True
+            else:
+                escalation_suppressed = True
+
+    if chosen_path == PATH_FAST and FAST_DISPATCH.get(req.operation) is None:
+        return SpineRouteDecision(
+            ok=False,
+            operation=req.operation,
+            predicted_path=PATH_FAST,
+            write_capable=False,
+            would_escalate=would_escalate,
+            escalation_reasons=list(esc_reasons),
+            would_refuse=True,
+            refusal_reason=f"No fast handler for operation: {req.operation}",
+            drift_score=drift_score,
+            drift_direction=drift_direction,
+            relational_count=relational_count,
+            drift_status=drift_status,
+            decision_code=DECISION_BLOCKED_NO_HANDLER,
+            allowed=True,
+            trust_tier=ctx.trust_tier,
+            escalation_suppressed=escalation_suppressed,
+        )
+
+    if would_escalate:
+        decision_code = DECISION_ESCALATED_FULL
+    elif chosen_path == PATH_FAST:
+        decision_code = DECISION_FAST_ALLOWED
+    else:
+        decision_code = DECISION_FULL_ALLOWED
+    write_capable = (
+        req.operation == "ingest"
+        and chosen_path == PATH_FAST
+        and FAST_DISPATCH.get(req.operation) is not None
+    )
+
+    return SpineRouteDecision(
+        ok=True,
+        operation=req.operation,
+        predicted_path=chosen_path,
+        write_capable=write_capable,
+        would_escalate=would_escalate,
+        escalation_reasons=list(esc_reasons),
+        would_refuse=False,
+        refusal_reason="",
+        drift_score=drift_score,
+        drift_direction=drift_direction,
+        relational_count=relational_count,
+        drift_status=drift_status,
+        decision_code=decision_code,
+        allowed=True,
+        trust_tier=ctx.trust_tier,
+        escalation_suppressed=escalation_suppressed,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1183,85 +1369,52 @@ def submit_task(
     """
     t0 = time.time()
 
-    # --- 1. Validate operation ---
-    spec = OPERATION_REGISTRY.get(req.operation)
-    if spec is None:
-        reason = f"Unknown operation: {req.operation}"
-        _audit_blocked(req, ctx, reason, "unknown_operation")
+    # --- 1-4. Validate, authorize and choose path ---
+    route_decision = preview_route_decision(req, fabric, ctx)
+    if route_decision.would_refuse:
+        block_code = {
+            DECISION_BLOCKED_UNKNOWN_OP: "unknown_operation",
+            DECISION_BLOCKED_TRUST: "insufficient_trust",
+            DECISION_BLOCKED_NO_HANDLER: "no_fast_handler",
+        }.get(route_decision.decision_code, "route_refused")
+        _audit_blocked(req, ctx, route_decision.refusal_reason, block_code)
         resp = SpineResponse(
-            ok=False, path="none", operation=req.operation,
-            allowed=False, workspace_id=req.workspace_id,
-            agent_id=req.agent_id, reason=reason,
-            decision_code=DECISION_BLOCKED_UNKNOWN_OP,
-            result_code=RESULT_NONE,
-            task_id=req.task_id,
-        )
-        log_spine_decision(resp, req, ctx)
-        return resp
-
-    # --- 2. Trust check ---
-    if ctx.trust_tier < spec.min_trust:
-        reason = f"Insufficient trust: {ctx.trust_tier:.1f} < required {spec.min_trust:.1f}"
-        _audit_blocked(req, ctx, reason, "insufficient_trust")
-        resp = SpineResponse(
-            ok=False, path=spec.default_path, operation=req.operation,
-            allowed=False, workspace_id=req.workspace_id,
-            agent_id=req.agent_id, trust_tier=ctx.trust_tier,
-            reason=reason,
-            decision_code=DECISION_BLOCKED_TRUST,
+            ok=False,
+            path=route_decision.predicted_path,
+            operation=req.operation,
+            allowed=route_decision.allowed,
+            workspace_id=req.workspace_id,
+            agent_id=req.agent_id,
+            trust_tier=ctx.trust_tier,
+            drift_status=route_decision.drift_status,
+            reason=route_decision.refusal_reason,
+            decision_code=route_decision.decision_code,
             result_code=RESULT_NONE,
             task_id=req.task_id,
             audit=ctx.to_audit_dict(),
+            escalation_reasons=list(route_decision.escalation_reasons),
         )
         log_spine_decision(resp, req, ctx)
         return resp
 
-    # --- 3. Determine path ---
-    if req.mode == MODE_FAST:
-        chosen_path = PATH_FAST
-    elif req.mode == MODE_FULL:
-        chosen_path = PATH_FULL
-    else:
-        # Auto: start with operation's default path
-        chosen_path = spec.default_path
+    spec = OPERATION_REGISTRY[req.operation]
+    chosen_path = route_decision.predicted_path
+    escalated = route_decision.would_escalate
+    esc_reasons = list(route_decision.escalation_reasons)
+    drift_status = route_decision.drift_status
 
-    # --- 4. Auto-escalation check ---
-    escalated = False
-    esc_reasons: List[str] = []
-    if req.mode == MODE_AUTO and chosen_path == PATH_FAST and spec.can_escalate:
-        # Load drift state for escalation decision
-        drift_score = 0.0
-        drift_direction = "stable"
-        try:
-            cstate = fabric.character_store.load_state(req.workspace_id, req.agent_id)
-            if cstate:
-                drift_score = float(cstate.drift_score)
-                drift_direction = str(cstate.drift_direction or "stable")
-        except Exception as e:
-            logger.debug("Failed to load drift state for escalation check %s/%s: %s", req.workspace_id, req.agent_id, e)
-
-        esc_reasons = escalation_reasons(req.operation, req.payload, ctx, drift_score, drift_direction)
-        if esc_reasons:
-            chosen_path = PATH_FULL
-            escalated = True
-            logger.info("Auto-escalated %s from fast→full for %s/%s (reasons: %s)",
-                        req.operation, req.workspace_id, req.agent_id, ", ".join(esc_reasons))
+    if escalated:
+        logger.info("Auto-escalated %s from fast->full for %s/%s (reasons: %s)",
+                    req.operation, req.workspace_id, req.agent_id, ", ".join(esc_reasons))
+    elif route_decision.escalation_suppressed and esc_reasons:
+        logger.info("Observed escalation reasons for explicit ingest without redirect for %s/%s (reasons: %s)",
+                    req.workspace_id, req.agent_id, ", ".join(esc_reasons))
 
     # --- 4b. Advisory thinking (observation only, never influences dispatch) ---
     advisory_text = str(req.payload.get("text", "") or req.payload.get("query", "") or req.payload.get("user_input", ""))
     _geo_ctx = _harvest_geometric_context(fabric, req.workspace_id, req.agent_id) if advisory_text else None
     advisory_thinking_result = _advisory_thinking(req.workspace_id, req.agent_id, advisory_text,
                                                   geometric_context=_geo_ctx) if advisory_text else None
-
-    # --- 5-6. Load drift for envelope ---
-    drift_score = 0.0
-    try:
-        cstate = fabric.character_store.load_state(req.workspace_id, req.agent_id)
-        if cstate:
-            drift_score = float(cstate.drift_score)
-    except Exception as e:
-        logger.debug("Failed to load drift state for envelope %s/%s: %s", req.workspace_id, req.agent_id, e)
-    drift_status = _classify_drift(drift_score)
 
     # --- 7. Dispatch ---
     try:
@@ -1388,7 +1541,7 @@ def submit_task(
         escalated=escalated,
         # NOTE: esc_reasons (the computed list from line ~1187), not
         # escalation_reasons (the module-level function with the same name).
-        escalation_reasons=list(esc_reasons) if escalated else [],
+        escalation_reasons=list(esc_reasons),
         elapsed_ms=elapsed,
     )
     log_spine_decision(resp, req, ctx)

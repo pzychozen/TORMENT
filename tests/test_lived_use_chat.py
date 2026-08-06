@@ -92,6 +92,109 @@ def _config():
     }
 
 
+def _runtime_flags(**overrides):
+    data_dir = r"C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\data\lived_use\eira_voss\a0"
+    flags = {
+        "TORMENT_THINKING_ADVISORY": {
+            "effective_value": True,
+            "read_timing": "import_time",
+            "source": "torment_service.spine._THINKING_ADVISORY_ENABLE",
+        },
+        "TORMENT_SPINE_ENABLE": {
+            "effective_value": True,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._SPINE_ENABLE",
+        },
+        "TORMENT_IDENTITY_SENSITIVE": {
+            "effective_value": True,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._IDENTITY_SENSITIVE_ENABLE",
+        },
+        "TORMENT_ARCHIVE_RECALL": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._ARCHIVE_RECALL_ENABLE",
+        },
+        "TORMENT_LIVE_SOCIAL": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._LIVE_SOCIAL_ENABLE",
+        },
+        "TORMENT_SRG_COGNITION": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._SRG_COGNITION_ENABLE",
+        },
+        "TORMENT_CONTEXTUAL_ABSTENTION": {
+            "effective_value": False,
+            "read_timing": "per_request",
+            "source": "torment_service.spine.contextual_abstention_enabled()",
+        },
+        "TORMENT_SQLITE_INDEX_ENABLE": {
+            "effective_value": True,
+            "read_timing": "service_start",
+            "source": "torment_service.app.fabric._sqlite_enable",
+        },
+        "TORMENT_COMPRESS_MIN_STEP": {
+            "effective_value": 60,
+            "read_timing": "service_start",
+            "source": "torment_service.app.fabric._compress_min_step",
+        },
+        "TORMENT_COGNITION_SHAPING_V2": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._COGNITION_SHAPING_V2_ENABLE",
+        },
+        "TORMENT_COGNITION_CORE_SHAPING_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._COGNITION_CORE_SHAPING_V1_ENABLE",
+        },
+        "TORMENT_GEOMETRIC_MEMORY_SHAPING_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._GEOMETRIC_MEMORY_SHAPING_V1_ENABLE",
+        },
+        "TORMENT_GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._GEOMETRIC_RELATIONAL_PROMINENCE_SHAPING_V1_ENABLE",
+        },
+        "TORMENT_RELATIONAL_AMBIGUITY_PROMINENCE_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._RELATIONAL_AMBIGUITY_PROMINENCE_V1_ENABLE",
+        },
+        "TORMENT_AMBIGUITY_CONTEXT_DIVERSITY_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._AMBIGUITY_CONTEXT_DIVERSITY_V1_ENABLE",
+        },
+        "TORMENT_PARTICIPATION_GUIDANCE_V1": {
+            "effective_value": False,
+            "read_timing": "import_time",
+            "source": "torment_service.thinking_controller._PARTICIPATION_GUIDANCE_V1_ENABLE",
+        },
+        "TORMENT_DATA_DIR": {
+            "effective_value": data_dir,
+            "read_timing": "service_start",
+            "source": "torment_service.app.DATA_DIR",
+        },
+        "TORMENT_TEST_CONDITION": {
+            "effective_value": "a0",
+            "read_timing": "service_start",
+            "source": "torment_service.app.TEST_CONDITION",
+        },
+        "TORMENT_SERVER_LAUNCHER_PATH": {
+            "effective_value": r"C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\examples\lived_use_a0_server.cmd",
+            "read_timing": "service_start",
+            "source": "torment_service.app.SERVER_LAUNCHER_PATH",
+        },
+    }
+    flags.update(overrides)
+    return flags
+
+
 def _metrics():
     return {
         "workspace_id": "default",
@@ -103,6 +206,7 @@ def _metrics():
             "character_enable": True,
             "checkpoint_enable": True,
         },
+        "companion_runtime_flags": _runtime_flags(),
         "agents": {
             luc.EXPECTED_AGENT_ID: {
                 "memory_count": 3,
@@ -192,6 +296,29 @@ def _recent(step=None, ok=True, malformed=False):
         ],
         "count": 1,
     }
+
+
+def _route_probe(**overrides):
+    data = {
+        "ok": True,
+        "operation": "ingest",
+        "predicted_path": "fast",
+        "write_capable": True,
+        "would_escalate": False,
+        "escalation_reasons": [],
+        "would_refuse": False,
+        "refusal_reason": "",
+        "drift_score": 0.02,
+        "drift_direction": "stable",
+        "relational_count": 2,
+        "drift_status": "green",
+        "decision_code": "fast_allowed",
+        "allowed": True,
+        "trust_tier": 1.0,
+        "escalation_suppressed": False,
+    }
+    data.update(overrides)
+    return data
 
 
 def _explain():
@@ -335,6 +462,7 @@ class FakeTorment:
         profiles=None,
         identity=None,
         recent=None,
+        route_probe=None,
         query_response=None,
         workspace_error=None,
         agent_error=None,
@@ -348,6 +476,7 @@ class FakeTorment:
         self.profiles_response = profiles if profiles is not None else _profiles()
         self.identity_response = identity if identity is not None else _identity()
         self.recent_response = recent if recent is not None else _recent()
+        self.route_probe_response = route_probe if route_probe is not None else _route_probe()
         self.query_response = query_response if query_response is not None else _query_response()
         self.workspace_error = workspace_error
         self.agent_error = agent_error
@@ -357,6 +486,7 @@ class FakeTorment:
         self.calls = []
         self.query_payloads = []
         self.ingest_payloads = []
+        self.route_probe_payloads = []
 
     def health(self):
         self.calls.append(("health", None))
@@ -396,6 +526,11 @@ class FakeTorment:
     def recent_index(self, workspace_id, agent_id, limit=1):
         self.calls.append(("recent_index", {"workspace_id": workspace_id, "agent_id": agent_id, "limit": limit}))
         return copy.deepcopy(self.recent_response)
+
+    def ingest_route_probe(self, payload):
+        self.calls.append(("ingest_route_probe", copy.deepcopy(payload)))
+        self.route_probe_payloads.append(copy.deepcopy(payload))
+        return copy.deepcopy(self.route_probe_response)
 
     def thinking_debug(self, payload):
         self.calls.append(("thinking_debug", copy.deepcopy(payload)))
@@ -463,7 +598,16 @@ class FakeProvider:
             input_tokens=11,
             output_tokens=7,
             thinking_tokens=None,
+            generation_parameters=self.generation_parameters(max_tokens),
         )
+
+    def generation_parameters(self, max_tokens):
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "max_tokens": int(max_tokens),
+            "random_seed_supported": False,
+        }
 
 
 class FakeMessages:
@@ -505,6 +649,173 @@ class FakeHttpPost:
             }
         )
         return FakeHttpResponse(self.payload)
+
+
+class FakeQwenTokenTensor:
+    def __init__(self, rows):
+        self.rows = [list(row) for row in rows]
+        self.shape = (len(self.rows), len(self.rows[0]) if self.rows else 0)
+        self.to_devices = []
+
+    def to(self, device):
+        self.to_devices.append(device)
+        return self
+
+    def tolist(self):
+        return copy.deepcopy(self.rows)
+
+
+class FakeQwenParam:
+    def __init__(self, is_cuda):
+        self.is_cuda = bool(is_cuda)
+        self.device = "cuda:0" if is_cuda else "cpu"
+
+
+class FakeQwenInferenceMode:
+    def __init__(self, state):
+        self.state = state
+
+    def __enter__(self):
+        self.state["inference_entries"] += 1
+
+    def __exit__(self, exc_type, exc, tb):
+        self.state["inference_exits"] += 1
+        return False
+
+
+class FakeQwenCuda:
+    def __init__(self, available):
+        self._available = bool(available)
+        self.seed_all_calls = []
+
+    def is_available(self):
+        return self._available
+
+    def manual_seed_all(self, seed):
+        self.seed_all_calls.append(seed)
+
+
+class FakeQwenTorch:
+    bfloat16 = "fake-bfloat16"
+
+    def __init__(self, state, cuda_available=True):
+        self.state = state
+        self.cuda = FakeQwenCuda(cuda_available)
+
+    def inference_mode(self):
+        return FakeQwenInferenceMode(self.state)
+
+    def manual_seed(self, seed):
+        self.state["manual_seed_calls"].append(seed)
+
+
+def _fake_qwen_components(
+    *,
+    cuda_available=True,
+    input_ids=None,
+    output_ids=None,
+    decode_text="visible qwen answer",
+    eos_token_id=99,
+    pad_token_id=None,
+    generation_eos_token_id=None,
+    generation_pad_token_id=None,
+    param_on_cuda=True,
+    return_mapping=False,
+):
+    state = {
+        "tokenizer_loads": [],
+        "model_loads": [],
+        "template_calls": [],
+        "decode_calls": [],
+        "generate_calls": [],
+        "model_to_devices": [],
+        "eval_calls": 0,
+        "inference_entries": 0,
+        "inference_exits": 0,
+        "input_tensor": None,
+        "manual_seed_calls": [],
+    }
+    input_ids = list(input_ids if input_ids is not None else [10, 11, 12])
+    output_ids = list(output_ids if output_ids is not None else input_ids + [21, eos_token_id])
+    torch_module = FakeQwenTorch(state, cuda_available=cuda_available)
+    fake_eos_token_id = eos_token_id
+    fake_pad_token_id = pad_token_id
+    fake_generation_eos_token_id = generation_eos_token_id
+    fake_generation_pad_token_id = generation_pad_token_id
+
+    class FakeQwenTokenizer:
+        eos_token_id = fake_eos_token_id
+        pad_token_id = fake_pad_token_id
+
+        @classmethod
+        def from_pretrained(cls, path, **kwargs):
+            state["tokenizer_loads"].append({"path": path, "kwargs": copy.deepcopy(kwargs)})
+            return cls()
+
+        def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, return_tensors):
+            state["template_calls"].append(
+                {
+                    "messages": copy.deepcopy(messages),
+                    "tokenize": tokenize,
+                    "add_generation_prompt": add_generation_prompt,
+                    "return_tensors": return_tensors,
+                }
+            )
+            state["input_tensor"] = FakeQwenTokenTensor([input_ids])
+            if return_mapping:
+                return {
+                    "input_ids": state["input_tensor"],
+                    "attention_mask": FakeQwenTokenTensor([[1 for _token in input_ids]]),
+                }
+            return state["input_tensor"]
+
+        def decode(self, token_ids, *, skip_special_tokens):
+            state["decode_calls"].append(
+                {
+                    "token_ids": list(token_ids),
+                    "skip_special_tokens": skip_special_tokens,
+                }
+            )
+            return decode_text
+
+    class FakeQwenModel:
+        config = types.SimpleNamespace(eos_token_id=fake_eos_token_id, pad_token_id=fake_pad_token_id)
+        generation_config = types.SimpleNamespace(
+            eos_token_id=fake_generation_eos_token_id,
+            pad_token_id=fake_generation_pad_token_id,
+        )
+
+        @classmethod
+        def from_pretrained(cls, path, **kwargs):
+            state["model_loads"].append({"path": path, "kwargs": copy.deepcopy(kwargs)})
+            return cls()
+
+        def __init__(self):
+            self.on_cuda = False
+
+        def to(self, device):
+            state["model_to_devices"].append(device)
+            self.on_cuda = str(device).startswith("cuda")
+            return self
+
+        def eval(self):
+            state["eval_calls"] += 1
+            return self
+
+        def parameters(self):
+            return iter([FakeQwenParam(param_on_cuda and self.on_cuda)])
+
+        def generate(self, *args, **kwargs):
+            state["generate_calls"].append(
+                {
+                    "args": list(args),
+                    "input_ids": args[0] if args else kwargs.get("input_ids"),
+                    "kwargs": copy.deepcopy(kwargs),
+                }
+            )
+            return FakeQwenTokenTensor([output_ids])
+
+    return state, torch_module, FakeQwenTokenizer, FakeQwenModel
 
 
 def _anthropic_response(content, stop_reason="end_turn", input_tokens=5, output_tokens=3, thinking_tokens=None):
@@ -772,6 +1083,344 @@ def test_chat_completions_success_captures_finish_reason_and_tokens():
     assert result.thinking_tokens == 2
 
 
+def test_local_qwen_provider_factory_success_and_env_capture_allowlist():
+    with tempfile.TemporaryDirectory() as tmp:
+        provider = luc.build_provider_from_env(
+            {
+                "TORMENT_CHAT_PROVIDER": "local_qwen",
+                "TORMENT_CHAT_MODEL": "Qwen3-4B-Instruct-2507",
+                "TORMENT_CHAT_MODEL_PATH": tmp,
+                "TORMENT_CHAT_SEED": "12345",
+            }
+        )
+        captured = luc.filtered_torment_env(
+            {
+                "TORMENT_CHAT_PROVIDER": "local_qwen",
+                "TORMENT_CHAT_MODEL": "Qwen3-4B-Instruct-2507",
+                "TORMENT_CHAT_MODEL_PATH": tmp,
+                "TORMENT_CHAT_API_KEY": "do-not-capture",
+            }
+        )
+        assert isinstance(provider, luc.LocalQwenProvider)
+        assert provider.name == "local_qwen"
+        assert provider.model == "Qwen3-4B-Instruct-2507"
+        assert provider.model_path.is_dir()
+        assert provider.do_sample is True
+        assert provider.seed == 12345
+        assert captured["TORMENT_CHAT_MODEL_PATH"] == tmp
+        assert "TORMENT_CHAT_API_KEY" not in captured
+
+
+def test_local_qwen_provider_factory_accepts_explicit_greedy_override():
+    with tempfile.TemporaryDirectory() as tmp:
+        provider = luc.build_provider_from_env(
+            {
+                "TORMENT_CHAT_PROVIDER": "local_qwen",
+                "TORMENT_CHAT_MODEL": "Qwen3-4B-Instruct-2507",
+                "TORMENT_CHAT_MODEL_PATH": tmp,
+                "TORMENT_CHAT_QWEN_GREEDY": "1",
+            }
+        )
+
+        assert isinstance(provider, luc.LocalQwenProvider)
+        assert provider.do_sample is False
+        assert provider.seed == luc.DEFAULT_QWEN_SEED
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"TORMENT_CHAT_PROVIDER": "local_qwen", "TORMENT_CHAT_MODEL": "m"},
+        {
+            "TORMENT_CHAT_PROVIDER": "local_qwen",
+            "TORMENT_CHAT_MODEL": "m",
+            "TORMENT_CHAT_MODEL_PATH": r"C:\definitely\missing\torment\qwen",
+        },
+    ],
+)
+def test_local_qwen_provider_factory_rejects_missing_or_nonexistent_model_path(env):
+    with pytest.raises(luc.ProviderConfigError):
+        luc.build_provider_from_env(env)
+
+
+def test_local_qwen_provider_construction_performs_no_heavy_model_load():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+    assert provider.name == "local_qwen"
+    assert provider.model == "qwen-test"
+    assert state["tokenizer_loads"] == []
+    assert state["model_loads"] == []
+    assert state["generate_calls"] == []
+    assert not provider.loaded
+
+
+def test_local_qwen_first_generate_lazily_loads_once_and_later_turns_reuse_runtime():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        first = provider.generate(system_prompt="sys", messages=[{"role": "user", "content": "one"}], max_tokens=8)
+        second = provider.generate(system_prompt="sys", messages=[{"role": "user", "content": "two"}], max_tokens=8)
+
+    assert first.text == "visible qwen answer"
+    assert second.text == "visible qwen answer"
+    assert len(state["tokenizer_loads"]) == 1
+    assert len(state["model_loads"]) == 1
+    assert len(state["generate_calls"]) == 2
+    assert state["eval_calls"] == 1
+    assert provider.loaded
+
+
+def test_local_qwen_uses_local_files_only_bfloat16_cuda_and_inference_mode():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    assert state["tokenizer_loads"][0]["kwargs"] == {"local_files_only": True}
+    assert state["model_loads"][0]["kwargs"] == {
+        "local_files_only": True,
+        "dtype": "fake-bfloat16",
+    }
+    assert state["model_to_devices"] == ["cuda"]
+    assert state["input_tensor"].to_devices == ["cuda"]
+    assert state["inference_entries"] == 1
+    assert state["inference_exits"] == 1
+    kwargs = state["generate_calls"][0]["kwargs"]
+    assert kwargs["do_sample"] is True
+    assert kwargs["temperature"] == pytest.approx(0.7)
+    assert kwargs["top_p"] == pytest.approx(0.8)
+    assert kwargs["top_k"] == 20
+    assert kwargs["min_p"] == pytest.approx(0.0)
+    assert state["manual_seed_calls"] == [luc.DEFAULT_QWEN_SEED]
+    assert torch_module.cuda.seed_all_calls == [luc.DEFAULT_QWEN_SEED]
+
+
+def test_local_qwen_explicit_greedy_override_disables_sampling_params():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            do_sample=False,
+            seed=77,
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    kwargs = state["generate_calls"][0]["kwargs"]
+    assert kwargs["do_sample"] is False
+    assert "temperature" not in kwargs
+    assert "top_p" not in kwargs
+    assert "top_k" not in kwargs
+    assert "min_p" not in kwargs
+    assert state["manual_seed_calls"] == [77]
+    assert result.generation_parameters["greedy_override"] is True
+    assert result.generation_parameters["seed"] == 77
+
+
+def test_local_qwen_accepts_mapping_outputs_from_chat_template():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(return_mapping=True)
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    call = state["generate_calls"][0]
+    assert call["args"] == []
+    assert call["input_ids"] is state["input_tensor"]
+    assert call["kwargs"]["attention_mask"].to_devices == ["cuda"]
+    assert result.input_tokens == 3
+    assert result.visible_text_present
+
+
+def test_local_qwen_cuda_unavailable_fails_closed_without_cpu_fallback_or_model_load():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(cuda_available=False)
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        with pytest.raises(luc.ProviderError) as exc:
+            provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    assert "CUDA is unavailable" in str(exc.value)
+    assert state["tokenizer_loads"] == []
+    assert state["model_loads"] == []
+    assert state["model_to_devices"] == []
+
+
+def test_local_qwen_exact_system_message_and_history_are_passed_to_chat_template():
+    messages = [
+        {"role": "user", "content": "first exact user text"},
+        {"role": "assistant", "content": "first exact assistant text"},
+        {"role": "user", "content": "second exact user text"},
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        provider.generate(system_prompt="exact rendered system prompt", messages=messages, max_tokens=8)
+
+    assert state["template_calls"][0] == {
+        "messages": [{"role": "system", "content": "exact rendered system prompt"}] + messages,
+        "tokenize": True,
+        "add_generation_prompt": True,
+        "return_tensors": "pt",
+    }
+
+
+def test_local_qwen_decodes_only_new_tokens_and_reports_token_counts_with_eos_stop():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(
+            input_ids=[101, 102, 103, 104],
+            output_ids=[101, 102, 103, 104, 201, 202, 99],
+            decode_text="decoded continuation",
+        )
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    assert state["decode_calls"] == [{"token_ids": [201, 202, 99], "skip_special_tokens": True}]
+    assert result.text == "decoded continuation"
+    assert result.stop_reason == "stop"
+    assert result.content_block_types == ["text"]
+    assert result.input_tokens == 4
+    assert result.output_tokens == 3
+    assert result.thinking_tokens is None
+
+
+def test_local_qwen_uses_all_tokenizer_model_and_generation_config_eos_ids():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(
+            input_ids=[1, 2],
+            output_ids=[1, 2, 31, 100],
+            eos_token_id=99,
+            generation_eos_token_id=[100, 101],
+            decode_text="stopped on alternate eos",
+        )
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    assert state["generate_calls"][0]["kwargs"]["eos_token_id"] == [99, 100, 101]
+    assert result.stop_reason == "stop"
+    assert result.generation_parameters["eos_token_ids"] == [99, 100, 101]
+
+
+def test_local_qwen_token_limit_exhaustion_is_represented_honestly():
+    with tempfile.TemporaryDirectory() as tmp:
+        _state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(
+            input_ids=[1, 2],
+            output_ids=[1, 2, 31, 32],
+            decode_text="partial continuation",
+        )
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=2)
+
+    assert result.text == "partial continuation"
+    assert result.stop_reason == "length"
+    assert result.output_tokens == 2
+
+
+def test_local_qwen_token_cap_boundary_reports_length_even_with_eos():
+    with tempfile.TemporaryDirectory() as tmp:
+        _state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(
+            input_ids=[1, 2],
+            output_ids=[1, 2, 31, 99],
+            decode_text="cap boundary eos",
+        )
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        result = provider.generate(system_prompt="sys", messages=[], max_tokens=2)
+
+    assert result.stop_reason == "length"
+    assert result.output_tokens == 2
+
+
+def test_local_qwen_visible_empty_output_is_rejected_through_existing_semantics():
+    with tempfile.TemporaryDirectory() as tmp:
+        _state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components(decode_text=" \n\t ")
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+
+        with pytest.raises(luc.ProviderResponseError) as exc:
+            provider.generate(system_prompt="sys", messages=[], max_tokens=8)
+
+    assert exc.value.result.visible_text_present is False
+    assert exc.value.result.content_block_types == []
+
+
 def test_provider_response_failure_does_not_append_history_or_ingest():
     bad = luc.ProviderResult(text="", stop_reason="end_turn", content_block_types=["thinking"])
     session, torment, provider = _preflighted(provider=FakeProvider(error=luc.ProviderResponseError("empty", bad)))
@@ -832,6 +1481,7 @@ def test_successful_provider_result_metadata_is_captured():
         input_tokens=10,
         output_tokens=6,
         thinking_tokens=3,
+        generation_parameters={"provider": "anthropic", "model": "test-model", "max_tokens": 8},
     )
     session, _torment, _provider = _preflighted(provider=FakeProvider(result=result), recorder=recorder)
 
@@ -846,6 +1496,7 @@ def test_successful_provider_result_metadata_is_captured():
         "output_tokens": 6,
         "thinking_tokens": 3,
         "visible_text_present": True,
+        "generation_parameters": {"provider": "anthropic", "model": "test-model", "max_tokens": 8},
     }
 
 
@@ -897,7 +1548,7 @@ def test_repeated_successful_idempotent_creation_is_accepted_before_first_query(
     session.run_turn("hello")
 
     names = _call_names(torment)
-    assert names[:8] == [
+    assert names[:9] == [
         "health",
         "config",
         "debug_metrics",
@@ -906,6 +1557,7 @@ def test_repeated_successful_idempotent_creation_is_accepted_before_first_query(
         "agent_create",
         "agent_identity",
         "recent_index",
+        "ingest_route_probe",
     ]
     assert names.index("workspace_create") < names.index("query")
     assert names.index("agent_create") < names.index("query")
@@ -950,6 +1602,125 @@ def test_existing_recent_step_17_next_ingest_uses_18():
     assert outcome.ok
     assert torment.ingest_payloads[0]["step"] == 18
     assert session.current_step == 18
+
+
+def test_preflight_route_probe_verifies_write_path_before_turn(capsys):
+    recorder = MemoryRecorder()
+    session, torment, provider = _preflighted(torment=FakeTorment(recent=_recent(17)), recorder=recorder)
+
+    captured = capsys.readouterr()
+    assert "INGEST_WRITE_PATH_VERIFIED" in captured.out
+    assert "predicted_path=fast" in captured.out
+    assert provider.calls == []
+    assert torment.route_probe_payloads == [
+        {
+            "workspace_id": luc.EXPECTED_WORKSPACE_ID,
+            "agent_id": luc.EXPECTED_AGENT_ID,
+            "text": "A0 preflight representative companion summary.",
+            "step": 18,
+            "domain_id": luc.EXPECTED_DOMAIN,
+            "scope": "private",
+            "operation": "ingest",
+        }
+    ]
+    preflight = _events_of(recorder, "preflight")[-1]
+    assert preflight["runtime_parity_verified"] is True
+    assert preflight["ingest_route_probe"]["write_capable"] is True
+    assert preflight["provider_generation_parameters"]["provider"] == provider.name
+
+
+def test_preflight_write_dead_route_fails_closed_before_provider(capsys):
+    recorder = MemoryRecorder()
+    torment = FakeTorment(
+        route_probe=_route_probe(
+            predicted_path="full",
+            write_capable=False,
+            would_escalate=True,
+            escalation_reasons=["high_drift"],
+            decision_code="escalated_full",
+        )
+    )
+    provider = FakeProvider()
+    session = _session(torment=torment, provider=provider, recorder=recorder)
+
+    with pytest.raises(luc.PreflightError):
+        session.preflight()
+
+    captured = capsys.readouterr()
+    assert "INGEST_WRITE_PATH_NOT_AVAILABLE" in captured.out
+    assert "predicted_path=full" in captured.out
+    assert provider.calls == []
+    assert "query" not in _call_names(torment)
+    preflight = _events_of(recorder, "preflight")[-1]
+    assert preflight["failure_stage"] == "ingest_route_probe"
+    assert preflight["runtime_parity_verified"] is False
+
+
+def test_preflight_non_writing_override_is_explicit_and_captured(capsys):
+    recorder = MemoryRecorder()
+    torment = FakeTorment(route_probe=_route_probe(predicted_path="full", write_capable=False))
+    session = _session(
+        torment=torment,
+        provider=FakeProvider(),
+        recorder=recorder,
+        environ={},
+    )
+    session.allow_non_writing_basin = True
+
+    record = session.preflight()
+
+    captured = capsys.readouterr()
+    assert "WARNING: --allow-non-writing-basin" in captured.out
+    assert record["ok"] is True
+    assert record["runtime_parity_verified"] is False
+    assert record["non_writing_basin_override"] is True
+    assert session.preflight_ok is True
+
+
+def test_preflight_condition_and_data_dir_mismatch_fail_closed_before_provider():
+    metrics = _metrics()
+    metrics["companion_runtime_flags"] = _runtime_flags(
+        TORMENT_TEST_CONDITION={
+            "effective_value": "a1_core_shaping",
+            "read_timing": "service_start",
+            "source": "torment_service.app.TEST_CONDITION",
+        }
+    )
+    environ = {
+        "TORMENT_TEST_CONDITION": "provider_qwen3_4b_a0",
+        "TORMENT_EXPECTED_DATA_DIR": r"C:\different\data\dir",
+    }
+    provider = FakeProvider()
+    session = _session(torment=FakeTorment(metrics=metrics), provider=provider, environ=environ)
+
+    with pytest.raises(luc.PreflightError):
+        session.preflight()
+
+    assert provider.calls == []
+
+
+def test_local_qwen_model_not_loaded_before_failed_route_preflight():
+    with tempfile.TemporaryDirectory() as tmp:
+        state, torch_module, tokenizer_cls, model_cls = _fake_qwen_components()
+        provider = luc.LocalQwenProvider(
+            model="qwen-test",
+            model_path=Path(tmp),
+            torch_module=torch_module,
+            tokenizer_cls=tokenizer_cls,
+            model_cls=model_cls,
+        )
+        session = _session(
+            torment=FakeTorment(route_probe=_route_probe(predicted_path="full", write_capable=False)),
+            provider=provider,
+        )
+
+        with pytest.raises(luc.PreflightError):
+            session.preflight()
+
+    assert state["tokenizer_loads"] == []
+    assert state["model_loads"] == []
+    assert state["generate_calls"] == []
+    assert not provider.loaded
 
 
 def test_a0_stored_ingest_capture_retains_safe_outcome_metadata():
@@ -1259,6 +2030,77 @@ def test_prompt_uses_torment_seed_preamble_but_not_local_seed_text():
     assert _character().seed_text not in system_prompt
 
 
+def test_stable_positive_drift_prompt_uses_alignment_label_not_raw_drift():
+    query_response = _query_response()
+    query_response["character_context"]["drift_score"] = 0.915931224822998
+    query_response["character_context"]["drift_direction"] = "stable"
+    query_response["character_context"]["drift_summary"] = "Character is well-centered near seed basin."
+    query_response["character_context"]["recommendations"] = [
+        "Character is well-centered. Maintain current voice."
+    ]
+    session, _torment, provider = _preflighted(torment=FakeTorment(query_response=query_response))
+
+    session.run_turn("prompt coherence")
+    system_prompt = provider.calls[0]["system_prompt"]
+
+    assert "Character is well-centered" in system_prompt
+    assert "[Alignment: +0.92]" in system_prompt
+    assert "[Drift: +0.92]" not in system_prompt
+
+
+@pytest.mark.parametrize("direction", ["stable", "toward_seed", "away_seed"])
+def test_positive_signed_drift_scores_use_alignment_label(direction):
+    summary = "Server reports the character remains close to the seed basin."
+
+    note = luc.format_drift_note(
+        {
+            "drift_score": 0.8,
+            "drift_direction": direction,
+            "drift_summary": summary,
+        }
+    )
+
+    assert note == f"[Alignment: +0.80] {summary}"
+    assert "[Drift:" not in note
+
+
+@pytest.mark.parametrize("direction", ["stable", "away_seed", "toward_seed"])
+def test_negative_signed_drift_scores_use_drift_label(direction):
+    summary = "Significant drift detected; server explanation must remain visible."
+
+    note = luc.format_drift_note(
+        {
+            "drift_score": -0.8,
+            "drift_direction": direction,
+            "drift_summary": summary,
+            "recommendations": ["Character is well-centered. Maintain current voice."],
+        }
+    )
+
+    assert note == f"[Drift: -0.80 {direction}] {summary}"
+    assert "[Alignment:" not in note
+
+
+def test_near_zero_drift_without_summary_is_omitted():
+    assert luc.format_drift_note({"drift_score": 0.03, "drift_direction": "stable"}) == ""
+
+
+def test_near_zero_drift_with_summary_preserves_summary_without_label():
+    summary = "Recent movement is flat, but the server included a useful caveat."
+
+    note = luc.format_drift_note(
+        {
+            "drift_score": -0.03,
+            "drift_direction": "stable",
+            "drift_summary": summary,
+        }
+    )
+
+    assert note == summary
+    assert "[Alignment:" not in note
+    assert "[Drift:" not in note
+
+
 def test_query_diagnostics_are_requested_and_captured_with_real_keys():
     recorder = MemoryRecorder()
     session, torment, _provider = _preflighted(recorder=recorder)
@@ -1299,7 +2141,7 @@ def test_preflight_endpoint_allowlists_match_production_shapes():
     assert health["embedder_error"] == ""
 
     metrics = preflight["metrics"]
-    assert set(["workspace_id", "agent_id", "features", "agents", "domains", "collective"]).issubset(metrics)
+    assert set(["workspace_id", "agent_id", "features", "companion_runtime_flags", "agents", "domains", "collective"]).issubset(metrics)
     assert metrics["features"] == {
         "compress_enable": False,
         "hivemind_enable": False,
@@ -1310,6 +2152,8 @@ def test_preflight_endpoint_allowlists_match_production_shapes():
     assert "counts" not in metrics
     assert "memory" not in metrics
     assert "requests" not in metrics
+    assert "TORMENT_COGNITION_CORE_SHAPING_V1" in metrics["companion_runtime_flags"]
+    assert metrics["companion_runtime_flags"]["TORMENT_COGNITION_CORE_SHAPING_V1"]["read_timing"] == "import_time"
 
     config = preflight["config"]
     assert "TORMENT_DATA_DIR" in config["effective"]
@@ -1322,6 +2166,23 @@ def test_preflight_endpoint_allowlists_match_production_shapes():
     assert "TORMENT_ROLE_ENABLE" in config["effective"]
     assert "TORMENT_THREAD_WINDOW_STEPS" in config["effective"]
     assert "UNRELATED" not in config["effective"]
+
+
+def test_session_and_preflight_capture_include_runtime_provenance_without_diffs():
+    recorder = MemoryRecorder()
+    _preflighted(recorder=recorder)
+
+    start = _events_of(recorder, "session_start")[0]
+    preflight = _events_of(recorder, "preflight")[-1]
+    assert start["client_provenance"]["git"]["head"]
+    assert isinstance(start["client_provenance"]["git"]["dirty_paths"], list)
+    assert start["client_provenance"]["client_file_sha256"]["sha256"]
+    assert start["client_provenance"]["character_yaml_sha256"]["sha256"]
+    assert "diff" not in start["client_provenance"]["git"]
+    assert preflight["server_data_directory"]
+    assert preflight["runtime_flags"]["TORMENT_DATA_DIR"]["effective_value"]
+    assert preflight["ingest_route_probe"]["write_capable"] is True
+    assert preflight["provider_generation_parameters"]["max_tokens"] == luc.DEFAULT_MAX_TOKENS
 
 
 def test_capture_disabled_and_enabled_leave_requests_and_provider_inputs_identical():
@@ -1537,6 +2398,20 @@ def test_provider_can_be_constructed_before_preflight_but_not_invoked():
     assert provider.calls == []
 
 
+def test_anthropic_request_not_sent_before_failed_route_preflight():
+    sdk = FakeAnthropicSdk(_anthropic_response([types.SimpleNamespace(type="text", text="ok")]))
+    provider = luc.AnthropicProvider("secret", "claude-test", sdk_client=sdk)
+    session = _session(
+        torment=FakeTorment(route_probe=_route_probe(predicted_path="full", write_capable=False)),
+        provider=provider,
+    )
+
+    with pytest.raises(luc.PreflightError):
+        session.preflight()
+
+    assert sdk.messages.calls == []
+
+
 def test_provider_model_changes_affect_metadata_only_not_torment_contract():
     def run(provider):
         torment = FakeTorment()
@@ -1556,6 +2431,51 @@ def test_provider_model_changes_affect_metadata_only_not_torment_contract():
     assert start_b["provider"] == "openrouter"
     assert start_a["model"] == "m-a"
     assert start_b["model"] == "m-b"
+
+
+def test_qwen_a0_server_launcher_preserves_a0_feature_boundary():
+    a0_lines = (ROOT / "examples" / "lived_use_a0_server.cmd").read_text(encoding="utf-8").splitlines()
+    qwen_lines = (ROOT / "examples" / "lived_use_qwen3_4b_a0_server.cmd").read_text(encoding="utf-8").splitlines()
+    normalized_qwen = [
+        line.replace(r"provider_qwen3_4b_a0", "a0").replace(
+            "lived_use_qwen3_4b_a0_server.cmd", "lived_use_a0_server.cmd"
+        )
+        for line in qwen_lines
+    ]
+
+    assert normalized_qwen == a0_lines
+    assert r"set TORMENT_DATA_DIR=%CD%\data\lived_use\eira_voss\provider_qwen3_4b_a0" in qwen_lines
+    assert "set TORMENT_TEST_CONDITION=provider_qwen3_4b_a0" in qwen_lines
+    assert "set TORMENT_SERVER_LAUNCHER_PATH=%CD%\\examples\\lived_use_qwen3_4b_a0_server.cmd" in qwen_lines
+    assert "set TORMENT_COGNITION_CORE_SHAPING_V1=0" in qwen_lines
+    assert "set TORMENT_COMPRESS_ENABLE=0" in qwen_lines
+    assert "set TORMENT_ARCHIVE_RECALL=0" in qwen_lines
+    assert "set TORMENT_CONTEXTUAL_ABSTENTION=0" in qwen_lines
+    assert "set TORMENT_SRG_ENABLE=0" in qwen_lines
+    assert "set TORMENT_SRG_COGNITION=0" in qwen_lines
+    assert "set TORMENT_HIVEMIND_ENABLE=0" in qwen_lines
+
+
+def test_qwen_chat_launcher_selects_direct_local_provider_without_starting_service():
+    text = (ROOT / "examples" / "lived_use_qwen3_4b_chat.cmd").read_text(encoding="utf-8")
+
+    assert 'cd /d "%~dp0\\.."' in text
+    assert "set TORMENT_CHAT_PROVIDER=local_qwen" in text
+    assert "set TORMENT_CHAT_MODEL=Qwen3-4B-Instruct-2507" in text
+    assert "set TORMENT_CHAT_SEED=20260805" in text
+    assert "set TORMENT_CHAT_QWEN_GREEDY=0" in text
+    assert "set TORMENT_TEST_CONDITION=provider_qwen3_4b_a0" in text
+    assert r"set TORMENT_EXPECTED_DATA_DIR=%CD%\data\lived_use\eira_voss\provider_qwen3_4b_a0" in text
+    assert "set TORMENT_SERVER_LAUNCHER_PATH=%CD%\\examples\\lived_use_qwen3_4b_a0_server.cmd" in text
+    assert (
+        "set TORMENT_CHAT_MODEL_PATH="
+        r"C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\models\qwen3_4b_instruct_2507"
+    ) in text
+    assert (
+        r'"C:\Users\Notandi\miniconda3\envs\torment-qwen\python.exe" '
+        r"examples\lived_use_chat.py --capture --top-k 8 --character-file examples\lived_use_character_v1.yaml"
+    ) in text
+    assert "-m torment_service" not in text
 
 
 @pytest.mark.parametrize(
