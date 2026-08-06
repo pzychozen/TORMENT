@@ -131,6 +131,85 @@ class TestAffectAttributionParity(unittest.TestCase):
         self.assertEqual(hit_env["affect_tag"], "sad")
 
 
+class TestIndependentMoodContinuityBonuses(unittest.TestCase):
+    def setUp(self):
+        self._saved = {}
+        for k, v in _PINNED_ENV.items():
+            self._saved[k] = os.environ.get(k)
+            os.environ[k] = v
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _ctx(self, *, personal=True, tag="neutral", conf=0.0, spiral_neg_recent=3):
+        return ContinuityContext.from_env(
+            agent_id="agent",
+            canonical_step=800,
+            affect_personal=personal,
+            q_affect_tag=tag,
+            q_affect_conf=conf,
+            spiral_neg_recent=spiral_neg_recent,
+        )
+
+    def _hit(self, *, mtype="episode", affect_tag="neutral", affect_conf=0.0, step=10):
+        return {
+            "eid": 10,
+            "scope": "private",
+            "agent_id": "other",
+            "type": mtype,
+            "affect_tag": affect_tag,
+            "affect_conf": affect_conf,
+            "step": step,
+        }
+
+    def test_mood_drift_bonus_fires_for_personal_neutral_query(self):
+        r = compute_continuity_bonuses(
+            self._hit(mtype="mood_drift"),
+            self._ctx(tag="neutral", conf=0.0),
+            is_tool_result=False,
+        )
+
+        self.assertEqual(r.affect_match_bonus, 0.0)
+        self.assertEqual(r.mood_drift_bonus, 0.04)
+        self.assertEqual(r.mood_spiral_penalty, 0.0)
+
+    def test_mood_spiral_penalty_fires_for_personal_neutral_query(self):
+        r = compute_continuity_bonuses(
+            self._hit(affect_tag="sad", affect_conf=0.8, step=10),
+            self._ctx(tag="neutral", conf=0.0, spiral_neg_recent=3),
+            is_tool_result=False,
+        )
+
+        self.assertEqual(r.affect_match_bonus, 0.0)
+        self.assertEqual(r.mood_drift_bonus, 0.0)
+        self.assertGreater(r.mood_spiral_penalty, 0.0)
+
+    def test_independent_mood_bonuses_do_not_fire_for_nonpersonal_query(self):
+        r = compute_continuity_bonuses(
+            self._hit(mtype="mood_drift", affect_tag="sad", affect_conf=0.8, step=10),
+            self._ctx(personal=False, tag="neutral", conf=0.0, spiral_neg_recent=3),
+            is_tool_result=False,
+        )
+
+        self.assertEqual(r.affect_match_bonus, 0.0)
+        self.assertEqual(r.mood_drift_bonus, 0.0)
+        self.assertEqual(r.mood_spiral_penalty, 0.0)
+
+    def test_affect_match_remains_live_for_qualifying_affective_query(self):
+        r = compute_continuity_bonuses(
+            self._hit(affect_tag="sad", affect_conf=0.8),
+            self._ctx(tag="sad", conf=0.8),
+            is_tool_result=False,
+        )
+
+        self.assertEqual(r.affect_match_bonus, 0.04000000000000001)
+        self.assertEqual(r.mood_drift_bonus, 0.0)
+
+
 # --- Deterministic ingest fixtures (mirroring test_affect_state_mood_drift.py) ---
 SAD_TEXT = "I feel so sad, depressed and hopeless today"
 ANGRY_TEXT = "I am so angry, furious and full of rage"

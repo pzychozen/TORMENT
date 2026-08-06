@@ -2261,6 +2261,7 @@ class LivedUseSession:
             route_probe_payload = self._ingest_payload(
                 "A0 preflight representative companion summary.",
                 resumed_step + 1,
+                include_supplied_summary=False,
             )
             route_probe_payload["operation"] = "ingest"
             route_probe = self.torment.ingest_route_probe(route_probe_payload)
@@ -2326,8 +2327,14 @@ class LivedUseSession:
             "continuity_debug": True,
         }
 
-    def _ingest_payload(self, summary: str, step: int) -> Dict[str, Any]:
-        return {
+    def _ingest_payload(
+        self,
+        summary: str,
+        step: int,
+        *,
+        include_supplied_summary: bool = True,
+    ) -> Dict[str, Any]:
+        payload = {
             "workspace_id": self.character.workspace_id,
             "agent_id": self.character.agent_id,
             "text": summary,
@@ -2335,6 +2342,9 @@ class LivedUseSession:
             "domain_id": self.character.domain,
             "scope": "private",
         }
+        if include_supplied_summary:
+            payload["supplied_summary"] = summary
+        return payload
 
     def _empty_turn(
         self,

@@ -1604,6 +1604,64 @@ def test_existing_recent_step_17_next_ingest_uses_18():
     assert session.current_step == 18
 
 
+def test_companion_ingest_payload_sends_explicit_summary_as_supplied_summary():
+    reply = "First visible sentence. Second visible sentence stays durable."
+    session, torment, _provider = _preflighted(
+        torment=FakeTorment(recent=_recent(4)),
+        provider=FakeProvider(reply=reply),
+    )
+
+    outcome = session.run_turn("multi sentence ingest check")
+
+    assert outcome.ok
+    payload = torment.ingest_payloads[0]
+    assert payload["text"] == outcome.ingest_summary
+    assert payload["supplied_summary"] == outcome.ingest_summary
+    assert "Second visible sentence stays durable." in payload["supplied_summary"]
+    assert payload["workspace_id"] == luc.EXPECTED_WORKSPACE_ID
+    assert payload["agent_id"] == luc.EXPECTED_AGENT_ID
+    assert payload["step"] == 5
+    assert payload["domain_id"] == luc.EXPECTED_DOMAIN
+    assert payload["scope"] == "private"
+    assert "provenance" not in payload
+
+
+def test_companion_supplied_summary_preserves_durable_content_after_first_sentence(monkeypatch):
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0")
+    from torment_service.fabric import TormentFabric
+
+    session = _session()
+    summary = luc.build_ingest_summary(
+        luc.EXPECTED_USER_NAME,
+        luc.EXPECTED_CHARACTER_NAME,
+        "Please remember the complete exchange.",
+        "First stored sentence. Second durable sentence must survive. Third sentence too.",
+        {},
+    )
+    payload = session._ingest_payload(summary, 1)
+
+    with tempfile.TemporaryDirectory(prefix="torment_companion_summary_") as tmp:
+        fabric = TormentFabric(data_dir=tmp)
+        try:
+            fabric.get_workspace(payload["workspace_id"], domains=[payload["domain_id"]])
+            fabric.create_agent(payload["workspace_id"], payload["agent_id"])
+            result = fabric.ingest(**payload)
+
+            graph = fabric.private_graphs[fabric._agent_key(payload["workspace_id"], payload["agent_id"])]
+            stored_summary = graph.entities[int(result["eid"])].payload["summary"]
+            assert stored_summary == summary
+            assert "Second durable sentence must survive." in stored_summary
+            assert "Third sentence too." in stored_summary
+        finally:
+            for graph in fabric.private_graphs.values():
+                graph.close()
+            for workspace in fabric.workspaces.values():
+                for graph in workspace.shared_graphs.values():
+                    graph.close()
+            fabric.close()
+
+
 def test_preflight_route_probe_verifies_write_path_before_turn(capsys):
     recorder = MemoryRecorder()
     session, torment, provider = _preflighted(torment=FakeTorment(recent=_recent(17)), recorder=recorder)

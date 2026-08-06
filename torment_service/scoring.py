@@ -231,24 +231,28 @@ def compute_continuity_bonuses(
         if h_tag and h_tag == ctx.q_affect_tag and h_conf >= ctx.affect_min_conf:
             r.affect_match_bonus = ctx.affect_match_bonus * float(min(ctx.q_affect_conf, h_conf))
 
-        # --- Mood-drift bonus ---
-        if ctx.affect_personal and str(hit.get("type")) == "mood_drift":
-            r.mood_drift_bonus = ctx.mood_drift_bonus
+    # --- Mood-drift bonus ---
+    if ctx.affect_personal and mtype == "mood_drift":
+        r.mood_drift_bonus = ctx.mood_drift_bonus
 
-        # --- Mood-spiral penalty ---
-        if ctx.spiral_enable and ctx.spiral_neg_recent >= ctx.spiral_min_drifts:
-            _neg = {"stressed", "sad", "angry"}
-            try:
-                _ht = str(hit.get("affect_tag") or "")
-                _hs = int(hit.get("step", -1))
-            except Exception:
-                _ht, _hs = "", -1
-            if _ht in _neg and _hs >= 0 and ctx.canonical_step >= 0:
-                _age = max(0, ctx.canonical_step - _hs)
-                if _age > ctx.spiral_older_than:
-                    _age_fac = min(1.0, float(_age - ctx.spiral_older_than) / float(max(1, ctx.spiral_window)))
-                    _trend_fac = min(1.0, 0.5 + 0.25 * float(ctx.spiral_neg_recent - ctx.spiral_min_drifts + 1))
-                    r.mood_spiral_penalty = float(ctx.spiral_penalty_max) * _age_fac * _trend_fac
+    # --- Mood-spiral penalty ---
+    if (
+        ctx.affect_personal
+        and ctx.spiral_enable
+        and ctx.spiral_neg_recent >= ctx.spiral_min_drifts
+    ):
+        _neg = {"stressed", "sad", "angry"}
+        try:
+            _ht = str(hit.get("affect_tag") or "")
+            _hs = int(hit.get("step", -1))
+        except Exception:
+            _ht, _hs = "", -1
+        if _ht in _neg and _hs >= 0 and ctx.canonical_step >= 0:
+            _age = max(0, ctx.canonical_step - _hs)
+            if _age > ctx.spiral_older_than:
+                _age_fac = min(1.0, float(_age - ctx.spiral_older_than) / float(max(1, ctx.spiral_window)))
+                _trend_fac = min(1.0, 0.5 + 0.25 * float(ctx.spiral_neg_recent - ctx.spiral_min_drifts + 1))
+                r.mood_spiral_penalty = float(ctx.spiral_penalty_max) * _age_fac * _trend_fac
 
     return r
 
