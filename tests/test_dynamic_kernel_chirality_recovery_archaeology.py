@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
 from torment_service.kernel.model_core import (
     ModelParams,
     ModelState,
@@ -40,7 +41,7 @@ from torment_service.kernel.seed_entities import SeedWorld, SeedEntity
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Documented chirality primitive (model_core.update_z): the SIGNED triad area.
+# Documented chirality primitive (cognitive_core): the SIGNED triad area.
 _OMEGA_POS_JEFF = np.array([1 + 0j, 1 + 0j, 0 + 1j], dtype=complex)   # Im(1*1*1j)=+1
 _OMEGA_NEG_JEFF = np.array([1 + 0j, 1 + 0j, 0 - 1j], dtype=complex)   # Im(1*1*-1j)=-1
 
@@ -52,6 +53,16 @@ def _jeff(omega) -> float:
 
 def _jeff_norm(j: float) -> float:
     return j / (1.0 + abs(j))
+
+
+def _cognitive_response(omega, *, z_mem0: float = 0.0, n: int = 1) -> CognitiveCoreState:
+    params = ModelParams()
+    state = ModelState(Omega=np.asarray(omega, dtype=complex).reshape(3).copy())
+    cog = CognitiveCoreState(z_mem=float(z_mem0))
+    core = CognitiveCore()
+    for _ in range(n):
+        core.update(cog, state=state, params=params)
+    return cog
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +93,7 @@ class TestPrimitivesImportable(unittest.TestCase):
         self.assertEqual(float(model.p.omega_noise_sigma), 0.0)
         state = ModelState(Omega=_OMEGA_POS_JEFF.copy())
         self.assertEqual(state.Omega.shape, (3,))
-        self.assertEqual(float(state.z_mem), 0.0)
+        self.assertEqual(float(CognitiveCoreState().z_mem), 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -90,38 +101,26 @@ class TestPrimitivesImportable(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestChiralityMemorySurface(unittest.TestCase):
-    def _model(self):
-        return TriOctaPhaseLockModel(ModelParams())
-
     def test_z_mem_moves_toward_jeff_sign(self):
-        model = self._model()
         # positive-chirality Omega -> z_mem moves positive
-        sp = ModelState(Omega=_OMEGA_POS_JEFF.copy(), z_mem=0.0)
-        model.update_z(sp)
+        sp = _cognitive_response(_OMEGA_POS_JEFF, z_mem0=0.0)
         self.assertGreater(sp.z_mem, 0.0)
         self.assertEqual(math.copysign(1.0, sp.z_mem),
                          math.copysign(1.0, _jeff_norm(_jeff(_OMEGA_POS_JEFF))))
         # negative-chirality Omega -> z_mem moves negative
-        sn = ModelState(Omega=_OMEGA_NEG_JEFF.copy(), z_mem=0.0)
-        model.update_z(sn)
+        sn = _cognitive_response(_OMEGA_NEG_JEFF, z_mem0=0.0)
         self.assertLess(sn.z_mem, 0.0)
 
     def test_z_mem_is_slow_contractive_memory(self):
-        model = self._model()
-        s = ModelState(Omega=_OMEGA_POS_JEFF.copy(), z_mem=0.0)
-        model.update_z(s)
+        s = _cognitive_response(_OMEGA_POS_JEFF, z_mem0=0.0)
         one_step = s.z_mem
         jn = _jeff_norm(_jeff(_OMEGA_POS_JEFF))
         # a single update moves only a small fraction toward jeff_norm
         self.assertLess(abs(one_step), abs(jn))
 
     def test_z_mem_accumulates_but_stays_bounded(self):
-        model = self._model()
-        s = ModelState(Omega=_OMEGA_POS_JEFF.copy(), z_mem=0.0)
-        model.update_z(s)
-        after_one = s.z_mem
-        for _ in range(400):
-            model.update_z(s)  # Omega held fixed -> constant-sign chirality input
+        after_one = _cognitive_response(_OMEGA_POS_JEFF, z_mem0=0.0).z_mem
+        s = _cognitive_response(_OMEGA_POS_JEFF, z_mem0=0.0, n=401)
         jn = _jeff_norm(_jeff(_OMEGA_POS_JEFF))
         # accumulates toward jeff_norm from below, never reaching/exceeding it,
         # and always within the bounded chirality-memory band (-1, 1).
@@ -234,12 +233,18 @@ class TestZVectorBlendAndDeterminism(unittest.TestCase):
         params = ModelParams()  # shared -> identical params on both models
         ma = TriOctaPhaseLockModel(params)
         mb = TriOctaPhaseLockModel(params)
+        ca = CognitiveCore()
+        cb = CognitiveCore()
+        csa = CognitiveCoreState()
+        csb = CognitiveCoreState()
         for _ in range(60):
             ma.step(a)
             mb.step(b)
+            ca.update(csa, state=a, params=params)
+            cb.update(csb, state=b, params=params)
         np.testing.assert_allclose(a.Omega, b.Omega, rtol=1e-12, atol=1e-12)
         self.assertEqual(float(a.z), float(b.z))
-        self.assertEqual(float(a.z_mem), float(b.z_mem))
+        self.assertEqual(float(csa.z_mem), float(csb.z_mem))
         self.assertEqual(int(a.cycle_stage), int(b.cycle_stage))
         self.assertEqual(int(a.identity_state), int(b.identity_state))
 

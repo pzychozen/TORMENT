@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
 from torment_service.embeddings import HashEmbedding
 from torment_service.memory_kernel import TriOctaMemoryKernel
 
@@ -57,7 +58,7 @@ _EXPECTED_DEBUG_KEYS = {
         ("both", {"g_mod": 0.23, "theta_lock_mod": 0.40}),
     ],
 )
-def test_process_phase1a_cognitive_values_exactly_match_live_model_core(
+def test_process_phase1a_cognitive_values_recur_independently(
     arm_label: str,
     character_modulation: dict[str, Any] | None,
 ) -> None:
@@ -67,18 +68,32 @@ def test_process_phase1a_cognitive_values_exactly_match_live_model_core(
         character_modulation=character_modulation,
     )
     runtime_ctx = kernel.new_runtime_context()
+    ref_core = CognitiveCore()
+    ref_cog = CognitiveCoreState()
 
     for step in range(1000):
         observation = (
             f"Phase 1a recurrent equality arm={arm_label} step={step}: "
-            "kernel identity surface remains byte-still."
+            "kernel identity surface remains cognitive."
         )
         state, _, debug = kernel.process(state, observation, runtime_ctx)
         cog = runtime_ctx.cognitive_state
+        char_mod = getattr(state, "_char_mod", {}) or {}
+        theta_lock_override = (
+            float(char_mod["theta_lock_mod"])
+            if "theta_lock_mod" in char_mod
+            else None
+        )
+        ref_core.update(
+            ref_cog,
+            state=state,
+            params=kernel.params,
+            theta_lock_override=theta_lock_override,
+        )
 
-        assert cog.z_mem == state.z_mem
-        assert cog.z_identity == state.z
-        assert cog.identity_state == state.identity_state
+        assert cog.z_mem == ref_cog.z_mem
+        assert cog.z_identity == ref_cog.z_identity
+        assert cog.identity_state == ref_cog.identity_state
 
         assert debug["z"] == cog.z_identity
         assert debug["identity_state"] == float(cog.identity_state)
@@ -115,7 +130,8 @@ def test_cognitive_and_model_core_source_boundary_contract() -> None:
     assert "model_core" not in cognitive_src
     assert "cognitive_core" not in model_src
     assert "CognitiveCore" not in model_src
-    assert "z_mem" in model_src
+    assert "z_mem" not in model_src
+    assert "z_mem" in cognitive_src
     assert "cognitive_state.z_mem =" not in memory_kernel_src
 
     cognitive_imports = _import_modules(cognitive_path)

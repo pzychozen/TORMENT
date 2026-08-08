@@ -12,9 +12,9 @@ It reconstructs ONLY baseline continuous kernel stepping using the CANONICAL
 ``torment_service/kernel`` primitives already locked by
 ``tests/test_dynamic_kernel_continuous_kernel_reconstruction_contract.py``:
 ``TriOctaPhaseLockModel`` / ``ModelParams`` / ``ModelState`` (and, optionally, a
-DECOUPLED ``SeedWorld``). Per step it records ``Omega`` / ``z`` / ``z_mem`` / the
-J_eff-like signed coupling / ``cycle_stage`` / ``identity_state``, plus optional
-decoupled seed position/velocity state.
+DECOUPLED ``SeedWorld``). Per step it records canonical ``Omega`` / ``z`` plus
+extracted cognitive ``z_mem`` / the J_eff-like signed coupling /
+``cycle_stage`` / ``identity_state``, plus optional decoupled seed position/velocity state.
 
 HOLD (NOT reconstructed here): the external Z-force seed-coupling loop, the
 ``chirality_flip`` and ``conversation_shock`` targets, plots, data/output files,
@@ -27,6 +27,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
 from torment_service.kernel.model_core import (
     ModelParams,
     ModelState,
@@ -101,6 +102,8 @@ def run_continuous_kernel_reconstruction(
         params = ModelParams()
     model = TriOctaPhaseLockModel(params)
     state = ModelState(Omega=np.asarray(omega0, dtype=complex).reshape(3).copy())
+    cognitive_core = CognitiveCore()
+    cognitive_state = CognitiveCoreState()
 
     world: Optional[SeedWorld] = None
     if seeds:
@@ -117,6 +120,7 @@ def run_continuous_kernel_reconstruction(
     seed_samples: List[SeedSample] = []
     for _ in range(int(n_steps)):
         model.step(state, dt=dt)            # baseline continuous step (no external input)
+        cognitive_core.update(cognitive_state, state=state, params=params)
         if world is not None:
             world.step()                    # DECOUPLED -- no kernel state passed in
         o = state.Omega
@@ -126,10 +130,10 @@ def run_continuous_kernel_reconstruction(
             omega=(complex(o[0]), complex(o[1]), complex(o[2])),
             kappa=float(state.kappa()),
             z=float(state.z),
-            z_mem=float(state.z_mem),
+            z_mem=float(cognitive_state.z_mem),
             jeff=jeff_of(o),
             cycle_stage=int(state.cycle_stage),
-            identity_state=int(state.identity_state),
+            identity_state=int(cognitive_state.identity_state),
         ))
         if world is not None:
             seed_samples.append(SeedSample(

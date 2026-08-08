@@ -90,8 +90,6 @@ class ModelState:
     # Total / blended orientation vector (legacy name: Z_vec)
     Z_vec: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
 
-    z_mem: float = 0.0
-
     # Time / step counters
     t: float = 0.0                 # time (continuous)
     step: int = 0                  # step counter
@@ -170,57 +168,56 @@ class TriOctaPhaseLockModel:
         self, state: ModelState, *, theta_lock_override: float | None = None,
     ) -> None:
         """
-        Stable bounded Z:
-        - macro scaffold: lam * rho * cos(3*(theta-theta_lock))
-        - chiral memory: EMA of normalized jeff (triad chirality)
-        - blended scalar z = z_inst + z_mem (bounded)
+        Emergent Z from triangular phase oscillator idea.
+
+        Redefine Z_vec as a full orientation manifold vector that mixes:
+          - macro TriOcta geometry (corridor angle + scalar z)
+          - micro chiral geometry from Omega phases.
         """
 
-        # geometry scaffold
         kappa = state.kappa()
-        rho = kappa / (1.0 + kappa)  # 0..1 soft saturation
+        # normalize rho with soft saturation
+        rho = kappa / (1.0 + kappa)
 
-        theta = (2.0 * np.pi * state.phi_index) / float(self.p.d24_steps)
-        lam = float(self.p.lambda_vp)
-        theta_lock = float(
+        theta = (2.0 * np.pi * state.phi_index) / self.p.d24_steps
+        lam = self.p.lambda_vp
+        gamma = self.p.gamma
+        theta_lock = (
             self.p.theta_lock
             if theta_lock_override is None
             else theta_lock_override
         )
 
-        z_inst = lam * rho * np.cos(3.0 * (theta - theta_lock))  # bounded in [-lam*rho, +lam*rho]
+        # --- scalar Z as before (macro vesica/TriOcta Z) ---
+        z = lam * rho * np.cos(3.0 * (theta - theta_lock)) * np.exp(-gamma * state.t)
+        state.z = float(z)
 
-        # chirality (bounded)
+        # (1) Macro geometry contribution (corridor angle in x-y plane)
+        phi = theta
+
+        Z_macro = np.array(
+            [float(z * np.cos(phi)),
+             float(z * np.sin(phi)),
+             float(z)],
+            dtype=float
+        )
+        state.Z_macro[:] = Z_macro
+
+        # (2) Micro chiral contribution from Omega phases
         O1, O2, O3 = state.Omega
-        jeff = float(np.imag(O1 * np.conj(O2) * O3))
-        jeff_norm = jeff / (1.0 + abs(jeff))  # in (-1,1)
-
-        # slow memory (bounded EMA)
-        tau_meta = 0.01
-        state.z_mem = (1.0 - tau_meta) * float(state.z_mem) + tau_meta * float(jeff_norm)
-
-        # final scalar z (bounded)
-        state.z = float(z_inst + state.z_mem)
-
-        # vectors (keep them, but do NOT overwrite z again)
-        z = float(state.z)
-        phi = float(theta)
-
-        state.Z_macro[:] = np.array([z * np.cos(phi), z * np.sin(phi), z], dtype=float)
-
         Z_chiral = np.array(
-            [
-                float(np.imag(np.conj(O2) * O3)),
-                float(np.imag(np.conj(O3) * O1)),
-                float(np.imag(np.conj(O1) * O2)),
-            ],
-            dtype=float,
+            [float(np.imag(np.conj(O2) * O3)),
+             float(np.imag(np.conj(O3) * O1)),
+             float(np.imag(np.conj(O1) * O2))],
+            dtype=float
         )
         state.Z_chiral[:] = Z_chiral
 
-        alpha = float(self.p.z_alpha)
-        beta = float(self.p.z_beta)
-        state.Z_vec[:] = alpha * state.Z_macro + beta * state.Z_chiral
+        # (3) Blend them into a single orientation manifold vector
+        alpha = self.p.z_alpha
+        beta = self.p.z_beta
+        Z_vec = alpha * Z_macro + beta * Z_chiral
+        state.Z_vec[:] = Z_vec
 
     def update_cycle_stage(self, state: ModelState) -> None:
         """Cycle stage = how many kappa thresholds are crossed (S0..S6)."""

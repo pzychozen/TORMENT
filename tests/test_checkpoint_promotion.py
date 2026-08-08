@@ -53,7 +53,6 @@ def _make_model_state():
     state.cycle_stage = 3
     state.identity_state = 5
     state.z = 0.42
-    state.z_mem = 0.031
     state.Z_macro[:] = [0.1, 0.2, 0.42]
     state.Z_chiral[:] = [-0.05, 0.08, 0.02]
     state.Z_vec[:] = [0.12, 0.3, 0.44]
@@ -61,6 +60,24 @@ def _make_model_state():
     state.step = 2510
     state._char_mod = {"g_mod": 0.22, "theta_lock_mod": 0.25}
     return state
+
+
+def _expected_canonical_restore(state):
+    from torment_service.kernel.model_core import ModelParams, ModelState, TriOctaPhaseLockModel
+
+    expected = ModelState(
+        Omega=state.Omega.copy(),
+        phi_index=state.phi_index,
+        t=state.t,
+        step=state.step,
+    )
+    expected._char_mod = dict(getattr(state, "_char_mod", {}) or {})
+    theta_lock_override = float(expected._char_mod["theta_lock_mod"])
+    model = TriOctaPhaseLockModel(ModelParams())
+    model.update_z(expected, theta_lock_override=theta_lock_override)
+    model.update_cycle_stage(expected)
+    model.update_identity_state(expected)
+    return expected
 
 
 def _make_corridor_monitor():
@@ -124,19 +141,21 @@ class TestCheckpointSerialization:
         state = _make_model_state()
         data = serialize_model_state(state)
         restored = deserialize_model_state(data)
+        expected = _expected_canonical_restore(state)
 
         # Omega must survive complex serialization
         assert np.allclose(state.Omega, restored.Omega, atol=1e-10)
         assert restored.phi_index == 7
-        assert restored.cycle_stage == 3
-        assert restored.identity_state == 5
-        assert abs(restored.z - 0.42) < 1e-10
-        assert abs(restored.z_mem - 0.031) < 1e-10
+        assert restored.cycle_stage == expected.cycle_stage
+        assert restored.identity_state == expected.identity_state
+        assert restored.z == expected.z
+        assert data["z_semantics"] == "kernel_canonical_v4_0"
+        assert "z_mem" not in data
         assert abs(restored.t - 125.5) < 1e-10
         assert restored.step == 2510
-        assert np.allclose(state.Z_macro, restored.Z_macro, atol=1e-10)
-        assert np.allclose(state.Z_chiral, restored.Z_chiral, atol=1e-10)
-        assert np.allclose(state.Z_vec, restored.Z_vec, atol=1e-10)
+        assert np.array_equal(expected.Z_macro, restored.Z_macro)
+        assert np.array_equal(expected.Z_chiral, restored.Z_chiral)
+        assert np.array_equal(expected.Z_vec, restored.Z_vec)
         assert restored._char_mod == {"g_mod": 0.22, "theta_lock_mod": 0.25}
 
     def test_corridor_monitor_round_trip(self):

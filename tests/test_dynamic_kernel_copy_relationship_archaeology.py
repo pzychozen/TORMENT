@@ -24,8 +24,9 @@ Ground-truth relationship this file pins (observed, not chosen):
     TriOctaPhaseLockModel.{phase_lock_step, advance_phi, update_z,
     update_cycle_stage, update_identity_state, step, run}) is present in all four.
   * The chirality-MEMORY primitive (`z_mem` + `jeff` EMA, the surface the lost
-    sims used) survives ONLY in {production, epistemic_kernel}. v4.0 keeps the
-    `Z_chiral` vector but not the `z_mem`/`jeff` memory; zenodo has neither.
+    sims used) is extracted to production `cognitive_core.py`; the old in-kernel
+    copy still survives in epistemic_kernel. v4.0 keeps the `Z_chiral` vector but
+    not the `z_mem`/`jeff` memory; zenodo has neither.
 
 This is a MAP, not a decision. It infers no lost simulation mechanics, selects no
 canonical copy, and begins no reconstruction.
@@ -49,6 +50,7 @@ _COPIES = {
     "epistemic_kernel": _OUTER / "epistemic_kernel" / "kernel",
     "zenodo": _OUTER / "Zenodo_research" / "tri_octagon_Model" / "17766958",
 }
+_PRODUCTION_COGNITIVE = _OUTER / "torment_fabric" / "torment_service" / "cognitive_core.py"
 
 _FULL_COPIES = ("production", "v4_0", "epistemic_kernel")  # the three with seed_entities
 
@@ -183,14 +185,17 @@ class TestChiralityPrimitiveDistribution(unittest.TestCase):
     def _has(self, copy: str, token: str) -> bool:
         return token in _src(copy, "model_core.py")
 
-    def test_chiral_memory_surface_only_in_production_and_epistemic(self):
+    def test_chiral_memory_surface_moved_out_of_production_model_core(self):
         # z_mem + jeff (the chirality-MEMORY EMA the lost sims relied on)
         for token in ("z_mem", "jeff"):
             present = {c for c in _COPIES if self._has(c, token)}
             self.assertEqual(
-                present, {"production", "epistemic_kernel"},
+                present, {"epistemic_kernel"},
                 f"{token!r} chirality-memory surface distribution: {sorted(present)}",
             )
+        cognitive_src = _PRODUCTION_COGNITIVE.read_text(encoding="utf-8")
+        self.assertIn("z_mem", cognitive_src)
+        self.assertIn("jeff", cognitive_src)
 
     def test_z_chiral_vector_in_full_copies_not_zenodo(self):
         present = {c for c in _COPIES if self._has(c, "Z_chiral")}
@@ -239,12 +244,13 @@ class TestContentIdentityAndDivergence(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 class TestNoCanonicalSelectionNoReconstruction(unittest.TestCase):
-    def test_chiral_memory_surface_has_more_than_one_candidate(self):
-        # >= 2 copies carry the chirality-memory surface => this map does NOT
-        # force a single canonical source; the choice stays OPEN for a later gate.
+    def test_chiral_memory_surface_has_extracted_and_archaeology_candidates(self):
+        # Production now owns cognition in cognitive_core; epistemic_kernel remains
+        # an untouched archaeology copy carrying the old in-kernel memory surface.
         candidates = {c for c in _COPIES if "z_mem" in _src(c, "model_core.py")}
-        self.assertGreaterEqual(len(candidates), 2,
-                                "expected the canonical choice to remain undecided (>=2 candidates)")
+        if "z_mem" in _PRODUCTION_COGNITIVE.read_text(encoding="utf-8"):
+            candidates.add("production_cognitive_core")
+        self.assertEqual(candidates, {"production_cognitive_core", "epistemic_kernel"})
 
     def test_no_lost_sim_scripts_recreated_in_any_copy(self):
         for copy, d in _COPIES.items():

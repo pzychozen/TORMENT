@@ -35,6 +35,9 @@ from .embedding_store import _canonical_storage_root, _child_path
 
 log = logging.getLogger("torment.checkpoint")
 
+CHECKPOINT_VERSION = 3
+Z_SEMANTICS = "kernel_canonical_v4_0"
+
 
 def _sanitize_log(value: str) -> str:
     """Strip control characters that could forge log entries."""
@@ -124,7 +127,7 @@ def serialize_model_state(state) -> Dict[str, Any]:
         "cycle_stage": int(state.cycle_stage),
         "identity_state": int(state.identity_state),
         "z": float(state.z),
-        "z_mem": float(state.z_mem),
+        "z_semantics": Z_SEMANTICS,
         "Z_macro": _float_array_to_json(state.Z_macro),
         "Z_chiral": _float_array_to_json(state.Z_chiral),
         "Z_vec": _float_array_to_json(state.Z_vec),
@@ -139,27 +142,26 @@ def deserialize_model_state(data: Dict[str, Any]):
 
     Imports ModelState locally to avoid circular imports.
     """
-    from .kernel.model_core import ModelState
+    from .kernel.model_core import ModelParams, ModelState, TriOctaPhaseLockModel
 
     state = ModelState(
         Omega=_json_to_complex_array(data["Omega"]),
         phi_index=int(data.get("phi_index", 0)),
-        cycle_stage=int(data.get("cycle_stage", 0)),
-        identity_state=int(data.get("identity_state", 0)),
-        z=float(data.get("z", 0.0)),
-        z_mem=float(data.get("z_mem", 0.0)),
         t=float(data.get("t", 0.0)),
         step=int(data.get("step", 0)),
     )
-    # Restore numpy vectors
-    if "Z_macro" in data:
-        state.Z_macro[:] = _json_to_float_array(data["Z_macro"])[:3]
-    if "Z_chiral" in data:
-        state.Z_chiral[:] = _json_to_float_array(data["Z_chiral"])[:3]
-    if "Z_vec" in data:
-        state.Z_vec[:] = _json_to_float_array(data["Z_vec"])[:3]
     # Restore character modulation
     state._char_mod = dict(data.get("_char_mod", {}))  # type: ignore[attr-defined]
+    char_mod = getattr(state, "_char_mod", {}) or {}
+    theta_lock_override = (
+        float(char_mod["theta_lock_mod"])
+        if "theta_lock_mod" in char_mod
+        else None
+    )
+    model = TriOctaPhaseLockModel(ModelParams())
+    model.update_z(state, theta_lock_override=theta_lock_override)
+    model.update_cycle_stage(state)
+    model.update_identity_state(state)
     return state
 
 
@@ -191,12 +193,34 @@ def deserialize_corridor_monitor(data: Dict[str, Any]):
     return mon
 
 
+def serialize_cognitive_core_state(cognitive_state) -> Dict[str, Any]:
+    """Serialize the extracted cognitive identity state."""
+    return {
+        "z_mem": float(cognitive_state.z_mem),
+        "z_identity": float(cognitive_state.z_identity),
+        "identity_state": int(cognitive_state.identity_state),
+    }
+
+
+def deserialize_cognitive_core_state(data: Dict[str, Any] | None):
+    """Restore cognitive identity state with safe defaults."""
+    from .cognitive_core import CognitiveCoreState
+
+    payload = data or {}
+    return CognitiveCoreState(
+        z_mem=float(payload.get("z_mem", 0.0)),
+        z_identity=float(payload.get("z_identity", 0.0)),
+        identity_state=int(payload.get("identity_state", 0)),
+    )
+
+
 def serialize_kernel_runtime_context(runtime_ctx) -> Dict[str, Any]:
     """Serialize per-agent kernel observation history."""
     return {
         "mon": serialize_corridor_monitor(runtime_ctx.mon),
         "disp_buffer": [float(x) for x in runtime_ctx.disp_buffer],
         "last_effective_scale": float(runtime_ctx.last_effective_scale),
+        "cognitive_state": serialize_cognitive_core_state(runtime_ctx.cognitive_state),
     }
 
 
@@ -208,6 +232,18 @@ def deserialize_kernel_runtime_context(data: Dict[str, Any]):
         mon=deserialize_corridor_monitor(data["mon"]),
         disp_buffer=[float(x) for x in data.get("disp_buffer", [])],
         last_effective_scale=float(data.get("last_effective_scale", DEFAULT_DISP_SCALE)),
+        cognitive_state=deserialize_cognitive_core_state(data.get("cognitive_state")),
+    )
+
+
+def _migrate_legacy_cognitive_state(runtime_ctx, model_state_data: Dict[str, Any]) -> None:
+    """Move legacy spliced model fields into the extracted cognitive state."""
+    runtime_ctx.cognitive_state = deserialize_cognitive_core_state(
+        {
+            "z_mem": model_state_data.get("z_mem", 0.0),
+            "z_identity": model_state_data.get("z", 0.0),
+            "identity_state": model_state_data.get("identity_state", 0),
+        }
     )
 
 
@@ -330,12 +366,15 @@ def save_checkpoint(
         os.makedirs(safe_dir, exist_ok=True)
 
         mon = kernel_runtime_context.mon if kernel_runtime_context is not None else corridor_monitor
+        model_state_data = serialize_model_state(model_state)
+        if kernel_runtime_context is not None:
+            model_state_data["z_mem"] = float(kernel_runtime_context.cognitive_state.z_mem)
         payload: Dict[str, Any] = {
-            "version": 2,
+            "version": CHECKPOINT_VERSION,
             "step": int(step),
             "timestamp": time.time(),
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "model_state": serialize_model_state(model_state),
+            "model_state": model_state_data,
             "corridor_monitor": serialize_corridor_monitor(mon),
             "character_state": character_state_dict,
             "motif_summary": motif_summary,
@@ -446,9 +485,10 @@ def restore_from_checkpoint(
       - motif_summary: dict or None
       - shard_snapshot: dict or None
     """
-    if "kernel_runtime_context" in checkpoint_data:
+    runtime_payload = checkpoint_data.get("kernel_runtime_context")
+    if runtime_payload is not None:
         runtime_ctx = deserialize_kernel_runtime_context(
-            checkpoint_data["kernel_runtime_context"],
+            runtime_payload,
         )
         mon = runtime_ctx.mon
     else:
@@ -461,9 +501,14 @@ def restore_from_checkpoint(
             last_effective_scale=DEFAULT_DISP_SCALE,
         )
 
+    model_state_data = checkpoint_data["model_state"]
+    model_state = deserialize_model_state(model_state_data)
+    if not (isinstance(runtime_payload, dict) and "cognitive_state" in runtime_payload):
+        _migrate_legacy_cognitive_state(runtime_ctx, model_state_data)
+
     return {
         "step": int(checkpoint_data["step"]),
-        "model_state": deserialize_model_state(checkpoint_data["model_state"]),
+        "model_state": model_state,
         "corridor_monitor": mon,
         "kernel_runtime_context": runtime_ctx,
         "character_state": checkpoint_data.get("character_state"),

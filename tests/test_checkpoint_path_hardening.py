@@ -43,7 +43,6 @@ def _make_model_state() -> ModelState:
         cycle_stage=2,
         identity_state=1,
         z=0.15,
-        z_mem=0.10,
         t=100.0,
         step=50,
     )
@@ -367,7 +366,7 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
         self.assertIsNotNone(data)
         restored = restore_from_checkpoint(data)
         self.assertEqual(restored["step"], 50)
-        self.assertAlmostEqual(restored["model_state"].z, 0.15, places=5)
+        self.assertEqual(data["model_state"]["z_semantics"], "kernel_canonical_v4_0")
         self.assertEqual(restored["character_state"]["drift_score"], 0.05)
 
 

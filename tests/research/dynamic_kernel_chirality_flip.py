@@ -16,8 +16,8 @@ Reconstructed surface (source-supported, per the contract):
   * ``chirality_sign``         -- sign(J_eff) in {-1, 0, +1};
   * ``is_flip(a, b)``          -- PAIRWISE detection: a "flip" is ONLY an opposite
                                  effective chirality sign between two states;
-  * ``z_mem_response``         -- the canonical ``z_mem`` after ONE
-                                 ``TriOctaPhaseLockModel.update_z`` (single update).
+  * ``z_mem_response``         -- the cognitive ``z_mem`` after ONE
+                                 ``CognitiveCore.update`` (single update).
 
 NOT reconstructed (HOLD): the flip-hunting loop, the A-D scenario sweep, seed-force
 reversal, flip-count tables, PNG reproduction, kernel trajectory stepping, and the
@@ -30,10 +30,10 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
 from torment_service.kernel.model_core import (
     ModelParams,
     ModelState,
-    TriOctaPhaseLockModel,
 )
 
 
@@ -91,7 +91,7 @@ def chirality_sample(omega: Sequence[complex]) -> ChiralitySample:
 
 @dataclass(frozen=True)
 class ZMemResponse:
-    """Canonical ``z_mem`` response to one ``update_z`` (chirality-memory prerequisite)."""
+    """Cognitive ``z_mem`` response to one update (chirality-memory prerequisite)."""
     jeff: float
     normalized: float
     z_mem_before: float
@@ -104,23 +104,22 @@ def z_mem_response(
     z_mem0: float = 0.0,
     params: Optional[ModelParams] = None,
 ) -> ZMemResponse:
-    """Return the canonical ``z_mem`` after ONE ``update_z`` from ``z_mem0``.
+    """Return the cognitive ``z_mem`` after ONE update from ``z_mem0``.
 
-    Uses ``TriOctaPhaseLockModel.update_z`` -- a single deterministic update, NOT a
+    Uses ``CognitiveCore.update`` -- a single deterministic update, NOT a
     trajectory step, no loop, no noise. Characterizes the bounded, sign-following
     chirality memory the flip surface depends on.
     """
     if params is None:
         params = ModelParams()
-    model = TriOctaPhaseLockModel(params)
     state = ModelState(
         Omega=np.asarray(omega, dtype=complex).reshape(3).copy(),
-        z_mem=float(z_mem0),
     )
-    model.update_z(state)
+    cog = CognitiveCoreState(z_mem=float(z_mem0))
+    CognitiveCore().update(cog, state=state, params=params)
     return ZMemResponse(
         jeff=jeff(omega),
         normalized=normalized_chirality(omega),
         z_mem_before=float(z_mem0),
-        z_mem_after=float(state.z_mem),
+        z_mem_after=float(cog.z_mem),
     )

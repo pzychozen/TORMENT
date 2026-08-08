@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
+
 # Canonical reference source (proven importable + safe in phase-1 archaeology).
 from torment_service.kernel.model_core import (
     ModelParams,
@@ -62,6 +64,16 @@ def _jeff_norm(j: float) -> float:
     return j / (1.0 + abs(j))
 
 
+def _cognitive_response(omega, *, z_mem0: float = 0.0, n: int = 1) -> CognitiveCoreState:
+    params = ModelParams()
+    state = ModelState(Omega=np.asarray(omega, dtype=complex).reshape(3).copy())
+    cog = CognitiveCoreState(z_mem=float(z_mem0))
+    core = CognitiveCore()
+    for _ in range(n):
+        core.update(cog, state=state, params=params)
+    return cog
+
+
 # ---------------------------------------------------------------------------
 # C1. Canonical primitives are constructible and deterministic by default
 # ---------------------------------------------------------------------------
@@ -85,14 +97,11 @@ class TestCanonicalSourceConstructible(unittest.TestCase):
 
 class TestChiralityMemoryContract(unittest.TestCase):
     def test_z_mem_field_exists_and_defaults_zero(self):
-        self.assertEqual(float(ModelState(Omega=_OMEGA_ASYM.copy()).z_mem), 0.0)
+        self.assertEqual(float(CognitiveCoreState().z_mem), 0.0)
 
     def test_z_mem_is_bounded_signed_memory_following_jeff(self):
-        model = TriOctaPhaseLockModel(ModelParams())
-        sp = ModelState(Omega=_OMEGA_POS.copy(), z_mem=0.0)
-        model.update_z(sp)
-        sn = ModelState(Omega=_OMEGA_NEG.copy(), z_mem=0.0)
-        model.update_z(sn)
+        sp = _cognitive_response(_OMEGA_POS, z_mem0=0.0)
+        sn = _cognitive_response(_OMEGA_NEG, z_mem0=0.0)
         # moves toward the sign of normalized J_eff, stays in the (-1, 1) band
         self.assertGreater(sp.z_mem, 0.0)
         self.assertLess(sn.z_mem, 0.0)
@@ -112,9 +121,7 @@ class TestJeffSignedCouplingSurfaceContract(unittest.TestCase):
         for omega in (_OMEGA_POS, _OMEGA_NEG, _OMEGA_ASYM):
             self.assertTrue(-1.0 < _jeff_norm(_jeff(omega)) < 1.0)
         # z_mem sign follows the surface sign (surface drives memory)
-        model = TriOctaPhaseLockModel(ModelParams())
-        s = ModelState(Omega=_OMEGA_POS.copy(), z_mem=0.0)
-        model.update_z(s)
+        s = _cognitive_response(_OMEGA_POS, z_mem0=0.0)
         self.assertEqual(math.copysign(1.0, s.z_mem),
                          math.copysign(1.0, _jeff_norm(_jeff(_OMEGA_POS))))
 
@@ -159,16 +166,19 @@ class TestContinuousDeterministicSteppingContract(unittest.TestCase):
         params = ModelParams()
         model = TriOctaPhaseLockModel(params)
         s = ModelState(Omega=_OMEGA_ASYM.copy())
+        core = CognitiveCore()
+        cog = CognitiveCoreState()
         omega0 = s.Omega.copy()
         for _ in range(100):
             model.step(s)
+            core.update(cog, state=s, params=params)
         # the kernel has its own continuous internal dynamics (no conversation /
         # external input needed): state evolves and stays finite + bounded.
         self.assertEqual(int(s.step), 100)
         self.assertTrue(math.isclose(s.t, 100 * 0.1, rel_tol=1e-9))
         self.assertTrue(np.all(np.isfinite(s.Omega)))
         self.assertFalse(np.allclose(s.Omega, omega0))
-        self.assertTrue(-1.0 < float(s.z_mem) < 1.0)
+        self.assertTrue(-1.0 < float(cog.z_mem) < 1.0)
 
     def test_default_config_stepping_is_reproducible(self):
         params = ModelParams()  # shared -> identical params on both models
@@ -176,12 +186,18 @@ class TestContinuousDeterministicSteppingContract(unittest.TestCase):
         b = ModelState(Omega=_OMEGA_ASYM.copy())
         ma = TriOctaPhaseLockModel(params)
         mb = TriOctaPhaseLockModel(params)
+        ca = CognitiveCore()
+        cb = CognitiveCore()
+        csa = CognitiveCoreState()
+        csb = CognitiveCoreState()
         for _ in range(100):
             ma.step(a)
             mb.step(b)
+            ca.update(csa, state=a, params=params)
+            cb.update(csb, state=b, params=params)
         np.testing.assert_allclose(a.Omega, b.Omega, rtol=1e-12, atol=1e-12)
         self.assertEqual(float(a.z), float(b.z))
-        self.assertEqual(float(a.z_mem), float(b.z_mem))
+        self.assertEqual(float(csa.z_mem), float(csb.z_mem))
         self.assertEqual(int(a.cycle_stage), int(b.cycle_stage))
         self.assertEqual(int(a.identity_state), int(b.identity_state))
 

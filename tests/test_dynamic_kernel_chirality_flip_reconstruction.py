@@ -24,11 +24,8 @@ from pathlib import Path
 
 import numpy as np
 
-from torment_service.kernel.model_core import (
-    ModelParams,
-    ModelState,
-    TriOctaPhaseLockModel,
-)
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
+from torment_service.kernel.model_core import ModelParams, ModelState
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _TESTS_DIR.parent  # torment_fabric
@@ -51,11 +48,11 @@ def _load_module():
 _CF = _load_module()
 
 
-def _canonical_zmem(omega, z_mem0=0.0):
-    m = TriOctaPhaseLockModel(ModelParams())
-    s = ModelState(Omega=np.asarray(omega, dtype=complex).reshape(3).copy(), z_mem=float(z_mem0))
-    m.update_z(s)
-    return float(s.z_mem)
+def _cognitive_zmem(omega, z_mem0=0.0):
+    s = ModelState(Omega=np.asarray(omega, dtype=complex).reshape(3).copy())
+    cog = CognitiveCoreState(z_mem=float(z_mem0))
+    CognitiveCore().update(cog, state=s, params=ModelParams())
+    return float(cog.z_mem)
 
 
 def _snapshot_repo_files():
@@ -150,7 +147,7 @@ class TestZMemBoundedSignFollowing(unittest.TestCase):
         for omega in (_OMEGA_POS, _OMEGA_NEG):
             r = _CF.z_mem_response(omega, z_mem0=0.0)
             self.assertIsInstance(r, _CF.ZMemResponse)
-            self.assertAlmostEqual(r.z_mem_after, _canonical_zmem(omega, 0.0))
+            self.assertAlmostEqual(r.z_mem_after, _cognitive_zmem(omega, 0.0))
 
     def test_z_mem_is_bounded_and_sign_following_and_contractive(self):
         rp = _CF.z_mem_response(_OMEGA_POS, z_mem0=0.0)
@@ -179,7 +176,7 @@ class TestModuleBoundaries(unittest.TestCase):
     def _src(self):
         return _MODULE_PATH.read_text(encoding="utf-8")
 
-    def test_imports_canonical_model_core_only(self):
+    def test_imports_extracted_cognition_and_canonical_model_state_only(self):
         roots = set()
         for node in ast.walk(ast.parse(self._src())):
             if isinstance(node, ast.Import):
@@ -188,6 +185,7 @@ class TestModuleBoundaries(unittest.TestCase):
                 roots.add(node.module.split(".")[0])
         self.assertEqual(roots - self._ALLOWED_IMPORT_ROOTS, set())
         src = self._src()
+        self.assertIn("torment_service.cognitive_core", src)
         self.assertIn("torment_service.kernel.model_core", src)
         self.assertNotIn("torment_service.kernel.seed_entities", src)  # no seeds
 

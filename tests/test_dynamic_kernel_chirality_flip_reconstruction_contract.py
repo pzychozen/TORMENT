@@ -42,9 +42,11 @@ from pathlib import Path
 
 import numpy as np
 
+import torment_service.cognitive_core as _cc
 # Canonical source (proven importable + safe by the archaeology/contract tests).
 import torment_service.kernel.model_core as _mc
 import torment_service.kernel.seed_entities as _se
+from torment_service.cognitive_core import CognitiveCore, CognitiveCoreState
 from torment_service.kernel.model_core import (
     ModelParams,
     ModelState,
@@ -53,6 +55,7 @@ from torment_service.kernel.model_core import (
 from torment_service.kernel.seed_entities import SeedWorld
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_COGNITIVE_SRC = Path(_cc.__file__).read_text(encoding="utf-8")
 _MODEL_CORE_SRC = Path(_mc.__file__).read_text(encoding="utf-8")
 _SEED_SRC = Path(_se.__file__).read_text(encoding="utf-8")
 
@@ -83,6 +86,13 @@ def _is_flip(omega_a, omega_b) -> bool:
     return sa != 0 and sb != 0 and sa != sb
 
 
+def _cognitive_response(omega, *, z_mem0: float = 0.0) -> CognitiveCoreState:
+    state = ModelState(Omega=np.asarray(omega, dtype=complex).reshape(3).copy())
+    cog = CognitiveCoreState(z_mem=float(z_mem0))
+    CognitiveCore().update(cog, state=state, params=ModelParams())
+    return cog
+
+
 def _snapshot_repo_files():
     out = set()
     for p in _REPO_ROOT.rglob("*"):
@@ -111,9 +121,9 @@ class TestFlipDefinitionSourceBacked(unittest.TestCase):
         self.assertFalse(_is_flip(_OMEGA_POS, _OMEGA_POS))
 
     def test_jeff_formula_is_the_canonical_one(self):
-        # the contract's J_eff matches the canonical update_z primitive (source token).
-        self.assertIn("np.imag", _MODEL_CORE_SRC)
-        self.assertIn("z_mem", _MODEL_CORE_SRC)
+        # the contract's J_eff matches the extracted cognitive primitive (source token).
+        self.assertIn("np.imag", _COGNITIVE_SRC)
+        self.assertIn("z_mem", _COGNITIVE_SRC)
         # bounded normalization stays in (-1, 1)
         for omega in (_OMEGA_POS, _OMEGA_NEG, np.array([3 + 2j, -1 + 0j, 0 + 5j], dtype=complex)):
             self.assertTrue(-1.0 < _jeff_norm(_jeff(omega)) < 1.0)
@@ -125,14 +135,11 @@ class TestFlipDefinitionSourceBacked(unittest.TestCase):
 
 class TestChiralityMemoryPrerequisite(unittest.TestCase):
     def test_z_mem_field_exists_default_zero(self):
-        self.assertEqual(float(ModelState(Omega=_OMEGA_POS.copy()).z_mem), 0.0)
+        self.assertEqual(float(CognitiveCoreState().z_mem), 0.0)
 
     def test_z_mem_follows_sign_and_stays_bounded(self):
-        model = TriOctaPhaseLockModel(ModelParams())
-        sp = ModelState(Omega=_OMEGA_POS.copy(), z_mem=0.0)
-        model.update_z(sp)
-        sn = ModelState(Omega=_OMEGA_NEG.copy(), z_mem=0.0)
-        model.update_z(sn)
+        sp = _cognitive_response(_OMEGA_POS, z_mem0=0.0)
+        sn = _cognitive_response(_OMEGA_NEG, z_mem0=0.0)
         self.assertGreater(sp.z_mem, 0.0)
         self.assertLess(sn.z_mem, 0.0)
         self.assertTrue(-1.0 < sp.z_mem < 1.0 and -1.0 < sn.z_mem < 1.0)
@@ -196,9 +203,8 @@ class TestLostScriptAndNoArtifacts(unittest.TestCase):
 
     def test_exercising_the_surface_creates_no_files(self):
         before = _snapshot_repo_files()
-        model = TriOctaPhaseLockModel(ModelParams())
         for omega in (_OMEGA_POS, _OMEGA_NEG):
-            model.update_z(ModelState(Omega=omega.copy(), z_mem=0.0))
+            _cognitive_response(omega, z_mem0=0.0)
         after = _snapshot_repo_files()
         self.assertEqual(after - before, set(),
                          f"contract checks created artifacts: {after - before}")
