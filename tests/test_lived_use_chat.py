@@ -2088,6 +2088,81 @@ def test_prompt_uses_torment_seed_preamble_but_not_local_seed_text():
     assert _character().seed_text not in system_prompt
 
 
+def test_format_memories_single_line_rendering_is_unchanged():
+    rendered = luc.format_memories(
+        [
+            {
+                "summary": "Hilmir asked whether strange ideas can be explored seriously.",
+                "final_score": 0.8732,
+                "character_tier": "core",
+                "provenance_type": "source_memory",
+            }
+        ]
+    )
+
+    assert rendered == (
+        "[Retrieved memories - most relevant first]\n"
+        "  1. (score 0.87 [core] [source_memory]) "
+        "Hilmir asked whether strange ideas can be explored seriously."
+    )
+
+
+def test_format_memories_indents_two_line_summary_continuation():
+    rendered = luc.format_memories(
+        [
+            {
+                "summary": "Hilmir said: Please remember this.\nEira Voss responded: First sentence. Second sentence.",
+                "final_score": 1.023,
+                "character_tier": "relational",
+                "provenance_type": "user_input",
+            }
+        ]
+    )
+
+    assert rendered.split("\n") == [
+        "[Retrieved memories - most relevant first]",
+        "  1. (score 1.02 [relational] [user_input]) Hilmir said: Please remember this.",
+        "     Eira Voss responded: First sentence. Second sentence.",
+    ]
+
+
+def test_format_memories_indents_multiline_continuations_without_mutating_summary():
+    first_summary = "first line\nsecond line\n\nfourth line"
+    original_summary = first_summary
+    rendered = luc.format_memories(
+        [
+            {
+                "summary": first_summary,
+                "final_score": 1.023,
+                "character_tier": "relational",
+                "provenance_type": "user_input",
+            },
+            {
+                "summary": "another memory",
+                "final_score": 0.9,
+                "character_tier": "core",
+                "provenance_type": "source_memory",
+            },
+        ],
+        top_k=2,
+    )
+
+    assert first_summary == original_summary
+    lines = rendered.split("\n")
+    assert lines == [
+        "[Retrieved memories - most relevant first]",
+        "  1. (score 1.02 [relational] [user_input]) first line",
+        "     second line",
+        "     ",
+        "     fourth line",
+        "  2. (score 0.90 [core] [source_memory]) another memory",
+    ]
+    continuation_lines = lines[2:5]
+    assert all(line.startswith("     ") for line in continuation_lines)
+    assert all(line.startswith(" ") for line in continuation_lines if line.strip())
+    assert lines[5].startswith("  2. (score 0.90 [core] [source_memory])")
+
+
 def test_stable_positive_drift_prompt_uses_alignment_label_not_raw_drift():
     query_response = _query_response()
     query_response["character_context"]["drift_score"] = 0.915931224822998

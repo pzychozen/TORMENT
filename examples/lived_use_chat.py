@@ -1947,7 +1947,10 @@ def format_memories(hits: List[Dict[str, Any]], top_k: int = DEFAULT_TOP_K, envi
         provenance = safe_string(hit.get("provenance_type", ""), environ).strip()
         tags = " ".join(f"[{value}]" for value in (tier, provenance) if value)
         tag_text = f" {tags}" if tags else ""
-        lines.append(f"  {rank}. (score {(score or 0.0):.2f}{tag_text}) {summary}")
+        list_prefix = f"  {rank}. "
+        continuation_indent = " " * len(list_prefix)
+        rendered_summary = summary.replace("\n", "\n" + continuation_indent)
+        lines.append(f"{list_prefix}(score {(score or 0.0):.2f}{tag_text}) {rendered_summary}")
     return "\n".join(lines)
 
 
