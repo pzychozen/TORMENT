@@ -8,6 +8,7 @@ import numpy as np
 
 from .embeddings import Embedder, HashEmbedding
 from .summarizer import summarize
+from .cognitive_core import CognitiveCore, CognitiveCoreState
 
 # ✅ correct imports for YOUR repo layout (kernel/*)
 from .kernel.model_core import ModelParams, ModelState, TriOctaPhaseLockModel
@@ -53,6 +54,7 @@ class KernelRuntimeContext:
     mon: CorridorMonitor = field(default_factory=CorridorMonitor)
     disp_buffer: List[float] = field(default_factory=list)
     last_effective_scale: float = DEFAULT_DISP_SCALE
+    cognitive_state: CognitiveCoreState = field(default_factory=CognitiveCoreState)
 
 
 class TriOctaMemoryKernel:
@@ -67,6 +69,7 @@ class TriOctaMemoryKernel:
     def __init__(self, params: Optional[ModelParams] = None, embedder: Optional[Embedder] = None) -> None:
         self.params = params or ModelParams()
         self.model = TriOctaPhaseLockModel(self.params)
+        self.cognitive_core = CognitiveCore()
         self.embedder = embedder or HashEmbedding()
 
         # Tunables (safe defaults)
@@ -244,6 +247,12 @@ class TriOctaMemoryKernel:
             g_override=g_override,
             theta_lock_override=theta_lock_override,
         )
+        cognitive_state = self.cognitive_core.update(
+            runtime_ctx.cognitive_state,
+            state=state,
+            params=self.params,
+            theta_lock_override=theta_lock_override,
+        )
 
         # debug-only triad coherence (NOT mechanics)
         try:
@@ -267,7 +276,7 @@ class TriOctaMemoryKernel:
 
         # labels
         cycle_stage = int(getattr(state, "cycle_stage", 0))
-        identity_state = int(getattr(state, "identity_state", 0))
+        identity_state = int(cognitive_state.identity_state)
         id_label = label_for_identity(identity_state)
 
         # base bounded modulation
@@ -374,7 +383,7 @@ class TriOctaMemoryKernel:
         tri_mod["coh_phase"] = float(coh_phase)
 
         # seed motion (optional)
-        z = float(getattr(state, "z", 0.0))
+        z = float(cognitive_state.z_identity)
         speed = 0.05 + 0.25 * float(coh)
         sign_z = 1.0 if z >= 0 else -1.0
         theta = (cycle_stage % 6) * (np.pi / 3.0)
@@ -409,7 +418,7 @@ class TriOctaMemoryKernel:
         # -----------------------------
         # Debug payload (keys used by sim scripts MUST be present)
         # -----------------------------
-        z_val = float(getattr(state, "z", 0.0))
+        z_val = float(cognitive_state.z_identity)
 
         debug: Dict[str, Any] = {
             "coherence": float(coh),
