@@ -1604,6 +1604,19 @@ def test_existing_recent_step_17_next_ingest_uses_18():
     assert session.current_step == 18
 
 
+def _expanded_lived_use_texts():
+    user_text = " ".join(["user-preserved"] * 17 + ["USER_AFTER_200_SURVIVES"])
+    assistant_text = (
+        " ".join(["assistant-preserved"] * 19 + ["ASSISTANT_AFTER_300_SURVIVES"])
+        + "\nsecond assistant line stays multi-line"
+    )
+    assert 200 < len(user_text) <= luc.USER_SUMMARY_MAX_CHARS
+    assert 300 < len(assistant_text) <= luc.ASSISTANT_SUMMARY_MAX_CHARS
+    assert user_text.index("USER_AFTER_200_SURVIVES") > 200
+    assert assistant_text.index("ASSISTANT_AFTER_300_SURVIVES") > 300
+    return user_text, assistant_text
+
+
 def test_companion_ingest_payload_sends_explicit_summary_as_supplied_summary():
     reply = "First visible sentence. Second visible sentence stays durable."
     session, torment, _provider = _preflighted(
@@ -1624,6 +1637,25 @@ def test_companion_ingest_payload_sends_explicit_summary_as_supplied_summary():
     assert payload["domain_id"] == luc.EXPECTED_DOMAIN
     assert payload["scope"] == "private"
     assert "provenance" not in payload
+
+
+def test_companion_ingest_summary_preserves_expanded_user_and_assistant_texts():
+    user_text, assistant_text = _expanded_lived_use_texts()
+    session, torment, _provider = _preflighted(
+        torment=FakeTorment(recent=_recent(4)),
+        provider=FakeProvider(reply=assistant_text),
+    )
+
+    outcome = session.run_turn(user_text)
+
+    assert outcome.ok
+    payload = torment.ingest_payloads[0]
+    assert payload["text"] == payload["supplied_summary"] == outcome.ingest_summary
+    assert f"{luc.EXPECTED_USER_NAME} said: {user_text}" in outcome.ingest_summary
+    assert f"{luc.EXPECTED_CHARACTER_NAME} responded: {assistant_text}" in outcome.ingest_summary
+    assert "USER_AFTER_200_SURVIVES" in outcome.ingest_summary
+    assert "ASSISTANT_AFTER_300_SURVIVES" in outcome.ingest_summary
+    assert "\nsecond assistant line stays multi-line" in outcome.ingest_summary
 
 
 def test_companion_supplied_summary_preserves_durable_content_after_first_sentence(monkeypatch):
@@ -1660,6 +1692,78 @@ def test_companion_supplied_summary_preserves_durable_content_after_first_senten
                 for graph in workspace.shared_graphs.values():
                     graph.close()
             fabric.close()
+
+
+def test_companion_expanded_summary_survives_durable_ingest_storage(monkeypatch):
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0")
+    from torment_service.fabric import TormentFabric
+
+    user_text, assistant_text = _expanded_lived_use_texts()
+    session = _session()
+    summary = luc.build_ingest_summary(
+        luc.EXPECTED_USER_NAME,
+        luc.EXPECTED_CHARACTER_NAME,
+        user_text,
+        assistant_text,
+        {},
+    )
+    payload = session._ingest_payload(summary, 1)
+
+    with tempfile.TemporaryDirectory(prefix="torment_companion_expanded_summary_") as tmp:
+        fabric = TormentFabric(data_dir=tmp)
+        try:
+            fabric.get_workspace(payload["workspace_id"], domains=[payload["domain_id"]])
+            fabric.create_agent(payload["workspace_id"], payload["agent_id"])
+            result = fabric.ingest(**payload)
+
+            graph = fabric.private_graphs[fabric._agent_key(payload["workspace_id"], payload["agent_id"])]
+            stored_summary = graph.entities[int(result["eid"])].payload["summary"]
+            assert stored_summary == summary
+            assert "USER_AFTER_200_SURVIVES" in stored_summary
+            assert "ASSISTANT_AFTER_300_SURVIVES" in stored_summary
+            assert "\nsecond assistant line stays multi-line" in stored_summary
+        finally:
+            for graph in fabric.private_graphs.values():
+                graph.close()
+            for workspace in fabric.workspaces.values():
+                for graph in workspace.shared_graphs.values():
+                    graph.close()
+            fabric.close()
+
+
+def test_build_ingest_summary_truncates_above_new_cap_at_whitespace_boundary():
+    prefix = "word " * 239
+    assistant_text = prefix + "splitwordcontinues beyond cap"
+
+    summary = luc.build_ingest_summary(
+        luc.EXPECTED_USER_NAME,
+        luc.EXPECTED_CHARACTER_NAME,
+        "short user",
+        assistant_text,
+        {},
+    )
+
+    assistant_summary = summary.split(f"{luc.EXPECTED_CHARACTER_NAME} responded: ", 1)[1]
+    assert len(assistant_summary) <= luc.ASSISTANT_SUMMARY_MAX_CHARS
+    assert assistant_summary == prefix.rstrip()
+    assert assistant_summary.endswith("word")
+    assert "splitwordcontinues" not in assistant_summary
+
+
+def test_build_ingest_summary_preserves_within_cap_text_after_existing_normalization():
+    summary = luc.build_ingest_summary(
+        luc.EXPECTED_USER_NAME,
+        luc.EXPECTED_CHARACTER_NAME,
+        "  exact user text within cap  ",
+        "  exact assistant line one\n\nline two  ",
+        {},
+    )
+
+    assert summary == (
+        f"{luc.EXPECTED_USER_NAME} said: exact user text within cap\n"
+        f"{luc.EXPECTED_CHARACTER_NAME} responded: exact assistant line one\nline two"
+    )
 
 
 def test_preflight_route_probe_verifies_write_path_before_turn(capsys):

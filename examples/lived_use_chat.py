@@ -38,6 +38,8 @@ QWEN_DEFAULT_TEMPERATURE = 0.7
 QWEN_DEFAULT_TOP_P = 0.8
 QWEN_DEFAULT_TOP_K = 20
 QWEN_DEFAULT_MIN_P = 0.0
+USER_SUMMARY_MAX_CHARS = 500
+ASSISTANT_SUMMARY_MAX_CHARS = 1200
 
 EXPECTED_WORKSPACE_ID = "lived_use_eira_voss_a0"
 EXPECTED_AGENT_ID = "eira_voss"
@@ -2007,6 +2009,22 @@ def render_system_prompt(
     ).strip()
 
 
+def _truncate_summary_text(text: str, max_chars: int) -> str:
+    if len(text) <= int(max_chars):
+        return text
+    clipped = text[: int(max_chars)]
+    if not clipped:
+        return ""
+    if clipped[-1].isspace():
+        return clipped.rstrip()
+    for index in range(len(clipped) - 1, -1, -1):
+        if clipped[index].isspace():
+            if index > 0:
+                return clipped[:index].rstrip()
+            break
+    return clipped.rstrip()
+
+
 def build_ingest_summary(
     user_name: str,
     character_name: str,
@@ -2014,8 +2032,14 @@ def build_ingest_summary(
     assistant_text: str,
     environ: Optional[Mapping[str, str]] = None,
 ) -> str:
-    user_short = safe_string(user_text, environ)[:200].strip()
-    assistant_short = safe_string(assistant_text, environ)[:300].strip().replace("\n\n", "\n")
+    user_short = _truncate_summary_text(
+        safe_string(user_text, environ).strip(),
+        USER_SUMMARY_MAX_CHARS,
+    )
+    assistant_short = _truncate_summary_text(
+        safe_string(assistant_text, environ).strip().replace("\n\n", "\n"),
+        ASSISTANT_SUMMARY_MAX_CHARS,
+    )
     return f"{user_name} said: {user_short}\n{character_name} responded: {assistant_short}"
 
 
