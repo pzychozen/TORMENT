@@ -1048,35 +1048,91 @@ def check_hard_cap(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _get_or_create_deep_store(fabric_instance, agent_id: str, workspace_id: str = "default"):
-    """Lazy-init deep memory store for an agent (workspace-scoped)."""
+def _deep_store_location(fabric_instance, agent_id: str, workspace_id: str = "default"):
+    """Return the validated deep-store cache key, data root, and base path."""
     from .fabric import TormentFabric
     ak = TormentFabric._agent_key(workspace_id, agent_id)
     if not hasattr(fabric_instance, "_deep_stores"):
         fabric_instance._deep_stores = {}
+    from .pathing import safe_slug
+
+    # Validate dynamic components before embedding in a path.
+    safe_slug(workspace_id, "workspace_id")
+    safe_slug(agent_id, "agent_id")
+
+    # Build path under the canonical data root and verify containment
+    # (inline startswith is CodeQL's recognised sanitiser).
+    _data_root = os.path.realpath(str(fabric_instance.data_dir))
+    _base = os.path.realpath(os.path.join(
+        _data_root, "workspaces", workspace_id,
+        "agents", agent_id, "deep_memory",
+    ))
+    if not _base.startswith(_data_root + os.sep):
+        raise ValueError(
+            f"Deep memory path escapes data root: {_base!r}"
+        )
+    return ak, _data_root, Path(_base)
+
+
+def _get_or_create_deep_store(fabric_instance, agent_id: str, workspace_id: str = "default"):
+    """Lazy-init deep memory store for an agent (workspace-scoped)."""
+    ak, _data_root, _base = _deep_store_location(
+        fabric_instance, agent_id, workspace_id
+    )
     if ak not in fabric_instance._deep_stores:
         from .deep_memory import DeepMemoryStore
-        from .pathing import safe_slug
 
-        # Validate dynamic components before embedding in a path.
-        safe_slug(workspace_id, "workspace_id")
-        safe_slug(agent_id, "agent_id")
-
-        # Build path under the canonical data root and verify containment
-        # (inline startswith is CodeQL's recognised sanitiser).
-        _data_root = os.path.realpath(str(fabric_instance.data_dir))
-        _base = os.path.realpath(os.path.join(
-            _data_root, "workspaces", workspace_id,
-            "agents", agent_id, "deep_memory",
-        ))
-        if not _base.startswith(_data_root + os.sep):
-            raise ValueError(
-                f"Deep memory path escapes data root: {_base!r}"
-            )
         fabric_instance._deep_stores[ak] = DeepMemoryStore(
-            Path(_base), trusted_root=_data_root,
+            _base, trusted_root=_data_root,
         )
     return fabric_instance._deep_stores[ak]
+
+
+def _attach_persisted_deep_store(
+    fabric_instance,
+    agent_id: str,
+    workspace_id: str = "default",
+):
+    """Attach an existing persisted deep store without creating one.
+
+    Retrieval uses this after the compression feature guard. The only
+    existence gate is the validated ``deep_memory/memories.jsonl`` file:
+    absent stores return None without constructing DeepMemoryStore, so a
+    no-deep-memory query cannot create deep-memory directories or files.
+    """
+    from .fabric import TormentFabric
+
+    ak = TormentFabric._agent_key(workspace_id, agent_id)
+    if not hasattr(fabric_instance, "_deep_stores"):
+        fabric_instance._deep_stores = {}
+    cached = fabric_instance._deep_stores.get(ak)
+    if cached is not None:
+        return cached
+
+    ak, _data_root, _base = _deep_store_location(
+        fabric_instance, agent_id, workspace_id
+    )
+
+    _memories = os.path.realpath(os.path.join(str(_base), "memories.jsonl"))
+    if not _memories.startswith(_data_root + os.sep):
+        raise ValueError(
+            f"Deep memory file path escapes data root: {_memories!r}"
+        )
+    if not os.path.isfile(_memories):
+        return None
+
+    with fabric_instance.locks.agent_lock(workspace_id, agent_id):
+        cached = fabric_instance._deep_stores.get(ak)
+        if cached is not None:
+            return cached
+        if not os.path.isfile(_memories):
+            return None
+
+        from .deep_memory import DeepMemoryStore
+
+        store = DeepMemoryStore(_base, trusted_root=_data_root)
+        fabric_instance._deep_stores[ak] = store
+        return store
 
 
 def _find_motifs_path(fabric_instance, agent_id: str, workspace_id: str = "default") -> Optional[str]:

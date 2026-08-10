@@ -3774,9 +3774,14 @@ class TormentFabric:
         if not self._compress_enable or top_k <= 0:
             return []
         try:
+            from .compression import _attach_persisted_deep_store
             from .spirit_return import enrich_deep_memory_hit, WarmupTracker, inject_spirit_return_into_hit
 
             _deep_store = self._deep_stores.get(ak)
+            if not _deep_store:
+                _deep_store = _attach_persisted_deep_store(
+                    self, agent_id, workspace_id=workspace_id
+                )
             if not _deep_store:
                 return []
 

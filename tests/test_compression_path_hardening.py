@@ -7,6 +7,7 @@ Covers:
   4. Compression logging still works for valid inputs
 """
 
+from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -17,14 +18,31 @@ from types import SimpleNamespace
 from torment_service.compression import (
     _find_motifs_path,
     _log_compression_event,
+    _attach_persisted_deep_store,
     _validate_path_component,
     CompressionEvent,
 )
 
 
+class _Locks:
+    @contextmanager
+    def agent_lock(self, workspace_id: str, agent_id: str):
+        yield
+
+
+class _CountingLocks:
+    def __init__(self):
+        self.count = 0
+
+    @contextmanager
+    def agent_lock(self, workspace_id: str, agent_id: str):
+        self.count += 1
+        yield
+
+
 def _make_fabric(data_dir: str) -> SimpleNamespace:
     """Create a minimal fabric-like object."""
-    return SimpleNamespace(data_dir=data_dir, _deep_stores={})
+    return SimpleNamespace(data_dir=data_dir, _deep_stores={}, locks=_Locks())
 
 
 def _make_event() -> CompressionEvent:
@@ -184,6 +202,84 @@ class TestValidatePathComponent(unittest.TestCase):
     def test_accepts_valid(self):
         result = _validate_path_component("valid_name", "test")
         self.assertEqual(result, "valid_name")
+
+
+class TestAttachPersistedDeepStore(unittest.TestCase):
+    """_attach_persisted_deep_store validates paths without creating absent stores."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _deep_dir(self, workspace_id: str = "ws1", agent_id: str = "agent1") -> str:
+        return os.path.join(
+            self._tmpdir,
+            "workspaces",
+            workspace_id,
+            "agents",
+            agent_id,
+            "deep_memory",
+        )
+
+    def test_absent_memories_returns_none_without_creating_directory(self):
+        fab = _make_fabric(self._tmpdir)
+
+        result = _attach_persisted_deep_store(fab, "agent1", "ws1")
+
+        self.assertIsNone(result)
+        self.assertEqual(fab._deep_stores, {})
+        self.assertFalse(os.path.exists(self._deep_dir()))
+
+    def test_attaches_existing_memories_jsonl_under_agent_lock(self):
+        deep_dir = self._deep_dir()
+        os.makedirs(deep_dir)
+        with open(os.path.join(deep_dir, "memories.jsonl"), "w") as f:
+            f.write("")
+
+        fab = _make_fabric(self._tmpdir)
+        locks = _CountingLocks()
+        fab.locks = locks
+
+        result = _attach_persisted_deep_store(fab, "agent1", "ws1")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(locks.count, 1)
+        self.assertIn("ws1/agent1", fab._deep_stores)
+
+    def test_cached_store_returns_without_relocking(self):
+        deep_dir = self._deep_dir()
+        os.makedirs(deep_dir)
+        with open(os.path.join(deep_dir, "memories.jsonl"), "w") as f:
+            f.write("")
+
+        fab = _make_fabric(self._tmpdir)
+        locks = _CountingLocks()
+        fab.locks = locks
+
+        first = _attach_persisted_deep_store(fab, "agent1", "ws1")
+        second = _attach_persisted_deep_store(fab, "agent1", "ws1")
+
+        self.assertIs(first, second)
+        self.assertEqual(locks.count, 1)
+
+    def test_rejects_dotdot_workspace_before_probe(self):
+        fab = _make_fabric(self._tmpdir)
+
+        with self.assertRaises(ValueError):
+            _attach_persisted_deep_store(fab, "agent1", "../escape")
+
+        parent = os.path.dirname(self._tmpdir)
+        self.assertFalse(os.path.exists(os.path.join(parent, "escape")))
+
+    def test_rejects_slash_agent_before_probe(self):
+        fab = _make_fabric(self._tmpdir)
+
+        with self.assertRaises(ValueError):
+            _attach_persisted_deep_store(fab, "a/evil", "ws1")
+
+        self.assertFalse(os.path.exists(self._deep_dir("ws1", "a")))
 
 
 if __name__ == "__main__":
