@@ -3,6 +3,11 @@
 
 > I built TORMENT because I wanted AI memory that could carry character, continuity, and emotional/behavioral shape without breaking the AI’s natural flow or trapping it inside brittle roleplay boundaries.
 
+> [!CAUTION]
+> **Security update - archive REST authentication bypass**
+>
+> A HIGH-severity authentication bypass was reported on July 8, 2026. Affected releases could permit unauthenticated archive read, write, query, list, and delete operations even with `TORMENT_AUTH_ENABLE=1`. The issue was fixed in `v2.4.7-security` and is included in `v2.5.0`; affected users should upgrade. See [SECURITY.md](SECURITY.md) and [GHSA-9j44-4v2c-3hp2](https://github.com/pzychozen/TORMENT/security/advisories/GHSA-9j44-4v2c-3hp2).
+
 ---
 
 TORMENT helps AI characters and agents build long-term memory without their identity dissolving into accumulated context.
@@ -194,13 +199,15 @@ Deeper reference:
 
 ---
 
-## Current status — v2.4.4
+## Current status — v2.5.0
 
-v2.4.4 closes the provenance-migration subsystem (step 6). Legacy memory rows can be walked through a two-gate policy — gate 1 epistemic recovery, gate 2 ancestry admission — and rewritten by a narrow append-only writer that preserves refusal state and recursion safety. The full closure sequence — export, dry-run, apply, and guard re-verification — has been validated end-to-end against a live workspace. `TORMENT_ARCHIVIST_WRITEBACK` remains off; enabling it is a separate later decision gate.
+v2.5.0 is the current supported release line. It preserves the archive REST authentication fix first marked by `v2.4.7-security` and represents the current repository line after development beyond the old v2.4.x security marker.
+
+v2.4.4 closed the provenance-migration subsystem (step 6). Legacy memory rows can be walked through a two-gate policy — gate 1 epistemic recovery, gate 2 ancestry admission — and rewritten by a narrow append-only writer that preserves refusal state and recursion safety. The full closure sequence — export, dry-run, apply, and guard re-verification — has been validated end-to-end against a live workspace. `TORMENT_ARCHIVIST_WRITEBACK` remains off; enabling it is a separate later decision gate.
 
 Recent work in the v2.4.x line:
 
-- **Post-v2.4.4 block merges (landed on main 2026-04-21)** — three memory-regrouping blocks extending the ontology established in earlier v2.4.x work: Block A (baton substrate — cross-session continuity state distinct from durable semantic memory), Block B (reference + environment — whole-object reference memory and scoped operational environment memory, kept as distinct primitives rather than interchangeable context), and Block C (closure synthesis — ratification-gated arc records with deferred-or-open-items as a required structural field). See `docs/BLOCK_A_DESIGN.md`, `docs/BLOCK_B_DESIGN.md`, `docs/BLOCK_C_DESIGN.md`, and their `PRE_BLOCK_*_PRECONDITIONS.md` companions for the design and governance trail. No post-v2.4.4 version stamp yet; these are on main pending a release bundle.
+- **Post-v2.4.4 block merges (landed on main 2026-04-21, included in v2.5.0)** — three memory-regrouping blocks extending the ontology established in earlier v2.4.x work: Block A (baton substrate — cross-session continuity state distinct from durable semantic memory), Block B (reference + environment — whole-object reference memory and scoped operational environment memory, kept as distinct primitives rather than interchangeable context), and Block C (closure synthesis — ratification-gated arc records with deferred-or-open-items as a required structural field). See `docs/BLOCK_A_DESIGN.md`, `docs/BLOCK_B_DESIGN.md`, `docs/BLOCK_C_DESIGN.md`, and their `PRE_BLOCK_*_PRECONDITIONS.md` companions for the design and governance trail.
 - **v2.4.4** — advisory retrieval shaping default-on (`TORMENT_THINKING_ADVISORY=1`): §2A validation confirmed across six eval runs — anchor preservation, collaborative escalation, analytical depth, and FAST guard all pass. Reinforce contract close: `torment_reinforce` now moves per-memory `reinforcement_count`, truthfully reports `"reinforced"` or `"no_op"`, and applies a log-scaled retrieval boost at rank stage. Provenance migration closure (step 6), recursion guard and refusal sentinels validated end-to-end
 - **v2.4.3** — tool-result memory lane, governed ingest of external tool outputs
 - **v2.4.2** — provenance system, recursion safety policy, MCP capability boundary

@@ -37,7 +37,7 @@ def _character():
 def _health(**overrides):
     data = {
         "ok": True,
-        "version": "2.4.7",
+        "version": "2.5.0",
         "profile": {
             "name": "companion",
             "known": True,

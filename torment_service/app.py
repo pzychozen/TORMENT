@@ -68,7 +68,7 @@ PROFILE_KNOWN = bool(ACTIVE_PROFILE) and (ACTIVE_PROFILE in PROFILES)
 TEST_CONDITION = os.environ.get("TORMENT_TEST_CONDITION", "").strip()
 SERVER_LAUNCHER_PATH = os.environ.get("TORMENT_SERVER_LAUNCHER_PATH", "").strip()
 
-app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.4.7' )
+app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.0' )
 
 fabric = TormentFabric(data_dir=DATA_DIR)
 
