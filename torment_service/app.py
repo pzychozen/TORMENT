@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional, List
 import logging
 import os, json
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import spine as _spine_module
@@ -24,6 +25,24 @@ from .scoring import derive_provenance_type as _derive_prov_type
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 
 _log = logging.getLogger("torment.app")
+
+
+PUBLIC_SAFE_REST_ROUTES = frozenset(
+    {
+        ("GET", "/retrieve/profiles"),
+        ("GET", "/thinking/debug/geo_profiles"),
+    }
+)
+
+
+def _rest_auth_path(path: str) -> str:
+    if path != "/" and path.endswith("/"):
+        return path.rstrip("/")
+    return path
+
+
+def is_public_safe_rest_route(method: str, path: str) -> bool:
+    return (method.upper(), _rest_auth_path(path)) in PUBLIC_SAFE_REST_ROUTES
 
 
 def _validate_path_component(name: str, label: str = "identifier") -> str:
@@ -69,6 +88,21 @@ TEST_CONDITION = os.environ.get("TORMENT_TEST_CONDITION", "").strip()
 SERVER_LAUNCHER_PATH = os.environ.get("TORMENT_SERVER_LAUNCHER_PATH", "").strip()
 
 app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.0' )
+
+
+@app.middleware("http")
+async def enforce_rest_auth_boundary(request: Request, call_next):
+    """Require API-key auth for all non-public REST surfaces when enabled."""
+    if AUTH_ENABLED and not is_public_safe_rest_route(request.method, request.url.path):
+        try:
+            request.state.torment_auth_context = resolve_request_context(request)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=getattr(exc, "headers", None),
+            )
+    return await call_next(request)
 
 fabric = TormentFabric(data_dir=DATA_DIR)
 

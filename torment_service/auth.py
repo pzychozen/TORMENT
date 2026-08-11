@@ -179,8 +179,9 @@ def resolve_request_context(
       - Returns a default operator-level context
       - Useful for local development and existing deployments
 
-    This function is designed to be called by endpoint handlers,
-    not as a dependency injection (to avoid breaking existing endpoints).
+    This function is called by the REST auth middleware for the outer
+    boundary and by endpoint handlers that need workspace/agent-specific
+    RequestContext values for Spine trust checks.
     """
     if not AUTH_ENABLED:
         return RequestContext(

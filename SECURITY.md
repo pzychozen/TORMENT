@@ -26,9 +26,25 @@ GHSA-9j44-4v2c-3hp2 was reported on July 8, 2026.
 - First fixed tag: `v2.4.7-security`.
 - Current fixed release: `v2.5.0`.
 
-Users running any affected release should upgrade to `v2.5.0`. If you cannot upgrade immediately, move at least to `v2.4.7-security` and plan a full upgrade to the current supported line.
+Users running any affected release should upgrade to `v2.5.0`. If you cannot upgrade immediately, move at least to `v2.4.7-security` and plan a full upgrade to the current supported line. `v2.4.7-security` is the first marker for the originally disclosed archive endpoint fix; `v2.5.0` is the first release intended to enforce the configured REST authentication boundary consistently across sensitive REST surfaces.
 
 TORMENT is commonly deployed as a local or controlled HTTP service. That deployment context does not change the severity or validity of an authentication bypass when authentication is configured.
+
+## 2026-08-11 Pre-release REST Auth Surface Audit
+
+During final review of the unpushed v2.5.0 release, maintainers found that handler-local authentication enforcement left additional sensitive REST routes unauthenticated when `TORMENT_AUTH_ENABLE=1`. This was broader than the original GHSA disclosure, which specifically covered five `/archive/*` handlers.
+
+The pre-release audit inventoried 93 FastAPI route declarations in `torment_service/app.py`:
+
+- 2 routes were classified `PUBLIC_SAFE`.
+- 61 routes were classified `AUTH_REQUIRED_READ`.
+- 30 routes were classified `AUTH_REQUIRED_WRITE`.
+
+The repair for v2.5.0 adds a default-deny REST authentication middleware when `TORMENT_AUTH_ENABLE=1`, with a tiny explicit public-safe allowlist. Existing per-handler `resolve_request_context` calls remain in place where endpoints need workspace/agent-specific `RequestContext` values for Spine trust checks.
+
+Current v2.5.0 intent: every externally exposed REST endpoint that reads private TORMENT memory/state or mutates TORMENT state requires a valid API key when REST auth is enabled. When `TORMENT_AUTH_ENABLE=0`, existing local/no-auth behavior is preserved.
+
+Audit record: `docs/TORMENT_REST_AUTH_SURFACE_AUDIT_2026_08_11.md`.
 
 ## Reporting a Vulnerability
 

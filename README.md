@@ -4,9 +4,9 @@
 > I built TORMENT because I wanted AI memory that could carry character, continuity, and emotional/behavioral shape without breaking the AI’s natural flow or trapping it inside brittle roleplay boundaries.
 
 > [!CAUTION]
-> **Security update - archive REST authentication bypass**
+> **Security update - REST authentication boundary**
 >
-> A HIGH-severity authentication bypass was reported on July 8, 2026. Affected releases could permit unauthenticated archive read, write, query, list, and delete operations even with `TORMENT_AUTH_ENABLE=1`. The issue was fixed in `v2.4.7-security` and is included in `v2.5.0`; affected users should upgrade. See [SECURITY.md](SECURITY.md) and [GHSA-9j44-4v2c-3hp2](https://github.com/pzychozen/TORMENT/security/advisories/GHSA-9j44-4v2c-3hp2).
+> A HIGH-severity archive REST authentication bypass was reported on July 8, 2026 and narrowly fixed in `v2.4.7-security`. During v2.5.0 preparation, a broader REST auth-surface audit found additional sensitive routes relying on handler-local enforcement, so v2.5.0 hardens the configured REST authentication boundary across sensitive read/write surfaces. Affected users should upgrade. See [SECURITY.md](SECURITY.md) and [GHSA-9j44-4v2c-3hp2](https://github.com/pzychozen/TORMENT/security/advisories/GHSA-9j44-4v2c-3hp2).
 
 ---
 
@@ -201,7 +201,7 @@ Deeper reference:
 
 ## Current status — v2.5.0
 
-v2.5.0 is the current supported release line. It preserves the archive REST authentication fix first marked by `v2.4.7-security` and represents the current repository line after development beyond the old v2.4.x security marker.
+v2.5.0 is the current supported release line. It preserves the archive REST authentication fix first marked by `v2.4.7-security`, hardens the configured REST auth boundary across sensitive surfaces, and represents the current repository line after development beyond the old v2.4.x security marker.
 
 v2.4.4 closed the provenance-migration subsystem (step 6). Legacy memory rows can be walked through a two-gate policy — gate 1 epistemic recovery, gate 2 ancestry admission — and rewritten by a narrow append-only writer that preserves refusal state and recursion safety. The full closure sequence — export, dry-run, apply, and guard re-verification — has been validated end-to-end against a live workspace. `TORMENT_ARCHIVIST_WRITEBACK` remains off; enabling it is a separate later decision gate.
 
