@@ -23,6 +23,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from torment_service.archive_lifecycle import replay_document_lifecycle
+
 
 def _parse_jsonl(path: str):
     if not os.path.exists(path):
@@ -50,6 +52,9 @@ def compact_documents(docs_path: str, dry_run: bool = False) -> dict:
     """Deduplicate documents.jsonl — keep latest record per doc_id."""
     latest_by_id: dict = {}
     total = 0
+    lifecycle = replay_document_lifecycle(
+        os.path.join(os.path.dirname(os.path.realpath(docs_path)), "events.jsonl")
+    )
 
     for rec in _parse_jsonl(docs_path):
         total += 1
@@ -57,8 +62,13 @@ def compact_documents(docs_path: str, dry_run: bool = False) -> dict:
         if doc_id:
             latest_by_id[doc_id] = rec
 
-    # Filter out deleted documents (marked with _deleted flag)
-    active = {k: v for k, v in latest_by_id.items() if not v.get("_deleted", False)}
+    # Events are authoritative when present. ``_deleted`` remains a fallback
+    # for legacy documents.jsonl tombstones with no lifecycle event.
+    active = {
+        doc_id: record
+        for doc_id, record in latest_by_id.items()
+        if lifecycle.get(doc_id, not record.get("_deleted", False))
+    }
     deleted_count = len(latest_by_id) - len(active)
     dedup_removed = total - len(latest_by_id)
 

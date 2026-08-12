@@ -38,6 +38,11 @@ import numpy as np
 from .chunking import chunk_text
 from .embedding_store import EmbeddingShardWriter, EmbeddingShardReader
 from .embeddings import Embedder, HashEmbedding
+from .archive_lifecycle import (
+    DOCUMENT_DELETED,
+    DOCUMENT_INGESTED,
+    replay_document_lifecycle,
+)
 
 
 # Logger
@@ -177,6 +182,8 @@ class ArchiveStore:
 
     def _load(self) -> None:
         """Load documents and chunks from JSONL."""
+        lifecycle = replay_document_lifecycle(self.events_path)
+
         # Documents
         if os.path.exists(self.documents_path):
             with open(self.documents_path, "r", encoding="utf-8") as f:
@@ -194,6 +201,8 @@ class ArchiveStore:
                             created_ts=int(obj.get("created_ts", 0)),
                             metadata=obj.get("metadata", {}),
                         )
+                        if lifecycle.get(doc.doc_id) is False:
+                            continue
                         self._documents[doc.doc_id] = doc
                     except (json.JSONDecodeError, KeyError):
                         continue
@@ -222,6 +231,8 @@ class ArchiveStore:
                             # chunks.jsonl files; no migration required.
                             governance=obj.get("governance"),
                         )
+                        if lifecycle.get(chunk.doc_id) is False:
+                            continue
                         self._chunks[chunk.chunk_id] = chunk
 
                         # Load embedding into RAM for search
@@ -368,7 +379,7 @@ class ArchiveStore:
 
         # Log event
         self._append_jsonl(self.events_path, {
-            "type": "DOCUMENT_INGESTED",
+            "type": DOCUMENT_INGESTED,
             "ts": _now_ts(),
             "doc_id": doc_id,
             "title": title,
@@ -525,8 +536,8 @@ class ArchiveStore:
 
         This is safe — archive deletion never affects core memory.
         Note: This removes from in-memory indexes. JSONL files retain
-        the records (append-only), but they won't be loaded on restart
-        once we add a deletion marker.
+        the records (append-only); events.jsonl records the deletion and
+        is replayed when the archive is loaded or its SQLite index rebuilt.
         """
         if doc_id not in self._documents:
             return False
@@ -545,7 +556,7 @@ class ArchiveStore:
 
         # Log deletion event
         self._append_jsonl(self.events_path, {
-            "type": "DOCUMENT_DELETED",
+            "type": DOCUMENT_DELETED,
             "ts": _now_ts(),
             "doc_id": doc_id,
             "chunks_removed": len(chunk_ids),
