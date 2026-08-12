@@ -90,7 +90,7 @@ def _reference_memory_plan(frame, mode) -> MemoryPlan:
         "archive" in frame.context_tags
         or "document" in frame.normalized_input.lower()
     )
-    plan.retrieve_deep = _ARCHIVE_RECALL_ENABLE and mode.chosen_mode in {
+    plan.retrieve_deep = mode.chosen_mode in {
         CognitiveMode.REFLECTIVE,
         CognitiveMode.IDENTITY_SENSITIVE,
     }
@@ -436,7 +436,7 @@ def test_plan_routes_through_state(raw, source_type):
     assert plan.retrieve_srg_state == (_SRG_COGNITION_ENABLE and state.character_state_context_eligible)
     assert plan.retrieve_relational == (state.memory_need or state.live_social)
     assert plan.retrieve_archive == (_ARCHIVE_RECALL_ENABLE and state.archive_context_signal)
-    assert plan.retrieve_deep == (_ARCHIVE_RECALL_ENABLE and state.deep_context_eligible)
+    assert plan.retrieve_deep == state.deep_context_eligible
     assert plan.retrieve_collective == (state.governance_sensitive and state.collective_context_signal)
 
 

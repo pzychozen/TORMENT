@@ -440,6 +440,13 @@ class TestWiring_ArchiveFilterA:
     ``assembled_text`` regardless of audit flag state.
     """
 
+    @pytest.fixture(autouse=True)
+    def _enable_automatic_archive_recall(self, monkeypatch):
+        """FILTER-A needs a candidate, so opt in to automatic Archive recall."""
+        import torment_service.thinking_controller as tc
+        monkeypatch.setenv("TORMENT_ARCHIVE_RECALL", "1")
+        monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
+
     def test_archive_excluded_empty_list_when_no_archive_ingested(self, client):
         """No archive chunks ingested → no exclusions → archive_excluded
         is an empty list. Presence of the empty list (not absent key)

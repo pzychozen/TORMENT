@@ -158,7 +158,13 @@ def test_ingest_with_governance_stores_chunk_governance(client):
 #    retrieved/assembled prompt-visible output (and was actually a candidate).
 # ---------------------------------------------------------------------------
 
-def test_non_shareable_http_ingest_excluded_from_retrieve(client):
+def test_non_shareable_http_ingest_excluded_from_retrieve(client, monkeypatch):
+    # This is the one test in this module that deliberately exercises
+    # automatic Archive inclusion in /retrieve. It must opt in now that
+    # Archive recall is default-off.
+    import torment_service.thinking_controller as tc
+    monkeypatch.setenv("TORMENT_ARCHIVE_RECALL", "1")
+    monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", True)
     ws, ag = _bootstrap(client)
     secret = "TOKEN_HTTP_PRIVATE_MARKER_77_NOT_SHAREABLE"
     res = _ingest_archive_http(

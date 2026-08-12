@@ -1579,18 +1579,21 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
     )
     core_hits = core_result.get("results", [])
 
-    # 2. Archive retrieval (if archive exists for this agent)
+    # 2. Optional automatic Archive retrieval. The import-time flag is owned
+    # by ThinkingController, so this endpoint shares its exact interpretation
+    # without defining a second parser or affecting explicit /archive/* APIs.
     archive_hits = []
-    try:
-        store = _get_archive_store(req.workspace_id, req.agent_id)
-        if store.chunk_count > 0:
-            archive_hits = store.retrieve(
-                query=req.query,
-                top_k=req.archive_top_k,
-                min_score=req.archive_min_score,
-            )
-    except Exception:
-        archive_hits = []
+    if _thinking_controller_module._ARCHIVE_RECALL_ENABLE:
+        try:
+            store = _get_archive_store(req.workspace_id, req.agent_id)
+            if store.chunk_count > 0:
+                archive_hits = store.retrieve(
+                    query=req.query,
+                    top_k=req.archive_top_k,
+                    min_score=req.archive_min_score,
+                )
+        except Exception:
+            archive_hits = []
 
     # 2b. Track retrieval counts for promotion (Phase 5)
     if archive_hits:

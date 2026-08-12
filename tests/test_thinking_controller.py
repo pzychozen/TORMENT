@@ -1,5 +1,6 @@
 import pytest
 
+import torment_service.thinking_controller as tc
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ActionType, CognitiveMode
 
@@ -42,7 +43,8 @@ def test_tool_mode_selected_for_execution_request():
     assert result.action_decision.action == ActionType.USE_TOOL
 
 
-def test_retrieval_mode_selected_for_archive_document_question():
+def test_retrieval_mode_selected_for_archive_document_question(monkeypatch):
+    monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", False)
     ctl = ThinkingController()
     # Avoid "transcript" — it's in both ARCHIVE and LIVE_SOCIAL hint words,
     # and live_social wins in mode priority. Use archive-only keywords.
@@ -52,7 +54,7 @@ def test_retrieval_mode_selected_for_archive_document_question():
         "Can you look through the archive document notes and remember what was said before?",
     )
     assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
-    assert result.memory_plan.retrieve_archive is True
+    assert result.memory_plan.retrieve_archive is False
     assert result.memory_plan.retrieve_relational is True
 
 
@@ -139,7 +141,8 @@ def test_memory_plan_collective_is_non_dominant_when_collective_governance_input
     assert "governance_review_before_execution" in result.memory_plan.safety_constraints
 
 
-def test_transcript_defaults_to_archive_retrieval_not_live_social():
+def test_transcript_defaults_to_archive_retrieval_not_live_social(monkeypatch):
+    monkeypatch.setattr(tc, "_ARCHIVE_RECALL_ENABLE", False)
     ctl = ThinkingController()
     # "transcript" should route to archive/retrieval, not live-social.
     # Avoid tool-hint words like "search" since tool beats retrieval in priority.
@@ -149,7 +152,7 @@ def test_transcript_defaults_to_archive_retrieval_not_live_social():
         "Look through the archive transcript for what was said before.",
     )
     assert result.mode_decision.chosen_mode == CognitiveMode.RETRIEVAL
-    assert result.memory_plan.retrieve_archive is True
+    assert result.memory_plan.retrieve_archive is False
     assert "archive" in result.task_frame.context_tags
     assert "live_social" not in result.task_frame.context_tags
 

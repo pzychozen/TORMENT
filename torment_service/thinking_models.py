@@ -165,8 +165,9 @@ class EphemeralCognitionState:
     predicates; the ``*_context_eligible`` fields are mode-derived
     eligibility predicates. Both are pre-environment-flag — the
     ``_SRG_COGNITION_ENABLE`` / ``_ARCHIVE_RECALL_ENABLE`` gates are applied
-    downstream in ``build_memory_plan``, keeping this state independent of
-    runtime configuration.
+    downstream to their respective SRG and Archive lanes in
+    ``build_memory_plan``. Deep eligibility remains mode-derived, keeping
+    this state independent of runtime configuration.
     """
 
     # mode-decision shape (already-computed scalars)

@@ -210,7 +210,9 @@ ANALYTICAL_DEPTH_HINT_WORDS = {
 _SPINE_ENABLE = os.environ.get("TORMENT_SPINE_ENABLE", "1").strip() not in ("0", "false", "no", "off")
 _IDENTITY_SENSITIVE_ENABLE = os.environ.get("TORMENT_IDENTITY_SENSITIVE", "1").strip() not in ("0", "false", "no", "off")
 _SRG_COGNITION_ENABLE = os.environ.get("TORMENT_SRG_COGNITION", "1").strip() not in ("0", "false", "no", "off")
-_ARCHIVE_RECALL_ENABLE = os.environ.get("TORMENT_ARCHIVE_RECALL", "1").strip() not in ("0", "false", "no", "off")
+# Archive is explicit document/reference memory. Automatic inclusion is
+# opt-in; Deep continuity retrieval remains mode-derived.
+_ARCHIVE_RECALL_ENABLE = os.environ.get("TORMENT_ARCHIVE_RECALL", "0").strip() not in ("", "0", "false", "no", "off")
 _LIVE_SOCIAL_ENABLE = os.environ.get("TORMENT_LIVE_SOCIAL", "1").strip() not in ("0", "false", "no", "off")
 
 # Slice 2 (ephemeral cognition state) — numeric retrieval shaping. DEFAULT OFF.
@@ -527,10 +529,10 @@ class ThinkingController:
         ``ThinkingResult``, or exposed by any endpoint in Slice 1.
 
         Environment gates (``_SRG_COGNITION_ENABLE`` /
-        ``_ARCHIVE_RECALL_ENABLE``) are deliberately NOT folded in here; the
-        ``*_signal`` / ``*_eligible`` fields are the pre-flag predicates and
-        the flags are applied downstream, so this state stays a pure
-        function of its two inputs.
+        ``_ARCHIVE_RECALL_ENABLE``) are deliberately NOT folded in here. The
+        Archive signal remains pre-flag and is gated downstream; Deep
+        eligibility remains mode-derived, so this state stays a pure function
+        of its two inputs.
         """
         character_state_context_eligible = frame.identity_sensitive or mode.chosen_mode in {
             CognitiveMode.IDENTITY_SENSITIVE,
@@ -587,7 +589,7 @@ class ThinkingController:
         plan.retrieve_srg_state = _SRG_COGNITION_ENABLE and state.character_state_context_eligible
         plan.retrieve_relational = state.memory_need or state.live_social
         plan.retrieve_archive = _ARCHIVE_RECALL_ENABLE and state.archive_context_signal
-        plan.retrieve_deep = _ARCHIVE_RECALL_ENABLE and state.deep_context_eligible
+        plan.retrieve_deep = state.deep_context_eligible
         plan.retrieve_collective = state.governance_sensitive and state.collective_context_signal
 
         plan.top_k_by_lane = {
