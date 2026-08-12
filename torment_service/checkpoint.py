@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import numbers
 import os
 import re
 import time
@@ -112,6 +113,93 @@ def _json_to_float_array(data: List[float]) -> np.ndarray:
     return np.array(data, dtype=float)
 
 
+_CHAR_MOD_SCALAR_FIELDS = (
+    "g_mod",
+    "theta_lock_mod",
+    "warmth",
+    "structure",
+)
+_CHAR_MOD_FIELDS = frozenset(("omega_init", *_CHAR_MOD_SCALAR_FIELDS))
+
+
+def _serialize_character_modulation(state) -> Dict[str, Any]:
+    """Serialize the fixed, internal ``ModelState._char_mod`` schema.
+
+    Character modulation is intentionally not a general JSON payload.  The
+    production schema contains one three-element complex initial vector and
+    four real scalar modulation values; unknown additions must be made
+    explicit here rather than being silently persisted as arbitrary objects.
+    """
+    char_mod = getattr(state, "_char_mod", {}) or {}
+    if not isinstance(char_mod, dict):
+        raise TypeError(
+            "invalid _char_mod: expected dict, "
+            f"got {type(char_mod).__name__}"
+        )
+
+    unexpected = [field for field in char_mod if field not in _CHAR_MOD_FIELDS]
+    if unexpected:
+        raise TypeError(f"unsupported _char_mod.{unexpected[0]}")
+
+    payload: Dict[str, Any] = {}
+    if "omega_init" in char_mod:
+        omega_init = char_mod["omega_init"]
+        if not isinstance(omega_init, np.ndarray):
+            raise TypeError(
+                "invalid _char_mod.omega_init: expected complex ndarray "
+                f"with shape (3,), got {type(omega_init).__name__}"
+            )
+        if omega_init.shape != (3,):
+            raise ValueError(
+                "invalid _char_mod.omega_init: expected shape (3,), "
+                f"got {omega_init.shape}"
+            )
+        if not np.issubdtype(omega_init.dtype, np.complexfloating):
+            raise TypeError(
+                "invalid _char_mod.omega_init: expected complex ndarray, "
+                f"got dtype={omega_init.dtype}"
+            )
+        payload["omega_init"] = _complex_array_to_json(omega_init)
+
+    for field in _CHAR_MOD_SCALAR_FIELDS:
+        if field not in char_mod:
+            continue
+        value = char_mod[field]
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, numbers.Real):
+            raise TypeError(
+                f"invalid _char_mod.{field}: expected real numeric scalar, "
+                f"got {type(value).__name__}"
+            )
+        payload[field] = float(value)
+
+    return payload
+
+
+def _deserialize_character_modulation(data: Any) -> Dict[str, Any]:
+    """Restore the supported character modulation values from checkpoint JSON."""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise TypeError(
+            "invalid _char_mod: expected dict, "
+            f"got {type(data).__name__}"
+        )
+
+    char_mod = dict(data)
+    if "omega_init" in char_mod:
+        try:
+            omega_init = _json_to_complex_array(char_mod["omega_init"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid _char_mod.omega_init encoding") from exc
+        if omega_init.shape != (3,):
+            raise ValueError(
+                "invalid _char_mod.omega_init: expected decoded shape (3,), "
+                f"got {omega_init.shape}"
+            )
+        char_mod["omega_init"] = omega_init
+    return char_mod
+
+
 # ---------------------------------------------------------------------------
 # Serialize kernel state (ModelState + CorridorMonitor)
 # ---------------------------------------------------------------------------
@@ -133,7 +221,7 @@ def serialize_model_state(state) -> Dict[str, Any]:
         "Z_vec": _float_array_to_json(state.Z_vec),
         "t": float(state.t),
         "step": int(state.step),
-        "_char_mod": dict(getattr(state, "_char_mod", {}) or {}),
+        "_char_mod": _serialize_character_modulation(state),
     }
 
 
@@ -151,7 +239,9 @@ def deserialize_model_state(data: Dict[str, Any]):
         step=int(data.get("step", 0)),
     )
     # Restore character modulation
-    state._char_mod = dict(data.get("_char_mod", {}))  # type: ignore[attr-defined]
+    state._char_mod = _deserialize_character_modulation(  # type: ignore[attr-defined]
+        data.get("_char_mod", {}),
+    )
     char_mod = getattr(state, "_char_mod", {}) or {}
     theta_lock_override = (
         float(char_mod["theta_lock_mod"])

@@ -269,8 +269,12 @@ class TestPruneCheckpoints(unittest.TestCase):
         rogue = os.path.join(ckpt_dir, "notes.txt")
         with open(rogue, "w") as f:
             f.write("keep me")
+        stale_tmp = os.path.join(ckpt_dir, "checkpoint_000999.json.tmp")
+        with open(stale_tmp, "w") as f:
+            f.write("incomplete")
         _prune_old_checkpoints(ckpt_dir, 1)
         self.assertTrue(os.path.exists(rogue), "non-checkpoint file was deleted")
+        self.assertTrue(os.path.exists(stale_tmp), "tmp checkpoint was pruned")
 
     def test_prune_uses_child_path_not_raw_glob(self):
         """Prune reconstructs paths from basenames — a symlink-escaped
@@ -306,6 +310,9 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
                 model_state=_make_model_state(),
                 corridor_monitor=_make_corridor_monitor(),
             )
+        ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
+        with open(os.path.join(ckpt_dir, "checkpoint_000999.json.tmp"), "w") as f:
+            f.write('{"step": 999')
         data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNotNone(data)
         self.assertEqual(data["step"], 30)
@@ -335,6 +342,9 @@ class TestLoadLatestCheckpoint(unittest.TestCase):
         rogue = os.path.join(ckpt_dir, "checkpoint_evil.json")
         with open(rogue, "w") as f:
             json.dump({"step": 999}, f)
+        stale_tmp = os.path.join(ckpt_dir, "checkpoint_000999.json.tmp")
+        with open(stale_tmp, "w") as f:
+            f.write('{"step": 999')
         data = load_latest_checkpoint(self._tmpdir, "ws1", "agent1")
         self.assertIsNone(data, "should ignore non-matching filenames")
 

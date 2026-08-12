@@ -18,6 +18,7 @@ import shutil
 import sys
 import tempfile
 import traceback
+from dataclasses import asdict
 
 import numpy as np
 
@@ -27,8 +28,9 @@ from torment_service.checkpoint import (
     serialize_model_state, deserialize_model_state,
     serialize_corridor_monitor, deserialize_corridor_monitor,
     save_checkpoint, load_latest_checkpoint, restore_from_checkpoint,
-    get_checkpoint_dir, build_motif_summary,
+    get_checkpoint_dir, build_motif_summary, CHECKPOINT_VERSION,
 )
+from torment_service.character import CharacterState
 from torment_service.promotion import (
     evaluate_promotion, promote_chunk, suggest_promotions,
     load_retrieval_counts, save_retrieval_counts, increment_retrieval_counts,
@@ -58,7 +60,16 @@ def _make_model_state():
     state.Z_vec[:] = [0.12, 0.3, 0.44]
     state.t = 125.5
     state.step = 2510
-    state._char_mod = {"g_mod": 0.22, "theta_lock_mod": 0.25}
+    state._char_mod = {
+        "omega_init": np.array(
+            [0.5 + 0.3j, -0.2 + 0.8j, 0.4 - 0.6j],
+            dtype=np.complex128,
+        ),
+        "g_mod": 0.22,
+        "theta_lock_mod": 0.25,
+        "warmth": 0.35,
+        "structure": 0.65,
+    }
     return state
 
 
@@ -156,7 +167,16 @@ class TestCheckpointSerialization:
         assert np.array_equal(expected.Z_macro, restored.Z_macro)
         assert np.array_equal(expected.Z_chiral, restored.Z_chiral)
         assert np.array_equal(expected.Z_vec, restored.Z_vec)
-        assert restored._char_mod == {"g_mod": 0.22, "theta_lock_mod": 0.25}
+        assert restored._char_mod["g_mod"] == 0.22
+        assert restored._char_mod["theta_lock_mod"] == 0.25
+        assert restored._char_mod["warmth"] == 0.35
+        assert restored._char_mod["structure"] == 0.65
+        assert restored._char_mod["omega_init"].dtype == np.complex128
+        assert restored._char_mod["omega_init"].shape == (3,)
+        assert restored._char_mod["omega_init"].shape != (3, 2)
+        assert np.array_equal(
+            restored._char_mod["omega_init"], state._char_mod["omega_init"],
+        )
 
     def test_corridor_monitor_round_trip(self):
         mon = _make_corridor_monitor()
@@ -193,6 +213,123 @@ class TestCheckpointSerialization:
         parsed = json.loads(s)
         assert "model_state" in parsed
 
+    def test_scalar_only_char_mod_remains_readable(self):
+        state = _make_model_state()
+        state._char_mod = {"g_mod": 0.22, "theta_lock_mod": 0.25}
+
+        restored = deserialize_model_state(serialize_model_state(state))
+
+        assert restored._char_mod == {"g_mod": 0.22, "theta_lock_mod": 0.25}
+
+    def test_boolean_char_mod_scalar_values_are_rejected(self):
+        for field in ("g_mod", "theta_lock_mod", "warmth", "structure"):
+            for value in (True, np.bool_(False)):
+                state = _make_model_state()
+                state._char_mod[field] = value
+                try:
+                    serialize_model_state(state)
+                except TypeError as exc:
+                    assert f"invalid _char_mod.{field}" in str(exc)
+                else:
+                    assert False, f"boolean _char_mod.{field} must fail"
+
+    def test_deserialize_rejects_malformed_omega_init_encoding(self):
+        data = serialize_model_state(_make_model_state())
+        data["_char_mod"]["omega_init"] = [["not-a-real", 0.0]]
+
+        try:
+            deserialize_model_state(data)
+        except ValueError as exc:
+            assert "invalid _char_mod.omega_init encoding" in str(exc)
+        else:
+            assert False, "malformed omega_init encoding must fail"
+
+    def test_deserialize_rejects_omega_init_with_decoded_wrong_shape(self):
+        data = serialize_model_state(_make_model_state())
+        data["_char_mod"]["omega_init"] = [[0.5, 0.3], [-0.2, 0.8]]
+
+        try:
+            deserialize_model_state(data)
+        except ValueError as exc:
+            assert "invalid _char_mod.omega_init: expected decoded shape (3,)" in str(exc)
+        else:
+            assert False, "wrong-shape omega_init encoding must fail"
+
+    def test_deserialize_rejects_non_dict_char_mod(self):
+        data = serialize_model_state(_make_model_state())
+        data["_char_mod"] = []
+
+        try:
+            deserialize_model_state(data)
+        except TypeError as exc:
+            assert "invalid _char_mod: expected dict" in str(exc)
+        else:
+            assert False, "non-dict _char_mod must fail"
+
+    def test_deserialize_accepts_none_char_mod(self):
+        data = serialize_model_state(_make_model_state())
+        data["_char_mod"] = None
+
+        restored = deserialize_model_state(data)
+
+        assert restored._char_mod == {}
+
+    def test_unknown_char_mod_key_fails_loudly_and_nonfatally(self):
+        state = _make_model_state()
+        state._char_mod["future_mod"] = 0.1
+        try:
+            serialize_model_state(state)
+        except TypeError as exc:
+            assert "unsupported _char_mod.future_mod" in str(exc)
+        else:
+            assert False, "unknown _char_mod field must fail"
+
+        tmp = _tmp()
+        try:
+            path = save_checkpoint(
+                data_dir=tmp, workspace_id="test_ws", agent_id="test_agent",
+                step=500, model_state=state, corridor_monitor=_make_corridor_monitor(),
+            )
+            assert path is None
+            ckpt_dir = os.path.join(
+                tmp, "workspaces", "test_ws", "agents", "test_agent",
+                "private", "checkpoints",
+            )
+            assert os.listdir(ckpt_dir) == []
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_invalid_omega_init_type_and_shape_fail_loudly_and_nonfatally(self):
+        invalid_cases = [
+            ([0.5 + 0.3j, -0.2 + 0.8j, 0.4 - 0.6j], TypeError),
+            (np.ones(3, dtype=float), TypeError),
+            (np.ones(2, dtype=np.complex128), ValueError),
+        ]
+        for omega_init, error_type in invalid_cases:
+            state = _make_model_state()
+            state._char_mod["omega_init"] = omega_init
+            try:
+                serialize_model_state(state)
+            except error_type as exc:
+                assert "invalid _char_mod.omega_init" in str(exc)
+            else:
+                assert False, "invalid omega_init must fail"
+
+            tmp = _tmp()
+            try:
+                path = save_checkpoint(
+                    data_dir=tmp, workspace_id="test_ws", agent_id="test_agent",
+                    step=500, model_state=state, corridor_monitor=_make_corridor_monitor(),
+                )
+                assert path is None
+                ckpt_dir = os.path.join(
+                    tmp, "workspaces", "test_ws", "agents", "test_agent",
+                    "private", "checkpoints",
+                )
+                assert os.listdir(ckpt_dir) == []
+            finally:
+                shutil.rmtree(tmp)
+
 
 # ---------------------------------------------------------------------------
 # Test: Checkpoint Save / Load
@@ -223,10 +360,12 @@ class TestCheckpointSaveLoad:
             )
             assert path is not None
             assert os.path.exists(path)
+            assert not os.path.exists(path + ".tmp")
 
             loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
             assert loaded is not None
             assert loaded["step"] == 500
+            assert loaded["version"] == CHECKPOINT_VERSION == 3
             assert loaded["character_state"]["drift_score"] == 0.12
             assert loaded["shard_snapshot"]["next_row"] == 42
         finally:
@@ -248,6 +387,64 @@ class TestCheckpointSaveLoad:
             assert restored["step"] == 1000
             assert np.allclose(state.Omega, restored["model_state"].Omega, atol=1e-10)
             assert abs(restored["corridor_monitor"].surv_ema - 1.7) < 1e-10
+            assert restored["model_state"]._char_mod["omega_init"].dtype == np.complex128
+            assert restored["model_state"]._char_mod["omega_init"].shape == (3,)
+            assert restored["model_state"]._char_mod["omega_init"].shape != (3, 2)
+            assert np.array_equal(
+                restored["model_state"]._char_mod["omega_init"],
+                state._char_mod["omega_init"],
+            )
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_character_state_history_survives_checkpoint_json_path(self):
+        tmp = _tmp()
+        try:
+            character_state = asdict(CharacterState(
+                workspace_id=self._WS,
+                agent_id=self._AG,
+                seed_id="seed",
+                drift_history=[(500, -0.12), (1000, 0.34)],
+            ))
+            path = save_checkpoint(
+                data_dir=tmp, workspace_id=self._WS, agent_id=self._AG,
+                step=500, model_state=_make_model_state(),
+                corridor_monitor=_make_corridor_monitor(),
+                character_state_dict=character_state,
+            )
+            assert path is not None
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
+            assert loaded is not None
+            assert loaded["character_state"]["drift_history"] == [
+                [500, -0.12], [1000, 0.34],
+            ]
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_later_failed_save_keeps_prior_valid_checkpoint(self):
+        tmp = _tmp()
+        try:
+            state = _make_model_state()
+            mon = _make_corridor_monitor()
+            first_path = save_checkpoint(
+                data_dir=tmp, workspace_id=self._WS, agent_id=self._AG,
+                step=500, model_state=state, corridor_monitor=mon,
+            )
+            assert first_path is not None
+            with open(first_path, "rb") as f:
+                first_bytes = f.read()
+
+            state._char_mod["future_mod"] = 0.1
+            failed_path = save_checkpoint(
+                data_dir=tmp, workspace_id=self._WS, agent_id=self._AG,
+                step=1000, model_state=state, corridor_monitor=mon,
+            )
+            assert failed_path is None
+            with open(first_path, "rb") as f:
+                assert f.read() == first_bytes
+            loaded = load_latest_checkpoint(tmp, self._WS, self._AG)
+            assert loaded is not None
+            assert loaded["step"] == 500
         finally:
             shutil.rmtree(tmp)
 
