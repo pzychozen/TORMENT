@@ -161,15 +161,16 @@ class DeepMemoryStore:
         if self.memories_path.exists():
             try:
                 with open(self.memories_path, "r", encoding="utf-8") as f:
-                    for i, line in enumerate(f):
+                    for line in f:
                         line = line.strip()
                         if not line:
                             continue
                         try:
                             d = json.loads(line)
                             mem = DeepMemory.from_dict(d)
+                            idx = len(self._memories)
                             self._memories.append(mem)
-                            self._eid_index[mem.eid] = i
+                            self._eid_index[mem.eid] = idx
                         except Exception:
                             continue
             except Exception as exc:
@@ -277,9 +278,9 @@ class DeepMemoryStore:
         """Build cosine-search matrix from shard reader."""
         self._ensure_loaded()
         assert self._memories is not None
+        assert self._eid_index is not None
 
-        vecs: List[np.ndarray] = []
-        eids: List[int] = []
+        latest_vec_by_eid: Dict[int, np.ndarray] = {}
 
         for mem in self._memories:
             if mem.embedding_ref is None or self._shard_reader is None:
@@ -289,10 +290,22 @@ class DeepMemoryStore:
                 if vec is not None:
                     v = np.asarray(vec, dtype=np.float32).reshape(-1)
                     norm = float(np.linalg.norm(v) + 1e-12)
-                    vecs.append(v / norm)
-                    eids.append(mem.eid)
+                    latest_vec_by_eid[int(mem.eid)] = v / norm
             except Exception:
                 continue
+
+        vecs: List[np.ndarray] = []
+        eids: List[int] = []
+
+        for idx, mem in enumerate(self._memories):
+            eid = int(mem.eid)
+            if self._eid_index.get(eid) != idx:
+                continue
+            vec = latest_vec_by_eid.get(eid)
+            if vec is None:
+                continue
+            vecs.append(vec)
+            eids.append(eid)
 
         if vecs:
             self._emb_mat = np.stack(vecs, axis=0)
@@ -345,11 +358,7 @@ class DeepMemoryStore:
         if k <= 0:
             return []
 
-        if len(scores) <= k:
-            order = np.argsort(-scores)
-        else:
-            idx = np.argpartition(-scores, k - 1)[:k]
-            order = idx[np.argsort(-scores[idx])]
+        order = np.argsort(-scores, kind="mergesort")[:k]
 
         self._ensure_loaded()
         assert self._memories is not None
