@@ -463,7 +463,7 @@ class VoicePipeline:
 
     def run_loop(self) -> None:
         print("=" * 60)
-        print("TORMENT Live Agent — Voice Pipeline")
+        print("TORMENT Voice Character Client — Voice Pipeline")
         print("Speak to interact. Press Ctrl+C to stop.")
         print("=" * 60)
 
@@ -497,7 +497,7 @@ class TextPipeline:
 
     def run_loop(self) -> None:
         print("=" * 60)
-        print("TORMENT Live Agent — Text Mode")
+        print("TORMENT Voice Character Client — Text Mode")
         print("Type to interact. Type 'quit' to stop.")
         if self.tts:
             print(f"TTS: {type(self.tts).__name__} (responses will be spoken)")
@@ -551,7 +551,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-    parser = argparse.ArgumentParser(description="TORMENT Live Agent")
+    parser = argparse.ArgumentParser(description="TORMENT Voice Character Client")
 
     # Mode
     parser.add_argument(

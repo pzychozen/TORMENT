@@ -12,7 +12,7 @@ break the character authoring flow. Specifically, proves that:
   * ordinary memory rows continue to be non-protected
   * disagreements are operator-visible without disrupting the
     character flow itself
-  * external inference modules (``live_agent.inference``) still import
+  * external inference modules (``voice_client.inference``) still import
     cleanly after the Q2-D imports were added
 
 This is a local pytest pack. NO real Anthropic/OpenRouter/Gemini API
@@ -501,19 +501,19 @@ def test_disagreement_payload_falls_back_in_derive_retention_tier(caplog):
 # PHASE 4 -- External inference import smoke
 #
 # No real API calls. Purely regression — proves Q2-D's lifecycle imports
-# didn't break the live_agent.inference module's transitive import graph.
+# didn't break the voice_client.inference module's transitive import graph.
 # ===========================================================================
 
 
-def test_live_agent_inference_module_imports():
-    """``live_agent.inference`` imports cleanly. If Q2-D introduced a
+def test_voice_client_inference_module_imports():
+    """``voice_client.inference`` imports cleanly. If Q2-D introduced a
     transitive import problem, this fails loud at module load.
     """
     try:
-        from live_agent import inference  # noqa: F401
+        from voice_client import inference  # noqa: F401
     except ImportError as exc:
         pytest.fail(
-            f"live_agent.inference failed to import after Q2-D: {exc}"
+            f"voice_client.inference failed to import after Q2-D: {exc}"
         )
 
 
@@ -524,10 +524,10 @@ def test_claude_inference_class_resolves_without_instantiation():
     definition survived Q2-D's import changes.
     """
     try:
-        from live_agent.inference import ClaudeInference
+        from voice_client.inference import ClaudeInference
     except ImportError as exc:
         pytest.fail(
-            f"live_agent.inference.ClaudeInference unavailable: {exc}"
+            f"voice_client.inference.ClaudeInference unavailable: {exc}"
         )
     else:
         # Sanity: the class is a class.
@@ -540,8 +540,8 @@ def test_memory_bridge_module_imports():
     after the Q2-D changes.
     """
     try:
-        from live_agent import memory_bridge  # noqa: F401
+        from voice_client import memory_bridge  # noqa: F401
     except ImportError as exc:
         pytest.fail(
-            f"live_agent.memory_bridge failed to import after Q2-D: {exc}"
+            f"voice_client.memory_bridge failed to import after Q2-D: {exc}"
         )

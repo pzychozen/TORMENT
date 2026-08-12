@@ -2,7 +2,7 @@
 TORMENT Integration — Ryuki Nox demo
 
 Run:
-    py -3 live_agent/demo/chat_ryuki_nox.py
+    py -3 voice_client/demo/chat_ryuki_nox.py
 
 First run creates workspace + agent automatically.
 TORMENT server must be running first:

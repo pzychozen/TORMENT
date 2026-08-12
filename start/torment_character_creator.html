@@ -2776,19 +2776,19 @@ function generateSolo() {
   if (cognitionCaps['cog-livesocial']) {
     document.getElementById('out-voice').textContent =
       '# ── Voice Pipeline (Live-Social Compact Mode) ──\n' +
-      '# Requires: live_agent/ directory with voice_pipeline.py and memory_bridge.py\n' +
+      '# Requires: voice_client/ directory with voice_pipeline.py and memory_bridge.py\n' +
       '# Install deps: pip install sounddevice numpy websockets edge-tts\n' +
       '#               (optional: voicebox for advanced TTS)\n\n' +
       '# Linux / Mac / WSL\n' +
       'export TORMENT_URL="http://127.0.0.1:8787"\n' +
       'export TORMENT_WORKSPACE="' + wsId + '"\n' +
       'export TORMENT_AGENT="' + agentId + '"\n' +
-      'python live_agent/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
+      'python voice_client/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
       '# Windows CMD\n' +
       'set TORMENT_URL=http://127.0.0.1:8787\n' +
       'set TORMENT_WORKSPACE=' + wsId + '\n' +
       'set TORMENT_AGENT=' + agentId + '\n' +
-      'python live_agent/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
+      'python voice_client/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
       '# NOTE: Start the TORMENT server first (python -m torment_service),\n' +
       '# then run the voice pipeline in a separate terminal.\n' +
       '# Uses Whisper for STT, your chosen LLM for generation, and Voicebox/edge-tts for voice.\n' +

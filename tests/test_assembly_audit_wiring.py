@@ -362,7 +362,7 @@ class TestWiring_MemoryBridgeKwarg:
         """MemoryBridge.retrieve() without the kwarg sends
         include_assembly_audit=False in the POST payload.
         """
-        from live_agent.memory_bridge import MemoryBridge
+        from voice_client.memory_bridge import MemoryBridge
 
         bridge = MemoryBridge(
             base_url="http://127.0.0.1:9999",
@@ -376,7 +376,7 @@ class TestWiring_MemoryBridgeKwarg:
         mock_response.json.return_value = {
             "blocks": [], "character_context": {}
         }
-        with patch("live_agent.memory_bridge.requests.post",
+        with patch("voice_client.memory_bridge.requests.post",
                    return_value=mock_response) as mock_post:
             bridge.retrieve("hello")
         # Inspect the captured payload.
@@ -385,7 +385,7 @@ class TestWiring_MemoryBridgeKwarg:
         assert payload.get("include_assembly_audit") is False
 
     def test_kwarg_true_passed_in_payload(self):
-        from live_agent.memory_bridge import MemoryBridge
+        from voice_client.memory_bridge import MemoryBridge
 
         bridge = MemoryBridge(
             base_url="http://127.0.0.1:9999",
@@ -397,7 +397,7 @@ class TestWiring_MemoryBridgeKwarg:
         mock_response.json.return_value = {
             "blocks": [], "character_context": {}, "assembly_audit": {}
         }
-        with patch("live_agent.memory_bridge.requests.post",
+        with patch("voice_client.memory_bridge.requests.post",
                    return_value=mock_response) as mock_post:
             result = bridge.retrieve("hello", include_assembly_audit=True)
         kwargs = mock_post.call_args.kwargs
