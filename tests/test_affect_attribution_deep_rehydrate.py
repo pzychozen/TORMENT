@@ -59,7 +59,9 @@ class _DeepStoreBase(unittest.TestCase):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _export(self, original_payload, eid=42):
-        return self.store.export(_candidate(eid=eid), self.vec, original_payload)
+        return self.store.export(
+            _candidate(eid=eid), self.vec, original_payload, step=10
+        )
 
 
 # --- 1 / 2: export preserves the producer snapshot verbatim -----------------

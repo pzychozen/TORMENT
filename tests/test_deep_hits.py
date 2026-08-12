@@ -101,6 +101,14 @@ def test_deep_retrieval_hit_serializes_with_authority_status():
     assert status["role"] == "retrieval_echo"
 
 
+def test_deep_retrieval_hit_identity_serialization_has_four_fixed_fields():
+    """Patch D preserves the deep-hit identity shape unchanged."""
+    d = _make_retrieval_hit().to_dict()
+    identity_fields = {"source_eid", "workspace_id", "agent_id", "compressed_step"}
+    assert set(d).intersection(identity_fields) == identity_fields
+    assert len(set(d).intersection(identity_fields)) == 4
+
+
 def test_orphaned_deep_hit_serializes_with_authority_status():
     """Orphan hit's ``to_dict()`` emits authority_status with orphaned_echo role
     and mirrors ``orphan_reason`` into ``rehydration_blocked``.

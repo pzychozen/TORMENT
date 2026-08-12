@@ -397,10 +397,63 @@ class TestCompressionExecutor(unittest.TestCase):
         self.assertEqual(event.exported_deep, 1)
         payload = self.entities[2].payload
         self.assertTrue(payload.get("exported_deep"))
+        self.assertEqual(payload.get("exported_step"), 200)
 
         # Verify deep store has the memory
         stats = self.deep_store.stats()
         self.assertEqual(stats["count"], 1)
+        deep_memory = self.deep_store.recall(2)
+        self.assertIsNotNone(deep_memory)
+        self.assertEqual(deep_memory.compressed_step, 200)
+        self.assertEqual(deep_memory.compressed_step, payload["exported_step"])
+
+    def test_long_path_preserves_short_path_compressed_step(self):
+        """Long-path export must not overwrite short-path compression history."""
+        self.entities[1].payload.update({"compressed": True, "compressed_step": 125})
+        executor = CompressionExecutor(self.graph, self.deep_store)
+        candidate = CompressionCandidate(
+            eid=1, born_step=0, summary="test deep", score=0.8, route="long_path",
+        )
+
+        executor.execute([candidate], step=200, trigger="corridor_exit")
+
+        payload = self.entities[1].payload
+        self.assertEqual(payload["compressed_step"], 125)
+        self.assertEqual(payload["exported_step"], 200)
+        deep_memory = self.deep_store.recall(1)
+        self.assertIsNotNone(deep_memory)
+        self.assertEqual(deep_memory.compressed_step, 200)
+
+    def test_repeated_long_path_exports_keep_distinct_logical_steps(self):
+        """Repeated physical deep rows retain their individual export steps."""
+        executor = CompressionExecutor(self.graph, self.deep_store)
+        candidate = CompressionCandidate(
+            eid=2, born_step=0, summary="test deep", score=0.8, route="long_path",
+        )
+
+        executor.execute([candidate], step=200, trigger="corridor_exit")
+        executor.execute([candidate], step=201, trigger="cycle_stage_change")
+
+        fresh_store = DeepMemoryStore(
+            Path(self.tmpdir) / "deep", dim=self.deep_store.dim
+        )
+        try:
+            canonical = fresh_store.recall(candidate.eid)
+            self.assertIsNotNone(canonical)
+            self.assertEqual(canonical.compressed_step, 201)
+
+            with open(fresh_store.memories_path, "r", encoding="utf-8") as f:
+                rows = []
+                for line in f:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if row["eid"] == candidate.eid:
+                        rows.append(row["compressed_step"])
+            self.assertEqual(rows, [200, 201])
+        finally:
+            fresh_store.close()
+        self.assertEqual(self.entities[2].payload["exported_step"], 201)
 
     def test_missing_entity_retained(self):
         """Missing entity should be counted as retained (not crash)."""
@@ -448,13 +501,19 @@ class TestDeepMemoryStore(unittest.TestCase):
         """Export a memory, then recall it by EID."""
         c = self._make_candidate(1)
         emb = np.random.randn(16).astype(np.float32)
-        self.store.export(c, emb, {"type": "episode", "affect_tag": "joy"})
+        exported = self.store.export(
+            c, emb, {"type": "episode", "affect_tag": "joy"}, step=101
+        )
 
         recalled = self.store.recall(1)
         self.assertIsNotNone(recalled)
         self.assertEqual(recalled.eid, 1)
+        self.assertEqual(recalled.compressed_step, 101)
         self.assertEqual(recalled.summary, "Memory 1")
         self.assertEqual(recalled.metadata.get("affect_tag"), "joy")
+        self.assertIsNotNone(exported.embedding_ref)
+        stored_vector = self.store._shard_reader.load_one(exported.embedding_ref)
+        np.testing.assert_array_equal(stored_vector, emb)
 
     def test_export_and_query(self):
         """Export multiple memories, query should return similar ones."""
@@ -465,7 +524,7 @@ class TestDeepMemoryStore(unittest.TestCase):
             emb = np.zeros(16, dtype=np.float32)
             emb[i % 16] = 1.0
             emb += np.random.randn(16).astype(np.float32) * 0.1
-            self.store.export(c, emb, {"type": "episode"})
+            self.store.export(c, emb, {"type": "episode"}, step=100 + i)
 
         # Query with embedding similar to memory 0
         query_emb = np.zeros(16, dtype=np.float32)
@@ -498,7 +557,7 @@ class TestDeepMemoryStore(unittest.TestCase):
         """Stats after exports."""
         for i in range(3):
             c = self._make_candidate(i)
-            self.store.export(c, None, {"type": "episode"})
+            self.store.export(c, None, {"type": "episode"}, step=200 + i)
 
         stats = self.store.stats()
         self.assertEqual(stats["count"], 3)
@@ -508,20 +567,26 @@ class TestDeepMemoryStore(unittest.TestCase):
     def test_export_no_embedding(self):
         """Export without embedding should work (no shard write)."""
         c = self._make_candidate(1)
-        mem = self.store.export(c, None, {"type": "episode"})
+        mem = self.store.export(c, None, {"type": "episode"}, step=101)
         self.assertIsNotNone(mem)
         self.assertIsNone(mem.embedding_ref)
 
     def test_persistence(self):
         """Data should persist across store instances."""
         c = self._make_candidate(1)
-        self.store.export(c, None, {"type": "episode"})
+        self.store.export(c, None, {"type": "episode"}, step=101)
 
         # Create new store pointing to same dir
         store2 = DeepMemoryStore(Path(self.tmpdir) / "deep", dim=16)
         recalled = store2.recall(1)
         self.assertIsNotNone(recalled)
         self.assertEqual(recalled.summary, "Memory 1")
+
+    def test_export_requires_logical_step(self):
+        """No wall-clock fallback is permitted for direct store exports."""
+        c = self._make_candidate(1)
+        with self.assertRaises(TypeError):
+            self.store.export(c, None, {"type": "episode"})
 
 
 # ===========================================================================
@@ -751,6 +816,8 @@ class TestDeepMemorySerialization(unittest.TestCase):
         restored = DeepMemory.from_dict(json.loads(json_str))
 
         self.assertEqual(restored.eid, 42)
+        self.assertIsInstance(restored.compressed_step, int)
+        self.assertEqual(restored.compressed_step, 100)
         self.assertEqual(restored.summary, "Hello world")
         self.assertEqual(restored.compression_score, 0.75)
         self.assertEqual(restored.embedding_ref, {"shard": 0, "row": 5, "dim": 384})

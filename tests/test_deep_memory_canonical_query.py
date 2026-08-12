@@ -51,11 +51,14 @@ def _export(
     summary: str,
     embedding=None,
     score: float = 0.9,
+    *,
+    step: int | None = None,
 ) -> DeepMemory:
     return store.export(
         _candidate(eid, summary, score=score),
         embedding,
         {"type": "episode"},
+        step=int(eid) if step is None else int(step),
     )
 
 
@@ -371,6 +374,31 @@ def test_historical_duplicate_laden_store_loads_without_memories_rewrite(tmp_pat
         reloaded.close()
 
     assert memories_path.read_bytes() == before
+
+
+def test_epoch_valued_historical_record_loads_recalls_and_queries(tmp_path):
+    base = tmp_path / "deep"
+    vector = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    store = DeepMemoryStore(base, dim=4)
+    try:
+        _export(store, 77, "historical epoch record", vector, step=77)
+    finally:
+        store.close()
+
+    memories_path = base / "memories.jsonl"
+    historical = json.loads(memories_path.read_text(encoding="utf-8"))
+    historical["compressed_step"] = 1_786_463_657
+    memories_path.write_text(json.dumps(historical) + "\n", encoding="utf-8")
+
+    reloaded = DeepMemoryStore(base, dim=4)
+    try:
+        recalled = reloaded.recall(77)
+        assert recalled is not None
+        assert recalled.compressed_step == 1_786_463_657
+        assert isinstance(recalled.compressed_step, int)
+        assert _query_eids(reloaded, vector, top_k=1) == [77]
+    finally:
+        reloaded.close()
 
 
 def test_stats_count_remains_physical_record_based(tmp_path):

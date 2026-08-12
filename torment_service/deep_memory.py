@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -46,7 +45,7 @@ class DeepMemory:
     """A compressed memory record in the deep store."""
     eid: int                            # original entity ID
     born_step: int                      # when originally created
-    compressed_step: int                # when compressed
+    compressed_step: int                # logical TORMENT step of deep export
     summary: str                        # original or distilled summary
     compression_score: float = 0.0
     original_motif_id: Optional[str] = None
@@ -190,6 +189,8 @@ class DeepMemoryStore:
         candidate,  # CompressionCandidate
         embedding: Optional[np.ndarray],
         original_payload: dict,
+        *,
+        step: int,
     ) -> DeepMemory:
         """Write compressed memory to deep store.
 
@@ -197,6 +198,7 @@ class DeepMemoryStore:
             candidate: CompressionCandidate with scoring info
             embedding: optional embedding vector (384-dim float32)
             original_payload: original node payload dict (preserved fields)
+            step: logical TORMENT step of this deep export
 
         Returns:
             DeepMemory record
@@ -245,7 +247,7 @@ class DeepMemoryStore:
         mem = DeepMemory(
             eid=candidate.eid,
             born_step=candidate.born_step,
-            compressed_step=int(time.time()),  # approximate; caller can override
+            compressed_step=int(step),
             summary=candidate.summary,
             compression_score=candidate.score,
             original_motif_id=candidate.motif_id,

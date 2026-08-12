@@ -573,7 +573,12 @@ class TestFullPipeline(IntegrationBase):
             route="long_path", memory_class="core",
         )
         emb = np.random.randn(dim).astype(np.float32)
-        store.export(candidate, emb, {"summary": "A deep old memory about exploration."})
+        store.export(
+            candidate,
+            emb,
+            {"summary": "A deep old memory about exploration."},
+            step=5,
+        )
 
         # Save a symbol state so spirit return can read it
         from torment_service.fabric import _save_symbol_state

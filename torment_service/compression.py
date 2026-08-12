@@ -849,7 +849,7 @@ class CompressionExecutor:
             logger.debug("Could not load embedding for deep store: %s", e)
 
         # Export to deep store
-        self.deep_store.export(candidate, embedding, payload)
+        self.deep_store.export(candidate, embedding, payload, step=step)
 
         # Mark exported in core with minimal strength
         patch = {

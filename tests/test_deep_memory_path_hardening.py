@@ -100,7 +100,7 @@ class TestDeepMemoryExportQuery(unittest.TestCase):
         candidate.memory_class = "core"
 
         vec = np.random.randn(8).astype(np.float32)
-        mem = self.store.export(candidate, vec, {"type": "episode"})
+        mem = self.store.export(candidate, vec, {"type": "episode"}, step=101)
 
         self.assertEqual(mem.eid, 42)
         self.assertEqual(mem.summary, "test deep memory")
@@ -121,7 +121,7 @@ class TestDeepMemoryExportQuery(unittest.TestCase):
         candidate.memory_class = "core"
 
         vec = np.array([1, 0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
-        self.store.export(candidate, vec, {})
+        self.store.export(candidate, vec, {}, step=102)
 
         results = self.store.query(vec, top_k=5, min_similarity=0.1)
         self.assertEqual(len(results), 1)
@@ -138,7 +138,7 @@ class TestDeepMemoryExportQuery(unittest.TestCase):
         candidate.motif_id = None
         candidate.memory_class = "core"
 
-        self.store.export(candidate, np.zeros(8, dtype=np.float32), {})
+        self.store.export(candidate, np.zeros(8, dtype=np.float32), {}, step=103)
         s = self.store.stats()
         self.assertEqual(s["count"], 1)
         self.assertTrue(s["has_embeddings"])
