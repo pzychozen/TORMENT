@@ -41,7 +41,8 @@ from .embeddings import Embedder, HashEmbedding
 from .archive_lifecycle import (
     DOCUMENT_DELETED,
     DOCUMENT_INGESTED,
-    replay_document_lifecycle,
+    is_current_archive_chunk,
+    replay_canonical_archive_documents,
 )
 
 
@@ -182,30 +183,30 @@ class ArchiveStore:
 
     def _load(self) -> None:
         """Load documents and chunks from JSONL."""
-        lifecycle = replay_document_lifecycle(self.events_path)
+        canonical_documents = replay_canonical_archive_documents(
+            self.documents_path, self.events_path
+        )
 
         # Documents
-        if os.path.exists(self.documents_path):
-            with open(self.documents_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    try:
-                        obj = json.loads(line)
-                        doc = ArchiveDocument(
-                            doc_id=obj["doc_id"],
-                            title=obj.get("title", ""),
-                            source_type=obj.get("source_type", "text"),
-                            chunk_count=int(obj.get("chunk_count", 0)),
-                            token_count=int(obj.get("token_count", 0)),
-                            created_ts=int(obj.get("created_ts", 0)),
-                            metadata=obj.get("metadata", {}),
-                        )
-                        if lifecycle.get(doc.doc_id) is False:
-                            continue
-                        self._documents[doc.doc_id] = doc
-                    except (json.JSONDecodeError, KeyError):
-                        continue
+        for state in canonical_documents.values():
+            if not state.active:
+                continue
+            obj = state.record
+            try:
+                doc = ArchiveDocument(
+                    doc_id=obj["doc_id"],
+                    title=obj.get("title", ""),
+                    source_type=obj.get("source_type", "text"),
+                    chunk_count=(
+                        state.chunk_count if state.chunk_count is not None else 0
+                    ),
+                    token_count=int(obj.get("token_count", 0)),
+                    created_ts=int(obj.get("created_ts", 0)),
+                    metadata=obj.get("metadata", {}),
+                )
+                self._documents[doc.doc_id] = doc
+            except (KeyError, TypeError, ValueError):
+                continue
 
         # Chunks
         if os.path.exists(self.chunks_path):
@@ -231,7 +232,11 @@ class ArchiveStore:
                             # chunks.jsonl files; no migration required.
                             governance=obj.get("governance"),
                         )
-                        if lifecycle.get(chunk.doc_id) is False:
+                        if not is_current_archive_chunk(
+                            canonical_documents,
+                            chunk.doc_id,
+                            chunk.chunk_index,
+                        ):
                             continue
                         self._chunks[chunk.chunk_id] = chunk
 
@@ -306,6 +311,7 @@ class ArchiveStore:
             return {"doc_id": doc_id, "chunk_count": 0, "token_count": 0}
 
         total_tokens = sum(c.token_count for c in chunks)
+        replacing_existing_document = doc_id in self._documents
 
         # Write document record
         doc = ArchiveDocument(
@@ -319,6 +325,15 @@ class ArchiveStore:
         )
         self._documents[doc_id] = doc
         self._append_jsonl(self.documents_path, asdict(doc))
+
+        # An explicit doc_id is a replacement key.  Clear the old in-memory
+        # representation and its rebuildable sidecar rows only after the new
+        # canonical document record is durable; JSONL and lifecycle history
+        # remain append-only and the new ingest event is the sole lifecycle
+        # signal.
+        if replacing_existing_document:
+            self._supersede_live_document(doc_id)
+
         # Mirror to SQLite sidecar (Phase 4) — failure is non-fatal
         if self._sqlite_index:
             try:
@@ -393,6 +408,22 @@ class ArchiveStore:
             "chunk_count": len(chunks),
             "token_count": total_tokens,
         }
+
+    def _supersede_live_document(self, doc_id: str) -> None:
+        """Discard the previous live incarnation before a same-ID replacement."""
+        chunk_ids = [
+            chunk_id for chunk_id, chunk in self._chunks.items()
+            if chunk.doc_id == doc_id
+        ]
+        for chunk_id in chunk_ids:
+            self._chunks.pop(chunk_id, None)
+            self._chunk_embeddings.pop(chunk_id, None)
+
+        if self._sqlite_index:
+            try:
+                self._sqlite_index.delete_document_index(doc_id)
+            except Exception as e:
+                log.debug("SQLite replacement cleanup skipped: %s", e)
 
     # ----------------------------
     # Retrieval (pure cosine, NO physics)

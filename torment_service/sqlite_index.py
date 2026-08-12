@@ -26,7 +26,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .embedding_store import _child_path
 from .scoring import derive_provenance_type
-from .archive_lifecycle import replay_document_lifecycle
+from .archive_lifecycle import (
+    is_current_archive_chunk,
+    replay_canonical_archive_documents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -516,10 +519,11 @@ class IndexManager:
         safe_archive_chunks = self._guard_rebuild_path(archive_chunks_path, "archive_chunks")
         safe_motifs = self._guard_rebuild_path(motifs_path, "motifs")
         archive_source = safe_archive_docs or safe_archive_chunks
-        # Archive lifecycle events live beside the canonical document/chunk
-        # JSONL and suppress deleted records during a sidecar rebuild.
-        archive_lifecycle = replay_document_lifecycle(
-            os.path.join(os.path.dirname(archive_source), "events.jsonl")
+        # Archive replay derives one canonical document state used for both
+        # document lifecycle suppression and chunk-range replacement filtering.
+        archive_documents = replay_canonical_archive_documents(
+            safe_archive_docs,
+            os.path.join(os.path.dirname(archive_source), "events.jsonl"),
         ) if archive_source else {}
 
         self.clear_all()
@@ -590,11 +594,16 @@ class IndexManager:
                         continue
                     try:
                         obj = json.loads(line)
-                        if archive_lifecycle.get(str(obj.get("doc_id", ""))) is False:
+                        document = archive_documents.get(str(obj.get("doc_id", "")))
+                        if document is None or not document.active:
                             continue
-                        if self.index_document(obj):
+                        record = obj
+                        if document.chunk_count is None:
+                            record = dict(obj)
+                            record["chunk_count"] = 0
+                        if self.index_document(record):
                             counts["documents"] += 1
-                    except (json.JSONDecodeError, KeyError):
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                         continue
 
         # --- Archive chunks ---
@@ -605,11 +614,15 @@ class IndexManager:
                         continue
                     try:
                         obj = json.loads(line)
-                        if archive_lifecycle.get(str(obj.get("doc_id", ""))) is False:
+                        if not is_current_archive_chunk(
+                            archive_documents,
+                            str(obj.get("doc_id", "")),
+                            int(obj.get("chunk_index", 0)),
+                        ):
                             continue
                         if self.index_chunk(obj):
                             counts["chunks"] += 1
-                    except (json.JSONDecodeError, KeyError):
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                         continue
 
         # --- Motifs (JSON file, not JSONL) ---

@@ -23,7 +23,10 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from torment_service.archive_lifecycle import replay_document_lifecycle
+from torment_service.archive_lifecycle import (
+    is_current_archive_chunk,
+    replay_canonical_archive_documents,
+)
 
 
 def _parse_jsonl(path: str):
@@ -50,31 +53,28 @@ def _write_jsonl(path: str, records):
 
 def compact_documents(docs_path: str, dry_run: bool = False) -> dict:
     """Deduplicate documents.jsonl — keep latest record per doc_id."""
-    latest_by_id: dict = {}
     total = 0
-    lifecycle = replay_document_lifecycle(
-        os.path.join(os.path.dirname(os.path.realpath(docs_path)), "events.jsonl")
+    canonical = replay_canonical_archive_documents(
+        docs_path,
+        legacy_deleted_fallback=True,
     )
 
     for rec in _parse_jsonl(docs_path):
         total += 1
-        doc_id = rec.get("doc_id")
-        if doc_id:
-            latest_by_id[doc_id] = rec
 
     # Events are authoritative when present. ``_deleted`` remains a fallback
     # for legacy documents.jsonl tombstones with no lifecycle event.
     active = {
-        doc_id: record
-        for doc_id, record in latest_by_id.items()
-        if lifecycle.get(doc_id, not record.get("_deleted", False))
+        doc_id: document.record
+        for doc_id, document in canonical.items()
+        if document.active
     }
-    deleted_count = len(latest_by_id) - len(active)
-    dedup_removed = total - len(latest_by_id)
+    deleted_count = len(canonical) - len(active)
+    dedup_removed = total - len(canonical)
 
     stats = {
         "total_records": total,
-        "unique_docs": len(latest_by_id),
+        "unique_docs": len(canonical),
         "dedup_removed": dedup_removed,
         "deleted_docs": deleted_count,
         "active_docs": len(active),
@@ -97,6 +97,13 @@ def compact_chunks(chunks_path: str, active_doc_ids: set, dry_run: bool = False)
     """Compact chunks.jsonl — deduplicate and remove orphans."""
     latest_by_id: dict = {}
     total = 0
+    docs_path = os.path.join(
+        os.path.dirname(os.path.realpath(chunks_path)), "documents.jsonl"
+    )
+    canonical = replay_canonical_archive_documents(
+        docs_path,
+        legacy_deleted_fallback=True,
+    )
 
     for rec in _parse_jsonl(chunks_path):
         total += 1
@@ -104,15 +111,22 @@ def compact_chunks(chunks_path: str, active_doc_ids: set, dry_run: bool = False)
         if chunk_id:
             latest_by_id[chunk_id] = rec
 
-    # Remove orphan chunks (doc_id not in active documents)
     kept = {}
-    orphan_count = 0
+    excluded_count = 0
     for chunk_id, rec in latest_by_id.items():
         doc_id = rec.get("doc_id", "")
-        if doc_id in active_doc_ids:
+        try:
+            chunk_index = int(rec.get("chunk_index", 0))
+        except (TypeError, ValueError):
+            chunk_index = None
+        if (
+            doc_id in active_doc_ids
+            and chunk_index is not None
+            and is_current_archive_chunk(canonical, doc_id, chunk_index)
+        ):
             kept[chunk_id] = rec
         else:
-            orphan_count += 1
+            excluded_count += 1
 
     dedup_removed = total - len(latest_by_id)
 
@@ -120,11 +134,11 @@ def compact_chunks(chunks_path: str, active_doc_ids: set, dry_run: bool = False)
         "total_records": total,
         "unique_chunks": len(latest_by_id),
         "dedup_removed": dedup_removed,
-        "orphans_removed": orphan_count,
+        "orphans_removed": excluded_count,
         "kept": len(kept),
     }
 
-    if not dry_run and (dedup_removed > 0 or orphan_count > 0):
+    if not dry_run and (dedup_removed > 0 or excluded_count > 0):
         backup = chunks_path + f".bak.{int(time.time())}"
         try:
             os.rename(chunks_path, backup)
