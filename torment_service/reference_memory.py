@@ -61,6 +61,8 @@ VALID_SOURCE_KINDS = frozenset({
     "generated",        # generated artifact (programmatic output)
 })
 
+_REFERENCE_TOMBSTONE = "reference_tombstone"
+
 
 def _now_ts() -> int:
     return int(time.time())
@@ -167,7 +169,13 @@ class ReferenceStore:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
     def _load(self) -> None:
-        """Load references from JSONL. Last record per ref_id wins."""
+        """Replay reference JSONL. The final record per ref_id wins.
+
+        Live records populate the in-memory index; a tombstone removes an
+        entry. This preserves the original append-only format while making a
+        delete durable across restart. Legacy live records have no
+        ``record_type`` and continue to load unchanged.
+        """
         if not os.path.exists(self.references_path):
             return
         with open(self._guard(self.references_path), "r", encoding="utf-8") as f:
@@ -176,6 +184,11 @@ class ReferenceStore:
                     continue
                 try:
                     obj = json.loads(line)
+                    if obj.get("record_type") == _REFERENCE_TOMBSTONE:
+                        ref_id = obj.get("ref_id")
+                        if ref_id:
+                            self._entries.pop(ref_id, None)
+                        continue
                     entry = ReferenceEntry(
                         ref_id=obj["ref_id"],
                         workspace_id=obj["workspace_id"],
@@ -284,6 +297,9 @@ class ReferenceStore:
                 if isinstance(_meta_value, CandidateShapedValue):
                     raise TypeError("candidate-shaped value cannot be written into reference metadata")
 
+        if source_kind not in VALID_SOURCE_KINDS:
+            raise ValueError("unsupported reference source_kind")
+
         ref_id = f"ref_{uuid.uuid4().hex[:16]}"
         source_hash = self.compute_source_hash(source_link, source_kind, body)
         entry = ReferenceEntry(
@@ -318,6 +334,13 @@ class ReferenceStore:
     def delete(self, ref_id: str) -> bool:
         if ref_id not in self._entries:
             return False
+        # Persist lifecycle state before changing the in-memory index. A later
+        # live record for this ID reactivates it during the next JSONL replay.
+        self._append_jsonl(self.references_path, {
+            "record_type": _REFERENCE_TOMBSTONE,
+            "ref_id": ref_id,
+            "deleted_ts": _now_ts(),
+        })
         del self._entries[ref_id]
         self._append_jsonl(self.events_path, {
             "type": "REFERENCE_DELETED",

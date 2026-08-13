@@ -5055,6 +5055,17 @@ class TormentFabric:
                 "ref_id": "",
             }
 
+        from .reference_memory import VALID_SOURCE_KINDS
+        # Leave candidate-shaped values to ReferenceStore's pre-side-effect
+        # type guard, which is the established refusal boundary for them.
+        if (not isinstance(source_kind, CandidateShapedValue)
+                and source_kind not in VALID_SOURCE_KINDS):
+            return {
+                "ok": False,
+                "result_code": "unsupported_source_kind",
+                "ref_id": "",
+            }
+
         # Make sure the workspace exists (for consistency with other methods)
         self.get_workspace(workspace_id)
 
