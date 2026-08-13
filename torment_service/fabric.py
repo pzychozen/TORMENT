@@ -2612,6 +2612,10 @@ class TormentFabric:
         # Baton lifecycle fields live on extra_payload (mutable state over
         # the baton's life), not on ProvenanceV1 (origin/lineage only).
         if memory_class == "baton":
+            if scope != "private":
+                raise ValueError(
+                    "memory_class='baton' requires scope='private'"
+                )
             _bl = (extra_payload or {}).get("baton_lifecycle")
             if not isinstance(_bl, dict):
                 raise ValueError(
@@ -4813,6 +4817,44 @@ class TormentFabric:
     # (docs/BLOCK_A_DESIGN.md §6.2 / §6.3)
     # -----------------------------------------------------------------
 
+    def _baton_private_graph_view(
+        self,
+        workspace_id: str,
+        agent_id: str,
+    ) -> Tuple[Optional[MemoryGraph], bool]:
+        """Return the cached private graph or a transient persisted view.
+
+        Baton lifecycle operations are explicit and agent-private.  A cold
+        Fabric process must therefore be able to inspect an existing private
+        graph without hydrating the agent runtime or retaining a graph cache
+        entry.  The boolean reports whether the caller must close the view.
+        """
+        ak = self._agent_key(workspace_id, agent_id)
+        graph = self.private_graphs.get(ak)
+        if graph is not None:
+            return graph, False
+
+        private_dir = _safe_child(
+            _agent_dir(self.data_dir, workspace_id, agent_id), "private"
+        )
+        if not os.path.isdir(private_dir):
+            return None, False
+
+        try:
+            return MemoryGraph(
+                data_dir=private_dir,
+                embedder=self.kernel.embedder,
+            ), True
+        except Exception as e:
+            self._log.debug(
+                "Baton private-graph read skipped for workspace_id=%s "
+                "agent_id=%s: %s",
+                _safe_log_value(workspace_id),
+                _safe_log_value(agent_id),
+                _safe_log_value(e),
+            )
+            return None, False
+
     def list_active_batons(
         self,
         workspace_id: str,
@@ -4847,26 +4889,33 @@ class TormentFabric:
         # Cap the server-side limit to prevent runaway large responses.
         limit = max(1, min(int(limit), 200))
 
-        ak = self._agent_key(workspace_id, agent_id)
-        g = self.private_graphs.get(ak)
         batons: List[Dict[str, Any]] = []
-        if g is not None:
-            for eid, ent in g.entities.items():
-                payload = ent.payload or {}
-                if payload.get("memory_class") != "baton":
-                    continue
-                lifecycle = payload.get("baton_lifecycle") or {}
-                if lifecycle.get("status") != "active":
-                    continue
-                if owner is not None and lifecycle.get("owner") != owner:
-                    continue
-                batons.append({
-                    "eid": int(eid),
-                    "summary": payload.get("summary", ""),
-                    "baton_lifecycle": dict(lifecycle),
-                    "created_ts": int(payload.get("created_ts", 0) or 0),
-                    "provenance": payload.get("provenance"),
-                })
+        g, transient = self._baton_private_graph_view(workspace_id, agent_id)
+        try:
+            if g is not None:
+                for eid, ent in g.entities.items():
+                    payload = ent.payload or {}
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("memory_class") != "baton":
+                        continue
+                    lifecycle = payload.get("baton_lifecycle")
+                    if not isinstance(lifecycle, dict):
+                        continue
+                    if lifecycle.get("status") != "active":
+                        continue
+                    if owner is not None and lifecycle.get("owner") != owner:
+                        continue
+                    batons.append({
+                        "eid": int(eid),
+                        "summary": payload.get("summary", ""),
+                        "baton_lifecycle": dict(lifecycle),
+                        "created_ts": int(payload.get("created_ts", 0) or 0),
+                        "provenance": payload.get("provenance"),
+                    })
+        finally:
+            if transient and g is not None:
+                g.close()
 
         # Sort oldest first (aging bias — oldest batons surface first).
         batons.sort(key=lambda b: b.get("created_ts", 0))
@@ -4910,71 +4959,78 @@ class TormentFabric:
             {
                 "ok": True,
                 "result_code": "resolved" | "already_consumed"
-                              | "not_found" | "not_a_baton",
+                              | "not_found" | "not_a_baton"
+                              | "invalid_lifecycle",
                 "eid": int,
                 "outcome": str,
             }
         """
         eid = int(eid)
-        ak = self._agent_key(workspace_id, agent_id)
-        g = self.private_graphs.get(ak)
-
-        # Not-found: no agent graph or eid absent.
-        if g is None or eid not in g.entities:
-            return {"ok": True, "result_code": "not_found",
-                    "eid": eid, "outcome": outcome}
-
-        ent = g.entities[eid]
-        payload = ent.payload or {}
-
-        # Not-a-baton: present but wrong memory_class.
-        if payload.get("memory_class") != "baton":
-            return {"ok": True, "result_code": "not_a_baton",
-                    "eid": eid, "outcome": outcome}
-
-        lifecycle = dict(payload.get("baton_lifecycle") or {})
-        # Already-consumed: no-op (idempotent). No ledger re-entry.
-        if lifecycle.get("status") == "consumed":
-            return {"ok": True, "result_code": "already_consumed",
-                    "eid": eid, "outcome": outcome}
-
-        # Soft-consume: update lifecycle fields in place. memory_class
-        # does NOT change (resolution is lifecycle, not reclassification).
-        now_ts = int(time.time())
-        consumed_by = resolver or agent_id
-        owner_at_consume = lifecycle.get("owner")
-        lifecycle["status"] = "consumed"
-        lifecycle["consumed_at"] = now_ts
-        lifecycle["consumed_by"] = consumed_by
-        lifecycle["consumed_outcome"] = outcome
-        g.update_payload(eid, {"baton_lifecycle": lifecycle})
-
-        # Append to the audit ledger. Payload is source of truth;
-        # ledger is audit trail. Errors here are swallowed — a ledger
-        # write failure must not roll back the payload state change,
-        # because the ledger is derivable from payload events but the
-        # payload is not derivable from the ledger alone.
+        g, transient = self._baton_private_graph_view(workspace_id, agent_id)
         try:
-            from .baton_ledger import BatonLedger
-            ledger = BatonLedger(
-                data_dir=self.data_dir,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
-            event = ledger.build_consumed_event(
-                eid=eid,
-                outcome=outcome,
-                resolver=consumed_by,
-                owner=owner_at_consume,
-            )
-            ledger.add_event(event)
-        except Exception as e:
-            self._log.debug(
-                "baton ledger write failed for eid=%s: %s", eid, e
-            )
+            # Not-found: no private graph or eid absent.
+            if g is None or eid not in g.entities:
+                return {"ok": True, "result_code": "not_found",
+                        "eid": eid, "outcome": outcome}
 
-        return {"ok": True, "result_code": "resolved",
-                "eid": eid, "outcome": outcome}
+            ent = g.entities[eid]
+            payload = ent.payload or {}
+
+            # Not-a-baton: present but wrong memory_class.
+            if not isinstance(payload, dict) or payload.get("memory_class") != "baton":
+                return {"ok": True, "result_code": "not_a_baton",
+                        "eid": eid, "outcome": outcome}
+
+            lifecycle = payload.get("baton_lifecycle")
+            if not isinstance(lifecycle, dict):
+                return {"ok": True, "result_code": "invalid_lifecycle",
+                        "eid": eid, "outcome": outcome}
+            # Already-consumed: no-op (idempotent). No ledger re-entry.
+            if lifecycle.get("status") == "consumed":
+                return {"ok": True, "result_code": "already_consumed",
+                        "eid": eid, "outcome": outcome}
+
+            # Soft-consume: update lifecycle fields in place. memory_class
+            # does NOT change (resolution is lifecycle, not reclassification).
+            lifecycle = dict(lifecycle)
+            now_ts = int(time.time())
+            consumed_by = resolver or agent_id
+            owner_at_consume = lifecycle.get("owner")
+            lifecycle["status"] = "consumed"
+            lifecycle["consumed_at"] = now_ts
+            lifecycle["consumed_by"] = consumed_by
+            lifecycle["consumed_outcome"] = outcome
+            g.update_payload(eid, {"baton_lifecycle": lifecycle})
+
+            # Append to the audit ledger. Payload is source of truth;
+            # ledger is audit trail. Errors here are swallowed — a ledger
+            # write failure must not roll back the payload state change,
+            # because the ledger is derivable from payload events but the
+            # payload is not derivable from the ledger alone.
+            try:
+                from .baton_ledger import BatonLedger
+                ledger = BatonLedger(
+                    data_dir=self.data_dir,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+                event = ledger.build_consumed_event(
+                    eid=eid,
+                    outcome=outcome,
+                    resolver=consumed_by,
+                    owner=owner_at_consume,
+                )
+                ledger.add_event(event)
+            except Exception as e:
+                self._log.debug(
+                    "baton ledger write failed for eid=%s: %s", eid, e
+                )
+
+            return {"ok": True, "result_code": "resolved",
+                    "eid": eid, "outcome": outcome}
+        finally:
+            if transient and g is not None:
+                g.close()
 
     # -----------------------------------------------------------------
     # Block B — reference memory API
