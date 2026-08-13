@@ -592,6 +592,55 @@ class TestEnvironmentLifecycleArchaeology(_FabricCase):
         ))
         self.assertNotIn("ENVIRONMENT_ARCHAEOLOGY_SENTINEL", assembled["assembled_text"])
 
+    def test_environment_write_has_no_hivemind_packet_or_event_path(self) -> None:
+        """Environment stays direct-consult workspace state even with Hive enabled."""
+        with patch.dict(os.environ, {"TORMENT_HIVEMIND_ENABLE": "1"}):
+            hive_fabric = TormentFabric(data_dir=self.tempdir.name)
+        self.addCleanup(_dispose_fabric, hive_fabric)
+        hive_fabric.get_workspace("ws_a")
+        hive_fabric.create_agent("ws_a", "atlas")
+        hive_fabric.create_agent("ws_a", "beacon")
+
+        field = hive_fabric._get_collective_field("ws_a")
+        self.assertEqual(field.status()["packet_count_total"], 0)
+        self.assertEqual(field.status()["event_count"], 0)
+
+        written = hive_fabric.write_environment(
+            workspace_id="ws_a", target_runtime="test_runtime", scope_tag="shell",
+            key="network_available", value="ENVIRONMENT_HIVE_BOUNDARY_SENTINEL",
+            evidence_class="observed", ownership="system",
+            observation_source="environment_hive_boundary_probe",
+        )
+        self.assertTrue(written["ok"])
+
+        # Direct consult has no agent parameter: a same-workspace caller can see it.
+        consulted = hive_fabric.consult_environment("ws_a", "run", "shell")
+        self.assertEqual(
+            [fact["value"] for fact in consulted["facts"]],
+            ["ENVIRONMENT_HIVE_BOUNDARY_SENTINEL"],
+        )
+
+        # But the write is not a core ingest, so it creates neither a packet nor
+        # a convergence event for query context or re-ingestion.
+        status = field.status()
+        self.assertEqual(status["packet_count_total"], 0)
+        self.assertEqual(status["event_count"], 0)
+        self.assertEqual(field.all_packets(), [])
+        self.assertEqual(hive_fabric._collective_query_context("ws_a", ["default"]), {})
+        shared_nodes = [
+            entity
+            for graph in hive_fabric.get_workspace("ws_a").shared_graphs.values()
+            for entity in graph.entities.values()
+        ]
+        self.assertEqual(shared_nodes, [])
+        query_result = hive_fabric.query(
+            "ws_a", "beacon", "ENVIRONMENT_HIVE_BOUNDARY_SENTINEL", top_k=100
+        )
+        self.assertNotIn("ENVIRONMENT_HIVE_BOUNDARY_SENTINEL", json.dumps(query_result))
+        self.assertEqual(
+            hive_fabric.consult_environment("ws_b", "run", "shell")["facts"], []
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
