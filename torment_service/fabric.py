@@ -5547,9 +5547,9 @@ class TormentFabric:
     #   - Closure commit/revision use WRITE_CLOSURE_COMMIT; ratification
     #     uses WRITE_DIRECT_INGEST (lifecycle event only, not content).
     #
-    # LIFECYCLE DERIVATION is literal event-kind lookup — no fuzzy
-    # inference, no heuristic state reconstruction. See
-    # closure_ledger.get_latest_event_kind (§12 handoff note 9).
+    # RAW lifecycle evidence is literal Ledger append history. Trusted
+    # operational lifecycle is a named, non-mutating reconciliation of that
+    # evidence with ClosureStore payload versions.
 
     def _get_closure_store(self, workspace_id: str):
         """Lazily create the per-workspace ClosureStore."""
@@ -5574,6 +5574,30 @@ class TormentFabric:
         return ClosureLedger(
             data_dir=self.data_dir,
             workspace_id=workspace_id,
+        )
+
+    def _reconcile_closure_current(self, workspace_id: str, closure_id: str):
+        """Return the non-mutating trusted-current Closure projection.
+
+        Store and ledger APIs intentionally retain their raw forensic meaning.
+        Lifecycle mutation gates use this helper so unmatched rows cannot enter
+        a trusted ancestry chain or advance a lifecycle claim.
+        """
+        from .closure_reconciliation import reconcile_closure_history
+
+        store = self._get_closure_store(workspace_id)
+        entries = []
+        for known_closure_id in store.list_closures():
+            entries.extend(store.list_versions(known_closure_id))
+        events = self._get_closure_ledger(workspace_id).list_events(
+            closure_id=closure_id,
+            limit=None,
+        )
+        return reconcile_closure_history(
+            entries,
+            events,
+            workspace_id=workspace_id,
+            closure_id=closure_id,
         )
 
     # ---- Closure scope / honesty read helpers ----
@@ -5907,10 +5931,9 @@ class TormentFabric:
                 "closure_id": closure_id or "",
             }
 
-        store = self._get_closure_store(workspace_id)
         ledger = self._get_closure_ledger(workspace_id)
-
-        entry = store.get_latest_version(closure_id)
+        reconciled = self._reconcile_closure_current(workspace_id, closure_id)
+        entry = reconciled.current_entry
         if entry is None:
             return {
                 "ok": False,
@@ -5921,8 +5944,7 @@ class TormentFabric:
         # If already committed, ratifying again is a no-op error — the
         # lifecycle state "committed" is terminal for the ratification
         # gate. Revisions flow through revise_closure instead.
-        latest_kind = ledger.get_latest_event_kind(closure_id)
-        if latest_kind == "committed":
+        if reconciled.current_state == "committed":
             return {
                 "ok": False,
                 "result_code": "already_committed",
@@ -5982,10 +6004,9 @@ class TormentFabric:
                 "closure_id": closure_id or "",
             }
 
-        store = self._get_closure_store(workspace_id)
         ledger = self._get_closure_ledger(workspace_id)
-
-        entry = store.get_latest_version(closure_id)
+        reconciled = self._reconcile_closure_current(workspace_id, closure_id)
+        entry = reconciled.current_entry
         if entry is None:
             return {
                 "ok": False,
@@ -5993,19 +6014,19 @@ class TormentFabric:
                 "closure_id": closure_id,
             }
 
-        latest_kind = ledger.get_latest_event_kind(closure_id)
-        if latest_kind == "committed":
+        if reconciled.current_state == "committed":
             return {
                 "ok": False,
                 "result_code": "already_committed",
                 "closure_id": closure_id,
             }
 
-        # AC-2: must have a ratified event. Literal event-kind lookup,
-        # not inference. Any state that isn't literally "ratified" in
-        # the last event is rejected — including "proposed" (never
-        # ratified) and anything unexpected.
-        if not ledger.has_ratification(closure_id):
+        # AC-2: the closure-bound ratification must be part of the trusted
+        # chain, and commit may only advance a trusted ratified/revised state.
+        if (
+            not reconciled.has_ratification
+            or reconciled.current_state not in {"ratified", "revised"}
+        ):
             return {
                 "ok": False,
                 "result_code": "not_ratified",
@@ -6098,7 +6119,8 @@ class TormentFabric:
         store = self._get_closure_store(workspace_id)
         ledger = self._get_closure_ledger(workspace_id)
 
-        latest = store.get_latest_version(closure_id)
+        reconciled = self._reconcile_closure_current(workspace_id, closure_id)
+        latest = reconciled.current_entry
         if latest is None:
             return {
                 "ok": False,
@@ -6106,16 +6128,10 @@ class TormentFabric:
                 "closure_id": closure_id,
             }
 
-        # Must be committed to be revisable — literal event-kind
-        # lookup: has_ratification + a committed event ever recorded.
-        # We check "was ever committed" rather than "is currently
-        # committed" because a revision also creates a "revised"
-        # event; the lifecycle after commit goes committed → revised
-        # → revised → ... and all of those post-commit states are
-        # revisable.
-        events = ledger.list_events(closure_id=closure_id)
-        ever_committed = any(e.kind == "committed" for e in events)
-        if not ever_committed:
+        # The trusted chain must have been committed at least once.  A
+        # revision remains revisable after valid revised events, while a raw
+        # orphan payload cannot become the parent of a new trusted version.
+        if not reconciled.has_committed:
             return {
                 "ok": False,
                 "result_code": "not_committed",
@@ -6262,8 +6278,11 @@ class TormentFabric:
     ) -> Optional[Dict[str, Any]]:
         """Return one closure version as a dict (or None if missing).
 
-        If `version_id` is None, returns the latest version. Admin/test
-        surface only; not wired into retrieval."""
+        This is the RAW / FORENSIC admin surface. If `version_id` is None,
+        it returns the physically latest Store version even when that version
+        is unmatched by lifecycle evidence. Use ``get_closure_current`` for
+        trusted operational state. Neither surface is wired into retrieval.
+        """
         store = self._get_closure_store(workspace_id)
         from dataclasses import asdict
         if version_id is None:
@@ -6273,6 +6292,33 @@ class TormentFabric:
         if entry is None:
             return None
         return asdict(entry)
+
+    def get_closure_current(
+        self,
+        workspace_id: str,
+        closure_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the TRUSTED / OPERATIONAL current Closure projection.
+
+        Unlike :meth:`get_closure`, this validates the raw Store and Ledger
+        relationship without modifying either. ``diagnostics`` makes an
+        otherwise healthy chain distinguishable from one reconciled around
+        orphan evidence.
+        """
+        reconciled = self._reconcile_closure_current(workspace_id, closure_id)
+        if not (
+            reconciled.valid_versions
+            or reconciled.orphan_versions
+            or reconciled.valid_events
+            or reconciled.orphan_events
+        ):
+            return None
+        current = reconciled.as_current_dict()
+        # A Store-only or event-only history has no trusted entry, but the
+        # named current-read still identifies the raw closure being examined.
+        current["closure_id"] = closure_id
+        current["workspace_id"] = workspace_id
+        return current
 
     def list_closures(self, workspace_id: str) -> List[str]:
         """Return the list of closure_ids in the workspace's store."""

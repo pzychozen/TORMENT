@@ -2,18 +2,15 @@
 """
 Append-only per-workspace closure lifecycle event ledger.
 
-Block C (docs/BLOCK_C_DESIGN.md §5.3 + §6.6). Audit trail + lifecycle
-derivation — the literal, deterministic, auditable source of a
-closure's current lifecycle state.
+Block C (docs/BLOCK_C_DESIGN.md §5.3 + §6.6). Audit trail + raw lifecycle
+evidence. The non-mutating Closure reconciler derives trusted operational
+state only when Store payload and Ledger evidence agree.
 
 === WATCH-ITEM HONORED LITERALLY ===
-Lifecycle state (proposed / ratified / committed / revised) is derived
-by `get_latest_event_kind(closure_id)` — that is, the *kind* field of
-the last event appended for this closure_id. NO fuzzy inference,
-NO heuristic reconstruction, NO "smart" combinator across multiple
-events. If the callers want a nuanced view they read the events
-themselves; the derivation rule here stays boring on purpose.
-(§12 handoff note 9.)
+`get_latest_event_kind(closure_id)` remains a literal forensic lookup of the
+last event appended for the closure. Trusted operational state is a separate,
+explicit reconciliation projection over Store + Ledger evidence; raw rows are
+never rewritten or hidden by that projection.
 
 === §7.3 HONORED LITERALLY ===
 Distinct JSONL file at
@@ -66,13 +63,14 @@ class ClosureEvent:
 
     Each event carries the ProvenanceV1 dict for the event and the
     ratifier (populated for ratified / committed / revised; None on
-    the initial proposed event). `version_id` is populated for
-    committed and revised events (the version that was made durable).
+    the initial proposed event). ``version_id`` pairs proposed,
+    committed, and revised events to payload versions; ratification
+    is intentionally closure-bound and versionless.
     """
     event_id: str
     workspace_id: str
     closure_id: str
-    version_id: Optional[str]     # committed / revised → which version
+    version_id: Optional[str]     # proposed / committed / revised → version
     kind: str                     # one of VALID_EVENT_KINDS
     ts: int
     ratifier: Optional[str]       # required on ratified/committed/revised
@@ -85,8 +83,8 @@ class ClosureLedger:
 
     Two roles:
         1. Audit trail — every lifecycle state change appends one event.
-        2. Lifecycle derivation — `get_latest_event_kind(closure_id)`
-           returns the current state by literal last-event lookup.
+        2. Raw lifecycle evidence — `get_latest_event_kind(closure_id)`
+           returns the literal last-event kind for forensic inspection.
 
     There is NO in-memory event cache. Every read walks the JSONL.
     This keeps the ledger a flat truth source; any concurrent writer
@@ -143,13 +141,14 @@ class ClosureLedger:
         self,
         closure_id: Optional[str] = None,
         kind: Optional[str] = None,
-        limit: int = 500,
+        limit: Optional[int] = 500,
     ) -> List[ClosureEvent]:
         """Read events from the ledger with optional filters.
 
         Order: append order (oldest first). If the filtered result
         exceeds `limit`, the LAST `limit` events are returned
-        (most recent), matching the BatonLedger pattern.
+        (most recent), matching the BatonLedger pattern. Pass ``None``
+        for the complete forensic history.
 
         Malformed JSONL lines are skipped silently — a corrupted event
         cannot hide the rest of the history.
@@ -181,16 +180,16 @@ class ClosureLedger:
                 if kind is not None and e.kind != kind:
                     continue
                 events.append(e)
-        if len(events) > limit:
+        if limit is not None and len(events) > limit:
             events = events[-limit:]
         return events
 
     def get_latest_event_kind(self, closure_id: str) -> Optional[str]:
         """Return the `kind` of the last event for this closure_id.
 
-        This is the LITERAL event-kind lookup that defines a closure's
-        lifecycle state per §5.4 + §12 handoff note 9. No inference,
-        no smart reconstruction — just the last event's kind string.
+        This is the LITERAL forensic event-kind lookup. It performs no
+        Store/Ledger validation or reconstruction; use Fabric's named
+        trusted-current read for operational lifecycle state.
 
         Returns None if no events exist for this closure_id (i.e., the
         closure does not exist).
@@ -201,10 +200,10 @@ class ClosureLedger:
         return events[-1].kind
 
     def has_ratification(self, closure_id: str) -> bool:
-        """Return True iff a `ratified` event exists for this closure_id.
+        """Return True iff raw forensic history contains `ratified`.
 
-        AC-2 precondition: commit_closure MUST reject unless this
-        returns True. Literal event-kind lookup per §5.4.
+        Trusted mutation gates use Closure reconciliation rather than this
+        raw-history predicate.
         """
         return any(
             e.kind == EVENT_RATIFIED

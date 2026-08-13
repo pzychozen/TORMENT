@@ -23,8 +23,9 @@ Closure memory:
 === WATCH-ITEM HONORED LITERALLY ===
 ONE `ClosureEntry` class. Lifecycle stages (proposed / ratified /
 committed / revised) are NOT separate object ontologies — they are
-event kinds in `ClosureLedger`. State is derived by literal
-event-kind lookup. No `ClosureProposal`, `RatifiedClosure`,
+event kinds in `ClosureLedger`. Raw event history remains literal;
+trusted operational state is derived by the non-mutating reconciler.
+No `ClosureProposal`, `RatifiedClosure`,
 `CommittedClosure`, or `RevisedClosure` sibling classes exist.
 
 === R+8 HONORED LITERALLY ===
@@ -77,8 +78,9 @@ def _now_ts() -> int:
 class ClosureEntry:
     """One version of one closure.
 
-    Lifecycle state is NOT stored on this entry. State is derived by
-    literal event-kind lookup in ClosureLedger for this closure_id.
+    Lifecycle state is NOT stored on this entry. Raw lifecycle evidence lives
+    in ClosureLedger; trusted operational state is derived by the
+    non-mutating closure reconciliation helper.
     Adding a `state` / `is_committed` / `is_ratified` field here would
     violate the watch-item and the ratified design §5.4.
 
