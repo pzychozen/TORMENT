@@ -380,40 +380,21 @@ def detect_open_items_mismatch(
 
     # ---- Signal 2: Active batons in scope (across every agent) ----
     #
-    # Batons are per-agent. We need to check every agent in the
-    # workspace so a baton under agent "atlas" falling in a closure
-    # scope that doesn't name an agent still surfaces. The
-    # agent-enumeration uses the internal composite key convention
-    # (`<workspace_id>/<agent_id>`) from fabric._agent_key.
-    agent_ids: List[str] = []
-    private_graphs = getattr(fabric, "private_graphs", None)
-    if isinstance(private_graphs, dict):
-        prefix = f"{workspace_id}/"
-        for agent_key in private_graphs.keys():
-            if not agent_key.startswith(prefix):
-                continue
-            aid = agent_key[len(prefix):]
-            if aid and aid not in agent_ids:
-                agent_ids.append(aid)
-
-    for agent_id in agent_ids:
+    # The baton payload is the authoritative lifecycle state.  The Fabric
+    # helper reads persisted private graphs when needed, rather than treating
+    # the lazy ``private_graphs`` runtime cache as the workspace agent index.
+    active_batons = fabric._closure_active_batons(workspace_id)
+    for baton in active_batons:
         try:
-            r = fabric.list_active_batons(
-                workspace_id=workspace_id, agent_id=agent_id, limit=200,
-            )
+            eid = int(baton.get("eid", -1))
         except Exception:
             continue
-        for b in r.get("batons", []) or []:
-            try:
-                eid = int(b.get("eid", -1))
-            except Exception:
-                continue
-            if eid in scope_set:
-                unresolved_batons.append({
-                    "eid": eid,
-                    "summary": str(b.get("summary", "")),
-                    "agent_id": agent_id,
-                })
+        if eid in scope_set:
+            unresolved_batons.append({
+                "eid": eid,
+                "summary": str(baton.get("summary", "")),
+                "agent_id": str(baton.get("agent_id", "")),
+            })
 
     has_unresolved = bool(unresolved_conflicts) or bool(unresolved_batons)
     deferred_empty = len(declared) == 0

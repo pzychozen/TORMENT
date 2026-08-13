@@ -53,7 +53,7 @@ def _full_proposal_kwargs() -> dict:
         "workspace_id": "ws1",
         "arc_name": "ratification-test-arc",
         "arc_kind": "feature",
-        "scope": [1, 2, 3],
+        "scope": [1],
         "what_it_was": "An arc for testing ratification flow.",
         "what_worked": "Ratification was structural.",
         "what_surprised": "Nothing.",
@@ -77,6 +77,10 @@ class TestCommitRequiresPriorRatification(unittest.TestCase):
         os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
         self.fabric = TormentFabric(data_dir=self.tmp)
         self.fabric.get_workspace("ws1")
+        self.fabric.create_agent("ws1", "atlas")
+        self.fabric.ingest(
+            workspace_id="ws1", agent_id="atlas", text="Closure ratification scope seed.", step=1,
+        )
         # Seed a proposal we'll attempt to commit without ratification.
         result = self.fabric.propose_closure(**_full_proposal_kwargs())
         self.assertTrue(result.get("ok"), "precondition: proposal succeeded")
@@ -155,6 +159,10 @@ class TestLifecycleIsEventDerived(unittest.TestCase):
         os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
         self.fabric = TormentFabric(data_dir=self.tmp)
         self.fabric.get_workspace("ws1")
+        self.fabric.create_agent("ws1", "atlas")
+        self.fabric.ingest(
+            workspace_id="ws1", agent_id="atlas", text="Closure lifecycle scope seed.", step=1,
+        )
 
     def test_closure_ledger_module_exists(self) -> None:
         try:

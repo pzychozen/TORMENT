@@ -5576,6 +5576,142 @@ class TormentFabric:
             workspace_id=workspace_id,
         )
 
+    # ---- Closure scope / honesty read helpers ----
+
+    def _closure_private_graph_views(
+        self,
+        workspace_id: str,
+    ) -> Tuple[List[Tuple[str, MemoryGraph]], List[MemoryGraph]]:
+        """Read persisted private graphs without hydrating agent runtime state."""
+        agent_ids: set = set()
+        prefix = f"{workspace_id}/"
+        for agent_key in self.private_graphs:
+            if agent_key.startswith(prefix):
+                agent_id = agent_key[len(prefix):]
+                if agent_id:
+                    agent_ids.add(agent_id)
+
+        agents_root = _safe_child(_ws_root(self.data_dir, workspace_id), "agents")
+        if os.path.isdir(agents_root):
+            for agent_id in os.listdir(agents_root):
+                try:
+                    _validate_path_component(agent_id, "agent_id")
+                except HTTPException:
+                    continue
+                private_dir = _safe_child(
+                    _agent_dir(self.data_dir, workspace_id, agent_id), "private"
+                )
+                if os.path.isdir(private_dir):
+                    agent_ids.add(agent_id)
+
+        views: List[Tuple[str, MemoryGraph]] = []
+        transient: List[MemoryGraph] = []
+        for agent_id in sorted(agent_ids):
+            graph = self.private_graphs.get(self._agent_key(workspace_id, agent_id))
+            if graph is None:
+                private_dir = _safe_child(
+                    _agent_dir(self.data_dir, workspace_id, agent_id), "private"
+                )
+                try:
+                    graph = MemoryGraph(
+                        data_dir=private_dir,
+                        embedder=self.kernel.embedder,
+                    )
+                except Exception as e:
+                    self._log.debug(
+                        "Closure private-graph read skipped for workspace_id=%s "
+                        "agent_id=%s: %s",
+                        _safe_log_value(workspace_id),
+                        _safe_log_value(agent_id),
+                        _safe_log_value(e),
+                    )
+                    continue
+                transient.append(graph)
+            views.append((agent_id, graph))
+        return views, transient
+
+    def _closure_workspace_eids(self, workspace_id: str) -> set:
+        """Return workspace-local EID candidates for closure scope validation.
+
+        EIDs are local to individual graphs.  The established v0.1 closure
+        schema stores only ``List[int]``, so this write-boundary guard proves
+        local existence without inventing an agent/domain qualifier.
+        """
+        known_eids: set = set()
+        workspace = self.get_workspace(workspace_id)
+        for graph in workspace.shared_graphs.values():
+            known_eids.update(int(eid) for eid in graph.entities)
+
+        views, transient = self._closure_private_graph_views(workspace_id)
+        try:
+            for _agent_id, graph in views:
+                known_eids.update(int(eid) for eid in graph.entities)
+        finally:
+            for graph in transient:
+                graph.close()
+        return known_eids
+
+    def _normalize_and_validate_closure_scope(
+        self,
+        workspace_id: str,
+        scope: List[int],
+    ) -> Tuple[List[int], List[Any]]:
+        """Normalize scope EIDs in first-seen order and report invalid values."""
+        normalized: List[int] = []
+        invalid: List[Any] = []
+        seen: set = set()
+        for raw_eid in scope:
+            try:
+                eid = int(raw_eid)
+            except (TypeError, ValueError):
+                invalid.append(raw_eid)
+                continue
+            if eid not in seen:
+                seen.add(eid)
+                normalized.append(eid)
+        if invalid:
+            return normalized, invalid
+
+        known_eids = self._closure_workspace_eids(workspace_id)
+        return normalized, [eid for eid in normalized if eid not in known_eids]
+
+    def _closure_active_batons(self, workspace_id: str) -> List[Dict[str, Any]]:
+        """Read active persisted batons for Closure honesty without cache reliance."""
+        active: List[Dict[str, Any]] = []
+        views, transient = self._closure_private_graph_views(workspace_id)
+        try:
+            for agent_id, graph in views:
+                try:
+                    for eid, entry in graph.entities.items():
+                        payload = entry.payload or {}
+                        if not isinstance(payload, dict):
+                            continue
+                        if payload.get("memory_class") != "baton":
+                            continue
+                        lifecycle = payload.get("baton_lifecycle") or {}
+                        if not isinstance(lifecycle, dict):
+                            continue
+                        if lifecycle.get("status") != "active":
+                            continue
+                        active.append({
+                            "eid": int(eid),
+                            "summary": str(payload.get("summary", "")),
+                            "agent_id": agent_id,
+                        })
+                except Exception as e:
+                    self._log.debug(
+                        "Closure baton scan skipped damaged graph for workspace_id=%s "
+                        "agent_id=%s: %s",
+                        _safe_log_value(workspace_id),
+                        _safe_log_value(agent_id),
+                        _safe_log_value(e),
+                    )
+        finally:
+            for graph in transient:
+                graph.close()
+        active.sort(key=lambda baton: (baton["agent_id"], baton["eid"]))
+        return active
+
     # ---- Required-field validation helper ----
 
     @staticmethod
@@ -5664,6 +5800,18 @@ class TormentFabric:
                 "version_id": "",
             }
 
+        normalized_scope, invalid_eids = self._normalize_and_validate_closure_scope(
+            workspace_id, scope,
+        )
+        if invalid_eids:
+            return {
+                "ok": False,
+                "result_code": "invalid_scope",
+                "invalid_eids": invalid_eids,
+                "closure_id": "",
+                "version_id": "",
+            }
+
         store = self._get_closure_store(workspace_id)
         ledger = self._get_closure_ledger(workspace_id)
 
@@ -5696,7 +5844,7 @@ class TormentFabric:
             workspace_id=workspace_id,
             arc_name=arc_name,
             arc_kind=arc_kind,
-            scope=list(int(e) for e in scope),
+            scope=normalized_scope,
             what_it_was=what_it_was,
             what_worked=what_worked,
             what_surprised=what_surprised,
@@ -6027,7 +6175,26 @@ class TormentFabric:
         # still has open conflicts / active batons is rejected with the
         # same code commit_closure uses.
         from .closure_memory import detect_open_items_mismatch
-        prospective_scope = list(int(e) for e in _field("scope"))
+        if "scope" in revised_fields and "scope" in REVISABLE_FIELDS:
+            if not isinstance(_field("scope"), list) or not _field("scope"):
+                return {
+                    "ok": False,
+                    "result_code": "missing_required_field",
+                    "missing_field": "scope",
+                    "closure_id": closure_id,
+                }
+            prospective_scope, invalid_eids = self._normalize_and_validate_closure_scope(
+                workspace_id, _field("scope"),
+            )
+            if invalid_eids:
+                return {
+                    "ok": False,
+                    "result_code": "invalid_scope",
+                    "invalid_eids": invalid_eids,
+                    "closure_id": closure_id,
+                }
+        else:
+            prospective_scope = list(int(e) for e in _field("scope"))
         prospective_deferred = list(_field("deferred_or_open_items"))
         check = detect_open_items_mismatch(
             fabric=self,

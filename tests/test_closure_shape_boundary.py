@@ -103,7 +103,7 @@ def _full_proposal_kwargs() -> dict:
         "workspace_id": "ws1",
         "arc_name": "block-c-test-arc",
         "arc_kind": "feature",                # free-form per D.4
-        "scope": [1, 2, 3],                   # explicit eid list per D.3
+        "scope": [1],                         # explicit eid list per D.3
         "what_it_was": "A small test arc for proposing a closure.",
         "what_worked": "The proposal validation worked.",
         "what_surprised": "Nothing surprising in this test.",
@@ -122,6 +122,10 @@ class TestProposeClosureRequiresAllFields(unittest.TestCase):
         os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
         self.fabric = TormentFabric(data_dir=self.tmp)
         self.fabric.get_workspace("ws1")
+        self.fabric.create_agent("ws1", "atlas")
+        self.fabric.ingest(
+            workspace_id="ws1", agent_id="atlas", text="Closure shape scope seed.", step=1,
+        )
 
     def test_fabric_has_propose_closure(self) -> None:
         self.assertTrue(

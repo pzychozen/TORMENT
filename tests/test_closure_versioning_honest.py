@@ -39,7 +39,7 @@ def _full_proposal_kwargs() -> dict:
         "workspace_id": "ws1",
         "arc_name": "versioning-test-arc",
         "arc_kind": "feature",
-        "scope": [10, 11, 12],
+        "scope": [1],
         "what_it_was": "An arc for testing revision versioning.",
         "what_worked": "The first commit was complete.",
         "what_surprised": "Nothing in the first version.",
@@ -57,6 +57,10 @@ class TestRevisionCreatesNewVersion(unittest.TestCase):
         os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
         self.fabric = TormentFabric(data_dir=self.tmp)
         self.fabric.get_workspace("ws1")
+        self.fabric.create_agent("ws1", "atlas")
+        self.fabric.ingest(
+            workspace_id="ws1", agent_id="atlas", text="Closure version scope seed.", step=1,
+        )
         # propose → ratify → commit, so we have something to revise
         prop = self.fabric.propose_closure(**_full_proposal_kwargs())
         self.assertTrue(prop.get("ok"))
