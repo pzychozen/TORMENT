@@ -1544,6 +1544,7 @@ class AssembleContextReq(BaseModel):
     workspace_id: str
     agent_id: str
     query: str
+    scope_tag: Optional[str] = None
     profile: str = "companion"
     token_budget: int = 4000
     top_k: int = 8
@@ -1669,10 +1670,23 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
         ]
         archive_hits = _arc_filtered["results"]
 
-    # 4. Assemble context with hard precedence
+    # 4. Caller-controlled reference foregrounding.  A missing/null/empty
+    # scope intentionally means no reference selection; it never falls back
+    # to every active scope.  list_active_loads performs the exact
+    # workspace/agent/scope match and resolves each live reference body.
+    reference_loads = []
+    if req.scope_tag:
+        reference_loads = fabric.list_active_loads(
+            req.workspace_id,
+            req.agent_id,
+            scope_tag=req.scope_tag,
+        ).get("loads", [])
+
+    # 5. Assemble context with hard precedence
     assembled = assemble_context(
         core_hits=core_hits,
         archive_hits=archive_hits,
+        reference_loads=reference_loads,
         profile=req.profile,
         token_budget=req.token_budget,
         seed_text=seed_text,

@@ -326,6 +326,36 @@ def _archive_hit_to_block(hit: Dict[str, Any]) -> ContextBlock:
     )
 
 
+def _reference_load_to_block(load: Dict[str, Any]) -> ContextBlock:
+    """Convert an already-selected active reference load to a context block.
+
+    Active-load selection and ordering belong to ``TormentFabric``.  This
+    helper only turns its resolved, whole-object view into the assembler's
+    existing reference block shape.
+    """
+    text = str(load.get("body") or "")
+    ref_id = str(load.get("ref_id") or "")
+    load_id = str(load.get("load_id") or "")
+
+    return ContextBlock(
+        block_type=BLOCK_REFERENCE,
+        eid=None,
+        chunk_id=None,
+        text=text,
+        token_count=_estimate_tokens(text),
+        score=1.0,  # active loads are intentional, not similarity-ranked
+        reason=f"active reference load: {ref_id}",
+        source="reference",
+        metadata={
+            "ref_id": ref_id,
+            "load_id": load_id,
+            "scope_tag": load.get("scope_tag"),
+            "stale_at_load": bool(load.get("stale_at_load", False)),
+            "title": str(load.get("title") or ""),
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Seed / drift context builder
 # ---------------------------------------------------------------------------
@@ -371,6 +401,7 @@ def assemble_context(
     *,
     core_hits: List[Dict[str, Any]],
     archive_hits: Optional[List[Dict[str, Any]]] = None,
+    reference_loads: Optional[List[Dict[str, Any]]] = None,
     profile: str = "companion",
     token_budget: int = 4000,
     seed_text: str = "",
@@ -378,13 +409,14 @@ def assemble_context(
     drift_info: Optional[Dict[str, Any]] = None,
     custom_weights: Optional[Dict[str, float]] = None,
 ) -> AssembledContext:
-    """Assemble a unified context from core + archive retrieval.
+    """Assemble a unified context from core, reference, and archive retrieval.
 
     This is the main entry point for Phase 3.
 
     Args:
         core_hits: Results from fabric.query() — already rescored.
         archive_hits: Results from ArchiveStore.retrieve() (optional).
+        reference_loads: Already-selected active reference loads (optional).
         profile: Profile name ("companion", "research", "narrator", "balanced").
         token_budget: Total token budget for assembled context.
         seed_text: Character seed text (always included first).
@@ -396,6 +428,7 @@ def assemble_context(
         AssembledContext with structured blocks and assembled text.
     """
     archive_hits = archive_hits or []
+    reference_loads = reference_loads or []
 
     # Resolve profile weights
     weights = dict(PROFILES.get(profile, PROFILES["companion"]))
@@ -432,6 +465,13 @@ def assemble_context(
     for ahit in archive_hits:
         block = _archive_hit_to_block(ahit)
         block_candidates[BLOCK_ARCHIVE].append(block)
+
+    # --- Step 3b: Convert selected active reference loads to whole blocks ---
+    # The fabric has already applied the exact workspace/agent/scope filter and
+    # oldest-first lifecycle ordering.  Equal scores preserve that input order
+    # under Python's stable per-bucket sort below.
+    for load in reference_loads:
+        block_candidates[BLOCK_REFERENCE].append(_reference_load_to_block(load))
 
     # --- Step 4: Sort each bucket by score (descending) ---
     # Identity: seed block always first (score=1.0), then by score.

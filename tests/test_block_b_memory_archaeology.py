@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import gc
+import inspect
 import json
 import os
 import sys
@@ -326,6 +327,147 @@ class TestReferenceLifecycleArchaeology(_FabricCase):
 
         self.assertNotIn("REFERENCE_ARCHAEOLOGY_SENTINEL", result["assembled_text"])
         self.assertEqual(result["blocks"]["reference_context"], [])
+
+
+class TestReferenceScopeContractArchaeology(_FabricCase):
+    """Characterize scope filtering without proposing retrieval wiring."""
+
+    def test_scope_filter_is_exact_all_scopes_are_visible_and_loads_are_not_deduped(self) -> None:
+        self.fabric.get_workspace("ws_a")
+        self.fabric.create_agent("ws_a", "atlas")
+        first_ref = self.ingest_reference()
+        second_ref = self.fabric.ingest_reference(
+            workspace_id="ws_a",
+            title="Second reference",
+            body="SECOND_REFERENCE_SCOPE_SENTINEL",
+            source_link="internal/reference/second",
+            source_kind="internal_doc",
+        )["ref_id"]
+
+        # Load one reference twice into different scopes and a second reference
+        # into the first scope.  Monotonic timestamps make the documented
+        # oldest-first order mechanically observable.
+        with patch("torment_service.fabric.time.time", side_effect=range(100, 112)):
+            first_research = self.fabric.load_reference(
+                "ws_a", "atlas", first_ref, "research"
+            )
+            second_research = self.fabric.load_reference(
+                "ws_a", "atlas", second_ref, "research"
+            )
+            first_editorial = self.fabric.load_reference(
+                "ws_a", "atlas", first_ref, "editorial"
+            )
+
+        research = self.fabric.list_active_loads("ws_a", "atlas", "research")["loads"]
+        editorial = self.fabric.list_active_loads("ws_a", "atlas", "editorial")["loads"]
+        all_scopes = self.fabric.list_active_loads("ws_a", "atlas")["loads"]
+
+        self.assertEqual(
+            [load["load_id"] for load in research],
+            [first_research["load_id"], second_research["load_id"]],
+        )
+        self.assertEqual(
+            [load["load_id"] for load in editorial],
+            [first_editorial["load_id"]],
+        )
+        self.assertEqual(
+            [load["load_id"] for load in all_scopes],
+            [
+                first_research["load_id"],
+                second_research["load_id"],
+                first_editorial["load_id"],
+            ],
+        )
+        self.assertEqual(
+            [load["ref_id"] for load in all_scopes].count(first_ref), 2,
+            "list_active_loads returns distinct active load events, not one ref_id-deduped entry",
+        )
+
+    def test_scope_names_are_agent_and_workspace_isolated_and_unload_targets_one_load(self) -> None:
+        self.fabric.get_workspace("ws_a")
+        self.fabric.create_agent("ws_a", "atlas")
+        self.fabric.create_agent("ws_a", "beacon")
+        shared_workspace_ref = self.ingest_reference()
+
+        atlas_shared = self.fabric.load_reference(
+            "ws_a", "atlas", shared_workspace_ref, "shared"
+        )
+        atlas_private = self.fabric.load_reference(
+            "ws_a", "atlas", shared_workspace_ref, "private"
+        )
+        beacon_shared = self.fabric.load_reference(
+            "ws_a", "beacon", shared_workspace_ref, "shared"
+        )
+
+        self.assertEqual(
+            [load["load_id"] for load in self.fabric.list_active_loads("ws_a", "atlas", "shared")["loads"]],
+            [atlas_shared["load_id"]],
+        )
+        self.assertEqual(
+            [load["load_id"] for load in self.fabric.list_active_loads("ws_a", "beacon", "shared")["loads"]],
+            [beacon_shared["load_id"]],
+        )
+
+        self.fabric.get_workspace("ws_b")
+        self.fabric.create_agent("ws_b", "atlas")
+        workspace_b_ref = self.ingest_reference("ws_b")
+        workspace_b_load = self.fabric.load_reference(
+            "ws_b", "atlas", workspace_b_ref, "shared"
+        )
+        self.assertEqual(
+            [load["load_id"] for load in self.fabric.list_active_loads("ws_b", "atlas", "shared")["loads"]],
+            [workspace_b_load["load_id"]],
+        )
+
+        self.assertEqual(
+            self.fabric.unload_reference("ws_a", "atlas", atlas_shared["load_id"])["result_code"],
+            "unloaded",
+        )
+        self.assertEqual(
+            [load["load_id"] for load in self.fabric.list_active_loads("ws_a", "atlas")["loads"]],
+            [atlas_private["load_id"]],
+        )
+        self.assertEqual(
+            [load["load_id"] for load in self.fabric.list_active_loads("ws_a", "beacon")["loads"]],
+            [beacon_shared["load_id"]],
+        )
+
+    def test_public_active_load_api_has_scope_filter_but_no_ref_or_session_selector(self) -> None:
+        list_params = inspect.signature(self.fabric.list_active_loads).parameters
+        load_params = inspect.signature(self.fabric.load_reference).parameters
+        unload_params = inspect.signature(self.fabric.unload_reference).parameters
+
+        self.assertEqual(tuple(list_params), ("workspace_id", "agent_id", "scope_tag"))
+        self.assertEqual(list_params["scope_tag"].default, None)
+        self.assertNotIn("ref_id", list_params)
+        self.assertNotIn("session_id", list_params)
+        self.assertNotIn("session_id", load_params)
+        self.assertEqual(tuple(unload_params), ("workspace_id", "agent_id", "load_id"))
+
+    def test_none_scope_is_accepted_on_load_but_is_not_an_exact_list_filter(self) -> None:
+        self.fabric.get_workspace("ws_a")
+        self.fabric.create_agent("ws_a", "atlas")
+        ref_id = self.ingest_reference()
+
+        loaded = self.fabric.load_reference("ws_a", "atlas", ref_id, None)
+        self.assertEqual(loaded["result_code"], "loaded")
+        self.assertEqual(
+            self.fabric.list_active_loads("ws_a", "atlas", "research")["result_code"],
+            "no_active",
+        )
+        all_scopes = self.fabric.list_active_loads("ws_a", "atlas", None)["loads"]
+        self.assertEqual(len(all_scopes), 1)
+        self.assertIsNone(all_scopes[0]["scope_tag"])
+
+    def test_retrieve_request_has_optional_scope_but_no_session_field(self) -> None:
+        import torment_service.app as appmod
+
+        fields = getattr(appmod.AssembleContextReq, "model_fields", None)
+        if fields is None:
+            fields = appmod.AssembleContextReq.__fields__
+        self.assertIn("scope_tag", fields)
+        self.assertIsNone(fields["scope_tag"].default)
+        self.assertNotIn("session_id", fields)
 
 
 class TestEnvironmentLifecycleArchaeology(_FabricCase):
