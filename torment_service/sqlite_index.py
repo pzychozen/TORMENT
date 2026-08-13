@@ -505,6 +505,7 @@ class IndexManager:
         archive_documents_path: str = "",
         archive_chunks_path: str = "",
         motifs_path: str = "",
+        legacy_trajectories_path: str = "",
     ) -> Dict[str, int]:
         """Rebuild the entire index from canonical JSONL/JSON files.
 
@@ -515,6 +516,9 @@ class IndexManager:
         safe_nodes = self._guard_rebuild_path(nodes_path, "nodes")
         safe_events = self._guard_rebuild_path(events_path, "events")
         safe_trajectories = self._guard_rebuild_path(trajectories_path, "trajectories")
+        safe_legacy_trajectories = self._guard_rebuild_path(
+            legacy_trajectories_path, "legacy_trajectories"
+        )
         safe_archive_docs = self._guard_rebuild_path(archive_documents_path, "archive_documents")
         safe_archive_chunks = self._guard_rebuild_path(archive_chunks_path, "archive_chunks")
         safe_motifs = self._guard_rebuild_path(motifs_path, "motifs")
@@ -567,8 +571,29 @@ class IndexManager:
                         continue
 
         # --- Trajectory index ---
-        if safe_trajectories and os.path.exists(safe_trajectories):
-            with open(safe_trajectories, "r", encoding="utf-8") as f:
+        # Current writers rotate trajectory logs daily.  Preserve legacy single
+        # file rebuilds as an additional source for existing workspaces.
+        trajectory_sources: List[str] = []
+        if safe_trajectories and os.path.isdir(safe_trajectories):
+            try:
+                for name in sorted(os.listdir(safe_trajectories)):
+                    if not name.endswith(".jsonl"):
+                        continue
+                    candidate = os.path.realpath(os.path.join(safe_trajectories, name))
+                    if (candidate.startswith(safe_trajectories + os.sep)
+                            and os.path.isfile(candidate)):
+                        trajectory_sources.append(candidate)
+            except OSError:
+                pass
+        elif safe_trajectories and os.path.isfile(safe_trajectories):
+            trajectory_sources.append(safe_trajectories)
+        if (safe_legacy_trajectories
+                and os.path.isfile(safe_legacy_trajectories)
+                and safe_legacy_trajectories not in trajectory_sources):
+            trajectory_sources.append(safe_legacy_trajectories)
+
+        for safe_trajectory_file in trajectory_sources:
+            with open(safe_trajectory_file, "r", encoding="utf-8") as f:
                 for line in f:
                     if not line.strip():
                         continue

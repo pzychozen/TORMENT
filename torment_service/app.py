@@ -1857,7 +1857,10 @@ def index_rebuild(req: RebuildIndexReq) -> Dict[str, Any]:
     counts = idx.rebuild_from_jsonl(
         nodes_path=os.path.join(private_dir, "nodes.jsonl"),
         events_path=os.path.join(private_dir, "memory_events.jsonl"),
-        trajectories_path=os.path.join(private_dir, "trajectories.jsonl"),
+        trajectories_path=os.path.join(
+            private_dir, "logs", "trajectories", "daily"
+        ),
+        legacy_trajectories_path=os.path.join(private_dir, "trajectories.jsonl"),
         archive_documents_path=os.path.join(archive_dir, "documents.jsonl"),
         archive_chunks_path=os.path.join(archive_dir, "chunks.jsonl"),
     )

@@ -52,6 +52,7 @@ _TORMENTFABRIC_WRITERS = frozenset({
     "_create_kernel_state_and_context", "_get_closure_store",
     "_get_environment_store", "_get_reference_store",
     "_maybe_emit_identity_anchor", "_maybe_emit_mood_drift", "_persist_job",
+    "_resolve_srg_writeback_target",
     "commit_closure", "create_agent", "decide_motif_merge", "ingest",
     "ingest_reference", "list_motif_merges", "reinforce",
     "reingest_convergence", "write_environment",

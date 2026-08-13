@@ -3640,6 +3640,62 @@ class TormentFabric:
     # cognition roles receive truly scope-separated memory context.
     # -----------------------------------------------------------------------
 
+    def _resolve_srg_writeback_target(
+        self,
+        ws: Workspace,
+        workspace_id: str,
+        agent_id: str,
+        hit: Dict[str, Any],
+    ) -> Optional[Any]:
+        """Resolve an SRG writeback target from a hit's graph origin.
+
+        EIDs are graph-local, so target selection must be fully determined by
+        the flattened origin metadata carried by the retrieved hit.  Anything
+        incomplete or inconsistent fails closed rather than probing graphs by
+        raw EID.
+        """
+        try:
+            eid = int(hit.get("eid"))
+        except (TypeError, ValueError):
+            return None
+
+        if str(hit.get("workspace_id") or "") != str(workspace_id):
+            return None
+
+        scope = str(hit.get("scope") or "")
+        graph: Optional[MemoryGraph]
+        if scope == "private":
+            if str(hit.get("agent_id") or "") != str(agent_id):
+                return None
+            graph = self.private_graphs.get(self._agent_key(workspace_id, agent_id))
+        elif scope == "shared":
+            domain_id = str(hit.get("domain_id") or "")
+            if not domain_id:
+                return None
+            graph = ws.shared_graphs.get(domain_id)
+        else:
+            # Deep and unknown-origin hits do not carry a graph identity that
+            # is sufficient for this RAM-only SRG writeback.
+            return None
+
+        if graph is None:
+            return None
+        entity = graph.entities.get(eid)
+        if entity is None:
+            return None
+
+        payload = getattr(entity, "payload", {}) or {}
+        if str(payload.get("workspace_id") or "") != str(workspace_id):
+            return None
+        if str(payload.get("scope") or "") != scope:
+            return None
+        if scope == "private":
+            if str(payload.get("agent_id") or "") != str(agent_id):
+                return None
+        elif str(payload.get("domain_id") or "") != str(hit.get("domain_id") or ""):
+            return None
+        return entity
+
     def _query_private_lane(
         self,
         ak: str,
@@ -4371,21 +4427,14 @@ class TormentFabric:
                         from .srg_engine import SRGMemoryState as _SMS, evolve_breathing as _evolve
                         _srg_live = _SMS.from_dict(_srg_writeback_src)
                         _evolve(_srg_live)
-                        # Write back evolved state to the in-memory entity
+                        # Write back evolved state only to the graph that
+                        # produced this hit.  Raw EIDs are graph-local.
                         _hit_eid = h.get("eid")
-                        if _hit_eid is not None:
-                            # Try private graph first, then each domain's shared graph
-                            _hit_ent = None
-                            _pg = self.private_graphs.get(ak)
-                            if _pg is not None:
-                                _hit_ent = _pg.entities.get(int(_hit_eid))
-                            if _hit_ent is None:
-                                for _sg in ws.shared_graphs.values():
-                                    _hit_ent = _sg.entities.get(int(_hit_eid))
-                                    if _hit_ent is not None:
-                                        break
-                            if _hit_ent is not None:
-                                _hit_ent.payload["srg"] = _srg_live.to_dict()
+                        _hit_ent = self._resolve_srg_writeback_target(
+                            ws, workspace_id, agent_id, h
+                        )
+                        if _hit_ent is not None:
+                            _hit_ent.payload["srg"] = _srg_live.to_dict()
                     except Exception as e:
                         self._log.debug("failed to write srg payload to entity eid=%s: %s", _hit_eid, e)
 
@@ -7499,11 +7548,10 @@ class TormentFabric:
     def close(self) -> None:
         """Release fabric-owned transient resources.
 
-        Closes per-agent SQLite indexes (Phase 4 sidecar) and, if
-        this fabric was constructed with data_dir=":memory:", the
-        backing TemporaryDirectory. Idempotent -- safe to call
-        multiple times. After close(), persistent state held only
-        in the temp directory is gone.
+        Closes Fabric-owned graphs and per-agent SQLite indexes, then, if this
+        fabric was constructed with data_dir=":memory:", the backing
+        TemporaryDirectory. Idempotent -- safe to call multiple times. After
+        close(), persistent state held only in the temp directory is gone.
         """
         # Close per-agent SQLite indexes BEFORE tmpdir cleanup so
         # Windows can unlink memory_index.sqlite. IndexManager.close()
@@ -7517,6 +7565,27 @@ class TormentFabric:
                     except Exception as e:
                         self._log.debug("SQLite index close failed during fabric close: %s", e)
             sqlite_indexes.clear()
+
+        # Cached private and shared graphs are Fabric-owned.  Their shard
+        # reader/writer memmaps must be closed before Windows can clean up a
+        # Fabric temporary directory.  Deduplicate by object identity in case
+        # a graph is ever reachable from more than one owned cache.
+        closed_graph_ids = set()
+
+        def _close_owned_graph(graph: Optional[MemoryGraph]) -> None:
+            if graph is None or id(graph) in closed_graph_ids:
+                return
+            closed_graph_ids.add(id(graph))
+            try:
+                graph.close()
+            except Exception as e:
+                self._log.debug("MemoryGraph close failed during fabric close: %s", e)
+
+        for graph in list(getattr(self, "private_graphs", {}).values()):
+            _close_owned_graph(graph)
+        for workspace in list(getattr(self, "workspaces", {}).values()):
+            for graph in list(getattr(workspace, "shared_graphs", {}).values()):
+                _close_owned_graph(graph)
 
         kernel_contexts = getattr(self, "_kernel_contexts", None)
         if kernel_contexts is not None:
