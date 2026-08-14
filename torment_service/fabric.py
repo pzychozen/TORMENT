@@ -6508,6 +6508,7 @@ class TormentFabric:
         Simple governance v1:
           - group pending proposals by embedding similarity
           - approve a group if it has >= min_distinct_agents unique agent_id
+            from non-collective-derived proposals
           - store one shared memory node (summary from the highest-strength proposal)
           - mark all proposals in the approved group as approved; rest remain pending
         """
@@ -6541,7 +6542,9 @@ class TormentFabric:
             # build group around i
             group = [i]
             used.add(pi.proposal_id)
-            agents = {pi.agent_id}
+            # Collective-derived proposals remain in the group but are not
+            # independent agent evidence for quorum.
+            agents = {pi.agent_id} if pi.mtype != "collective_echo" else set()
             for j in range(i+1, len(P)):
                 pj = P[j]
                 if pj.proposal_id in used:
@@ -6550,7 +6553,8 @@ class TormentFabric:
                 if s >= sim_threshold:
                     group.append(j)
                     used.add(pj.proposal_id)
-                    agents.add(pj.agent_id)
+                    if pj.mtype != "collective_echo":
+                        agents.add(pj.agent_id)
 
             if len(agents) >= min_distinct_agents:
                 approved_groups += 1
