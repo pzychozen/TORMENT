@@ -2149,11 +2149,30 @@ class TormentFabric:
         _validate_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
-        # Serialize entire agent creation to prevent duplicate init under concurrency
-        with self.locks.agent_lock(workspace_id, agent_id):
+        # Serialize creation by workspace before the per-agent initializer so a
+        # CharacterSeed ownership check and first save are one atomic sequence.
+        with self.locks.workspace_lock(workspace_id), self.locks.agent_lock(workspace_id, agent_id):
             ident = self.ident_store.load(workspace_id, agent_id)
             if ident is None:
-                ident = self.ident_store.create(workspace_id, agent_id, seed=seed or DEFAULT_AGENT_SEED)
+                effective_seed = seed or DEFAULT_AGENT_SEED
+                effective_seed_id = str(effective_seed.get("seed_id", "") or "").strip()
+                if self._character_enable and effective_seed_id:
+                    existing_character_seed = self.character_store.load_seed(
+                        workspace_id, effective_seed_id
+                    )
+                    if existing_character_seed is not None:
+                        owner_agent_id = str(existing_character_seed.owner_agent_id or "").strip()
+                        if not owner_agent_id or owner_agent_id != agent_id:
+                            detail = (
+                                "Character seed ownership conflict: "
+                                f"workspace_id={workspace_id!r}, "
+                                f"seed_id={effective_seed_id!r}, "
+                                f"requesting_agent_id={agent_id!r}"
+                            )
+                            if owner_agent_id:
+                                detail += f", owner_agent_id={owner_agent_id!r}"
+                            raise HTTPException(status_code=409, detail=detail)
+                ident = self.ident_store.create(workspace_id, agent_id, seed=effective_seed)
             # init role profile (character continuity guidance)
             try:
                 _ = self.role_store.load(workspace_id, agent_id)
@@ -2222,6 +2241,7 @@ class TormentFabric:
                                 seed_id=seed_id,
                                 character_name=_char_name,
                                 seed_text=seed_text,
+                                owner_agent_id=agent_id,
                             )
                         if not char_seed.seed_motif_id:
                             # Determine domain (first available or "default")

@@ -114,6 +114,8 @@ class CharacterSeed:
     seed_id: str                    # e.g. "aria_v1"
     character_name: str             # e.g. "Aria"
     seed_text: str                  # 10-15 lines of natural language
+    # Workspace-local ownership; empty preserves legacy seed JSON on load.
+    owner_agent_id: str = ""
 
     # Set after planting — the gravitational basin
     seed_motif_id: str = ""
