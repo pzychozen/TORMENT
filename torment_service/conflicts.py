@@ -28,6 +28,9 @@ class CanonConflict:
     decided_ts: Optional[int] = None
     decision: Optional[str] = None
     note: Optional[str] = None
+    origin_scope: Optional[str] = None
+    origin_agent_id: Optional[str] = None
+    origin_domain_id: Optional[str] = None
 
 
 class ConflictRegistry:
@@ -56,7 +59,34 @@ class ConflictRegistry:
             raise ValueError(f"Path escapes domain root: {rp!r}")
         return rp
 
-    def add(self, eid_a: int, eid_b: int, sim: float, conflict_score: float, reason: str) -> CanonConflict:
+    def add(
+        self,
+        eid_a: int,
+        eid_b: int,
+        sim: float,
+        conflict_score: float,
+        reason: str,
+        *,
+        origin_scope: Optional[str] = None,
+        origin_agent_id: Optional[str] = None,
+        origin_domain_id: Optional[str] = None,
+    ) -> CanonConflict:
+        if origin_scope is None:
+            if origin_agent_id is not None or origin_domain_id is not None:
+                raise ValueError("Legacy conflict origin must not include qualifiers")
+        elif origin_scope == "private":
+            if not isinstance(origin_agent_id, str) or not origin_agent_id.strip():
+                raise ValueError("Private conflict origin requires origin_agent_id")
+            if origin_domain_id is not None:
+                raise ValueError("Private conflict origin forbids origin_domain_id")
+        elif origin_scope == "shared":
+            if not isinstance(origin_domain_id, str) or not origin_domain_id.strip():
+                raise ValueError("Shared conflict origin requires origin_domain_id")
+            if origin_agent_id is not None:
+                raise ValueError("Shared conflict origin forbids origin_agent_id")
+        else:
+            raise ValueError("Unknown conflict origin_scope")
+
         c = CanonConflict(
             conflict_id=str(uuid.uuid4()),
             workspace_id=self.workspace_id,
@@ -68,6 +98,9 @@ class ConflictRegistry:
             reason=str(reason)[:240],
             status="open",
             created_ts=_now_ts(),
+            origin_scope=origin_scope,
+            origin_agent_id=origin_agent_id,
+            origin_domain_id=origin_domain_id,
         )
         with open(self._guard(self.path), "a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(c), ensure_ascii=False) + "\n")

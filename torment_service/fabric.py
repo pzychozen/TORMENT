@@ -174,6 +174,71 @@ def _detect_canon_conflict(new_summary: str, old_summary: str, sim: float) -> Tu
     is_conflict = (j >= 0.18) and (boost >= 0.7)  # require negation mismatch
     return (is_conflict, score, reason)
 
+
+def _conflict_record_keys(conflict: Any, workspace_id: str) -> List[Tuple[str, str, int]]:
+    """Return qualified lookup keys for a current-origin conflict row."""
+    if str(getattr(conflict, "workspace_id", "")) != str(workspace_id):
+        return []
+    origin_scope = getattr(conflict, "origin_scope", None)
+    if origin_scope == "private":
+        qualifier = str(getattr(conflict, "origin_agent_id", "") or "").strip()
+    elif origin_scope == "shared":
+        qualifier = str(getattr(conflict, "origin_domain_id", "") or "").strip()
+    else:
+        return []
+    if not qualifier:
+        return []
+    return [
+        (str(origin_scope), qualifier, int(conflict.eid_a)),
+        (str(origin_scope), qualifier, int(conflict.eid_b)),
+    ]
+
+
+def _conflict_hit_key(hit: Dict[str, Any]) -> Optional[Tuple[str, str, int]]:
+    """Return a qualified conflict key from existing flattened hit origin."""
+    origin_scope = str(hit.get("scope", "") or "")
+    if origin_scope == "private":
+        qualifier = str(hit.get("agent_id", "") or "").strip()
+    elif origin_scope == "shared":
+        qualifier = str(hit.get("domain_id", "") or "").strip()
+    else:
+        return None
+    if not qualifier:
+        return None
+    try:
+        return (origin_scope, qualifier, int(hit.get("eid")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_conflict_map(ws: Any, workspace_id: str, domains: List[str]) -> Dict[Tuple[str, str, int], Dict[str, Any]]:
+    """Build a qualified open-conflict map for query and trace scoring."""
+    conflict_map: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+    for domain_id in domains:
+        try:
+            conflicts = ws.conflicts[domain_id].list(status="open", limit=500)
+        except Exception:
+            continue
+        for conflict in conflicts:
+            for key in _conflict_record_keys(conflict, workspace_id):
+                entry = conflict_map.get(key)
+                if entry is None:
+                    conflict_map[key] = {
+                        "max_score": float(conflict.conflict_score),
+                        "conflict_ids": [conflict.conflict_id],
+                    }
+                else:
+                    entry["max_score"] = max(
+                        float(entry.get("max_score", 0.0)),
+                        float(conflict.conflict_score),
+                    )
+                    conflict_ids = entry.get("conflict_ids") or []
+                    if conflict.conflict_id not in conflict_ids:
+                        conflict_ids.append(conflict.conflict_id)
+                    entry["conflict_ids"] = conflict_ids
+    return conflict_map
+
+
 def _now_ts() -> int:
     return int(time.time())
 
@@ -3177,6 +3242,9 @@ class TormentFabric:
                                     sim=float(_sim),
                                     conflict_score=float(cscore),
                                     reason=str(reason or "heuristic"),
+                                    origin_scope="private",
+                                    origin_agent_id=agent_id,
+                                    origin_domain_id=None,
                                 )
                                 break  # one conflict per new node is enough
                     except Exception as e:
@@ -4217,8 +4285,8 @@ class TormentFabric:
                 _q_affect_conf = float(_qa.conf)
             except Exception:
                 _q_affect_tag, _q_affect_conf = "neutral", 0.0
-        # conflict map: map eid->max conflict score and ids for open conflicts in the queried domains
-        conflict_map: Dict[int, Dict[str, Any]] = {}
+        # Conflict map keyed by flattened graph origin plus graph-local EID.
+        conflict_map = _build_conflict_map(ws, workspace_id, domains)
 
         # Continuity debug (v1.11.6): compact, opt-in explanation of which continuity bonuses fired.
         try:
@@ -4230,23 +4298,6 @@ class TormentFabric:
         except Exception:
             _cd_max_hits = 50
         _cd_enable = bool(continuity_debug)
-        for d in domains:
-            try:
-                clist = ws.conflicts[d].list(status="open", limit=500)
-            except Exception:
-                clist = []
-            for c in clist:
-                for eid in (int(c.eid_a), int(c.eid_b)):
-                    ent = conflict_map.get(eid)
-                    if ent is None:
-                        conflict_map[eid] = {"max_score": float(c.conflict_score), "conflict_ids": [c.conflict_id]}
-                    else:
-                        ent["max_score"] = max(float(ent.get("max_score", 0.0)), float(c.conflict_score))
-                        ids = ent.get("conflict_ids") or []
-                        if c.conflict_id not in ids:
-                            ids.append(c.conflict_id)
-                        ent["conflict_ids"] = ids
-        
         # Character continuity: cap identity anchor dominance so anchors guide rather than dominate.
         try:
             _anchor_topk = int(os.getenv("TORMENT_ANCHOR_BOOST_TOPK", "3"))
@@ -4353,7 +4404,8 @@ class TormentFabric:
                     continue
                 motif_alignment = max(motif_alignment, float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12))))
             contradiction_risk = float(h.get("contradiction_risk", 0.0))
-            conflict_info = conflict_map.get(int(h.get("eid", -1)))
+            conflict_key = _conflict_hit_key(h)
+            conflict_info = conflict_map.get(conflict_key) if conflict_key is not None else None
             conflict_penalty = 0.0
             conflict_ids: List[str] = []
             conflict_status = None
@@ -6634,6 +6686,9 @@ class TormentFabric:
                             sim=float(sim),
                             conflict_score=float(cscore),
                             reason=str(reason or "heuristic"),
+                            origin_scope="shared",
+                            origin_agent_id=None,
+                            origin_domain_id=domain_id,
                         )
                         # one conflict per new node is enough for now
                         break
@@ -6934,24 +6989,8 @@ class TormentFabric:
             for m in ws.motif_regs.get(d, MotifRegistry(self.data_dir, workspace_id, d)).motifs.values():
                 motif_centroids[m.motif_id] = m.centroid_np()
 
-        # Build conflict map for traced domains (parity with query())
-        _trace_conflict_map: Dict[int, Dict[str, Any]] = {}
-        for d in domains:
-            try:
-                clist = ws.conflicts[d].list(status="open", limit=500)
-            except Exception:
-                clist = []
-            for c in clist:
-                for _ceid in (int(c.eid_a), int(c.eid_b)):
-                    ent = _trace_conflict_map.get(_ceid)
-                    if ent is None:
-                        _trace_conflict_map[_ceid] = {"max_score": float(c.conflict_score), "conflict_ids": [c.conflict_id]}
-                    else:
-                        ent["max_score"] = max(float(ent.get("max_score", 0.0)), float(c.conflict_score))
-                        ids = ent.get("conflict_ids") or []
-                        if c.conflict_id not in ids:
-                            ids.append(c.conflict_id)
-                        ent["conflict_ids"] = ids
+        # Build qualified conflict map for traced domains (parity with query()).
+        _trace_conflict_map = _build_conflict_map(ws, workspace_id, domains)
 
         # --- Memory-plan lane weights (parity with query()) ---
         _trace_mp = memory_plan or {}
@@ -7048,7 +7087,12 @@ class TormentFabric:
 
             # --- Conflict penalty (parity with query()) ---
             _hit_eid = int(hit.get("eid", -1))
-            conflict_info = _trace_conflict_map.get(_hit_eid)
+            _hit_conflict_key = _conflict_hit_key(hit)
+            conflict_info = (
+                _trace_conflict_map.get(_hit_conflict_key)
+                if _hit_conflict_key is not None
+                else None
+            )
             conflict_penalty = 0.0
             conflict_ids: List[str] = []
             conflict_status = None
