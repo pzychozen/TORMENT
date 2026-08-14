@@ -4104,6 +4104,7 @@ class TormentFabric:
 
         _core_k = min(max(0, int(_mp_topk.get("core", top_k))), _topk_cap)
         _relational_k = min(max(0, int(_mp_topk.get("relational", top_k))), _topk_cap)
+        _deep_key_present = "deep" in _mp_topk
         _deep_k = min(max(0, int(_mp_topk.get("deep", 0))), _topk_cap)
 
         # --- Lane retrieval (v2.4.4) ---
@@ -4119,12 +4120,10 @@ class TormentFabric:
         _canonical_step = self._get_canonical_step(ak)
 
         # --- Deep memory fallback with spirit return (Phase 6) ---
-        # Deep is primarily a gap-filler: only query when core+shared didn't
-        # fill top_k. The memory plan can raise the deep budget, but never
-        # above the remaining headroom to prevent deep from crowding out
-        # core/relational results that already exist.
+        # Deep is a headroom-bounded gap filler. An absent plan key preserves
+        # baseline gap-fill; an explicit value caps it, and zero declines it.
         _remaining = max(0, top_k - len(private_hits) - len(shared_hits))
-        _deep_budget = min(_deep_k, _remaining) if _deep_k > 0 else _remaining
+        _deep_budget = min(_deep_k, _remaining) if _deep_key_present else _remaining
 
         deep_hits = self._query_deep_lane(
             ak, workspace_id, agent_id, qemb,

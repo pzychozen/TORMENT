@@ -302,6 +302,180 @@ def test_fabric_deep_fallback_uses_remaining_headroom_for_both_flag_values(
         _close_fabric_io(fabric)
 
 
+def test_explicit_deep_zero_declines_lane_without_warmup_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit Deep zero is a lane decline, not a gap-fill request."""
+    _configure_fabric_env(monkeypatch)
+    fabric = TormentFabric(data_dir=str(tmp_path / "fabric_data"))
+    try:
+        _create_real_deep_sentinel(fabric)
+        ak = fabric._agent_key(WORKSPACE_ID, AGENT_ID)
+        deep_store = fabric._deep_stores[ak]
+        original_deep_query = deep_store.query
+        warmup_path = (
+            tmp_path / "fabric_data" / "workspaces" / WORKSPACE_ID / "agents"
+            / AGENT_ID / "warmup" / "warmup_state.jsonl"
+        )
+        observed: Dict[str, Dict[str, Any]] = {}
+
+        for core_count, label in ((3, "remaining_0"), (2, "remaining_1"), (0, "remaining_3")):
+            calls: list[int] = []
+
+            def deep_query_spy(query_embedding, *, top_k: int):
+                calls.append(top_k)
+                return original_deep_query(query_embedding, top_k=top_k)
+
+            monkeypatch.setattr(deep_store, "query", deep_query_spy)
+            monkeypatch.setattr(
+                fabric,
+                "_query_private_lane",
+                lambda *_args, _hits=_core_sentinel_hits(core_count), **_kwargs: list(_hits),
+            )
+            monkeypatch.setattr(
+                fabric,
+                "_query_shared_lane",
+                lambda *_args, **_kwargs: ([], []),
+            )
+
+            result = fabric.query(
+                WORKSPACE_ID,
+                AGENT_ID,
+                DEEP_SENTINEL,
+                top_k=3,
+                domain_id=DOMAIN_ID,
+                memory_plan={"top_k_by_lane": {"core": 6, "relational": 4, "deep": 0}},
+            )
+            deep_hits = [
+                hit for hit in result["results"]
+                if hit.get("from_spirit_return") is True
+            ]
+            remaining = 3 - core_count
+            assert calls == []
+            assert deep_hits == []
+            assert not warmup_path.exists()
+            observed[label] = {
+                "remaining": remaining,
+                "DeepMemoryStore.query_top_k_calls": calls,
+                "deep_hit_count": len(deep_hits),
+                "warmup_rows": 0,
+            }
+
+        assert observed == {
+            "remaining_0": {
+                "remaining": 0,
+                "DeepMemoryStore.query_top_k_calls": [],
+                "deep_hit_count": 0,
+                "warmup_rows": 0,
+            },
+            "remaining_1": {
+                "remaining": 1,
+                "DeepMemoryStore.query_top_k_calls": [],
+                "deep_hit_count": 0,
+                "warmup_rows": 0,
+            },
+            "remaining_3": {
+                "remaining": 3,
+                "DeepMemoryStore.query_top_k_calls": [],
+                "deep_hit_count": 0,
+                "warmup_rows": 0,
+            },
+        }
+        print("ARCHIVE_DEEP_EXPLICIT_ZERO=" + json.dumps(observed, sort_keys=True))
+    finally:
+        _close_fabric_io(fabric)
+
+
+def test_absent_deep_key_preserves_baseline_gap_fill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A present plan without a Deep key keeps pre-Thinking gap-fill behavior."""
+    _configure_fabric_env(monkeypatch)
+    fabric = TormentFabric(data_dir=str(tmp_path / "fabric_data"))
+    try:
+        deep_eid = _create_real_deep_sentinel(fabric)
+        ak = fabric._agent_key(WORKSPACE_ID, AGENT_ID)
+        deep_store = fabric._deep_stores[ak]
+        original_deep_query = deep_store.query
+        warmup_path = (
+            tmp_path / "fabric_data" / "workspaces" / WORKSPACE_ID / "agents"
+            / AGENT_ID / "warmup" / "warmup_state.jsonl"
+        )
+        observed: Dict[str, Dict[str, Any]] = {}
+
+        for core_count, label in ((3, "remaining_0"), (2, "remaining_1"), (0, "remaining_3")):
+            calls: list[int] = []
+
+            def deep_query_spy(query_embedding, *, top_k: int):
+                calls.append(top_k)
+                return original_deep_query(query_embedding, top_k=top_k)
+
+            monkeypatch.setattr(deep_store, "query", deep_query_spy)
+            monkeypatch.setattr(
+                fabric,
+                "_query_private_lane",
+                lambda *_args, _hits=_core_sentinel_hits(core_count), **_kwargs: list(_hits),
+            )
+            monkeypatch.setattr(
+                fabric,
+                "_query_shared_lane",
+                lambda *_args, **_kwargs: ([], []),
+            )
+
+            result = fabric.query(
+                WORKSPACE_ID,
+                AGENT_ID,
+                DEEP_SENTINEL,
+                top_k=3,
+                domain_id=DOMAIN_ID,
+                memory_plan={"top_k_by_lane": {"core": 6, "relational": 4}},
+            )
+            deep_hits = [
+                hit for hit in result["results"]
+                if hit.get("from_spirit_return") is True
+            ]
+            remaining = 3 - core_count
+            expected_calls = [] if remaining == 0 else [remaining]
+            assert calls == expected_calls
+            assert [int(hit.get("eid", -1)) for hit in deep_hits] == (
+                [] if remaining == 0 else [deep_eid]
+            )
+            warmup_rows = (
+                len([line for line in warmup_path.read_text(encoding="utf-8").splitlines() if line])
+                if warmup_path.exists() else 0
+            )
+            observed[label] = {
+                "remaining": remaining,
+                "DeepMemoryStore.query_top_k_calls": calls,
+                "deep_hit_count": len(deep_hits),
+                "warmup_rows": warmup_rows,
+            }
+
+        assert observed == {
+            "remaining_0": {
+                "remaining": 0,
+                "DeepMemoryStore.query_top_k_calls": [],
+                "deep_hit_count": 0,
+                "warmup_rows": 0,
+            },
+            "remaining_1": {
+                "remaining": 1,
+                "DeepMemoryStore.query_top_k_calls": [1],
+                "deep_hit_count": 1,
+                "warmup_rows": 1,
+            },
+            "remaining_3": {
+                "remaining": 3,
+                "DeepMemoryStore.query_top_k_calls": [3],
+                "deep_hit_count": 1,
+                "warmup_rows": 2,
+            },
+        }
+        print("ARCHIVE_DEEP_ABSENT_KEY=" + json.dumps(observed, sort_keys=True))
+    finally:
+        _close_fabric_io(fabric)
+
+
 @contextmanager
 def _isolated_app(data_dir: Path, archive_recall_flag: str | None) -> Iterator[Any]:
     """Run real endpoint functions against temporary Fabric and Archive globals."""
