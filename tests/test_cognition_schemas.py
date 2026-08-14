@@ -184,14 +184,14 @@ class TestDriftReport(unittest.TestCase):
         self.assertFalse(dr.requires_block)
 
     def test_red_zone(self):
-        dr = DriftReport(total_drift=0.40)
+        dr = DriftReport(total_drift=0.40, drift_direction="away_seed")
         self.assertEqual(dr.zone, "red")
         self.assertFalse(dr.allows_durable_write)
         self.assertFalse(dr.allows_provisional_write)
         self.assertTrue(dr.requires_block)
 
     def test_hard_block_zone(self):
-        dr = DriftReport(total_drift=0.55)
+        dr = DriftReport(total_drift=0.55, drift_direction="away_seed")
         self.assertEqual(dr.zone, "hard_block")
         self.assertFalse(dr.allows_durable_write)
         self.assertFalse(dr.allows_provisional_write)
@@ -229,6 +229,7 @@ class TestDriftReport(unittest.TestCase):
     def test_serialization_round_trip(self):
         original = DriftReport(
             total_drift=0.30,
+            drift_direction="toward_seed",
             domain_shift=0.10,
             motif_shift=0.15,
             style_shift=0.05,
@@ -241,6 +242,7 @@ class TestDriftReport(unittest.TestCase):
         # round-trip through from_dict (computed props ignored)
         restored = DriftReport.from_dict(d)
         self.assertAlmostEqual(restored.total_drift, 0.30)
+        self.assertEqual(restored.drift_direction, "toward_seed")
         self.assertAlmostEqual(restored.domain_shift, 0.10)
         self.assertEqual(restored.reasons, ["motif divergence detected"])
 

@@ -30,6 +30,7 @@ class DriftReport:
     """Report produced by the drift checker for identity-sensitive flows."""
 
     total_drift: float = 0.0
+    drift_direction: str = "stable"
     domain_shift: float = 0.0
     motif_shift: float = 0.0
     style_shift: float = 0.0
@@ -61,7 +62,13 @@ class DriftReport:
     @property
     def requires_block(self) -> bool:
         """Whether all identity-sensitive durable writes must be blocked."""
-        return self.zone in ("red", "hard_block") or self.governance_breach
+        return (
+            self.governance_breach
+            or (
+                self.zone in ("red", "hard_block")
+                and self.drift_direction == "away_seed"
+            )
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

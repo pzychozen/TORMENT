@@ -29,6 +29,7 @@ from schemas.drift_report import DriftReport, DRIFT_RED
 
 def stub_drift_check(
     total_drift: float = 0.0,
+    drift_direction: str = "away_seed",
     domain_shift: float = 0.0,
     motif_shift: float = 0.0,
     style_shift: float = 0.0,
@@ -47,6 +48,7 @@ def stub_drift_check(
     """
     report = DriftReport(
         total_drift=total_drift,
+        drift_direction=drift_direction,
         domain_shift=domain_shift,
         motif_shift=motif_shift,
         style_shift=style_shift,
@@ -145,6 +147,7 @@ def make_live_drift_check(fabric_instance) -> "DriftCheckFn":
             # Drift check failure → return hard_block as safety fallback
             return DriftReport(
                 total_drift=DRIFT_RED,
+                drift_direction="away_seed",
                 governance_breach=False,
                 reasons=[f"Live drift check failed: {str(e)}"],
             )
@@ -155,12 +158,15 @@ def make_live_drift_check(fabric_instance) -> "DriftCheckFn":
 def _raw_to_drift_report(raw: Dict[str, Any]) -> DriftReport:
     """Convert the raw dict from character.measure_drift() to a DriftReport.
 
-    character.measure_drift() returns a dict with keys like:
-      drift_score, domain_drift, motif_drift, style_drift, etc.
-    We map these to our DriftReport fields.
+    Character returns a signed centering score: positive means centered and
+    negative means drifting away.  Cognition consumes an unsigned risk
+    magnitude, so the boundary is deliberately one-way: only negative
+    Character scores create risk.  Direction remains a separate signal for
+    the direction-aware ordinary-drift block rule.
     """
     return DriftReport(
-        total_drift=raw.get("drift_score", raw.get("total_drift", 0.0)),
+        total_drift=max(0.0, -float(raw.get("drift_score", 0.0))),
+        drift_direction=str(raw.get("drift_direction") or "stable"),
         domain_shift=raw.get("domain_drift", raw.get("domain_shift", 0.0)),
         motif_shift=raw.get("motif_drift", raw.get("motif_shift", 0.0)),
         style_shift=raw.get("style_drift", raw.get("style_shift", 0.0)),

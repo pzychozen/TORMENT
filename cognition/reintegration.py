@@ -320,6 +320,7 @@ def _run_drift_check(
             # Drift check failure → assume worst case (block)
             return DriftReport(
                 total_drift=0.50,
+                drift_direction="away_seed",
                 governance_breach=False,
                 reasons=["Drift check failed — defaulting to hard_block"],
             )
