@@ -14,6 +14,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from starlette.requests import Request
 
 # We import the helpers directly from the app module.
 # _safe_join_data_dir and _safe_log_value are module-level functions.
@@ -204,7 +205,8 @@ def _run_cognition_with_result(monkeypatch, result):
     monkeypatch.setattr(appmod, "fabric", _CognitionDummyFabric())
     monkeypatch.setattr(pipeline, "run_cognition_pipeline", lambda **kwargs: result)
     req = appmod.CognitionRunReq(workspace_id="ws", agent_id="agent", user_input="hello")
-    return appmod.cognition_run(req)
+    request = Request({"type": "http", "method": "POST", "path": "/cognition/run", "headers": []})
+    return appmod.cognition_run(req, request)
 
 
 def test_cognition_status_error_returns_generic_pipeline_failure(monkeypatch):

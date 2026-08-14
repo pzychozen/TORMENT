@@ -14,9 +14,11 @@ from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
 from .auth import (
     resolve_request_context,
+    handle_trust_error,
     AUTH_ENABLED,
     get_key_store,
 )
+from .request_context import InsufficientTrustError
 from .thinking_controller import ThinkingController
 from .scoring import derive_provenance_type as _derive_prov_type
 # v0.2.4-A1: archive FILTER-A defense-in-depth at /retrieve. Used in
@@ -2597,12 +2599,33 @@ def _build_cognition_response(result: Any) -> Dict[str, Any]:
 
 
 @app.post("/cognition/run")
-def cognition_run(req: CognitionRunReq) -> Dict[str, Any]:
+def cognition_run(req: CognitionRunReq, request: Request) -> Dict[str, Any]:
     """Execute the Agent Spine cognition pipeline.
 
     Single-pass pipeline: TaskPacket → Router → Apertures → Roles →
     Reintegration → Response.  See docs/archive/AGENT_SPINE_PLAN.md for design.
     """
+    from .spine import OPERATION_REGISTRY
+
+    # /cognition/run predates Spine routing, but it can become write-capable
+    # through the archivist-writeback gate. Use the same registry authority
+    # threshold as the governed cognition operation before touching Fabric.
+    ctx = resolve_request_context(
+        request,
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
+    required_min_trust = OPERATION_REGISTRY["cognition_run"].min_trust
+    if ctx.trust_tier < required_min_trust:
+        handle_trust_error(
+            InsufficientTrustError(
+                client_id=ctx.client_id,
+                operation="cognition_run",
+                required=required_min_trust,
+                actual=ctx.trust_tier,
+            )
+        )
+
     from cognition.task_models import TaskPacket
     from cognition.pipeline import run_cognition_pipeline
     from cognition.drift import make_live_drift_check
