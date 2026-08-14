@@ -23,6 +23,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from collections import deque
 from dataclasses import dataclass, field, asdict
 from typing import Any, Deque, Dict, List, Optional
@@ -53,13 +54,15 @@ class SpineIncident:
     client_id: str = ""
     session_id: str = ""
     task_id: str = ""
+    operation_ok: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     def is_failure(self) -> bool:
-        """True if this incident represents a block or error."""
-        return not self.ok or self.decision_code.startswith("blocked_") or \
+        """True if Spine blocked/errored or its handler explicitly failed."""
+        return not self.ok or not self.operation_ok or \
+               self.decision_code.startswith("blocked_") or \
                self.decision_code.startswith("error_")
 
 
@@ -227,6 +230,11 @@ def log_spine_decision(
     Call this at the end of submit_task() to capture every decision.
     """
     log = get_incident_log()
+    result = getattr(resp, "result", None)
+    operation_ok = not (
+        isinstance(result, Mapping)
+        and result.get("ok") is False
+    )
     incident = SpineIncident(
         timestamp=time.time(),
         operation=resp.operation,
@@ -245,6 +253,7 @@ def log_spine_decision(
         client_id=getattr(ctx, "client_id", ""),
         session_id=getattr(ctx, "session_id", ""),
         task_id=resp.task_id,
+        operation_ok=operation_ok,
     )
     log.record(incident)
 

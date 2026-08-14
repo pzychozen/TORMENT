@@ -2911,7 +2911,7 @@ def spine_status(workspace_id: Optional[str] = None) -> Dict[str, Any]:
     Returns:
       - Active agents and their trust contexts
       - Recent Spine decisions (aggregated counts)
-      - Recent blocks and escalations
+      - Recent failures and escalations
       - Drift summary for workspace agents
       - Incident log summary
 

@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 
 # Ensure project root is on path
@@ -84,6 +85,7 @@ class TestSpineIncident(unittest.TestCase):
 
     def test_successful_incident_not_failure(self):
         inc = _make_incident(ok=True, decision_code="fast_allowed")
+        self.assertTrue(inc.operation_ok)
         self.assertFalse(inc.is_failure())
 
     def test_blocked_trust_is_failure(self):
@@ -162,6 +164,114 @@ class TestIncidentLogRecord(unittest.TestCase):
         self.assertEqual(len(log._buffer), 0)
         # Counters remain (they track lifetime, not current buffer)
         self.assertEqual(log._total_logged, 10)
+
+
+# ---------------------------------------------------------------------------
+# Tests: dispatched handler outcome accounting
+# ---------------------------------------------------------------------------
+
+class TestOperationOutcomeAccounting(unittest.TestCase):
+    """Inner handler failures must count without changing outer Spine semantics."""
+
+    def setUp(self):
+        mod = sys.modules["torment_service.incident_log"]
+        self._old_log = mod._incident_log
+        mod._incident_log = IncidentLog(max_size=100)
+
+    def tearDown(self):
+        sys.modules["torment_service.incident_log"]._incident_log = self._old_log
+
+    def _record(self, *, operation, decision_code, result_code, result):
+        resp = SimpleNamespace(
+            operation=operation,
+            decision_code=decision_code,
+            result_code=result_code,
+            ok=True,
+            workspace_id="ws_outcome",
+            agent_id="agent_outcome",
+            trust_tier=1.0,
+            drift_status="green",
+            path="full" if decision_code == "full_allowed" else "fast",
+            elapsed_ms=1.0,
+            escalated=False,
+            escalation_reasons=[],
+            reason="",
+            task_id="task_outcome",
+            result=result,
+        )
+        log_spine_decision(
+            resp,
+            SimpleNamespace(),
+            SimpleNamespace(client_id="test_client", session_id="test_session"),
+        )
+        return get_incident_log()
+
+    def test_fast_inner_failure_is_counted_and_queryable(self):
+        log = self._record(
+            operation="memory_governance_set",
+            decision_code="fast_allowed",
+            result_code="governed",
+            result={"ok": False, "reason": "Memory not found"},
+        )
+
+        incident = log.query(limit=1)[0]
+        self.assertFalse(incident.operation_ok)
+        self.assertTrue(incident.is_failure())
+        self.assertEqual(log._total_failures, 1)
+        self.assertEqual(log.query(failures_only=True), [incident])
+
+    def test_cognition_inner_failure_is_counted_without_changing_result_code(self):
+        log = self._record(
+            operation="cognition_run",
+            decision_code="full_allowed",
+            result_code="cognition",
+            result={"ok": False, "reason": "Pipeline failure"},
+        )
+
+        incident = log.query(limit=1)[0]
+        self.assertFalse(incident.operation_ok)
+        self.assertTrue(incident.is_failure())
+        self.assertEqual(incident.result_code, "cognition")
+        self.assertEqual(log._total_failures, 1)
+        self.assertEqual(log.query(failures_only=True), [incident])
+
+    def test_absent_inner_ok_defaults_to_operation_success(self):
+        log = self._record(
+            operation="ingest",
+            decision_code="fast_allowed",
+            result_code="stored",
+            result={},
+        )
+        self._record(
+            operation="ingest",
+            decision_code="fast_allowed",
+            result_code="stored",
+            result={"stored": True},
+        )
+
+        incidents = log.query(limit=2)
+        self.assertTrue(all(incident.operation_ok for incident in incidents))
+        self.assertFalse(any(incident.is_failure() for incident in incidents))
+        self.assertEqual(log._total_failures, 0)
+
+    def test_only_exact_false_is_an_operation_failure(self):
+        log = self._record(
+            operation="ingest",
+            decision_code="fast_allowed",
+            result_code="stored",
+            result={"ok": 0},
+        )
+        self._record(
+            operation="ingest",
+            decision_code="fast_allowed",
+            result_code="stored",
+            result={"ok": None},
+        )
+
+        incidents = log.query(limit=2)
+        self.assertTrue(all(incident.operation_ok for incident in incidents))
+        self.assertFalse(any(incident.is_failure() for incident in incidents))
+        self.assertEqual(log._total_failures, 0)
 
 
 # ---------------------------------------------------------------------------

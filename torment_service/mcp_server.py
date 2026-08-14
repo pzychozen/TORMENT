@@ -791,7 +791,7 @@ def create_mcp_server() -> FastMCP:
             name="Spine Admin Status",
             description=(
                 "[Guarded] Cross-agent administrative view: active agents, "
-                "recent Spine decisions, blocks, escalations, and drift summary. "
+                "recent Spine decisions, failures, escalations, and drift summary. "
                 "Exposes internal operational state — requires guarded exposure tier."
             ),
             mime_type="application/json",
