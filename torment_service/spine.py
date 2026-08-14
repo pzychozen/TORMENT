@@ -62,6 +62,13 @@ _alignment_buffer: List[Dict[str, Any]] = []
 _alignment_lock = __import__("threading").Lock()
 
 
+def _canonical_spine_text(payload: Dict[str, Any]) -> str:
+    """Return the logical request text shared by Spine decision and dispatch."""
+    return str(
+        payload.get("text") or payload.get("query") or payload.get("user_input") or ""
+    )
+
+
 def _resolve_capabilities() -> Optional[Dict[str, bool]]:
     """Build a capabilities dict from env vars for the advisory sidecar.
 
@@ -537,7 +544,7 @@ def escalation_reasons(
     reasons: List[str] = []
 
     # Seed/canon/identity content in payload
-    text = str(payload.get("text", "") or payload.get("query", "")).lower()
+    text = _canonical_spine_text(payload).lower()
     if any(kw in text for kw in ("seed", "canon", "identity", "core identity",
                                   "who am i", "character", "rewrite")):
         logger.info("Escalating %s: identity-sensitive content detected", operation)
@@ -812,7 +819,7 @@ def _fast_query_memory(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> 
     _mp: Optional[Dict[str, Any]] = None
     if _THINKING_ADVISORY_ENABLE:
         try:
-            _text = payload.get("query", payload.get("text", ""))
+            _text = _canonical_spine_text(payload)
             _geo = _harvest_geometric_context(fabric, ctx.workspace_id, ctx.agent_id)
             _advisory = _advisory_thinking(ctx.workspace_id, ctx.agent_id, _text,
                                            geometric_context=_geo)
@@ -828,7 +835,7 @@ def _fast_query_memory(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> 
     return fabric.query(
         workspace_id=ctx.workspace_id,
         agent_id=ctx.agent_id,
-        query_text=payload.get("query", payload.get("text", "")),
+        query_text=_canonical_spine_text(payload),
         top_k=int(payload.get("top_k", 8)),
         domain_id=payload.get("domain_id"),
         peek_bridges=bool(payload.get("peek_bridges", False)),
@@ -1000,7 +1007,7 @@ def _full_cognition(fabric, ctx: RequestContext, req: SpineRequest) -> Dict[str,
     task = TaskPacket(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
-        user_input=req.payload.get("text", req.payload.get("query", req.payload.get("user_input", ""))),
+        user_input=_canonical_spine_text(req.payload),
         mode=req.payload.get("cognition_mode", "auto"),
         priority=req.payload.get("priority", "normal"),
     )
@@ -1411,7 +1418,7 @@ def submit_task(
                     req.workspace_id, req.agent_id, ", ".join(esc_reasons))
 
     # --- 4b. Advisory thinking (observation only, never influences dispatch) ---
-    advisory_text = str(req.payload.get("text", "") or req.payload.get("query", "") or req.payload.get("user_input", ""))
+    advisory_text = _canonical_spine_text(req.payload)
     _geo_ctx = _harvest_geometric_context(fabric, req.workspace_id, req.agent_id) if advisory_text else None
     advisory_thinking_result = _advisory_thinking(req.workspace_id, req.agent_id, advisory_text,
                                                   geometric_context=_geo_ctx) if advisory_text else None
