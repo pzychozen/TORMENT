@@ -101,12 +101,12 @@ Every response wraps the Fabric result with governance metadata:
 |---|---|
 | `stored` | New memory created (ingest, tool_result_ingest) |
 | `reinforced` | Feedback applied (static); or reinforce moved at least one eid's per-memory significance (handler-driven, v2.4.x contract) |
-| `no_op` | Reinforce call admitted but no eid moved (all missing, out-of-scope, or shared). Callers may trust this: no per-memory state changed. |
+| `no_op` | Handler-driven operation admitted but no state changed (for example, reinforce found no movable eid or governance found no changed target). Callers may trust this: no per-memory state changed. |
 | `reingested` | Collective reingest completed |
 | `queried` | Read-only query returned results |
-| `governed` | Governance flags updated |
+| `governed` | At least one governance flag actually changed value; unchanged or missing-target cases produce `no_op` |
 | `compressed` | Compression cycle ran |
-| `cognition` | Full cognition pipeline completed |
+| `cognition` | Full cognition path taken; the pipeline's own outcome remains in the result body |
 | `state_read` | Agent state snapshot returned |
 | `none` | No result (blocked or errored) |
 

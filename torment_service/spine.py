@@ -856,11 +856,19 @@ def _fast_governance_set(fabric, ctx: RequestContext, payload: Dict[str, Any]) -
     ak = fabric._agent_key(ctx.workspace_id, ctx.agent_id)
     graph = fabric.private_graphs.get(ak)
     if graph is None:
-        return {"ok": False, "reason": "Agent graph not found"}
+        return {
+            "ok": False,
+            "reason": "Agent graph not found",
+            "_spine_result_code": RESULT_NO_OP,
+        }
 
     ent = graph.entities.get(eid)
     if ent is None:
-        return {"ok": False, "reason": f"Memory eid={eid} not found"}
+        return {
+            "ok": False,
+            "reason": f"Memory eid={eid} not found",
+            "_spine_result_code": RESULT_NO_OP,
+        }
 
     p = ent.payload or {}
     audit_record = update_governance(p, flags, actor=actor, source=source)
@@ -875,7 +883,13 @@ def _fast_governance_set(fabric, ctx: RequestContext, payload: Dict[str, Any]) -
     except Exception as e:
         logger.debug("Failed to log audit entry for %s: %s", eid, e)
 
-    return {"ok": True, "eid": eid, "audit": audit_record}
+    result_code = RESULT_GOVERNED if audit_record["changed"] else RESULT_NO_OP
+    return {
+        "ok": True,
+        "eid": eid,
+        "audit": audit_record,
+        "_spine_result_code": result_code,
+    }
 
 
 def _fast_compression_run(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1109,16 +1123,17 @@ RESULT_NONE = "none"
 # because the operation was registered in _ALWAYS_FAST but missing
 # from this dict.
 # Value of ``None`` means the result_code is handler-driven: the handler
-# returns a ``_reinforce_result_code`` key that the envelope builder reads.
-# This supports the reinforce contract (v2.4.x) where result_code must
-# truthfully reflect whether any per-memory state actually moved.
+# returns a ``_spine_result_code`` key that the envelope builder reads, with
+# ``_reinforce_result_code`` retained as the legacy reinforce fallback.
+# This supports operations whose result_code must truthfully reflect whether
+# any state actually moved.
 _OPERATION_RESULT_CODES: Dict[str, Optional[str]] = {
     "ingest": RESULT_STORED,
     "tool_result_ingest": RESULT_STORED,
     "feedback": RESULT_REINFORCED,
     "reinforce": None,  # handler-driven: "reinforced" or "no_op" (reinforce contract v2.4.x)
     "collective_reingest": RESULT_REINGESTED,
-    "memory_governance_set": RESULT_GOVERNED,
+    "memory_governance_set": None,  # handler-driven: "governed" only when a flag changed
     "query_state": RESULT_STATE_READ,
     "query_memory": RESULT_QUERIED,
     "compression_run": RESULT_COMPRESSED,
@@ -1505,11 +1520,15 @@ def submit_task(
         r_code = RESULT_COGNITION
     else:
         r_code = _OPERATION_RESULT_CODES.get(req.operation, RESULT_NONE)
-        # Handler-driven result_code (reinforce contract v2.4.x):
+        # Handler-driven result_code:
         # When the static map returns None, the handler's return dict
-        # carries the authoritative result_code under a private key.
+        # carries the authoritative result code under the neutral private key.
+        # Reinforce retains its established private key as a compatibility fallback.
         if r_code is None:
-            r_code = (result or {}).get("_reinforce_result_code", RESULT_NONE)
+            r_code = (result or {}).get(
+                "_spine_result_code",
+                (result or {}).get("_reinforce_result_code", RESULT_NONE),
+            )
 
     audit_dict = ctx.to_audit_dict()
     if advisory_thinking_result is not None:
