@@ -13,6 +13,18 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+class ConflictRegistryError(ValueError):
+    """Raised when durable conflict state cannot be replayed completely."""
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        self.reason = str(reason)
+        self.detail = str(detail)
+        message = f"ConflictRegistryError: {self.reason}"
+        if self.detail:
+            message += f" ({self.detail})"
+        super().__init__(message)
+
+
 @dataclass
 class CanonConflict:
     conflict_id: str
@@ -122,18 +134,41 @@ class ConflictRegistry:
         latest: Dict[str, CanonConflict] = {}
         if os.path.exists(self.path):
             with open(self._guard(self.path), "r", encoding="utf-8") as f:
-                for line in f:
+                for lineno, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
-                    obj = json.loads(line)
-                    c = CanonConflict(**obj)
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ConflictRegistryError(
+                            "malformed_line",
+                            f"conflicts.jsonl line {lineno}: {exc}",
+                        ) from None
+                    try:
+                        c = CanonConflict(**obj)
+                    except TypeError as exc:
+                        raise ConflictRegistryError(
+                            "invalid_record",
+                            f"conflicts.jsonl line {lineno}: {exc}",
+                        ) from None
                     latest[c.conflict_id] = c
         if os.path.exists(self.events_path):
             with open(self._guard(self.events_path), "r", encoding="utf-8") as f:
-                for line in f:
+                for lineno, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
-                    e = json.loads(line)
+                    try:
+                        e = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ConflictRegistryError(
+                            "malformed_line",
+                            f"conflict_events.jsonl line {lineno}: {exc}",
+                        ) from None
+                    if not isinstance(e, dict):
+                        raise ConflictRegistryError(
+                            "invalid_record",
+                            f"conflict_events.jsonl line {lineno}: expected object",
+                        )
                     cid = e.get("conflict_id")
                     c = latest.get(cid)
                     if c is None:

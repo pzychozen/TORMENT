@@ -217,7 +217,13 @@ def _build_conflict_map(ws: Any, workspace_id: str, domains: List[str]) -> Dict[
     for domain_id in domains:
         try:
             conflicts = ws.conflicts[domain_id].list(status="open", limit=500)
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "Conflict registry unreadable for query/trace workspace=%s domain=%s: %s",
+                _safe_log_value(workspace_id),
+                _safe_log_value(domain_id),
+                _safe_log_value(exc),
+            )
             continue
         for conflict in conflicts:
             for key in _conflict_record_keys(conflict, workspace_id):
@@ -6222,6 +6228,17 @@ class TormentFabric:
             scope=entry.scope,
             declared_open_items=entry.deferred_or_open_items,
         )
+        if check.get("unreadable_conflict_domains"):
+            return {
+                "ok": False,
+                "result_code": "conflict_state_unreadable",
+                "closure_id": closure_id,
+                "unreadable": {
+                    "unreadable_conflict_domains": check["unreadable_conflict_domains"],
+                    "unresolved_conflicts": check["unresolved_conflicts"],
+                    "unresolved_batons": check["unresolved_batons"],
+                },
+            }
         if check.get("mismatch"):
             return {
                 "ok": False,
@@ -6394,6 +6411,17 @@ class TormentFabric:
             scope=prospective_scope,
             declared_open_items=prospective_deferred,
         )
+        if check.get("unreadable_conflict_domains"):
+            return {
+                "ok": False,
+                "result_code": "conflict_state_unreadable",
+                "closure_id": closure_id,
+                "unreadable": {
+                    "unreadable_conflict_domains": check["unreadable_conflict_domains"],
+                    "unresolved_conflicts": check["unresolved_conflicts"],
+                    "unresolved_batons": check["unresolved_batons"],
+                },
+            }
         if check.get("mismatch"):
             return {
                 "ok": False,

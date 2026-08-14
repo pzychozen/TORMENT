@@ -330,6 +330,9 @@ def detect_open_items_mismatch(
             "unresolved_batons": [
                 {"eid": int, "summary": str, "agent_id": str}
             ],
+            "unreadable_conflict_domains": [
+                {"domain_id": str, "reason": str, "detail": str}
+            ],
             "declared": [<copy of declared_open_items>],
             "reason": Optional[str],
         }
@@ -350,6 +353,7 @@ def detect_open_items_mismatch(
 
     unresolved_conflicts: List[Dict[str, Any]] = []
     unresolved_batons: List[Dict[str, Any]] = []
+    unreadable_conflict_domains: List[Dict[str, str]] = []
 
     # ---- Signal 1: ConflictRegistry open conflicts in scope ----
     #
@@ -367,7 +371,20 @@ def detect_open_items_mismatch(
         for domain_id, registry in ws.conflicts.items():
             try:
                 opens = registry.list(status="open", limit=500)
-            except Exception:
+            except Exception as exc:
+                detail = str(exc)[:240]
+                error_reason = getattr(exc, "reason", None) or "read_failed"
+                unreadable_conflict_domains.append({
+                    "domain_id": str(domain_id),
+                    "reason": str(error_reason),
+                    "detail": detail,
+                })
+                log.warning(
+                    "Conflict registry unreadable for closure workspace=%s domain=%s: %s",
+                    workspace_id,
+                    domain_id,
+                    detail,
+                )
                 continue
             for c in opens:
                 eid_a = int(getattr(c, "eid_a", -1))
@@ -423,6 +440,7 @@ def detect_open_items_mismatch(
         "mismatch": mismatch,
         "unresolved_conflicts": unresolved_conflicts,
         "unresolved_batons": unresolved_batons,
+        "unreadable_conflict_domains": unreadable_conflict_domains,
         "declared": declared,
         "reason": reason,
     }

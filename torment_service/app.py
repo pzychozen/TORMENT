@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from . import spine as _spine_module
 from . import thinking_controller as _thinking_controller_module
 from .fabric import TormentFabric
+from .conflicts import ConflictRegistryError
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
 from .auth import (
@@ -1403,6 +1404,9 @@ def decide_motif_merge(req: MotifMergeDecideReq) -> Dict[str, Any]:
 def list_conflicts(workspace_id: str, domain_id: str, status: str = "open", limit: int = 200) -> Dict[str, Any]:
     try:
         return fabric.list_conflicts(workspace_id, domain_id, status=status, limit=limit)
+    except ConflictRegistryError as e:
+        _log.warning("list_conflicts unreadable registry: %s", e)
+        raise HTTPException(status_code=500, detail="Conflict registry is unreadable")
     except ValueError as e:
         _log.debug("list_conflicts not found: %s", e)
         raise HTTPException(status_code=404, detail="Conflicts not found for this domain")
