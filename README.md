@@ -155,6 +155,30 @@ Start here:
 - **Smoke test** — `docs/MCP_SMOKE_TEST.md`
 - **Zero-code setup helper** — `start/torment_character_creator.html`
 
+## Testing
+
+Run the supported TORMENT suite:
+
+```bash
+python -m pytest -q
+# or: make test
+```
+
+`make verify` uses this ordinary TORMENT suite (plus compile and simulation checks) and intentionally does not run Brainvision research tests; run Brainvision explicitly when needed.
+
+Brainvision is an offline research suite and is intentionally separate. Run it only when needed:
+
+```bash
+python -m pytest -q -o addopts= research/brainvision tests/research
+# or: make test-brainvision
+```
+
+To run one Brainvision test, override the ordinary-suite collection options explicitly, for example:
+
+```bash
+python -m pytest -q -o addopts= tests/research/test_brainvision_offline_falsifier.py
+```
+
 ---
 
 ## What makes TORMENT different

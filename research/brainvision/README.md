@@ -32,8 +32,17 @@ python research/brainvision/run_falsifier.py
 
 ## Test
 
+Run the complete offline Brainvision suite explicitly:
+
 ```
-pytest tests/research/test_brainvision_offline_falsifier.py
+python -m pytest -q -o addopts= research/brainvision tests/research
+# or: make test-brainvision
+```
+
+For an individual Brainvision test, override the ordinary TORMENT collection options:
+
+```
+python -m pytest -q -o addopts= tests/research/test_brainvision_offline_falsifier.py
 ```
 
 ## Status

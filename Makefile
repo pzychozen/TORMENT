@@ -1,7 +1,10 @@
-.PHONY: test verify py_compile sim_verify
+.PHONY: test test-brainvision verify py_compile sim_verify
 
 test:
-	pytest -q
+	python -m pytest -q
+
+test-brainvision:
+	python -m pytest -q -o addopts= research/brainvision tests/research
 
 # Ship gate: compile + tests + deterministic sim record/replay check.
 verify: py_compile test sim_verify

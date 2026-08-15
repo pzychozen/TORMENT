@@ -59,6 +59,8 @@ pytest -q tests/research -p no:cacheprovider
 1513 passed, 1 skipped
 ```
 
+After the 2026-08 test-discovery separation, reproducing that explicit Brainvision invocation requires clearing the default ignore options with `-o addopts=`; see `research/brainvision/README.md` for the current command.
+
 ## Future work
 
 Any future LLM-facing descriptor experiment is a **separate, isolated, one-way
