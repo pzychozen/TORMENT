@@ -462,7 +462,11 @@ class TestArchivist(unittest.TestCase):
 
     def test_rejects_under_drift_block(self):
         task = _make_task()
-        drift = {"total_drift": 0.55, "governance_breach": False}
+        drift = {
+            "total_drift": 0.55,
+            "drift_direction": "away_seed",
+            "governance_breach": False,
+        }
         ctx = _make_memory_context(aperture="protected", drift=drift)
         mp = _make_proposal(strength=0.5, task_id=task.task_id)
         prior = RoleOutput(
