@@ -34,6 +34,7 @@ from .character import (
     assemble_character_context, derive_kernel_modulation,
 )
 from .agent_locks import AgentLockManager
+from brainvision.lifecycle import BrainvisionLifecycleManager
 from .checkpoint import (
     save_checkpoint,
     build_motif_summary, build_shard_snapshot,
@@ -831,6 +832,11 @@ class TormentFabric:
 
         # Per-agent and per-workspace serialization (Phase 0 — MCP prep)
         self.locks = AgentLockManager()
+        self.brainvision_lifecycle = BrainvisionLifecycleManager(
+            data_dir=self.data_dir,
+            identity_store=self.ident_store,
+            lock_manager=self.locks,
+        )
 
         # workspace clone controls (v1.10.4)
         self._clone_mutex = threading.Lock()
@@ -7648,6 +7654,13 @@ class TormentFabric:
         TemporaryDirectory. Idempotent -- safe to call multiple times. After
         close(), persistent state held only in the temp directory is gone.
         """
+        manager = getattr(self, "brainvision_lifecycle", None)
+        if manager is not None:
+            try:
+                manager.shutdown()
+            except Exception as e:
+                log.debug("Brainvision lifecycle shutdown failed during fabric close: %s", e)
+
         # Close per-agent SQLite indexes BEFORE tmpdir cleanup so
         # Windows can unlink memory_index.sqlite. IndexManager.close()
         # is itself idempotent (handles already-closed connections).
