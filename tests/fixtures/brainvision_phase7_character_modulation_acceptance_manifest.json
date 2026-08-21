@@ -1,0 +1,391 @@
+{
+  "schema_id": "brainvision.phase7.character_modulation_acceptance_manifest.v1",
+  "phase": 7,
+  "phase7_specification": {
+    "path": "docs/TORMENT_BRAINVISION_PHASE_7_CHARACTER_MODULATION_SPECIFICATION_v1.0.md",
+    "modulation_schema_id": "brainvision.character_modulation.v1",
+    "implementation_commit": "4ae28a5930868dbe79b9d1c1ff0539fd9c2d712a"
+  },
+  "frozen_authorities": {
+    "base_operator_id": "bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb",
+    "base_projection_id": "bvproj1_c9f5ed6b1300bc242d7633e6b0e7cea107e0473cfd26d9650abf8da9ad055b3f",
+    "modulation_mapping_core_sha256": "f8b41a1987437410613157ae403d10ac12fbce3b34cc760f0cc8376193206aeb",
+    "modulation_mapping_id": "bvmodmap1_f8b41a1987437410613157ae403d10ac12fbce3b34cc760f0cc8376193206aeb",
+    "modulation_profile_schema_id": "brainvision.character_modulation.profile.v1",
+    "modulation_profile_ids": {
+      "-1": "bvmodprof1_95cf73f228a5c02a16e13b90cf17aa46d31bbc312643f7dbf374d33816d9ad49",
+      "0": "bvmodprof1_9f65a350c2526bc63733e9267d7846ce4eace56a6c4ec3261bfc748a18287abc",
+      "+1": "bvmodprof1_ceeb161b2dcb510601d85fc7b5a64eb023827bb044220b046b2c61b98be422f5"
+    },
+    "theta_v1": [
+      -1,
+      0,
+      1
+    ],
+    "theta_0": 0,
+    "product_horizon_ns": 300000000000,
+    "phase_2_fixture_hashes": {
+      "d0": "c08e4b0cf384c20b126ea4466ab2122811f5ad2328e2c482bcfea5471d526544",
+      "dA": "9fdd9ce03853911b050565684b0432079cc4cf3f7e51a4dc035b7423762e7583",
+      "dB": "2caa7c6d89da394da758f26ada91658cabb1969639fffd7767130d789c152517"
+    },
+    "projection_payload_fields": [
+      "schema_id",
+      "projection_id",
+      "operator_id",
+      "current_activity_code",
+      "retained_history_code",
+      "present_history_relation_code",
+      "trajectory_code",
+      "open_event_class",
+      "recurrence_code"
+    ]
+  },
+  "administration": {
+    "command": "python -m pytest tests\\test_brainvision_phase7_character_modulation_acceptance.py -q",
+    "primary_failure_verdict": "BRAINVISION_PHASE7_CHARACTER_MODULATION_ACCEPTANCE_FAIL",
+    "pass_verdict": "BRAINVISION_PHASE7_CHARACTER_MODULATION_ACCEPTANCE_PASS"
+  },
+  "descriptor_references": {
+    "d0": "phase_2_fixture:d0",
+    "dA": "phase_2_fixture:dA",
+    "dB": "phase_2_fixture:dB"
+  },
+  "formal_relevant_projection_fields": {
+    "primary_current_equality": [
+      "current_activity_code"
+    ],
+    "primary_retained_history": [
+      "retained_history_code"
+    ],
+    "order_current_equality": [
+      "current_activity_code"
+    ],
+    "order_trajectory": [
+      "trajectory_code"
+    ]
+  },
+  "histories": {
+    "H0": {
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ],
+      "pure_read_elapsed_after_final_event_ns": 299000000000
+    },
+    "H1": {
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "dA",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ],
+      "pure_read_elapsed_after_final_event_ns": 299000000000,
+      "retained_event_active_time_ns": 1000000000,
+      "pure_read_target_active_time_ns": 301000000000
+    },
+    "O1": {
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "dA",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "dB",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 3000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ],
+      "pure_read_elapsed_after_final_event_ns": 0
+    },
+    "O2": {
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "dB",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "dA",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 3000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ],
+      "pure_read_elapsed_after_final_event_ns": 0
+    }
+  },
+  "neutral_baseline_cases": [
+    {
+      "case_id": "retained_context",
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "dA",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ]
+    },
+    {
+      "case_id": "orientation_order",
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "dA",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "dB",
+          "semantic_event_class": null
+        },
+        {
+          "active_time_ns": 3000000000,
+          "descriptor": "d0",
+          "semantic_event_class": null
+        }
+      ]
+    },
+    {
+      "case_id": "semantic_register",
+      "events": [
+        {
+          "active_time_ns": 0,
+          "descriptor": "d0",
+          "semantic_event_class": "detector:scene_change"
+        },
+        {
+          "active_time_ns": 1000000000,
+          "descriptor": "d0",
+          "semantic_event_class": "detector:scene_change"
+        },
+        {
+          "active_time_ns": 2000000000,
+          "descriptor": "d0",
+          "semantic_event_class": "detector:motion"
+        }
+      ]
+    }
+  ],
+  "structural_neutral_dispatch_guard": {
+    "theta": 0,
+    "active_time_ns": 23,
+    "prior_committed_active_time_ns": 17,
+    "descriptor": "d0",
+    "semantic_event_class": null
+  },
+  "primary_same_experience": {
+    "history_ref": "H1",
+    "expected_by_theta": {
+      "-1": {
+        "persistent_context": [
+          375000,
+          0,
+          0
+        ],
+        "current_activity_code": 0,
+        "retained_history_code": 6
+      },
+      "0": {
+        "persistent_context": [
+          500000,
+          0,
+          0
+        ],
+        "current_activity_code": 0,
+        "retained_history_code": 8
+      },
+      "+1": {
+        "persistent_context": [
+          625000,
+          0,
+          0
+        ],
+        "current_activity_code": 0,
+        "retained_history_code": 10
+      }
+    },
+    "expected_direction": [
+      6,
+      8,
+      10
+    ],
+    "expected_delta_from_neutral": {
+      "-1": -2,
+      "+1": 2
+    },
+    "minimum_absolute_effect_codes": 2,
+    "acceptance_margin_codes": 0
+  },
+  "domain_horizon": {
+    "history_refs": [
+      "H0",
+      "H1"
+    ],
+    "expected_retained_history_codes": {
+      "H0": {
+        "-1": 0,
+        "0": 0,
+        "+1": 0
+      },
+      "H1": {
+        "-1": 6,
+        "0": 8,
+        "+1": 10
+      }
+    },
+    "expected_current_activity_code": 0,
+    "expected_separation_codes": {
+      "-1": 6,
+      "0": 8,
+      "+1": 10
+    },
+    "minimum_domain_separation_codes": 6,
+    "minimum_product_horizon_separation_codes": 2,
+    "domain_wide_margin_codes": 4
+  },
+  "order_regression": {
+    "history_refs": [
+      "O1",
+      "O2"
+    ],
+    "expected_by_theta": {
+      "-1": {
+        "O1": {
+          "orientation_q": 240000,
+          "trajectory_code": 4
+        },
+        "O2": {
+          "orientation_q": -240000,
+          "trajectory_code": -4
+        }
+      },
+      "0": {
+        "O1": {
+          "orientation_q": 320000,
+          "trajectory_code": 5
+        },
+        "O2": {
+          "orientation_q": -320000,
+          "trajectory_code": -5
+        }
+      },
+      "+1": {
+        "O1": {
+          "orientation_q": 400000,
+          "trajectory_code": 6
+        },
+        "O2": {
+          "orientation_q": -400000,
+          "trajectory_code": -6
+        }
+      }
+    }
+  },
+  "non_modulated_dynamics_isolation": {
+    "theta_values": [
+      -1,
+      1
+    ],
+    "state_history": [
+      {
+        "active_time_ns": 0,
+        "descriptor": "d0",
+        "semantic_event_class": null
+      },
+      {
+        "active_time_ns": 1000000000,
+        "descriptor": "dA",
+        "semantic_event_class": "detector:scene_change"
+      }
+    ],
+    "update": {
+      "active_time_ns": 2000000000,
+      "descriptor": "dB",
+      "semantic_event_class": "detector:motion"
+    },
+    "exact_baseline_owned_fields": [
+      "fast_trace",
+      "semantic_register",
+      "write_gate_q",
+      "clamped_orientation_q",
+      "event_active_time_ns"
+    ]
+  },
+  "semantic_dynamical_isolation": {
+    "theta_values": [
+      -1,
+      0,
+      1
+    ],
+    "descriptor": "dA",
+    "prior_committed_active_time_ns": 101,
+    "elapsed_active_time_ns": 23,
+    "semantic_event_class": "detector:scene_change",
+    "exact_dynamic_fields": [
+      "fast_trace",
+      "persistent_context",
+      "write_gate_q",
+      "clamped_orientation_q"
+    ]
+  }
+}
