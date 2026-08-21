@@ -1,0 +1,266 @@
+{
+  "schema_id": "brainvision.phase6.horizon_acceptance_manifest.v1",
+  "phase": 6,
+  "classification": {
+    "primary": [
+      "retained_horizon"
+    ],
+    "mandatory_qualification": [
+      "order",
+      "open_event_recurrence",
+      "neutral_reset_d0",
+      "world_event_id_invariance",
+      "semantic_dynamical_isolation",
+      "pure_read_determinism",
+      "deterministic_reconstruction"
+    ],
+    "supporting_coverage": [
+      "present_history_relation"
+    ]
+  },
+  "administration_guards": [
+    "authorities_and_matrix_bindings"
+  ],
+  "frozen_authorities": {
+    "operator_id": "bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb",
+    "projection_id": "bvproj1_c9f5ed6b1300bc242d7633e6b0e7cea107e0473cfd26d9650abf8da9ad055b3f",
+    "phase_2_descriptor_schema_id": "brainvision.low_level_descriptor.v1",
+    "phase_2_fixtures": {
+      "d0": "c08e4b0cf384c20b126ea4466ab2122811f5ad2328e2c482bcfea5471d526544",
+      "dA": "9fdd9ce03853911b050565684b0432079cc4cf3f7e51a4dc035b7423762e7583",
+      "dB": "2caa7c6d89da394da758f26ada91658cabb1969639fffd7767130d789c152517"
+    }
+  },
+  "product_horizon": {
+    "active_visual_seconds": 300,
+    "active_visual_ns": 300000000000
+  },
+  "comparison_relation": {
+    "name": "WITHIN_PROJECTION_QUANTUM",
+    "definition": "exact_equality_of_every_canonical_encoded_value_in_named_relevant_field_set",
+    "tolerance": "none"
+  },
+  "descriptor_references": {
+    "d0": "phase_2_fixture:d0",
+    "dA": "phase_2_fixture:dA",
+    "dB": "phase_2_fixture:dB",
+    "negative_luminance": {
+      "schema_id": "brainvision.low_level_descriptor.v1",
+      "mean_luminance_q": 250000,
+      "mean_adjacent_luminance_difference_q": 0
+    },
+    "half_positive_luminance": {
+      "schema_id": "brainvision.low_level_descriptor.v1",
+      "mean_luminance_q": 625000,
+      "mean_adjacent_luminance_difference_q": 0
+    },
+    "weak_contrast": {
+      "schema_id": "brainvision.low_level_descriptor.v1",
+      "mean_luminance_q": 500000,
+      "mean_adjacent_luminance_difference_q": 2000
+    }
+  },
+  "histories": {
+    "h0": {
+      "events": [
+        {"active_time_ns": 0, "descriptor": "d0", "semantic_event_class": null},
+        {"active_time_ns": 1000000000, "descriptor": "d0", "semantic_event_class": null},
+        {"active_time_ns": 2000000000, "descriptor": "d0", "semantic_event_class": null}
+      ]
+    },
+    "h1": {
+      "events": [
+        {"active_time_ns": 0, "descriptor": "d0", "semantic_event_class": null},
+        {"active_time_ns": 1000000000, "descriptor": "dA", "semantic_event_class": null},
+        {"active_time_ns": 2000000000, "descriptor": "d0", "semantic_event_class": null}
+      ]
+    },
+    "o1": {
+      "events": [
+        {"active_time_ns": 0, "descriptor": "d0", "semantic_event_class": null},
+        {"active_time_ns": 1000000000, "descriptor": "dA", "semantic_event_class": null},
+        {"active_time_ns": 2000000000, "descriptor": "dB", "semantic_event_class": null},
+        {"active_time_ns": 3000000000, "descriptor": "d0", "semantic_event_class": null}
+      ]
+    },
+    "o2": {
+      "events": [
+        {"active_time_ns": 0, "descriptor": "d0", "semantic_event_class": null},
+        {"active_time_ns": 1000000000, "descriptor": "dB", "semantic_event_class": null},
+        {"active_time_ns": 2000000000, "descriptor": "dA", "semantic_event_class": null},
+        {"active_time_ns": 3000000000, "descriptor": "d0", "semantic_event_class": null}
+      ]
+    }
+  },
+  "primary_retained_horizon": {
+    "history_refs": ["h0", "h1"],
+    "retained_event_active_time_ns": 1000000000,
+    "pure_read_target_active_time_ns": 301000000000,
+    "pure_read_elapsed_after_final_event_ns": 299000000000,
+    "relevant_field_sets": {
+      "current_equality": ["current_activity_code"],
+      "retained_difference": ["retained_history_code"]
+    },
+    "expected": {
+      "h0": {"current_activity_code": 0, "retained_history_code": 0},
+      "h1": {"current_activity_code": 0, "retained_history_code": 8}
+    },
+    "expected_retained_separation": 8,
+    "minimum_retained_separation": 2,
+    "failure_verdict": "VHE_ACCEPTANCE_FAIL"
+  },
+  "mandatory_order_qualification": {
+    "history_refs": ["o1", "o2"],
+    "pure_read_elapsed_after_final_event_ns": 0,
+    "relevant_field_sets": {
+      "current_equality": ["current_activity_code"],
+      "history_difference": ["trajectory_code"]
+    },
+    "expected": {
+      "o1": {"current_activity_code": 0, "trajectory_code": 5},
+      "o2": {"current_activity_code": 0, "trajectory_code": -5}
+    },
+    "expected_trajectory_separation": 10
+  },
+  "supporting_present_history_relation": {
+    "relevant_field_set": ["present_history_relation_code"],
+    "cases": {
+      "no_current": {
+        "history_ref": "h1",
+        "pure_read_elapsed_after_final_event_ns": 299000000000,
+        "expected_raw_relation_q": 0,
+        "expected_code": 0
+      },
+      "aligned": {
+        "events": [
+          {"active_time_ns": 0, "descriptor": "dA", "semantic_event_class": null}
+        ],
+        "pure_read_elapsed_after_final_event_ns": 0,
+        "expected_raw_relation_q": 500000,
+        "expected_code": 8
+      },
+      "opposed": {
+        "events": [
+          {"active_time_ns": 0, "descriptor": "negative_luminance", "semantic_event_class": null},
+          {"active_time_ns": 1000000000, "descriptor": "half_positive_luminance", "semantic_event_class": null}
+        ],
+        "pure_read_elapsed_after_final_event_ns": 0,
+        "expected_raw_relation_q": -187500,
+        "expected_code": -3
+      },
+      "orthogonal": {
+        "events": [
+          {"active_time_ns": 0, "descriptor": "dA", "semantic_event_class": null},
+          {"active_time_ns": 0, "descriptor": "weak_contrast", "semantic_event_class": null}
+        ],
+        "pure_read_elapsed_after_final_event_ns": 0,
+        "expected_raw_relation_q": 0,
+        "expected_code": 0
+      }
+    }
+  },
+  "mandatory_open_event_recurrence": {
+    "initial_state": "fresh/reset neutral VHE",
+    "transitions": "d0-only semantic observations",
+    "events": [
+      {"active_time_ns": 17, "descriptor": "d0", "semantic_event_class": "detector:scene_change", "label": "first"},
+      {"active_time_ns": 40, "descriptor": "d0", "semantic_event_class": "detector:scene_change", "label": "repeat"},
+      {"active_time_ns": 45, "descriptor": "d0", "semantic_event_class": "detector:motion", "label": "new"}
+    ],
+    "expected_projection_sequence": {
+      "fresh": {"open_event_class": null, "recurrence_code": 0},
+      "first": {"open_event_class": "detector:scene_change", "recurrence_code": 1},
+      "repeat": {"open_event_class": "detector:scene_change", "recurrence_code": 2},
+      "new": {"open_event_class": "detector:motion", "recurrence_code": 1}
+    },
+    "relevant_field_sets": {
+      "open_event": ["open_event_class"],
+      "recurrence": ["recurrence_code"]
+    },
+    "under_that_fixture": {
+      "fast_trace_unchanged": true,
+      "persistent_context_unchanged": true,
+      "write_gate_q": 0
+    }
+  },
+  "mandatory_neutral_reset_d0": {
+    "initial_state": "fresh/reset neutral VHE",
+    "events": [
+      {"active_time_ns": 0, "descriptor": "d0", "semantic_event_class": null},
+      {"active_time_ns": 1000000000, "descriptor": "d0", "semantic_event_class": null},
+      {"active_time_ns": 2000000000, "descriptor": "d0", "semantic_event_class": null}
+    ],
+    "expected": {
+      "state_unchanged": true,
+      "write_gate_q": 0
+    }
+  },
+  "mandatory_world_event_id_invariance": {
+    "descriptor": "dA",
+    "stream_identity": "phase6_stream",
+    "source_sequence": 1,
+    "adapter_id": "phase6_adapter",
+    "adapter_contract_id": "phase6_contract",
+    "world_event_ids": ["phase6.world-a", "phase6.world-b"],
+    "dynamical_projection_fields": [
+      "current_activity_code",
+      "retained_history_code",
+      "present_history_relation_code",
+      "trajectory_code"
+    ]
+  },
+  "mandatory_semantic_dynamical_isolation": {
+    "descriptor": "dA",
+    "semantic_event_class": "detector:scene_change",
+    "dynamical_projection_fields": [
+      "current_activity_code",
+      "retained_history_code",
+      "present_history_relation_code",
+      "trajectory_code"
+    ]
+  },
+  "mandatory_pure_read_determinism": {
+    "history_ref": "h1",
+    "pure_read_elapsed_after_final_event_ns": 299000000000
+  },
+  "mandatory_deterministic_reconstruction": {
+    "history_refs": ["h0", "h1", "o1", "o2"],
+    "pure_read_elapsed_after_final_event_ns": {
+      "h0": 299000000000,
+      "h1": 299000000000,
+      "o1": 0,
+      "o2": 0
+    }
+  },
+  "verdict_rules": {
+    "primary_retained_horizon": "PASS iff current equality, retained distinction, absolute retained separation >= 2, and exact expected 0/8 outputs all hold; otherwise VHE_ACCEPTANCE_FAIL",
+    "mandatory_qualification": "Every listed mandatory qualification must pass before Phase 6 is complete",
+    "supporting_coverage": "Present/history relation coverage is recorded without creating a new baseline acceptance verdict"
+  },
+  "administration_semantics": {
+    "phase_1_to_5_unit_and_regression_tests": "freely_rerunnable_verification",
+    "phase_6_scientific_acceptance": "one_recorded_first_administration_after_preregistration_commit",
+    "later_phase_6_reruns": "reproduction_or_verification_only_do_not_replace_recorded_first_result",
+    "stochastic_retry_doctrine": "not_applicable_deterministic_local_computation"
+  },
+  "anti_tuning_boundary": [
+    "do_not_change_fixture_descriptors",
+    "do_not_change_active_time_schedule",
+    "do_not_change_operator_or_projection_identity",
+    "do_not_change_projection_steps_or_quantizer",
+    "do_not_change_field_bindings_or_relevant_field_sets",
+    "do_not_change_minimum_retained_separation"
+  ],
+  "claim_ceiling": [
+    "pass_establishes_only_the_frozen_deterministic_synthetic_v1a_qualification_matrix_at_the_frozen_product_horizon",
+    "does_not_establish_arbitrary_camera_understanding",
+    "does_not_establish_semantic_visual_understanding",
+    "does_not_establish_downstream_llm_usefulness",
+    "does_not_establish_physical_world_vision_accuracy",
+    "does_not_establish_universal_frame_rate_invariance",
+    "does_not_establish_phase_7_modulation_validity",
+    "does_not_establish_lifecycle_or_persistence_correctness",
+    "does_not_establish_full_brainvision_product_readiness"
+  ],
+  "phase_7_gate": "Phase 7 is prohibited until Phase 6 is recorded complete."
+}
