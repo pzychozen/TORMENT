@@ -44,6 +44,12 @@ def _path(root: Path) -> Path:
     return Path(brainvision_configuration_path(root, "workspace-a", "agent-a"))
 
 
+def _prepare_agent_root(root: Path) -> Path:
+    agent_root = root / "workspaces" / "workspace-a" / "agents" / "agent-a"
+    agent_root.mkdir(parents=True)
+    return agent_root
+
+
 def _force_mutation(
     configuration: BrainvisionConfigurationV1, **changes: object
 ) -> BrainvisionConfigurationV1:
@@ -90,6 +96,7 @@ def test_absent_read_returns_none_without_creating_any_path(tmp_path: Path) -> N
 def test_write_is_canonical_and_read_is_a_strict_equal_round_trip(tmp_path: Path) -> None:
     root = tmp_path / "data"
     configuration = _configuration()
+    _prepare_agent_root(root)
 
     write_brainvision_configuration(root, "workspace-a", "agent-a", configuration)
 
@@ -97,6 +104,32 @@ def test_write_is_canonical_and_read_is_a_strict_equal_round_trip(tmp_path: Path
     assert target.read_bytes() == configuration.to_canonical_json_bytes()
     assert load_brainvision_configuration(root, "workspace-a", "agent-a") == configuration
     assert {path.name for path in root.rglob("*") if path.is_file()} == {"configuration.json"}
+
+
+def test_write_requires_a_preexisting_ordinary_agent_directory(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+
+    with pytest.raises(FileNotFoundError):
+        write_brainvision_configuration(root, "workspace-a", "agent-a", _configuration())
+
+    assert root.exists()
+    assert not (root / "workspaces").exists()
+    assert not (root / "workspaces" / "workspace-a" / "agents" / "agent-a").exists()
+    assert not _path(root).parent.exists()
+    assert not _path(root).exists()
+
+
+def test_write_creates_only_the_brainvision_leaf_for_a_preexisting_agent(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    agent_root = _prepare_agent_root(root)
+
+    write_brainvision_configuration(root, "workspace-a", "agent-a", _configuration())
+
+    assert {entry.name for entry in agent_root.iterdir()} == {"brainvision"}
+    assert {entry.name for entry in (agent_root / "brainvision").iterdir()} == {
+        "configuration.json"
+    }
 
 
 def test_malformed_or_incompatible_existing_configuration_raises(tmp_path: Path) -> None:
@@ -131,6 +164,7 @@ def test_atomic_replacement_replaces_the_complete_canonical_artifact(tmp_path: P
     root = tmp_path / "data"
     prior = _configuration()
     replacement = _configuration(watermark=0, lifecycle_status=LIFECYCLE_ACTIVE)
+    _prepare_agent_root(root)
     write_brainvision_configuration(root, "workspace-a", "agent-a", prior)
     prior_bytes = _path(root).read_bytes()
 
@@ -147,6 +181,7 @@ def test_temporary_write_failure_preserves_the_prior_target(
     root = tmp_path / "data"
     prior = _configuration()
     replacement = _configuration(watermark=1)
+    _prepare_agent_root(root)
     write_brainvision_configuration(root, "workspace-a", "agent-a", prior)
     target = _path(root)
     prior_bytes = target.read_bytes()

@@ -69,6 +69,17 @@ def test_strict_round_trip_from_mapping_and_json_bytes() -> None:
     assert configuration_from_json_bytes(configuration.to_canonical_json_bytes()) == configuration
 
 
+def test_json_bytes_reject_duplicate_authoritative_fields() -> None:
+    duplicate_theta = _configuration().to_canonical_json_bytes().replace(
+        b'"theta":0}', b'"theta":0,"theta":1}'
+    )
+
+    with pytest.raises(BrainvisionConfigurationValidationError) as error:
+        configuration_from_json_bytes(duplicate_theta)
+
+    assert (error.value.field, error.value.reason) == ("theta", "duplicate_field")
+
+
 @pytest.mark.parametrize(
     "status", (LIFECYCLE_DISABLED, LIFECYCLE_ACTIVE, LIFECYCLE_SUSPENDED)
 )

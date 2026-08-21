@@ -134,6 +134,18 @@ def _canonical_json_bytes(payload: Mapping[str, object]) -> bytes:
     ).encode("ascii")
 
 
+def _configuration_object_from_pairs(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    """Build one JSON object while rejecting a duplicate authoritative field."""
+    result: dict[str, object] = {}
+    for field, value in pairs:
+        if field in result:
+            raise BrainvisionConfigurationValidationError(field, "duplicate_field")
+        result[field] = value
+    return result
+
+
 @dataclass(frozen=True, kw_only=True)
 class BrainvisionConfigurationV1:
     """One fully populated immutable Phase-8 Brainvision configuration."""
@@ -252,7 +264,9 @@ def configuration_from_json_bytes(raw: bytes) -> BrainvisionConfigurationV1:
     """Decode strict ASCII JSON bytes into a validated configuration."""
     if type(raw) is not bytes:
         raise TypeError("configuration JSON must be bytes")
-    return configuration_from_dict(json.loads(raw.decode("ascii")))
+    return configuration_from_dict(
+        json.loads(raw.decode("ascii"), object_pairs_hook=_configuration_object_from_pairs)
+    )
 
 
 def fresh_disabled_brainvision_configuration(
@@ -339,10 +353,21 @@ def write_brainvision_configuration(
     root = _resolved_data_root(data_root)
     target = brainvision_configuration_path(root, workspace_id, agent_id)
     target_directory = os.path.dirname(target)
+    agent_root = os.path.dirname(target_directory)
 
+    ensure_within_base(agent_root, root)
     ensure_within_base(target_directory, root)
     ensure_within_base(target, root)
-    os.makedirs(target_directory, exist_ok=True)
+    if not os.path.exists(agent_root):
+        raise FileNotFoundError(agent_root)
+    if not os.path.isdir(agent_root):
+        raise NotADirectoryError(agent_root)
+    try:
+        os.mkdir(target_directory)
+    except FileExistsError:
+        if not os.path.isdir(target_directory):
+            raise NotADirectoryError(target_directory)
+    ensure_within_base(target_directory, root)
 
     temporary_path: str | None = None
     try:
