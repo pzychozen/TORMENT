@@ -28,8 +28,10 @@ The manifest core binds the frozen Phase-4 operator ID,
 `bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb`,
 all field formulas/domains, quantization, role bindings, relevant field sets,
 fixture expectations, canonical serialization, and claim ceiling. Canonical
-ASCII core bytes are authoritative and never contain `projection_id`.
-Object-form manifest views are fresh decoded copies.
+ASCII core bytes are authoritative. They may contain the field name
+`projection_id` as part of the frozen canonical projection-field specification,
+but they never contain their own derived `projection_id` value. Object-form
+manifest views are fresh decoded copies.
 
 ## Exact quantization
 
