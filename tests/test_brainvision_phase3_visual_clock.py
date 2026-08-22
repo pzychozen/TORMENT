@@ -74,6 +74,19 @@ def test_active_construction_binds_now_and_starts_at_committed_time() -> None:
     assert clock.read_active_time_ns() == 123_456_789
 
 
+def test_active_construction_accepts_an_explicit_runtime_only_origin() -> None:
+    source = FakeMonotonicNsSource(now_ns=12_000_000_000)
+    clock = VisualClock.from_active(
+        committed_active_time_ns=1_000_000_000,
+        monotonic_ns_source=source,
+        process_local_origin_ns=11_000_000_000,
+    )
+
+    assert source.calls == 0
+    assert _clock_state(clock) == (1_000_000_000, 11_000_000_000)
+    assert clock.read_active_time_ns() == 2_000_000_000
+
+
 def test_frozen_construction_and_reads_ignore_source_movement() -> None:
     source = FakeMonotonicNsSource(now_ns=10)
     clock = VisualClock.from_frozen(

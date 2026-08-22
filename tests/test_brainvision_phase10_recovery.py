@@ -201,6 +201,33 @@ def test_cold_recovery_reconstructs_equal_active_and_suspended_runtimes(
     assert cold.runtime_count == 1
 
 
+def test_active_reconstruction_epoch_is_independent_of_first_lazy_access(tmp_path: Path) -> None:
+    manager, source, identities, locks = _environment(tmp_path)
+    _configure(manager)
+    manager.enable(WORKSPACE_ID, AGENT_ID)
+
+    source.now = 1_000_000_000
+    with manager.active_transaction(WORKSPACE_ID, AGENT_ID) as transaction:
+        initial = transaction.commit_successor(transaction.base_vhe_state, 0)
+    assert initial.active_time_ns == 1_000_000_000
+    manager.shutdown()
+
+    source.now = 11_000_000_000
+    recovered = _cold_manager(tmp_path, source, identities, locks)
+    assert recovered.runtime_count == 0
+
+    source.now = 12_000_000_000
+    with recovered.active_transaction(WORKSPACE_ID, AGENT_ID) as transaction:
+        assert transaction.prior_committed_active_time_ns == 1_000_000_000
+        assert transaction.elapsed_active_time_ns == 1_000_000_000
+        committed = transaction.commit_successor(transaction.base_vhe_state, 1)
+
+    assert committed.active_time_ns == 2_000_000_000
+    sidecar = load_vhe_sidecar(tmp_path, WORKSPACE_ID, AGENT_ID)
+    assert sidecar is not None
+    assert sidecar.committed_active_time_ns == 2_000_000_000
+
+
 @pytest.mark.parametrize("status", (LIFECYCLE_ACTIVE, LIFECYCLE_SUSPENDED))
 def test_active_or_suspended_sidecar_ahead_repairs_watermark_and_reconstructs(
     tmp_path: Path, status: str

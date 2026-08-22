@@ -156,7 +156,9 @@ class BrainvisionLifecycleManager:
         self._identity_store = identity_store
         self._lock_manager = lock_manager
         self._monotonic_ns_source = monotonic_ns_source
+        self._manager_reconstruction_epoch_ns = monotonic_ns_source()
         self._runtimes: dict[tuple[str, str], BrainvisionRuntime] = {}
+        self._initialized_runtime_keys: set[tuple[str, str]] = set()
 
     @property
     def runtime_count(self) -> int:
@@ -286,12 +288,15 @@ class BrainvisionLifecycleManager:
         self,
         configuration: BrainvisionConfigurationV1,
         sidecar: VheSidecarV1,
+        *,
+        active_clock_origin_ns: int | None = None,
     ) -> BrainvisionRuntime:
         try:
             if configuration.lifecycle_status == LIFECYCLE_ACTIVE:
                 clock = VisualClock.from_active(
                     committed_active_time_ns=sidecar.committed_active_time_ns,
                     monotonic_ns_source=self._monotonic_ns_source,
+                    process_local_origin_ns=active_clock_origin_ns,
                 )
             elif configuration.lifecycle_status == LIFECYCLE_SUSPENDED:
                 clock = VisualClock.from_frozen(
@@ -340,12 +345,14 @@ class BrainvisionLifecycleManager:
         configuration, sidecar = self._load_artifacts_locked(workspace_id, agent_id)
         if configuration is None:
             self._runtimes.pop(key, None)
+            self._initialized_runtime_keys.discard(key)
             if sidecar is None:
                 return None
             raise BrainvisionLifecycleError("sidecar", "sidecar_integrity_failure")
 
         if configuration.lifecycle_status == LIFECYCLE_DISABLED:
             self._runtimes.pop(key, None)
+            self._initialized_runtime_keys.discard(key)
             if sidecar is None:
                 return configuration
             try:
@@ -395,8 +402,21 @@ class BrainvisionLifecycleManager:
         runtime = self._runtimes.get(key)
         if runtime is None or not self._runtime_matches(runtime, configuration, sidecar):
             self._runtimes.pop(key, None)
-            runtime = self._build_runtime(configuration, sidecar)
+            active_clock_origin_ns = (
+                self._manager_reconstruction_epoch_ns
+                if (
+                    configuration.lifecycle_status == LIFECYCLE_ACTIVE
+                    and key not in self._initialized_runtime_keys
+                )
+                else None
+            )
+            runtime = self._build_runtime(
+                configuration,
+                sidecar,
+                active_clock_origin_ns=active_clock_origin_ns,
+            )
             self._runtimes[key] = runtime
+            self._initialized_runtime_keys.add(key)
         return configuration
 
     def _require_configuration(
@@ -551,6 +571,7 @@ class BrainvisionLifecycleManager:
                 ) from error
             try:
                 self._runtimes[key] = self._build_runtime(active_configuration, sidecar)
+                self._initialized_runtime_keys.add(key)
             except BrainvisionLifecycleError as error:
                 self._runtimes.pop(key, None)
                 raise BrainvisionLifecycleError(
@@ -644,6 +665,7 @@ class BrainvisionLifecycleManager:
                 )
             try:
                 self._runtimes[key] = self._build_runtime(active_configuration, sidecar)
+                self._initialized_runtime_keys.add(key)
             except BrainvisionLifecycleError as error:
                 self._runtimes.pop(key, None)
                 raise BrainvisionLifecycleError(
@@ -669,6 +691,7 @@ class BrainvisionLifecycleManager:
                 raise BrainvisionLifecycleError("sidecar", "durability_failure") from error
             try:
                 self._runtimes[key] = self._build_runtime(configuration, sidecar)
+                self._initialized_runtime_keys.add(key)
             except BrainvisionLifecycleError as error:
                 self._runtimes.pop(key, None)
                 raise BrainvisionLifecycleError(
@@ -714,6 +737,7 @@ class BrainvisionLifecycleManager:
                     "sidecar", "durability_failure", durable_committed=True
                 ) from error
             self._runtimes.pop(key, None)
+            self._initialized_runtime_keys.discard(key)
             return disabled_configuration
 
     @contextmanager

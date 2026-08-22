@@ -98,15 +98,20 @@ class VisualClock:
         *,
         committed_active_time_ns: int = 0,
         monotonic_ns_source: MonotonicNsSource = time.monotonic_ns,
+        process_local_origin_ns: int | None = None,
     ) -> "VisualClock":
-        """Start a fresh active accumulation period at a new local origin."""
+        """Start an active accumulation period at a runtime-only local origin."""
         _require_nonnegative_exact_int(
             committed_active_time_ns,
             "committed_active_time_ns",
         )
         if not callable(monotonic_ns_source):
             raise ClockValueError("monotonic_ns_source", "must_be_callable")
-        origin = _require_exact_int(monotonic_ns_source(), "monotonic_ns_source result")
+        origin = (
+            _require_exact_int(monotonic_ns_source(), "monotonic_ns_source result")
+            if process_local_origin_ns is None
+            else _require_exact_int(process_local_origin_ns, "process_local_origin_ns")
+        )
         return cls(
             committed_active_time_ns=committed_active_time_ns,
             process_local_origin_ns=origin,
