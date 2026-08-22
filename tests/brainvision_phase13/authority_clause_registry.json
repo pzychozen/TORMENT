@@ -1,0 +1,27 @@
+{
+  "schema_id": "brainvision.phase13.authority_clause_registry.v1",
+  "documents": {
+    "phase13_specification": {
+      "path": "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md",
+      "sha256": "3f53bcbbf5e2d4380c72a110060a8b032db22e02df25a2024e7b04f2ccd09ba0"
+    },
+    "phase13_bindings": {
+      "path": "docs/TORMENT_BRAINVISION_PHASE_13_FORMAL_ADMINISTRATION_BINDINGS_v1.0.md",
+      "sha256": "05db28035b5fec45e1412ac765e9aadba3503cbbc43fa870d6707747f6f51e8d"
+    }
+  },
+  "clauses": {
+    "E1": {"sources": [{"document": "phase13_specification", "section": "25 / E1", "semantic_role": "retained-horizon qualification"}, {"document": "phase13_bindings", "section": "3. E1", "semantic_role": "executable H0/H1 schedule"}]},
+    "E2": {"sources": [{"document": "phase13_specification", "section": "25 / E2", "semantic_role": "order qualification"}, {"document": "phase13_bindings", "section": "4. E2", "semantic_role": "executable O1/O2 schedule"}]},
+    "E3": {"sources": [{"document": "phase13_specification", "section": "E3 metadata inertness", "semantic_role": "metadata and identity isolation"}, {"document": "phase13_bindings", "section": "5. E3", "semantic_role": "metadata twin and forged-ID schedules"}]},
+    "E4": {"sources": [{"document": "phase13_specification", "section": "E4 semantic isolation", "semantic_role": "semantic-register isolation"}, {"document": "phase13_bindings", "section": "6. E4", "semantic_role": "two-arm semantic schedule"}]},
+    "E5": {"sources": [{"document": "phase13_specification", "section": "25 / E5", "semantic_role": "theta modulation qualification"}, {"document": "phase13_bindings", "section": "7. E5", "semantic_role": "three administered theta arms"}]},
+    "E6": {"sources": [{"document": "phase13_specification", "section": "E6 restart/reload", "semantic_role": "active-time restart qualification"}, {"document": "phase13_bindings", "section": "8. E6", "semantic_role": "control/restart schedule"}]},
+    "E7": {"sources": [{"document": "phase13_specification", "section": "E7 durability and recovery", "semantic_role": "persistence-fault qualification"}, {"document": "phase13_bindings", "section": "9. E7", "semantic_role": "five frozen fault/delivery branches"}]},
+    "E8": {"sources": [{"document": "phase13_specification", "section": "E8 replay", "semantic_role": "replay and invalid-ID qualification"}, {"document": "phase13_bindings", "section": "10. E8", "semantic_role": "five replay branches"}]},
+    "E9": {"sources": [{"document": "phase13_specification", "section": "E9 read purity", "semantic_role": "pure-read qualification"}, {"document": "phase13_bindings", "section": "11. E9", "semantic_role": "bounded read/recovery schedules"}]},
+    "E10": {"sources": [{"document": "phase13_specification", "section": "E10 lifecycle", "semantic_role": "lifecycle qualification"}, {"document": "phase13_bindings", "section": "12. E10", "semantic_role": "single lifecycle schedule"}]},
+    "E11": {"sources": [{"document": "phase13_specification", "section": "E11 sink purity", "semantic_role": "bounded sink-purity qualification"}, {"document": "phase13_bindings", "section": "13. E11", "semantic_role": "depth-two sink schedule"}]},
+    "E12": {"sources": [{"document": "phase13_specification", "section": "E12 determinism", "semantic_role": "whole-run determinism qualification"}, {"document": "phase13_bindings", "section": "14. E12", "semantic_role": "bounded repeat schedule"}]}
+  }
+}

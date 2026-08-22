@@ -1,0 +1,118 @@
+{
+  "schema_id": "brainvision.phase13.expected_result_manifest.v2",
+  "evidence_obligations_manifest": "evidence_obligations_manifest.json",
+  "blocks": {
+    "E1": {"classification":"DEGENERATE_TERMINAL_D0_CONTROL","criteria":[
+      {"criterion_id":"E1_H0_current","block_id":"E1","actual_selectors":["checkpoints.E1_H0_final.projection.payload.current_activity_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_H0_present","block_id":"E1","actual_selectors":["checkpoints.E1_H0_final.projection.payload.present_history_relation_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_H0_retained","block_id":"E1","actual_selectors":["checkpoints.E1_H0_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_H1_current","block_id":"E1","actual_selectors":["checkpoints.E1_H1_final.projection.payload.current_activity_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_H1_present","block_id":"E1","actual_selectors":["checkpoints.E1_H1_final.projection.payload.present_history_relation_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_H1_retained","block_id":"E1","actual_selectors":["checkpoints.E1_H1_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":8,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_current_role_equal","block_id":"E1","actual_selectors":["checkpoints.E1_H0_final.projection.payload.current_activity_code","checkpoints.E1_H1_final.projection.payload.current_activity_code"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E1_retained_role_distinct","block_id":"E1","actual_selectors":["checkpoints.E1_H0_final.projection.payload.retained_history_code","checkpoints.E1_H1_final.projection.payload.retained_history_code"],"relation":"NOT_EQUAL","failure_class":"FAIL_SCIENTIFIC"}
+    ]},
+    "E2": {"classification":"DEGENERATE_TERMINAL_D0_CONTROL","criteria":[
+      {"criterion_id":"E2_O1_current","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload.current_activity_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O1_present","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload.present_history_relation_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O1_retained_auxiliary","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":8,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O1_trajectory","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload.trajectory_code"],"relation":"EXACT","expected_value":5,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O2_current","block_id":"E2","actual_selectors":["checkpoints.E2_O2_final.projection.payload.current_activity_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O2_present","block_id":"E2","actual_selectors":["checkpoints.E2_O2_final.projection.payload.present_history_relation_code"],"relation":"EXACT","expected_value":0,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O2_retained_auxiliary","block_id":"E2","actual_selectors":["checkpoints.E2_O2_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":8,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_O2_trajectory","block_id":"E2","actual_selectors":["checkpoints.E2_O2_final.projection.payload.trajectory_code"],"relation":"EXACT","expected_value":-5,"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_trajectory_distinct","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload.trajectory_code","checkpoints.E2_O2_final.projection.payload.trajectory_code"],"relation":"NOT_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E2_other_roles_equal","block_id":"E2","actual_selectors":["checkpoints.E2_O1_final.projection.payload","checkpoints.E2_O2_final.projection.payload"],"relation":"ALL_FIELDS_EQUAL","fields":["current_activity_code","retained_history_code","present_history_relation_code","open_event_class","recurrence_code"],"failure_class":"FAIL_SCIENTIFIC"}
+    ]},
+    "E3": {"criteria":[
+      {"criterion_id":"E3_adapter_projection","block_id":"E3","actual_selectors":["checkpoints.E3_adapter_a_seq2.projection.canonical_bytes_ascii","checkpoints.E3_adapter_b_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_adapter_sidecar","block_id":"E3","actual_selectors":["checkpoints.E3_adapter_a_seq2.artifact_hashes.sidecar_sha256","checkpoints.E3_adapter_b_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E3_capture_projection","block_id":"E3","actual_selectors":["checkpoints.E3_capture_a_seq2.projection.canonical_bytes_ascii","checkpoints.E3_capture_b_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_capture_sidecar","block_id":"E3","actual_selectors":["checkpoints.E3_capture_a_seq2.artifact_hashes.sidecar_sha256","checkpoints.E3_capture_b_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E3_confidence_projection","block_id":"E3","actual_selectors":["checkpoints.E3_confidence_a_seq2.projection.canonical_bytes_ascii","checkpoints.E3_confidence_b_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_confidence_sidecar","block_id":"E3","actual_selectors":["checkpoints.E3_confidence_a_seq2.artifact_hashes.sidecar_sha256","checkpoints.E3_confidence_b_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E3_world_projection","block_id":"E3","actual_selectors":["checkpoints.E3_world_a_seq2.projection.canonical_bytes_ascii","checkpoints.E3_world_b_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_world_sidecar","block_id":"E3","actual_selectors":["checkpoints.E3_world_a_seq2.artifact_hashes.sidecar_sha256","checkpoints.E3_world_b_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E3_sequence_offset_projection","block_id":"E3","actual_selectors":["checkpoints.E3_sequence_base_seq2.projection.canonical_bytes_ascii","checkpoints.E3_sequence_offset_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_contract_projection","block_id":"E3","actual_selectors":["checkpoints.E3_contract_a_seq2.projection.canonical_bytes_ascii","checkpoints.E3_contract_b_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E3_invalid_identity_failure","block_id":"E3","actual_selectors":["checkpoints.E3_invalid_tampered.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"observation_id","reason":"invalid_observation_id"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E3_invalid_identity_no_residue","block_id":"E3","actual_selectors":["checkpoints.E3_invalid_canonical.receipt.source_sequence"],"relation":"EXACT","expected_value":1,"failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E4": {"criteria":[
+      {"criterion_id":"E4_null_projection","block_id":"E4","actual_selectors":["checkpoints.E4_null_final.projection.payload"],"relation":"MAPPING_EXACT","expected_value":{"schema_id":"brainvision.projection.v1","projection_id":"bvproj1_c9f5ed6b1300bc242d7633e6b0e7cea107e0473cfd26d9650abf8da9ad055b3f","operator_id":"bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb","current_activity_code":16,"retained_history_code":8,"present_history_relation_code":8,"trajectory_code":0,"open_event_class":null,"recurrence_code":0},"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E4_event_projection","block_id":"E4","actual_selectors":["checkpoints.E4_event_final.projection.payload"],"relation":"MAPPING_EXACT","expected_value":{"schema_id":"brainvision.projection.v1","projection_id":"bvproj1_c9f5ed6b1300bc242d7633e6b0e7cea107e0473cfd26d9650abf8da9ad055b3f","operator_id":"bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb","current_activity_code":16,"retained_history_code":8,"present_history_relation_code":8,"trajectory_code":0,"open_event_class":"phase13:event-a","recurrence_code":1},"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E4_dynamical_fields_equal","block_id":"E4","actual_selectors":["checkpoints.E4_null_final.projection.payload","checkpoints.E4_event_final.projection.payload"],"relation":"ALL_FIELDS_EQUAL","fields":["current_activity_code","retained_history_code","present_history_relation_code","trajectory_code"],"failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E4_register_fields_differ","block_id":"E4","actual_selectors":["checkpoints.E4_null_final.projection.payload","checkpoints.E4_event_final.projection.payload"],"relation":"ALL_FIELDS_NOT_EQUAL","fields":["open_event_class","recurrence_code"],"failure_class":"FAIL_SCIENTIFIC"}
+    ]},
+    "E5": {
+      "theta_lineages": {
+        "-1":{"agent_id":"e5-theta-neg1","adapter_contract_id":"bv13-contract-a","modulation_profile_id":"bvmodprof1_95cf73f228a5c02a16e13b90cf17aa46d31bbc312643f7dbf374d33816d9ad49","stream_identity":"bv13-e5-stream","theta":-1,"workspace_id":"bv13-qualification"},
+        "0":{"agent_id":"e5-theta-zero","adapter_contract_id":"bv13-contract-a","modulation_profile_id":"bvmodprof1_9f65a350c2526bc63733e9267d7846ce4eace56a6c4ec3261bfc748a18287abc","stream_identity":"bv13-e5-stream","theta":0,"workspace_id":"bv13-qualification"},
+        "1":{"agent_id":"e5-theta-pos1","adapter_contract_id":"bv13-contract-a","modulation_profile_id":"bvmodprof1_ceeb161b2dcb510601d85fc7b5a64eb023827bb044220b046b2c61b98be422f5","stream_identity":"bv13-e5-stream","theta":1,"workspace_id":"bv13-qualification"}
+      },
+      "criteria":[
+        {"criterion_id":"E5_theta_neg1","block_id":"E5","actual_selectors":["checkpoints.E5_neg1_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":6,"failure_class":"FAIL_SCIENTIFIC"},
+        {"criterion_id":"E5_theta_zero","block_id":"E5","actual_selectors":["checkpoints.E5_zero_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":8,"failure_class":"FAIL_SCIENTIFIC"},
+        {"criterion_id":"E5_theta_pos1","block_id":"E5","actual_selectors":["checkpoints.E5_pos1_final.projection.payload.retained_history_code"],"relation":"EXACT","expected_value":10,"failure_class":"FAIL_SCIENTIFIC"},
+        {"criterion_id":"E5_H0_authority_only","block_id":"E5","actual_selectors":[],"relation":"AUTHORITY_ONLY_STRUCTURAL_REPRODUCTION_REFERENCE","authority_reference":{"classification":"AUTHORITY_ONLY_STRUCTURAL_REPRODUCTION_REFERENCE","theta_values":[-1,0,1],"current_activity_code":0,"retained_history_code":0},"failure_class":"FAIL_SCIENTIFIC"}
+      ]
+    },
+    "E6": {"criteria":[
+      {"criterion_id":"E6_configuration_bytes","block_id":"E6","actual_selectors":["checkpoints.E6_control_k1.artifact_hashes.configuration_sha256","checkpoints.E6_restart_k1.artifact_hashes.configuration_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E6_sidecar_bytes","block_id":"E6","actual_selectors":["checkpoints.E6_control_k1.artifact_hashes.sidecar_sha256","checkpoints.E6_restart_k1.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E6_receipt","block_id":"E6","actual_selectors":["checkpoints.E6_control_k1.receipt","checkpoints.E6_restart_k1.receipt"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E6_projection","block_id":"E6","actual_selectors":["checkpoints.E6_control_k1.projection.canonical_bytes_ascii","checkpoints.E6_restart_k1.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_SCIENTIFIC"},
+      {"criterion_id":"E6_active_time","block_id":"E6","actual_selectors":["checkpoints.E6_restart_k1.receipt.committed_active_time_ns"],"relation":"EXACT","expected_value":2000000000,"failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E7": {"criteria":[
+      {"criterion_id":"E7_sidecar_failure","block_id":"E7","actual_selectors":["checkpoints.E7_1_failure.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"sidecar","reason":"durability_failure","durable_committed":false},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_sidecar_retry","block_id":"E7","actual_selectors":["checkpoints.E7_1_retry.receipt.source_sequence"],"relation":"EXACT","expected_value":1,"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_config_pre_failure","block_id":"E7","actual_selectors":["checkpoints.E7_2_failure.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"configuration","reason":"recovery_required","durable_committed":true},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_config_pre_replay","block_id":"E7","actual_selectors":["checkpoints.E7_2_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_sidecar_ahead_stable","block_id":"E7","actual_selectors":["checkpoints.E7_3_post_first.artifact_hashes.configuration_sha256","checkpoints.E7_3_post_second.artifact_hashes.configuration_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_post_durable_failure","block_id":"E7","actual_selectors":["checkpoints.E7_4_failure.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"configuration","reason":"recovery_required","durable_committed":true},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_post_durable_replay","block_id":"E7","actual_selectors":["checkpoints.E7_4_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_post_durable_continuation","block_id":"E7","actual_selectors":["checkpoints.E7_4_control_continuation.projection.canonical_bytes_ascii","checkpoints.E7_4_fault_continuation.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_throwing_metrics","block_id":"E7","actual_selectors":["checkpoints.E7_5_receipt_metrics.metrics"],"relation":"MAPPING_EXACT","expected_value":{"sink_invocations_total":0,"sink_delivery_failures_total":1,"projection_construction_failures_total":0},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E7_throwing_replay","block_id":"E7","actual_selectors":["checkpoints.E7_5_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E8": {"criteria":[
+      {"criterion_id":"E8_equal_replay","block_id":"E8","actual_selectors":["checkpoints.E8_equal_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E8_below_replay","block_id":"E8","actual_selectors":["checkpoints.E8_below_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E8_reload_replay","block_id":"E8","actual_selectors":["checkpoints.E8_reload_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E8_recovered_replay","block_id":"E8","actual_selectors":["checkpoints.E8_recovered_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E8_invalid_identity","block_id":"E8","actual_selectors":["checkpoints.E8_invalid_tampered.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"observation_id","reason":"invalid_observation_id"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E8_invalid_identity_no_residue","block_id":"E8","actual_selectors":["checkpoints.E8_invalid_canonical.receipt.source_sequence"],"relation":"EXACT","expected_value":1,"failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E9": {"criteria":[
+      {"criterion_id":"E9_read_0_1_projection","block_id":"E9","actual_selectors":["checkpoints.E9_read_0_seq2.projection.canonical_bytes_ascii","checkpoints.E9_read_1_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E9_read_0_7_projection","block_id":"E9","actual_selectors":["checkpoints.E9_read_0_seq2.projection.canonical_bytes_ascii","checkpoints.E9_read_7_seq2.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E9_read_0_1_sidecar","block_id":"E9","actual_selectors":["checkpoints.E9_read_0_seq2.artifact_hashes.sidecar_sha256","checkpoints.E9_read_1_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E9_read_0_7_sidecar","block_id":"E9","actual_selectors":["checkpoints.E9_read_0_seq2.artifact_hashes.sidecar_sha256","checkpoints.E9_read_7_seq2.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E9_repair_stable","block_id":"E9","actual_selectors":["checkpoints.E9_repair_post_first.artifact_hashes.configuration_sha256","checkpoints.E9_repair_post_second.artifact_hashes.configuration_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E10": {"criteria":[
+      {"criterion_id":"E10_suspended_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_suspended_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_active_rebase","block_id":"E10","actual_selectors":["checkpoints.E10_seq1.receipt.committed_active_time_ns"],"relation":"EXACT","expected_value":1000000000,"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_reset_replay","block_id":"E10","actual_selectors":["checkpoints.E10_reset_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_sidecar_absent","block_id":"E10","actual_selectors":["checkpoints.E10_disabled_artifacts.artifact_hashes.sidecar_sha256"],"relation":"EXACT","expected_value":null,"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_disabled_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_disabled_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_reenable_active_time","block_id":"E10","actual_selectors":["checkpoints.E10_seq2.receipt.committed_active_time_ns"],"relation":"EXACT","expected_value":1000000000,"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_reenable_watermark","block_id":"E10","actual_selectors":["checkpoints.E10_seq2.receipt.source_sequence"],"relation":"EXACT","expected_value":2,"failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E11": {"criteria":[
+      {"criterion_id":"E11_null_metrics","block_id":"E11","actual_selectors":["checkpoints.E11_null_initial.metrics"],"relation":"MAPPING_EXACT","expected_value":{"sink_invocations_total":0,"sink_delivery_failures_total":0,"projection_construction_failures_total":0},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E11_recording_metrics","block_id":"E11","actual_selectors":["checkpoints.E11_recording_initial.metrics"],"relation":"MAPPING_EXACT","expected_value":{"sink_invocations_total":2,"sink_delivery_failures_total":0,"projection_construction_failures_total":0},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E11_throwing_metrics","block_id":"E11","actual_selectors":["checkpoints.E11_throwing_initial.metrics"],"relation":"MAPPING_EXACT","expected_value":{"sink_invocations_total":0,"sink_delivery_failures_total":2,"projection_construction_failures_total":0},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E11_null_recording_final","block_id":"E11","actual_selectors":["checkpoints.E11_null_final.projection.canonical_bytes_ascii","checkpoints.E11_recording_final.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E11_null_throwing_final","block_id":"E11","actual_selectors":["checkpoints.E11_null_final.projection.canonical_bytes_ascii","checkpoints.E11_throwing_final.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"}
+    ]},
+    "E12": {"criteria":[
+      {"criterion_id":"E12_replay_a","block_id":"E12","actual_selectors":["checkpoints.E12_a_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E12_replay_b","block_id":"E12","actual_selectors":["checkpoints.E12_b_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E12_final_projection","block_id":"E12","actual_selectors":["checkpoints.E12_a_final.projection.canonical_bytes_ascii","checkpoints.E12_b_final.projection.canonical_bytes_ascii"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E12_final_configuration","block_id":"E12","actual_selectors":["checkpoints.E12_a_final.artifact_hashes.configuration_sha256","checkpoints.E12_b_final.artifact_hashes.configuration_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E12_final_sidecar","block_id":"E12","actual_selectors":["checkpoints.E12_a_final.artifact_hashes.sidecar_sha256","checkpoints.E12_b_final.artifact_hashes.sidecar_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"}
+    ]}
+  }
+}

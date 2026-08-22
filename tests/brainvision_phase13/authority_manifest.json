@@ -1,0 +1,30 @@
+{
+  "modulation_mapping_id": "bvmodmap1_f8b41a1987437410613157ae403d10ac12fbce3b34cc760f0cc8376193206aeb",
+  "modulation_profile_schema_id": "brainvision.character_modulation.profile.v1",
+  "modulation_schema_id": "brainvision.character_modulation.v1",
+  "observation_identity_schema_id": "brainvision.observation-id.v1",
+  "observation_schema_id": "brainvision.firsthand_visual_observation.v1",
+  "operator_id": "bvheop1_c367de696ba56b417054336a2ace5e8fd6b6b6a5cb3c7e3fa21f2bac4519d8bb",
+  "phase13_specification": {
+    "path": "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md",
+    "sha256": "3f53bcbbf5e2d4380c72a110060a8b032db22e02df25a2024e7b04f2ccd09ba0"
+  },
+  "phase13_bindings": {
+    "path": "docs/TORMENT_BRAINVISION_PHASE_13_FORMAL_ADMINISTRATION_BINDINGS_v1.0.md",
+    "sha256": "05db28035b5fec45e1412ac765e9aadba3503cbbc43fa870d6707747f6f51e8d"
+  },
+  "phase2_fixture_sha256s": {
+    "d0": "c08e4b0cf384c20b126ea4466ab2122811f5ad2328e2c482bcfea5471d526544",
+    "dA": "9fdd9ce03853911b050565684b0432079cc4cf3f7e51a4dc035b7423762e7583",
+    "dB": "2caa7c6d89da394da758f26ada91658cabb1969639fffd7767130d789c152517"
+  },
+  "projection_id": "bvproj1_c9f5ed6b1300bc242d7633e6b0e7cea107e0473cfd26d9650abf8da9ad055b3f",
+  "projection_schema_id": "brainvision.projection.v1",
+  "rounding_algorithm_id": "signed-quotient-remainder-half-even.v1",
+  "schema_id": "brainvision.phase13.authority_manifest.v1",
+  "theta_profile_ids": {
+    "-1": "bvmodprof1_95cf73f228a5c02a16e13b90cf17aa46d31bbc312643f7dbf374d33816d9ad49",
+    "0": "bvmodprof1_9f65a350c2526bc63733e9267d7846ce4eace56a6c4ec3261bfc748a18287abc",
+    "1": "bvmodprof1_ceeb161b2dcb510601d85fc7b5a64eb023827bb044220b046b2c61b98be422f5"
+  }
+}

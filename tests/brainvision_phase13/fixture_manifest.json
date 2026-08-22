@@ -1,0 +1,36 @@
+{
+  "descriptor_schema_id": "brainvision.low_level_descriptor.v1",
+  "descriptors": {
+    "d0": {
+      "canonical_bytes_ascii": "{\"mean_adjacent_luminance_difference_q\":0,\"mean_luminance_q\":500000,\"schema_id\":\"brainvision.low_level_descriptor.v1\"}",
+      "descriptor": {
+        "mean_adjacent_luminance_difference_q": 0,
+        "mean_luminance_q": 500000,
+        "schema_id": "brainvision.low_level_descriptor.v1"
+      },
+      "name": "d0",
+      "sha256": "c08e4b0cf384c20b126ea4466ab2122811f5ad2328e2c482bcfea5471d526544"
+    },
+    "dA": {
+      "canonical_bytes_ascii": "{\"mean_adjacent_luminance_difference_q\":0,\"mean_luminance_q\":750000,\"schema_id\":\"brainvision.low_level_descriptor.v1\"}",
+      "descriptor": {
+        "mean_adjacent_luminance_difference_q": 0,
+        "mean_luminance_q": 750000,
+        "schema_id": "brainvision.low_level_descriptor.v1"
+      },
+      "name": "dA",
+      "sha256": "9fdd9ce03853911b050565684b0432079cc4cf3f7e51a4dc035b7423762e7583"
+    },
+    "dB": {
+      "canonical_bytes_ascii": "{\"mean_adjacent_luminance_difference_q\":250000,\"mean_luminance_q\":500000,\"schema_id\":\"brainvision.low_level_descriptor.v1\"}",
+      "descriptor": {
+        "mean_adjacent_luminance_difference_q": 250000,
+        "mean_luminance_q": 500000,
+        "schema_id": "brainvision.low_level_descriptor.v1"
+      },
+      "name": "dB",
+      "sha256": "2caa7c6d89da394da758f26ada91658cabb1969639fffd7767130d789c152517"
+    }
+  },
+  "schema_id": "brainvision.phase13.fixture_manifest.v1"
+}
