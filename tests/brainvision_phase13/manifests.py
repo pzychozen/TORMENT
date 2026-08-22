@@ -49,6 +49,17 @@ _OBSERVATION_DEFAULT_FIELDS: Final[frozenset[str]] = frozenset(
 _OBSERVATION_COMMAND_FIELDS: Final[frozenset[str]] = frozenset(
     {"fixture_id", "source_sequence"} | _OBSERVATION_DEFAULT_FIELDS
 )
+_FROZEN_FORMAL_ARM_COUNT: Final = 45
+_FROZEN_PRIMARY_CRITERIA_COUNT: Final = 81
+_FROZEN_EVIDENCE_OBLIGATION_COUNT: Final = 147
+_FROZEN_TOTAL_CRITERIA_COUNT: Final = 228
+_FAILURE_DURABILITY_BY_SHAPE: Final[dict[tuple[str, str], bool | None]] = {
+    ("observation_id", "invalid_observation_id"): None,
+    ("source_sequence", "refused_replay"): None,
+    ("sidecar", "durability_failure"): False,
+    ("configuration", "recovery_required"): True,
+    ("lifecycle_status", "invalid_lifecycle_transition"): False,
+}
 
 
 def load_manifest(path: Path) -> dict[str, object]:
@@ -260,6 +271,89 @@ def validate_expected_result_manifest(
                     raise ValueError("criterion requires a closed obligation kind")
 
 
+def validate_failure_evidence_shapes(payload: Mapping[str, object]) -> None:
+    """Bind each formal failure mapping to its frozen runtime durability shape."""
+
+    blocks = payload.get("blocks")
+    if not isinstance(blocks, Mapping):
+        raise ValueError("expected-result manifest requires blocks")
+    for block in blocks.values():
+        if not isinstance(block, Mapping):
+            raise ValueError("expected block must be a mapping")
+        criteria = block.get("criteria")
+        if not isinstance(criteria, Sequence) or isinstance(criteria, (str, bytes)):
+            raise ValueError("expected block requires criteria")
+        for criterion in criteria:
+            if not isinstance(criterion, Mapping):
+                raise ValueError("criterion must be a mapping")
+            selectors = criterion.get("actual_selectors")
+            if (
+                criterion.get("relation") != "MAPPING_EXACT"
+                or not isinstance(selectors, Sequence)
+                or isinstance(selectors, (str, bytes))
+                or len(selectors) != 1
+                or not isinstance(selectors[0], str)
+                or not selectors[0].endswith(".failure")
+            ):
+                continue
+            expected = criterion.get("expected_value")
+            if not isinstance(expected, Mapping):
+                raise ValueError("failure mapping must be an object")
+            field = expected.get("field")
+            reason = expected.get("reason")
+            if type(field) is not str or type(reason) is not str:
+                raise ValueError("failure mapping requires field and reason")
+            try:
+                durable_required = _FAILURE_DURABILITY_BY_SHAPE[(field, reason)]
+            except KeyError as error:
+                raise ValueError("failure mapping has no frozen runtime error contract") from error
+            has_durable = "durable_committed" in expected
+            if durable_required is None:
+                if has_durable:
+                    raise ValueError("ingress refusal must omit durable_committed")
+            elif expected.get("durable_committed") is not durable_required:
+                raise ValueError("lifecycle failure has wrong durable_committed value")
+
+
+def validate_frozen_instrument_counts(
+    *,
+    expected_manifest: Mapping[str, object],
+    evidence_obligations_manifest: Mapping[str, object],
+    schedule_manifest: Mapping[str, object],
+) -> None:
+    """Prevent silent scientific-arm or criterion-count drift."""
+
+    expected_blocks = expected_manifest.get("blocks")
+    obligation_blocks = evidence_obligations_manifest.get("blocks")
+    schedule_blocks = schedule_manifest.get("blocks")
+    if not all(isinstance(value, Mapping) for value in (
+        expected_blocks, obligation_blocks, schedule_blocks
+    )):
+        raise ValueError("Phase-13 manifests require block mappings")
+    primary_count = sum(
+        len(block["criteria"])
+        for block in expected_blocks.values()
+        if isinstance(block, Mapping) and isinstance(block.get("criteria"), Sequence)
+    )
+    obligation_count = sum(
+        len(block["criteria"])
+        for block in obligation_blocks.values()
+        if isinstance(block, Mapping) and isinstance(block.get("criteria"), Sequence)
+    )
+    arm_count = sum(
+        len(block["arms"])
+        for block in schedule_blocks.values()
+        if isinstance(block, Mapping) and isinstance(block.get("arms"), Mapping)
+    )
+    if (
+        arm_count != _FROZEN_FORMAL_ARM_COUNT
+        or primary_count != _FROZEN_PRIMARY_CRITERIA_COUNT
+        or obligation_count != _FROZEN_EVIDENCE_OBLIGATION_COUNT
+        or primary_count + obligation_count != _FROZEN_TOTAL_CRITERIA_COUNT
+    ):
+        raise ValueError("Phase-13 frozen arm or criterion count drift")
+
+
 def _load_provenance_sources() -> dict[str, tuple[dict[str, object], ...]]:
     registry = load_manifest(AUTHORITY_CLAUSE_REGISTRY_PATH)
     mapping = load_manifest(CRITERION_PROVENANCE_MANIFEST_PATH)
@@ -430,6 +524,7 @@ def validate_schedule_manifest(payload: Mapping[str, object]) -> None:
         raise ValueError("schedule must declare every frozen arm")
     require_exact_block_ids(required_arm_ids)
     lineages: set[str] = set()
+    lineage_specs: dict[str, Mapping[str, object]] = {}
     for block_id, block in blocks.items():
         if not isinstance(block, Mapping):
             raise ValueError(f"{block_id} schedule block must be an object")
@@ -451,6 +546,27 @@ def validate_schedule_manifest(payload: Mapping[str, object]) -> None:
                 if not isinstance(command, Mapping):
                     raise ValueError("schedule command must be an object")
                 _validate_command(command, lineages, observation_defaults)
+                if command.get("operation") == "CREATE_LINEAGE":
+                    candidate = command.get("spec")
+                    assert isinstance(candidate, Mapping)
+                    lineage = command.get("lineage")
+                    assert type(lineage) is str
+                    lineage_specs[lineage] = candidate
+                elif command.get("operation") == "ADMIT":
+                    lineage = command.get("lineage")
+                    assert type(lineage) is str
+                    lineage_spec = lineage_specs.get(lineage)
+                    if lineage_spec is None:
+                        raise ValueError("ADMIT must resolve a lineage configuration")
+                    observation = command.get("observation")
+                    assert isinstance(observation, Mapping)
+                    resolved = resolve_effective_observation_spec(
+                        observation_defaults, observation
+                    )
+                    if resolved["adapter_contract_id"] != lineage_spec["adapter_contract_id"]:
+                        raise ValueError(
+                            "ADMIT adapter_contract_id must match its lineage configuration"
+                        )
     if payload.get("administered_sink_purity_depth") != 2:
         raise ValueError("schedule must bind the frozen E11 sink-purity depth")
     e11 = blocks["E11"]
@@ -572,6 +688,12 @@ def validate_all_manifests() -> dict[str, str]:
     schedule = load_manifest(SCHEDULE_MANIFEST_PATH)
     authority = load_manifest(AUTHORITY_MANIFEST_PATH)
     validate_expected_result_manifest(expected)
+    validate_failure_evidence_shapes(expected)
+    validate_frozen_instrument_counts(
+        expected_manifest=expected,
+        evidence_obligations_manifest=obligations,
+        schedule_manifest=schedule,
+    )
     complete_expected = load_complete_expected_result_manifest()
     validate_schedule_manifest(schedule)
     validate_fixture_schedule_boundary(fixture, schedule)
@@ -602,5 +724,6 @@ __all__ = (
     "SCHEDULE_MANIFEST_PATH", "canonical_manifest_identity", "load_manifest", "manifest_sha256",
     "load_complete_expected_result_manifest", "resolve_effective_observation_spec", "resolved_schedule_commands",
     "validate_all_manifests", "validate_authority_manifest", "validate_expected_result_manifest",
+    "validate_failure_evidence_shapes", "validate_frozen_instrument_counts",
     "validate_fixture_schedule_boundary", "validate_graph_completeness", "validate_schedule_manifest",
 )

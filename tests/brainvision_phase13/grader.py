@@ -56,6 +56,7 @@ _RAW_SELECTOR_FRAGMENTS: Final[tuple[str, ...]] = (
     "gain",
     "orientation",
 )
+_NOT_APPLICABLE: Final = object()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,6 +147,43 @@ def _resolve(mapping: Mapping[str, object], selector: str) -> object:
     return value
 
 
+def _metric_value_or_not_applicable(record: Mapping[str, object], field_path: str) -> object:
+    """Resolve a metric field only for structurally metric-bearing evidence."""
+
+    if not field_path.startswith("metrics.") or "metrics" not in record:
+        raise KeyError(field_path)
+    metrics = record["metrics"]
+    if metrics is None:
+        return _NOT_APPLICABLE
+    if not isinstance(metrics, Mapping):
+        raise KeyError(field_path)
+    return _resolve(record, field_path)
+
+
+def _metric_records_field_exact(
+    records: Sequence[object],
+    *,
+    field_path: str,
+    expected: object,
+) -> bool:
+    """Require exact values from every applicable metric-bearing record."""
+
+    observed = 0
+    for record in records:
+        if not isinstance(record, Mapping):
+            return False
+        try:
+            value = _metric_value_or_not_applicable(record, field_path)
+        except KeyError:
+            return False
+        if value is _NOT_APPLICABLE:
+            continue
+        observed += 1
+        if value != expected:
+            return False
+    return observed > 0
+
+
 def _comparison_passes(
     relation: str,
     actual_values: tuple[object, ...],
@@ -195,20 +233,9 @@ def _comparison_passes(
             or type(field_path) is not str
         ):
             return False
-        observed = 0
-        for record in actual_values[0]:
-            if not isinstance(record, Mapping):
-                return False
-            try:
-                value = _resolve(record, field_path)
-            except KeyError:
-                return False
-            if value is None:
-                continue
-            observed += 1
-            if value != expected:
-                return False
-        return observed > 0
+        return _metric_records_field_exact(
+            actual_values[0], field_path=field_path, expected=expected
+        )
     if relation == "ALL_ARM_RECORDS_FIELD_EXACT":
         field_path = criterion.get("field_path")
         if (
@@ -217,23 +244,14 @@ def _comparison_passes(
             or type(field_path) is not str
         ):
             return False
-        observed = 0
+        records: list[object] = []
         for arm in actual_values[0].values():
             if not isinstance(arm, Mapping) or not isinstance(arm.get("records"), Sequence):
                 return False
-            for record in arm["records"]:
-                if not isinstance(record, Mapping):
-                    return False
-                try:
-                    value = _resolve(record, field_path)
-                except KeyError:
-                    return False
-                if value is None:
-                    continue
-                observed += 1
-                if value != expected:
-                    return False
-        return observed > 0
+            records.extend(arm["records"])
+        return _metric_records_field_exact(
+            records, field_path=field_path, expected=expected
+        )
     raise ValueError(f"unknown criterion relation: {relation}")
 
 

@@ -7,6 +7,7 @@ formal E1–E12 command array to the execution backend.
 from __future__ import annotations
 
 import ast
+import copy
 from hashlib import sha256
 from pathlib import Path
 import sys
@@ -62,6 +63,9 @@ from brainvision_phase13.manifests import (
     load_manifest,
     load_complete_expected_result_manifest,
     manifest_sha256,
+    validate_failure_evidence_shapes,
+    validate_frozen_instrument_counts,
+    validate_schedule_manifest,
     validate_all_manifests,
 )
 from brainvision_phase13.preflight import (
@@ -176,6 +180,114 @@ def test_every_frozen_arm_has_complete_structured_commands_and_supported_handler
     )
 
 
+def test_schedule_observation_contracts_match_their_lineage_contracts() -> None:
+    schedule = load_manifest(SCHEDULE_MANIFEST_PATH)
+    contract_b = schedule["blocks"]["E3"]["arms"]["contract-b"]
+    commands = contract_b["commands"]
+    lineage_contract = commands[0]["spec"]["adapter_contract_id"]
+    observations = [
+        command["observation"] for command in commands if command["operation"] == "ADMIT"
+    ]
+
+    assert lineage_contract == "bv13-contract-b"
+    assert len(observations) == 3
+    assert all(observation["adapter_contract_id"] == lineage_contract for observation in observations)
+
+    incompatible = copy.deepcopy(schedule)
+    del incompatible["blocks"]["E3"]["arms"]["contract-b"]["commands"][5]["observation"]["adapter_contract_id"]
+    with pytest.raises(ValueError, match="adapter_contract_id"):
+        validate_schedule_manifest(incompatible)
+
+
+def _metric_relation_status(relation: str, records: list[dict[str, object]]) -> str:
+    criterion = {
+        "criterion_id": f"synthetic-{relation}",
+        "block_id": "E1",
+        "actual_selectors": ["arm_ledgers" if relation == "ALL_ARM_RECORDS_FIELD_EXACT" else "records"],
+        "relation": relation,
+        "field_path": "metrics.projection_construction_failures_total",
+        "expected_value": 0,
+        "failure_class": "FAIL_IMPLEMENTATION",
+    }
+    evidence = (
+        {"arm_ledgers": {"synthetic": {"records": records}}}
+        if relation == "ALL_ARM_RECORDS_FIELD_EXACT"
+        else {"records": records}
+    )
+    return grade_block(block_id="E1", expected={"criteria": [criterion]}, evidence=evidence).status
+
+
+@pytest.mark.parametrize(
+    "relation",
+    ("ALL_ARM_RECORDS_FIELD_EXACT", "ALL_PRESENT_RECORDS_FIELD_EXACT"),
+)
+def test_metric_record_relations_apply_before_nested_resolution(relation: str) -> None:
+    metric = {"projection_construction_failures_total": 0}
+    assert _metric_relation_status(relation, [{"metrics": None}, {"metrics": metric}]) == "PASS"
+    assert _metric_relation_status(relation, [{"metrics": None}]) == "FAIL"
+    assert _metric_relation_status(relation, [{"metrics": {}}]) == "FAIL"
+    assert _metric_relation_status(
+        relation, [{"metrics": {"projection_construction_failures_total": 1}}]
+    ) == "FAIL"
+
+
+def test_all_projection_construction_obligations_accept_mixed_setup_and_metric_records() -> None:
+    obligations = load_manifest(EVIDENCE_OBLIGATIONS_MANIFEST_PATH)
+    criteria = [
+        criterion
+        for block in obligations["blocks"].values()
+        for criterion in block["criteria"]
+        if criterion["relation"] == "ALL_ARM_RECORDS_FIELD_EXACT"
+    ]
+    assert len(criteria) == 12
+    evidence = {
+        "arm_ledgers": {
+            "synthetic": {
+                "records": [
+                    {"metrics": None},
+                    {"metrics": {"projection_construction_failures_total": 0}},
+                ]
+            }
+        }
+    }
+    for criterion in criteria:
+        result = grade_block(
+            block_id=criterion["block_id"], expected={"criteria": [criterion]}, evidence=evidence
+        )
+        assert result.status == "PASS"
+
+
+def test_failure_shapes_and_frozen_counts_are_validated_uniformly() -> None:
+    expected = load_manifest(EXPECTED_RESULT_MANIFEST_PATH)
+    obligations = load_manifest(EVIDENCE_OBLIGATIONS_MANIFEST_PATH)
+    schedule = load_manifest(SCHEDULE_MANIFEST_PATH)
+    validate_failure_evidence_shapes(expected)
+    validate_frozen_instrument_counts(
+        expected_manifest=expected,
+        evidence_obligations_manifest=obligations,
+        schedule_manifest=schedule,
+    )
+
+    failures = {
+        criterion["criterion_id"]: criterion["expected_value"]
+        for block in expected["blocks"].values()
+        for criterion in block["criteria"]
+        if criterion["relation"] == "MAPPING_EXACT"
+        and criterion["actual_selectors"][0].endswith(".failure")
+    }
+    assert failures["E7_sidecar_failure"]["durable_committed"] is False
+    assert failures["E7_config_pre_failure"]["durable_committed"] is True
+    assert failures["E7_post_durable_failure"]["durable_committed"] is True
+    assert failures["E10_suspended_refusal"]["durable_committed"] is False
+    assert failures["E10_disabled_refusal"]["durable_committed"] is False
+    assert "durable_committed" not in failures["E8_equal_replay"]
+
+    malformed = copy.deepcopy(expected)
+    del malformed["blocks"]["E10"]["criteria"][0]["expected_value"]["durable_committed"]
+    with pytest.raises(ValueError, match="durable_committed"):
+        validate_failure_evidence_shapes(malformed)
+
+
 def test_canonical_fault_vocabulary_has_no_legacy_alias_or_fourth_fault() -> None:
     assert FAULT_IDS == {
         "E7_SIDECAR_WRITE_FAIL",
@@ -260,6 +372,7 @@ def test_inventory_is_deterministic_and_binds_documents_grader_and_execution_lay
         "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md",
         "docs/TORMENT_BRAINVISION_PHASE_13_FORMAL_ADMINISTRATION_BINDINGS_v1.0.md",
         "docs/TORMENT_BRAINVISION_PHASE_13_INSTRUMENT_AMENDMENT_1_EXTERNAL_AUTHORIZATION_ARTIFACT_v1.0.md",
+        "docs/TORMENT_BRAINVISION_PHASE_13_CORRECTED_QUALIFICATION_INSTRUMENT_AMENDMENT_v1.0.md",
         "tests/brainvision_phase13/backend.py",
         "tests/brainvision_phase13/evidence_obligations_manifest.json",
         "tests/brainvision_phase13/grader.py",

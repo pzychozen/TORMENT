@@ -92,11 +92,11 @@
       {"criterion_id":"E9_repair_stable","block_id":"E9","actual_selectors":["checkpoints.E9_repair_post_first.artifact_hashes.configuration_sha256","checkpoints.E9_repair_post_second.artifact_hashes.configuration_sha256"],"relation":"CANONICAL_BYTES_EQUAL","failure_class":"FAIL_IMPLEMENTATION"}
     ]},
     "E10": {"criteria":[
-      {"criterion_id":"E10_suspended_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_suspended_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_suspended_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_suspended_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition","durable_committed":false},"failure_class":"FAIL_IMPLEMENTATION"},
       {"criterion_id":"E10_active_rebase","block_id":"E10","actual_selectors":["checkpoints.E10_seq1.receipt.committed_active_time_ns"],"relation":"EXACT","expected_value":1000000000,"failure_class":"FAIL_IMPLEMENTATION"},
       {"criterion_id":"E10_reset_replay","block_id":"E10","actual_selectors":["checkpoints.E10_reset_replay.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"source_sequence","reason":"refused_replay"},"failure_class":"FAIL_IMPLEMENTATION"},
       {"criterion_id":"E10_sidecar_absent","block_id":"E10","actual_selectors":["checkpoints.E10_disabled_artifacts.artifact_hashes.sidecar_sha256"],"relation":"EXACT","expected_value":null,"failure_class":"FAIL_IMPLEMENTATION"},
-      {"criterion_id":"E10_disabled_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_disabled_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition"},"failure_class":"FAIL_IMPLEMENTATION"},
+      {"criterion_id":"E10_disabled_refusal","block_id":"E10","actual_selectors":["checkpoints.E10_disabled_refusal.failure"],"relation":"MAPPING_EXACT","expected_value":{"field":"lifecycle_status","reason":"invalid_lifecycle_transition","durable_committed":false},"failure_class":"FAIL_IMPLEMENTATION"},
       {"criterion_id":"E10_reenable_active_time","block_id":"E10","actual_selectors":["checkpoints.E10_seq2.receipt.committed_active_time_ns"],"relation":"EXACT","expected_value":1000000000,"failure_class":"FAIL_IMPLEMENTATION"},
       {"criterion_id":"E10_reenable_watermark","block_id":"E10","actual_selectors":["checkpoints.E10_seq2.receipt.source_sequence"],"relation":"EXACT","expected_value":2,"failure_class":"FAIL_IMPLEMENTATION"}
     ]},
