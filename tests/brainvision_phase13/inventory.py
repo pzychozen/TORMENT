@@ -12,6 +12,7 @@ REPOSITORY_ROOT: Final = PACKAGE_DIRECTORY.parents[1]
 _INVENTORY_PATHS: Final[tuple[str, ...]] = (
     "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md",
     "docs/TORMENT_BRAINVISION_PHASE_13_FORMAL_ADMINISTRATION_BINDINGS_v1.0.md",
+    "docs/TORMENT_BRAINVISION_PHASE_13_INSTRUMENT_AMENDMENT_1_EXTERNAL_AUTHORIZATION_ARTIFACT_v1.0.md",
     "tests/test_brainvision_phase13_instrument.py",
     "tests/brainvision_phase13/__init__.py",
     "tests/brainvision_phase13/backend.py",

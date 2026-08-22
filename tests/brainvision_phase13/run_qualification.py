@@ -16,14 +16,10 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from brainvision_phase13.manifests import validate_all_manifests
 
 
-FORMAL_AUTHORIZATION_MANIFEST = (
-    Path(__file__).resolve().parent / "formal_authorization_manifest.json"
-)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Phase-13 qualification instrument")
     parser.add_argument("--validate-instrument", action="store_true")
+    parser.add_argument("--authorization-file", type=Path)
     parser.add_argument("--expected-head")
     parser.add_argument("--administration-id")
     parser.add_argument("--output-dir", type=Path)
@@ -35,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_cli_authorization(args: argparse.Namespace) -> None:
     """Reject every partial authorization before any future E-block contact."""
     formal_values = (
+        args.authorization_file,
         args.expected_head,
         args.administration_id,
         args.output_dir,
@@ -49,19 +46,14 @@ def validate_cli_authorization(args: argparse.Namespace) -> None:
 
 
 def dispatch_formal_administration(args: argparse.Namespace) -> int:
-    """Dispatch only after the external authorization artifact is validated.
-
-    ``main`` verifies the artifact exists before this seam is reached.  This
-    function then binds its token/identity and lets the future-only dispatcher
-    perform preflight before consuming the administration start record.
-    """
+    """Load the explicit external artifact before the non-consuming preflight."""
     from brainvision_phase13.orchestrator import (
         dispatch_authorized_qualification,
-        load_formal_authorization,
+        load_external_formal_authorization_artifact,
     )
 
-    authorization = load_formal_authorization(FORMAL_AUTHORIZATION_MANIFEST)
-    dispatch_authorized_qualification(args=args, authorization=authorization)
+    authorization_artifact = load_external_formal_authorization_artifact(args.authorization_file)
+    dispatch_authorized_qualification(args=args, authorization_artifact=authorization_artifact)
     return 0
 
 
@@ -76,12 +68,6 @@ def main(argv: list[str] | None = None) -> int:
         print("PHASE13_INSTRUMENT_VALIDATION_ONLY")
         return 0
     if args.formal_first_administration:
-        # The latch is deliberately checked before any backend/plan dispatch.
-        if not FORMAL_AUTHORIZATION_MANIFEST.is_file():
-            raise RuntimeError(
-                "formal execution is refused: the later frozen authorization manifest "
-                f"does not exist: {FORMAL_AUTHORIZATION_MANIFEST.name}"
-            )
         return dispatch_formal_administration(args)
     raise ValueError("choose --validate-instrument; no implicit qualification execution exists")
 

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from types import MappingProxyType
 from typing import Final, Protocol
 
 from brainvision_phase13.backend import (
@@ -44,6 +45,8 @@ _PACKAGE_DIRECTORY = Path(__file__).resolve().parent
 _REPOSITORY_ROOT = _PACKAGE_DIRECTORY.parents[1]
 _SPECIFICATION_PATH = _REPOSITORY_ROOT / "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md"
 _AUTHORIZATION_SCHEMA_ID = "brainvision.phase13.formal_authorization.v2"
+_FORMAL_COMMAND_IDENTITY_SCHEMA_ID = "brainvision.phase13.formal_command_identity.v1"
+_FORMAL_RUNNER_PATH = "tests/brainvision_phase13/run_qualification.py"
 _REQUIRED_IMPORTS = (
     "brainvision.lifecycle", "brainvision.ingress", "brainvision.sink", "brainvision_phase13.backend",
 )
@@ -74,6 +77,30 @@ class FormalAuthorization:
     manifest_sha256s: Mapping[str, str]
     harness_sha256: str
     instrument_inventory: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        """Copy and freeze the two nested authorization authorities."""
+        object.__setattr__(
+            self,
+            "manifest_sha256s",
+            MappingProxyType(dict(self.manifest_sha256s)),
+        )
+        object.__setattr__(
+            self,
+            "instrument_inventory",
+            MappingProxyType(dict(self.instrument_inventory)),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class ExternalAuthorizationArtifact:
+    """One read-once external authorization datum bound into formal evidence."""
+
+    authorization: FormalAuthorization
+    canonical_bytes: bytes
+    normalized_path: Path
+    sha256: str
+    schema_id: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -139,12 +166,56 @@ def _component_record(path: Path, *, status: str = "PRESENT") -> dict[str, objec
     }
 
 
-def load_formal_authorization(path: Path) -> FormalAuthorization:
-    """Strictly parse a later authorization artifact without consuming it."""
+def _normalize_external_authorization_path(path: object) -> Path:
+    """Require the authorization datum to live outside the authoritative repository."""
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise FormalAuthorizationError("authorization file must be an absolute path")
+    normalized = path.resolve(strict=False)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise FormalAuthorizationError("formal authorization artifact is unreadable") from error
+        normalized.relative_to(_REPOSITORY_ROOT.resolve())
+    except ValueError:
+        return normalized
+    raise FormalAuthorizationError("authorization file must be outside the authoritative repository")
+
+
+def _normalized_output_directory(path: object) -> Path:
+    if not isinstance(path, Path):
+        raise FormalAuthorizationError("formal output directory is not a Path")
+    return path.resolve(strict=False)
+
+
+def canonical_formal_command_identity(
+    *, authorization_file: Path, expected_head: str, output_directory: Path, authorization_token: str
+) -> str:
+    """Canonicalize the formal CLI inputs excluding the self-derived administration ID."""
+    normalized_authorization = _normalize_external_authorization_path(authorization_file)
+    normalized_output = _normalized_output_directory(output_directory)
+    if type(expected_head) is not str or not expected_head:
+        raise FormalAuthorizationError("formal expected HEAD must be textual")
+    if type(authorization_token) is not str or not authorization_token:
+        raise FormalAuthorizationError("formal authorization token must be textual")
+    return canonical_json_bytes(
+        {
+            "argv": [
+                "python",
+                _FORMAL_RUNNER_PATH,
+                "--authorization-file",
+                str(normalized_authorization),
+                "--expected-head",
+                expected_head,
+                "--output-dir",
+                str(normalized_output),
+                "--formal-first-administration",
+                "--formal-authorization-token",
+                authorization_token,
+            ],
+            "schema_id": _FORMAL_COMMAND_IDENTITY_SCHEMA_ID,
+        }
+    ).decode("ascii")
+
+
+def _parse_formal_authorization_payload(raw: object) -> FormalAuthorization:
+    """Strictly parse the unchanged v2 authorization field set."""
     required = {
         "schema_id", "expected_head", "administration_id", "authorization_token",
         "command_identity", "specification_sha256", "manifest_sha256s", "harness_sha256",
@@ -171,15 +242,50 @@ def load_formal_authorization(path: Path) -> FormalAuthorization:
     )
 
 
+def load_external_formal_authorization_artifact(path: Path) -> ExternalAuthorizationArtifact:
+    """Read and validate the external artifact exactly once before dispatch."""
+    normalized = _normalize_external_authorization_path(path)
+    try:
+        raw_bytes = normalized.read_bytes()
+        raw = json.loads(raw_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FormalAuthorizationError("formal authorization artifact is unreadable") from error
+    authorization = _parse_formal_authorization_payload(raw)
+    canonical_bytes = canonical_json_bytes(raw)
+    if raw_bytes != canonical_bytes:
+        raise FormalAuthorizationError("formal authorization artifact must use canonical JSON bytes")
+    return ExternalAuthorizationArtifact(
+        authorization=authorization,
+        canonical_bytes=canonical_bytes,
+        normalized_path=normalized,
+        sha256=sha256(canonical_bytes).hexdigest(),
+        schema_id=_AUTHORIZATION_SCHEMA_ID,
+    )
+
+
 def verify_authorization_arguments(
-    args: object, authorization: FormalAuthorization, canonical_administration_id: str
+    args: object,
+    authorization_artifact: ExternalAuthorizationArtifact,
+    canonical_administration_id: str,
 ) -> None:
     """Require CLI, artifact, and independent recomputation to agree before start."""
+    authorization = authorization_artifact.authorization
+    normalized_cli_authorization_file = _normalize_external_authorization_path(
+        getattr(args, "authorization_file", None)
+    )
+    command_identity = canonical_formal_command_identity(
+        authorization_file=normalized_cli_authorization_file,
+        expected_head=getattr(args, "expected_head", None),
+        output_directory=getattr(args, "output_dir", None),
+        authorization_token=getattr(args, "formal_authorization_token", None),
+    )
     if (
         getattr(args, "expected_head", None) != authorization.expected_head
         or getattr(args, "administration_id", None) != authorization.administration_id
         or getattr(args, "formal_authorization_token", None) != authorization.authorization_token
         or authorization.administration_id != canonical_administration_id
+        or normalized_cli_authorization_file != authorization_artifact.normalized_path
+        or authorization.command_identity != command_identity
     ):
         raise FormalAuthorizationError("formal authorization identity does not match canonical frozen inputs")
 
@@ -235,6 +341,7 @@ def _not_executed_block_evidence() -> dict[str, object]:
 def _build_evidence_index(
     *, output_directory: Path, identity_path: Path, preflight_path: Path, start_path: Path,
     journal_path: Path, evidence_path: Path, grading_path: Path, result_path: Path,
+    authorization_artifact: ExternalAuthorizationArtifact,
 ) -> dict[str, object]:
     """One deterministic top-level index for all durable formal evidence components."""
     evidence_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -255,6 +362,12 @@ def _build_evidence_index(
         }
 
     components = {
+        "authorization_artifact": {
+            "path": str(authorization_artifact.normalized_path),
+            "schema_id": authorization_artifact.schema_id,
+            "sha256": authorization_artifact.sha256,
+            "status": "EXTERNAL_BOUND",
+        },
         "identity_binding_record": _component_record(identity_path),
         "environment_preflight_record": _component_record(preflight_path),
         "administration_start_record": _component_record(start_path),
@@ -280,11 +393,12 @@ def _build_evidence_index(
 
 
 def dispatch_authorized_qualification(
-    *, args: object, authorization: FormalAuthorization,
+    *, args: object, authorization_artifact: ExternalAuthorizationArtifact,
     preflight_collector: Callable[..., PreflightFacts] = collect_live_preflight_facts,
     backend_factory: BackendFactory | None = None,
 ) -> FormalDispatchResult:
     """Future-only, one-shot formal dispatch after all data-only guards pass."""
+    authorization = authorization_artifact.authorization
     canonical_administration_id = build_administration_identity(
         expected_head=authorization.expected_head,
         specification_sha256=authorization.specification_sha256,
@@ -292,10 +406,8 @@ def dispatch_authorized_qualification(
         harness_sha256=authorization.harness_sha256,
         command_identity=authorization.command_identity,
     )
-    verify_authorization_arguments(args, authorization, canonical_administration_id)
-    output_directory = getattr(args, "output_dir", None)
-    if not isinstance(output_directory, Path):
-        raise FormalAuthorizationError("formal output directory is not a Path")
+    verify_authorization_arguments(args, authorization_artifact, canonical_administration_id)
+    output_directory = _normalized_output_directory(getattr(args, "output_dir", None))
     facts = preflight_collector(authorization=authorization, output_directory=output_directory)
     outcome = verify_preflight(
         facts=facts, expected_head=authorization.expected_head,
@@ -316,8 +428,14 @@ def dispatch_authorized_qualification(
         command_identity=authorization.command_identity, output_directory=output_directory,
         environment_checks=facts.environment_checks, authority_manifest=authority_manifest,
         inventory=inventory,
+        authorization_artifact_path=authorization_artifact.normalized_path,
+        authorization_artifact_sha256=authorization_artifact.sha256,
+        authorization_schema_id=authorization_artifact.schema_id,
     )
     preflight_record = {
+        "authorization_artifact_path": str(authorization_artifact.normalized_path),
+        "authorization_artifact_sha256": authorization_artifact.sha256,
+        "authorization_schema_id": authorization_artifact.schema_id,
         "checks": [dict(check) for check in facts.environment_checks],
         "preflight_status": outcome.status,
         "schema_id": "brainvision.phase13.environment_preflight_record.v1",
@@ -378,6 +496,9 @@ def dispatch_authorized_qualification(
     evidence_package: dict[str, object] = {
         "administration_identity": canonical_administration_id,
         "administration_started": True,
+        "authorization_artifact_path": str(authorization_artifact.normalized_path),
+        "authorization_artifact_sha256": authorization_artifact.sha256,
+        "authorization_schema_id": authorization_artifact.schema_id,
         "blocks": blocks,
         "execution_failure": execution_failure,
         "identity_binding_record": identity_record,
@@ -408,6 +529,7 @@ def dispatch_authorized_qualification(
         output_directory=output_directory, identity_path=identity_path, preflight_path=preflight_path,
         start_path=start_path, journal_path=journal_path, evidence_path=evidence_path,
         grading_path=grading_path, result_path=result_document_path,
+        authorization_artifact=authorization_artifact,
     )))
     return FormalDispatchResult(
         administration_identity=canonical_administration_id, evidence_path=evidence_path,
@@ -417,7 +539,8 @@ def dispatch_authorized_qualification(
 
 
 __all__ = (
-    "FormalAuthorization", "FormalAuthorizationError", "FormalDispatchResult",
+    "ExternalAuthorizationArtifact", "FormalAuthorization", "FormalAuthorizationError",
+    "FormalDispatchResult", "canonical_formal_command_identity",
     "collect_live_preflight_facts", "dispatch_authorized_qualification",
-    "load_formal_authorization", "verify_authorization_arguments",
+    "load_external_formal_authorization_artifact", "verify_authorization_arguments",
 )

@@ -74,10 +74,12 @@ from brainvision_phase13.preflight import (
     verify_preflight,
 )
 from brainvision_phase13.orchestrator import (
+    ExternalAuthorizationArtifact,
     FormalAuthorization,
     FormalAuthorizationError,
+    canonical_formal_command_identity,
     dispatch_authorized_qualification,
-    load_formal_authorization,
+    load_external_formal_authorization_artifact,
     verify_authorization_arguments,
 )
 from brainvision_phase13.qualification import (
@@ -100,6 +102,7 @@ from brainvision_phase13.schemas import (
     TOP_LEVEL_INVALID,
     TOP_LEVEL_PASS,
     aggregate_taxonomy,
+    canonical_json_bytes,
 )
 
 
@@ -256,6 +259,7 @@ def test_inventory_is_deterministic_and_binds_documents_grader_and_execution_lay
     for required in (
         "docs/TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md",
         "docs/TORMENT_BRAINVISION_PHASE_13_FORMAL_ADMINISTRATION_BINDINGS_v1.0.md",
+        "docs/TORMENT_BRAINVISION_PHASE_13_INSTRUMENT_AMENDMENT_1_EXTERNAL_AUTHORIZATION_ARTIFACT_v1.0.md",
         "tests/brainvision_phase13/backend.py",
         "tests/brainvision_phase13/evidence_obligations_manifest.json",
         "tests/brainvision_phase13/grader.py",
@@ -453,8 +457,8 @@ def test_formal_latch_refuses_before_dispatch_even_with_all_cli_parameters(monke
         return 99
 
     monkeypatch.setattr(runner_module, "dispatch_formal_administration", dispatch_spy)
-    assert not runner_module.FORMAL_AUTHORIZATION_MANIFEST.exists()
-    with pytest.raises(RuntimeError, match="frozen authorization manifest"):
+    assert not hasattr(runner_module, "FORMAL_AUTHORIZATION_MANIFEST")
+    with pytest.raises(ValueError, match="every frozen authorization"):
         runner_module.main([
             "--expected-head", "a" * 40,
             "--administration-id", "bvphase13a1_" + "b" * 64,
@@ -462,6 +466,25 @@ def test_formal_latch_refuses_before_dispatch_even_with_all_cli_parameters(monke
             "--formal-first-administration", "--formal-authorization-token", "unfrozen",
         ])
     assert dispatched == 0
+
+
+def test_external_authorization_file_must_be_absolute_and_outside_repository() -> None:
+    with pytest.raises(FormalAuthorizationError, match="absolute path"):
+        load_external_formal_authorization_artifact(Path("formal_authorization_manifest.json"))
+    with pytest.raises(FormalAuthorizationError, match="outside the authoritative repository"):
+        load_external_formal_authorization_artifact(
+            TESTS_DIR / "brainvision_phase13" / "formal_authorization_manifest.json"
+        )
+    source = (TESTS_DIR / "brainvision_phase13" / "run_qualification.py").read_text(encoding="utf-8")
+    assert "FORMAL_AUTHORIZATION_MANIFEST" not in source
+    assert "--authorization-file" in source
+
+
+def test_clean_worktree_preflight_remains_literal_without_authorization_exception() -> None:
+    source = (TESTS_DIR / "brainvision_phase13" / "orchestrator.py").read_text(encoding="utf-8")
+    assert 'worktree_clean=not _run_git("status", "--porcelain")' in source
+    assert "clean except" not in source
+    assert "status filtering" not in source
 
 
 def test_runner_has_no_implicit_execution() -> None:
@@ -659,26 +682,9 @@ def test_formal_result_renderer_emits_the_full_frozen_section_46_only_on_pass() 
 
 
 def test_synthetic_dispatcher_orchestration_uses_mock_backend_only(tmp_path: Path) -> None:
+    authorization_artifact, canonical_id, specification_sha256 = _synthetic_authorization(tmp_path)
+    authorization = authorization_artifact.authorization
     hashes = _manifest_hashes()
-    specification_sha256 = sha256(
-        (TESTS_DIR.parent / "docs" / "TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md").read_bytes()
-    ).hexdigest()
-    harness_sha = qualification_harness_sha256(TESTS_DIR / "brainvision_phase13")
-    canonical_id = build_administration_identity(
-        expected_head="a" * 40, specification_sha256=specification_sha256,
-        manifest_sha256s=hashes, harness_sha256=harness_sha,
-        command_identity="synthetic-dispatch",
-    )
-    authorization = FormalAuthorization(
-        expected_head="a" * 40,
-        administration_id=canonical_id,
-        authorization_token="synthetic-token",
-        command_identity="synthetic-dispatch",
-        specification_sha256=specification_sha256,
-        manifest_sha256s=hashes,
-        harness_sha256=harness_sha,
-        instrument_inventory=instrument_content_hash_inventory(),
-    )
     facts = PreflightFacts(
         head="a" * 40,
         origin_main="a" * 40,
@@ -708,11 +714,13 @@ def test_synthetic_dispatcher_orchestration_uses_mock_backend_only(tmp_path: Pat
         expected_head="a" * 40,
         administration_id=canonical_id,
         formal_authorization_token="synthetic-token",
+        authorization_file=authorization_artifact.normalized_path,
         output_dir=tmp_path / "synthetic-output",
     )
+    authorization_artifact.normalized_path.write_bytes(b"{}")
     result = dispatch_authorized_qualification(
         args=args,
-        authorization=authorization,
+        authorization_artifact=authorization_artifact,
         preflight_collector=lambda **_: facts,
         backend_factory=MockBackend,
     )
@@ -720,30 +728,56 @@ def test_synthetic_dispatcher_orchestration_uses_mock_backend_only(tmp_path: Pat
     assert result.evidence_path.is_file() and result.grading_path.is_file()
     assert result.evidence_index_path.is_file()
     assert "V1A_QUALIFICATION_INVALID" in result.result_document_path.read_text(encoding="utf-8")
+    package = __import__("json").loads(result.evidence_path.read_text(encoding="utf-8"))
+    assert package["authorization_artifact_sha256"] == authorization_artifact.sha256
+    assert package["identity_binding_record"]["authorization_artifact_path"] == str(
+        authorization_artifact.normalized_path
+    )
+    assert package["preflight_record"]["authorization_schema_id"] == authorization_artifact.schema_id
 
 
 def _synthetic_environment_checks() -> tuple[dict[str, object], ...]:
     return ({"check_id": "synthetic", "status": "PASS", "observed": True, "expected": True},)
 
 
-def _synthetic_authorization(*, administration_id: str | None = None) -> tuple[FormalAuthorization, str, str]:
+def _synthetic_authorization(
+    tmp_path: Path,
+    *,
+    administration_id: str | None = None,
+    output_directory: Path | None = None,
+) -> tuple[ExternalAuthorizationArtifact, str, str]:
     hashes = _manifest_hashes()
     specification_sha256 = sha256(
         (TESTS_DIR.parent / "docs" / "TORMENT_BRAINVISION_PHASE_13_COMPLETE_V1A_QUALIFICATION_SPECIFICATION_v1.0.md").read_bytes()
     ).hexdigest()
     harness_sha = qualification_harness_sha256(TESTS_DIR / "brainvision_phase13")
+    authorization_path = tmp_path / "external_authorization" / "formal_authorization_manifest.json"
+    authorization_path.parent.mkdir(parents=True)
+    selected_output_directory = tmp_path / "synthetic-output" if output_directory is None else output_directory
+    command_identity = canonical_formal_command_identity(
+        authorization_file=authorization_path,
+        expected_head="a" * 40,
+        output_directory=selected_output_directory,
+        authorization_token="synthetic-token",
+    )
     canonical_id = build_administration_identity(
         expected_head="a" * 40, specification_sha256=specification_sha256,
-        manifest_sha256s=hashes, harness_sha256=harness_sha, command_identity="synthetic-dispatch",
+        manifest_sha256s=hashes, harness_sha256=harness_sha, command_identity=command_identity,
     )
+    payload = {
+        "schema_id": "brainvision.phase13.formal_authorization.v2",
+        "expected_head": "a" * 40,
+        "administration_id": canonical_id if administration_id is None else administration_id,
+        "authorization_token": "synthetic-token",
+        "command_identity": command_identity,
+        "specification_sha256": specification_sha256,
+        "manifest_sha256s": hashes,
+        "harness_sha256": harness_sha,
+        "instrument_inventory": instrument_content_hash_inventory(),
+    }
+    authorization_path.write_bytes(canonical_json_bytes(payload))
     return (
-        FormalAuthorization(
-            expected_head="a" * 40,
-            administration_id=canonical_id if administration_id is None else administration_id,
-            authorization_token="synthetic-token", command_identity="synthetic-dispatch",
-            specification_sha256=specification_sha256, manifest_sha256s=hashes,
-            harness_sha256=harness_sha, instrument_inventory=instrument_content_hash_inventory(),
-        ),
+        load_external_formal_authorization_artifact(authorization_path),
         canonical_id,
         specification_sha256,
     )
@@ -756,6 +790,58 @@ def _synthetic_ready_facts(*, specification_sha256: str, hashes: dict[str, str],
         harness_sha256=harness_sha, output_directory_fresh=True,
         administration_identity_unused=True, environment_checks=_synthetic_environment_checks(),
     )
+
+
+def test_formal_authorization_freezes_nested_mappings_without_source_aliases() -> None:
+    source_manifest_hashes = {"authority_manifest": "a" * 64}
+    source_inventory = {"tests/brainvision_phase13/orchestrator.py": "b" * 64}
+    authorization = FormalAuthorization(
+        expected_head="c" * 40,
+        administration_id="bvphase13a1_" + "d" * 64,
+        authorization_token="synthetic-token",
+        command_identity="synthetic-command",
+        specification_sha256="e" * 64,
+        manifest_sha256s=source_manifest_hashes,
+        harness_sha256="f" * 64,
+        instrument_inventory=source_inventory,
+    )
+
+    source_manifest_hashes["authority_manifest"] = "g" * 64
+    source_inventory["tests/brainvision_phase13/orchestrator.py"] = "h" * 64
+
+    assert authorization.manifest_sha256s["authority_manifest"] == "a" * 64
+    assert authorization.instrument_inventory["tests/brainvision_phase13/orchestrator.py"] == "b" * 64
+    with pytest.raises(TypeError):
+        authorization.manifest_sha256s["unexpected"] = "i" * 64  # type: ignore[index]
+    with pytest.raises(TypeError):
+        authorization.instrument_inventory["unexpected"] = "j" * 64  # type: ignore[index]
+
+
+def test_immutable_authorization_preserves_canonical_bytes_and_administration_id(tmp_path: Path) -> None:
+    authorization_artifact, canonical_id, _ = _synthetic_authorization(tmp_path)
+    authorization = authorization_artifact.authorization
+    canonical_payload = {
+        "schema_id": "brainvision.phase13.formal_authorization.v2",
+        "expected_head": authorization.expected_head,
+        "administration_id": authorization.administration_id,
+        "authorization_token": authorization.authorization_token,
+        "command_identity": authorization.command_identity,
+        "specification_sha256": authorization.specification_sha256,
+        "manifest_sha256s": dict(authorization.manifest_sha256s),
+        "harness_sha256": authorization.harness_sha256,
+        "instrument_inventory": dict(authorization.instrument_inventory),
+    }
+
+    assert canonical_json_bytes(canonical_payload) == authorization_artifact.canonical_bytes
+    assert build_administration_identity(
+        expected_head=authorization.expected_head,
+        specification_sha256=authorization.specification_sha256,
+        manifest_sha256s=authorization.manifest_sha256s,
+        harness_sha256=authorization.harness_sha256,
+        command_identity=authorization.command_identity,
+    ) == canonical_id
+    with pytest.raises(TypeError):
+        authorization_artifact.authorization.manifest_sha256s["unexpected"] = "a" * 64  # type: ignore[index]
 
 
 def test_fixture_manifest_is_descriptor_only_and_all_criteria_have_machine_provenance() -> None:
@@ -779,21 +865,28 @@ def test_fixture_manifest_is_descriptor_only_and_all_criteria_have_machine_prove
         } for source in criterion["authority_sources"])
 
 
-def test_canonical_authorization_identity_refuses_cli_and_artifact_mismatches() -> None:
-    authorization, canonical_id, _ = _synthetic_authorization()
+def test_canonical_authorization_identity_refuses_cli_and_artifact_mismatches(tmp_path: Path) -> None:
+    authorization_artifact, canonical_id, _ = _synthetic_authorization(tmp_path)
+    authorization = authorization_artifact.authorization
     valid = SimpleNamespace(
         expected_head="a" * 40, administration_id=canonical_id,
         formal_authorization_token="synthetic-token",
+        authorization_file=authorization_artifact.normalized_path,
+        output_dir=tmp_path / "synthetic-output",
     )
-    verify_authorization_arguments(valid, authorization, canonical_id)
+    verify_authorization_arguments(valid, authorization_artifact, canonical_id)
     with pytest.raises(FormalAuthorizationError):
         verify_authorization_arguments(
             SimpleNamespace(
                 expected_head="a" * 40, administration_id="bvphase13a1_" + "0" * 64,
                 formal_authorization_token="synthetic-token",
-            ), authorization, canonical_id,
+                authorization_file=authorization_artifact.normalized_path,
+                output_dir=tmp_path / "synthetic-output",
+            ), authorization_artifact, canonical_id,
         )
-    mismatched, _, _ = _synthetic_authorization(administration_id="bvphase13a1_" + "1" * 64)
+    mismatched, _, _ = _synthetic_authorization(
+        tmp_path / "mismatched", administration_id="bvphase13a1_" + "1" * 64
+    )
     with pytest.raises(FormalAuthorizationError):
         verify_authorization_arguments(valid, mismatched, canonical_id)
 
@@ -817,7 +910,10 @@ def test_environment_preflight_failure_is_blocked_without_dispatch() -> None:
 
 
 def test_post_start_backend_construction_failure_preserves_invalid_evidence(tmp_path: Path) -> None:
-    authorization, canonical_id, specification_sha256 = _synthetic_authorization()
+    authorization_artifact, canonical_id, specification_sha256 = _synthetic_authorization(
+        tmp_path, output_directory=tmp_path / "construction-failure"
+    )
+    authorization = authorization_artifact.authorization
     facts = _synthetic_ready_facts(
         specification_sha256=specification_sha256, hashes=_manifest_hashes(),
         harness_sha=authorization.harness_sha256,
@@ -829,8 +925,9 @@ def test_post_start_backend_construction_failure_preserves_invalid_evidence(tmp_
     result = dispatch_authorized_qualification(
         args=SimpleNamespace(
             expected_head="a" * 40, administration_id=canonical_id,
-            formal_authorization_token="synthetic-token", output_dir=tmp_path / "construction-failure",
-        ), authorization=authorization, preflight_collector=lambda **_: facts,
+            formal_authorization_token="synthetic-token", authorization_file=authorization_artifact.normalized_path,
+            output_dir=tmp_path / "construction-failure",
+        ), authorization_artifact=authorization_artifact, preflight_collector=lambda **_: facts,
         backend_factory=failing_factory,
     )
     package = __import__("json").loads(result.evidence_path.read_text(encoding="utf-8"))
@@ -845,7 +942,10 @@ def test_post_start_backend_construction_failure_preserves_invalid_evidence(tmp_
 
 
 def test_mid_block_defect_preserves_partial_safe_ledger_without_live_backend(tmp_path: Path) -> None:
-    authorization, canonical_id, specification_sha256 = _synthetic_authorization()
+    authorization_artifact, canonical_id, specification_sha256 = _synthetic_authorization(
+        tmp_path, output_directory=tmp_path / "partial-failure"
+    )
+    authorization = authorization_artifact.authorization
     facts = _synthetic_ready_facts(
         specification_sha256=specification_sha256, hashes=_manifest_hashes(),
         harness_sha=authorization.harness_sha256,
@@ -878,8 +978,9 @@ def test_mid_block_defect_preserves_partial_safe_ledger_without_live_backend(tmp
     result = dispatch_authorized_qualification(
         args=SimpleNamespace(
             expected_head="a" * 40, administration_id=canonical_id,
-            formal_authorization_token="synthetic-token", output_dir=tmp_path / "partial-failure",
-        ), authorization=authorization, preflight_collector=lambda **_: facts,
+            formal_authorization_token="synthetic-token", authorization_file=authorization_artifact.normalized_path,
+            output_dir=tmp_path / "partial-failure",
+        ), authorization_artifact=authorization_artifact, preflight_collector=lambda **_: facts,
         backend_factory=PartialBackend,
     )
     package = __import__("json").loads(result.evidence_path.read_text(encoding="utf-8"))
@@ -916,7 +1017,8 @@ def test_environment_check_record_is_structured_and_never_a_hard_coded_boolean(t
 
 
 def test_formal_authorization_schema_is_closed_and_data_only(tmp_path: Path) -> None:
-    authorization, _, _ = _synthetic_authorization()
+    authorization_artifact, _, _ = _synthetic_authorization(tmp_path)
+    authorization = authorization_artifact.authorization
     payload = {
         "schema_id": "brainvision.phase13.formal_authorization.v2",
         "expected_head": authorization.expected_head,
@@ -929,12 +1031,12 @@ def test_formal_authorization_schema_is_closed_and_data_only(tmp_path: Path) -> 
         "instrument_inventory": dict(authorization.instrument_inventory),
     }
     artifact = tmp_path / "synthetic_authorization.json"
-    artifact.write_text(__import__("json").dumps(payload), encoding="utf-8")
-    assert load_formal_authorization(artifact).administration_id == authorization.administration_id
+    artifact.write_bytes(canonical_json_bytes(payload))
+    assert load_external_formal_authorization_artifact(artifact).authorization.administration_id == authorization.administration_id
     payload["unexpected"] = True
-    artifact.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    artifact.write_bytes(canonical_json_bytes(payload))
     with pytest.raises(FormalAuthorizationError):
-        load_formal_authorization(artifact)
+        load_external_formal_authorization_artifact(artifact)
 
 
 def test_independent_grading_preserves_valid_fail_precedence_over_later_environment_gap() -> None:
@@ -963,7 +1065,10 @@ def test_independent_grading_preserves_valid_fail_precedence_over_later_environm
 
 
 def test_independent_reconstruction_of_synthetic_evidence_never_calls_backend(tmp_path: Path) -> None:
-    authorization, canonical_id, specification_sha256 = _synthetic_authorization()
+    authorization_artifact, canonical_id, specification_sha256 = _synthetic_authorization(
+        tmp_path, output_directory=tmp_path / "reconstruction"
+    )
+    authorization = authorization_artifact.authorization
     facts = _synthetic_ready_facts(
         specification_sha256=specification_sha256, hashes=_manifest_hashes(),
         harness_sha=authorization.harness_sha256,
@@ -975,8 +1080,9 @@ def test_independent_reconstruction_of_synthetic_evidence_never_calls_backend(tm
     result = dispatch_authorized_qualification(
         args=SimpleNamespace(
             expected_head="a" * 40, administration_id=canonical_id,
-            formal_authorization_token="synthetic-token", output_dir=tmp_path / "reconstruction",
-        ), authorization=authorization, preflight_collector=lambda **_: facts,
+            formal_authorization_token="synthetic-token", authorization_file=authorization_artifact.normalized_path,
+            output_dir=tmp_path / "reconstruction",
+        ), authorization_artifact=authorization_artifact, preflight_collector=lambda **_: facts,
         backend_factory=failing_factory,
     )
     package = __import__("json").loads(result.evidence_path.read_text(encoding="utf-8"))

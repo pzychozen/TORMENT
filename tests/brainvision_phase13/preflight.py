@@ -183,9 +183,12 @@ def build_administration_identity(
         raise ValueError("command_identity must be a nonempty string")
     _require_sha256(specification_sha256, "specification_sha256")
     _require_sha256(harness_sha256, "harness_sha256")
-    if tuple(manifest_sha256s) != _REQUIRED_MANIFEST_NAMES:
-        raise ValueError("manifest identities must have the frozen exact key order")
-    for key, value in manifest_sha256s.items():
+    if set(manifest_sha256s) != set(_REQUIRED_MANIFEST_NAMES):
+        raise ValueError("manifest identities must have the frozen exact key set")
+    ordered_manifest_sha256s = {
+        key: manifest_sha256s[key] for key in _REQUIRED_MANIFEST_NAMES
+    }
+    for key, value in ordered_manifest_sha256s.items():
         _require_sha256(value, key)
     digest = sha256_hex(
         canonical_json_bytes(
@@ -193,7 +196,7 @@ def build_administration_identity(
                 "command_identity": command_identity,
                 "expected_head": expected_head,
                 "harness_sha256": harness_sha256,
-                "manifest_sha256s": dict(manifest_sha256s),
+                "manifest_sha256s": ordered_manifest_sha256s,
                 "schema_id": "brainvision.phase13.administration_identity.v1",
                 "specification_sha256": specification_sha256,
             }
@@ -249,10 +252,16 @@ def identity_binding_record(
     environment_checks: tuple[Mapping[str, object], ...],
     authority_manifest: Mapping[str, object],
     inventory: Mapping[str, str],
+    authorization_artifact_path: Path,
+    authorization_artifact_sha256: str,
+    authorization_schema_id: str,
 ) -> dict[str, object]:
     """Build one immutable pre-start formal identity/environment record."""
     return {
         "administration_identity": administration_identity,
+        "authorization_artifact_path": str(authorization_artifact_path),
+        "authorization_artifact_sha256": authorization_artifact_sha256,
+        "authorization_schema_id": authorization_schema_id,
         "architecture": platform.architecture(),
         "authority_identities": dict(authority_manifest),
         "command_identity": command_identity,
