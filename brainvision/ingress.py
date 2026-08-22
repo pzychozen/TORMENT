@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from brainvision.character_modulation import update_vhe_state_with_character_modulation
-from brainvision.lifecycle import BrainvisionLifecycleManager
+from brainvision.lifecycle import BrainvisionLifecycleManager, BrainvisionRuntimeSnapshot
 from brainvision.observation import (
     FirsthandVisualObservationV1,
     derive_observation_id,
@@ -47,14 +47,15 @@ class FirsthandVisualAdmissionReceipt:
             raise TypeError("committed_active_time_ns must be a nonnegative exact int")
 
 
-def admit_firsthand_visual_observation(
+def _admit_firsthand_visual_observation_with_committed_snapshot(
     *,
     lifecycle_manager: BrainvisionLifecycleManager,
     workspace_id: str,
     agent_id: str,
     observation: FirsthandVisualObservationV1,
-) -> FirsthandVisualAdmissionReceipt:
-    """Admit one exact Phase-2 observation through the Phase-10 boundary."""
+    capture_committed_snapshot,
+) -> tuple[FirsthandVisualAdmissionReceipt, object]:
+    """Admit once and privately capture the committed snapshot under its lock."""
 
     if type(observation) is not FirsthandVisualObservationV1:
         raise BrainvisionIngressError("observation", "malformed_observation")
@@ -103,11 +104,31 @@ def admit_firsthand_visual_observation(
             update_result.state,
             observation.source_sequence,
         )
-        return FirsthandVisualAdmissionReceipt(
+        receipt = FirsthandVisualAdmissionReceipt(
             observation_id=observation.observation_id,
             source_sequence=observation.source_sequence,
             committed_active_time_ns=committed.active_time_ns,
         )
+        return receipt, capture_committed_snapshot(receipt, committed)
+
+
+def admit_firsthand_visual_observation(
+    *,
+    lifecycle_manager: BrainvisionLifecycleManager,
+    workspace_id: str,
+    agent_id: str,
+    observation: FirsthandVisualObservationV1,
+) -> FirsthandVisualAdmissionReceipt:
+    """Admit one exact Phase-2 observation through the Phase-10 boundary."""
+
+    receipt, _ = _admit_firsthand_visual_observation_with_committed_snapshot(
+        lifecycle_manager=lifecycle_manager,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        observation=observation,
+        capture_committed_snapshot=lambda _receipt, _snapshot: None,
+    )
+    return receipt
 
 
 __all__ = (
