@@ -2,7 +2,7 @@
 
 ## Status and authority
 
-**PRE-FREEZE CANDIDATE — DOCUMENTATION ONLY**
+**FROZEN PRE-IMPLEMENTATION PHASE-11 SPECIFICATION — DOCUMENTATION ONLY**
 
 This document defines the Phase-11 direct `FIRSTHAND_VISUAL` ingress contract for TORMENT Brainvision v1a.
 
