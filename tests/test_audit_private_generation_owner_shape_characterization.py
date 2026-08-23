@@ -33,7 +33,7 @@ import ast
 import os
 import unittest
 from dataclasses import dataclass, fields as dataclass_fields
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from torment_service.audit_evidence_context import selected_admitted_items
 from torment_service.audit_prompt_inclusion_observation import (

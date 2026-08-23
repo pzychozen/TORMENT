@@ -193,7 +193,7 @@ class TestInspectionSurfaceInventory(unittest.TestCase):
 
     def test_inventory_labels_are_valid(self):
         for name, labels in _APP_INSPECTION_SURFACES.items():
-            self.assertTrue(labels <= _VALID_LABELS,
+            self.assertLessEqual(labels, _VALID_LABELS,
                             msg=f"{name}: invalid label(s) {sorted(labels - _VALID_LABELS)}")
             self.assertIn("read-only", labels, msg=f"{name}: not classified read-only")
 
