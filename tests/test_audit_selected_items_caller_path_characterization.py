@@ -410,8 +410,8 @@ class TestAgentLoopOwnsNoAssemblerOrExtractor(unittest.TestCase):
         # them only to the inclusion observer) and TurnResult.
         receivers = _call_receivers(self.run_turn, "audit_admitted_context_items")
         allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
-        self.assertTrue(
-            receivers <= allowed,
+        self.assertLessEqual(
+            receivers, allowed,
             msg=f"audit items routed to unexpected call(s): {sorted(receivers - allowed)}",
         )
 

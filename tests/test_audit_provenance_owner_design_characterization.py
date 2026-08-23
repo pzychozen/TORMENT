@@ -240,14 +240,14 @@ class TestColocationIsNotProvenance(unittest.TestCase):
         # and TurnResult — never the prompt / review / ingest / fabric path.
         receivers = _call_receivers(self.run_turn, "audit_admitted_context_items")
         allowed = {"_observe_audit_evidence_from_prompt_request", "TurnResult"}
-        self.assertTrue(
-            receivers <= allowed,
+        self.assertLessEqual(
+            receivers, allowed,
             msg=f"audit items routed to unexpected call(s): {sorted(receivers - allowed)}",
         )
 
     def test_packet_reaches_only_turnresult(self):
         receivers = _call_receivers(self.run_turn, "_audit_evidence_packet")
-        self.assertTrue(receivers <= {"TurnResult"},
+        self.assertLessEqual(receivers, {"TurnResult"},
                         msg=f"packet routed beyond TurnResult: {sorted(receivers)}")
 
     def test_a_wrapper_calling_runturn_would_not_prove_inclusion(self):
