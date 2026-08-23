@@ -7,12 +7,10 @@ production policy or storage format.
 
 import copy
 import json
-import os
 import shutil
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from torment_service.embeddings import HashEmbedding
 from torment_service.fabric import TormentFabric
