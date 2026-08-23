@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import math
 import sys
 import unittest
 from pathlib import Path
