@@ -17,7 +17,6 @@ import sys
 import unittest
 from pathlib import Path
 
-import tests.manual.memory_to_prompt_c_d_operator_orchestration_harness as harness
 from tests.manual.memory_to_prompt_c_d_operator_orchestration_harness import (
     MemoryToPromptOperatorHarnessRequest,
     resolve_operator_memory_context,
