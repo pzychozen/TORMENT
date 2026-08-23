@@ -23,7 +23,6 @@ import torment_service.agent_loop as agent_loop
 from torment_service.agent_loop import AgentRunner, Observation
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ReviewResult
-from torment_service.audit_evidence_sidecar import build_audit_evidence_sidecar_from_items
 
 
 # A sentinel admitted-item text. For the packet to build, this text must appear
