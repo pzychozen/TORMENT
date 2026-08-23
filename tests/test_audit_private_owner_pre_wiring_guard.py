@@ -266,7 +266,7 @@ class TestPW4BuiltPacketDrivesNothing(unittest.TestCase):
     def test_built_packet_routes_only_to_turnresult(self):
         al = _parse_service(_AGENT_LOOP)
         receivers = _module_call_receivers(al, _BUILT_PACKET)
-        self.assertTrue(receivers <= {"TurnResult"},
+        self.assertLessEqual(receivers, {"TurnResult"},
                         msg=f"built audit packet routed beyond TurnResult: {sorted(receivers)}")
 
 

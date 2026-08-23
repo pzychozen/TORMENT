@@ -54,7 +54,6 @@ _ORCH_REL = "torment_service/memory_context_orchestrator.py"
 # complete() caller set records a dormant boundary, and authorizes no provider wiring and no live
 # model path.
 _NON_SPINE = "non_spine_llm_runtime.py"
-_NON_SPINE_REL = "torment_service/non_spine_llm_runtime.py"
 _SKIP_DIRS = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
 
 # The five owner-relevant call sites this inventory tracks.
