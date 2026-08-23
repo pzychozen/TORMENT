@@ -16,7 +16,6 @@ from torment_service.non_spine_llm_runtime import (
     NonSpineLLMRuntimeRequest,
     NonSpineLLMRuntimeResult,
     NonSpineLLMPromptRequest,
-    NonSpineLLMCompletion,
     NonSpineLLMCompletionAdapter,
     FakeNonSpineLLMCompletionAdapter,
     NonSpineLLMMemoryContext,
