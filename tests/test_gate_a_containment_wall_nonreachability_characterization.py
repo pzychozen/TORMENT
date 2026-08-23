@@ -318,7 +318,7 @@ class TestAuditPacketsNonControl(unittest.TestCase):
         self.assertEqual(_branch_uses(run_turn, "_audit_evidence_packet"), [],
                          msg="runner packet drives a control branch")
         receivers = _call_receivers(run_turn, "_audit_evidence_packet")
-        self.assertTrue(receivers <= {"TurnResult"},
+        self.assertLessEqual(receivers, {"TurnResult"},
                         msg=f"runner packet routed beyond TurnResult: {sorted(receivers)}")
 
     def test_owner_packet_drives_no_branch(self):

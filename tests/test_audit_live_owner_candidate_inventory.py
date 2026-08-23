@@ -563,7 +563,7 @@ class TestInvariant7PacketPresenceUnused(unittest.TestCase):
         self.assertIsNotNone(run_turn)
         # The built packet local flows only into TurnResult(...).
         receivers = _call_receivers(run_turn, "_audit_evidence_packet")
-        self.assertTrue(receivers <= {"TurnResult"},
+        self.assertLessEqual(receivers, {"TurnResult"},
                         msg=f"packet routed beyond TurnResult: {sorted(receivers)}")
         # The packet local is never used as a control-branch condition.
         branch_uses = []

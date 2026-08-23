@@ -338,7 +338,7 @@ class TestAuditBlindBoundaryAndEvidenceOnlyPacket(unittest.TestCase):
         self.assertEqual(_branch_uses(run_turn, "_audit_evidence_packet"), [],
                          msg="audit packet drives a control branch in run_turn")
         receivers = _call_receivers(run_turn, "_audit_evidence_packet")
-        self.assertTrue(receivers <= {"TurnResult"},
+        self.assertLessEqual(receivers, {"TurnResult"},
                         msg=f"audit packet routed beyond TurnResult: {sorted(receivers)}")
 
 
