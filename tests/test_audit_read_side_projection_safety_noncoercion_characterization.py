@@ -276,7 +276,7 @@ class TestSrgGatedAndBounded(unittest.TestCase):
             and isinstance(n.value, ast.Name)
         }
         expected_srg = {"_srg_same_band", "_srg_crystal", "_srg_heartbeat"}
-        self.assertTrue(expected_srg <= variable_multipliers,
+        self.assertLessEqual(expected_srg, variable_multipliers,
                         msg=f"missing expected SRG multiplier variables: {sorted(expected_srg - variable_multipliers)}")
 
         def assigned_values(name):
