@@ -17,7 +17,6 @@ from torment_service.non_spine_llm_runtime import (
     NonSpineLLMRuntimeResult,
     NonSpineLLMRealProviderError,
 )
-import tests.manual.non_spine_llm_anthropic_provider_harness as harness
 from tests.manual.non_spine_llm_anthropic_provider_harness import (
     run_non_spine_anthropic_provider_harness,
     main,
