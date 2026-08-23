@@ -9,7 +9,6 @@ import pytest
 from fastapi import HTTPException
 
 import torment_service.app as appmod
-from torment_service.closure_memory import detect_open_items_mismatch
 from torment_service.conflicts import ConflictRegistry, ConflictRegistryError
 from torment_service.fabric import TormentFabric
 
