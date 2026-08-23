@@ -11,7 +11,6 @@ from threading import Event, Thread
 import pytest
 
 import brainvision.ingress as ingress_module
-import brainvision.lifecycle as lifecycle_module
 import brainvision.sink as sink_module
 from brainvision.configuration import (
     brainvision_configuration_path,
