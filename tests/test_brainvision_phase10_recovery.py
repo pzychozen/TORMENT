@@ -233,7 +233,7 @@ def test_active_or_suspended_sidecar_ahead_repairs_watermark_and_reconstructs(
     tmp_path: Path, status: str
 ) -> None:
     manager, source, identities, locks = _environment(tmp_path)
-    configuration = _configure(manager)
+    _configure(manager)
     configuration = manager.enable(WORKSPACE_ID, AGENT_ID)
     if status == LIFECYCLE_SUSPENDED:
         source.now = 9
@@ -260,7 +260,7 @@ def test_active_or_suspended_configuration_ahead_hard_fails_without_mutation(
     tmp_path: Path, status: str
 ) -> None:
     manager, source, identities, locks = _environment(tmp_path)
-    configuration = _configure(manager)
+    _configure(manager)
     configuration = manager.enable(WORKSPACE_ID, AGENT_ID)
     if status == LIFECYCLE_SUSPENDED:
         source.now = 3
