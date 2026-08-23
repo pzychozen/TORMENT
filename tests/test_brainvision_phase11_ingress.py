@@ -16,7 +16,7 @@ from brainvision.configuration import (
     load_brainvision_configuration,
     write_brainvision_configuration,
 )
-from brainvision.fixtures import D0, DA, DB
+from brainvision.fixtures import DA, DB
 from brainvision.ingress import (
     BrainvisionIngressError,
     FirsthandVisualAdmissionReceipt,
