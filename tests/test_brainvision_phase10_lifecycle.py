@@ -1,6 +1,5 @@
 """Phase-10 lawful lifecycle transition coverage."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
