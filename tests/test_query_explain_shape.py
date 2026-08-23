@@ -255,7 +255,7 @@ class TestQueryExplainShape(unittest.TestCase):
         self.assertEqual(
             REQUIRED_LANE_SCORING_KEYS & FORBIDDEN_REFLECTION_TRACE_MAP_KEYS, frozenset()
         )
-        self.assertTrue(REQUIRED_LANE_SCORING_KEYS <= EXPECTED_QUERY_EXPLAIN_KEYS)
+        self.assertLessEqual(REQUIRED_LANE_SCORING_KEYS, EXPECTED_QUERY_EXPLAIN_KEYS)
         self.assertEqual(
             FORBIDDEN_REFLECTION_TRACE_MAP_KEYS & EXPECTED_QUERY_EXPLAIN_KEYS, frozenset()
         )
