@@ -15,7 +15,6 @@ import sys
 import unittest
 from pathlib import Path
 
-import tests.manual.non_spine_llm_character_operator_harness as harness
 from tests.manual.non_spine_llm_character_operator_harness import (
     NonSpineLLMCharacterHarnessRequest,
     build_non_spine_character_runtime_request,
