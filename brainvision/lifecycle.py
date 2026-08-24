@@ -31,7 +31,6 @@ from brainvision.configuration import (
 from brainvision.vhe import VheState, evolve_vhe_state_as_of
 from brainvision.vhe_sidecar import (
     CONFIG_AHEAD,
-    EQUAL,
     SIDECAR_AHEAD,
     VheSidecarV1,
     fresh_vhe_sidecar,
