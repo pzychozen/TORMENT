@@ -18,12 +18,6 @@ from torment_service.provenance_v1 import ProvenanceV1
 
 def _dispose_fabric(fabric: TormentFabric) -> None:
     fabric.close()
-    for workspace in getattr(fabric, "workspaces", {}).values():
-        for graph in getattr(workspace, "shared_graphs", {}).values():
-            try:
-                graph.close()
-            except Exception:
-                pass
     for name in (
         "private_graphs", "workspaces", "agent_states", "_kernel_contexts",
         "_sqlite_indexes",
