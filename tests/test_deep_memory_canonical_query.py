@@ -318,8 +318,7 @@ def test_broken_canonical_embedding_ref_falls_back_to_older_same_eid_vector(tmp_
     with (base / "memories.jsonl").open("a", encoding="utf-8") as f:
         f.write(_record(41, "canonical broken embedding ref", broken_ref) + "\n")
 
-    store = DeepMemoryStore(base, dim=4)
-    try:
+    with DeepMemoryStore(base, dim=4) as store:
         fallback_hits = store.query(older_vec, top_k=1, min_similarity=0.9)
         assert len(fallback_hits) == 1
         assert fallback_hits[0].eid == 41
@@ -329,13 +328,10 @@ def test_broken_canonical_embedding_ref_falls_back_to_older_same_eid_vector(tmp_
         assert len(unrelated_hits) == 1
         assert unrelated_hits[0].eid == 42
         assert unrelated_hits[0].summary == "unrelated searchable eid"
-    finally:
-        store.close()
 
 
 def test_eid_with_no_usable_vector_recalls_but_never_queries(tmp_path):
-    store = DeepMemoryStore(tmp_path / "deep", dim=4)
-    try:
+    with DeepMemoryStore(tmp_path / "deep", dim=4) as store:
         _export(store, 51, "old no vector", None)
         _export(store, 51, "latest no vector", None)
         searchable_vec = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
@@ -349,8 +345,6 @@ def test_eid_with_no_usable_vector_recalls_but_never_queries(tmp_path):
         eids = _query_eids(store, searchable_vec, top_k=5, min_similarity=0.0)
         assert 51 not in eids
         assert eids == [52]
-    finally:
-        store.close()
 
 
 def test_historical_duplicate_laden_store_loads_without_memories_rewrite(tmp_path):
@@ -390,25 +384,19 @@ def test_epoch_valued_historical_record_loads_recalls_and_queries(tmp_path):
     historical["compressed_step"] = 1_786_463_657
     memories_path.write_text(json.dumps(historical) + "\n", encoding="utf-8")
 
-    reloaded = DeepMemoryStore(base, dim=4)
-    try:
+    with DeepMemoryStore(base, dim=4) as reloaded:
         recalled = reloaded.recall(77)
         assert recalled is not None
         assert recalled.compressed_step == 1_786_463_657
         assert isinstance(recalled.compressed_step, int)
         assert _query_eids(reloaded, vector, top_k=1) == [77]
-    finally:
-        reloaded.close()
 
 
 def test_stats_count_remains_physical_record_based(tmp_path):
-    store = DeepMemoryStore(tmp_path / "deep", dim=4)
-    try:
+    with DeepMemoryStore(tmp_path / "deep", dim=4) as store:
         _export(store, 1, "eid 1 old", None)
         _export(store, 1, "eid 1 latest", None)
         _export(store, 2, "eid 2", None)
 
         stats = store.stats()
         assert stats["count"] == 3
-    finally:
-        store.close()
