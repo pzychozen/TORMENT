@@ -13,12 +13,14 @@ from experiments.hivemind_meridian_outage_v1.harness import (
     ConditionConfig,
     MeridianOutageHarness,
     NullCoordinationAdapter,
+    ProviderRoundResponse,
     TormentFabricAdapter,
     _aggregate_final_answers,
 )
 from experiments.hivemind_meridian_outage_v1.results import (
     SEAL_INDEX_FILENAME,
     ResultVerificationError,
+    validate_result_schema,
     verify_sealed_run,
 )
 from experiments.hivemind_meridian_outage_v1.scoring import score_run
@@ -49,11 +51,22 @@ class RecordingProvider:
 
     def metadata(self) -> Mapping[str, Any]:
         return {
+            "provider": "deterministic-test-double",
             "model_id": "deterministic-test-double",
+            "provider_mode": "dry",
             "session_isolation": "per_agent_per_round",
             "retry_policy": "none",
-            "retry_observability": "unavailable",
-            "model_configuration": "offline-test-double",
+            "sampling": {
+                "max_tokens": {"mode": "explicit", "explicit_value": 1024},
+                "temperature": {"mode": "provider_default", "explicit_value": None},
+                "top_p": {"mode": "provider_default", "explicit_value": None},
+                "top_k": {"mode": "provider_default", "explicit_value": None},
+                "timeout": {"mode": "provider_default", "explicit_value": None},
+                "system_instruction": {
+                    "mode": "harness_instruction",
+                    "sha256": "934b1ada8807926e70bf2f1f0482e58fec563d3df2975714e0d77251cc2a3fef",
+                },
+            },
         }
 
     def run_round(
@@ -155,6 +168,44 @@ class SharedSessionProvider(RecordingProvider):
         return metadata
 
 
+class EvidenceProvider(RecordingProvider):
+    def __init__(self, *, fail_on_call: int | None = None, invalid_on_call: int | None = None) -> None:
+        super().__init__()
+        self.fail_on_call = fail_on_call
+        self.invalid_on_call = invalid_on_call
+
+    def metadata(self) -> Mapping[str, Any]:
+        metadata = dict(super().metadata())
+        metadata.update({"provider": "simulated-live-provider", "model_id": "simulated-meridian-v1", "provider_mode": "live"})
+        return metadata
+
+    def run_round(self, **kwargs: Any) -> ProviderRoundResponse:
+        output = dict(super().run_round(**kwargs))
+        call_number = len(self.calls)
+        if call_number == self.fail_on_call:
+            raise RuntimeError("simulated provider outage")
+        if call_number == self.invalid_on_call:
+            return ProviderRoundResponse(
+                output={"findings": "not-a-list", "claims": []},
+                raw_response_text="{not valid Meridian response}",
+                usage={"input_tokens": 17, "output_tokens": 4, "total_tokens": 21},
+                response_metadata={"authorization": "Bearer must-not-be-sealed"},
+            )
+        return ProviderRoundResponse(
+            output=output,
+            raw_response_text=f"raw response {call_number}",
+            usage={"input_tokens": 17, "output_tokens": 4, "total_tokens": 21},
+            response_metadata={"request_id": f"simulated-{call_number}"},
+        )
+
+
+class SecretMetadataProvider(EvidenceProvider):
+    def metadata(self) -> Mapping[str, Any]:
+        metadata = dict(super().metadata())
+        metadata["api_key"] = "must-not-be-sealed"
+        return metadata
+
+
 def _run_condition(tmp_path: Path, condition: str, run_id: str):
     provider = RecordingProvider()
     adapter = RecordingAdapter({"recent_events": [{"event_id": "cev_mock"}], "event_count": 1})
@@ -241,11 +292,14 @@ def test_condition_isolation_and_sealed_results(tmp_path: Path, condition: str) 
     provider, adapter, run_dir, result = _run_condition(tmp_path, condition, f"run-{condition.lower()}")
     assert run_dir.is_dir()
     assert result["condition"] == condition
-    assert result["environment"]["live_model_calls"] is False
+    assert result["run_status"] == "COMPLETE"
+    assert result["model_call_evidence"]["live_model_calls_performed"] is False
+    assert result["model_call_evidence"]["logical_model_call_count_planned"] == 10
+    assert result["model_call_evidence"]["logical_model_call_count_attempted"] == 10
     assert result["assignment_manifest_sha256"] == assignment_manifest_sha256(5)
     assert result["provider"]["session_isolation"] == "per_agent_per_round"
-    assert result["cost_metrics"]["failure_retry_count"] is None
-    assert result["cost_metrics"]["failure_retry_observability"] == "unavailable"
+    assert result["cost_metrics"]["failure_retry_count"] == 0
+    assert result["cost_metrics"]["failure_retry_observability"] == "reported"
     round_two = [call for call in provider.calls if call["round"] == 2]
     if condition == "A_PRIVATE":
         assert adapter.boundary_calls == 0 and adapter.context_calls == []
@@ -323,27 +377,27 @@ def test_stance_aware_poison_and_card_discovery_duplicate_metrics() -> None:
     assert scores["duplicate_work_count"] == 1
 
 
-def test_verifier_rejects_forbidden_b2_context_and_cross_agent_leakage(tmp_path: Path) -> None:
+def test_invalid_provider_or_visibility_evidence_seals_failed_without_classification(tmp_path: Path) -> None:
     forbidden_adapter = RecordingAdapter({"recent_events": [], "packet_summary": "forbidden peer text"})
-    with pytest.raises(ResultVerificationError, match="forbidden fields"):
-        MeridianOutageHarness(RecordingProvider(), forbidden_adapter).run(
-            output_root=tmp_path, run_id="bad-b2", condition="B2_TORMENT_SALIENCE_SURFACED", n_agents=5,
-        )
+    run_dir = MeridianOutageHarness(RecordingProvider(), forbidden_adapter).run(
+        output_root=tmp_path, run_id="bad-b2", condition="B2_TORMENT_SALIENCE_SURFACED", n_agents=5,
+    )
+    assert verify_sealed_run(run_dir)["run_status"] == "FAILED"
     leaked_card_adapter = RecordingAdapter({
         "recent_events": [{"summary": AGENT_CARDS[0]["text"]}], "event_count": 1,
     })
-    with pytest.raises(ResultVerificationError, match="corpus card text"):
-        MeridianOutageHarness(RecordingProvider(), leaked_card_adapter).run(
-            output_root=tmp_path, run_id="card-text-b2", condition="B2_TORMENT_SALIENCE_SURFACED", n_agents=5,
-        )
-    with pytest.raises(ResultVerificationError, match="outside its permitted view"):
-        MeridianOutageHarness(LeakingProvider(), RecordingAdapter()).run(
-            output_root=tmp_path, run_id="leaking", condition="B1_TORMENT_MECHANISMS_ONLY", n_agents=5,
-        )
+    card_text_run = MeridianOutageHarness(RecordingProvider(), leaked_card_adapter).run(
+        output_root=tmp_path, run_id="card-text-b2", condition="B2_TORMENT_SALIENCE_SURFACED", n_agents=5,
+    )
+    leaking_run = MeridianOutageHarness(LeakingProvider(), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="leaking", condition="B1_TORMENT_MECHANISMS_ONLY", n_agents=5,
+    )
+    assert verify_sealed_run(card_text_run)["run_status"] == "FAILED"
+    assert verify_sealed_run(leaking_run)["run_status"] == "FAILED"
 
 
 def test_provider_metadata_and_session_isolation_fail_closed(tmp_path: Path) -> None:
-    for provider, expected in ((MissingMetadataProvider(), "missing required"), (SharedSessionProvider(), "non-shared")):
+    for provider, expected in ((MissingMetadataProvider(), "missing required"), (SharedSessionProvider(), "per_agent_per_round")):
         with pytest.raises(ValueError, match=expected):
             MeridianOutageHarness(provider, RecordingAdapter()).run(
                 output_root=tmp_path, run_id=provider.__class__.__name__, condition="A_PRIVATE", n_agents=5,
@@ -355,6 +409,7 @@ def test_external_seal_index_is_append_only_and_anchors_run(tmp_path: Path) -> N
     index_path = tmp_path / SEAL_INDEX_FILENAME
     rows = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1 and rows[0]["run_id"] == "sealed-run"
+    assert rows[0]["run_status"] == "COMPLETE"
     assert rows[0]["sealed_json_sha256"]
     with pytest.raises(FileExistsError, match="duplicate experiment run ID"):
         _run_condition(tmp_path, "B2_TORMENT_SALIENCE_SURFACED", "sealed-run")
@@ -364,6 +419,154 @@ def test_external_seal_index_is_append_only_and_anchors_run(tmp_path: Path) -> N
     raw_path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ResultVerificationError, match="sealed artifact hash mismatch"):
         verify_sealed_run(run_dir)
+
+
+def test_simulated_live_provider_seals_truthful_attempts_raw_text_and_usage(tmp_path: Path) -> None:
+    run_dir = MeridianOutageHarness(EvidenceProvider(), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="simulated-live", condition="A_PRIVATE", n_agents=5,
+    )
+    result = verify_sealed_run(run_dir, require_complete=True)
+    evidence = result["model_call_evidence"]
+    assert evidence == {
+        "live_model_calls_performed": True,
+        "logical_model_call_count_planned": 10,
+        "characterization_logical_model_call_count_planned": 40,
+        "logical_model_call_count_attempted": 10,
+        "logical_model_call_count_succeeded": 10,
+        "logical_model_call_count_failed": 0,
+        "retry_count": 0,
+        "hidden_evaluator_model_calls": 0,
+        "maximum_attempts_per_logical_call": 1,
+    }
+    raw = json.loads((run_dir / "raw_outputs.json").read_text(encoding="utf-8"))
+    assert raw["provider_attempts"][0]["raw_response_text"] == "raw response 1"
+    assert raw["provider_attempts"][0]["usage"] == {
+        "availability": "provider_reported", "input_tokens": 17, "output_tokens": 4, "total_tokens": 21,
+    }
+    assert all(attempt["attempt_number"] == 1 and attempt["success"] for attempt in raw["provider_attempts"])
+
+
+def test_provider_failure_seals_partial_evidence_and_does_not_classify_complete(tmp_path: Path) -> None:
+    run_dir = MeridianOutageHarness(EvidenceProvider(fail_on_call=3), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="provider-failure", condition="A_PRIVATE", n_agents=5,
+    )
+    result = verify_sealed_run(run_dir)
+    assert result["run_status"] == "FAILED"
+    assert result["model_call_evidence"]["logical_model_call_count_attempted"] == 3
+    assert result["model_call_evidence"]["logical_model_call_count_succeeded"] == 2
+    assert result["model_call_evidence"]["logical_model_call_count_failed"] == 1
+    assert result["failure_ledger"][0]["logical_call_id"] == "round_1:researcher_003"
+    assert result["failure_ledger"][0]["unexecuted_logical_call_count"] == 7
+    raw = json.loads((run_dir / "raw_outputs.json").read_text(encoding="utf-8"))
+    assert len(raw["provider_attempts"]) == 3
+    assert raw["provider_attempts"][-1]["exception"]["type"] == "RuntimeError"
+    assert raw["provider_attempts"][-1]["failure_stage"] == "provider_invocation"
+    assert set(raw["round_outputs"]) == {"round_1:researcher_001", "round_1:researcher_002"}
+    with pytest.raises(ResultVerificationError, match="not a completed experiment"):
+        verify_sealed_run(run_dir, require_complete=True)
+
+
+def test_schema_invalid_provider_response_seals_raw_text_and_one_attempt(tmp_path: Path) -> None:
+    run_dir = MeridianOutageHarness(EvidenceProvider(invalid_on_call=2), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="schema-failure", condition="A_PRIVATE", n_agents=5,
+    )
+    result = verify_sealed_run(run_dir)
+    raw = json.loads((run_dir / "raw_outputs.json").read_text(encoding="utf-8"))
+    assert result["run_status"] == "FAILED"
+    assert result["model_call_evidence"]["retry_count"] == 0
+    assert len(raw["provider_attempts"]) == 2
+    failed = raw["provider_attempts"][-1]
+    assert failed["raw_response_text"] == "{not valid Meridian response}"
+    assert failed["parser_schema_outcome"] == "failed"
+    assert failed["failure_stage"] == "parser_schema"
+    assert failed["usage"]["availability"] == "provider_reported"
+
+
+def test_provider_default_sampling_and_unavailable_usage_are_attested_without_invention(tmp_path: Path) -> None:
+    _, _, run_dir, result = _run_condition(tmp_path, "A_PRIVATE", "dry-defaults")
+    assert result["provider"]["sampling"]["temperature"] == {
+        "mode": "provider_default", "explicit_value": None,
+    }
+    raw = json.loads((run_dir / "raw_outputs.json").read_text(encoding="utf-8"))
+    assert raw["provider_attempts"][0]["usage"] == {
+        "availability": "unavailable", "input_tokens": None, "output_tokens": None, "total_tokens": None,
+    }
+
+
+def test_harness_preserves_per_agent_per_round_provider_boundary_without_transcripts(tmp_path: Path) -> None:
+    provider = RecordingProvider()
+    MeridianOutageHarness(provider, RecordingAdapter()).run(
+        output_root=tmp_path, run_id="session-boundary", condition="A_PRIVATE", n_agents=5,
+    )
+    assert len(provider.calls) == 10
+    assert all(set(call) == {
+        "agent_id", "round", "assigned_cards", "collective_context", "naive_shared_findings", "instruction",
+    } for call in provider.calls)
+    assert all("transcript" not in call and "prior_response" not in call for call in provider.calls)
+
+
+def test_provider_session_isolation_and_input_hash_boundaries_are_explicit(tmp_path: Path) -> None:
+    runs: dict[str, Path] = {}
+    for condition in (
+        "A_PRIVATE", "B1_TORMENT_MECHANISMS_ONLY", "B2_TORMENT_SALIENCE_SURFACED", "C_NAIVE_SHARED_CONTENT",
+    ):
+        runs[condition] = MeridianOutageHarness(
+            RecordingProvider(), RecordingAdapter({"recent_events": [{"event_id": "cev_hash"}], "event_count": 1}),
+        ).run(output_root=tmp_path / condition, run_id=condition, condition=condition, n_agents=5)
+    def records(condition: str) -> dict[str, dict[str, Any]]:
+        raw = json.loads((runs[condition] / "raw_outputs.json").read_text(encoding="utf-8"))
+        return {
+            record["agent_id"]: record
+            for record in raw["provider_attempts"] if record["round_number"] == 2
+        }
+    private = records("A_PRIVATE")
+    b1 = records("B1_TORMENT_MECHANISMS_ONLY")
+    b2 = records("B2_TORMENT_SALIENCE_SURFACED")
+    naive = records("C_NAIVE_SHARED_CONTENT")
+    for agent_id in private:
+        private_hashes = private[agent_id]["request_metadata"]["input_hashes"]
+        b1_hashes = b1[agent_id]["request_metadata"]["input_hashes"]
+        b2_hashes = b2[agent_id]["request_metadata"]["input_hashes"]
+        naive_hashes = naive[agent_id]["request_metadata"]["input_hashes"]
+        assert private_hashes == b1_hashes
+        assert {key: value for key, value in b2_hashes.items() if key not in {"collective_context_sha256", "provider_visible_input_sha256"}} == {
+            key: value for key, value in private_hashes.items() if key not in {"collective_context_sha256", "provider_visible_input_sha256"}
+        }
+        assert b2_hashes["collective_context_sha256"] is not None
+        assert {key: value for key, value in naive_hashes.items() if key not in {"naive_shared_findings_sha256", "provider_visible_input_sha256"}} == {
+            key: value for key, value in private_hashes.items() if key not in {"naive_shared_findings_sha256", "provider_visible_input_sha256"}
+        }
+        assert naive_hashes["naive_shared_findings_sha256"] is not None
+
+
+def test_provider_evidence_excludes_credentials_and_complete_failed_schemas_fail_closed(tmp_path: Path) -> None:
+    complete_dir = MeridianOutageHarness(SecretMetadataProvider(), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="secret-free", condition="A_PRIVATE", n_agents=5,
+    )
+    failed_dir = MeridianOutageHarness(EvidenceProvider(fail_on_call=1), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="failed-schema", condition="A_PRIVATE", n_agents=5,
+    )
+    complete = verify_sealed_run(complete_dir)
+    failed = verify_sealed_run(failed_dir)
+    assert "must-not-be-sealed" not in (complete_dir / "raw_outputs.json").read_text(encoding="utf-8")
+    for result in (complete, failed):
+        malformed = dict(result)
+        malformed.pop("run_status")
+        with pytest.raises(ResultVerificationError, match="run_status"):
+            validate_result_schema(malformed)
+
+
+def test_external_seal_index_records_complete_and_failed_statuses(tmp_path: Path) -> None:
+    MeridianOutageHarness(RecordingProvider(), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="complete-index", condition="A_PRIVATE", n_agents=5,
+    )
+    MeridianOutageHarness(EvidenceProvider(fail_on_call=1), RecordingAdapter()).run(
+        output_root=tmp_path, run_id="failed-index", condition="A_PRIVATE", n_agents=5,
+    )
+    rows = [json.loads(line) for line in (tmp_path / SEAL_INDEX_FILENAME).read_text(encoding="utf-8").splitlines()]
+    assert {row["run_id"]: row["run_status"] for row in rows} == {
+        "complete-index": "COMPLETE", "failed-index": "FAILED",
+    }
 
 
 def test_cards_for_agent_are_fixed_and_do_not_expose_evaluator_fields() -> None:

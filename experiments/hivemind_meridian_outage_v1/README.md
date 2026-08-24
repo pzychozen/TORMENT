@@ -1,8 +1,9 @@
 # Meridian Outage v1 — Frozen Offline Instrument
 
 This synthetic incident-reconstruction harness is an offline experimental
-instrument. It is not connected to normal TORMENT startup, supplies no default
-provider, and makes no live model calls. This corpus was corrected by an
+instrument. It is not connected to normal TORMENT startup and supplies no
+default provider; it cannot make a live model call unless a separately
+authorized live provider is injected. This corpus was corrected by an
 adversarial instrument audit before its first administration; no live result
 has been invalidated.
 
@@ -85,13 +86,24 @@ where decisive-card holders are actually a minority.
 
 Real-Fabric runs require one fresh empty absolute data root per run and
 condition. The adapter records that root and rejects prior state; restart mode
-is not part of v1. Provider metadata must identify `model_id`, non-shared
-`session_isolation` (`per_agent_per_round` or `per_agent`), and `retry_policy`.
-Retries are either reported or explicitly marked unavailable—never fabricated
-as zero.
+is not part of v1. Provider metadata must identify the provider, exact
+`model_id`, `per_agent_per_round` session isolation, `retry_policy: none`, and
+every sampling field. Explicit values are recorded as such; unavailable safe
+seams are attested as `provider_default` with a null explicit value, never as
+invented numeric defaults.
+
+`meridian-result-v2` records per-attempt provider evidence: deterministic
+provider-visible input hashes, raw response text when safely available,
+parser/schema outcome, exception evidence, provider-reported usage or explicit
+unavailability, sequence, timestamps, and exact logical-call counts. It never
+stores credential-shaped fields. The N=5 four-condition plan is 40 logical
+provider calls, with no hidden evaluator calls.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run
-directory. The index anchors run identity, condition, N, seed, seal file hash,
-and result timestamp. It is an operational append-only anchor, not a hostile
-tamper-resistance claim.
+directory. `RUN_STATUS=COMPLETE` requires every planned logical call and scored
+metrics. `RUN_STATUS=FAILED` seals observed partial evidence, records the
+terminal failure and unexecuted-call count, and is verifiable but cannot be
+treated as a completed experiment. The index anchors either status along with
+run identity, condition, N, seed, seal file hash, and result timestamp. It is
+an operational append-only anchor, not a hostile tamper-resistance claim.

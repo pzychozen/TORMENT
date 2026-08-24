@@ -6,13 +6,16 @@ The real-Fabric adapter is opt-in for a separately authorized characterization.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import platform
+import re
 import sys
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -28,6 +31,7 @@ from .spec import (
     cards_for_agent,
     corpus_sha256,
     ground_truth_sha256,
+    payload_sha256,
 )
 
 
@@ -85,8 +89,18 @@ class AgentProvider(Protocol):
         assigned_cards: Sequence[Mapping[str, str]],
         collective_context: Mapping[str, Any] | None,
         naive_shared_findings: Sequence[Mapping[str, Any]],
-    ) -> Mapping[str, Any]:
+    ) -> Mapping[str, Any] | ProviderRoundResponse:
         """Return findings, claims, and an optional structured final answer."""
+
+
+@dataclass(frozen=True)
+class ProviderRoundResponse:
+    """Optional raw provider evidence returned alongside a structured Meridian output."""
+
+    output: Mapping[str, Any]
+    raw_response_text: str | None = None
+    usage: Mapping[str, Any] | None = None
+    response_metadata: Mapping[str, Any] | None = None
 
 
 class CoordinationAdapter(Protocol):
@@ -499,26 +513,154 @@ def _aggregate_final_answers(outputs: Mapping[str, Mapping[str, Any]]) -> dict[s
     }
 
 
+_SENSITIVE_EVIDENCE_KEYS = frozenset({
+    "api_key", "apikey", "authorization", "credential", "credentials", "password", "secret", "token",
+})
+_SECRET_VALUE_PATTERN = re.compile(
+    r"(?i)(?:api[_-]?key|authorization|bearer|credential|password|secret|token)\s*[:=]\s*[^\s,;]+"
+)
+_SAMPLING_FIELDS = frozenset({"max_tokens", "temperature", "top_p", "top_k", "timeout"})
+
+
+def _safe_evidence_value(value: Any) -> Any:
+    """Remove credential-shaped fields before evidence is persisted."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _safe_evidence_value(item)
+            for key, item in value.items()
+            if str(key).lower() not in _SENSITIVE_EVIDENCE_KEYS
+        }
+    if isinstance(value, list):
+        return [_safe_evidence_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_safe_evidence_value(item) for item in value]
+    if isinstance(value, str):
+        return _SECRET_VALUE_PATTERN.sub("[REDACTED]", value)
+    return copy.deepcopy(value)
+
+
+def _sampling_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    sampling = metadata.get("sampling")
+    if not isinstance(sampling, Mapping):
+        raise ValueError("provider metadata must include sampling configuration")
+    normalized = _safe_evidence_value(sampling)
+    if set(normalized) != _SAMPLING_FIELDS | {"system_instruction"}:
+        raise ValueError("provider sampling metadata must attest every frozen sampling field")
+    for field in _SAMPLING_FIELDS:
+        value = normalized[field]
+        if not isinstance(value, Mapping) or set(value) != {"mode", "explicit_value"}:
+            raise ValueError(f"provider sampling {field} must record mode and explicit_value")
+        if value["mode"] not in {"explicit", "provider_default"}:
+            raise ValueError(f"provider sampling {field} has invalid mode")
+        if value["mode"] == "provider_default" and value["explicit_value"] is not None:
+            raise ValueError(f"provider-default sampling {field} must not invent a value")
+        if value["mode"] == "explicit" and value["explicit_value"] is None:
+            raise ValueError(f"explicit sampling {field} is missing its value")
+    instruction = normalized["system_instruction"]
+    if not isinstance(instruction, Mapping) or set(instruction) != {"mode", "sha256"}:
+        raise ValueError("provider sampling must attest system instruction identity")
+    if instruction["mode"] != "harness_instruction" or instruction["sha256"] != payload_sha256(RESEARCH_INSTRUCTION):
+        raise ValueError("provider system instruction identity does not match Meridian instruction")
+    return normalized
+
+
 def _provider_metadata(provider: AgentProvider) -> dict[str, Any]:
     metadata = provider.metadata()
     if not isinstance(metadata, Mapping):
         raise ValueError("provider metadata must be a mapping")
-    normalized = copy.deepcopy(dict(metadata))
-    missing = sorted({"model_id", "session_isolation", "retry_policy"} - set(normalized))
+    normalized = _safe_evidence_value(metadata)
+    missing = sorted({
+        "provider", "model_id", "provider_mode", "session_isolation", "retry_policy", "sampling",
+    } - set(normalized))
     if missing:
         raise ValueError(f"provider metadata missing required fields: {missing}")
-    if normalized["session_isolation"] not in {"per_agent_per_round", "per_agent"}:
-        raise ValueError("Meridian v1 requires non-shared provider session isolation")
-    if "retry_count" in normalized:
-        if not isinstance(normalized["retry_count"], int) or normalized["retry_count"] < 0:
-            raise ValueError("provider retry_count must be a non-negative integer")
-    elif normalized.get("retry_observability") != "unavailable":
-        raise ValueError("provider must report retry_count or retry_observability='unavailable'")
+    if not isinstance(normalized["provider"], str) or not normalized["provider"]:
+        raise ValueError("provider metadata provider must be a non-empty string")
+    if not isinstance(normalized["model_id"], str) or not normalized["model_id"]:
+        raise ValueError("provider metadata model_id must be a non-empty string")
+    if normalized["provider_mode"] not in {"dry", "live"}:
+        raise ValueError("provider metadata provider_mode must be 'dry' or 'live'")
+    if normalized["session_isolation"] != "per_agent_per_round":
+        raise ValueError("Meridian v1 requires per_agent_per_round provider session isolation")
+    if normalized["retry_policy"] != "none":
+        raise ValueError("Meridian v1 freezes retry_policy='none'")
+    normalized["sampling"] = _sampling_metadata(normalized)
     return normalized
 
 
+def _round_input_payload(
+    *,
+    instruction: str,
+    assigned_cards: Sequence[Mapping[str, str]],
+    round_number: int,
+    collective_context: Mapping[str, Any] | None,
+    naive_shared_findings: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    payload = {
+        "base_instruction": instruction,
+        "assigned_cards": [dict(card) for card in assigned_cards],
+        "round_number": round_number,
+        "collective_context": copy.deepcopy(collective_context),
+        "naive_shared_findings": copy.deepcopy(list(naive_shared_findings)),
+    }
+    payload["input_hashes"] = {
+        "base_instruction_sha256": payload_sha256(payload["base_instruction"]),
+        "assigned_cards_sha256": payload_sha256(payload["assigned_cards"]),
+        "round_number_sha256": payload_sha256(payload["round_number"]),
+        "collective_context_sha256": (
+            payload_sha256(payload["collective_context"])
+            if payload["collective_context"] is not None else None
+        ),
+        "naive_shared_findings_sha256": (
+            payload_sha256(payload["naive_shared_findings"])
+            if payload["naive_shared_findings"] else None
+        ),
+    }
+    payload["input_hashes"]["provider_visible_input_sha256"] = payload_sha256({
+        key: value for key, value in payload.items() if key != "input_hashes"
+    })
+    return payload
+
+
+def _normalize_usage(usage: Mapping[str, Any] | None) -> dict[str, Any]:
+    fields = ("input_tokens", "output_tokens", "total_tokens")
+    if usage is None:
+        return {"availability": "unavailable", **{field: None for field in fields}}
+    if not isinstance(usage, Mapping):
+        raise ValueError("provider usage metadata must be a mapping")
+    normalized = {field: usage.get(field) for field in fields}
+    if not all(value is None or (isinstance(value, int) and value >= 0) for value in normalized.values()):
+        raise ValueError("provider usage fields must be non-negative integers or null")
+    return {"availability": "provider_reported", **normalized}
+
+
+def _coerce_provider_response(response: Any) -> tuple[dict[str, Any], str | None, dict[str, Any], dict[str, Any]]:
+    if isinstance(response, ProviderRoundResponse):
+        output = response.output
+        raw_response_text = response.raw_response_text
+        usage = response.usage
+        response_metadata = response.response_metadata or {}
+    else:
+        output = response
+        raw_response_text = None
+        usage = None
+        response_metadata = {}
+    if not isinstance(output, Mapping):
+        raise ValueError("provider response output must be a mapping")
+    if raw_response_text is not None and not isinstance(raw_response_text, str):
+        raise ValueError("provider raw response must be text or null")
+    if not isinstance(response_metadata, Mapping):
+        raise ValueError("provider response metadata must be a mapping")
+    return (
+        copy.deepcopy(dict(output)),
+        _safe_evidence_value(raw_response_text),
+        _normalize_usage(usage),
+        _safe_evidence_value(response_metadata),
+    )
+
+
 class MeridianOutageHarness:
-    """Two-round offline runner; caller supplies provider and condition adapter."""
+    """Two-round Meridian runner with caller-supplied provider and condition adapter."""
 
     def __init__(self, provider: AgentProvider, adapter: CoordinationAdapter) -> None:
         self._provider = provider
@@ -549,33 +691,190 @@ class MeridianOutageHarness:
         round_inputs: dict[str, dict[str, Any]] = {}
         findings_by_agent: dict[str, list[dict[str, Any]]] = {}
         claims_by_agent: dict[str, list[dict[str, Any]]] = {}
-        failures: list[dict[str, str]] = []
+        provider_attempts: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        round_1_seconds: float | None = None
+        boundary_seconds: float | None = None
+        round_2_seconds: float | None = None
+        operator_result: Mapping[str, Any] = {"operator_action": "not_reached"}
 
-        self._adapter.start(
-            workspace_id=workspace_id,
-            agent_ids=sorted(assignments),
-            config=config,
-        )
-        try:
-            round_1_started = time.perf_counter()
-            for agent_id in sorted(assignments):
-                assigned_cards = cards_for_agent(manifest, agent_id)
-                output = dict(self._provider.run_round(
+        def call_provider(
+            *,
+            agent_id: str,
+            round_number: int,
+            assigned_cards: Sequence[Mapping[str, str]],
+            collective_context: Mapping[str, Any] | None,
+            naive_shared_findings: Sequence[Mapping[str, Any]],
+        ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+            input_payload = _round_input_payload(
+                instruction=RESEARCH_INSTRUCTION,
+                assigned_cards=assigned_cards,
+                round_number=round_number,
+                collective_context=collective_context,
+                naive_shared_findings=naive_shared_findings,
+            )
+            logical_call_id = f"round_{round_number}:{agent_id}"
+            attempt = {
+                "run_id": run_id,
+                "condition": condition,
+                "n_agents": n_agents,
+                "seed": manifest["assignment_seed"],
+                "round_number": round_number,
+                "agent_id": agent_id,
+                "logical_call_id": logical_call_id,
+                "attempt_number": 1,
+                "sequence": len(provider_attempts) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "provider": copy.deepcopy(provider_metadata),
+                "request_metadata": {
+                    "input_hashes": copy.deepcopy(input_payload["input_hashes"]),
+                    "assigned_card_ids": [card["card_id"] for card in assigned_cards],
+                },
+                "raw_response_text": None,
+                "response_metadata": {},
+                "usage": _normalize_usage(None),
+                "parser_schema_outcome": "not_attempted",
+                "success": False,
+                "failure_stage": None,
+                "exception": None,
+            }
+            provider_attempts.append(attempt)
+            response_received = False
+            try:
+                response = self._provider.run_round(
                     agent_id=agent_id,
-                    round_number=1,
+                    round_number=round_number,
                     instruction=RESEARCH_INSTRUCTION,
                     assigned_cards=assigned_cards,
-                    collective_context=None,
-                    naive_shared_findings=[],
-                ))
+                    collective_context=collective_context,
+                    naive_shared_findings=naive_shared_findings,
+                )
+                response_received = True
+                output, raw_response_text, usage, response_metadata = _coerce_provider_response(response)
+                attempt["raw_response_text"] = raw_response_text
+                attempt["usage"] = usage
+                attempt["response_metadata"] = response_metadata
                 findings = _findings(output)
                 claims = _claims(output)
                 output["claims"] = claims
-                round_outputs[f"round_1:{agent_id}"] = output
-                round_inputs[f"round_1:{agent_id}"] = {
-                    "collective_context": None,
-                    "naive_shared_findings": [],
+            except Exception as exc:
+                attempt["parser_schema_outcome"] = "failed"
+                attempt["failure_stage"] = "parser_schema" if response_received else "provider_invocation"
+                attempt["exception"] = {
+                    "type": type(exc).__name__,
+                    "message": _safe_evidence_value(str(exc)),
                 }
+                raise
+            attempt["parser_schema_outcome"] = "valid"
+            attempt["success"] = True
+            return output, input_payload, findings, claims
+
+        def build_result(
+            *,
+            run_status: str,
+            task_metrics: Mapping[str, Any] | None,
+            mechanism_metrics: Mapping[str, Any] | None,
+            cost_metrics: Mapping[str, Any],
+        ) -> dict[str, Any]:
+            attempted = len(provider_attempts)
+            succeeded = sum(attempt["success"] is True for attempt in provider_attempts)
+            failed = attempted - succeeded
+            total_seconds = time.perf_counter() - started
+            baseline = {
+                "frozen_implementation_commit": FROZEN_BASELINE_COMMIT,
+                "execution_commit": execution_commit,
+            }
+            if execution_commit != FROZEN_BASELINE_COMMIT:
+                baseline["successor_kind"] = successor_kind
+            return {
+                "schema_version": RESULT_SCHEMA_VERSION,
+                "preregistration": RESULT_SCHEMA_PREREGISTRATION,
+                "run_status": run_status,
+                "run_id": run_id,
+                "experiment_version": EXPERIMENT_VERSION,
+                "baseline": baseline,
+                "condition": condition,
+                "condition_config": config.to_dict(),
+                "n_agents": n_agents,
+                "seed": manifest["assignment_seed"],
+                "corpus_sha256": corpus_sha256(),
+                "ground_truth_sha256": ground_truth_sha256(),
+                "assignment_manifest_sha256": assignment_manifest_sha256(n_agents),
+                "provider": copy.deepcopy(provider_metadata),
+                "model_call_evidence": {
+                    "live_model_calls_performed": (
+                        provider_metadata["provider_mode"] == "live" and attempted > 0
+                    ),
+                    "logical_model_call_count_planned": 2 * n_agents,
+                    "characterization_logical_model_call_count_planned": 2 * n_agents * len(VALID_CONDITIONS),
+                    "logical_model_call_count_attempted": attempted,
+                    "logical_model_call_count_succeeded": succeeded,
+                    "logical_model_call_count_failed": failed,
+                    "retry_count": 0,
+                    "hidden_evaluator_model_calls": 0,
+                    "maximum_attempts_per_logical_call": 1,
+                },
+                "environment": {
+                    "python": sys.version,
+                    "platform": platform.platform(),
+                    "experimental_data_root": getattr(self._adapter, "data_root", None),
+                },
+                "timing": {
+                    "round_1_seconds": round_1_seconds,
+                    "round_boundary_seconds": boundary_seconds,
+                    "round_2_seconds": round_2_seconds,
+                    "total_seconds": total_seconds,
+                },
+                "task_metrics": copy.deepcopy(task_metrics),
+                "mechanism_metrics": copy.deepcopy(mechanism_metrics),
+                "cost_metrics": {
+                    **copy.deepcopy(dict(cost_metrics)),
+                    "total_wall_clock_seconds": total_seconds,
+                    "round_1_wall_clock_seconds": round_1_seconds,
+                    "round_boundary_wall_clock_seconds": boundary_seconds,
+                    "round_2_wall_clock_seconds": round_2_seconds,
+                    "provider_call_count": attempted,
+                    "model_call_count": attempted,
+                    "model_tokens": None,
+                    "coordination_model_call_count": 0,
+                    "coordination_model_tokens": 0,
+                    "restart_time_seconds": None,
+                    "failure_retry_count": 0,
+                    "failure_retry_observability": "reported",
+                    "human_operator_intervention_count": 0,
+                },
+                "failure_ledger": copy.deepcopy(failures),
+                "visibility_ledger": copy.deepcopy(visibility_ledger),
+                "artifact_hashes": {},
+            }
+
+        def raw_evidence(final_answer: Mapping[str, Any] | None) -> dict[str, Any]:
+            return {
+                "round_outputs": copy.deepcopy(round_outputs),
+                "round_inputs": copy.deepcopy(round_inputs),
+                "provider_attempts": copy.deepcopy(provider_attempts),
+                "final_answer": copy.deepcopy(final_answer),
+                "research_instruction": RESEARCH_INSTRUCTION,
+            }
+
+        try:
+            self._adapter.start(
+                workspace_id=workspace_id,
+                agent_ids=sorted(assignments),
+                config=config,
+            )
+            round_1_started = time.perf_counter()
+            for agent_id in sorted(assignments):
+                assigned_cards = cards_for_agent(manifest, agent_id)
+                output, input_payload, findings, claims = call_provider(
+                    agent_id=agent_id,
+                    round_number=1,
+                    assigned_cards=assigned_cards,
+                    collective_context=None,
+                    naive_shared_findings=[],
+                )
+                round_outputs[f"round_1:{agent_id}"] = output
+                round_inputs[f"round_1:{agent_id}"] = input_payload
                 findings_by_agent[agent_id] = findings
                 claims_by_agent[agent_id] = claims
                 visibility_ledger.append({
@@ -590,7 +889,7 @@ class MeridianOutageHarness:
             round_1_seconds = time.perf_counter() - round_1_started
 
             boundary_started = time.perf_counter()
-            operator_result: Mapping[str, Any] = {"operator_action": "none"}
+            operator_result = {"operator_action": "none"}
             if config.hivemind_enabled:
                 operator_result = self._adapter.process_round_boundary()
             naive_shared = _naive_shared_findings(findings_by_agent) if config.naive_shared_content else []
@@ -606,21 +905,15 @@ class MeridianOutageHarness:
                     context_available = bool(available_context)
                     if config.collective_context_surfaced:
                         collective_context = available_context
-                output = dict(self._provider.run_round(
+                output, input_payload, _unused_findings, claims = call_provider(
                     agent_id=agent_id,
                     round_number=2,
-                    instruction=RESEARCH_INSTRUCTION,
                     assigned_cards=assigned_cards,
                     collective_context=collective_context,
                     naive_shared_findings=naive_shared,
-                ))
-                claims = _claims(output)
-                output["claims"] = claims
+                )
                 round_outputs[f"round_2:{agent_id}"] = output
-                round_inputs[f"round_2:{agent_id}"] = {
-                    "collective_context": copy.deepcopy(collective_context),
-                    "naive_shared_findings": copy.deepcopy(naive_shared),
-                }
+                round_inputs[f"round_2:{agent_id}"] = input_payload
                 claims_by_agent[agent_id].extend(claims)
                 context_consumed = bool(
                     collective_context is not None
@@ -677,78 +970,45 @@ class MeridianOutageHarness:
                     "operator_result": dict(operator_result),
                 },
             })
-            total_seconds = time.perf_counter() - started
             cost_metrics = {
-                "total_wall_clock_seconds": total_seconds,
-                "round_1_wall_clock_seconds": round_1_seconds,
-                "round_boundary_wall_clock_seconds": boundary_seconds,
-                "round_2_wall_clock_seconds": round_2_seconds,
-                "provider_call_count": len(round_outputs),
-                "model_call_count": provider_metadata.get("model_call_count"),
-                "model_tokens": None,
-                "coordination_model_call_count": 0,
-                "coordination_model_tokens": 0,
                 **dict(self._adapter.cost_metrics()),
-                "restart_time_seconds": None,
-                "failure_retry_count": provider_metadata.get("retry_count"),
-                "failure_retry_observability": provider_metadata.get(
-                    "retry_observability", "reported"
-                ),
-                "human_operator_intervention_count": 0,
-            }
-            baseline = {
-                "frozen_implementation_commit": FROZEN_BASELINE_COMMIT,
-                "execution_commit": execution_commit,
-            }
-            if execution_commit != FROZEN_BASELINE_COMMIT:
-                baseline["successor_kind"] = successor_kind
-            result = {
-                "schema_version": RESULT_SCHEMA_VERSION,
-                "preregistration": RESULT_SCHEMA_PREREGISTRATION,
-                "run_id": run_id,
-                "experiment_version": EXPERIMENT_VERSION,
-                "baseline": baseline,
-                "condition": condition,
-                "condition_config": config.to_dict(),
-                "n_agents": n_agents,
-                "seed": manifest["assignment_seed"],
-                "corpus_sha256": corpus_sha256(),
-                "ground_truth_sha256": ground_truth_sha256(),
-                "assignment_manifest_sha256": assignment_manifest_sha256(n_agents),
-                "provider": provider_metadata,
-                "environment": {
-                    "python": sys.version,
-                    "platform": platform.platform(),
-                    "live_model_calls": False,
-                    "experimental_data_root": getattr(self._adapter, "data_root", None),
-                },
-                "timing": {
-                    "round_1_seconds": round_1_seconds,
-                    "round_boundary_seconds": boundary_seconds,
-                    "round_2_seconds": round_2_seconds,
-                    "total_seconds": total_seconds,
-                },
-                "task_metrics": task_metrics,
-                "mechanism_metrics": mechanism_metrics,
-                "cost_metrics": cost_metrics,
-                "failure_ledger": failures,
-                "visibility_ledger": visibility_ledger,
-                "artifact_hashes": {},
             }
             telemetry_records = getattr(self._adapter, "telemetry_records", [])
             return write_sealed_run(
                 output_root,
-                result=result,
-                raw_outputs={
-                    "round_outputs": round_outputs,
-                    "round_inputs": round_inputs,
-                    "final_answer": final_answer,
-                    "research_instruction": RESEARCH_INSTRUCTION,
-                },
+                result=build_result(
+                    run_status="COMPLETE",
+                    task_metrics=task_metrics,
+                    mechanism_metrics=mechanism_metrics,
+                    cost_metrics=cost_metrics,
+                ),
+                raw_outputs=raw_evidence(final_answer),
                 telemetry_records=copy.deepcopy(telemetry_records),
             )
         except Exception as exc:
-            failures.append({"stage": "harness", "error_type": type(exc).__name__, "message": str(exc)})
-            raise
+            failed_attempt = next(
+                (attempt for attempt in reversed(provider_attempts) if attempt["success"] is False),
+                None,
+            )
+            failures.append({
+                "stage": "provider_or_schema" if failed_attempt is not None else "harness_or_evidence",
+                "logical_call_id": failed_attempt["logical_call_id"] if failed_attempt else None,
+                "error_type": type(exc).__name__,
+                "message": _safe_evidence_value(str(exc)),
+                "unexecuted_logical_call_count": (2 * n_agents) - len(provider_attempts),
+                "condition_partially_administered": bool(provider_attempts),
+            })
+            telemetry_records = getattr(self._adapter, "telemetry_records", [])
+            return write_sealed_run(
+                output_root,
+                result=build_result(
+                    run_status="FAILED",
+                    task_metrics=None,
+                    mechanism_metrics=None,
+                    cost_metrics={},
+                ),
+                raw_outputs=raw_evidence(None),
+                telemetry_records=copy.deepcopy(telemetry_records),
+            )
         finally:
             self._adapter.close()
