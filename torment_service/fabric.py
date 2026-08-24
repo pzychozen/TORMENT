@@ -6663,8 +6663,20 @@ class TormentFabric:
 
             if len(agents) >= min_distinct_agents:
                 approved_groups += 1
-                # choose representative proposal: highest strength then confidence
-                rep_idx = max(group, key=lambda k: (P[k].strength, P[k].confidence))
+                # Canonical content must come from a proposal that contributed
+                # independent-agent authority to this quorum-qualified group.
+                authority_candidates = [
+                    k for k in group if P[k].mtype != "collective_echo"
+                ]
+                if not authority_candidates:
+                    raise RuntimeError(
+                        "quorum-qualified proposal group has no authority contributor"
+                    )
+                # Choose the strongest authority-contributing representative.
+                rep_idx = max(
+                    authority_candidates,
+                    key=lambda k: (P[k].strength, P[k].confidence),
+                )
                 rep = P[rep_idx]
                 emb = E[rep_idx]
 

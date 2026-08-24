@@ -23,6 +23,7 @@ E4_WORKSPACE = "hive_phase2_e4"
 E5_WORKSPACE = "hive_phase2_e5"
 E7_WORKSPACE_A = "hive_phase2_e7_a"
 E7_WORKSPACE_B = "hive_phase2_e7_b"
+REPRESENTATIVE_WORKSPACE = "hive_phase2_representative"
 DOMAIN = "research"
 
 
@@ -41,6 +42,14 @@ def fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _embedding() -> list[float]:
     """A valid deterministic 384-dimension input for the ordinary ingest API."""
     return np.linspace(0.1, 1.0, 384, dtype=np.float32).tolist()
+
+
+def _proposal_embedding(second_component: float) -> list[float]:
+    """Near-identical vectors with a deliberate, inspectable distinction."""
+    embedding = np.zeros(384, dtype=np.float32)
+    embedding[0] = 1.0
+    embedding[1] = second_component
+    return (embedding / np.linalg.norm(embedding)).tolist()
 
 
 def _prepare_workspace(fabric: TormentFabric, workspace_id: str) -> None:
@@ -192,6 +201,105 @@ class TestE3GovernanceEmission:
 
 
 class TestE6BridgeQuorum:
+    def test_collective_candidate_remains_group_evidence_but_cannot_represent(
+        self, fabric: TormentFabric,
+    ) -> None:
+        """Collective provenance remains grouped without owning canon content."""
+        _prepare_workspace(fabric, REPRESENTATIVE_WORKSPACE)
+        authority_embedding = _proposal_embedding(0.0)
+        supporting_embedding = _proposal_embedding(0.1)
+        collective_embedding = _proposal_embedding(0.2)
+
+        authority = fabric.propose_share(
+            workspace_id=REPRESENTATIVE_WORKSPACE,
+            agent_id="authority_agent_a",
+            summary="Independent proposition selected by agent A",
+            embedding=authority_embedding,
+            domain_id=DOMAIN,
+            mtype="fact",
+            strength=0.8,
+            confidence=0.7,
+        )["proposal"]
+        support = fabric.propose_share(
+            workspace_id=REPRESENTATIVE_WORKSPACE,
+            agent_id="authority_agent_b",
+            summary="Independent proposition selected by agent B",
+            embedding=supporting_embedding,
+            domain_id=DOMAIN,
+            mtype="fact",
+            strength=0.7,
+            confidence=0.7,
+        )["proposal"]
+        collective = fabric.propose_share(
+            workspace_id=REPRESENTATIVE_WORKSPACE,
+            agent_id="collective_evidence",
+            summary="[collective proposal] convergence metadata only",
+            embedding=collective_embedding,
+            domain_id=DOMAIN,
+            mtype="collective_echo",
+            strength=0.99,
+            confidence=0.99,
+        )["proposal"]
+
+        processed = fabric.process_proposals(
+            workspace_id=REPRESENTATIVE_WORKSPACE,
+            domain_id=DOMAIN,
+        )
+
+        assert processed["approved"] == 3
+        shared = fabric.get_workspace(REPRESENTATIVE_WORKSPACE).shared_graphs[DOMAIN].entities[
+            processed["created_shared_eids"][0]
+        ]
+        stored_embedding = fabric.get_workspace(REPRESENTATIVE_WORKSPACE).shared_graphs[
+            DOMAIN
+        ]._shard_reader.load_one(shared.payload["embedding_ref"])
+        assert shared.payload["summary"] == "Independent proposition selected by agent A"
+        assert shared.payload["type"] == "fact"
+        assert stored_embedding is not None
+        assert np.allclose(stored_embedding, authority_embedding)
+        assert shared.payload["support_agents"] == ["authority_agent_a", "authority_agent_b"]
+        assert set(shared.payload["source_proposal_ids"]) == {
+            authority["proposal_id"],
+            support["proposal_id"],
+            collective["proposal_id"],
+        }
+
+    def test_collective_only_proposals_cannot_establish_quorum_or_create_canon(
+        self, fabric: TormentFabric,
+    ) -> None:
+        workspace_id = f"{REPRESENTATIVE_WORKSPACE}_collective_only"
+        _prepare_workspace(fabric, workspace_id)
+        first = fabric.propose_share(
+            workspace_id=workspace_id,
+            agent_id="collective_evidence_a",
+            summary="[collective proposal] first metadata artifact",
+            embedding=_proposal_embedding(0.0),
+            domain_id=DOMAIN,
+            mtype="collective_echo",
+            strength=0.99,
+            confidence=0.99,
+        )["proposal"]
+        second = fabric.propose_share(
+            workspace_id=workspace_id,
+            agent_id="collective_evidence_b",
+            summary="[collective proposal] second metadata artifact",
+            embedding=_proposal_embedding(0.1),
+            domain_id=DOMAIN,
+            mtype="collective_echo",
+            strength=0.98,
+            confidence=0.98,
+        )["proposal"]
+
+        processed = fabric.process_proposals(workspace_id=workspace_id, domain_id=DOMAIN)
+
+        registry = fabric.get_workspace(workspace_id).proposals[DOMAIN]
+        assert processed["approved"] == 0
+        assert processed["created_shared_eids"] == []
+        assert {proposal.proposal_id for proposal in registry.list_pending(limit=100)} == {
+            first["proposal_id"],
+            second["proposal_id"],
+        }
+
     def test_collective_proposal_does_not_supply_independent_quorum(
         self, fabric: TormentFabric,
     ) -> None:
@@ -294,7 +402,9 @@ class TestE6BridgeQuorum:
             direct["proposal_id"],
             direct_c["proposal_id"],
         }
-        assert source_event_id in shared_entity.payload["summary"]
+        assert shared_entity.payload["summary"] == "Shared oscillator study result"
+        assert source_event_id not in shared_entity.payload["summary"]
+        assert shared_entity.payload["type"] == "fact"
 
     def test_two_direct_agents_still_reach_default_quorum(
         self, fabric: TormentFabric,
