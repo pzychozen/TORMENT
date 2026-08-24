@@ -33,6 +33,12 @@ It proves:
      (packet absence is non-punitive).
   9. No forbidden proof/claim flag exists in the audit-relevant production surfaces.
 
+Source-audit policy: a passing AST guard has inspected every file in its
+declared scope. ``_iter_service_trees`` deliberately covers top-level
+``torment_service/*.py`` only; nested service packages are outside this guard's
+scope and require separate review. Any parse failure inside either declared
+scope fails the relevant audit rather than silently reducing that scope.
+
 No forbidden wording is introduced (the set below is a quoted guard list).
 """
 
@@ -42,6 +48,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from unittest.mock import patch
 
 from torment_service.agent_loop import AgentRunner, Observation
 from torment_service.thinking_controller import ThinkingController
@@ -69,12 +76,19 @@ def _torment_service_dir():
 
 def _parse_service(filename):
     with open(os.path.join(_torment_service_dir(), filename), "rb") as fh:
-        # null-strip tolerates a mount-corruption artifact in some sandboxes;
-        # the authoritative Windows repo parses cleanly.
+        # Normalize the known NUL mount-corruption artifact before parsing.
+        # Remaining SyntaxError/ValueError failures are collected by each
+        # scoped guard and fail it closed; ValueError remains defensive after
+        # normalization. OSError is deliberately uncaught and fails loudly.
         return ast.parse(fh.read().replace(b"\x00", b""))
 
 
-def _iter_service_trees():
+def _iter_service_trees(unparseable):
+    """Yield top-level ``torment_service/*.py`` ASTs only.
+
+    ``unparseable`` is a required ledger for files in this declared scope that
+    fail AST parsing; callers must assert it empty after the scan.
+    """
     svc = _torment_service_dir()
     for fn in sorted(os.listdir(svc)):
         if not fn.endswith(".py"):
@@ -82,6 +96,7 @@ def _iter_service_trees():
         try:
             yield fn, _parse_service(fn)
         except (SyntaxError, ValueError):
+            unparseable.append(fn)
             continue
 
 
@@ -262,7 +277,8 @@ class TestNoProductionCallerOwnsBothHalves(unittest.TestCase):
 
     def test_no_function_calls_assemble_context_and_run_turn(self):
         offenders = []
-        for fn, tree in _iter_service_trees():
+        unparseable = []
+        for fn, tree in _iter_service_trees(unparseable):
             # Alias-aware (Codex-required): module-level or local rebinding of
             # either half (``ac = assemble_context`` / ``rt = runner.run_turn``
             # / import-as) must not evade detection.
@@ -271,6 +287,11 @@ class TestNoProductionCallerOwnsBothHalves(unittest.TestCase):
                 called = _called_targets(func, alias)
                 if "assemble_context" in called and "run_turn" in called:
                     offenders.append(f"{fn}:{func.name}")
+        self.assertEqual(
+            unparseable, [],
+            msg=("unparseable top-level torment_service source file(s): "
+                 f"{sorted(unparseable)}"),
+        )
         # The exemption below holds ONLY while the orchestrator is proven
         # dormant; any production reference voids it and this test goes red.
         self.assertEqual(
@@ -296,12 +317,18 @@ class TestNoProductionCallerOwnsBothHalves(unittest.TestCase):
         ``test_no_production_caller_passes_audit_items_into_run_turn``; the
         absolute "none exist" claim was true only for the pre-bridge topology.)"""
         callers = set()
-        for fn, tree in _iter_service_trees():
+        unparseable = []
+        for fn, tree in _iter_service_trees(unparseable):
             for n in ast.walk(tree):
                 if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                         and n.func.attr == "run_turn"
                         and any(k.arg == "audit_admitted_context_items" for k in n.keywords)):
                     callers.add(fn)
+        self.assertEqual(
+            unparseable, [],
+            msg=("unparseable top-level torment_service source file(s): "
+                 f"{sorted(unparseable)}"),
+        )
         self.assertEqual(
             sorted(callers), [_APPROVED_AUDIT_ITEMS_BRIDGE],
             msg=("exactly the approved private bridge may pass "
@@ -423,12 +450,17 @@ class TestNoForbiddenFlagInAuditSurfaces(unittest.TestCase):
         # tokens like ``authority_status`` do not false-match ``authority`` and
         # docstring/comment prose is ignored.
         surfaces = set()
+        unparseable = []
         for fn in ("audit_prompt_inclusion_observation.py", "audit_evidence_sidecar.py",
                    "audit_evidence_packet.py", "audit_evidence_context.py"):
             try:
                 surfaces |= _idents(_parse_service(fn))
             except (SyntaxError, ValueError):
-                pass
+                unparseable.append(fn)
+        self.assertEqual(
+            unparseable, [],
+            msg=f"unparseable audit source file(s): {sorted(unparseable)}",
+        )
         runner = _class(_parse_service("agent_loop.py"), "AgentRunner")
         surfaces |= _idents(_method(runner, "run_turn"))
         offenders = surfaces & _FORBIDDEN_FLAGS
@@ -635,6 +667,95 @@ class TestGuardTeethForbiddenFlags(unittest.TestCase):
             "authority_status = 1\n"
         )
         self.assertEqual(self._flags(src), set())
+
+
+class TestGuardTeethFailClosedParsing(unittest.TestCase):
+    """Synthetic parse-failure and completeness teeth for the declared scopes."""
+
+    _FORBIDDEN_SURFACES = (
+        "audit_prompt_inclusion_observation.py",
+        "audit_evidence_sidecar.py",
+        "audit_evidence_packet.py",
+        "audit_evidence_context.py",
+    )
+    _ORDINARY_SERVICE_FILE = "action_policy.py"
+
+    def test_unparseable_forbidden_surface_fails_with_filename(self):
+        real_parse = _parse_service
+        target = "audit_evidence_context.py"
+
+        def synthetic_parse(filename):
+            if filename == target:
+                return ast.parse("verified\nif\n")
+            return real_parse(filename)
+
+        guard = TestNoForbiddenFlagInAuditSurfaces(
+            "test_no_forbidden_proof_or_claim_flag"
+        )
+        with patch(__name__ + "._parse_service", side_effect=synthetic_parse):
+            with self.assertRaises(AssertionError) as failure:
+                guard.test_no_forbidden_proof_or_claim_flag()
+        self.assertIn(target, str(failure.exception))
+
+    def test_unparseable_ordinary_service_file_fails_with_filename(self):
+        target = self._ORDINARY_SERVICE_FILE
+
+        def synthetic_parse(filename):
+            if filename == target:
+                return ast.parse("runner.run_turn()\nif\n")
+            raise AssertionError(f"unexpected synthetic parse target: {filename}")
+
+        unparseable = []
+        with patch(__name__ + ".os.listdir", return_value=[target]):
+            with patch(__name__ + "._parse_service", side_effect=synthetic_parse):
+                scanned = list(_iter_service_trees(unparseable))
+        self.assertEqual(scanned, [])
+        self.assertEqual(unparseable, [target])
+
+        def reported_iterator(ledger):
+            ledger.append(target)
+            return iter(())
+
+        guard = TestNoProductionCallerOwnsBothHalves(
+            "test_no_function_calls_assemble_context_and_run_turn"
+        )
+        with patch(__name__ + "._iter_service_trees", side_effect=reported_iterator):
+            with self.assertRaises(AssertionError) as failure:
+                guard.test_no_function_calls_assemble_context_and_run_turn()
+        self.assertIn(target, str(failure.exception))
+
+    def test_named_audit_surfaces_are_inspected_on_clean_tree(self):
+        real_parse = _parse_service
+        seen = []
+
+        def recording_parse(filename):
+            seen.append(filename)
+            return real_parse(filename)
+
+        guard = TestNoForbiddenFlagInAuditSurfaces(
+            "test_no_forbidden_proof_or_claim_flag"
+        )
+        with patch(__name__ + "._parse_service", side_effect=recording_parse):
+            guard.test_no_forbidden_proof_or_claim_flag()
+        self.assertEqual(seen[:4], list(self._FORBIDDEN_SURFACES))
+
+    def test_top_level_iterator_is_complete_and_clean(self):
+        unparseable = []
+        scanned = {filename for filename, _ in _iter_service_trees(unparseable)}
+        self.assertEqual(unparseable, [])
+        self.assertTrue(
+            {
+                "app.py",
+                "agent_loop.py",
+                _APPROVED_AUDIT_ITEMS_BRIDGE,
+                "memory_context_orchestrator.py",
+            }.issubset(scanned),
+            msg=f"top-level service scan missing required files: {sorted(scanned)}",
+        )
+        self.assertGreaterEqual(
+            len(scanned), 80,
+            msg=f"top-level service scan unexpectedly incomplete: {len(scanned)} files",
+        )
 
 
 class TestGuardTeethRecursiveImporterScan(unittest.TestCase):
