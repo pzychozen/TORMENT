@@ -10,7 +10,10 @@ import importlib.util
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from torment_service.non_spine_llm_runtime import (
@@ -25,7 +28,22 @@ from .harness import ProviderRoundResponse, RESEARCH_INSTRUCTION
 from .spec import CARD_IDS, payload_sha256
 
 
-FROZEN_MODEL_ID = "claude-haiku-4-5-20251001"
+FROZEN_MODEL_ID = "claude-sonnet-5"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_DOTENV_PATH = REPO_ROOT / ".env"
+HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\meridian_outage_v1_n5_characterization_20260824",
+    "run_id": "meridian-n5-characterization-20260824-a-private",
+    "status": "FAILED",
+    "cause": "operator-session credential rejected by Anthropic with 401 invalid x-api-key",
+})
+SONNET5_CHARACTERIZATION_ROOT = r"C:\TORMENT\meridian_outage_v1_n5_sonnet5_characterization_20260824"
+SONNET5_CHARACTERIZATION_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5-characterization-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5-characterization-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5-characterization-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5-characterization-20260824-c-naive-shared-content",
+})
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
 _SAMPLING_DEFAULT = {"mode": "provider_default", "explicit_value": None}
@@ -37,6 +55,56 @@ _FINAL_ANSWER_KEYS = frozenset({"root_cause", "contributing_factors", "cited_car
 
 class MeridianProviderResponseError(ValueError):
     """The model response does not meet the frozen Meridian output contract."""
+
+
+@dataclass(frozen=True)
+class MeridianDotenvBootstrap:
+    """Redacted result of the experiment-local, non-overriding dotenv bootstrap."""
+
+    dotenv_path: str
+    dotenv_loaded: bool
+    credential_configured: bool
+
+
+def load_repo_dotenv_safely(
+    *,
+    environment: MutableMapping[str, str] | None = None,
+    dotenv_path: Path = REPO_DOTENV_PATH,
+) -> MeridianDotenvBootstrap:
+    """Load the repository `.env` without overriding process environment values.
+
+    This follows the user-facing tool convention. The returned status never
+    includes credential values; callers must use it only to report readiness.
+    """
+
+    env = environment if environment is not None else os.environ
+    try:
+        resolved = Path(dotenv_path).resolve()
+    except OSError:
+        resolved = Path(dotenv_path)
+    loaded = False
+    if resolved.exists() and resolved.is_file():
+        try:
+            with open(resolved, "r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                        value = value[1:-1]
+                    if key and key not in env:
+                        env[key] = value
+            loaded = True
+        except OSError:
+            pass
+    return MeridianDotenvBootstrap(
+        dotenv_path=str(resolved),
+        dotenv_loaded=loaded,
+        credential_configured=AnthropicNonSpineLLMProviderAdapter.API_KEY_ENV in env,
+    )
 
 
 class _FrozenAnthropicEnvironment:
@@ -139,7 +207,7 @@ class FrozenAnthropicMeridianProvider:
         environment: Mapping[str, str] | None = None,
     ) -> None:
         if model_id != FROZEN_MODEL_ID:
-            raise ValueError("Meridian v1 requires the frozen dated Anthropic model ID")
+            raise ValueError("Meridian v1 requires the frozen Anthropic model ID")
         if AnthropicNonSpineLLMProviderAdapter.MAX_TOKENS != 1024:
             raise ValueError("native Anthropic adapter no longer has Meridian's frozen max_tokens")
         if AnthropicNonSpineLLMProviderAdapter.DEFAULT_TIMEOUT_SECONDS != 30:
@@ -149,6 +217,20 @@ class FrozenAnthropicMeridianProvider:
         self._native_adapter = native_adapter or AnthropicNonSpineLLMProviderAdapter(
             env=_FrozenAnthropicEnvironment(self._environment, self._model_id),
         )
+
+    @classmethod
+    def from_repo_dotenv(
+        cls,
+        *,
+        native_adapter: NonSpineLLMProviderAdapter | None = None,
+        environment: MutableMapping[str, str] | None = None,
+        dotenv_path: Path = REPO_DOTENV_PATH,
+    ) -> tuple["FrozenAnthropicMeridianProvider", MeridianDotenvBootstrap]:
+        """Bootstrap the local environment before constructing the frozen bridge."""
+
+        env = environment if environment is not None else os.environ
+        bootstrap = load_repo_dotenv_safely(environment=env, dotenv_path=dotenv_path)
+        return cls(native_adapter=native_adapter, environment=env), bootstrap
 
     def metadata(self) -> dict[str, Any]:
         return {

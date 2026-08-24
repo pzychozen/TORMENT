@@ -11,7 +11,11 @@ import pytest
 from experiments.hivemind_meridian_outage_v1.anthropic_provider import (
     FROZEN_MODEL_ID,
     FrozenAnthropicMeridianProvider,
+    HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT,
     MeridianProviderResponseError,
+    SONNET5_CHARACTERIZATION_ROOT,
+    SONNET5_CHARACTERIZATION_RUN_IDS,
+    load_repo_dotenv_safely,
     parse_meridian_response,
 )
 from experiments.hivemind_meridian_outage_v1.harness import (
@@ -19,10 +23,11 @@ from experiments.hivemind_meridian_outage_v1.harness import (
     NullCoordinationAdapter,
     RESEARCH_INSTRUCTION,
 )
-from experiments.hivemind_meridian_outage_v1.results import verify_sealed_run
+from experiments.hivemind_meridian_outage_v1.results import RESULT_SCHEMA_VERSION, verify_sealed_run
 from experiments.hivemind_meridian_outage_v1.spec import cards_for_agent, assignment_manifest
 from torment_service.non_spine_llm_runtime import (
     NonSpineLLMProviderAdapter,
+    NonSpineLLMRealProviderError,
     NonSpineLLMProviderResult,
 )
 
@@ -86,6 +91,69 @@ def _cards() -> list[dict[str, str]]:
     return cards_for_agent(manifest, "researcher_001")
 
 
+def test_sonnet5_model_and_result_schema_are_frozen_for_the_corrected_characterization() -> None:
+    assert FROZEN_MODEL_ID == "claude-sonnet-5"
+    assert RESULT_SCHEMA_VERSION == "meridian-result-v2"
+
+
+def test_repo_dotenv_bootstrap_is_redacted_and_process_environment_takes_precedence(tmp_path: Path) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "ANTHROPIC_API_KEY=dotenv-test-secret\n"
+        "TORMENT_NON_SPINE_LLM_REAL_PROVIDER=0\n"
+        "MERIDIAN_TEST_VALUE=from-dotenv\n",
+        encoding="utf-8",
+    )
+    environment = {
+        "ANTHROPIC_API_KEY": "process-test-secret",
+        "TORMENT_NON_SPINE_LLM_REAL_PROVIDER": "1",
+    }
+
+    bootstrap = load_repo_dotenv_safely(environment=environment, dotenv_path=dotenv_path)
+
+    assert bootstrap.dotenv_path == str(dotenv_path.resolve())
+    assert bootstrap.dotenv_loaded is True
+    assert bootstrap.credential_configured is True
+    assert environment["ANTHROPIC_API_KEY"] == "process-test-secret"
+    assert environment["TORMENT_NON_SPINE_LLM_REAL_PROVIDER"] == "1"
+    assert environment["MERIDIAN_TEST_VALUE"] == "from-dotenv"
+    status_text = json.dumps({
+        "dotenv_path": bootstrap.dotenv_path,
+        "dotenv_loaded": bootstrap.dotenv_loaded,
+        "credential_configured": bootstrap.credential_configured,
+    })
+    assert "process-test-secret" not in status_text
+    assert "dotenv-test-secret" not in status_text
+
+
+def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_path: Path) -> None:
+    environment = {"TORMENT_NON_SPINE_LLM_REAL_PROVIDER": "1"}
+    provider, bootstrap = FrozenAnthropicMeridianProvider.from_repo_dotenv(
+        environment=environment,
+        dotenv_path=tmp_path / "missing.env",
+    )
+
+    assert bootstrap.dotenv_loaded is False
+    assert bootstrap.credential_configured is False
+    assert provider.preflight()["credential_configured"] is False
+    with pytest.raises(NonSpineLLMRealProviderError, match="ANTHROPIC_API_KEY is not set"):
+        provider.run_round(
+            agent_id="researcher_001", round_number=1, instruction=RESEARCH_INSTRUCTION,
+            assigned_cards=_cards(), collective_context=None, naive_shared_findings=[],
+        )
+
+
+def test_historical_failed_identity_is_preserved_and_sonnet5_identity_is_distinct() -> None:
+    assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["status"] == "FAILED"
+    assert "401 invalid x-api-key" in HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["cause"]
+    assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["root"] != SONNET5_CHARACTERIZATION_ROOT
+    assert len(SONNET5_CHARACTERIZATION_RUN_IDS) == 4
+    assert len(set(SONNET5_CHARACTERIZATION_RUN_IDS.values())) == 4
+    assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["run_id"] not in set(
+        SONNET5_CHARACTERIZATION_RUN_IDS.values()
+    )
+
+
 def test_valid_json_uses_native_public_seam_and_preserves_raw_text_exactly() -> None:
     provider, native = _provider()
     response = provider.run_round(
@@ -134,7 +202,10 @@ def test_parser_rejects_unknown_top_level_keys_and_missing_citations() -> None:
 
 
 def test_metadata_freezes_exact_configuration_and_contains_no_credentials() -> None:
-    provider, _ = _provider()
+    provider = FrozenAnthropicMeridianProvider(environment={
+        "ANTHROPIC_API_KEY": "metadata-test-secret",
+        "TORMENT_NON_SPINE_LLM_REAL_PROVIDER": "1",
+    })
     metadata = provider.metadata()
     assert metadata["provider"] == "AnthropicNonSpineLLMProviderAdapter"
     assert metadata["model_id"] == FROZEN_MODEL_ID
@@ -145,6 +216,7 @@ def test_metadata_freezes_exact_configuration_and_contains_no_credentials() -> N
     for field in ("temperature", "top_p", "top_k", "thinking"):
         assert metadata["sampling"][field] == {"mode": "provider_default", "explicit_value": None}
     assert "key" not in json.dumps(metadata).lower()
+    assert "metadata-test-secret" not in json.dumps(metadata)
 
 
 def test_prompt_rendering_is_deterministic_and_does_not_expose_condition_names() -> None:

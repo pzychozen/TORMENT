@@ -101,12 +101,46 @@ provider calls, with no hidden evaluator calls.
 
 The experiment-local `FrozenAnthropicMeridianProvider` is the only frozen
 bridge for a separately authorized live Meridian characterization. It uses the
-existing gated `AnthropicNonSpineLLMProviderAdapter` public seam, pins the dated
-model identifier, 1024-token limit, and 30-second timeout without altering the
-operator environment, and has no transcript state. Its prompt requires exactly
-one strict JSON object; malformed text is preserved and sealed as failed
-evidence rather than repaired or retried. Constructing the bridge or calling
-its preflight performs no model contact and exposes no credential value.
+existing gated `AnthropicNonSpineLLMProviderAdapter` public seam, pins
+`claude-sonnet-5`, the 1024-token limit, and the 30-second timeout without
+altering provider-default sampling, and has no transcript state. Its prompt
+requires exactly one strict JSON object; malformed text is preserved and sealed
+as failed evidence rather than repaired or retried. Constructing the bridge or
+calling its preflight performs no model contact and exposes no credential value.
+
+## Corrected live-provider configuration and identity
+
+Before a separately authorized live run, use the bridge's
+`FrozenAnthropicMeridianProvider.from_repo_dotenv()` bootstrap. It applies the
+same standard-library, non-overriding `KEY=value` loading convention used by
+TORMENT's user-facing tools: it reads only the repository-root `.env`, leaves
+all existing process values (including deliberately empty ones) unchanged, and
+returns only a redacted configured/not-configured status. No credential value is
+printed, hashed, persisted, or added to provider metadata. The real-provider
+gate is deliberately operator controlled rather than stored in `.env`; it must
+be set to the native adapter's exact enabled value, `TORMENT_NON_SPINE_LLM_REAL_PROVIDER=1`.
+
+`HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT` is immutable evidence at
+`C:\TORMENT\meridian_outage_v1_n5_characterization_20260824`, with prior run ID
+`meridian-n5-characterization-20260824-a-private`. It sealed `FAILED` after one
+attempt because the operator-session credential was rejected by Anthropic with
+`401 invalid x-api-key`. That is not a Haiku availability result, Hivemind
+result, efficacy result, or parser result. It must never be overwritten, reused,
+or deleted.
+
+The corrected Sonnet 5 characterization has a distinct, frozen identity before
+any model contact:
+
+| Condition | New run ID |
+| --- | --- |
+| A_PRIVATE | `meridian-n5-sonnet5-characterization-20260824-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5-characterization-20260824-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5-characterization-20260824-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5-characterization-20260824-c-naive-shared-content` |
+
+Its external root is
+`C:\TORMENT\meridian_outage_v1_n5_sonnet5_characterization_20260824`.
+The new root and all four IDs are distinct from the failed historical attempt.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run
