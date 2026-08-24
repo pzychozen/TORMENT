@@ -34,11 +34,8 @@ def fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TORMENT_COMPRESS_ENABLE", "0")
     monkeypatch.setenv("TORMENT_SRG_ENABLE", "0")
     monkeypatch.setenv("TORMENT_SQLITE_INDEX_ENABLE", "0")
-    instance = TormentFabric(data_dir=str(tmp_path))
-    try:
+    with TormentFabric(data_dir=str(tmp_path)) as instance:
         yield instance
-    finally:
-        instance.close()
 
 
 def _embedding() -> list[float]:
