@@ -158,8 +158,11 @@ class _ForcedReview(ThinkingController):
         self._forced = forced
         self.review_drafts: List[Any] = []
 
-    def review(self, *, frame, mode, action, response_draft):
-        self.review_drafts.append(response_draft)
+    def review(self, *args, **kwargs):
+        expected = {"frame", "mode", "action", "response_draft"}
+        if args or set(kwargs) != expected:
+            raise AssertionError("AgentRunner review must use named arguments")
+        self.review_drafts.append(kwargs["response_draft"])
         return self._forced
 
 
