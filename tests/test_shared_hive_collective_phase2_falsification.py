@@ -7,6 +7,7 @@ temporary data roots and record the current scope-transition behavior.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,19 @@ DOMAIN = "research"
 def fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Real Fabric with only deterministic, already-supported test settings."""
     monkeypatch.setenv("TORMENT_HIVEMIND_ENABLE", "1")
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+    monkeypatch.setenv("TORMENT_COMPRESS_ENABLE", "0")
+    monkeypatch.setenv("TORMENT_SRG_ENABLE", "0")
+    monkeypatch.setenv("TORMENT_SQLITE_INDEX_ENABLE", "0")
+    with TormentFabric(data_dir=str(tmp_path)) as instance:
+        yield instance
+
+
+@pytest.fixture
+def telemetry_fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Real Fabric with optional Hivemind decision telemetry enabled."""
+    monkeypatch.setenv("TORMENT_HIVEMIND_ENABLE", "1")
+    monkeypatch.setenv("TORMENT_HIVEMIND_TELEMETRY", "1")
     monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
     monkeypatch.setenv("TORMENT_COMPRESS_ENABLE", "0")
     monkeypatch.setenv("TORMENT_SRG_ENABLE", "0")
@@ -158,8 +172,10 @@ class TestE1PositiveControl:
 
 class TestE3GovernanceEmission:
     def test_valid_block_and_malformed_non_dict_characterization(
-        self, fabric: TormentFabric, capsys: pytest.CaptureFixture[str],
+        self, telemetry_fabric: TormentFabric, caplog: pytest.LogCaptureFixture,
     ) -> None:
+        fabric = telemetry_fabric
+        caplog.set_level(logging.INFO, logger="torment.hivemind")
         _prepare_workspace(fabric, WORKSPACE)
         field = fabric._get_collective_field(WORKSPACE)
 
@@ -175,7 +191,7 @@ class TestE3GovernanceEmission:
         assert blocked_payload["governance"]["non_shareable"] is True
         assert field.all_packets() == []
 
-        capsys.readouterr()
+        caplog.clear()
         malformed = _ingest_until_stored(
             fabric,
             workspace_id=WORKSPACE,
@@ -183,7 +199,6 @@ class TestE3GovernanceEmission:
             label="malformed",
             extra_payload={"governance": [1]},
         )
-        stderr = capsys.readouterr().err
         malformed_graph = fabric.private_graphs[fabric._agent_key(WORKSPACE, "malformed_agent")]
         malformed_payload = malformed_graph.entities[malformed["eid"]].payload
         emitted = [
@@ -195,7 +210,21 @@ class TestE3GovernanceEmission:
         # normalized by resolve_governance() to permissive defaults, and does
         # not throw inside the normal packet-emission path.
         assert malformed_payload["governance"] == [1]
-        assert "governance check exception" not in stderr
+        telemetry = [
+            record.hivemind_telemetry
+            for record in caplog.records
+            if record.name == "torment.hivemind"
+            and hasattr(record, "hivemind_telemetry")
+        ]
+        assert len(telemetry) == 1
+        decision = telemetry[0]
+        assert decision["workspace_id"] == WORKSPACE
+        assert decision["agent_id"] == "malformed_agent"
+        assert decision["source_eid"] == malformed["eid"]
+        assert decision["packet_emitted"] is True
+        assert decision["gate_outcome"] == "emitted"
+        assert decision["skip_reason"] is None
+        assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
         assert len(emitted) == 1
         assert malformed_graph.entities[malformed["eid"]] is not None
 

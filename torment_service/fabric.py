@@ -43,6 +43,7 @@ from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .candidate_types import CandidateShapedValue
 
 log = logging.getLogger("torment.fabric")
+hivemind_log = logging.getLogger("torment.hivemind")
 
 class _JobCancelled(Exception):
     pass
@@ -824,6 +825,8 @@ class TormentFabric:
 
         # Hivemind collective resonance (opt-in) — disabled by default
         self._hivemind_enable = str(os.environ.get("TORMENT_HIVEMIND_ENABLE", "0")).strip().lower() in ("1", "true", "yes", "on")
+        self._hivemind_telemetry_enable = str(os.environ.get("TORMENT_HIVEMIND_TELEMETRY", "0")).strip().lower() in ("1", "true", "yes", "on")
+        self._hivemind_telemetry_sequence = 0
         self._collective_fields: Dict[str, Any] = {}  # workspace_id -> CollectiveField (lazy init)
         self._proposal_bridges: Dict[str, Any] = {}  # workspace_id -> CollectiveProposalBridge (lazy init)
 
@@ -2419,6 +2422,54 @@ class TormentFabric:
         except Exception:
             return {}
 
+    def _emit_hivemind_packet_telemetry(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        domain_id: Optional[str],
+        source_eid: Optional[int],
+        packet_emitted: bool,
+        gate_outcome: str,
+        skip_reason: Optional[str],
+        coherence: Optional[float],
+        provenance_class: Optional[str] = None,
+        convergence_event: Optional[Any] = None,
+    ) -> None:
+        """Emit one optional structured packet-decision record for experiment capture."""
+        if not self._hivemind_telemetry_enable:
+            return
+
+        self._hivemind_telemetry_sequence += 1
+        partner_agent_id = None
+        if convergence_event is not None:
+            for participant in getattr(convergence_event, "participating_agents", []):
+                if participant != agent_id:
+                    partner_agent_id = participant
+                    break
+        record = {
+            "event_kind": "hivemind_packet_decision",
+            "timestamp": time.time(),
+            "sequence": self._hivemind_telemetry_sequence,
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "domain_id": domain_id,
+            "source_eid": source_eid,
+            "packet_emitted": packet_emitted,
+            "gate_outcome": gate_outcome,
+            "skip_reason": skip_reason,
+            "coherence": coherence,
+            "provenance_class": provenance_class,
+            "convergence_occurred": convergence_event is not None,
+            "convergence_event_id": getattr(convergence_event, "event_id", None),
+            "convergence_partner_agent_id": partner_agent_id,
+            "semantic_similarity": getattr(convergence_event, "semantic_overlap", None),
+        }
+        hivemind_log.info(
+            "HIVEMIND_PACKET_DECISION",
+            extra={"hivemind_telemetry": record},
+        )
+
     # ------------------------------------------------------------------
     # Phase D3: Collective echo re-ingestion
     # ------------------------------------------------------------------
@@ -3314,10 +3365,6 @@ class TormentFabric:
                         self._log.debug("Failed to process SRG collision for eid=%s: %s", eid, e)
 
                 # --- Hivemind: emit ResonancePacket into collective field ---
-                # === TEMPORARY PACKET DEBUG (print to stdout — remove after diagnosis) ===
-                import sys as _hm_sys
-                print(f"\n[PACKET-GATE] hivemind_enable={self._hivemind_enable}, stored={stored}, eid={eid}, agent={agent_id}, ws={workspace_id}, skip={skip_packet_emission}", file=_hm_sys.stderr, flush=True)
-                _hm_sys.stderr.flush()
                 if self._hivemind_enable and stored and eid is not None and not skip_packet_emission:
                     try:
                         from .collective_models import ResonancePacket
@@ -3327,6 +3374,7 @@ class TormentFabric:
                         # Check at emission time (earliest boundary), not at convergence time.
                         _hm_emit_ok = True
                         _hm_skip_reason = None
+                        _hm_provenance_class = None
                         try:
                             _hm_ent_gov = graph.entities.get(int(eid))
                             if _hm_ent_gov is not None:
@@ -3341,18 +3389,23 @@ class TormentFabric:
                                     or (isinstance(_hm_prov, dict) and _hm_prov.get("source_type") == "collective_echo")
                                 )
                                 if _hm_is_collective:
+                                    _hm_provenance_class = "collective_echo"
                                     _hm_emit_ok = False
                                     _hm_skip_reason = "governance: collective provenance (echo invariant)"
                         except Exception as _gov_exc:
-                            print(f"[PACKET-GATE] governance check exception: {_gov_exc}", file=_hm_sys.stderr, flush=True)
+                            hivemind_log.exception(
+                                "Hivemind packet governance evaluation failed ws=%s agent=%s eid=%s: %s",
+                                workspace_id,
+                                agent_id,
+                                eid,
+                                _gov_exc,
+                            )
 
                         # Gate 2: coherence minimum threshold
                         # Restored to 0.15 after DISP_SCALE recalibration (7e-4 → 0.10)
                         # and distributed Omega extraction fix.
                         _HM_COH_THRESHOLD = 0.15
                         _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
-
-                        print(f"[PACKET-GATE] gate1_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f} (threshold={_HM_COH_THRESHOLD}), skip_reason={_hm_skip_reason}", file=_hm_sys.stderr, flush=True)
 
                         if _hm_emit_ok and _hm_coherence >= _HM_COH_THRESHOLD:
                             _hm_emb_hash = ""
@@ -3424,22 +3477,24 @@ class TormentFabric:
                             _hm_field = self._get_collective_field(workspace_id)
                             _hm_conv_event = _hm_field.append_packet(_hm_packet, embedding=emb)
 
-                            print(
-                                f"[PACKET-EMIT] packet BUILT and appended: agent={agent_id}, domain={chosen_domain}, "
-                                f"coherence={_hm_coherence:.3f}, eid={eid}, convergence_event={_hm_conv_event is not None}",
-                                file=_hm_sys.stderr,
-                                flush=True,
-                            )
+                            if self._hivemind_telemetry_enable:
+                                self._emit_hivemind_packet_telemetry(
+                                    workspace_id=workspace_id,
+                                    agent_id=agent_id,
+                                    domain_id=chosen_domain,
+                                    source_eid=int(eid),
+                                    packet_emitted=True,
+                                    gate_outcome="emitted",
+                                    skip_reason=None,
+                                    coherence=_hm_coherence,
+                                    provenance_class=_hm_provenance_class,
+                                    convergence_event=_hm_conv_event,
+                                )
 
                             # Phase D4: Light proposal bridge
                             # If convergence was detected, feed it to the proposal bridge.
                             # Proposals are auto-drafted (pending), never auto-approved.
                             if _hm_conv_event is not None:
-                                print(
-                                    f"[PACKET-CONVERGE] convergence event detected! {_hm_conv_event}",
-                                    file=_hm_sys.stderr,
-                                    flush=True,
-                                )
                                 try:
                                     _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
                                     _hm_prop_reg = ws.proposals.get(chosen_domain)
@@ -3451,32 +3506,66 @@ class TormentFabric:
                                 except Exception:
                                     pass  # Proposal bridge is optional
                         else:
-                            print(
-                                f"[PACKET-SKIP] packet NOT built: emit_ok={_hm_emit_ok}, coherence={_hm_coherence:.4f}, "
-                                f"reason={_hm_skip_reason if not _hm_emit_ok else 'coherence_below_0.15'}",
-                                file=_hm_sys.stderr,
-                                flush=True,
-                            )
+                            if self._hivemind_telemetry_enable:
+                                self._emit_hivemind_packet_telemetry(
+                                    workspace_id=workspace_id,
+                                    agent_id=agent_id,
+                                    domain_id=chosen_domain,
+                                    source_eid=int(eid),
+                                    packet_emitted=False,
+                                    gate_outcome="skipped",
+                                    skip_reason=(
+                                        _hm_skip_reason
+                                        if not _hm_emit_ok
+                                        else "coherence_below_threshold"
+                                    ),
+                                    coherence=_hm_coherence,
+                                    provenance_class=_hm_provenance_class,
+                                )
                     except Exception as _hm_exc:
-                        import traceback
-                        print(
-                            f"[PACKET-ERROR] exception in packet emission: {_hm_exc}",
-                            file=_hm_sys.stderr,
-                            flush=True,
+                        hivemind_log.exception(
+                            "Hivemind packet emission failed ws=%s agent=%s eid=%s: %s",
+                            workspace_id,
+                            agent_id,
+                            eid,
+                            _hm_exc,
                         )
-                        traceback.print_exc(file=_hm_sys.stderr)
+                        if self._hivemind_telemetry_enable:
+                            self._emit_hivemind_packet_telemetry(
+                                workspace_id=workspace_id,
+                                agent_id=agent_id,
+                                domain_id=chosen_domain,
+                                source_eid=int(eid),
+                                packet_emitted=False,
+                                gate_outcome="error",
+                                skip_reason="packet_emission_error",
+                                coherence=None,
+                            )
                 else:
-                    # Outer gate failed — print which condition was False
                     _hm_reasons = []
                     if not self._hivemind_enable:
-                        _hm_reasons.append("hivemind_enable=False (set TORMENT_HIVEMIND_ENABLE=1)")
+                        _hm_reasons.append("hivemind_disabled")
                     # Note: 'stored' is always True here (both reinforcement and
                     # spawn branches set it; exceptions propagate before reaching
                     # this else block), so the old `if not stored:` check was
                     # unreachable and has been removed.
+                    if not stored:
+                        _hm_reasons.append("memory_not_stored")
                     if eid is None:
-                        _hm_reasons.append("eid=None")
-                    print(f"[PACKET-BLOCKED] outer gate failed: {', '.join(_hm_reasons)}", file=_hm_sys.stderr, flush=True)
+                        _hm_reasons.append("source_eid_missing")
+                    if skip_packet_emission:
+                        _hm_reasons.append("packet_emission_skipped")
+                    if self._hivemind_telemetry_enable:
+                        self._emit_hivemind_packet_telemetry(
+                            workspace_id=workspace_id,
+                            agent_id=agent_id,
+                            domain_id=chosen_domain,
+                            source_eid=int(eid) if eid is not None else None,
+                            packet_emitted=False,
+                            gate_outcome="blocked",
+                            skip_reason=",".join(_hm_reasons) or "outer_gate_blocked",
+                            coherence=None,
+                        )
 
                 pol = ws.domain_policies.get(chosen_domain, {})
                 try:
