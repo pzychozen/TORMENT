@@ -156,21 +156,36 @@ values were not inspected or compared, so it cannot be determined which specific
 credential Anthropic received. `credential_source` prevents that ambiguity in a
 future no-contact gate, but proves provenance only—not credential validity.
 
-### One authorized Sonnet 5 successor characterization
+### Closed Sonnet empty-text attempt
 
-The failed Sonnet attempt does not authorize a silent retry. Exactly one
-successor N=5 characterization is authorized only after every pre-contact gate
-below passes. It has a fresh, short Windows-safe external root to avoid the
-previous WinError 206 path-length failure:
+`C:\TORMENT\m5s5b` is immutable sealed `FAILED` evidence for
+`meridian-n5-sonnet5b-20260824-a-private`. It reached only `A_PRIVATE`, logical
+call `round_1:researcher_001`, with model `claude-sonnet-5`: one provider
+attempt, zero successful responses, one failure, and zero retries. Its
+classification is `UNRESOLVED PROVIDER BEHAVIOR`.
 
-`C:\TORMENT\m5s5b`
+Authentication succeeded and the provider returned a response object, but the
+native adapter found no nonempty final text. Meridian's parser was not reached.
+Adaptive thinking combined with the frozen 1024-token combined output budget is
+a plausible but unproven cause. This is not a Hivemind efficacy result, Sonnet
+task-quality result, Meridian schema/parser result, A/B1/B2/C comparison, or
+evidence for or against collective cognition. Its external evidence must never
+be overwritten, reused, or deleted.
+
+### One authorized Sonnet 5 diagnostic successor characterization
+
+The failed empty-text attempt does not authorize a silent retry. Exactly one
+diagnostic successor N=5 characterization is authorized only after every
+pre-contact gate below passes. It has a fresh, short Windows-safe external root:
+
+`C:\TORMENT\m5s5c`
 
 | Condition | Successor run ID |
 | --- | --- |
-| A_PRIVATE | `meridian-n5-sonnet5b-20260824-a-private` |
-| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5b-20260824-b1-mechanisms-only` |
-| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5b-20260824-b2-salience-surfaced` |
-| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5b-20260824-c-naive-shared-content` |
+| A_PRIVATE | `meridian-n5-sonnet5c-20260824-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5c-20260824-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5c-20260824-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5c-20260824-c-naive-shared-content` |
 
 Before any live call, the exact operator process must pass all frozen checks and
 all of these additional checks: `credential_source == "repo_dotenv"`, credential
@@ -178,14 +193,16 @@ configured is true, the real-provider gate equals `1`, model is
 `claude-sonnet-5`, the SDK is available, adapter construction succeeds, and
 network contact remains false. It must also verify the frozen corpus, manifest,
 and seed; `HEAD == origin/main ==` the committed successor-preparation revision;
-a clean tracked worktree; and that `C:\TORMENT\m5s5b` exists and is empty.
+a clean tracked worktree; and that `C:\TORMENT\m5s5c` exists and is empty.
 
 The successor preserves A_PRIVATE, B1_TORMENT_MECHANISMS_ONLY,
 B2_TORMENT_SALIENCE_SURFACED, and C_NAIVE_SHARED_CONTENT; 5 agents; 2 rounds;
 at most 40 planned logical calls; no retries; no second seed; no confirmatory
-rerun; no hidden evaluator; and no model synthesizer. Terminal provider or
-schema failure must stop immediately and seal `FAILED`. N=5 remains
-characterization-only.
+rerun; no hidden evaluator; and no model synthesizer. The diagnostic path adds
+only redacted response-shape metadata to an empty-text provider failure, so a
+repeat may distinguish likely output-budget exhaustion from other provider
+behavior. Terminal provider or schema failure must stop immediately and seal
+`FAILED`. N=5 remains characterization-only.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run

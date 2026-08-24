@@ -444,6 +444,15 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
     TIMEOUT_ENV = "TORMENT_NON_SPINE_PROVIDER_TIMEOUT_SECONDS"
     DEFAULT_TIMEOUT_SECONDS = 30
     MAX_TOKENS = 1024
+    _SAFE_STOP_REASONS = frozenset({
+        "end_turn",
+        "max_tokens",
+        "stop_sequence",
+        "tool_use",
+        "pause_turn",
+        "refusal",
+        "model_context_window_exceeded",
+    })
 
     def __init__(self, env=None, sdk_factory=None) -> None:
         # Store readers only. No env lookup, no SDK import, no provider contact here.
@@ -498,18 +507,62 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
 
     @staticmethod
     def _extract_text(response) -> str:
+        text, _ = AnthropicNonSpineLLMProviderAdapter._extract_text_with_shape(response)
+        return text
+
+    @staticmethod
+    def _extract_text_with_shape(response) -> tuple[str, dict[str, object]]:
+        """Extract only text blocks and retain safe shape diagnostics for failures."""
+        stop_reason_value = getattr(response, "stop_reason", None)
+        stop_reason = (
+            stop_reason_value
+            if isinstance(stop_reason_value, str)
+            and stop_reason_value in AnthropicNonSpineLLMProviderAdapter._SAFE_STOP_REASONS
+            else "unrecognized" if isinstance(stop_reason_value, str) else None
+        )
+        shape: dict[str, object] = {
+            "response_type": type(response).__name__,
+            "content_block_count": 0,
+            "content_block_types": [],
+            "text_field_block_count": 0,
+            "stop_reason": stop_reason if isinstance(stop_reason, str) else None,
+        }
         content = getattr(response, "content", None)
         if not content:
-            return ""
+            return "", shape
         parts = []
         try:
             for block in content:
+                shape["content_block_count"] = int(shape["content_block_count"]) + 1
+                block_types = shape["content_block_types"]
+                if isinstance(block_types, list):
+                    block_types.append(type(block).__name__)
                 value = getattr(block, "text", None)
                 if isinstance(value, str):
+                    shape["text_field_block_count"] = int(shape["text_field_block_count"]) + 1
                     parts.append(value)
         except TypeError:
-            return ""
-        return "".join(parts).strip()
+            return "", shape
+        return "".join(parts).strip(), shape
+
+    @staticmethod
+    def _empty_response_error(shape: dict[str, object]) -> NonSpineLLMRealProviderError:
+        """Return a fail-closed error containing structural, never textual, response data."""
+        block_types = shape["content_block_types"]
+        block_types_text = ",".join(block_types) if isinstance(block_types, list) and block_types else "none"
+        stop_reason = shape["stop_reason"] or "none"
+        return NonSpineLLMRealProviderError(
+            "anthropic returned empty or malformed text "
+            "(response_type=%s, content_block_count=%d, content_block_types=%s, "
+            "text_field_block_count=%d, stop_reason=%s)"
+            % (
+                shape["response_type"],
+                shape["content_block_count"],
+                block_types_text,
+                shape["text_field_block_count"],
+                stop_reason,
+            )
+        )
 
     def generate(
         self, request: "NonSpineLLMProviderRequest"
@@ -536,11 +589,9 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
             raise NonSpineLLMRealProviderError(
                 "anthropic provider call failed: %s" % exc
             )
-        text = self._extract_text(response)
+        text, response_shape = self._extract_text_with_shape(response)
         if not text:
-            raise NonSpineLLMRealProviderError(
-                "anthropic returned empty or malformed text"
-            )
+            raise self._empty_response_error(response_shape)
         return NonSpineLLMProviderResult(
             text=text,
             is_fake=False,

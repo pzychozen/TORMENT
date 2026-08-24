@@ -39,16 +39,33 @@ class _FakeBlock:
         self.text = text
 
 
+class _FakeThinkingBlock:
+    def __init__(self, thinking):
+        self.thinking = thinking
+
+
+class _FakeRedactedThinkingBlock:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeToolUseBlock:
+    def __init__(self, tool_input):
+        self.input = tool_input
+
+
 class _FakeResponse:
-    def __init__(self, blocks):
+    def __init__(self, blocks, stop_reason=None):
         self.content = blocks
+        self.stop_reason = stop_reason
 
 
 class _SpySdkFactory:
-    def __init__(self, blocks=None, raises_on_create=None):
+    def __init__(self, blocks=None, raises_on_create=None, stop_reason=None):
         self.called = 0
         self.blocks = blocks if blocks is not None else [_FakeBlock("hi from fake")]
         self.raises_on_create = raises_on_create
+        self.stop_reason = stop_reason
         self.client = None
 
     def __call__(self):
@@ -63,7 +80,7 @@ class _SpySdkFactory:
                 self.create_kwargs = kwargs
                 if factory.raises_on_create is not None:
                     raise factory.raises_on_create
-                return _FakeResponse(factory.blocks)
+                return _FakeResponse(factory.blocks, stop_reason=factory.stop_reason)
 
         class _Client:
             def __init__(self, **kwargs):
@@ -161,6 +178,49 @@ class TestAnthropicAdapterCall(unittest.TestCase):
             spy = _SpySdkFactory(blocks=blocks)
             with self.assertRaises(NonSpineLLMRealProviderError):
                 AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+
+    def test_thinking_block_followed_by_text_block_extracts_only_final_text(self):
+        spy = _SpySdkFactory(
+            blocks=[_FakeThinkingBlock("private-thinking"), _FakeBlock("visible answer")],
+            stop_reason="end_turn",
+        )
+        result = AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+        self.assertEqual(result.text, "visible answer")
+
+    def test_non_text_blocks_fail_closed_with_safe_structural_diagnostics(self):
+        cases = (
+            (_FakeThinkingBlock("private-thinking"), "_FakeThinkingBlock", "private-thinking"),
+            (_FakeRedactedThinkingBlock("private-redacted-data"), "_FakeRedactedThinkingBlock", "private-redacted-data"),
+            (_FakeToolUseBlock({"private": "tool-input"}), "_FakeToolUseBlock", "tool-input"),
+        )
+        for block, expected_type, forbidden_text in cases:
+            with self.subTest(block_type=expected_type):
+                spy = _SpySdkFactory(blocks=[block], stop_reason="max_tokens")
+                with self.assertRaises(NonSpineLLMRealProviderError) as raised:
+                    AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+                message = str(raised.exception)
+                self.assertIn("content_block_count=1", message)
+                self.assertIn("content_block_types=" + expected_type, message)
+                self.assertIn("text_field_block_count=0", message)
+                self.assertIn("stop_reason=max_tokens", message)
+                self.assertNotIn(forbidden_text, message)
+
+    def test_empty_text_block_diagnostic_reports_shape_without_text_content(self):
+        spy = _SpySdkFactory(blocks=[_FakeBlock("")], stop_reason="end_turn")
+        with self.assertRaises(NonSpineLLMRealProviderError) as raised:
+            AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+        message = str(raised.exception)
+        self.assertIn("content_block_types=_FakeBlock", message)
+        self.assertIn("text_field_block_count=1", message)
+        self.assertIn("stop_reason=end_turn", message)
+
+    def test_unrecognized_stop_reason_is_not_exposed(self):
+        spy = _SpySdkFactory(blocks=[], stop_reason="private-stop-reason")
+        with self.assertRaises(NonSpineLLMRealProviderError) as raised:
+            AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+        message = str(raised.exception)
+        self.assertIn("stop_reason=unrecognized", message)
+        self.assertNotIn("private-stop-reason", message)
 
     def test_success_with_fake_module_no_network(self):
         spy = _SpySdkFactory(blocks=[_FakeBlock("hello from anthropic-fake")])

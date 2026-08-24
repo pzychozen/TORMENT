@@ -50,12 +50,26 @@ HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT = MappingProxyType({
     "scientific_interpretation": "AUTHENTICATION / CONFIGURATION FAILURE",
     "cause": "Anthropic 401 authentication_error / invalid x-api-key",
 })
-SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5b"
-SONNET5B_SUCCESSOR_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5b-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5b-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5b-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5b-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5b",
+    "run_id": "meridian-n5-sonnet5b-20260824-a-private",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_1:researcher_001",
+    "model_id": FROZEN_MODEL_ID,
+    "attempted_provider_calls": 1,
+    "succeeded_provider_calls": 0,
+    "failed_provider_calls": 1,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "UNRESOLVED PROVIDER BEHAVIOR",
+    "cause": "anthropic returned empty or malformed text",
+})
+SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5c"
+SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5c-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5c-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5c-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5c-20260824-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})

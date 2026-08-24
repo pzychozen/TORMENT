@@ -12,10 +12,11 @@ from experiments.hivemind_meridian_outage_v1.anthropic_provider import (
     FROZEN_MODEL_ID,
     FrozenAnthropicMeridianProvider,
     HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT,
+    HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT,
     MeridianProviderResponseError,
-    SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT,
-    SONNET5B_SUCCESSOR_RUN_IDS,
+    SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT,
+    SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS,
     load_repo_dotenv_safely,
     parse_meridian_response,
 )
@@ -167,7 +168,7 @@ def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_pat
         )
 
 
-def test_failed_sonnet_identity_is_closed_and_successor_identity_is_distinct() -> None:
+def test_failed_sonnet_identities_are_closed_and_successor_identity_is_distinct() -> None:
     assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["status"] == "FAILED"
     assert "401 invalid x-api-key" in HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["cause"]
     assert HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT == {
@@ -183,14 +184,31 @@ def test_failed_sonnet_identity_is_closed_and_successor_identity_is_distinct() -
         "scientific_interpretation": "AUTHENTICATION / CONFIGURATION FAILURE",
         "cause": "Anthropic 401 authentication_error / invalid x-api-key",
     }
-    assert HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT["root"] != SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT
-    assert len(SONNET5B_SUCCESSOR_RUN_IDS) == 4
-    assert len(set(SONNET5B_SUCCESSOR_RUN_IDS.values())) == 4
-    assert set(SONNET5B_SUCCESSOR_RUN_IDS.values()) == {
-        "meridian-n5-sonnet5b-20260824-a-private",
-        "meridian-n5-sonnet5b-20260824-b1-mechanisms-only",
-        "meridian-n5-sonnet5b-20260824-b2-salience-surfaced",
-        "meridian-n5-sonnet5b-20260824-c-naive-shared-content",
+    assert HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT == {
+        "root": r"C:\TORMENT\m5s5b",
+        "run_id": "meridian-n5-sonnet5b-20260824-a-private",
+        "condition": "A_PRIVATE",
+        "logical_call": "round_1:researcher_001",
+        "model_id": "claude-sonnet-5",
+        "attempted_provider_calls": 1,
+        "succeeded_provider_calls": 0,
+        "failed_provider_calls": 1,
+        "retry_count": 0,
+        "status": "FAILED",
+        "scientific_interpretation": "UNRESOLVED PROVIDER BEHAVIOR",
+        "cause": "anthropic returned empty or malformed text",
+    }
+    assert (
+        HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT["root"]
+        != SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT
+    )
+    assert len(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS) == 4
+    assert len(set(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS.values())) == 4
+    assert set(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS.values()) == {
+        "meridian-n5-sonnet5c-20260824-a-private",
+        "meridian-n5-sonnet5c-20260824-b1-mechanisms-only",
+        "meridian-n5-sonnet5c-20260824-b2-salience-surfaced",
+        "meridian-n5-sonnet5c-20260824-c-naive-shared-content",
     }
 
 
