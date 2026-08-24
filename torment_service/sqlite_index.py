@@ -583,8 +583,12 @@ class IndexManager:
                     if (candidate.startswith(safe_trajectories + os.sep)
                             and os.path.isfile(candidate)):
                         trajectory_sources.append(candidate)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning(
+                    "Unable to enumerate daily trajectory directory %s: %s",
+                    safe_trajectories,
+                    exc,
+                )
         elif safe_trajectories and os.path.isfile(safe_trajectories):
             trajectory_sources.append(safe_trajectories)
         if (safe_legacy_trajectories

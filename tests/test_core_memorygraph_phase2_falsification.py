@@ -7,6 +7,7 @@ production policy or storage format.
 
 import copy
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -651,5 +652,69 @@ class TestGateBSuspiciousSeams:
                 assert missing_counts["trajectory_index"] == 0
             finally:
                 missing_index.close()
+        finally:
+            _close_fabric_graphs(fabric)
+
+    def test_b3_unreadable_daily_trajectory_directory_warns_and_legacy_rebuilds(
+        self, tmp_path, monkeypatch, caplog,
+    ):
+        """Unreadable daily logs warn while preserving best-effort rebuild behavior."""
+        root = tmp_path / "unreadable-trajectory-rebuild"
+        fabric = TormentFabric(str(root))
+        try:
+            fabric.create_agent("ws", "agent")
+            key = fabric._agent_key("ws", "agent")
+            graph = fabric.private_graphs[key]
+            eid = _add(graph, "unreadable trajectory rebuild core node", 0, step=71)
+            graph.step_world(step=71, classify_every=0, log_every=1)
+            private_dir = Path(graph.data_dir)
+            daily_dir = private_dir / "logs" / "trajectories" / "daily"
+            daily_paths = list(daily_dir.glob("*.jsonl"))
+            assert daily_paths and any(int(row["eid"]) == eid for row in _rows(daily_paths[0]))
+            legacy_path = private_dir / "trajectories.jsonl"
+            legacy_path.write_text(
+                json.dumps({"step": 73, "eid": eid, "pos": [3.0, 0.0, 0.0]}) + "\n",
+                encoding="utf-8",
+            )
+
+            def deny_daily_listdir(path):
+                assert Path(path).resolve() == daily_dir.resolve()
+                raise PermissionError("daily trajectory directory denied")
+
+            monkeypatch.setattr("torment_service.sqlite_index.os.listdir", deny_daily_listdir)
+            index = fabric._get_sqlite_index("ws", "agent")
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="torment_service.sqlite_index"):
+                counts = index.rebuild_from_jsonl(
+                    nodes_path=str(private_dir / "nodes.jsonl"),
+                    events_path=str(private_dir / "memory_events.jsonl"),
+                    trajectories_path=str(daily_dir),
+                    legacy_trajectories_path=str(legacy_path),
+                )
+
+            assert counts == {
+                "core_nodes": 1,
+                "core_events": 1,
+                "trajectory_index": 1,
+                "documents": 0,
+                "chunks": 0,
+                "core_motifs": 0,
+            }
+            assert [row["step"] for row in index.get_trajectory_range(71, 73)] == [73]
+            warning_records = [
+                record for record in caplog.records
+                if (
+                    record.name == "torment_service.sqlite_index"
+                    and record.levelno == logging.WARNING
+                )
+            ]
+            assert len(warning_records) == 1
+            assert str(daily_dir) in warning_records[0].getMessage()
+            assert any(
+                int(hit["eid"]) == eid
+                for hit in fabric.query(
+                    "ws", "agent", "unreadable trajectory rebuild", top_k=10
+                )["results"]
+            )
         finally:
             _close_fabric_graphs(fabric)
