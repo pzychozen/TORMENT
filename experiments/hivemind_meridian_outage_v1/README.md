@@ -200,20 +200,36 @@ reached. This is not an authentication failure, invalid-model-ID result,
 Meridian parser/schema failure, Hivemind result, or task-quality result. Its
 external evidence must never be overwritten, reused, or deleted.
 
-### One authorized Sonnet 5 timeout successor characterization
+### Closed Sonnet exact-schema noncompliance attempt
 
-The failed timeout attempt does not authorize a silent retry. Exactly one
+`C:\TORMENT\m5s5e` is immutable sealed `FAILED` evidence for
+`meridian-n5-sonnet5e-20260824-a-private`. All ten provider calls reached the
+provider; nine responses parsed successfully, with zero retries. The final
+`A_PRIVATE` call, `round_2:researcher_005`, returned complete valid JSON with
+the exact top-level structure, valid claims, valid final answer, and boolean
+`collective_context_consumed`. Its only contract failure was one finding with
+all required `text`, `card_ids`, and `share_permitted` keys plus a forbidden
+extra `stance_note` field.
+
+This is `MODEL OUTPUT CONTRACT NONCOMPLIANCE — MINOR EXTRA-FIELD DEVIATION`.
+It is not a Hivemind efficacy result, Sonnet task-quality result, Meridian
+parser defect, A/B1/B2/C comparison, or evidence for or against collective
+cognition. Its external evidence must never be overwritten, reused, or deleted.
+
+### One authorized Sonnet exact-schema-clarification successor characterization
+
+The failed schema attempt does not authorize a silent retry. Exactly one
 successor N=5 characterization is authorized only after every pre-contact gate
 below passes. It has a fresh, short Windows-safe external root:
 
-`C:\TORMENT\m5s5e`
+`C:\TORMENT\m5s5f`
 
 | Condition | Successor run ID |
 | --- | --- |
-| A_PRIVATE | `meridian-n5-sonnet5e-20260824-a-private` |
-| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5e-20260824-b1-mechanisms-only` |
-| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5e-20260824-b2-salience-surfaced` |
-| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5e-20260824-c-naive-shared-content` |
+| A_PRIVATE | `meridian-n5-sonnet5f-20260824-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5f-20260824-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5f-20260824-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5f-20260824-c-naive-shared-content` |
 
 Before any live call, the exact operator process must pass all frozen checks and
 all of these additional checks: `credential_source == "repo_dotenv"`, credential
@@ -221,17 +237,21 @@ configured is true, the real-provider gate equals `1`, model is
 `claude-sonnet-5`, the SDK is available, adapter construction succeeds, and
 network contact remains false. It must also verify the frozen corpus, manifest,
 and seed; `HEAD == origin/main ==` the committed successor-preparation revision;
-a clean tracked worktree; and that `C:\TORMENT\m5s5e` exists and is empty.
+a clean tracked worktree; and that `C:\TORMENT\m5s5f` exists and is empty.
 
 The successor preserves A_PRIVATE, B1_TORMENT_MECHANISMS_ONLY,
 B2_TORMENT_SALIENCE_SURFACED, and C_NAIVE_SHARED_CONTENT; 5 agents; 2 rounds;
 at most 40 planned logical calls; no retries; no second seed; no confirmatory
-rerun; no hidden evaluator; and no model synthesizer. The only configuration
-amendment is `timeout=600s`; `max_tokens=16000`, Sonnet 5's default adaptive
-thinking, and all provider-default sampling values remain unchanged. The native
-adapter explicitly disables SDK retries to preserve Meridian's frozen
-no-retry policy. Terminal provider or schema failure must stop immediately and
-seal `FAILED`. N=5 remains characterization-only.
+rerun; no hidden evaluator; and no model synthesizer. The only experimental
+interface change is the rendered response-instruction clarification: every
+object must use exactly the keys in `response_schema`, with no additional keys,
+annotations, metadata, notes, explanations, or fields. This changes each
+provider-visible prompt hash, while the frozen system instruction and its hash
+remain unchanged. `max_tokens=16000`, `timeout=600s`, Sonnet 5's default
+adaptive thinking, and all provider-default sampling values remain unchanged.
+The native adapter explicitly disables SDK retries to preserve Meridian's
+frozen no-retry policy. Terminal provider or schema failure must stop
+immediately and seal `FAILED`. N=5 remains characterization-only.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run

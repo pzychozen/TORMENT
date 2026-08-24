@@ -97,12 +97,28 @@ HISTORICAL_FAILED_SONNET_TIMEOUT_CHARACTERIZATION_ATTEMPT = MappingProxyType({
     "scientific_interpretation": "TIMEOUT",
     "cause": "Request timed out or interrupted",
 })
-SONNET5E_TIMEOUT_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5e"
-SONNET5E_TIMEOUT_SUCCESSOR_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5e-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5e-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5e-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5e-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_SCHEMA_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5e",
+    "run_id": "meridian-n5-sonnet5e-20260824-a-private",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_2:researcher_005",
+    "model_id": FROZEN_MODEL_ID,
+    "max_tokens": FROZEN_MAX_TOKENS,
+    "timeout_seconds": FROZEN_TIMEOUT_SECONDS,
+    "attempted_provider_calls": 10,
+    "succeeded_provider_calls": 9,
+    "failed_provider_calls": 1,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "MODEL OUTPUT CONTRACT NONCOMPLIANCE — MINOR EXTRA-FIELD DEVIATION",
+    "cause": "finding index 1 had forbidden extra stance_note field",
+})
+SONNET5F_EXACT_SCHEMA_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5f"
+SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5f-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5f-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5f-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5f-20260824-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
@@ -365,8 +381,10 @@ class FrozenAnthropicMeridianProvider:
                 key=_canonical_json,
             )
         return (
-            "Return exactly one JSON object matching response_schema. Do not use markdown fences "
-            "or add prose before or after the object.\n"
+            "Return exactly one JSON object matching response_schema. "
+            "Every object must contain exactly the keys shown in response_schema. "
+            "Do not add any additional keys, annotations, metadata, notes, explanations, or fields. "
+            "Do not use markdown fences or add prose before or after the object.\n"
             + _canonical_json(payload)
         )
 
