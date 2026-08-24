@@ -101,6 +101,8 @@ class ProviderRoundResponse:
     raw_response_text: str | None = None
     usage: Mapping[str, Any] | None = None
     response_metadata: Mapping[str, Any] | None = None
+    request_metadata: Mapping[str, Any] | None = None
+    parser_error: str | None = None
 
 
 class CoordinationAdapter(Protocol):
@@ -519,7 +521,7 @@ _SENSITIVE_EVIDENCE_KEYS = frozenset({
 _SECRET_VALUE_PATTERN = re.compile(
     r"(?i)(?:api[_-]?key|authorization|bearer|credential|password|secret|token)\s*[:=]\s*[^\s,;]+"
 )
-_SAMPLING_FIELDS = frozenset({"max_tokens", "temperature", "top_p", "top_k", "timeout"})
+_SAMPLING_FIELDS = frozenset({"max_tokens", "temperature", "top_p", "top_k", "thinking", "timeout"})
 
 
 def _safe_evidence_value(value: Any) -> Any:
@@ -634,28 +636,43 @@ def _normalize_usage(usage: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"availability": "provider_reported", **normalized}
 
 
-def _coerce_provider_response(response: Any) -> tuple[dict[str, Any], str | None, dict[str, Any], dict[str, Any]]:
+def _coerce_provider_response(
+    response: Any,
+) -> tuple[dict[str, Any], str | None, dict[str, Any], dict[str, Any], dict[str, Any], str | None]:
     if isinstance(response, ProviderRoundResponse):
         output = response.output
         raw_response_text = response.raw_response_text
         usage = response.usage
         response_metadata = response.response_metadata or {}
+        request_metadata = response.request_metadata or {}
+        parser_error = response.parser_error
     else:
         output = response
         raw_response_text = None
         usage = None
         response_metadata = {}
+        request_metadata = {}
+        parser_error = None
     if not isinstance(output, Mapping):
         raise ValueError("provider response output must be a mapping")
     if raw_response_text is not None and not isinstance(raw_response_text, str):
         raise ValueError("provider raw response must be text or null")
     if not isinstance(response_metadata, Mapping):
         raise ValueError("provider response metadata must be a mapping")
+    if not isinstance(request_metadata, Mapping) or set(request_metadata) - {"provider_visible_prompt_sha256"}:
+        raise ValueError("provider request metadata is malformed")
+    prompt_hash = request_metadata.get("provider_visible_prompt_sha256")
+    if prompt_hash is not None and not isinstance(prompt_hash, str):
+        raise ValueError("provider prompt hash must be text or null")
+    if parser_error is not None and not isinstance(parser_error, str):
+        raise ValueError("provider parser error must be text or null")
     return (
         copy.deepcopy(dict(output)),
         _safe_evidence_value(raw_response_text),
         _normalize_usage(usage),
         _safe_evidence_value(response_metadata),
+        _safe_evidence_value(request_metadata),
+        _safe_evidence_value(parser_error),
     )
 
 
@@ -729,6 +746,7 @@ class MeridianOutageHarness:
                 "request_metadata": {
                     "input_hashes": copy.deepcopy(input_payload["input_hashes"]),
                     "assigned_card_ids": [card["card_id"] for card in assigned_cards],
+                    "provider_visible_prompt_sha256": None,
                 },
                 "raw_response_text": None,
                 "response_metadata": {},
@@ -750,10 +768,13 @@ class MeridianOutageHarness:
                     naive_shared_findings=naive_shared_findings,
                 )
                 response_received = True
-                output, raw_response_text, usage, response_metadata = _coerce_provider_response(response)
+                output, raw_response_text, usage, response_metadata, response_request_metadata, parser_error = _coerce_provider_response(response)
                 attempt["raw_response_text"] = raw_response_text
                 attempt["usage"] = usage
                 attempt["response_metadata"] = response_metadata
+                attempt["request_metadata"].update(response_request_metadata)
+                if parser_error is not None:
+                    raise ValueError(parser_error)
                 findings = _findings(output)
                 claims = _claims(output)
                 output["claims"] = claims

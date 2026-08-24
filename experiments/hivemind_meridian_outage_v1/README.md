@@ -99,6 +99,15 @@ unavailability, sequence, timestamps, and exact logical-call counts. It never
 stores credential-shaped fields. The N=5 four-condition plan is 40 logical
 provider calls, with no hidden evaluator calls.
 
+The experiment-local `FrozenAnthropicMeridianProvider` is the only frozen
+bridge for a separately authorized live Meridian characterization. It uses the
+existing gated `AnthropicNonSpineLLMProviderAdapter` public seam, pins the dated
+model identifier, 1024-token limit, and 30-second timeout without altering the
+operator environment, and has no transcript state. Its prompt requires exactly
+one strict JSON object; malformed text is preserved and sealed as failed
+evidence rather than repaired or retried. Constructing the bridge or calling
+its preflight performs no model contact and exposes no credential value.
+
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run
 directory. `RUN_STATUS=COMPLETE` requires every planned logical call and scored

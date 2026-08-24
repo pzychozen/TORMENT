@@ -61,6 +61,7 @@ class RecordingProvider:
                 "temperature": {"mode": "provider_default", "explicit_value": None},
                 "top_p": {"mode": "provider_default", "explicit_value": None},
                 "top_k": {"mode": "provider_default", "explicit_value": None},
+                "thinking": {"mode": "provider_default", "explicit_value": None},
                 "timeout": {"mode": "provider_default", "explicit_value": None},
                 "system_instruction": {
                     "mode": "harness_instruction",

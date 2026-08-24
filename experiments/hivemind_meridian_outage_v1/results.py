@@ -50,7 +50,7 @@ _B2_EVENT_KEYS = frozenset({
 _SENSITIVE_EVIDENCE_KEYS = frozenset({
     "api_key", "apikey", "authorization", "credential", "credentials", "password", "secret", "token",
 })
-_SAMPLING_FIELDS = frozenset({"max_tokens", "temperature", "top_p", "top_k", "timeout"})
+_SAMPLING_FIELDS = frozenset({"max_tokens", "temperature", "top_p", "top_k", "thinking", "timeout"})
 
 
 class ResultVerificationError(ValueError):
@@ -475,8 +475,13 @@ def _validate_provider_attempts(result: dict[str, Any], raw_outputs: dict[str, A
             raise ResultVerificationError("Meridian retry policy permits only one attempt per logical call")
         logical_call_ids.add(attempt["logical_call_id"])
         request_metadata = attempt["request_metadata"]
-        if not isinstance(request_metadata, dict) or set(request_metadata) != {"input_hashes", "assigned_card_ids"}:
+        if not isinstance(request_metadata, dict) or set(request_metadata) != {
+            "input_hashes", "assigned_card_ids", "provider_visible_prompt_sha256",
+        }:
             raise ResultVerificationError("provider request metadata is malformed")
+        prompt_hash = request_metadata["provider_visible_prompt_sha256"]
+        if prompt_hash is not None and not isinstance(prompt_hash, str):
+            raise ResultVerificationError("provider-visible prompt hash is malformed")
         input_hashes = request_metadata["input_hashes"]
         if not isinstance(input_hashes, dict) or set(input_hashes) != expected_hash_keys:
             raise ResultVerificationError("provider input hash evidence is incomplete")
