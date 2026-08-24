@@ -12,9 +12,10 @@ from experiments.hivemind_meridian_outage_v1.anthropic_provider import (
     FROZEN_MODEL_ID,
     FrozenAnthropicMeridianProvider,
     HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT,
+    HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT,
     MeridianProviderResponseError,
-    SONNET5_CHARACTERIZATION_ROOT,
-    SONNET5_CHARACTERIZATION_RUN_IDS,
+    SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT,
+    SONNET5B_SUCCESSOR_RUN_IDS,
     load_repo_dotenv_safely,
     parse_meridian_response,
 )
@@ -114,6 +115,7 @@ def test_repo_dotenv_bootstrap_is_redacted_and_process_environment_takes_precede
     assert bootstrap.dotenv_path == str(dotenv_path.resolve())
     assert bootstrap.dotenv_loaded is True
     assert bootstrap.credential_configured is True
+    assert bootstrap.credential_source == "process_environment"
     assert environment["ANTHROPIC_API_KEY"] == "process-test-secret"
     assert environment["TORMENT_NON_SPINE_LLM_REAL_PROVIDER"] == "1"
     assert environment["MERIDIAN_TEST_VALUE"] == "from-dotenv"
@@ -121,9 +123,30 @@ def test_repo_dotenv_bootstrap_is_redacted_and_process_environment_takes_precede
         "dotenv_path": bootstrap.dotenv_path,
         "dotenv_loaded": bootstrap.dotenv_loaded,
         "credential_configured": bootstrap.credential_configured,
+        "credential_source": bootstrap.credential_source,
     })
     assert "process-test-secret" not in status_text
     assert "dotenv-test-secret" not in status_text
+    assert "process-test-secret" not in repr(bootstrap)
+    assert "dotenv-test-secret" not in repr(bootstrap)
+
+
+def test_repo_dotenv_populates_an_absent_credential_with_redacted_provenance(tmp_path: Path) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("ANTHROPIC_API_KEY=dotenv-test-secret\n", encoding="utf-8")
+    environment: dict[str, str] = {}
+
+    provider, bootstrap = FrozenAnthropicMeridianProvider.from_repo_dotenv(
+        environment=environment,
+        dotenv_path=dotenv_path,
+    )
+
+    assert bootstrap.dotenv_loaded is True
+    assert bootstrap.credential_configured is True
+    assert bootstrap.credential_source == "repo_dotenv"
+    assert environment["ANTHROPIC_API_KEY"] == "dotenv-test-secret"
+    assert "dotenv-test-secret" not in repr(bootstrap)
+    assert provider.preflight()["network_contact_performed"] is False
 
 
 def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_path: Path) -> None:
@@ -135,6 +158,7 @@ def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_pat
 
     assert bootstrap.dotenv_loaded is False
     assert bootstrap.credential_configured is False
+    assert bootstrap.credential_source == "absent"
     assert provider.preflight()["credential_configured"] is False
     with pytest.raises(NonSpineLLMRealProviderError, match="ANTHROPIC_API_KEY is not set"):
         provider.run_round(
@@ -143,15 +167,31 @@ def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_pat
         )
 
 
-def test_historical_failed_identity_is_preserved_and_sonnet5_identity_is_distinct() -> None:
+def test_failed_sonnet_identity_is_closed_and_successor_identity_is_distinct() -> None:
     assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["status"] == "FAILED"
     assert "401 invalid x-api-key" in HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["cause"]
-    assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["root"] != SONNET5_CHARACTERIZATION_ROOT
-    assert len(SONNET5_CHARACTERIZATION_RUN_IDS) == 4
-    assert len(set(SONNET5_CHARACTERIZATION_RUN_IDS.values())) == 4
-    assert HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT["run_id"] not in set(
-        SONNET5_CHARACTERIZATION_RUN_IDS.values()
-    )
+    assert HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT == {
+        "root": r"C:\TORMENT\m5s5",
+        "condition": "A_PRIVATE",
+        "logical_call": "round_1:researcher_001",
+        "model_id": "claude-sonnet-5",
+        "attempted_provider_calls": 1,
+        "succeeded_provider_calls": 0,
+        "failed_provider_calls": 1,
+        "retry_count": 0,
+        "status": "FAILED",
+        "scientific_interpretation": "AUTHENTICATION / CONFIGURATION FAILURE",
+        "cause": "Anthropic 401 authentication_error / invalid x-api-key",
+    }
+    assert HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT["root"] != SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT
+    assert len(SONNET5B_SUCCESSOR_RUN_IDS) == 4
+    assert len(set(SONNET5B_SUCCESSOR_RUN_IDS.values())) == 4
+    assert set(SONNET5B_SUCCESSOR_RUN_IDS.values()) == {
+        "meridian-n5-sonnet5b-20260824-a-private",
+        "meridian-n5-sonnet5b-20260824-b1-mechanisms-only",
+        "meridian-n5-sonnet5b-20260824-b2-salience-surfaced",
+        "meridian-n5-sonnet5b-20260824-c-naive-shared-content",
+    }
 
 
 def test_valid_json_uses_native_public_seam_and_preserves_raw_text_exactly() -> None:

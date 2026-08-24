@@ -115,10 +115,12 @@ Before a separately authorized live run, use the bridge's
 same standard-library, non-overriding `KEY=value` loading convention used by
 TORMENT's user-facing tools: it reads only the repository-root `.env`, leaves
 all existing process values (including deliberately empty ones) unchanged, and
-returns only a redacted configured/not-configured status. No credential value is
-printed, hashed, persisted, or added to provider metadata. The real-provider
-gate is deliberately operator controlled rather than stored in `.env`; it must
-be set to the native adapter's exact enabled value, `TORMENT_NON_SPINE_LLM_REAL_PROVIDER=1`.
+returns only redacted configured/provenance status. `credential_source` is one
+of `process_environment`, `repo_dotenv`, or `absent`; it contains no credential
+value, length, prefix, suffix, hash, fingerprint, or equality result. The
+real-provider gate is deliberately operator controlled rather than stored in
+`.env`; it must be set to the native adapter's exact enabled value,
+`TORMENT_NON_SPINE_LLM_REAL_PROVIDER=1`.
 
 `HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT` is immutable evidence at
 `C:\TORMENT\meridian_outage_v1_n5_characterization_20260824`, with prior run ID
@@ -128,19 +130,62 @@ attempt because the operator-session credential was rejected by Anthropic with
 result, efficacy result, or parser result. It must never be overwritten, reused,
 or deleted.
 
-The corrected Sonnet 5 characterization has a distinct, frozen identity before
-any model contact:
+### Closed Sonnet authentication/configuration attempt
 
-| Condition | New run ID |
+The original Sonnet 5 characterization is immutable sealed `FAILED` evidence at
+`C:\TORMENT\m5s5`. It reached only `A_PRIVATE`, logical call
+`round_1:researcher_001`, with this exact bounded outcome:
+
+| Field | Value |
 | --- | --- |
-| A_PRIVATE | `meridian-n5-sonnet5-characterization-20260824-a-private` |
-| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5-characterization-20260824-b1-mechanisms-only` |
-| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5-characterization-20260824-b2-salience-surfaced` |
-| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5-characterization-20260824-c-naive-shared-content` |
+| Model | `claude-sonnet-5` |
+| Provider calls attempted / succeeded / failed | 1 / 0 / 1 |
+| Retries | 0 |
+| Provider failure | `Anthropic 401 authentication_error / invalid x-api-key` |
+| Scientific interpretation | `AUTHENTICATION / CONFIGURATION FAILURE` |
 
-Its external root is
-`C:\TORMENT\meridian_outage_v1_n5_sonnet5_characterization_20260824`.
-The new root and all four IDs are distinct from the failed historical attempt.
+It is not a Hivemind result, Sonnet task-quality result, parser/schema result,
+A/B1/B2/C comparison, or evidence for or against collective cognition. Its
+external evidence must never be overwritten, reused, or deleted.
+
+The non-overriding dotenv contract makes stale-process credential shadowing
+structurally possible: `load_repo_dotenv_safely()` preserves a pre-existing
+`ANTHROPIC_API_KEY`, and that is the native adapter's credential variable.
+Previous readiness established only credential presence, not provenance. Secret
+values were not inspected or compared, so it cannot be determined which specific
+credential Anthropic received. `credential_source` prevents that ambiguity in a
+future no-contact gate, but proves provenance only—not credential validity.
+
+### One authorized Sonnet 5 successor characterization
+
+The failed Sonnet attempt does not authorize a silent retry. Exactly one
+successor N=5 characterization is authorized only after every pre-contact gate
+below passes. It has a fresh, short Windows-safe external root to avoid the
+previous WinError 206 path-length failure:
+
+`C:\TORMENT\m5s5b`
+
+| Condition | Successor run ID |
+| --- | --- |
+| A_PRIVATE | `meridian-n5-sonnet5b-20260824-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5b-20260824-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5b-20260824-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5b-20260824-c-naive-shared-content` |
+
+Before any live call, the exact operator process must pass all frozen checks and
+all of these additional checks: `credential_source == "repo_dotenv"`, credential
+configured is true, the real-provider gate equals `1`, model is
+`claude-sonnet-5`, the SDK is available, adapter construction succeeds, and
+network contact remains false. It must also verify the frozen corpus, manifest,
+and seed; `HEAD == origin/main ==` the committed successor-preparation revision;
+a clean tracked worktree; and that `C:\TORMENT\m5s5b` exists and is empty.
+
+The successor preserves A_PRIVATE, B1_TORMENT_MECHANISMS_ONLY,
+B2_TORMENT_SALIENCE_SURFACED, and C_NAIVE_SHARED_CONTENT; 5 agents; 2 rounds;
+at most 40 planned logical calls; no retries; no second seed; no confirmatory
+rerun; no hidden evaluator; and no model synthesizer. Terminal provider or
+schema failure must stop immediately and seal `FAILED`. N=5 remains
+characterization-only.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run

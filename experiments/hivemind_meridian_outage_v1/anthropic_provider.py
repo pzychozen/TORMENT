@@ -37,12 +37,25 @@ HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT = MappingProxyType({
     "status": "FAILED",
     "cause": "operator-session credential rejected by Anthropic with 401 invalid x-api-key",
 })
-SONNET5_CHARACTERIZATION_ROOT = r"C:\TORMENT\meridian_outage_v1_n5_sonnet5_characterization_20260824"
-SONNET5_CHARACTERIZATION_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5-characterization-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5-characterization-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5-characterization-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5-characterization-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_1:researcher_001",
+    "model_id": FROZEN_MODEL_ID,
+    "attempted_provider_calls": 1,
+    "succeeded_provider_calls": 0,
+    "failed_provider_calls": 1,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "AUTHENTICATION / CONFIGURATION FAILURE",
+    "cause": "Anthropic 401 authentication_error / invalid x-api-key",
+})
+SONNET5B_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5b"
+SONNET5B_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5b-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5b-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5b-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5b-20260824-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
@@ -64,6 +77,7 @@ class MeridianDotenvBootstrap:
     dotenv_path: str
     dotenv_loaded: bool
     credential_configured: bool
+    credential_source: str
 
 
 def load_repo_dotenv_safely(
@@ -78,6 +92,8 @@ def load_repo_dotenv_safely(
     """
 
     env = environment if environment is not None else os.environ
+    api_key_env = AnthropicNonSpineLLMProviderAdapter.API_KEY_ENV
+    credential_existed_before_bootstrap = api_key_env in env
     try:
         resolved = Path(dotenv_path).resolve()
     except OSError:
@@ -100,10 +116,16 @@ def load_repo_dotenv_safely(
             loaded = True
         except OSError:
             pass
+    credential_source = (
+        "process_environment" if credential_existed_before_bootstrap
+        else "repo_dotenv" if api_key_env in env
+        else "absent"
+    )
     return MeridianDotenvBootstrap(
         dotenv_path=str(resolved),
         dotenv_loaded=loaded,
-        credential_configured=AnthropicNonSpineLLMProviderAdapter.API_KEY_ENV in env,
+        credential_configured=credential_source != "absent",
+        credential_source=credential_source,
     )
 
 
