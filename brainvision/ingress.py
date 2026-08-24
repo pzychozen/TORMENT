@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from brainvision.character_modulation import update_vhe_state_with_character_modulation
-from brainvision.lifecycle import BrainvisionLifecycleManager, BrainvisionRuntimeSnapshot
+from brainvision.lifecycle import BrainvisionLifecycleManager
 from brainvision.observation import (
     FirsthandVisualObservationV1,
     derive_observation_id,
