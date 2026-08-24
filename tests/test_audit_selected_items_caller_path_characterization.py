@@ -615,6 +615,28 @@ class TestGuardTeethAliasedBothHalves(unittest.TestCase):
         self.assertEqual(self._called(src), {"run_turn"})
 
 
+class TestGuardTeethForbiddenFlags(unittest.TestCase):
+    """Synthetic teeth for the exact AST identifier guard above."""
+
+    def _flags(self, src):
+        return _idents(ast.parse(src)) & _FORBIDDEN_FLAGS
+
+    def test_forbidden_name_is_detected(self):
+        self.assertEqual(self._flags("verified\n"), {"verified"})
+
+    def test_forbidden_attribute_and_keyword_are_detected(self):
+        src = "record.verified\ncheck(verified=True)\n"
+        self.assertEqual(self._flags(src), {"verified"})
+
+    def test_prose_and_near_match_are_ignored(self):
+        src = (
+            '\"\"\"authority appears only in this docstring.\"\"\"\n'
+            "# authority appears only in this comment.\n"
+            "authority_status = 1\n"
+        )
+        self.assertEqual(self._flags(src), set())
+
+
 class TestGuardTeethRecursiveImporterScan(unittest.TestCase):
     """Teeth (Codex-required): the dormancy importer scan is recursive and
     reports root-relative paths; the orchestrator itself never counts."""
