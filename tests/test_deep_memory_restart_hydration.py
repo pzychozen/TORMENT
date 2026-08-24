@@ -29,12 +29,6 @@ def _configure_env(monkeypatch, *, compress_enabled: bool) -> None:
 
 
 def _close_fabric_io(fabric: TormentFabric) -> None:
-    # TormentFabric.close() owns private/shared graph shutdown.
-    for store in list(getattr(fabric, "_deep_stores", {}).values()):
-        try:
-            store.close()
-        except Exception:
-            pass
     fabric.close()
 
 

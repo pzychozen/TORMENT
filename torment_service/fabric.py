@@ -7695,6 +7695,20 @@ class TormentFabric:
             for graph in list(getattr(workspace, "shared_graphs", {}).values()):
                 _close_owned_graph(graph)
 
+        # Deep stores are constructed and retained by this Fabric.  Their shard
+        # memmaps must be released before a :memory: backing directory is removed.
+        deep_stores = getattr(self, "_deep_stores", None)
+        if deep_stores:
+            for store in list(deep_stores.values()):
+                if store is not None:
+                    try:
+                        store.close()
+                    except Exception as e:
+                        self._log.debug(
+                            "DeepMemoryStore close failed during fabric close: %s", e
+                        )
+            deep_stores.clear()
+
         kernel_contexts = getattr(self, "_kernel_contexts", None)
         if kernel_contexts is not None:
             kernel_contexts.clear()
