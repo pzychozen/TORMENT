@@ -454,10 +454,13 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
         "model_context_window_exceeded",
     })
 
-    def __init__(self, env=None, sdk_factory=None) -> None:
+    def __init__(self, env=None, sdk_factory=None, max_tokens: int | None = None) -> None:
         # Store readers only. No env lookup, no SDK import, no provider contact here.
+        if max_tokens is not None and (type(max_tokens) is not int or max_tokens <= 0):
+            raise ValueError("max_tokens must be a positive integer")
         self._env = env
         self._sdk_factory = sdk_factory
+        self._max_tokens = self.MAX_TOKENS if max_tokens is None else max_tokens
 
     def _resolve_env(self):
         if self._env is not None:
@@ -577,7 +580,7 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
             client = sdk.Anthropic(api_key=api_key, timeout=timeout)
             response = client.messages.create(
                 model=model,
-                max_tokens=self.MAX_TOKENS,
+                max_tokens=self._max_tokens,
                 system=request.prompt_request.system_text or "",
                 messages=[
                     {"role": "user", "content": request.prompt_request.rendered_prompt}

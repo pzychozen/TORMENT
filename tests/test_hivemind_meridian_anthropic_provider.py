@@ -9,14 +9,16 @@ from typing import Any
 import pytest
 
 from experiments.hivemind_meridian_outage_v1.anthropic_provider import (
+    FROZEN_MAX_TOKENS,
     FROZEN_MODEL_ID,
     FrozenAnthropicMeridianProvider,
     HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT,
+    HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT,
     MeridianProviderResponseError,
-    SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT,
-    SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS,
+    SONNET5D_OUTPUT_BUDGET_SUCCESSOR_CHARACTERIZATION_ROOT,
+    SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS,
     load_repo_dotenv_safely,
     parse_meridian_response,
 )
@@ -95,6 +97,7 @@ def _cards() -> list[dict[str, str]]:
 
 def test_sonnet5_model_and_result_schema_are_frozen_for_the_corrected_characterization() -> None:
     assert FROZEN_MODEL_ID == "claude-sonnet-5"
+    assert FROZEN_MAX_TOKENS == 16_000
     assert RESULT_SCHEMA_VERSION == "meridian-result-v2"
 
 
@@ -199,16 +202,34 @@ def test_failed_sonnet_identities_are_closed_and_successor_identity_is_distinct(
         "cause": "anthropic returned empty or malformed text",
     }
     assert (
-        HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT["root"]
-        != SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT
+        HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT
+        == {
+            "root": r"C:\TORMENT\m5s5c",
+            "run_id": "meridian-n5-sonnet5c-20260824-a-private",
+            "condition": "A_PRIVATE",
+            "logical_call": "round_1:researcher_001",
+            "model_id": "claude-sonnet-5",
+            "max_tokens": 1024,
+            "attempted_provider_calls": 1,
+            "succeeded_provider_calls": 0,
+            "failed_provider_calls": 1,
+            "retry_count": 0,
+            "status": "FAILED",
+            "scientific_interpretation": "OUTPUT-BUDGET EXHAUSTION",
+            "cause": "ThinkingBlock only; no TextBlock; stop_reason=max_tokens",
+        }
     )
-    assert len(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS) == 4
-    assert len(set(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS.values())) == 4
-    assert set(SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS.values()) == {
-        "meridian-n5-sonnet5c-20260824-a-private",
-        "meridian-n5-sonnet5c-20260824-b1-mechanisms-only",
-        "meridian-n5-sonnet5c-20260824-b2-salience-surfaced",
-        "meridian-n5-sonnet5c-20260824-c-naive-shared-content",
+    assert (
+        HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT["root"]
+        != SONNET5D_OUTPUT_BUDGET_SUCCESSOR_CHARACTERIZATION_ROOT
+    )
+    assert len(SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS) == 4
+    assert len(set(SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS.values())) == 4
+    assert set(SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS.values()) == {
+        "meridian-n5-sonnet5d-20260824-a-private",
+        "meridian-n5-sonnet5d-20260824-b1-mechanisms-only",
+        "meridian-n5-sonnet5d-20260824-b2-salience-surfaced",
+        "meridian-n5-sonnet5d-20260824-c-naive-shared-content",
     }
 
 
@@ -267,9 +288,12 @@ def test_metadata_freezes_exact_configuration_and_contains_no_credentials() -> N
     metadata = provider.metadata()
     assert metadata["provider"] == "AnthropicNonSpineLLMProviderAdapter"
     assert metadata["model_id"] == FROZEN_MODEL_ID
+    assert provider._native_adapter._max_tokens == FROZEN_MAX_TOKENS
     assert metadata["session_isolation"] == "per_agent_per_round"
     assert metadata["retry_policy"] == "none"
-    assert metadata["sampling"]["max_tokens"] == {"mode": "explicit", "explicit_value": 1024}
+    assert metadata["sampling"]["max_tokens"] == {
+        "mode": "explicit", "explicit_value": FROZEN_MAX_TOKENS,
+    }
     assert metadata["sampling"]["timeout"] == {"mode": "explicit", "explicit_value": 30}
     for field in ("temperature", "top_p", "top_k", "thinking"):
         assert metadata["sampling"][field] == {"mode": "provider_default", "explicit_value": None}

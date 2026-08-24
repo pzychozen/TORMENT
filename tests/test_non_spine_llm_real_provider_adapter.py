@@ -240,6 +240,14 @@ class TestAnthropicAdapterCall(unittest.TestCase):
         self.assertEqual(kwargs["messages"][0]["content"], "USER: where to?")
         self.assertEqual(kwargs["system"], "you are x")
         self.assertEqual(kwargs["model"], "claude-fake")
+        self.assertEqual(kwargs["max_tokens"], AnthropicNonSpineLLMProviderAdapter.MAX_TOKENS)
+
+    def test_explicit_max_tokens_overrides_the_generic_default(self):
+        spy = _SpySdkFactory()
+        AnthropicNonSpineLLMProviderAdapter(
+            env=_valid_env(), sdk_factory=spy, max_tokens=16_000,
+        ).generate(_req())
+        self.assertEqual(spy.client.messages.create_kwargs["max_tokens"], 16_000)
 
 
 class TestAnthropicAdapterIsNotDefault(unittest.TestCase):

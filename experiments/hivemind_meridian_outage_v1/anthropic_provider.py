@@ -29,6 +29,7 @@ from .spec import CARD_IDS, payload_sha256
 
 
 FROZEN_MODEL_ID = "claude-sonnet-5"
+FROZEN_MAX_TOKENS = 16_000
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_DOTENV_PATH = REPO_ROOT / ".env"
 HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT = MappingProxyType({
@@ -64,12 +65,27 @@ HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT = MappingProxyType(
     "scientific_interpretation": "UNRESOLVED PROVIDER BEHAVIOR",
     "cause": "anthropic returned empty or malformed text",
 })
-SONNET5C_DIAGNOSTIC_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5c"
-SONNET5C_DIAGNOSTIC_SUCCESSOR_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5c-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5c-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5c-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5c-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5c",
+    "run_id": "meridian-n5-sonnet5c-20260824-a-private",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_1:researcher_001",
+    "model_id": FROZEN_MODEL_ID,
+    "max_tokens": 1024,
+    "attempted_provider_calls": 1,
+    "succeeded_provider_calls": 0,
+    "failed_provider_calls": 1,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "OUTPUT-BUDGET EXHAUSTION",
+    "cause": "ThinkingBlock only; no TextBlock; stop_reason=max_tokens",
+})
+SONNET5D_OUTPUT_BUDGET_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5d"
+SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5d-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5d-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5d-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5d-20260824-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
@@ -244,14 +260,13 @@ class FrozenAnthropicMeridianProvider:
     ) -> None:
         if model_id != FROZEN_MODEL_ID:
             raise ValueError("Meridian v1 requires the frozen Anthropic model ID")
-        if AnthropicNonSpineLLMProviderAdapter.MAX_TOKENS != 1024:
-            raise ValueError("native Anthropic adapter no longer has Meridian's frozen max_tokens")
         if AnthropicNonSpineLLMProviderAdapter.DEFAULT_TIMEOUT_SECONDS != 30:
             raise ValueError("native Anthropic adapter no longer has Meridian's frozen timeout")
         self._model_id = model_id
         self._environment = environment if environment is not None else os.environ
         self._native_adapter = native_adapter or AnthropicNonSpineLLMProviderAdapter(
             env=_FrozenAnthropicEnvironment(self._environment, self._model_id),
+            max_tokens=FROZEN_MAX_TOKENS,
         )
 
     @classmethod
@@ -276,7 +291,7 @@ class FrozenAnthropicMeridianProvider:
             "session_isolation": "per_agent_per_round",
             "retry_policy": "none",
             "sampling": {
-                "max_tokens": {"mode": "explicit", "explicit_value": 1024},
+                "max_tokens": {"mode": "explicit", "explicit_value": FROZEN_MAX_TOKENS},
                 "temperature": copy.deepcopy(_SAMPLING_DEFAULT),
                 "top_p": copy.deepcopy(_SAMPLING_DEFAULT),
                 "top_k": copy.deepcopy(_SAMPLING_DEFAULT),

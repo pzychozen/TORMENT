@@ -102,7 +102,7 @@ provider calls, with no hidden evaluator calls.
 The experiment-local `FrozenAnthropicMeridianProvider` is the only frozen
 bridge for a separately authorized live Meridian characterization. It uses the
 existing gated `AnthropicNonSpineLLMProviderAdapter` public seam, pins
-`claude-sonnet-5`, the 1024-token limit, and the 30-second timeout without
+`claude-sonnet-5`, the 16,000-token output limit, and the 30-second timeout without
 altering provider-default sampling, and has no transcript state. Its prompt
 requires exactly one strict JSON object; malformed text is preserved and sealed
 as failed evidence rather than repaired or retried. Constructing the bridge or
@@ -172,20 +172,36 @@ task-quality result, Meridian schema/parser result, A/B1/B2/C comparison, or
 evidence for or against collective cognition. Its external evidence must never
 be overwritten, reused, or deleted.
 
-### One authorized Sonnet 5 diagnostic successor characterization
+### Closed Sonnet output-budget exhaustion attempt
 
-The failed empty-text attempt does not authorize a silent retry. Exactly one
-diagnostic successor N=5 characterization is authorized only after every
-pre-contact gate below passes. It has a fresh, short Windows-safe external root:
+`C:\TORMENT\m5s5c` is immutable sealed `FAILED` evidence for
+`meridian-n5-sonnet5c-20260824-a-private`. It reached only `A_PRIVATE`, logical
+call `round_1:researcher_001`, with model `claude-sonnet-5` and
+`max_tokens=1024`: one provider attempt, zero successful responses, one failure,
+and zero retries. Its classification is `OUTPUT-BUDGET EXHAUSTION`.
 
-`C:\TORMENT\m5s5c`
+The response was structurally valid at the provider boundary but contained one
+`ThinkingBlock`, no `TextBlock`, no string text field, and
+`stop_reason=max_tokens`. It therefore produced no final text for the native
+adapter, and Meridian's parser was not reached. This is not an authentication
+failure, invalid-model-ID result, SDK shape incompatibility, adapter extraction
+defect, Meridian parser/schema failure, Hivemind result, or task-quality result.
+Its external evidence must never be overwritten, reused, or deleted.
+
+### One authorized Sonnet 5 output-budget successor characterization
+
+The failed output-budget attempt does not authorize a silent retry. Exactly one
+successor N=5 characterization is authorized only after every pre-contact gate
+below passes. It has a fresh, short Windows-safe external root:
+
+`C:\TORMENT\m5s5d`
 
 | Condition | Successor run ID |
 | --- | --- |
-| A_PRIVATE | `meridian-n5-sonnet5c-20260824-a-private` |
-| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5c-20260824-b1-mechanisms-only` |
-| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5c-20260824-b2-salience-surfaced` |
-| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5c-20260824-c-naive-shared-content` |
+| A_PRIVATE | `meridian-n5-sonnet5d-20260824-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5d-20260824-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5d-20260824-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5d-20260824-c-naive-shared-content` |
 
 Before any live call, the exact operator process must pass all frozen checks and
 all of these additional checks: `credential_source == "repo_dotenv"`, credential
@@ -193,16 +209,17 @@ configured is true, the real-provider gate equals `1`, model is
 `claude-sonnet-5`, the SDK is available, adapter construction succeeds, and
 network contact remains false. It must also verify the frozen corpus, manifest,
 and seed; `HEAD == origin/main ==` the committed successor-preparation revision;
-a clean tracked worktree; and that `C:\TORMENT\m5s5c` exists and is empty.
+a clean tracked worktree; and that `C:\TORMENT\m5s5d` exists and is empty.
 
 The successor preserves A_PRIVATE, B1_TORMENT_MECHANISMS_ONLY,
 B2_TORMENT_SALIENCE_SURFACED, and C_NAIVE_SHARED_CONTENT; 5 agents; 2 rounds;
 at most 40 planned logical calls; no retries; no second seed; no confirmatory
-rerun; no hidden evaluator; and no model synthesizer. The diagnostic path adds
-only redacted response-shape metadata to an empty-text provider failure, so a
-repeat may distinguish likely output-budget exhaustion from other provider
-behavior. Terminal provider or schema failure must stop immediately and seal
-`FAILED`. N=5 remains characterization-only.
+rerun; no hidden evaluator; and no model synthesizer. The only configuration
+amendment is `max_tokens=16000`: Sonnet 5's default adaptive thinking remains
+unchanged, as do all provider-default sampling values. The diagnostic path
+retains only redacted response-shape metadata for an empty-text provider failure.
+Terminal provider or schema failure must stop immediately and seal `FAILED`.
+N=5 remains characterization-only.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run
