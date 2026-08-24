@@ -159,6 +159,18 @@ class TestAnthropicAdapterSdkAndTimeout(unittest.TestCase):
         AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
         self.assertEqual(spy.client.init_kwargs.get("timeout"), 30.0)
 
+    def test_explicit_timeout_overrides_the_generic_default(self):
+        spy = _SpySdkFactory()
+        AnthropicNonSpineLLMProviderAdapter(
+            env=_valid_env(), sdk_factory=spy, timeout_seconds=600,
+        ).generate(_req())
+        self.assertEqual(spy.client.init_kwargs.get("timeout"), 600.0)
+
+    def test_sdk_retries_are_explicitly_disabled(self):
+        spy = _SpySdkFactory()
+        AnthropicNonSpineLLMProviderAdapter(env=_valid_env(), sdk_factory=spy).generate(_req())
+        self.assertEqual(spy.client.init_kwargs.get("max_retries"), 0)
+
     def test_bad_timeout_fails_closed(self):
         for bad in ("abc", "0", "-5", "31"):
             spy = _SpySdkFactory()

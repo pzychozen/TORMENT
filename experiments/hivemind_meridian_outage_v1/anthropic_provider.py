@@ -30,6 +30,7 @@ from .spec import CARD_IDS, payload_sha256
 
 FROZEN_MODEL_ID = "claude-sonnet-5"
 FROZEN_MAX_TOKENS = 16_000
+FROZEN_TIMEOUT_SECONDS = 600
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_DOTENV_PATH = REPO_ROOT / ".env"
 HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT = MappingProxyType({
@@ -80,12 +81,28 @@ HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT = MappingProxyTy
     "scientific_interpretation": "OUTPUT-BUDGET EXHAUSTION",
     "cause": "ThinkingBlock only; no TextBlock; stop_reason=max_tokens",
 })
-SONNET5D_OUTPUT_BUDGET_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5d"
-SONNET5D_OUTPUT_BUDGET_SUCCESSOR_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5d-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5d-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5d-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5d-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_TIMEOUT_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5d",
+    "run_id": "meridian-n5-sonnet5d-20260824-a-private",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_1:researcher_001",
+    "model_id": FROZEN_MODEL_ID,
+    "max_tokens": FROZEN_MAX_TOKENS,
+    "timeout_seconds": 30,
+    "attempted_provider_calls": 1,
+    "succeeded_provider_calls": 0,
+    "failed_provider_calls": 1,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "TIMEOUT",
+    "cause": "Request timed out or interrupted",
+})
+SONNET5E_TIMEOUT_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5e"
+SONNET5E_TIMEOUT_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5e-20260824-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5e-20260824-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5e-20260824-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5e-20260824-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
@@ -162,15 +179,16 @@ def load_repo_dotenv_safely(
 class _FrozenAnthropicEnvironment:
     """Delegates normal reads but pins the non-secret model and timeout configuration."""
 
-    def __init__(self, base: Mapping[str, str], model_id: str) -> None:
+    def __init__(self, base: Mapping[str, str], model_id: str, timeout_seconds: int) -> None:
         self._base = base
         self._model_id = model_id
+        self._timeout_seconds = timeout_seconds
 
     def get(self, key: str, default: Any = None) -> Any:
         if key == AnthropicNonSpineLLMProviderAdapter.MODEL_ENV:
             return self._model_id
         if key == AnthropicNonSpineLLMProviderAdapter.TIMEOUT_ENV:
-            return "30"
+            return str(self._timeout_seconds)
         return self._base.get(key, default)
 
 
@@ -265,8 +283,11 @@ class FrozenAnthropicMeridianProvider:
         self._model_id = model_id
         self._environment = environment if environment is not None else os.environ
         self._native_adapter = native_adapter or AnthropicNonSpineLLMProviderAdapter(
-            env=_FrozenAnthropicEnvironment(self._environment, self._model_id),
+            env=_FrozenAnthropicEnvironment(
+                self._environment, self._model_id, FROZEN_TIMEOUT_SECONDS,
+            ),
             max_tokens=FROZEN_MAX_TOKENS,
+            timeout_seconds=FROZEN_TIMEOUT_SECONDS,
         )
 
     @classmethod
@@ -296,7 +317,7 @@ class FrozenAnthropicMeridianProvider:
                 "top_p": copy.deepcopy(_SAMPLING_DEFAULT),
                 "top_k": copy.deepcopy(_SAMPLING_DEFAULT),
                 "thinking": copy.deepcopy(_SAMPLING_DEFAULT),
-                "timeout": {"mode": "explicit", "explicit_value": 30},
+                "timeout": {"mode": "explicit", "explicit_value": FROZEN_TIMEOUT_SECONDS},
                 "system_instruction": {
                     "mode": "harness_instruction",
                     "sha256": payload_sha256(RESEARCH_INSTRUCTION),

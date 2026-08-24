@@ -454,13 +454,28 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
         "model_context_window_exceeded",
     })
 
-    def __init__(self, env=None, sdk_factory=None, max_tokens: int | None = None) -> None:
+    def __init__(
+        self, env=None, sdk_factory=None, max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
         # Store readers only. No env lookup, no SDK import, no provider contact here.
         if max_tokens is not None and (type(max_tokens) is not int or max_tokens <= 0):
             raise ValueError("max_tokens must be a positive integer")
+        if (
+            timeout_seconds is not None
+            and (
+                isinstance(timeout_seconds, bool)
+                or not isinstance(timeout_seconds, (int, float))
+                or timeout_seconds <= 0
+            )
+        ):
+            raise ValueError("timeout_seconds must be a positive number")
         self._env = env
         self._sdk_factory = sdk_factory
         self._max_tokens = self.MAX_TOKENS if max_tokens is None else max_tokens
+        self._timeout_seconds = (
+            None if timeout_seconds is None else float(timeout_seconds)
+        )
 
     def _resolve_env(self):
         if self._env is not None:
@@ -494,6 +509,11 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
                 % (self.TIMEOUT_ENV, self.DEFAULT_TIMEOUT_SECONDS)
             )
         return seconds
+
+    def _resolve_timeout(self, env) -> float:
+        if self._timeout_seconds is not None:
+            return self._timeout_seconds
+        return self._parse_timeout(env)
 
     def _load_sdk(self):
         try:
@@ -574,10 +594,10 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
         self._require_gate(env)                              # refuse before SDK import
         api_key = self._require_value(env, self.API_KEY_ENV)  # refuse before SDK import
         model = self._require_value(env, self.MODEL_ENV)      # refuse before SDK import
-        timeout = self._parse_timeout(env)
+        timeout = self._resolve_timeout(env)
         sdk = self._load_sdk()                               # lazy import AFTER validation
         try:
-            client = sdk.Anthropic(api_key=api_key, timeout=timeout)
+            client = sdk.Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
             response = client.messages.create(
                 model=model,
                 max_tokens=self._max_tokens,
