@@ -6991,6 +6991,12 @@ class TormentFabric:
             reg.mark(proposal_id, status="rejected", note=note or "rejected manually")
             return {"ok": True, "decision": "rejected", "proposal_id": proposal_id}
 
+        if p.mtype == "collective_echo":
+            raise ValueError(
+                "collective-derived proposals require the grouped "
+                "independent-authority path"
+            )
+
         emb = np.asarray(p.embedding, dtype=np.float32)
         emb_provider = str(getattr(self.kernel.embedder, "provider", ""))
         emb_model = str(getattr(self.kernel.embedder, "model", ""))

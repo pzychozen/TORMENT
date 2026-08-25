@@ -277,7 +277,9 @@ This tells the creative agent: "the researcher and builder both noticed somethin
 The request runs through the **7-gate policy engine** before anything is ingested:
 
 1. **Confidence** — event confidence must be >= 0.60 (stricter than detection)
-2. **Agent opt-in** — target agent must allow collective re-ingestion
+2. **Agent opt-in policy gate** — the policy has an opt-in/opt-out check, but
+   agent-level collective re-ingestion opt-out is not currently exposed as a
+   persistent production control
 3. **Domain match** — event domain must match the target agent's domain exactly
 4. **Deduplication** — same event+agent pair can never be reingested twice
 5. **Rate limit** — max 3 reingests per agent per hour
@@ -285,6 +287,14 @@ The request runs through the **7-gate policy engine** before anything is ingeste
 7. **Eligible** — all gates passed
 
 If any gate fails, you get back which gate failed and why. The policy is conservative by design.
+
+> **Gate 2 operational status:** Agent-level collective re-ingestion opt-out
+> exists as an in-memory policy gate, but normal operators cannot maintain that
+> state across production re-ingestion calls today. This is known bounded
+> terrain, not a newly discovered security-boundary failure. For actual
+> memory-level controls, use `non_shareable` and
+> `collective_export_blocked`. Those flags control an individual memory's
+> collective export and are not equivalent to agent-level opt-out.
 
 ### Echo properties
 
