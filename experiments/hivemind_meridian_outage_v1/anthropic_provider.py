@@ -113,12 +113,29 @@ HISTORICAL_FAILED_SONNET_SCHEMA_CHARACTERIZATION_ATTEMPT = MappingProxyType({
     "scientific_interpretation": "MODEL OUTPUT CONTRACT NONCOMPLIANCE — MINOR EXTRA-FIELD DEVIATION",
     "cause": "finding index 1 had forbidden extra stance_note field",
 })
-SONNET5F_EXACT_SCHEMA_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5f"
-SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS = MappingProxyType({
-    "A_PRIVATE": "meridian-n5-sonnet5f-20260824-a-private",
-    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5f-20260824-b1-mechanisms-only",
-    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5f-20260824-b2-salience-surfaced",
-    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5f-20260824-c-naive-shared-content",
+HISTORICAL_FAILED_SONNET_FREE_FORM_SCHEMA_CHARACTERIZATION_ATTEMPT = MappingProxyType({
+    "root": r"C:\TORMENT\m5s5f",
+    "run_id": "meridian-n5-sonnet5f-20260824-a-private",
+    "condition": "A_PRIVATE",
+    "logical_call": "round_2:researcher_002",
+    "model_id": FROZEN_MODEL_ID,
+    "max_tokens": FROZEN_MAX_TOKENS,
+    "timeout_seconds": FROZEN_TIMEOUT_SECONDS,
+    "attempted_provider_calls": 7,
+    "succeeded_provider_calls": 6,
+    "failed_provider_calls": 1,
+    "unexecuted_provider_calls": 3,
+    "retry_count": 0,
+    "status": "FAILED",
+    "scientific_interpretation": "FREE-FORM OUTPUT-SCHEMA NONCOMPLIANCE",
+    "cause": "finding has an unexpected structure",
+})
+SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_CHARACTERIZATION_ROOT = r"C:\TORMENT\m5s5g"
+SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_RUN_IDS = MappingProxyType({
+    "A_PRIVATE": "meridian-n5-sonnet5g-20260825-a-private",
+    "B1_TORMENT_MECHANISMS_ONLY": "meridian-n5-sonnet5g-20260825-b1-mechanisms-only",
+    "B2_TORMENT_SALIENCE_SURFACED": "meridian-n5-sonnet5g-20260825-b2-salience-surfaced",
+    "C_NAIVE_SHARED_CONTENT": "meridian-n5-sonnet5g-20260825-c-naive-shared-content",
 })
 _CARD_ID = re.compile(r"^[RMDCPN]-\d{3}$")
 _VALID_STANCES = frozenset({"asserts", "refutes", "mentions"})
@@ -127,6 +144,58 @@ _OUTPUT_KEYS = frozenset({"findings", "claims", "final_answer", "collective_cont
 _FINDING_KEYS = frozenset({"text", "card_ids", "share_permitted"})
 _CLAIM_KEYS = frozenset({"text", "card_ids", "stance"})
 _FINAL_ANSWER_KEYS = frozenset({"root_cause", "contributing_factors", "cited_card_ids"})
+MERIDIAN_RESPONSE_JSON_SCHEMA_ID = "meridian-response-json-schema-v1"
+MERIDIAN_RESPONSE_JSON_SCHEMA_VERSION = 1
+MERIDIAN_RESPONSE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "minLength": 1},
+                    "card_ids": {"type": "array", "items": {"type": "string"}},
+                    "share_permitted": {"type": "boolean"},
+                },
+                "required": ["text", "card_ids", "share_permitted"],
+                "additionalProperties": False,
+            },
+        },
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "minLength": 1},
+                    "card_ids": {"type": "array", "items": {"type": "string"}},
+                    "stance": {"type": "string", "enum": ["asserts", "refutes", "mentions"]},
+                },
+                "required": ["text", "card_ids", "stance"],
+                "additionalProperties": False,
+            },
+        },
+        "final_answer": {
+            "type": "object",
+            "properties": {
+                "root_cause": {"type": "string", "minLength": 1},
+                "contributing_factors": {"type": "array", "items": {"type": "string"}},
+                "cited_card_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["root_cause", "contributing_factors", "cited_card_ids"],
+            "additionalProperties": False,
+        },
+        "collective_context_consumed": {"type": "boolean"},
+    },
+    "required": ["findings", "claims", "final_answer", "collective_context_consumed"],
+    "additionalProperties": False,
+}
+MERIDIAN_STRUCTURED_OUTPUT_CONFIG = {
+    "format": {
+        "type": "json_schema",
+        "schema": MERIDIAN_RESPONSE_JSON_SCHEMA,
+    },
+}
 
 
 class MeridianProviderResponseError(ValueError):
@@ -304,6 +373,7 @@ class FrozenAnthropicMeridianProvider:
             ),
             max_tokens=FROZEN_MAX_TOKENS,
             timeout_seconds=FROZEN_TIMEOUT_SECONDS,
+            output_config=MERIDIAN_STRUCTURED_OUTPUT_CONFIG,
         )
 
     @classmethod
@@ -327,6 +397,12 @@ class FrozenAnthropicMeridianProvider:
             "provider_mode": "live",
             "session_isolation": "per_agent_per_round",
             "retry_policy": "none",
+            "structured_output": True,
+            "structured_output_schema": {
+                "id": MERIDIAN_RESPONSE_JSON_SCHEMA_ID,
+                "version": MERIDIAN_RESPONSE_JSON_SCHEMA_VERSION,
+                "sha256": payload_sha256(MERIDIAN_RESPONSE_JSON_SCHEMA),
+            },
             "sampling": {
                 "max_tokens": {"mode": "explicit", "explicit_value": FROZEN_MAX_TOKENS},
                 "temperature": copy.deepcopy(_SAMPLING_DEFAULT),
@@ -361,16 +437,6 @@ class FrozenAnthropicMeridianProvider:
         payload: dict[str, Any] = {
             "agent_id": agent_id,
             "assigned_cards": cards,
-            "response_schema": {
-                "findings": [{"text": "string", "card_ids": ["CARD-ID"], "share_permitted": "boolean"}],
-                "claims": [{"text": "string", "card_ids": ["CARD-ID"], "stance": "asserts|refutes|mentions"}],
-                "final_answer": {
-                    "root_cause": "string",
-                    "contributing_factors": ["string"],
-                    "cited_card_ids": ["CARD-ID"],
-                },
-                "collective_context_consumed": "boolean",
-            },
             "round_number": round_number,
         }
         if collective_context is not None:
@@ -381,9 +447,7 @@ class FrozenAnthropicMeridianProvider:
                 key=_canonical_json,
             )
         return (
-            "Return exactly one JSON object matching response_schema. "
-            "Every object must contain exactly the keys shown in response_schema. "
-            "Do not add any additional keys, annotations, metadata, notes, explanations, or fields. "
+            "Return exactly one JSON object matching the native structured-output schema. "
             "Do not use markdown fences or add prose before or after the object.\n"
             + _canonical_json(payload)
         )

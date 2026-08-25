@@ -253,6 +253,29 @@ class TestAnthropicAdapterCall(unittest.TestCase):
         self.assertEqual(kwargs["system"], "you are x")
         self.assertEqual(kwargs["model"], "claude-fake")
         self.assertEqual(kwargs["max_tokens"], AnthropicNonSpineLLMProviderAdapter.MAX_TOKENS)
+        self.assertNotIn("output_config", kwargs)
+
+    def test_structured_output_config_is_opt_in_and_forwarded_to_messages_api(self):
+        output_config = {
+            "format": {
+                "type": "json_schema",
+                "schema": {"type": "object", "additionalProperties": False},
+            },
+        }
+        spy = _SpySdkFactory()
+        adapter = AnthropicNonSpineLLMProviderAdapter(
+            env=_valid_env(), sdk_factory=spy, output_config=output_config,
+        )
+        output_config["format"]["type"] = "mutated-after-construction"
+
+        adapter.generate(_req())
+
+        self.assertEqual(spy.client.messages.create_kwargs["output_config"], {
+            "format": {
+                "type": "json_schema",
+                "schema": {"type": "object", "additionalProperties": False},
+            },
+        })
 
     def test_explicit_max_tokens_overrides_the_generic_default(self):
         spy = _SpySdkFactory()

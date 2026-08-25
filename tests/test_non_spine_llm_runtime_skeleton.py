@@ -42,7 +42,7 @@ FORBIDDEN_SUBSTRINGS = [
     "Thread", "subprocess", "socket", "os.getenv", "getenv(", "dotenv",
 ]
 
-TOPLEVEL_ALLOWED_IMPORTS = {"__future__", "dataclasses", "typing"}
+TOPLEVEL_ALLOWED_IMPORTS = {"__future__", "copy", "dataclasses", "typing"}
 NESTED_ALLOWED_IMPORTS = {"os", "anthropic"}
 FORBIDDEN_IMPORTS_ANYWHERE = {
     "requests", "httpx", "aiohttp", "urllib", "socket", "ssl", "subprocess",

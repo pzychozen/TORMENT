@@ -15,13 +15,18 @@ from experiments.hivemind_meridian_outage_v1.anthropic_provider import (
     FrozenAnthropicMeridianProvider,
     HISTORICAL_FAILED_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_EMPTY_TEXT_CHARACTERIZATION_ATTEMPT,
+    HISTORICAL_FAILED_SONNET_FREE_FORM_SCHEMA_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_OUTPUT_BUDGET_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_SCHEMA_CHARACTERIZATION_ATTEMPT,
     HISTORICAL_FAILED_SONNET_TIMEOUT_CHARACTERIZATION_ATTEMPT,
+    MERIDIAN_RESPONSE_JSON_SCHEMA,
+    MERIDIAN_RESPONSE_JSON_SCHEMA_ID,
+    MERIDIAN_RESPONSE_JSON_SCHEMA_VERSION,
+    MERIDIAN_STRUCTURED_OUTPUT_CONFIG,
     MeridianProviderResponseError,
-    SONNET5F_EXACT_SCHEMA_SUCCESSOR_CHARACTERIZATION_ROOT,
-    SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS,
+    SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_CHARACTERIZATION_ROOT,
+    SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_RUN_IDS,
     load_repo_dotenv_safely,
     parse_meridian_response,
 )
@@ -33,9 +38,12 @@ from experiments.hivemind_meridian_outage_v1.harness import (
 from experiments.hivemind_meridian_outage_v1.results import RESULT_SCHEMA_VERSION, verify_sealed_run
 from experiments.hivemind_meridian_outage_v1.spec import cards_for_agent, assignment_manifest, payload_sha256
 from torment_service.non_spine_llm_runtime import (
+    AnthropicNonSpineLLMProviderAdapter,
     NonSpineLLMProviderAdapter,
+    NonSpineLLMProviderRequest,
     NonSpineLLMRealProviderError,
     NonSpineLLMProviderResult,
+    NonSpineLLMPromptRequest,
 )
 
 
@@ -86,6 +94,107 @@ class PromptAwareNativeAdapter(NonSpineLLMProviderAdapter):
             model_name=FROZEN_MODEL_ID,
             echoed_prompt=request.prompt_request.rendered_prompt,
         )
+
+
+class _TextBlock:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _Message:
+    def __init__(self, text: str) -> None:
+        self.content = [_TextBlock(text)]
+        self.stop_reason = "end_turn"
+
+
+def _matches_json_schema(value: object, schema: Mapping[str, Any]) -> bool:
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        if not isinstance(value, dict):
+            return False
+        properties = schema.get("properties")
+        required = schema.get("required")
+        if not isinstance(properties, Mapping) or not isinstance(required, list):
+            return False
+        if any(key not in value for key in required):
+            return False
+        if schema.get("additionalProperties") is False and set(value) - set(properties):
+            return False
+        return all(
+            key in properties
+            and isinstance(properties[key], Mapping)
+            and _matches_json_schema(item, properties[key])
+            for key, item in value.items()
+        )
+    if schema_type == "array":
+        items = schema.get("items")
+        return isinstance(value, list) and isinstance(items, Mapping) and all(
+            _matches_json_schema(item, items) for item in value
+        )
+    if schema_type == "string":
+        if not isinstance(value, str) or len(value) < schema.get("minLength", 0):
+            return False
+        enum = schema.get("enum")
+        return not isinstance(enum, list) or value in enum
+    return schema_type == "boolean" and type(value) is bool
+
+
+class _StructuredOutputSdkFactory:
+    """Fake normal Messages API that rejects output invalid under its supplied schema."""
+
+    def __init__(self, response_text: str) -> None:
+        self.response_text = response_text
+        self.create_kwargs: dict[str, Any] | None = None
+
+    def __call__(self):
+        factory = self
+
+        class _Messages:
+            def create(self, **kwargs):
+                factory.create_kwargs = kwargs
+                output_config = kwargs.get("output_config")
+                if not isinstance(output_config, Mapping):
+                    raise RuntimeError("structured output config is absent")
+                format_config = output_config.get("format")
+                if not isinstance(format_config, Mapping) or format_config.get("type") != "json_schema":
+                    raise RuntimeError("structured output format is malformed")
+                schema = format_config.get("schema")
+                if not isinstance(schema, Mapping) or not _matches_json_schema(
+                    json.loads(factory.response_text), schema,
+                ):
+                    raise RuntimeError("mock structured output rejected the response")
+                return _Message(factory.response_text)
+
+        class _Client:
+            def __init__(self, **_kwargs) -> None:
+                self.messages = _Messages()
+
+        class _Module:
+            Anthropic = _Client
+
+        return _Module
+
+
+def _native_structured_adapter(factory: _StructuredOutputSdkFactory) -> AnthropicNonSpineLLMProviderAdapter:
+    return AnthropicNonSpineLLMProviderAdapter(
+        env={
+            "ANTHROPIC_API_KEY": "fake-key",
+            "TORMENT_NON_SPINE_LLM_REAL_PROVIDER": "1",
+            "TORMENT_NON_SPINE_ANTHROPIC_MODEL": FROZEN_MODEL_ID,
+        },
+        sdk_factory=factory,
+        max_tokens=FROZEN_MAX_TOKENS,
+        timeout_seconds=FROZEN_TIMEOUT_SECONDS,
+        output_config=MERIDIAN_STRUCTURED_OUTPUT_CONFIG,
+    )
+
+
+def _native_structured_request() -> NonSpineLLMProviderRequest:
+    return NonSpineLLMProviderRequest(
+        prompt_request=NonSpineLLMPromptRequest(
+            rendered_prompt="fake Meridian prompt", system_text=RESEARCH_INSTRUCTION,
+        ),
+    )
 
 
 def _provider(texts: Sequence[str] = (_valid_response(),)) -> tuple[FrozenAnthropicMeridianProvider, StubNativeAdapter]:
@@ -264,15 +373,36 @@ def test_failed_sonnet_identities_are_closed_and_successor_identity_is_distinct(
     }
     assert (
         HISTORICAL_FAILED_SONNET_SCHEMA_CHARACTERIZATION_ATTEMPT["root"]
-        != SONNET5F_EXACT_SCHEMA_SUCCESSOR_CHARACTERIZATION_ROOT
+        != HISTORICAL_FAILED_SONNET_FREE_FORM_SCHEMA_CHARACTERIZATION_ATTEMPT["root"]
     )
-    assert len(SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS) == 4
-    assert len(set(SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS.values())) == 4
-    assert set(SONNET5F_EXACT_SCHEMA_SUCCESSOR_RUN_IDS.values()) == {
-        "meridian-n5-sonnet5f-20260824-a-private",
-        "meridian-n5-sonnet5f-20260824-b1-mechanisms-only",
-        "meridian-n5-sonnet5f-20260824-b2-salience-surfaced",
-        "meridian-n5-sonnet5f-20260824-c-naive-shared-content",
+    assert HISTORICAL_FAILED_SONNET_FREE_FORM_SCHEMA_CHARACTERIZATION_ATTEMPT == {
+        "root": r"C:\TORMENT\m5s5f",
+        "run_id": "meridian-n5-sonnet5f-20260824-a-private",
+        "condition": "A_PRIVATE",
+        "logical_call": "round_2:researcher_002",
+        "model_id": "claude-sonnet-5",
+        "max_tokens": 16_000,
+        "timeout_seconds": 600,
+        "attempted_provider_calls": 7,
+        "succeeded_provider_calls": 6,
+        "failed_provider_calls": 1,
+        "unexecuted_provider_calls": 3,
+        "retry_count": 0,
+        "status": "FAILED",
+        "scientific_interpretation": "FREE-FORM OUTPUT-SCHEMA NONCOMPLIANCE",
+        "cause": "finding has an unexpected structure",
+    }
+    assert (
+        HISTORICAL_FAILED_SONNET_FREE_FORM_SCHEMA_CHARACTERIZATION_ATTEMPT["root"]
+        != SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_CHARACTERIZATION_ROOT
+    )
+    assert len(SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_RUN_IDS) == 4
+    assert len(set(SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_RUN_IDS.values())) == 4
+    assert set(SONNET5G_STRUCTURED_OUTPUT_SUCCESSOR_RUN_IDS.values()) == {
+        "meridian-n5-sonnet5g-20260825-a-private",
+        "meridian-n5-sonnet5g-20260825-b1-mechanisms-only",
+        "meridian-n5-sonnet5g-20260825-b2-salience-surfaced",
+        "meridian-n5-sonnet5g-20260825-c-naive-shared-content",
     }
 
 
@@ -338,6 +468,34 @@ def test_parser_rejects_extra_finding_keys_without_repair() -> None:
         parse_meridian_response(json.dumps(extra_field))
 
 
+def test_native_structured_output_schema_accepts_the_valid_frozen_response() -> None:
+    raw_response = _valid_response()
+    factory = _StructuredOutputSdkFactory(raw_response)
+
+    result = _native_structured_adapter(factory).generate(_native_structured_request())
+
+    assert result.text == raw_response
+    assert factory.create_kwargs is not None
+    assert factory.create_kwargs["output_config"] == MERIDIAN_STRUCTURED_OUTPUT_CONFIG
+
+
+@pytest.mark.parametrize("mutate", (
+    lambda response: response["findings"][0].update({"stance_note": "forbidden"}),
+    lambda response: response["findings"][0].pop("share_permitted"),
+    lambda response: response["findings"][0].update({"share_permitted": "wrong type"}),
+))
+def test_native_structured_output_schema_rejects_extra_missing_and_wrong_type_fields(mutate: Any) -> None:
+    response = json.loads(_valid_response())
+    mutate(response)
+    factory = _StructuredOutputSdkFactory(json.dumps(response))
+
+    with pytest.raises(NonSpineLLMRealProviderError, match="mock structured output rejected"):
+        _native_structured_adapter(factory).generate(_native_structured_request())
+
+    assert factory.create_kwargs is not None
+    assert factory.create_kwargs["output_config"] == MERIDIAN_STRUCTURED_OUTPUT_CONFIG
+
+
 def test_metadata_freezes_exact_configuration_and_contains_no_credentials() -> None:
     provider = FrozenAnthropicMeridianProvider(environment={
         "ANTHROPIC_API_KEY": "metadata-test-secret",
@@ -348,8 +506,15 @@ def test_metadata_freezes_exact_configuration_and_contains_no_credentials() -> N
     assert metadata["model_id"] == FROZEN_MODEL_ID
     assert provider._native_adapter._max_tokens == FROZEN_MAX_TOKENS
     assert provider._native_adapter._timeout_seconds == FROZEN_TIMEOUT_SECONDS
+    assert provider._native_adapter._output_config == MERIDIAN_STRUCTURED_OUTPUT_CONFIG
     assert metadata["session_isolation"] == "per_agent_per_round"
     assert metadata["retry_policy"] == "none"
+    assert metadata["structured_output"] is True
+    assert metadata["structured_output_schema"] == {
+        "id": MERIDIAN_RESPONSE_JSON_SCHEMA_ID,
+        "version": MERIDIAN_RESPONSE_JSON_SCHEMA_VERSION,
+        "sha256": payload_sha256(MERIDIAN_RESPONSE_JSON_SCHEMA),
+    }
     assert metadata["sampling"]["max_tokens"] == {
         "mode": "explicit", "explicit_value": FROZEN_MAX_TOKENS,
     }
@@ -377,21 +542,10 @@ def test_prompt_rendering_is_deterministic_and_does_not_expose_condition_names()
     assert "C_NAIVE" not in first
     instruction, payload = first.split("\n", 1)
     assert instruction == (
-        "Return exactly one JSON object matching response_schema. "
-        "Every object must contain exactly the keys shown in response_schema. "
-        "Do not add any additional keys, annotations, metadata, notes, explanations, or fields. "
+        "Return exactly one JSON object matching the native structured-output schema. "
         "Do not use markdown fences or add prose before or after the object."
     )
-    assert json.loads(payload)["response_schema"] == {
-        "findings": [{"text": "string", "card_ids": ["CARD-ID"], "share_permitted": "boolean"}],
-        "claims": [{"text": "string", "card_ids": ["CARD-ID"], "stance": "asserts|refutes|mentions"}],
-        "final_answer": {
-            "root_cause": "string",
-            "contributing_factors": ["string"],
-            "cited_card_ids": ["CARD-ID"],
-        },
-        "collective_context_consumed": "boolean",
-    }
+    assert "response_schema" not in json.loads(payload)
 
 
 def test_prompt_condition_boundaries_only_change_permitted_additions() -> None:

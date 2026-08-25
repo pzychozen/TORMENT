@@ -43,8 +43,9 @@ Live integration is a SEPARATE, separately-authorized gate and is not done here.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
-from typing import Callable, List, Tuple
+from typing import Callable, List, Mapping, Tuple
 
 
 # Fixed prompt label for the read-only memory-context block.
@@ -456,7 +457,7 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
 
     def __init__(
         self, env=None, sdk_factory=None, max_tokens: int | None = None,
-        timeout_seconds: float | None = None,
+        timeout_seconds: float | None = None, output_config: Mapping[str, object] | None = None,
     ) -> None:
         # Store readers only. No env lookup, no SDK import, no provider contact here.
         if max_tokens is not None and (type(max_tokens) is not int or max_tokens <= 0):
@@ -470,11 +471,16 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
             )
         ):
             raise ValueError("timeout_seconds must be a positive number")
+        if output_config is not None and not isinstance(output_config, Mapping):
+            raise ValueError("output_config must be a mapping")
         self._env = env
         self._sdk_factory = sdk_factory
         self._max_tokens = self.MAX_TOKENS if max_tokens is None else max_tokens
         self._timeout_seconds = (
             None if timeout_seconds is None else float(timeout_seconds)
+        )
+        self._output_config = (
+            None if output_config is None else copy.deepcopy(dict(output_config))
         )
 
     def _resolve_env(self):
@@ -598,14 +604,17 @@ class AnthropicNonSpineLLMProviderAdapter(NonSpineLLMProviderAdapter):
         sdk = self._load_sdk()                               # lazy import AFTER validation
         try:
             client = sdk.Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
-            response = client.messages.create(
-                model=model,
-                max_tokens=self._max_tokens,
-                system=request.prompt_request.system_text or "",
-                messages=[
+            create_kwargs = {
+                "model": model,
+                "max_tokens": self._max_tokens,
+                "system": request.prompt_request.system_text or "",
+                "messages": [
                     {"role": "user", "content": request.prompt_request.rendered_prompt}
                 ],
-            )
+            }
+            if self._output_config is not None:
+                create_kwargs["output_config"] = copy.deepcopy(self._output_config)
+            response = client.messages.create(**create_kwargs)
         except NonSpineLLMRealProviderError:
             raise
         except Exception as exc:

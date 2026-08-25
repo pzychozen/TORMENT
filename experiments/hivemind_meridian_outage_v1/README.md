@@ -216,20 +216,35 @@ It is not a Hivemind efficacy result, Sonnet task-quality result, Meridian
 parser defect, A/B1/B2/C comparison, or evidence for or against collective
 cognition. Its external evidence must never be overwritten, reused, or deleted.
 
-### One authorized Sonnet exact-schema-clarification successor characterization
+### Closed Sonnet free-form schema attempt
 
-The failed schema attempt does not authorize a silent retry. Exactly one
-successor N=5 characterization is authorized only after every pre-contact gate
-below passes. It has a fresh, short Windows-safe external root:
+`C:\TORMENT\m5s5f` is immutable sealed `FAILED` evidence for
+`meridian-n5-sonnet5f-20260824-a-private`. It administered `A_PRIVATE` only:
+seven provider calls were attempted, six parsed successfully, one failed at
+`round_2:researcher_002`, and zero retries occurred. Three calls remained
+unexecuted; B1, B2, and C were not administered. The terminal failure was
+`finding has an unexpected structure`.
 
-`C:\TORMENT\m5s5f`
+This is `FREE-FORM OUTPUT-SCHEMA NONCOMPLIANCE`. The exact-schema prompt
+clarification did not establish sufficient free-form schema reliability. It is
+not a Hivemind efficacy result, Sonnet task-quality result, A/B1/B2/C
+comparison, or evidence for or against collective cognition. Its external
+evidence must never be overwritten, reused, or deleted.
+
+### One authorized Sonnet native-structured-output successor characterization
+
+The failed free-form schema attempt does not authorize a silent retry. Exactly
+one successor N=5 characterization is authorized only after every pre-contact
+gate below passes. It has a fresh, short Windows-safe external root:
+
+`C:\TORMENT\m5s5g`
 
 | Condition | Successor run ID |
 | --- | --- |
-| A_PRIVATE | `meridian-n5-sonnet5f-20260824-a-private` |
-| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5f-20260824-b1-mechanisms-only` |
-| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5f-20260824-b2-salience-surfaced` |
-| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5f-20260824-c-naive-shared-content` |
+| A_PRIVATE | `meridian-n5-sonnet5g-20260825-a-private` |
+| B1_TORMENT_MECHANISMS_ONLY | `meridian-n5-sonnet5g-20260825-b1-mechanisms-only` |
+| B2_TORMENT_SALIENCE_SURFACED | `meridian-n5-sonnet5g-20260825-b2-salience-surfaced` |
+| C_NAIVE_SHARED_CONTENT | `meridian-n5-sonnet5g-20260825-c-naive-shared-content` |
 
 Before any live call, the exact operator process must pass all frozen checks and
 all of these additional checks: `credential_source == "repo_dotenv"`, credential
@@ -237,21 +252,26 @@ configured is true, the real-provider gate equals `1`, model is
 `claude-sonnet-5`, the SDK is available, adapter construction succeeds, and
 network contact remains false. It must also verify the frozen corpus, manifest,
 and seed; `HEAD == origin/main ==` the committed successor-preparation revision;
-a clean tracked worktree; and that `C:\TORMENT\m5s5f` exists and is empty.
+a clean tracked worktree; and that `C:\TORMENT\m5s5g` exists and is empty.
 
 The successor preserves A_PRIVATE, B1_TORMENT_MECHANISMS_ONLY,
 B2_TORMENT_SALIENCE_SURFACED, and C_NAIVE_SHARED_CONTENT; 5 agents; 2 rounds;
 at most 40 planned logical calls; no retries; no second seed; no confirmatory
 rerun; no hidden evaluator; and no model synthesizer. The only experimental
-interface change is the rendered response-instruction clarification: every
-object must use exactly the keys in `response_schema`, with no additional keys,
-annotations, metadata, notes, explanations, or fields. This changes each
-provider-visible prompt hash, while the frozen system instruction and its hash
-remain unchanged. `max_tokens=16000`, `timeout=600s`, Sonnet 5's default
-adaptive thinking, and all provider-default sampling values remain unchanged.
-The native adapter explicitly disables SDK retries to preserve Meridian's
-frozen no-retry policy. Terminal provider or schema failure must stop
-immediately and seal `FAILED`. N=5 remains characterization-only.
+interface change is native normal-Messages-API structured output:
+`output_config={"format": {"type": "json_schema", "schema": ...}}` carries the
+frozen Meridian response schema. Its metadata attests structured-output
+enforcement plus the schema identity, version, and hash. The duplicated prompt
+`response_schema` description is removed; the prompt still requires one JSON
+object without markdown or surrounding prose. This changes each provider-visible
+prompt hash, while the frozen system instruction and its hash remain unchanged.
+The raw textual provider response is still sealed and
+`parse_meridian_response()` remains the independent strict post-provider
+verifier. `max_tokens=16000`, `timeout=600s`, Sonnet 5's default adaptive
+thinking, and all provider-default sampling values remain unchanged. The native
+adapter explicitly disables SDK retries to preserve Meridian's frozen no-retry
+policy. Terminal provider or schema failure must stop immediately and seal
+`FAILED`. N=5 remains characterization-only.
 
 Every run has a unique ID, raw outputs, telemetry, a self-contained
 `SEALED.json`, and an append-only `meridian-seal-index.jsonl` outside its run
