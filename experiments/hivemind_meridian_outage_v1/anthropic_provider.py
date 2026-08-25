@@ -208,6 +208,7 @@ class MeridianDotenvBootstrap:
 
     dotenv_path: str
     dotenv_loaded: bool
+    dotenv_read_error: bool
     credential_configured: bool
     credential_source: str
 
@@ -231,6 +232,7 @@ def load_repo_dotenv_safely(
     except OSError:
         resolved = Path(dotenv_path)
     loaded = False
+    read_error = False
     if resolved.exists() and resolved.is_file():
         try:
             with open(resolved, "r", encoding="utf-8") as fh:
@@ -247,7 +249,8 @@ def load_repo_dotenv_safely(
                         env[key] = value
             loaded = True
         except OSError:
-            pass
+            # Read failure is observable only as redacted readiness state.
+            read_error = True
     credential_source = (
         "process_environment" if credential_existed_before_bootstrap
         else "repo_dotenv" if api_key_env in env
@@ -256,6 +259,7 @@ def load_repo_dotenv_safely(
     return MeridianDotenvBootstrap(
         dotenv_path=str(resolved),
         dotenv_loaded=loaded,
+        dotenv_read_error=read_error,
         credential_configured=credential_source != "absent",
         credential_source=credential_source,
     )

@@ -3549,8 +3549,6 @@ class TormentFabric:
                     # spawn branches set it; exceptions propagate before reaching
                     # this else block), so the old `if not stored:` check was
                     # unreachable and has been removed.
-                    if not stored:
-                        _hm_reasons.append("memory_not_stored")
                     if eid is None:
                         _hm_reasons.append("source_eid_missing")
                     if skip_packet_emission:

@@ -281,3 +281,15 @@ terminal failure and unexecuted-call count, and is verifiable but cannot be
 treated as a completed experiment. The index anchors either status along with
 run identity, condition, N, seed, seal file hash, and result timestamp. It is
 an operational append-only anchor, not a hostile tamper-resistance claim.
+
+## Residency and future-research boundary
+
+This package remains in the TORMENT tree only as the frozen Meridian v1
+reproducibility instrument and verifier. It is not imported by normal
+`python -m torment_service` startup or service paths; sealed run evidence stays
+outside the repository and is immutable. Future Black Vault and other research
+belongs under `C:\TORMENT\torment_experiment` and must drive the normal
+`python -m torment_service` public APIs. Experiment-specific implementation
+must not be added to the production service tree. If research reveals a missing
+production capability, stop and obtain separate production authorization before
+implementing it.

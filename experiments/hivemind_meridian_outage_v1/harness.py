@@ -6,7 +6,6 @@ The real-Fabric adapter is opt-in for a separately authorized characterization.
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import platform
 import re
@@ -287,11 +286,6 @@ class TormentFabricAdapter:
             self._workspace_id,
             "research",
             status="pending",
-        )
-        approved = self._fabric.list_proposals(
-            self._workspace_id,
-            "research",
-            status="approved",
         )
         support_agents_per_promoted_node: list[int] = []
         shared_graph = self._fabric.get_workspace(self._workspace_id).shared_graphs.get("research")

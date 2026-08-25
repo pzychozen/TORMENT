@@ -231,6 +231,7 @@ def test_repo_dotenv_bootstrap_is_redacted_and_process_environment_takes_precede
 
     assert bootstrap.dotenv_path == str(dotenv_path.resolve())
     assert bootstrap.dotenv_loaded is True
+    assert bootstrap.dotenv_read_error is False
     assert bootstrap.credential_configured is True
     assert bootstrap.credential_source == "process_environment"
     assert environment["ANTHROPIC_API_KEY"] == "process-test-secret"
@@ -239,6 +240,7 @@ def test_repo_dotenv_bootstrap_is_redacted_and_process_environment_takes_precede
     status_text = json.dumps({
         "dotenv_path": bootstrap.dotenv_path,
         "dotenv_loaded": bootstrap.dotenv_loaded,
+        "dotenv_read_error": bootstrap.dotenv_read_error,
         "credential_configured": bootstrap.credential_configured,
         "credential_source": bootstrap.credential_source,
     })
@@ -259,6 +261,7 @@ def test_repo_dotenv_populates_an_absent_credential_with_redacted_provenance(tmp
     )
 
     assert bootstrap.dotenv_loaded is True
+    assert bootstrap.dotenv_read_error is False
     assert bootstrap.credential_configured is True
     assert bootstrap.credential_source == "repo_dotenv"
     assert environment["ANTHROPIC_API_KEY"] == "dotenv-test-secret"
@@ -274,6 +277,7 @@ def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_pat
     )
 
     assert bootstrap.dotenv_loaded is False
+    assert bootstrap.dotenv_read_error is False
     assert bootstrap.credential_configured is False
     assert bootstrap.credential_source == "absent"
     assert provider.preflight()["credential_configured"] is False
@@ -282,6 +286,26 @@ def test_missing_dotenv_and_key_remain_fail_closed_before_sdk_or_network(tmp_pat
             agent_id="researcher_001", round_number=1, instruction=RESEARCH_INSTRUCTION,
             assigned_cards=_cards(), collective_context=None, naive_shared_findings=[],
         )
+
+
+def test_unreadable_repo_dotenv_is_redacted_and_remains_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("ANTHROPIC_API_KEY=dotenv-unreadable-test-secret\n", encoding="utf-8")
+
+    def _raise_permission_error(*args: object, **kwargs: object) -> object:
+        raise PermissionError("test-only unreadable dotenv")
+
+    monkeypatch.setattr("builtins.open", _raise_permission_error)
+    bootstrap = load_repo_dotenv_safely(environment={}, dotenv_path=dotenv_path)
+
+    assert bootstrap.dotenv_loaded is False
+    assert bootstrap.dotenv_read_error is True
+    assert bootstrap.credential_configured is False
+    assert bootstrap.credential_source == "absent"
+    assert "dotenv-unreadable-test-secret" not in repr(bootstrap)
 
 
 def test_failed_sonnet_identities_are_closed_and_successor_identity_is_distinct() -> None:
