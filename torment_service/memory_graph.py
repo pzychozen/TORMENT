@@ -246,10 +246,10 @@ class MemoryGraph:
         self.world = SeedWorld()
         self.entities: Dict[int, SeedEntity] = {}
 
-        # V2 is an opt-in observational format.  Keep the established JSONL
-        # logger as the production default until its qualification is reviewed.
+        # V2 is the qualified default for trajectory observability. Legacy
+        # JSONL remains available as an explicit compatibility override.
         requested_trajectory_format = str(
-            os.getenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
+            os.getenv("TORMENT_TRAJECTORY_FORMAT", "v2")
         ).strip().lower()
         self._trajectory_format = (
             requested_trajectory_format if requested_trajectory_format in {"legacy", "v2"}

@@ -66,3 +66,26 @@ path.
 V2 is qualified as a lossless trajectory persistence format. Its promotion
 changes only the default selection; the legacy reader and writer remain
 supported for explicit compatibility use.
+
+## Default promotion
+
+The production default is `TORMENT_TRAJECTORY_FORMAT=v2` when the environment
+variable is unset. `TORMENT_TRAJECTORY_FORMAT=legacy` continues to select the
+legacy JSONL writer. Invalid format values retain the established fallback to
+legacy rather than changing any non-trajectory runtime default.
+
+### Default-path N=100 smoke
+
+The fresh default-path smoke (`20260826T132145Z-a4d99b49`) started the service
+with `TORMENT_TRAJECTORY_FORMAT` absent, ST / `BAAI/bge-small-en-v1.5`, and
+SRG, compression, and Hivemind disabled. It completed and then shut down
+gracefully.
+
+- observed format: `trajectory-v2.2`;
+- sealed verification: PASS, with 2 finalized chunks, 102 frames, 5,868
+  dynamic records, and no partial chunks;
+- trajectory storage: 360,227 B, within the established N=100 V2 result;
+- logical steps: 100; native-valid repeated steps: 25 and 90;
+- retrieval metrics and target ranks: exact match to the prior clean N=100
+  qualification;
+- observer purity: true, with no root-outside-workspace mutation.

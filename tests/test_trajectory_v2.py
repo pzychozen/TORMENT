@@ -236,12 +236,40 @@ class TestMemoryGraphTrajectoryV2Integration:
         assert reset["last_observed_frame_seq"] == 1
         shutil.rmtree(root, ignore_errors=True)
 
-    def test_default_format_stays_legacy(self, monkeypatch):
+    def test_unset_format_selects_v2(self, monkeypatch):
+        from torment_service.embeddings import HashEmbedding
+        from torment_service.memory_graph import MemoryGraph
+
+        root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_default_"))
+        monkeypatch.delenv("TORMENT_TRAJECTORY_FORMAT", raising=False)
+        graph = MemoryGraph(str(root), embedder=HashEmbedding())
+        try:
+            assert graph._trajectory_format == "v2"
+            assert TrajectoryPathsV2(root).base.exists()
+        finally:
+            graph.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_v2_format_selects_v2(self, monkeypatch):
+        from torment_service.embeddings import HashEmbedding
+        from torment_service.memory_graph import MemoryGraph
+
+        root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_v2_explicit_"))
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
+        graph = MemoryGraph(str(root), embedder=HashEmbedding())
+        try:
+            assert graph._trajectory_format == "v2"
+            assert TrajectoryPathsV2(root).base.exists()
+        finally:
+            graph.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_legacy_format_preserves_legacy_writer(self, monkeypatch):
         from torment_service.embeddings import HashEmbedding
         from torment_service.memory_graph import MemoryGraph
 
         root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_legacy_"))
-        monkeypatch.delenv("TORMENT_TRAJECTORY_FORMAT", raising=False)
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
         graph = MemoryGraph(str(root), embedder=HashEmbedding())
         try:
             assert graph._trajectory_format == "legacy"
@@ -249,3 +277,40 @@ class TestMemoryGraphTrajectoryV2Integration:
         finally:
             graph.close()
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_invalid_format_preserves_legacy_fallback(self, monkeypatch):
+        from torment_service.embeddings import HashEmbedding
+        from torment_service.memory_graph import MemoryGraph
+
+        root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_invalid_"))
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "not-a-format")
+        graph = MemoryGraph(str(root), embedder=HashEmbedding())
+        try:
+            assert graph._trajectory_format == "legacy"
+            assert not TrajectoryPathsV2(root).base.exists()
+        finally:
+            graph.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_default_selection_changes_no_nontrajectory_defaults(self, monkeypatch):
+        from torment_service.embeddings import HashEmbedding
+        from torment_service.memory_graph import MemoryGraph
+
+        default_root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_default_scope_"))
+        legacy_root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_legacy_scope_"))
+        monkeypatch.delenv("TORMENT_TRAJECTORY_FORMAT", raising=False)
+        default_graph = MemoryGraph(str(default_root), embedder=HashEmbedding())
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
+        legacy_graph = MemoryGraph(str(legacy_root), embedder=HashEmbedding())
+        try:
+            assert default_graph._trajectory_format == "v2"
+            assert legacy_graph._trajectory_format == "legacy"
+            assert default_graph._emb_dim == legacy_graph._emb_dim == 384
+            assert default_graph._cache_embeddings == legacy_graph._cache_embeddings
+            assert type(default_graph.world) is type(legacy_graph.world)
+            assert default_graph.entities == legacy_graph.entities == {}
+        finally:
+            default_graph.close()
+            legacy_graph.close()
+            shutil.rmtree(default_root, ignore_errors=True)
+            shutil.rmtree(legacy_root, ignore_errors=True)
