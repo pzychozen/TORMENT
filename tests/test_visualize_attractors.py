@@ -20,9 +20,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tools.visualize_attractors import (
     _pca_2d, _unit, load_motifs, load_character_state,
-    load_trajectory_index, load_core_events, MotifInfo,
+    load_trajectory_index, load_trajectory_boundaries, load_core_events, MotifInfo,
     make_color_cycle, generate_visualization,
-    plot_basin_native, plot_basin_pca, plot_phase_space, plot_timeline,
+    plot_basin_native, plot_basin_pca, plot_position_trajectory, plot_timeline,
     load_member_embeddings,
 )
 
@@ -84,10 +84,10 @@ def _make_mock_field_rows():
 
 def _make_mock_trajectory():
     return [
-        {"step": 100, "eid": 1, "coh": 0.01, "phi_index": 3, "corridor_deg": 0.1, "pos_x": 0, "pos_y": 0, "pos_z": 0},
-        {"step": 200, "eid": 1, "coh": 0.03, "phi_index": 5, "corridor_deg": -0.2, "pos_x": 0.1, "pos_y": 0, "pos_z": 0},
-        {"step": 300, "eid": 1, "coh": 0.02, "phi_index": 7, "corridor_deg": 0.3, "pos_x": 0.2, "pos_y": 0.1, "pos_z": 0},
-        {"step": 400, "eid": 1, "coh": 0.05, "phi_index": 9, "corridor_deg": 0.0, "pos_x": 0.3, "pos_y": 0.1, "pos_z": 0},
+        {"step": 100, "frame_seq": 1, "eid": 1, "epoch": 1, "pos_x": 0, "pos_y": 0, "pos_z": 0, "vel_x": 0.1, "vel_y": 0.0, "vel_z": 0.0},
+        {"step": 200, "frame_seq": 2, "eid": 1, "epoch": 1, "pos_x": 0.1, "pos_y": 0, "pos_z": 0, "vel_x": 0.1, "vel_y": 0.1, "vel_z": 0.0},
+        {"step": 300, "frame_seq": 3, "eid": 1, "epoch": 1, "pos_x": 0.2, "pos_y": 0.1, "pos_z": 0, "vel_x": 0.2, "vel_y": 0.1, "vel_z": 0.0},
+        {"step": 400, "frame_seq": 1, "eid": 1, "epoch": 2, "pos_x": 0.3, "pos_y": 0.1, "pos_z": 0, "vel_x": 0.2, "vel_y": 0.2, "vel_z": 0.0},
     ]
 
 
@@ -150,14 +150,9 @@ class TestDataLoading:
         state = load_character_state(DATA_DIR, "nonexistent", "agent")
         assert state is None
 
-    @LIVE_RYUKI_REQUIRED
-    def test_load_trajectory_index_live(self):
-        rows = load_trajectory_index(DATA_DIR, "ryuki", "ryuki_nox")
-        assert len(rows) > 0
-        for r in rows:
-            assert "step" in r
-            assert "phi_index" in r
-            assert "coh" in r
+    def test_load_trajectory_index_requires_selected_eid(self):
+        assert load_trajectory_index(DATA_DIR, "ryuki", "ryuki_nox") == []
+        assert load_trajectory_boundaries(DATA_DIR, "ryuki", "ryuki_nox") == []
 
     def test_load_core_events_live(self):
         events = load_core_events(DATA_DIR, "ryuki", "ryuki_nox")
@@ -202,14 +197,22 @@ class TestPlotRendering:
         plot_basin_pca(ax, motifs, member_rows, field_by_mid, seed_motif_id="m1")
         plt.close(fig)
 
-    def test_phase_space_renders(self):
+    def test_selected_position_renders(self):
         fig, ax = plt.subplots()
-        plot_phase_space(ax, _make_mock_trajectory())
+        plot_position_trajectory(
+            ax, _make_mock_trajectory(),
+            [{"marker_type": "ENTITY_KINEMATIC_RESET", "epoch": 1, "last_observed_frame_seq": 2}],
+        )
         plt.close(fig)
 
-    def test_phase_space_sparse(self):
+    def test_selected_position_sparse(self):
         fig, ax = plt.subplots()
-        plot_phase_space(ax, [{"step": 1, "phi_index": 0, "coh": 0, "corridor_deg": 0}])
+        plot_position_trajectory(
+            ax,
+            [{"step": 1, "frame_seq": 1, "epoch": 1, "pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0,
+              "vel_x": 0.0, "vel_y": 0.0, "vel_z": 0.0}],
+            [],
+        )
         plt.close(fig)
 
     def test_timeline_renders(self):
@@ -312,8 +315,8 @@ def run_viz_tests():
         ("V.12 Basin native renders", TestPlotRendering().test_basin_native_renders),
         ("V.13 Basin native empty", TestPlotRendering().test_basin_native_empty),
         ("V.14 Basin PCA renders", TestPlotRendering().test_basin_pca_renders),
-        ("V.15 Phase space renders", TestPlotRendering().test_phase_space_renders),
-        ("V.16 Phase space sparse", TestPlotRendering().test_phase_space_sparse),
+        ("V.15 Selected position renders", TestPlotRendering().test_selected_position_renders),
+        ("V.16 Selected position sparse", TestPlotRendering().test_selected_position_sparse),
         ("V.17 Timeline renders", TestPlotRendering().test_timeline_renders),
         ("V.18 Timeline empty", TestPlotRendering().test_timeline_empty),
         ("V.19 E2E Ryuki full", TestEndToEnd().test_full_ryuki_visualization),

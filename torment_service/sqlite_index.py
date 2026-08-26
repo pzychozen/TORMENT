@@ -30,6 +30,11 @@ from .archive_lifecycle import (
     is_current_archive_chunk,
     replay_canonical_archive_documents,
 )
+from .kernel.trajectory_v2 import (
+    TrajectoryIntegrityError,
+    iter_v2_boundaries,
+    iter_v2_dynamic_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +91,36 @@ CREATE INDEX IF NOT EXISTS idx_core_events_type ON core_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_core_events_step ON core_events(step);
 
 CREATE TABLE IF NOT EXISTS trajectory_index (
-    step          INTEGER PRIMARY KEY,
-    eid           INTEGER,
-    coh           REAL,
-    phi_index     INTEGER,
-    corridor_deg  REAL,
-    pos_x         REAL,
-    pos_y         REAL,
-    pos_z         REAL
+    epoch         INTEGER NOT NULL DEFAULT 0,
+    frame_seq     INTEGER NOT NULL,
+    step          INTEGER NOT NULL,
+    eid           INTEGER NOT NULL,
+    wall_ts_ns    INTEGER,
+    pos_x         REAL NOT NULL,
+    pos_y         REAL NOT NULL,
+    pos_z         REAL NOT NULL,
+    vel_x         REAL,
+    vel_y         REAL,
+    vel_z         REAL,
+    PRIMARY KEY (epoch, frame_seq, eid)
 );
+CREATE INDEX IF NOT EXISTS idx_trajectory_index_step_eid ON trajectory_index(step, eid);
+CREATE INDEX IF NOT EXISTS idx_trajectory_index_eid_epoch_frame ON trajectory_index(eid, epoch, frame_seq);
+CREATE INDEX IF NOT EXISTS idx_trajectory_index_epoch_frame ON trajectory_index(epoch, frame_seq);
+
+CREATE TABLE IF NOT EXISTS trajectory_boundaries (
+    marker_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    epoch               INTEGER NOT NULL,
+    marker_type         TEXT NOT NULL,
+    eid                 INTEGER,
+    last_observed_step  INTEGER,
+    last_observed_frame_seq INTEGER,
+    effective_step      TEXT,
+    cause               TEXT,
+    wall_ts_ns          INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_trajectory_boundaries_eid_step
+    ON trajectory_boundaries(eid, last_observed_frame_seq);
 
 -- Archive index
 CREATE TABLE IF NOT EXISTS documents (
@@ -171,7 +197,7 @@ class IndexManager:
                 pass  # column already exists — expected on fresh schema
             self._conn.execute(
                 "INSERT OR REPLACE INTO index_meta (key, value) VALUES (?, ?)",
-                ("schema_version", "4.1"),
+                ("schema_version", "4.2"),
             )
             self._conn.commit()
         except Exception as e:
@@ -227,6 +253,69 @@ class IndexManager:
         except Exception as e:
             logger.warning("SQLite query failed: %s — %s", sql[:80], e)
             return []
+
+    def trajectory_cache_status(self) -> Dict[str, str]:
+        """Describe the non-authoritative trajectory-cache schema as found."""
+        if not self._conn:
+            return {"status": "unavailable", "schema": "unknown"}
+        try:
+            cols = self._conn.execute("PRAGMA table_info(trajectory_index)").fetchall()
+            names = {str(row[1]) for row in cols}
+            primary_key = [str(row[1]) for row in sorted(cols, key=lambda row: int(row[5])) if int(row[5])]
+            required = {
+                "step", "eid", "epoch", "frame_seq", "wall_ts_ns", "pos_x", "pos_y", "pos_z",
+                "vel_x", "vel_y", "vel_z",
+            }
+            if required.issubset(names) and primary_key == ["epoch", "frame_seq", "eid"]:
+                return {"status": "v2_ready", "schema": "trajectory-v2-cache.2"}
+            return {"status": "legacy_schema_needs_rebuild", "schema": "legacy"}
+        except sqlite3.Error:
+            return {"status": "unavailable", "schema": "unknown"}
+
+    def _recreate_trajectory_tables(self) -> None:
+        """Recreate only the disposable trajectory cache during a rebuild."""
+        if not self._conn:
+            return
+        try:
+            self._conn.executescript(
+                """
+                DROP TABLE IF EXISTS trajectory_boundaries;
+                DROP TABLE IF EXISTS trajectory_index;
+                CREATE TABLE trajectory_index (
+                    epoch         INTEGER NOT NULL DEFAULT 0,
+                    frame_seq     INTEGER NOT NULL,
+                    step          INTEGER NOT NULL,
+                    eid           INTEGER NOT NULL,
+                    wall_ts_ns    INTEGER,
+                    pos_x         REAL NOT NULL,
+                    pos_y         REAL NOT NULL,
+                    pos_z         REAL NOT NULL,
+                    vel_x         REAL,
+                    vel_y         REAL,
+                    vel_z         REAL,
+                    PRIMARY KEY (epoch, frame_seq, eid)
+                );
+                CREATE INDEX idx_trajectory_index_step_eid ON trajectory_index(step, eid);
+                CREATE INDEX idx_trajectory_index_eid_epoch_frame ON trajectory_index(eid, epoch, frame_seq);
+                CREATE INDEX idx_trajectory_index_epoch_frame ON trajectory_index(epoch, frame_seq);
+                CREATE TABLE trajectory_boundaries (
+                    marker_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    epoch               INTEGER NOT NULL,
+                    marker_type         TEXT NOT NULL,
+                    eid                 INTEGER,
+                    last_observed_step  INTEGER,
+                    last_observed_frame_seq INTEGER,
+                    effective_step      TEXT,
+                    cause               TEXT,
+                    wall_ts_ns          INTEGER
+                );
+                CREATE INDEX idx_trajectory_boundaries_eid_step
+                    ON trajectory_boundaries(eid, last_observed_frame_seq);
+                """
+            )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            raise TrajectoryIntegrityError(f"unable to recreate trajectory cache: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Mirror-write methods (called AFTER canonical JSONL writes)
@@ -301,19 +390,46 @@ class IndexManager:
         step: int,
         eid: int,
         pos: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        coh: float = 0.0,
-        phi_index: int = 0,
-        corridor_deg: float = 0.0,
+        vel: Optional[Tuple[float, float, float]] = None,
+        epoch: int = 0,
+        frame_seq: int = 0,
+        wall_ts_ns: Optional[int] = None,
     ) -> bool:
-        """Mirror a trajectory snapshot to the index."""
+        """Mirror an actual position/velocity trajectory snapshot to the index."""
+        if self.trajectory_cache_status().get("status") != "v2_ready":
+            logger.warning("Trajectory cache needs explicit rebuild before V2 indexing")
+            return False
+        velocity = tuple(float(value) for value in vel) if vel is not None else (None, None, None)
         return self._safe_execute(
             """INSERT OR REPLACE INTO trajectory_index
-               (step, eid, coh, phi_index, corridor_deg, pos_x, pos_y, pos_z)
+               (epoch, frame_seq, step, eid, wall_ts_ns, pos_x, pos_y, pos_z, vel_x, vel_y, vel_z)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                int(epoch), int(frame_seq), int(step), int(eid),
+                int(wall_ts_ns) if wall_ts_ns is not None else None,
+                float(pos[0]), float(pos[1]), float(pos[2]),
+                velocity[0], velocity[1], velocity[2],
+            ),
+        )
+
+    def index_trajectory_boundary(self, boundary: Dict[str, Any]) -> bool:
+        """Mirror a V2 epoch/reset marker for truthful visual segmentation."""
+        return self._safe_execute(
+            """INSERT INTO trajectory_boundaries
+               (epoch, marker_type, eid, last_observed_step, last_observed_frame_seq,
+                effective_step, cause, wall_ts_ns)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                int(step), int(eid), float(coh), int(phi_index),
-                float(corridor_deg),
-                float(pos[0]), float(pos[1]), float(pos[2]),
+                int(boundary.get("epoch", 0)),
+                str(boundary.get("type", "")),
+                int(boundary["eid"]) if boundary.get("eid") is not None else None,
+                int(boundary["last_observed_step"])
+                if boundary.get("last_observed_step") is not None else None,
+                int(boundary["last_observed_frame_seq"])
+                if boundary.get("last_observed_frame_seq") is not None else None,
+                str(boundary.get("effective_step", "")) or None,
+                str(boundary.get("cause", "")) or None,
+                int(boundary.get("ts_ns", 0)) or None,
             ),
         )
 
@@ -415,16 +531,113 @@ class IndexManager:
         step_from: int,
         step_to: int,
         limit: int = 1000,
+        *,
+        mode: str = "legacy",
+        eid: Optional[int] = None,
+        row_limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Get trajectory snapshots for a step range."""
-        rows = self._safe_query(
-            """SELECT * FROM trajectory_index
-               WHERE step >= ? AND step <= ?
-               ORDER BY step ASC
-               LIMIT ?""",
-            (int(step_from), int(step_to), int(limit)),
-        )
-        return [dict(r) for r in rows]
+        """Read legacy-compatible, one-entity, or explicitly bounded rows.
+
+        ``legacy`` returns one deterministic representative per logical step:
+        the highest EID in that step's latest emitted frame. ``entity`` is one
+        selected logical EID and its limit unit is frames. ``all`` returns all
+        frame/EID rows and must name a row limit.
+        """
+        mode = str(mode).strip().lower()
+        if mode not in {"legacy", "entity", "all"}:
+            raise ValueError("mode must be legacy, entity, or all")
+        if mode == "entity" and eid is None:
+            raise ValueError("mode=entity requires eid")
+        if mode == "all" and row_limit is None:
+            raise ValueError("mode=all requires row_limit")
+        cache_status = self.trajectory_cache_status().get("status")
+        if cache_status != "v2_ready":
+            if mode != "legacy":
+                raise ValueError("trajectory cache requires V2 rebuild for entity/all mode")
+            rows = self._safe_query(
+                """SELECT * FROM trajectory_index
+                   WHERE step >= ? AND step <= ?
+                   ORDER BY step ASC
+                   LIMIT ?""",
+                (int(step_from), int(step_to), int(limit)),
+            )
+            return [dict(row) for row in rows]
+        if mode == "legacy":
+            rows = self._safe_query(
+                """WITH ranked AS (
+                       SELECT indexed.*,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY step
+                                  ORDER BY epoch DESC, frame_seq DESC, eid DESC
+                              ) AS representative_rank
+                       FROM trajectory_index AS indexed
+                       WHERE step >= ? AND step <= ?
+                   )
+                   SELECT * FROM ranked
+                   WHERE representative_rank = 1
+                   ORDER BY step ASC
+                   LIMIT ?""",
+                (int(step_from), int(step_to), int(limit)),
+            )
+        elif mode == "entity":
+            rows = self._safe_query(
+                """SELECT * FROM trajectory_index
+                   WHERE eid = ? AND step >= ? AND step <= ?
+                   ORDER BY epoch ASC, frame_seq ASC
+                   LIMIT ?""",
+                (int(eid), int(step_from), int(step_to), int(limit)),
+            )
+        else:
+            rows = self._safe_query(
+                """SELECT * FROM trajectory_index
+                   WHERE step >= ? AND step <= ?
+                   ORDER BY epoch ASC, frame_seq ASC, eid ASC
+                   LIMIT ?""",
+                (int(step_from), int(step_to), int(row_limit)),
+            )
+        return [dict(row) for row in rows]
+
+    def get_trajectory_boundaries(
+        self,
+        *,
+        eid: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Read indexed V2 discontinuity markers, optionally for one entity."""
+        if self.trajectory_cache_status().get("status") != "v2_ready":
+            return []
+        if eid is None:
+            rows = self._safe_query(
+                "SELECT * FROM trajectory_boundaries ORDER BY marker_id ASC"
+            )
+        else:
+            rows = self._safe_query(
+                """SELECT * FROM trajectory_boundaries
+                   WHERE eid IS NULL OR eid = ?
+                   ORDER BY marker_id ASC""",
+                (int(eid),),
+            )
+        return [dict(row) for row in rows]
+
+    def trajectory_query_contract(self, mode: str) -> Dict[str, str]:
+        """Return factual endpoint metadata without executing a trajectory query."""
+        normalized = str(mode).strip().lower()
+        if normalized == "all":
+            limit_unit = "rows"
+            policy = "all_epoch_frame_seq_eid_records"
+        elif normalized == "entity":
+            limit_unit = "frames"
+            policy = "selected_eid_per_emitted_frame"
+        else:
+            limit_unit = "steps"
+            policy = "highest_eid_of_latest_frame_per_logical_step"
+        cache = self.trajectory_cache_status()
+        return {
+            "mode": normalized,
+            "limit_unit": limit_unit,
+            "representative_policy": policy,
+            "cache_status": cache["status"],
+            "cache_schema": cache["schema"],
+        }
 
     def get_events_by_type(
         self,
@@ -478,7 +691,7 @@ class IndexManager:
         if not self._conn:
             return
         for table in ["core_nodes", "core_motifs", "core_events",
-                       "trajectory_index", "documents", "chunks", "chunk_sections"]:
+                       "trajectory_index", "trajectory_boundaries", "documents", "chunks", "chunk_sections"]:
             self._safe_execute(f"DELETE FROM {table}")
 
     @staticmethod
@@ -506,6 +719,7 @@ class IndexManager:
         archive_chunks_path: str = "",
         motifs_path: str = "",
         legacy_trajectories_path: str = "",
+        trajectory_v2_root: str = "",
     ) -> Dict[str, int]:
         """Rebuild the entire index from canonical JSONL/JSON files.
 
@@ -519,6 +733,9 @@ class IndexManager:
         safe_legacy_trajectories = self._guard_rebuild_path(
             legacy_trajectories_path, "legacy_trajectories"
         )
+        safe_trajectory_v2_root = self._guard_rebuild_path(
+            trajectory_v2_root, "trajectory_v2_root"
+        )
         safe_archive_docs = self._guard_rebuild_path(archive_documents_path, "archive_documents")
         safe_archive_chunks = self._guard_rebuild_path(archive_chunks_path, "archive_chunks")
         safe_motifs = self._guard_rebuild_path(motifs_path, "motifs")
@@ -530,7 +747,17 @@ class IndexManager:
             os.path.join(os.path.dirname(archive_source), "events.jsonl"),
         ) if archive_source else {}
 
+        # Validate complete V2 history before replacing any disposable cache
+        # tables.  A failed verification leaves the prior sidecar intact and
+        # raises a factual integrity error to the caller.
+        v2_dynamic_records: List[Dict[str, Any]] = []
+        v2_boundaries: List[Dict[str, Any]] = []
+        if safe_trajectory_v2_root:
+            v2_dynamic_records = list(iter_v2_dynamic_records(safe_trajectory_v2_root))
+            v2_boundaries = list(iter_v2_boundaries(safe_trajectory_v2_root))
+
         self.clear_all()
+        self._recreate_trajectory_tables()
         counts: Dict[str, int] = {
             "core_nodes": 0,
             "core_events": 0,
@@ -596,6 +823,37 @@ class IndexManager:
                 and safe_legacy_trajectories not in trajectory_sources):
             trajectory_sources.append(safe_legacy_trajectories)
 
+        trajectory_records: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
+        trajectory_logical_sources: Dict[Tuple[int, int], Dict[str, Any]] = {}
+
+        def add_trajectory_record(record: Dict[str, Any], source: str, source_kind: str) -> None:
+            key = (int(record["epoch"]), int(record["frame_seq"]), int(record["eid"]))
+            existing = trajectory_records.get(key)
+            if existing is not None and existing["source_kind"] != source_kind:
+                raise TrajectoryIntegrityError(
+                    "mixed canonical trajectory sources overlap at "
+                    f"epoch={key[0]} frame_seq={key[1]} eid={key[2]} "
+                    f"({existing['source']} vs {source})"
+                )
+            logical_key = (int(record["step"]), int(record["eid"]))
+            logical_existing = trajectory_logical_sources.get(logical_key)
+            if logical_existing is not None and logical_existing["source_kind"] != source_kind:
+                raise TrajectoryIntegrityError(
+                    "mixed canonical trajectory sources overlap at "
+                    f"step={logical_key[0]} eid={logical_key[1]} "
+                    f"({logical_existing['source']} vs {source})"
+                )
+            record["source"] = source
+            record["source_kind"] = source_kind
+            trajectory_records[key] = record
+            trajectory_logical_sources[logical_key] = record
+
+        # Legacy JSONL has no frame identity. Reconstruct it sequentially:
+        # a changed step starts a frame; a repeated EID at the same step starts
+        # another frame. This retains scheduled duplicate frames such as 25/90.
+        legacy_frame_seq = 0
+        legacy_current_step: Optional[int] = None
+        legacy_frame_eids: set[int] = set()
         for safe_trajectory_file in trajectory_sources:
             with open(safe_trajectory_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -606,14 +864,49 @@ class IndexManager:
                         pos = obj.get("pos", [0, 0, 0])
                         if len(pos) < 3:
                             pos = pos + [0.0] * (3 - len(pos))
-                        if self.index_trajectory(
-                            step=int(obj.get("step", 0)),
-                            eid=int(obj.get("eid", 0)),
-                            pos=(float(pos[0]), float(pos[1]), float(pos[2])),
-                        ):
-                            counts["trajectory_index"] += 1
+                        step = int(obj.get("step", 0))
+                        eid = int(obj.get("eid", 0))
+                        if legacy_current_step is None or step != legacy_current_step or eid in legacy_frame_eids:
+                            legacy_frame_seq += 1
+                            legacy_current_step = step
+                            legacy_frame_eids = set()
+                        legacy_frame_eids.add(eid)
+                        add_trajectory_record({
+                            "step": step,
+                            "eid": eid,
+                            "epoch": 0,
+                            "frame_seq": legacy_frame_seq,
+                            "wall_ts_ns": None,
+                            "pos": (float(pos[0]), float(pos[1]), float(pos[2])),
+                            "vel": None,
+                        }, safe_trajectory_file, "legacy")
                     except (json.JSONDecodeError, KeyError, ValueError):
                         continue
+
+        # V2 chunks are canonical only after their verifier accepts the full
+        # history.  A corrupt/missing/partial chunk therefore raises instead
+        # of allowing a rebuild to silently serve incomplete observations.
+        for record in v2_dynamic_records:
+            add_trajectory_record({
+                "step": int(record["step"]),
+                "eid": int(record["eid"]),
+                "epoch": int(record["epoch"]),
+                "frame_seq": int(record["frame_seq"]),
+                "wall_ts_ns": int(record["wall_ts_ns"]),
+                "pos": tuple(float(value) for value in record["pos"]),
+                "vel": tuple(float(value) for value in record["vel"]),
+            }, "v2", "v2")
+
+        for record in trajectory_records.values():
+            if self.index_trajectory(
+                step=record["step"], eid=record["eid"], pos=record["pos"],
+                vel=record["vel"], epoch=record["epoch"],
+                frame_seq=record["frame_seq"],
+                wall_ts_ns=record["wall_ts_ns"],
+            ):
+                counts["trajectory_index"] += 1
+        for boundary in v2_boundaries:
+            self.index_trajectory_boundary(boundary)
 
         # --- Archive documents ---
         if safe_archive_docs and os.path.exists(safe_archive_docs):

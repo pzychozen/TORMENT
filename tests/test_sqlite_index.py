@@ -16,6 +16,7 @@ import tempfile
 import traceback
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -114,14 +115,15 @@ class TestIndexManagerBasic:
         tmp = _tmp()
         try:
             idx = IndexManager(tmp)
-            idx.index_trajectory(step=100, eid=5, pos=(0.1, 0.2, 0.3), coh=0.85)
-            idx.index_trajectory(step=101, eid=5, pos=(0.15, 0.25, 0.35), coh=0.82)
-            idx.index_trajectory(step=200, eid=5, pos=(0.5, 0.5, 0.5), coh=0.70)
+            idx.index_trajectory(step=100, eid=5, pos=(0.1, 0.2, 0.3), vel=(0.01, 0.02, 0.03), frame_seq=1)
+            idx.index_trajectory(step=101, eid=5, pos=(0.15, 0.25, 0.35), vel=(0.04, 0.05, 0.06), frame_seq=2)
+            idx.index_trajectory(step=200, eid=5, pos=(0.5, 0.5, 0.5), vel=(0.07, 0.08, 0.09), frame_seq=3)
 
             results = idx.get_trajectory_range(100, 150)
             assert len(results) == 2
             assert results[0]["step"] == 100
             assert abs(results[0]["pos_x"] - 0.1) < 0.01
+            assert abs(results[0]["vel_x"] - 0.01) < 0.01
             idx.close()
         finally:
             shutil.rmtree(tmp)
@@ -278,6 +280,91 @@ class TestRebuild:
             assert idx2.available
             assert len(idx2.get_recent_memories()) == 0
             idx2.close()
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_rebuild_from_verified_v2_trajectory_preserves_step_eid_records(self):
+        from torment_service.kernel.trajectory_v2 import TrajectoryV2Writer
+
+        tmp = _tmp()
+        try:
+            writer = TrajectoryV2Writer(tmp)
+            entities = [
+                type("Entity", (), {
+                    "eid": eid,
+                    "pos": np.asarray(pos, dtype=np.float64),
+                    "vel": np.asarray(vel, dtype=np.float64),
+                    "vel0": np.asarray(vel, dtype=np.float64),
+                    "born_step": 0,
+                    "channel": 0,
+                    "alive": True,
+                    "payload": {},
+                })()
+                for eid, pos, vel in [
+                    (7, (1.0, 2.0, 3.0), (0.1, 0.2, 0.3)),
+                    (8, (4.0, 5.0, 6.0), (0.4, 0.5, 0.6)),
+                ]
+            ]
+            assert writer.write_step(entities, 1).ok
+            assert writer.close().ok
+
+            idx = IndexManager(os.path.join(tmp, "index"))
+            counts = idx.rebuild_from_jsonl(
+                nodes_path=os.path.join(tmp, "nodes.jsonl"),
+                trajectory_v2_root=tmp,
+            )
+            assert counts["trajectory_index"] == 2
+            assert idx.trajectory_cache_status()["status"] == "v2_ready"
+            records = idx.get_trajectory_range(1, 1, mode="all", row_limit=10)
+            assert [(row["step"], row["eid"]) for row in records] == [(1, 7), (1, 8)]
+            assert records[0]["vel_z"] == 0.3
+            assert idx.trajectory_query_contract("legacy")["representative_policy"] == "highest_eid_of_latest_frame_per_logical_step"
+            idx.close()
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_rebuild_rejects_partial_v2_history_and_mixed_source_overlap(self):
+        from torment_service.kernel.trajectory_v2 import TrajectoryIntegrityError, TrajectoryV2Writer
+
+        tmp = _tmp()
+        try:
+            entity = type("Entity", (), {
+                "eid": 7,
+                "pos": np.asarray((1.0, 2.0, 3.0), dtype=np.float64),
+                "vel": np.asarray((0.1, 0.2, 0.3), dtype=np.float64),
+                "vel0": np.asarray((0.1, 0.2, 0.3), dtype=np.float64),
+                "born_step": 0,
+                "channel": 0,
+                "alive": True,
+                "payload": {},
+            })()
+            partial = TrajectoryV2Writer(tmp)
+            assert partial.write_step([entity], 1).ok
+            # Simulate an interrupted process: the artifact stays partial but
+            # its operating-system handle is no longer held by this test.
+            partial._chunk_handle.close()
+            partial._chunk_handle = None
+            idx = IndexManager(os.path.join(tmp, "index_partial"))
+            with pytest.raises(TrajectoryIntegrityError):
+                idx.rebuild_from_jsonl(nodes_path="", trajectory_v2_root=tmp)
+            idx.close()
+
+            # A completed V2 row and a legacy row claiming the same logical
+            # (step, eid) record are two canonical sources and must be loud.
+            complete_root = os.path.join(tmp, "complete")
+            complete = TrajectoryV2Writer(complete_root)
+            assert complete.write_step([entity], 1).ok
+            assert complete.close().ok
+            legacy = os.path.join(tmp, "legacy_trajectories.jsonl")
+            with open(legacy, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"step": 1, "eid": 7, "pos": [1.0, 2.0, 3.0]}) + "\n")
+            idx = IndexManager(os.path.join(tmp, "index_mixed"))
+            with pytest.raises(TrajectoryIntegrityError):
+                idx.rebuild_from_jsonl(
+                    nodes_path="", legacy_trajectories_path=legacy,
+                    trajectory_v2_root=complete_root,
+                )
+            idx.close()
         finally:
             shutil.rmtree(tmp)
 

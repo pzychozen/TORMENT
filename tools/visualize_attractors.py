@@ -8,11 +8,11 @@ Generates a multi-panel PNG showing three layers of the attractor geometry:
     Left:  Native engine geometry (phi vs kappa, colored by tension)
     Right: Embedding PCA projection (semantic space)
 
-  Layer 2 (middle): Phase Space Dynamics
-    Trajectory through D24 sectors, coherence, corridor proximity
+  Layer 2 (middle): Selected Entity Trajectory
+    Actual x/y position segments for one selected logical EID
 
   Layer 3 (bottom): Drift + Identity Timeline
-    Drift score, memory events, coherence/corridor over time
+    Drift score, memory events, and selected-entity speed over time
 
 Usage:
     python tools/visualize_attractors.py \\
@@ -151,8 +151,16 @@ def load_character_state(data_dir: str, workspace: str, agent: str) -> Optional[
         return None
 
 
-def load_trajectory_index(data_dir: str, workspace: str, agent: str) -> List[dict]:
-    """Load trajectory data from SQLite index."""
+def load_trajectory_index(
+    data_dir: str, workspace: str, agent: str, trajectory_eid: Optional[int] = None,
+) -> List[dict]:
+    """Load one selected entity's actual V2 trajectory from SQLite.
+
+    Old cache schemas represented unrelated zero-valued fields.  They are
+    deliberately not rendered as physical trajectory data.
+    """
+    if trajectory_eid is None:
+        return []
     db_path = os.path.join(
         data_dir, "workspaces", workspace, "agents", agent,
         "index", "memory_index.sqlite",
@@ -162,12 +170,56 @@ def load_trajectory_index(data_dir: str, workspace: str, agent: str) -> List[dic
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(trajectory_index)")}
+        required = {
+            "step", "eid", "epoch", "frame_seq", "pos_x", "pos_y", "pos_z",
+            "vel_x", "vel_y", "vel_z",
+        }
+        if not required.issubset(columns):
+            conn.close()
+            return []
         rows = conn.execute(
-            "SELECT step, eid, coh, phi_index, corridor_deg, pos_x, pos_y, pos_z "
-            "FROM trajectory_index ORDER BY step"
+            "SELECT step, eid, epoch, frame_seq, wall_ts_ns, pos_x, pos_y, pos_z, vel_x, vel_y, vel_z "
+            "FROM trajectory_index WHERE eid = ? ORDER BY epoch, frame_seq",
+            (int(trajectory_eid),),
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def load_trajectory_boundaries(
+    data_dir: str, workspace: str, agent: str, trajectory_eid: Optional[int] = None,
+) -> List[dict]:
+    """Load V2 epoch/reset markers for truthful selected-EID segmentation."""
+    if trajectory_eid is None:
+        return []
+    db_path = os.path.join(
+        data_dir, "workspaces", workspace, "agents", agent,
+        "index", "memory_index.sqlite",
+    )
+    if not os.path.exists(db_path):
+        return []
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )}
+        if "trajectory_boundaries" not in tables:
+            conn.close()
+            return []
+        rows = conn.execute(
+            """SELECT epoch, marker_type, eid, last_observed_step, last_observed_frame_seq,
+                      effective_step, cause
+               FROM trajectory_boundaries
+               WHERE eid IS NULL OR eid = ?
+               ORDER BY marker_id""",
+            (int(trajectory_eid),),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
     except Exception:
         return []
 
@@ -344,63 +396,57 @@ def plot_basin_pca(ax, motifs: Dict[str, MotifInfo], member_rows: List[dict],
 
 
 # ---------------------------------------------------------------------------
-# Layer 2: Phase Space Dynamics
+# Layer 2: Selected Entity Trajectory
 # ---------------------------------------------------------------------------
 
-def plot_phase_space(ax, trajectory_rows: List[dict]):
-    """Phase space: phi_index vs coherence, colored by corridor proximity."""
+def _trajectory_segments(trajectory_rows: List[dict], boundaries: List[dict]) -> List[List[dict]]:
+    """Split physical paths at epoch transitions and recorded kinematic resets."""
+    if not trajectory_rows:
+        return []
+    reset_after = {
+        (int(marker.get("epoch", 0)), int(marker["last_observed_frame_seq"]))
+        for marker in boundaries
+        if marker.get("marker_type") == "ENTITY_KINEMATIC_RESET"
+        and marker.get("last_observed_frame_seq") is not None
+    }
+    ordered = sorted(trajectory_rows, key=lambda row: (int(row.get("epoch", 0)), int(row["frame_seq"])))
+    segments: List[List[dict]] = [[ordered[0]]]
+    for row in ordered[1:]:
+        previous = segments[-1][-1]
+        discontinuity = (
+            int(row.get("epoch", 0)) != int(previous.get("epoch", 0))
+            or (int(previous.get("epoch", 0)), int(previous["frame_seq"])) in reset_after
+        )
+        if discontinuity:
+            segments.append([row])
+        else:
+            segments[-1].append(row)
+    return segments
+
+
+def plot_position_trajectory(ax, trajectory_rows: List[dict], boundaries: List[dict]):
+    """Plot actual x/y positions for the selected EID, preserving discontinuities."""
     if len(trajectory_rows) < 3:
-        _sparse_notice(ax, "Needs more conversation data\n(< 3 trajectory points)")
-        ax.set_title("Phase Space Dynamics", fontsize=10, fontweight="bold")
+        _sparse_notice(ax, "Select --trajectory-eid and record\n>= 3 V2 trajectory points")
+        ax.set_title("Selected Entity Position", fontsize=10, fontweight="bold")
         return
 
-    steps = [r["step"] for r in trajectory_rows]
-    phi_idx = [r["phi_index"] for r in trajectory_rows]
-    coh = [r["coh"] for r in trajectory_rows]
-    corr_deg = [r.get("corridor_deg", 0.0) or 0.0 for r in trajectory_rows]
-
-    # Normalize corridor_deg for coloring
-    corr_arr = np.array(corr_deg)
-    corr_norm = np.clip(corr_arr, -1, 1)
-
-    # Create diverging colormap: red (low) → white → green (high corridor)
-    from matplotlib.colors import LinearSegmentedColormap
-    corr_cmap = LinearSegmentedColormap.from_list(
-        "corridor", ["#d62728", "#f0f0f0", "#2ca02c"]
-    )
-    norm = Normalize(vmin=-0.5, vmax=0.5)
-
-    # Trajectory line (thin, connecting)
-    ax.plot(phi_idx, coh, color="gray", linewidth=0.6, alpha=0.4, zorder=2)
-
-    # Scatter colored by corridor_deg
-    sc = ax.scatter(phi_idx, coh, c=corr_norm, cmap=corr_cmap, norm=norm,
-                    s=50, edgecolors="black", linewidths=0.4, zorder=5, alpha=0.85)
-
-    # Mark latest point
-    ax.scatter([phi_idx[-1]], [coh[-1]], s=150, marker="D", color="gold",
-               edgecolors="black", linewidths=1.2, zorder=11, label="current")
-
-    # Mark first point
-    ax.scatter([phi_idx[0]], [coh[0]], s=100, marker="o", color="white",
-               edgecolors="black", linewidths=1.2, zorder=10, label="start")
-
-    # Step annotations on a few key points
-    n = len(steps)
-    for idx in [0, n // 2, n - 1]:
-        ax.annotate(f"s{steps[idx]}", (phi_idx[idx], coh[idx]),
-                    fontsize=6, ha="center", va="bottom",
-                    xytext=(0, 6), textcoords="offset points", alpha=0.6)
-
-    cbar = plt.colorbar(sc, ax=ax, shrink=0.7, pad=0.02)
-    cbar.set_label("corridor_deg", fontsize=8)
-
-    ax.set_xlabel("phi_index (D24 sector)", fontsize=9)
-    ax.set_ylabel("coherence", fontsize=9)
-    ax.set_title("Phase Space Dynamics\ntrajectory through D24 sectors", fontsize=10, fontweight="bold")
-    ax.set_xticks(range(12))
+    segments = _trajectory_segments(trajectory_rows, boundaries)
+    for index, segment in enumerate(segments):
+        pos_x = [float(row["pos_x"]) for row in segment]
+        pos_y = [float(row["pos_y"]) for row in segment]
+        ax.plot(pos_x, pos_y, linewidth=1.2, alpha=0.75, label=f"segment {index + 1}")
+        ax.scatter(pos_x, pos_y, s=18, alpha=0.8, zorder=4)
+    first, latest = trajectory_rows[0], trajectory_rows[-1]
+    ax.scatter([first["pos_x"]], [first["pos_y"]], s=90, marker="o", color="white",
+               edgecolors="black", linewidths=1.1, zorder=7, label="start")
+    ax.scatter([latest["pos_x"]], [latest["pos_y"]], s=130, marker="D", color="gold",
+               edgecolors="black", linewidths=1.1, zorder=8, label="latest")
+    ax.set_xlabel("position x", fontsize=9)
+    ax.set_ylabel("position y", fontsize=9)
+    ax.set_title("Selected Entity Position\nactual SeedWorld x/y trajectory", fontsize=10, fontweight="bold")
     ax.grid(alpha=0.15)
-    ax.legend(fontsize=7, loc="upper right", framealpha=0.6)
+    ax.legend(fontsize=7, loc="best", framealpha=0.6)
 
 
 # ---------------------------------------------------------------------------
@@ -408,9 +454,9 @@ def plot_phase_space(ax, trajectory_rows: List[dict]):
 # ---------------------------------------------------------------------------
 
 def plot_timeline(axes, char_state: Optional[dict], core_events: List[dict],
-                  trajectory_rows: List[dict]):
-    """Three-track timeline: drift, memory events, coherence/corridor."""
-    ax_drift, ax_events, ax_coh = axes
+                  trajectory_rows: List[dict], boundaries: Optional[List[dict]] = None):
+    """Three-track timeline: drift, memory events, selected-entity speed."""
+    ax_drift, ax_events, ax_speed = axes
 
     # --- Track A: Drift Score ---
     drift_history = []
@@ -462,22 +508,30 @@ def plot_timeline(axes, char_state: Optional[dict], core_events: List[dict],
     ax_events.set_title("Memory Events", fontsize=9, fontweight="bold")
     ax_events.grid(alpha=0.12)
 
-    # --- Track C: Coherence + Corridor ---
+    # --- Track C: Actual Speed ---
     if len(trajectory_rows) >= 2:
-        steps_t = [r["step"] for r in trajectory_rows]
-        coh_vals = [r["coh"] for r in trajectory_rows]
-        corr_vals = [r.get("corridor_deg", 0.0) or 0.0 for r in trajectory_rows]
-
-        ax_coh.plot(steps_t, coh_vals, color="tab:blue", linewidth=1.2, label="coherence")
-        ax_coh.fill_between(steps_t, 0, corr_vals, alpha=0.25, color="green", label="corridor_deg")
-        ax_coh.legend(fontsize=6, loc="upper right", framealpha=0.6)
+        segments = _trajectory_segments(trajectory_rows, boundaries or [])
+        for index, segment in enumerate(segments):
+            steps_t = [int(row["step"]) for row in segment]
+            speeds = [float(np.linalg.norm([
+                float(row["vel_x"]), float(row["vel_y"]), float(row["vel_z"]),
+            ])) for row in segment]
+            ax_speed.plot(steps_t, speeds, color="tab:purple", linewidth=1.2,
+                          label="speed" if index == 0 else None)
+        for marker in boundaries or []:
+            if marker.get("marker_type") == "ENTITY_KINEMATIC_RESET":
+                last_step = marker.get("last_observed_step")
+                if last_step is not None:
+                    ax_speed.axvline(int(last_step), color="tab:red", alpha=0.5,
+                                     linewidth=0.8, linestyle="--")
+        ax_speed.legend(fontsize=6, loc="upper right", framealpha=0.6)
     else:
-        _sparse_notice(ax_coh, "Needs more trajectory data")
+        _sparse_notice(ax_speed, "Needs selected V2 trajectory data")
 
-    ax_coh.set_ylabel("value", fontsize=8)
-    ax_coh.set_xlabel("step", fontsize=9)
-    ax_coh.set_title("Coherence & Corridor", fontsize=9, fontweight="bold")
-    ax_coh.grid(alpha=0.12)
+    ax_speed.set_ylabel("speed", fontsize=8)
+    ax_speed.set_xlabel("step", fontsize=9)
+    ax_speed.set_title("Selected Entity Speed", fontsize=9, fontweight="bold")
+    ax_speed.grid(alpha=0.12)
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +547,7 @@ def generate_visualization(
     layers: str = "all",
     dpi: int = 180,
     title: str = "",
+    trajectory_eid: Optional[int] = None,
 ) -> str:
     """Generate the multi-panel attractor visualization. Returns PNG path."""
 
@@ -527,7 +582,8 @@ def generate_visualization(
                 break
 
     # Trajectory + events from SQLite
-    trajectory_rows = load_trajectory_index(data_dir, workspace, agent)
+    trajectory_rows = load_trajectory_index(data_dir, workspace, agent, trajectory_eid)
+    trajectory_boundaries = load_trajectory_boundaries(data_dir, workspace, agent, trajectory_eid)
     core_events = load_core_events(data_dir, workspace, agent)
 
     # --- Determine layout ---
@@ -566,10 +622,10 @@ def generate_visualization(
         plot_basin_pca(ax_pca, motifs, member_rows, field_by_mid, seed_motif_id)
         layer_idx += 1
 
-    # --- Layer 2: Phase Space ---
+    # --- Layer 2: Selected Entity Position ---
     if "orbits" in show_layers:
-        ax_phase = fig.add_subplot(gs_main[layer_idx])
-        plot_phase_space(ax_phase, trajectory_rows)
+        ax_position = fig.add_subplot(gs_main[layer_idx])
+        plot_position_trajectory(ax_position, trajectory_rows, trajectory_boundaries)
         layer_idx += 1
 
     # --- Layer 3: Timeline ---
@@ -580,7 +636,10 @@ def generate_visualization(
         ax_events = fig.add_subplot(gs_time[1], sharex=ax_drift)
         ax_coh = fig.add_subplot(gs_time[2], sharex=ax_drift)
 
-        plot_timeline([ax_drift, ax_events, ax_coh], char_state, core_events, trajectory_rows)
+        plot_timeline(
+            [ax_drift, ax_events, ax_coh], char_state, core_events,
+            trajectory_rows, trajectory_boundaries,
+        )
         layer_idx += 1
 
     # --- Save ---
@@ -630,6 +689,8 @@ def main():
     ap.add_argument("--layers", default="all", help="Comma-separated: basin,orbits,timeline or all")
     ap.add_argument("--dpi", type=int, default=180)
     ap.add_argument("--title", default="")
+    ap.add_argument("--trajectory-eid", type=int, default=None,
+                    help="Logical EID for V2 physical trajectory panels")
     args = ap.parse_args()
 
     generate_visualization(
@@ -641,6 +702,7 @@ def main():
         layers=args.layers,
         dpi=args.dpi,
         title=args.title,
+        trajectory_eid=args.trajectory_eid,
     )
 
 

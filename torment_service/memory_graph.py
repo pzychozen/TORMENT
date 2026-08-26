@@ -9,6 +9,7 @@ import numpy as np
 
 from .kernel.seed_trajectory_analysis import classify_trajectory
 from .kernel.trajectory_logging import TrajectoryLogger
+from .kernel.trajectory_v2 import TrajectoryV2Writer
 from .kernel.seed_entities import SeedWorld, SeedEntity, _as3
 from .embeddings import Embedder, HashEmbedding
 from .embedding_store import (
@@ -245,7 +246,21 @@ class MemoryGraph:
         self.world = SeedWorld()
         self.entities: Dict[int, SeedEntity] = {}
 
-        self.traj = TrajectoryLogger(root_dir=self.data_dir)
+        # V2 is an opt-in observational format.  Keep the established JSONL
+        # logger as the production default until its qualification is reviewed.
+        requested_trajectory_format = str(
+            os.getenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
+        ).strip().lower()
+        self._trajectory_format = (
+            requested_trajectory_format if requested_trajectory_format in {"legacy", "v2"}
+            else "legacy"
+        )
+        self._last_trajectory_step: Optional[int] = None
+        self._last_trajectory_frame_seq: Optional[int] = None
+        if self._trajectory_format == "v2":
+            self.traj = TrajectoryV2Writer(root_dir=self.data_dir)
+        else:
+            self.traj = TrajectoryLogger(root_dir=self.data_dir)
 
         # Derive fixed child paths from the canonical root.
         self.meta_path = _child_path(self.data_dir, "nodes.jsonl")
@@ -615,6 +630,7 @@ class MemoryGraph:
             raise KeyError(f"Unknown eid: {eid}")
 
         ent = self.entities[eid]
+        kinematic_reset = False
         try:
             ent.payload.update(dict(patch))
         except Exception:
@@ -624,11 +640,13 @@ class MemoryGraph:
         if "pos" in ent.payload:
             try:
                 ent.pos = _as3(ent.payload["pos"])
+                kinematic_reset = "pos" in patch
             except Exception as e:
                 log.debug("Could not parse pos from payload: %s", e)
         if "vel" in ent.payload:
             try:
                 ent.vel = _as3(ent.payload["vel"])
+                kinematic_reset = kinematic_reset or "vel" in patch
             except Exception as e:
                 log.debug("Could not parse vel from payload: %s", e)
         if "vel0" in ent.payload:
@@ -646,6 +664,15 @@ class MemoryGraph:
                 "payload": ent.payload,
             },
         )
+        if kinematic_reset and self._trajectory_format == "v2":
+            try:
+                self.traj.mark_entity_reset(
+                    eid,
+                    last_observed_step=self._last_trajectory_step,
+                    last_observed_frame_seq=self._last_trajectory_frame_seq,
+                )
+            except Exception as e:
+                log.debug("Trajectory reset boundary skipped: %s", e)
         # Mirror to SQLite sidecar (Phase 4) — failure is non-fatal
         if self._sqlite_index:
             try:
@@ -760,6 +787,11 @@ class MemoryGraph:
             payload=payload,
         )
         self.entities[int(ent.eid)] = ent
+        if self._trajectory_format == "v2":
+            try:
+                self.traj.write_genesis(ent)
+            except Exception as e:
+                log.debug("Trajectory genesis skipped: %s", e)
 
         # --- Write embedding: shard (preferred) or legacy per-file ---
         emb_vec = np.asarray(embedding, dtype=np.float32)
@@ -878,13 +910,26 @@ class MemoryGraph:
 
         # 2) log snapshots
         if log_every and (int(step) % int(log_every) == 0):
-            for ent in list(self.world.entities):
-                if ent is None or not getattr(ent, "alive", True):
-                    continue
+            live_entities = [
+                ent for ent in list(self.world.entities)
+                if ent is not None and getattr(ent, "alive", True)
+            ]
+            if self._trajectory_format == "v2":
                 try:
-                    self.traj.log_entity(ent, step=int(step))
+                    result = self.traj.write_step(live_entities, step=int(step))
+                    if result.ok:
+                        self._last_trajectory_step = int(step)
+                        self._last_trajectory_frame_seq = result.frame_seq
+                    else:
+                        log.debug("Trajectory V2 step incomplete: %s", result.detail)
                 except Exception as e:
-                    log.debug("Trajectory log skipped: %s", e)
+                    log.debug("Trajectory V2 log skipped: %s", e)
+            else:
+                for ent in live_entities:
+                    try:
+                        self.traj.log_entity(ent, step=int(step))
+                    except Exception as e:
+                        log.debug("Trajectory log skipped: %s", e)
 
         # 3) classify occasionally (in-memory only — no nodes.jsonl write)
         #    Trajectory labels are diagnostic; they stay in the entity payload
@@ -922,6 +967,11 @@ class MemoryGraph:
         numpy memmap objects in the embedding shard writer/reader hold
         OS file handles open until explicitly released.
         """
+        if self._trajectory_format == "v2":
+            try:
+                self.traj.close()
+            except Exception as e:
+                log.debug("Trajectory V2 close skipped: %s", e)
         if self._shard_writer is not None:
             self._shard_writer.close()
         if self._shard_reader is not None:

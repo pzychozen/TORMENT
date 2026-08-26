@@ -109,6 +109,12 @@ async def enforce_rest_auth_boundary(request: Request, call_next):
 
 fabric = TormentFabric(data_dir=DATA_DIR)
 
+
+@app.on_event("shutdown")
+async def _close_fabric_on_shutdown() -> None:
+    """Seal opt-in trajectory V2 tails before the service releases graphs."""
+    fabric.close()
+
 thinking_controller = ThinkingController()
 
 
@@ -1799,13 +1805,25 @@ def index_memories_by_motif(workspace_id: str, agent_id: str, motif_id: str, lim
 def index_trajectory_range(
     workspace_id: str, agent_id: str,
     step_from: int = 0, step_to: int = 999999, limit: int = 1000,
+    mode: str = "legacy", eid: Optional[int] = None, row_limit: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Get trajectory snapshots for a step range from the sidecar index."""
+    """Read legacy-compatible, selected-EID, or explicitly bounded trajectory rows."""
     idx = fabric._get_sqlite_index(workspace_id, agent_id)
     if not idx or not idx.available:
         return {"ok": False, "detail": "SQLite index not available", "results": []}
-    results = idx.get_trajectory_range(step_from, step_to, limit=limit)
-    return {"ok": True, "results": results, "count": len(results)}
+    try:
+        contract = idx.trajectory_query_contract(mode)
+        results = idx.get_trajectory_range(
+            step_from, step_to, limit=limit, mode=mode, eid=eid, row_limit=row_limit,
+        )
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "detail": str(exc),
+            "results": [],
+            **idx.trajectory_query_contract(mode),
+        }
+    return {"ok": True, "results": results, "count": len(results), **contract}
 
 
 @app.get("/index/{workspace_id}/{agent_id}/events")
@@ -1860,18 +1878,27 @@ def index_rebuild(req: RebuildIndexReq) -> Dict[str, Any]:
     private_dir = os.path.join(agent_dir, "private")
     archive_dir = os.path.join(agent_dir, "memory_archive")
 
-    counts = idx.rebuild_from_jsonl(
-        nodes_path=os.path.join(private_dir, "nodes.jsonl"),
-        events_path=os.path.join(private_dir, "memory_events.jsonl"),
-        trajectories_path=os.path.join(
-            private_dir, "logs", "trajectories", "daily"
-        ),
-        legacy_trajectories_path=os.path.join(private_dir, "trajectories.jsonl"),
-        archive_documents_path=os.path.join(archive_dir, "documents.jsonl"),
-        archive_chunks_path=os.path.join(archive_dir, "chunks.jsonl"),
-    )
+    from .kernel.trajectory_v2 import TrajectoryIntegrityError
+    try:
+        counts = idx.rebuild_from_jsonl(
+            nodes_path=os.path.join(private_dir, "nodes.jsonl"),
+            events_path=os.path.join(private_dir, "memory_events.jsonl"),
+            trajectories_path=os.path.join(
+                private_dir, "logs", "trajectories", "daily"
+            ),
+            legacy_trajectories_path=os.path.join(private_dir, "trajectories.jsonl"),
+            trajectory_v2_root=private_dir,
+            archive_documents_path=os.path.join(archive_dir, "documents.jsonl"),
+            archive_chunks_path=os.path.join(archive_dir, "chunks.jsonl"),
+        )
+    except TrajectoryIntegrityError as exc:
+        return {
+            "ok": False,
+            "detail": "Trajectory history was not indexed because integrity verification failed",
+            "integrity_report": str(exc),
+        }
 
-    return {"ok": True, "rebuilt": counts}
+    return {"ok": True, "rebuilt": counts, "trajectory_cache": idx.trajectory_cache_status()}
 
 
 # ====================================================================
