@@ -1895,7 +1895,7 @@ def index_rebuild(req: RebuildIndexReq) -> Dict[str, Any]:
         return {
             "ok": False,
             "detail": "Trajectory history was not indexed because integrity verification failed",
-            "integrity_report": str(exc),
+            "integrity_report": "Trajectory integrity verification failed",
         }
 
     return {"ok": True, "rebuilt": counts, "trajectory_cache": idx.trajectory_cache_status()}
