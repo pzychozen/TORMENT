@@ -1,4 +1,4 @@
-"""Regression coverage for REST authorization repair batch A1."""
+"""Regression coverage for REST authorization repair batches A1 and A2."""
 from __future__ import annotations
 
 import ast
@@ -258,6 +258,199 @@ DIRECT_ROUTE_CASES = (
 )
 
 
+A2_OPERATION_TIERS = {
+    "workspace_clone": 1.0,
+    "embedding_audit": 0.0,
+    "embedding_repair": 1.0,
+    "embedding_repair_cancel": 1.0,
+    "workspace_maintenance": 1.0,
+    "archive_delete": 1.0,
+    "index_rebuild": 1.0,
+    "checkpoint_save": 0.6,
+    "spirit_reflection_process": 0.6,
+    "domain_suggestion_approve": 1.0,
+    "promote_force": 1.0,
+}
+
+
+A2_CONTROL_ROUTE_CASES = (
+    (
+        "workspace_clone",
+        "post",
+        "/workspace/clone",
+        {"source_workspace_id": "ws_a2_source", "target_workspace_id": "ws_a2_target"},
+    ),
+    (
+        "embedding_audit",
+        "post",
+        "/workspace/repair_embeddings",
+        {"workspace_id": "ws_a2_embedding", "mode": "scan"},
+    ),
+    (
+        "embedding_repair",
+        "post",
+        "/workspace/repair_embeddings",
+        {"workspace_id": "ws_a2_embedding", "mode": "repair"},
+    ),
+    (
+        "embedding_repair",
+        "post",
+        "/workspace/repair_embeddings/job",
+        {"workspace_id": "ws_a2_embedding", "mode": "scan"},
+    ),
+    (
+        "embedding_repair_cancel",
+        "post",
+        "/workspace/repair_embeddings/job/job-a2/cancel",
+        {},
+    ),
+    (
+        "workspace_maintenance",
+        "post",
+        "/workspace/maintenance",
+        {"workspace_id": "ws_a2_maintenance", "mode": "scan"},
+    ),
+    (
+        "workspace_maintenance",
+        "post",
+        "/workspace/maintenance/job",
+        {"workspace_id": "ws_a2_maintenance", "mode": "repair"},
+    ),
+    (
+        "archive_delete",
+        "delete",
+        "/archive/ws_a2_archive/ag_a2_archive/document/doc-a2",
+        {},
+    ),
+    (
+        "index_rebuild",
+        "post",
+        "/index/rebuild",
+        {"workspace_id": "ws_a2_index", "agent_id": "ag_a2_index"},
+    ),
+    (
+        "checkpoint_save",
+        "post",
+        "/checkpoint/save",
+        {"workspace_id": "ws_a2_checkpoint", "agent_id": "ag_a2_checkpoint"},
+    ),
+    (
+        "spirit_reflection_process",
+        "post",
+        "/workspace/ws_a2_reflection/spirit-reflections/process",
+        {
+            "workspace_id": "ws_a2_reflection",
+            "agent_id": "ag_a2_reflection",
+            "query_text": "question",
+            "response_text": "answer",
+            "blocks": [],
+        },
+    ),
+    (
+        "domain_suggestion_approve",
+        "post",
+        "/workspace/domain_suggestions/approve",
+        {"workspace_id": "ws_a2_domain", "domain_id": "new-domain"},
+    ),
+)
+
+
+def _patch_a2_control_surface(monkeypatch, appmod, operation: str, path: str, calls: list[str]) -> None:
+    def _record(name: str, result=None):
+        def _call(*_args, **_kwargs):
+            calls.append(name)
+            return {"ok": True} if result is None else result
+
+        return _call
+
+    if operation == "workspace_clone":
+        monkeypatch.setattr(appmod.fabric, "clone_workspace", _record("clone"))
+        return
+    if operation == "embedding_audit":
+        monkeypatch.setattr(appmod.fabric, "repair_embeddings", _record("embedding-scan"))
+        return
+    if operation == "embedding_repair":
+        method = "start_repair_embeddings_job" if path.endswith("/job") else "repair_embeddings"
+        monkeypatch.setattr(appmod.fabric, method, _record("embedding-repair"))
+        return
+    if operation == "embedding_repair_cancel":
+        monkeypatch.setattr(appmod.fabric, "cancel_repair_job", _record("embedding-repair-cancel"))
+        return
+    if operation == "workspace_maintenance":
+        method = "start_repair_embeddings_job" if path.endswith("/job") else "repair_embeddings"
+        monkeypatch.setattr(appmod.fabric, method, _record("workspace-maintenance"))
+        return
+    if operation == "archive_delete":
+        class ArchiveStoreStub:
+            def delete_document(self, _doc_id: str) -> bool:
+                calls.append("archive-delete")
+                return True
+
+        def _store(*_args, **_kwargs):
+            calls.append("archive-store")
+            return ArchiveStoreStub()
+
+        monkeypatch.setattr(appmod, "_get_archive_store", _store)
+        return
+    if operation == "index_rebuild":
+        class IndexStub:
+            available = True
+
+            def rebuild_from_jsonl(self, **_kwargs):
+                calls.append("index-rebuild")
+                return {"nodes": 0}
+
+            def trajectory_cache_status(self):
+                return {"ok": True}
+
+        def _index(*_args, **_kwargs):
+            calls.append("index-store")
+            return IndexStub()
+
+        monkeypatch.setattr(appmod.fabric, "_get_sqlite_index", _index)
+        return
+    if operation == "checkpoint_save":
+        import torment_service.checkpoint as checkpointmod
+
+        agent_key = appmod.fabric._agent_key("ws_a2_checkpoint", "ag_a2_checkpoint")
+        appmod.fabric.agent_states[agent_key] = SimpleNamespace(step=3)
+        monkeypatch.setattr(
+            appmod.fabric,
+            "get_kernel_runtime_context",
+            lambda *_args, **_kwargs: SimpleNamespace(mon=object()),
+        )
+        monkeypatch.setattr(
+            appmod.fabric,
+            "get_workspace",
+            lambda *_args, **_kwargs: SimpleNamespace(motif_regs={}),
+        )
+        monkeypatch.setattr(appmod.fabric.character_store, "load_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(checkpointmod, "build_shard_snapshot", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            checkpointmod,
+            "save_checkpoint",
+            _record("checkpoint-save", "checkpoint-a2"),
+        )
+        return
+    if operation == "spirit_reflection_process":
+        import torment_service.spirit_reflection as reflectionmod
+
+        class ReflectionStoreStub:
+            def __init__(self, *_args, **_kwargs):
+                calls.append("reflection-store")
+
+            def stats(self):
+                return {"total_reflections": 0}
+
+        monkeypatch.setattr(reflectionmod, "SpiritReflectionStore", ReflectionStoreStub)
+        monkeypatch.setattr(reflectionmod, "process_spirit_reflections", _record("reflection-process", []))
+        return
+    if operation == "domain_suggestion_approve":
+        monkeypatch.setattr(appmod.fabric, "approve_domain_suggestion", _record("domain-suggestion"))
+        return
+    raise AssertionError(f"Unhandled A2 operation: {operation}")
+
+
 @pytest.mark.parametrize("operation,path,payload,minimum_tier", DIRECT_ROUTE_CASES)
 def test_direct_routes_enforce_existing_policy(
     auth_client,
@@ -276,6 +469,131 @@ def test_direct_routes_enforce_existing_policy(
             assert response.status_code == 403, (operation, tier, response.text)
         else:
             assert response.status_code == 200, (operation, tier, response.text)
+
+
+@pytest.mark.parametrize("operation,method,path,payload", A2_CONTROL_ROUTE_CASES)
+def test_a2_control_routes_enforce_explicit_policy_before_stateful_helpers(
+    auth_client,
+    monkeypatch,
+    operation: str,
+    method: str,
+    path: str,
+    payload: dict,
+):
+    """Every A2 control route is exercised with each configured real-key tier."""
+    client, appmod, _authmod = auth_client
+    calls: list[str] = []
+    _patch_a2_control_surface(monkeypatch, appmod, operation, path, calls)
+    minimum_tier = A2_OPERATION_TIERS[operation]
+
+    for tier in ALL_TIERS:
+        response = client.request(method.upper(), path, headers=_headers(tier), json=payload)
+        if tier < minimum_tier:
+            assert response.status_code == 403, (operation, tier, response.text)
+            assert not calls, (operation, tier, calls)
+        else:
+            assert response.status_code == 200, (operation, tier, response.text)
+            assert calls, (operation, tier)
+            calls.clear()
+
+
+def test_embedding_repair_preserves_invalid_mode_validation(auth_client):
+    client, _appmod, _authmod = auth_client
+
+    response = client.post(
+        "/workspace/repair_embeddings",
+        headers=_headers(1.0),
+        json={"workspace_id": "ws_a2_invalid_mode", "mode": "unknown"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "mode must be scan|repair"
+
+
+def test_archive_delete_denial_preserves_existing_document(auth_client):
+    client, _appmod, _authmod = auth_client
+    workspace_id = "ws_a2_archive_persist"
+    agent_id = "ag_a2_archive_persist"
+    doc_id = "doc-a2-archive-persist"
+    ingest = client.post(
+        "/archive/ingest_document",
+        headers=_headers(0.6),
+        json={
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "doc_id": doc_id,
+            "text": "A document that must remain after denied deletion.",
+        },
+    )
+    assert ingest.status_code == 200, ingest.text
+
+    denied = client.delete(
+        f"/archive/{workspace_id}/{agent_id}/document/{doc_id}",
+        headers=_headers(0.9),
+    )
+    remaining = client.get(
+        f"/archive/{workspace_id}/{agent_id}/document/{doc_id}",
+        headers=_headers(0.0),
+    )
+
+    assert denied.status_code == 403, denied.text
+    assert remaining.status_code == 200, remaining.text
+    assert remaining.json()["document"]["doc_id"] == doc_id
+
+
+def test_force_promotion_uses_separate_operator_tier_before_archive_access(auth_client, monkeypatch):
+    client, appmod, _authmod = auth_client
+    import torment_service.promotion as promotionmod
+
+    class ArchiveStoreStub:
+        _chunks = {"chunk-a2": SimpleNamespace(text="force test", doc_id="doc-a2")}
+        _chunk_embeddings = {"chunk-a2": None}
+
+    archive_calls: list[str] = []
+    promotion_calls: list[bool] = []
+
+    def _archive_store(*_args, **_kwargs):
+        archive_calls.append("archive")
+        return ArchiveStoreStub()
+
+    def _evaluate(*_args, **kwargs):
+        promotion_calls.append(bool(kwargs["user_approved"]))
+        return promotionmod.PromotionResult(
+            promote=False,
+            score=0.0,
+            reason="test",
+            criteria={},
+        )
+
+    monkeypatch.setattr(appmod, "_get_archive_store", _archive_store)
+    monkeypatch.setattr(promotionmod, "evaluate_promotion", _evaluate)
+    monkeypatch.setattr(promotionmod, "promote_chunk", lambda **_kwargs: 4242)
+    agent_key = appmod.fabric._agent_key("ws_a2_promote", "ag_a2_promote")
+    appmod.fabric.private_graphs[agent_key] = object()
+    payload = {
+        "workspace_id": "ws_a2_promote",
+        "agent_id": "ag_a2_promote",
+        "chunk_id": "chunk-a2",
+    }
+
+    ordinary = client.post("/promote", headers=_headers(0.6), json={**payload, "force": False})
+    assert ordinary.status_code == 200, ordinary.text
+    assert promotion_calls == [False]
+    assert archive_calls == ["archive"]
+
+    archive_calls.clear()
+    promotion_calls.clear()
+    for tier in (0.6, 0.9):
+        denied = client.post("/promote", headers=_headers(tier), json={**payload, "force": True})
+        assert denied.status_code == 403, (tier, denied.text)
+        assert not archive_calls
+        assert not promotion_calls
+
+    allowed = client.post("/promote", headers=_headers(1.0), json={**payload, "force": True})
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["promoted_eid"] == 4242
+    assert promotion_calls == [True]
+    assert archive_calls == ["archive"]
 
 
 def test_compress_denial_precedes_feature_state(auth_client):
@@ -315,8 +633,12 @@ def test_direct_trust_literals_are_defined_policy_operations(auth_client):
         and isinstance(call.args[1].value, str)
     }
 
-    assert direct_operations == {case[0] for case in DIRECT_ROUTE_CASES}
+    assert direct_operations == {case[0] for case in DIRECT_ROUTE_CASES} | set(A2_OPERATION_TIERS)
     assert direct_operations <= set(OPERATION_TRUST_REQUIREMENTS)
+    assert {
+        operation: OPERATION_TRUST_REQUIREMENTS[operation]
+        for operation in A2_OPERATION_TIERS
+    } == A2_OPERATION_TIERS
 
 
 def test_insufficient_trust_spine_routes_do_not_create_agent_state(auth_client):
@@ -419,6 +741,7 @@ def test_authorized_generic_spine_and_direct_submit_task_preserve_provisioning(a
 def test_auth_disabled_direct_routes_remain_operator_equivalent(no_auth_client, monkeypatch):
     client, appmod, _authmod = no_auth_client
     monkeypatch.setattr(appmod.fabric, "propose_share", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(appmod.fabric, "clone_workspace", lambda *_args, **_kwargs: {"ok": True})
 
     workspace = client.post(
         "/workspace/create",
@@ -428,6 +751,11 @@ def test_auth_disabled_direct_routes_remain_operator_equivalent(no_auth_client, 
         "/agent/propose_share",
         json={"workspace_id": "ws_a1_local", "agent_id": "ag_a1_local", "summary": "local"},
     )
+    clone = client.post(
+        "/workspace/clone",
+        json={"source_workspace_id": "ws_a1_local", "target_workspace_id": "ws_a1_local_clone"},
+    )
 
     assert workspace.status_code == 200, workspace.text
     assert proposal.status_code == 200, proposal.text
+    assert clone.status_code == 200, clone.text

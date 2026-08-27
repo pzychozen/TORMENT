@@ -21,7 +21,7 @@ def test_index_rebuild_redacts_unsealed_v2_integrity_details():
     env_overrides = {
         "TORMENT_DATA_DIR": str(temp_root / "data"),
         "TORMENT_AUTH_ENABLE": "1",
-        "TORMENT_API_KEYS": "sk-index-rebuild-low:index-rebuild-low:0.0",
+        "TORMENT_API_KEYS": "sk-index-rebuild-operator:index-rebuild-operator:1.0",
         "TORMENT_EMBED_PROVIDER": "hash",
         "TORMENT_SQLITE_INDEX_ENABLE": "1",
         "TORMENT_TRAJECTORY_FORMAT": "v2",
@@ -81,7 +81,7 @@ def test_index_rebuild_redacts_unsealed_v2_integrity_details():
         client = TestClient(appmod.app)
         response = client.post(
             "/index/rebuild",
-            headers={"X-API-Key": "sk-index-rebuild-low"},
+            headers={"X-API-Key": "sk-index-rebuild-operator"},
             json={"workspace_id": workspace_id, "agent_id": agent_id},
         )
 

@@ -40,6 +40,7 @@ OPERATION_TRUST_REQUIREMENTS: Dict[str, float] = {
     "collective_status": TRUST_READ_ONLY,
     "agent_state": TRUST_READ_ONLY,
     "debug_metrics": TRUST_READ_ONLY,
+    "embedding_audit": TRUST_READ_ONLY,
     # Light write operations
     "feedback": TRUST_QUERY_REINFORCE,
     "reinforce": TRUST_QUERY_REINFORCE,
@@ -48,6 +49,8 @@ OPERATION_TRUST_REQUIREMENTS: Dict[str, float] = {
     "archive_ingest": TRUST_INGEST,
     "promote": TRUST_INGEST,
     "propose_share": TRUST_INGEST,
+    "checkpoint_save": TRUST_INGEST,
+    "spirit_reflection_process": TRUST_INGEST,
     # Collective actions
     "collective_reingest": TRUST_COLLECTIVE,
     "process_proposals": TRUST_COLLECTIVE,
@@ -59,6 +62,14 @@ OPERATION_TRUST_REQUIREMENTS: Dict[str, float] = {
     "bridges_decide": TRUST_OPERATOR,
     "conflicts_decide": TRUST_OPERATOR,
     "workspace_create": TRUST_OPERATOR,
+    "workspace_clone": TRUST_OPERATOR,
+    "embedding_repair": TRUST_OPERATOR,
+    "embedding_repair_cancel": TRUST_OPERATOR,
+    "workspace_maintenance": TRUST_OPERATOR,
+    "archive_delete": TRUST_OPERATOR,
+    "index_rebuild": TRUST_OPERATOR,
+    "domain_suggestion_approve": TRUST_OPERATOR,
+    "promote_force": TRUST_OPERATOR,
     "agent_create": TRUST_OPERATOR,
 }
 

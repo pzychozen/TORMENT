@@ -9,6 +9,7 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from torment_service.embeddings import HashEmbedding
 from torment_service.fabric import TormentFabric
@@ -17,6 +18,19 @@ from torment_service.memory_kernel import TriOctaMemoryKernel
 
 A_TEXT = "Alpha research note: phase lock synchronization and corridor stability."
 B_TEXT = "Candidate 129: signal corridor echo winter glass winter echo marker-129"
+
+
+def _checkpoint_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/checkpoint/save",
+            "raw_path": b"/checkpoint/save",
+            "query_string": b"",
+            "headers": [],
+        }
+    )
 
 
 def _new_fabric(monkeypatch: pytest.MonkeyPatch) -> TormentFabric:
@@ -186,7 +200,8 @@ def test_manual_checkpoint_routes_requested_agent_monitor(
         assert ctx_a is not None and ctx_b is not None
 
         result = app_module.checkpoint_save(
-            app_module.CheckpointSaveReq(workspace_id="audit", agent_id="b")
+            app_module.CheckpointSaveReq(workspace_id="audit", agent_id="b"),
+            _checkpoint_request(),
         )
         assert result["ok"] is True
         assert captured["corridor_monitor"] is ctx_b.mon
@@ -218,7 +233,8 @@ def test_manual_checkpoint_fails_closed_when_context_is_missing(
         fabric._kernel_contexts.pop(ak)
         with pytest.raises(HTTPException) as exc:
             app_module.checkpoint_save(
-                app_module.CheckpointSaveReq(workspace_id="audit", agent_id="a")
+                app_module.CheckpointSaveReq(workspace_id="audit", agent_id="a"),
+                _checkpoint_request(),
             )
         assert exc.value.status_code == 409
         assert saved == {}

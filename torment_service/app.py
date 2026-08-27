@@ -682,7 +682,8 @@ def workspace_create(req: WorkspaceCreateReq, request: Request) -> Dict[str, Any
 
 
 @app.post("/workspace/clone")
-def workspace_clone(req: WorkspaceCloneReq) -> Dict[str, Any]:
+def workspace_clone(req: WorkspaceCloneReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "workspace_clone", workspace_id=req.target_workspace_id)
     return fabric.clone_workspace(
         source_workspace_id=req.source_workspace_id,
         target_workspace_id=req.target_workspace_id,
@@ -694,8 +695,13 @@ def workspace_clone(req: WorkspaceCloneReq) -> Dict[str, Any]:
 
 
 @app.post("/workspace/repair_embeddings")
-def workspace_repair_embeddings(req: WorkspaceRepairReq) -> Dict[str, Any]:
+def workspace_repair_embeddings(req: WorkspaceRepairReq, request: Request) -> Dict[str, Any]:
     """Scan or repair embeddings for a workspace without cloning."""
+    mode = (req.mode or "scan").strip().lower()
+    if mode == "scan":
+        require_request_trust(request, "embedding_audit", workspace_id=req.workspace_id)
+    elif mode == "repair":
+        require_request_trust(request, "embedding_repair", workspace_id=req.workspace_id)
     return fabric.repair_embeddings(
         workspace_id=req.workspace_id,
         mode=req.mode,
@@ -705,8 +711,9 @@ def workspace_repair_embeddings(req: WorkspaceRepairReq) -> Dict[str, Any]:
     )
 
 @app.post("/workspace/repair_embeddings/job")
-def workspace_repair_embeddings_job(req: WorkspaceRepairReq) -> Dict[str, Any]:
+def workspace_repair_embeddings_job(req: WorkspaceRepairReq, request: Request) -> Dict[str, Any]:
     """Start an async scan/repair job and return a job_id."""
+    require_request_trust(request, "embedding_repair", workspace_id=req.workspace_id)
     return fabric.start_repair_embeddings_job(
         workspace_id=req.workspace_id,
         mode=req.mode,
@@ -725,7 +732,8 @@ def repair_job(job_id: str) -> Dict[str, Any]:
 
 
 @app.post("/workspace/repair_embeddings/job/{job_id}/cancel")
-def cancel_repair_job(job_id: str) -> Dict[str, Any]:
+def cancel_repair_job(job_id: str, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "embedding_repair_cancel")
     return fabric.cancel_repair_job(job_id)
 
 
@@ -733,8 +741,9 @@ def cancel_repair_job(job_id: str) -> Dict[str, Any]:
 
 
 @app.post("/workspace/maintenance")
-def workspace_maintenance(req: WorkspaceMaintenanceReq) -> Dict[str, Any]:
+def workspace_maintenance(req: WorkspaceMaintenanceReq, request: Request) -> Dict[str, Any]:
     """Unified maintenance endpoint (simple UX wrapper)."""
+    require_request_trust(request, "workspace_maintenance", workspace_id=req.workspace_id)
     mode = (req.mode or "").strip().lower()
     if mode in ("scan_embeddings", "scan"):
         return fabric.repair_embeddings(
@@ -759,8 +768,9 @@ def workspace_maintenance(req: WorkspaceMaintenanceReq) -> Dict[str, Any]:
 
 
 @app.post("/workspace/maintenance/job")
-def workspace_maintenance_job(req: WorkspaceMaintenanceReq) -> Dict[str, Any]:
+def workspace_maintenance_job(req: WorkspaceMaintenanceReq, request: Request) -> Dict[str, Any]:
     """Unified async maintenance job starter."""
+    require_request_trust(request, "workspace_maintenance", workspace_id=req.workspace_id)
     mode = (req.mode or "").strip().lower()
     if mode in ("scan_embeddings", "scan"):
         out = fabric.start_repair_embeddings_job(
@@ -1386,7 +1396,8 @@ def decide_proposal(req: DecideProposalReq, request: Request) -> Dict[str, Any]:
 
 
 @app.post("/workspace/domain_suggestions/approve")
-def approve_domain(req: ApproveDomainSuggestionReq) -> Dict[str, Any]:
+def approve_domain(req: ApproveDomainSuggestionReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "domain_suggestion_approve", workspace_id=req.workspace_id)
     return fabric.approve_domain_suggestion(workspace_id=req.workspace_id, suggested_domain_id=req.domain_id)
 
 @app.get("/workspace/{workspace_id}/domain_suggestions")
@@ -1570,7 +1581,12 @@ def archive_get_document(workspace_id: str, agent_id: str, doc_id: str, request:
 @app.delete("/archive/{workspace_id}/{agent_id}/document/{doc_id}")
 def archive_delete_document(workspace_id: str, agent_id: str, doc_id: str, request: Request) -> Dict[str, Any]:
     """Delete a document from archive memory. Safe — never affects core identity."""
-    get_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
+    require_request_trust(
+        request,
+        "archive_delete",
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
     store = _get_archive_store(workspace_id, agent_id)
     ok = store.delete_document(doc_id)
     if not ok:
@@ -1896,11 +1912,17 @@ class RebuildIndexReq(BaseModel):
 
 
 @app.post("/index/rebuild")
-def index_rebuild(req: RebuildIndexReq) -> Dict[str, Any]:
+def index_rebuild(req: RebuildIndexReq, request: Request) -> Dict[str, Any]:
     """Rebuild the SQLite sidecar index from canonical JSONL sources.
 
     Safe to run at any time — the index is disposable and rebuildable.
     """
+    require_request_trust(
+        request,
+        "index_rebuild",
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
     idx = fabric._get_sqlite_index(req.workspace_id, req.agent_id)
     if not idx or not idx.available:
         return {"ok": False, "detail": "SQLite index not available"}
@@ -1944,8 +1966,14 @@ class CheckpointSaveReq(BaseModel):
     agent_id: str
 
 @app.post("/checkpoint/save")
-def checkpoint_save(req: CheckpointSaveReq) -> Dict[str, Any]:
+def checkpoint_save(req: CheckpointSaveReq, request: Request) -> Dict[str, Any]:
     """Manually trigger a checkpoint save for an agent."""
+    require_request_trust(
+        request,
+        "checkpoint_save",
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
     _validate_path_component(req.workspace_id, "workspace_id")
     _validate_path_component(req.agent_id, "agent_id")
     from .checkpoint import (
@@ -2087,10 +2115,16 @@ class PromoteReq(BaseModel):
 @app.post("/promote")
 def promote_chunk_endpoint(req: PromoteReq, request: Request) -> Dict[str, Any]:
     """Evaluate and optionally promote an archive chunk to core memory."""
-    # The force bypass has separate authority semantics and remains parked for
-    # Batch A2.  Ordinary evaluator-governed promotion follows the established
-    # promote policy before touching the archive store.
-    if not req.force:
+    # Ordinary evaluator-governed promotion and the force bypass have distinct
+    # authority requirements before either path touches the archive store.
+    if req.force:
+        require_request_trust(
+            request,
+            "promote_force",
+            workspace_id=req.workspace_id,
+            agent_id=req.agent_id,
+        )
+    else:
         require_request_trust(
             request,
             "promote",
@@ -2449,7 +2483,7 @@ class SpiritReflectionProcessReq(BaseModel):
 
 @app.post("/workspace/{workspace_id}/spirit-reflections/process")
 def process_spirit_reflections_endpoint(
-    workspace_id: str, req: SpiritReflectionProcessReq,
+    workspace_id: str, req: SpiritReflectionProcessReq, request: Request,
 ) -> Dict[str, Any]:
     """Run the post-response spirit reflection pipeline.
 
@@ -2462,6 +2496,14 @@ def process_spirit_reflections_endpoint(
     NEVER raises an HTTP exception. The main response path is never
     affected.
     """
+    # This is 0.6 only while reflections remain derived/observational output.
+    # Re-review its tier if reflections become governance or decision inputs.
+    require_request_trust(
+        request,
+        "spirit_reflection_process",
+        workspace_id=workspace_id,
+        agent_id=req.agent_id,
+    )
     try:
         from pathlib import Path
         from .spirit_reflection import (
