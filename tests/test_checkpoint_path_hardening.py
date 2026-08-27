@@ -25,6 +25,7 @@ from torment_service.checkpoint import (
     load_latest_checkpoint,
     _prune_old_checkpoints,
     _build_checkpoint_dir,
+    _get_checkpoint_root_guard,
     build_shard_snapshot,
     restore_from_checkpoint,
     _validate_path_component,
@@ -272,7 +273,8 @@ class TestPruneCheckpoints(unittest.TestCase):
         stale_tmp = os.path.join(ckpt_dir, "checkpoint_000999.json.tmp")
         with open(stale_tmp, "w") as f:
             f.write("incomplete")
-        _prune_old_checkpoints(ckpt_dir, 1)
+        root_guard = _get_checkpoint_root_guard(self._tmpdir, "ws1", "agent1")
+        _prune_old_checkpoints(root_guard, 1)
         self.assertTrue(os.path.exists(rogue), "non-checkpoint file was deleted")
         self.assertTrue(os.path.exists(stale_tmp), "tmp checkpoint was pruned")
 
@@ -288,7 +290,8 @@ class TestPruneCheckpoints(unittest.TestCase):
                 max_checkpoints=10,
             )
         ckpt_dir = _build_checkpoint_dir(self._tmpdir, "ws1", "agent1")
-        _prune_old_checkpoints(ckpt_dir, 1)
+        root_guard = _get_checkpoint_root_guard(self._tmpdir, "ws1", "agent1")
+        _prune_old_checkpoints(root_guard, 1)
         remaining = [f for f in os.listdir(ckpt_dir) if f.endswith(".json")]
         self.assertEqual(len(remaining), 1, "should keep exactly 1 valid checkpoint")
 

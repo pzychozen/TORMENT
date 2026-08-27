@@ -1,6 +1,6 @@
 # fabric.py
 from __future__ import annotations
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import os, time, json, re, atexit, tempfile, threading, uuid, logging, math
 from pathlib import Path
@@ -51,6 +51,35 @@ from .pathing import validate_portable_new_identifier, validate_structural_path_
 
 log = logging.getLogger("torment.fabric")
 hivemind_log = logging.getLogger("torment.hivemind")
+
+_FILESYSTEM_CONTAINMENT_EVENT = "filesystem_containment_substitution"
+
+
+class PersistedJobContainmentError(RuntimeError):
+    """Bounded persisted-job root continuity detection failed."""
+
+
+@dataclass(frozen=True)
+class _FilesystemDirectoryIdentity:
+    """Canonical directory identity used for bounded continuity detection."""
+
+    canonical_path: str
+    st_dev: int
+    st_ino: int
+
+
+@dataclass(frozen=True)
+class _PersistedJobRootIdentity:
+    """Captured root and parent identities for persisted-job deletion.
+
+    A matching value is evidence of continuity, not proof that a later remove
+    operation is race-free.
+    """
+
+    data_root: _FilesystemDirectoryIdentity
+    jobs_root: _FilesystemDirectoryIdentity
+    clone_root: _FilesystemDirectoryIdentity
+    repair_root: _FilesystemDirectoryIdentity
 
 class _JobCancelled(Exception):
     pass
@@ -954,6 +983,8 @@ class TormentFabric:
         self._job_max: int = int(os.environ.get('TORMENT_JOB_MAX') or 50)
         self._job_persist: bool = str(os.environ.get('TORMENT_JOB_PERSIST') or '').strip().lower() in ('1','true','yes','on')
         self._jobs_root: str = _safe_child(self.data_dir, 'jobs')
+        self._persisted_job_root_identity: Optional[_PersistedJobRootIdentity] = None
+        self._last_persisted_job_security_incident: Optional[Dict[str, str]] = None
         if self._job_persist:
             _clone_dir = os.path.realpath(os.path.join(self._jobs_root, 'clone'))
             if not _clone_dir.startswith(os.sep) and not os.path.isabs(_clone_dir):
@@ -963,6 +994,7 @@ class TormentFabric:
             if not _repair_dir.startswith(os.sep) and not os.path.isabs(_repair_dir):
                 raise ValueError(f"Repair job dir not absolute: {_repair_dir!r}")
             os.makedirs(_repair_dir, exist_ok=True)
+            self._persisted_job_root_identity = self._capture_persisted_job_root_identity()
             self._load_jobs('clone')
             self._load_jobs('repair')
 
@@ -1089,6 +1121,137 @@ class TormentFabric:
         return out
 
     # ---- job persistence helpers (v1.10.10) ----
+    @staticmethod
+    def _filesystem_directory_identity(path: str) -> _FilesystemDirectoryIdentity:
+        """Capture a directory identity token without retaining a handle."""
+        canonical_path = os.path.normcase(os.path.realpath(path))
+        st = os.stat(canonical_path)
+        if not os.path.isdir(canonical_path):
+            raise OSError("expected persisted-job directory is not a directory")
+        return _FilesystemDirectoryIdentity(
+            canonical_path=canonical_path,
+            st_dev=int(st.st_dev),
+            st_ino=int(st.st_ino),
+        )
+
+    @staticmethod
+    def _is_link_or_reparse(path: str) -> bool:
+        """Return whether a deletion candidate is a link/reparse point."""
+        if os.path.islink(path):
+            return True
+        isjunction = getattr(os.path, "isjunction", None)
+        if callable(isjunction) and isjunction(path):
+            return True
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+        return bool(attributes & 0x0400)  # FILE_ATTRIBUTE_REPARSE_POINT
+
+    def _capture_persisted_job_root_identity(self) -> _PersistedJobRootIdentity:
+        """Capture the trusted job-root identities after normal setup.
+
+        These are Level-2 identity-continuity tokens.  They are deliberately
+        not represented as pinned directory handles and do not close a later
+        same-user TOCTOU window.
+        """
+        data_root = self._filesystem_directory_identity(self.data_dir)
+        jobs_root = self._filesystem_directory_identity(
+            _safe_child(data_root.canonical_path, 'jobs'),
+        )
+        clone_root = self._filesystem_directory_identity(
+            _safe_child(jobs_root.canonical_path, 'clone'),
+        )
+        repair_root = self._filesystem_directory_identity(
+            _safe_child(jobs_root.canonical_path, 'repair'),
+        )
+        return _PersistedJobRootIdentity(
+            data_root=data_root,
+            jobs_root=jobs_root,
+            clone_root=clone_root,
+            repair_root=repair_root,
+        )
+
+    def _record_persisted_job_containment_incident(self, operation: str) -> None:
+        """Keep a stable, process-local security record without new I/O."""
+        self._last_persisted_job_security_incident = {
+            "event": _FILESYSTEM_CONTAINMENT_EVENT,
+            "subsystem": "persisted_job",
+            "operation": operation,
+            "failure_class": "identity_continuity",
+        }
+        self._log.error(
+            "security_incident=%s subsystem=persisted_job operation=%s "
+            "failure_class=identity_continuity",
+            _FILESYSTEM_CONTAINMENT_EVENT,
+            operation,
+        )
+
+    def _persisted_job_containment_failure(
+        self, operation: str,
+    ) -> PersistedJobContainmentError:
+        # A later ordinary operation may rederive a fresh identity after the
+        # caller has restored/reopened the expected root; do not poison Fabric.
+        self._persisted_job_root_identity = None
+        self._record_persisted_job_containment_incident(operation)
+        return PersistedJobContainmentError(
+            "persisted-job filesystem containment or identity continuity validation failed"
+        )
+
+    def _revalidate_persisted_job_root(self, kind: str, operation: str) -> str:
+        """Return a current job-kind root or fail closed on substitution.
+
+        The revalidation is intentionally bounded detection.  It compares the
+        original canonical root plus device/inode tokens before destructive
+        work, but does not claim a handle-pinned, race-free deletion.
+        """
+        _validate_path_component(kind, "job_kind")
+        try:
+            identity = self._persisted_job_root_identity
+            if identity is None:
+                identity = self._capture_persisted_job_root_identity()
+                self._persisted_job_root_identity = identity
+                self._jobs_root = identity.jobs_root.canonical_path
+
+            current_data = self._filesystem_directory_identity(self.data_dir)
+            if current_data != identity.data_root:
+                raise OSError("persisted-job data root identity changed")
+            current_jobs = self._filesystem_directory_identity(
+                _safe_child(current_data.canonical_path, 'jobs'),
+            )
+            if current_jobs != identity.jobs_root:
+                raise OSError("persisted-job root identity changed")
+
+            expected_kind_root = (
+                identity.clone_root if kind == 'clone' else identity.repair_root
+            )
+            current_kind = self._filesystem_directory_identity(
+                _safe_child(current_jobs.canonical_path, kind),
+            )
+            if current_kind != expected_kind_root:
+                raise OSError("persisted-job parent identity changed")
+            return current_kind.canonical_path
+        except Exception as exc:
+            if isinstance(exc, PersistedJobContainmentError):
+                raise
+            raise self._persisted_job_containment_failure(operation) from None
+
+    def _validated_persisted_job_delete_path(self, kind: str, job_id: str) -> str:
+        """Revalidate one destructive persisted-job deletion target."""
+        _validate_path_component(job_id, "job_id")
+        kind_root = self._revalidate_persisted_job_root(kind, "sweep")
+        filename = f"{job_id}.json"
+        raw_candidate = os.path.join(kind_root, filename)
+        try:
+            candidate = _safe_child(kind_root, filename)
+            if self._is_link_or_reparse(raw_candidate):
+                raise self._persisted_job_containment_failure("sweep")
+            return candidate
+        except FileNotFoundError:
+            # Preserve ordinary cleanup semantics for a file already absent.
+            return raw_candidate
+        except PersistedJobContainmentError:
+            raise
+        except Exception:
+            raise self._persisted_job_containment_failure("sweep") from None
+
     def _job_path(self, kind: str, job_id: str) -> str:
         _validate_path_component(kind, "job_kind")
         _validate_path_component(job_id, "job_id")
@@ -1148,21 +1311,36 @@ class TormentFabric:
         except Exception as e:
             self._log.debug("Job persist failed: %s", e)
 
-    def _prune_jobs(self, kind: str) -> None:
-        """Keep only the most recent N jobs (by started_ts) in memory and on disk."""
+    def _prune_jobs(self, kind: str) -> bool:
+        """Keep only the most recent N jobs (by started_ts) in memory and on disk.
+
+        A root-identity substitution aborts the sweep before the affected job
+        is removed from memory or disk and returns ``False``.  Normal lifecycle
+        behaviour remains best-effort and returns ``True``.
+        """
         n = int(self._job_max or 0)
         if n <= 0:
-            return
+            return True
         store = self._clone_jobs if kind == 'clone' else self._repair_jobs
         items = sorted(store.items(), key=lambda kv: float(kv[1].get('started_ts', 0) or 0), reverse=True)
         drop = [jid for jid,_ in items[n:]]
+
+        if self._job_persist:
+            try:
+                self._revalidate_persisted_job_root(kind, "sweep")
+            except PersistedJobContainmentError:
+                return False
+
         for jid in drop:
-            store.pop(jid, None)
             if self._job_persist:
                 try:
-                    os.remove(self._job_path(kind, jid))
+                    os.remove(self._validated_persisted_job_delete_path(kind, jid))
+                except PersistedJobContainmentError:
+                    return False
                 except Exception as e:
                     self._log.debug("Job file removal failed: %s", e)
+            store.pop(jid, None)
+        return True
 
 
 

@@ -27,18 +27,63 @@ import logging
 import numbers
 import os
 import re
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .embedding_store import _canonical_storage_root, _child_path
+from .embedding_store import _child_path
 from .pathing import validate_structural_path_component
 
 log = logging.getLogger("torment.checkpoint")
 
 CHECKPOINT_VERSION = 3
 Z_SEMANTICS = "kernel_canonical_v4_0"
+
+
+_FILESYSTEM_CONTAINMENT_EVENT = "filesystem_containment_substitution"
+_CHECKPOINT_ROOT_GUARD_MAX = 512
+
+
+class CheckpointContainmentError(RuntimeError):
+    """A checkpoint root no longer has its captured filesystem identity.
+
+    This is deliberately distinct from ordinary non-fatal checkpoint I/O
+    failures.  It reports bounded identity-continuity detection, not a claim
+    that a path-only check closes every TOCTOU window.
+    """
+
+
+@dataclass(frozen=True)
+class _DirectoryIdentity:
+    """Canonical directory identity used for bounded continuity detection."""
+
+    canonical_path: str
+    st_dev: int
+    st_ino: int
+
+
+@dataclass(frozen=True)
+class _CheckpointRootGuard:
+    """Captured identities for one checkpoint root.
+
+    Matching identities are evidence of continuity, not proof that later
+    filesystem operations are race-free.
+    """
+
+    data_dir_input: str
+    workspace_id: str
+    agent_id: str
+    data_root: _DirectoryIdentity
+    checkpoint_parent: _DirectoryIdentity
+    checkpoint_root: _DirectoryIdentity
+
+
+_checkpoint_root_guards: "OrderedDict[Tuple[str, str, str], _CheckpointRootGuard]" = OrderedDict()
+_checkpoint_root_guards_lock = threading.RLock()
 
 
 def _sanitize_log(value: str) -> str:
@@ -90,6 +135,67 @@ def _validated_checkpoint_root(
             os.makedirs(root, exist_ok=True)
         return root
     raise ValueError("Checkpoint directory escapes base")
+
+
+def _directory_identity(path: str) -> _DirectoryIdentity:
+    """Capture a directory identity token without retaining a live handle."""
+    canonical_path = os.path.normcase(os.path.realpath(path))
+    st = os.stat(canonical_path)
+    if not os.path.isdir(canonical_path):
+        raise OSError("expected checkpoint directory is not a directory")
+    return _DirectoryIdentity(
+        canonical_path=canonical_path,
+        st_dev=int(st.st_dev),
+        st_ino=int(st.st_ino),
+    )
+
+
+def _is_link_or_reparse(path: str) -> bool:
+    """Return whether a destructive checkpoint candidate is redirected."""
+    if os.path.islink(path):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    if callable(isjunction) and isjunction(path):
+        return True
+    attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    return bool(attributes & 0x0400)  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+def _checkpoint_guard_key(data_dir: str, workspace_id: str, agent_id: str) -> Tuple[str, str, str]:
+    return (os.path.normcase(os.path.abspath(data_dir)), workspace_id, agent_id)
+
+
+def _discard_checkpoint_root_guard(guard: _CheckpointRootGuard) -> None:
+    key = _checkpoint_guard_key(guard.data_dir_input, guard.workspace_id, guard.agent_id)
+    with _checkpoint_root_guards_lock:
+        if _checkpoint_root_guards.get(key) is guard:
+            _checkpoint_root_guards.pop(key, None)
+
+
+def _record_checkpoint_containment_incident(
+    operation: str, workspace_id: str, agent_id: str,
+) -> None:
+    """Emit a stable, non-secret incident record for a rejected root."""
+    log.error(
+        "security_incident=%s subsystem=checkpoint operation=%s "
+        "workspace_id=%s agent_id=%s failure_class=identity_continuity",
+        _FILESYSTEM_CONTAINMENT_EVENT,
+        operation,
+        _sanitize_log(workspace_id),
+        _sanitize_log(agent_id),
+    )
+
+
+def _checkpoint_containment_failure(
+    guard: _CheckpointRootGuard, operation: str,
+) -> CheckpointContainmentError:
+    _discard_checkpoint_root_guard(guard)
+    _record_checkpoint_containment_incident(
+        operation, guard.workspace_id, guard.agent_id,
+    )
+    return CheckpointContainmentError(
+        "checkpoint filesystem containment or identity continuity validation failed"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -425,13 +531,84 @@ def _build_checkpoint_dir(data_dir: str, workspace_id: str, agent_id: str) -> st
         raise ValueError(f"Invalid agent_id: {agent_id!r}")
 
     base = os.path.realpath(data_dir)
-    safe_dir = os.path.realpath(os.path.join(
+    requested_dir = os.path.join(
         base, "workspaces", workspace_id,
         "agents", agent_id, "private", "checkpoints",
-    ))
-    if not safe_dir.startswith(base + os.sep):
-        raise ValueError("Checkpoint directory escapes data root")
-    return safe_dir
+    )
+    # ``_validated_checkpoint_root`` is the single checkpoint containment
+    # contract used by the live builder and compatibility helper.
+    return _validated_checkpoint_root(requested_dir, base)
+
+
+def _capture_checkpoint_root_guard(
+    data_dir: str, workspace_id: str, agent_id: str,
+) -> _CheckpointRootGuard:
+    """Create the first identity snapshot for a checkpoint root."""
+    safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
+    os.makedirs(safe_dir, exist_ok=True)
+    # Rebuild after creation so a substituted parent is detected before the
+    # initial snapshot is trusted.
+    safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
+    return _CheckpointRootGuard(
+        data_dir_input=os.path.abspath(data_dir),
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        data_root=_directory_identity(data_dir),
+        checkpoint_parent=_directory_identity(os.path.dirname(safe_dir)),
+        checkpoint_root=_directory_identity(safe_dir),
+    )
+
+
+def _get_checkpoint_root_guard(
+    data_dir: str, workspace_id: str, agent_id: str,
+) -> _CheckpointRootGuard:
+    """Get the bounded cached guard or capture a root for a future check."""
+    key = _checkpoint_guard_key(data_dir, workspace_id, agent_id)
+    with _checkpoint_root_guards_lock:
+        guard = _checkpoint_root_guards.get(key)
+        if guard is not None:
+            _checkpoint_root_guards.move_to_end(key)
+            return guard
+
+    guard = _capture_checkpoint_root_guard(data_dir, workspace_id, agent_id)
+    with _checkpoint_root_guards_lock:
+        _checkpoint_root_guards[key] = guard
+        _checkpoint_root_guards.move_to_end(key)
+        while len(_checkpoint_root_guards) > _CHECKPOINT_ROOT_GUARD_MAX:
+            _checkpoint_root_guards.popitem(last=False)
+    return guard
+
+
+def _revalidate_checkpoint_root(
+    guard: _CheckpointRootGuard, operation: str,
+) -> str:
+    """Fail closed if a cached checkpoint root has been substituted.
+
+    The checks intentionally happen immediately before a write or destructive
+    prune operation.  They provide identity-continuity detection only; they do
+    not retain a pinned OS directory handle and therefore do not claim TOCTOU
+    race closure.
+    """
+    try:
+        current_data = _directory_identity(guard.data_dir_input)
+        if current_data != guard.data_root:
+            raise OSError("checkpoint data root identity changed")
+
+        current_root = _build_checkpoint_dir(
+            guard.data_dir_input, guard.workspace_id, guard.agent_id,
+        )
+        current_parent = _directory_identity(os.path.dirname(current_root))
+        current_checkpoint_root = _directory_identity(current_root)
+        if (
+            current_parent != guard.checkpoint_parent
+            or current_checkpoint_root != guard.checkpoint_root
+        ):
+            raise OSError("checkpoint root identity changed")
+        return current_checkpoint_root.canonical_path
+    except Exception as exc:
+        if isinstance(exc, CheckpointContainmentError):
+            raise
+        raise _checkpoint_containment_failure(guard, operation) from None
 
 
 def save_checkpoint(
@@ -456,8 +633,9 @@ def save_checkpoint(
     parameter reaches filesystem sinks.
     """
     try:
-        safe_dir = _build_checkpoint_dir(data_dir, workspace_id, agent_id)
-        os.makedirs(safe_dir, exist_ok=True)
+        # Preserve the existing non-fatal invalid-ID / ordinary-I/O behaviour,
+        # while making a previously trusted root substitution a distinct error.
+        root_guard = _get_checkpoint_root_guard(data_dir, workspace_id, agent_id)
 
         mon = kernel_runtime_context.mon if kernel_runtime_context is not None else corridor_monitor
         model_state_data = serialize_model_state(model_state)
@@ -479,6 +657,7 @@ def save_checkpoint(
                 kernel_runtime_context,
             )
 
+        safe_dir = _revalidate_checkpoint_root(root_guard, "write")
         ckpt_name = _checkpoint_filename(step)
         path = _child_path(safe_dir, ckpt_name)
         tmp = _child_path(safe_dir, ckpt_name + ".tmp")
@@ -487,22 +666,30 @@ def save_checkpoint(
         os.replace(tmp, path)
 
         # Prune old checkpoints
-        _prune_old_checkpoints(safe_dir, max_checkpoints)
+        _prune_old_checkpoints(root_guard, max_checkpoints)
 
         log.info("Checkpoint saved: step=%d -> %s", step, _sanitize_log(path))
         return path
 
+    except CheckpointContainmentError:
+        # The error is deliberately caller-visible: ordinary checkpoint I/O
+        # failures still return None below, but a root substitution must not be
+        # mistaken for "checkpoint just was not saved".
+        raise
     except Exception as exc:
         log.warning("Checkpoint save failed (step=%d): %s", step, exc)
         return None
 
 
-def _prune_old_checkpoints(safe_dir: str, keep: int) -> None:
+def _prune_old_checkpoints(root_guard: _CheckpointRootGuard, keep: int) -> None:
     """Remove oldest checkpoints, keeping at most ``keep``.
 
-    *safe_dir* must already be a validated, ``realpath``-resolved
-    checkpoint directory (as returned by ``_build_checkpoint_dir``).
+    Each candidate is revalidated against the original captured root and the
+    current root/parent identities immediately before deletion.  This aborts
+    on substitution detection; it does not claim to close the remaining
+    check-to-remove race.
     """
+    safe_dir = _revalidate_checkpoint_root(root_guard, "prune")
     try:
         entries = os.listdir(safe_dir)
     except OSError:
@@ -517,9 +704,19 @@ def _prune_old_checkpoints(safe_dir: str, keep: int) -> None:
         return
 
     for name in valid_names[: len(valid_names) - keep]:
+        # Keep the strict filename contract even though entries were filtered.
+        if not re.fullmatch(r"checkpoint_\d+\.json", name):
+            continue
+        safe_dir = _revalidate_checkpoint_root(root_guard, "prune")
         try:
             candidate = _child_path(safe_dir, name)
+            # A symlink/reparse candidate is not a normal checkpoint file.  Do
+            # not rely on remove()'s link behaviour for a destructive flow.
+            if _is_link_or_reparse(os.path.join(safe_dir, name)):
+                raise _checkpoint_containment_failure(root_guard, "prune")
             os.remove(candidate)
+        except CheckpointContainmentError:
+            raise
         except (ValueError, OSError) as e:
             log.debug("Could not remove old checkpoint: %s", e)
 
@@ -617,12 +814,4 @@ def get_checkpoint_dir(data_dir: str, workspace_id: str, agent_id: str) -> str:
     Validates workspace_id and agent_id, canonicalizes data_dir,
     and returns a trusted root path.
     """
-    _validate_path_component(workspace_id, "workspace_id")
-    _validate_path_component(agent_id, "agent_id")
-    canonical_data = _canonical_storage_root(data_dir)
-    return _canonical_storage_root(
-        os.path.join(
-            canonical_data, "workspaces", workspace_id,
-            "agents", agent_id, "private", "checkpoints",
-        ),
-    )
+    return _build_checkpoint_dir(data_dir, workspace_id, agent_id)

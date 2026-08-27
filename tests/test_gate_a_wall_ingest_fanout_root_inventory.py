@@ -110,6 +110,18 @@ _CLASSIFIED_OBSERVABILITY_SURFACES = {
     ),
 }
 
+# Filesystem containment guards can match the writer-ish verb heuristic solely
+# because their defensive names mention persisted-job state.  They revalidate
+# identity or record a process-local security incident; they are not new
+# writer/fan-out roots.
+_CLASSIFIED_FILESYSTEM_SECURITY_GUARDS = {
+    "_capture_persisted_job_root_identity",
+    "_record_persisted_job_containment_incident",
+    "_persisted_job_containment_failure",
+    "_revalidate_persisted_job_root",
+    "_validated_persisted_job_delete_path",
+}
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -263,8 +275,11 @@ class TestWriterSurfaceInventory(unittest.TestCase):
             name for name, (where, _desc) in _CLASSIFIED_OBSERVABILITY_SURFACES.items()
             if where == "TormentFabric"
         }
+        filesystem_security_guards = _CLASSIFIED_FILESYSTEM_SECURITY_GUARDS
         self._assert_no_new(
-            _writish(_class_method_names(ft, "TormentFabric")) - observability,
+            _writish(_class_method_names(ft, "TormentFabric"))
+            - observability
+            - filesystem_security_guards,
             _TORMENTFABRIC_WRITERS,
             "TormentFabric",
         )
@@ -358,6 +373,27 @@ class TestClassifiedObservabilitySurfaces(unittest.TestCase):
         )
         self.assertIsNotNone(telemetry)
         self.assertEqual(_called_names(telemetry), {"getattr", "info", "time"})
+
+
+class TestClassifiedFilesystemSecurityGuards(unittest.TestCase):
+
+    def test_f5_b_defensive_helpers_are_not_writer_roots(self):
+        ft = _tree("fabric.py")
+        methods = set(_class_method_names(ft, "TormentFabric"))
+        self.assertEqual(
+            _CLASSIFIED_FILESYSTEM_SECURITY_GUARDS,
+            {
+                "_capture_persisted_job_root_identity",
+                "_record_persisted_job_containment_incident",
+                "_persisted_job_containment_failure",
+                "_revalidate_persisted_job_root",
+                "_validated_persisted_job_delete_path",
+            },
+        )
+        self.assertTrue(
+            _CLASSIFIED_FILESYSTEM_SECURITY_GUARDS <= methods,
+            "classified F5-B filesystem guard no longer exists; re-inventory required",
+        )
 
 
 # --------------------------------------------------------------------------- #
