@@ -58,6 +58,10 @@ class PersistentIdentityCollisionError(RuntimeError):
     """A requested logical ID resolves to a differently declared stored identity."""
 
 
+class PersistentIdentityMissingError(RuntimeError):
+    """Canonical agent memory exists but its persistent identity is absent."""
+
+
 class IdentityStore:
     """Persists agent identities as JSON files."""
     def __init__(self, data_dir: str) -> None:

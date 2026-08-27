@@ -857,6 +857,41 @@ class MemoryGraph:
             except Exception as e:
                 log.debug("SQLite index_node skipped: %s", e)
 
+    def abort_unflushed_node(self, eid: int) -> None:
+        """Remove a failed pre-commit node from live graph state.
+
+        ``spawn_memory`` intentionally writes embedding, event, and edge audit
+        residue before the caller chooses the canonical ``nodes.jsonl`` commit.
+        When that commit fails, those durable artifacts require later
+        reconciliation and are deliberately left untouched here. This method
+        only removes the uncommitted entity from current-process lookup and
+        physics state so it cannot be mistaken for stored memory.
+
+        The SeedWorld allocator is deliberately not rewound: reusing the EID
+        while pre-commit residue exists would make that residue ambiguous.
+        """
+        eid = int(eid)
+        ent = self.entities.pop(eid, None)
+
+        if ent is not None:
+            self.world.entities[:] = [
+                world_ent
+                for world_ent in self.world.entities
+                if world_ent is not ent
+            ]
+
+        self._emb_by_eid.pop(eid, None)
+        self._eid_list = [known_eid for known_eid in self._eid_list if known_eid != eid]
+        self._emb_mat = None
+        self._index_dirty = True
+
+        # Only discard the live edge view. ``edges.jsonl`` is pre-commit
+        # residue and must remain available for later reconciliation.
+        self.edges[:] = [
+            edge for edge in self.edges
+            if not isinstance(edge, dict) or edge.get("src") != eid
+        ]
+
     def add_memory(
         self,
         summary: str,

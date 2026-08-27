@@ -14,6 +14,7 @@ from .identity import (
     IdentityStore,
     AgentIdentity,
     PersistentIdentityCollisionError,
+    PersistentIdentityMissingError,
     DEFAULT_AGENT_SEED,
     DEFAULT_AGENT_OVERLAY,
 )
@@ -763,6 +764,53 @@ def _safe_child(base: str, *parts: str) -> str:
     if _r != _b and not _r.startswith(_b + os.sep):
         raise ValueError(f"Path escapes base directory: {_r!r}")
     return _r
+
+
+def _agent_canonical_ownership_evidence(
+    data_dir: str,
+    workspace_id: str,
+    agent_id: str,
+) -> Tuple[str, ...]:
+    """Return non-empty agent-bound canonical files without creating paths.
+
+    The identity file binds the private core graph and per-agent archive lane.
+    Embeddings, SQLite indexes, checkpoints, and memory-event logs are
+    derived or audit-only residue and therefore cannot by themselves block a
+    genuinely new identity. Reference, environment, and closure stores are
+    workspace-scoped rather than agent-bound, so they are outside this check.
+    """
+    agent_dir = _agent_dir(data_dir, workspace_id, agent_id)
+    candidates = (
+        ("private_nodes", ("private", "nodes.jsonl")),
+        ("private_edges", ("private", "edges.jsonl")),
+        ("archive_documents", ("memory_archive", "documents.jsonl")),
+        ("archive_chunks", ("memory_archive", "chunks.jsonl")),
+        ("archive_lifecycle", ("memory_archive", "events.jsonl")),
+    )
+    evidence: List[str] = []
+    for label, parts in candidates:
+        path = _safe_child(agent_dir, *parts)
+        try:
+            if os.path.getsize(path) > 0:
+                evidence.append(label)
+        except OSError:
+            # An unreadable or substituted canonical filename is still
+            # ownership evidence. Fail closed rather than create an identity
+            # over state that cannot be classified safely.
+            if os.path.lexists(path):
+                evidence.append(label)
+    return tuple(evidence)
+
+
+def _raise_if_agent_identity_is_missing_over_canonical_memory(
+    data_dir: str,
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    if _agent_canonical_ownership_evidence(data_dir, workspace_id, agent_id):
+        raise PersistentIdentityMissingError(
+            "Persistent identity is missing for existing canonical agent memory"
+        )
 
 
 _WORKSPACE_IDENTITY_NEW = "NEW"
@@ -2502,7 +2550,6 @@ class TormentFabric:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if existing_identity is None:
             _validate_new_path_component(agent_id, "agent_id")
-        ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         # Serialize creation by workspace before the per-agent initializer so a
         # CharacterSeed ownership check and first save are one atomic sequence.
@@ -2511,6 +2558,30 @@ class TormentFabric:
                 ident = self.ident_store.load(workspace_id, agent_id)
             except PersistentIdentityCollisionError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if ident is None:
+                try:
+                    _raise_if_agent_identity_is_missing_over_canonical_memory(
+                        self.data_dir, workspace_id, agent_id,
+                    )
+                except PersistentIdentityMissingError as exc:
+                    self._log.warning(
+                        "persistent_identity_missing_over_canonical_memory "
+                        "workspace_id=%s agent_id=%s",
+                        _safe_log_value(workspace_id),
+                        _safe_log_value(agent_id),
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Persistent identity is missing for existing canonical "
+                            "agent memory; recovery is required"
+                        ),
+                    ) from exc
+
+            # Do not initialize the workspace before the missing-identity
+            # check above: an agent-bound canonical artifact must fail closed
+            # without creating replacement state around it.
+            ws = self.get_workspace(workspace_id)
             if ident is None:
                 effective_seed = seed or DEFAULT_AGENT_SEED
                 effective_seed_id = str(effective_seed.get("seed_id", "") or "")
@@ -3439,7 +3510,6 @@ class TormentFabric:
                 memory_class=memory_class,
                 extra_payload=_merged_ep,
                 )
-                stored = True
 
                 _mark_embed_audit_dirty(self.data_dir, workspace_id)
 
@@ -3539,8 +3609,25 @@ class TormentFabric:
                 # --- Single flush: write the complete, enriched record once ---
                 try:
                     graph.flush_node(int(eid))
-                except Exception as e:
-                    self._log.debug("Failed to flush node eid=%s: %s", eid, e)
+                except Exception:
+                    # The nodes.jsonl append is the canonical commit boundary.
+                    # Pre-commit embedding/event/edge residue is intentionally
+                    # retained for later reconciliation, but the live entity
+                    # must not remain queryable as stored memory.
+                    graph.abort_unflushed_node(int(eid))
+                    self._log.warning(
+                        "canonical_memory_commit_failed workspace_id=%s agent_id=%s",
+                        _safe_log_value(workspace_id),
+                        _safe_log_value(agent_id),
+                    )
+                    return {
+                        "stored": False,
+                        "reinforced": False,
+                        "failure_code": "canonical_commit_failed",
+                        "eid": None,
+                        "domain_chosen": chosen_domain,
+                    }
+                stored = True
 
                 # --- Private-ingest contradiction surfacing (Block A, §8) ---
                 # When a private core ingest's content is similar-plus-

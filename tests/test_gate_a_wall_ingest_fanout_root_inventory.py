@@ -122,6 +122,17 @@ _CLASSIFIED_FILESYSTEM_SECURITY_GUARDS = {
     "_validated_persisted_job_delete_path",
 }
 
+# Commit-abort helpers can match the writer-ish verb heuristic because their
+# names refer to a pre-commit node. They remove current-process state after a
+# failed canonical commit and leave durable residue for later reconciliation;
+# they are neither a canonical writer nor a fan-out root.
+_CLASSIFIED_IN_MEMORY_ABORT_SURFACES = {
+    "abort_unflushed_node": (
+        "MemoryGraph",
+        "removes only uncommitted in-memory graph/cache/edge state after failed canonical commit",
+    ),
+}
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -291,8 +302,15 @@ class TestWriterSurfaceInventory(unittest.TestCase):
 
     def test_memorygraph_writer_surface(self):
         gt = _tree("memory_graph.py")
-        self._assert_no_new(_writish(_class_method_names(gt, "MemoryGraph")),
-                            _MEMORYGRAPH_WRITERS, "MemoryGraph")
+        in_memory_aborts = {
+            name for name, (where, _desc) in _CLASSIFIED_IN_MEMORY_ABORT_SURFACES.items()
+            if where == "MemoryGraph"
+        }
+        self._assert_no_new(
+            _writish(_class_method_names(gt, "MemoryGraph")) - in_memory_aborts,
+            _MEMORYGRAPH_WRITERS,
+            "MemoryGraph",
+        )
 
     def test_promotion_writer_surface(self):
         pt = _tree("promotion.py")
@@ -393,6 +411,35 @@ class TestClassifiedFilesystemSecurityGuards(unittest.TestCase):
         self.assertTrue(
             _CLASSIFIED_FILESYSTEM_SECURITY_GUARDS <= methods,
             "classified F5-B filesystem guard no longer exists; re-inventory required",
+        )
+
+
+class TestClassifiedInMemoryAbortSurfaces(unittest.TestCase):
+
+    def test_commit_abort_surface_remains_non_persistent(self):
+        gt = _tree("memory_graph.py")
+        abort = next(
+            (
+                method for method in _class(gt, "MemoryGraph").body
+                if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and method.name == "abort_unflushed_node"
+            ),
+            None,
+        )
+
+        self.assertEqual(
+            set(_CLASSIFIED_IN_MEMORY_ABORT_SURFACES),
+            {"abort_unflushed_node"},
+        )
+        self.assertEqual(
+            _CLASSIFIED_IN_MEMORY_ABORT_SURFACES["abort_unflushed_node"][0],
+            "MemoryGraph",
+        )
+        self.assertIsNotNone(abort)
+        self.assertEqual(
+            _called_names(abort) & {"_append_jsonl", "_log_event", "flush_node"},
+            set(),
+            "commit abort must not create new durable graph state",
         )
 
 
