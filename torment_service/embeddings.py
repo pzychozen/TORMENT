@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import urllib.parse
 import urllib.request
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -169,7 +170,7 @@ class OllamaEmbedding:
 
     def __init__(self, model: str, base_url: str = "http://127.0.0.1:11434", timeout_s: float = 30.0) -> None:
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _validated_ollama_base_url(base_url)
         self.timeout_s = float(timeout_s)
 
         v = self._embed_raw("dim_probe")
@@ -202,6 +203,20 @@ class OllamaEmbedding:
         if n > 0:
             v = v / n
         return v.astype(np.float32)
+
+
+def _validated_ollama_base_url(base_url: str) -> str:
+    """Return an absolute HTTP(S) Ollama base URL or raise before I/O."""
+    normalized = (base_url or "").strip()
+    try:
+        parsed = urllib.parse.urlparse(normalized)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("Ollama base URL must be an HTTP(S) URL with a hostname") from exc
+    if parsed.scheme not in ("http", "https") or not hostname:
+        raise ValueError("Ollama base URL must be an HTTP(S) URL with a hostname")
+    return normalized.rstrip("/")
 
 
 def build_embedder_from_env() -> Embedder:

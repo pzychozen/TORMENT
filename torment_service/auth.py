@@ -115,8 +115,8 @@ class APIKeyStore:
                         description=entry.get("description", ""),
                     )
             logger.info("Loaded %d API key(s) from file: %s", len(entries), path)
-        except Exception as e:
-            logger.error("Failed to load API keys from %s: %s", path, e)
+        except Exception:
+            logger.error("Failed to load configured API key file")
 
     def lookup(self, key: str) -> Optional[ClientRecord]:
         """Look up a client record by API key. Returns None if not found."""
