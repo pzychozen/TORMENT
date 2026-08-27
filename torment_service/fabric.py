@@ -10,7 +10,13 @@ from fastapi import HTTPException
 
 from .memory_kernel import KernelRuntimeContext, TriOctaMemoryKernel
 from .memory_graph import MemoryGraph
-from .identity import IdentityStore, AgentIdentity, DEFAULT_AGENT_SEED, DEFAULT_AGENT_OVERLAY
+from .identity import (
+    IdentityStore,
+    AgentIdentity,
+    PersistentIdentityCollisionError,
+    DEFAULT_AGENT_SEED,
+    DEFAULT_AGENT_OVERLAY,
+)
 from .motifs import MotifRegistry, cosine as cos_sim
 from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
@@ -730,6 +736,85 @@ def _safe_child(base: str, *parts: str) -> str:
     return _r
 
 
+_WORKSPACE_IDENTITY_NEW = "NEW"
+_WORKSPACE_IDENTITY_VERIFIED_EXISTING = "VERIFIED_EXISTING"
+_WORKSPACE_IDENTITY_LEGACY_UNVERIFIED = "LEGACY_UNVERIFIED"
+
+
+def _verify_workspace_identity_before_initialization(data_dir: str, workspace_id: str) -> str:
+    """Read-only Layer-C verification before Workspace can create metadata.
+
+    Metadata-backed workspaces self-verify their persisted ID.  For legacy
+    metadata-less roots, an exact immediate directory-entry spelling is only a
+    collision-containment witness; it is not persistent identity evidence.
+    """
+    workspace_root = _ws_root(data_dir, workspace_id)
+    if not os.path.exists(workspace_root):
+        return _WORKSPACE_IDENTITY_NEW
+
+    meta_path = _safe_child(workspace_root, "workspace_meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            persisted_workspace_id = meta.get("workspace_id") if isinstance(meta, dict) else None
+        except (OSError, ValueError, TypeError) as exc:
+            raise PersistentIdentityCollisionError(
+                "Persistent workspace identity cannot be verified from metadata: "
+                f"requested workspace_id={workspace_id!r}"
+            ) from exc
+        if not isinstance(persisted_workspace_id, str) or persisted_workspace_id != workspace_id:
+            raise PersistentIdentityCollisionError(
+                "Persistent workspace identity collision: requested "
+                f"workspace_id={workspace_id!r}; stored declaration does not exactly match"
+            )
+        return _WORKSPACE_IDENTITY_VERIFIED_EXISTING
+
+    workspaces_root = _safe_child(_canonical_data_root(data_dir), "workspaces")
+    try:
+        entries = tuple(os.scandir(workspaces_root))
+    except OSError as exc:
+        raise PersistentIdentityCollisionError(
+            "Persistent legacy workspace identity cannot be verified: "
+            f"requested workspace_id={workspace_id!r}"
+        ) from exc
+
+    has_exact_entry = False
+    samefile_errors = []
+    for entry in entries:
+        try:
+            if not entry.is_dir():
+                continue
+        except OSError:
+            continue
+        if entry.name == workspace_id:
+            has_exact_entry = True
+            continue
+        try:
+            if os.path.samefile(entry.path, workspace_root):
+                raise PersistentIdentityCollisionError(
+                    "Persistent legacy workspace identity collision: requested "
+                    f"workspace_id={workspace_id!r}; existing directory entry "
+                    f"{entry.name!r} resolves to the same object"
+                )
+        except PersistentIdentityCollisionError:
+            raise
+        except (AttributeError, NotImplementedError, OSError) as exc:
+            samefile_errors.append(exc)
+
+    if has_exact_entry:
+        return _WORKSPACE_IDENTITY_LEGACY_UNVERIFIED
+    if samefile_errors:
+        raise PersistentIdentityCollisionError(
+            "Persistent legacy workspace identity cannot be verified without "
+            f"filesystem object equivalence: requested workspace_id={workspace_id!r}"
+        ) from samefile_errors[0]
+    raise PersistentIdentityCollisionError(
+        "Persistent legacy workspace identity has no exact directory-entry witness: "
+        f"requested workspace_id={workspace_id!r}"
+    )
+
+
 class TormentFabric:
 
     @staticmethod
@@ -951,10 +1036,15 @@ class TormentFabric:
         _validate_path_component(workspace_id, "workspace_id")
         ws = self.workspaces.get(workspace_id)
         if ws is None:
-            # Preserve structural-only access to an existing legacy workspace.
+            try:
+                identity_state = _verify_workspace_identity_before_initialization(
+                    self.data_dir, workspace_id,
+                )
+            except PersistentIdentityCollisionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             # A missing root is a first-creation seam and must be admitted
             # portably before Workspace can write workspace-level artefacts.
-            if not os.path.exists(_ws_root(self.data_dir, workspace_id)):
+            if identity_state == _WORKSPACE_IDENTITY_NEW:
                 _validate_new_path_component(workspace_id, "workspace_id")
             try:
                 ws = Workspace(data_dir=self.data_dir, workspace_id=workspace_id,
@@ -2228,14 +2318,21 @@ class TormentFabric:
         # existence probe cannot create an agent directory.  Preserve access to
         # legacy identities through Layer A while applying Layer B before any
         # new identity can be written.
-        if self.ident_store.load(workspace_id, agent_id) is None:
+        try:
+            existing_identity = self.ident_store.load(workspace_id, agent_id)
+        except PersistentIdentityCollisionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if existing_identity is None:
             _validate_new_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         # Serialize creation by workspace before the per-agent initializer so a
         # CharacterSeed ownership check and first save are one atomic sequence.
         with self.locks.workspace_lock(workspace_id), self.locks.agent_lock(workspace_id, agent_id):
-            ident = self.ident_store.load(workspace_id, agent_id)
+            try:
+                ident = self.ident_store.load(workspace_id, agent_id)
+            except PersistentIdentityCollisionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             if ident is None:
                 effective_seed = seed or DEFAULT_AGENT_SEED
                 effective_seed_id = str(effective_seed.get("seed_id", "") or "")

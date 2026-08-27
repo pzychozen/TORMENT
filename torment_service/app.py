@@ -11,6 +11,7 @@ from . import spine as _spine_module
 from . import thinking_controller as _thinking_controller_module
 from .fabric import TormentFabric
 from .conflicts import ConflictRegistryError
+from .identity import PersistentIdentityCollisionError
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
@@ -801,7 +802,13 @@ def agent_create(req: AgentCreateReq) -> Dict[str, Any]:
 
 @app.get("/agent/{agent_id}/identity")
 def get_identity(agent_id: str, workspace_id: str = "default") -> Dict[str, Any]:
-    ident = fabric.ident_store.load(workspace_id, agent_id)
+    try:
+        ident = fabric.ident_store.load(workspace_id, agent_id)
+    except PersistentIdentityCollisionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Persistent identity conflicts with the requested logical identifier",
+        ) from exc
     if ident is None:
         raise HTTPException(status_code=404, detail="Unknown agent_id")
     return {"workspace_id": ident.workspace_id, "agent_id": ident.agent_id, "seed": ident.seed, "overlay": ident.overlay, "updated_ts": ident.updated_ts}

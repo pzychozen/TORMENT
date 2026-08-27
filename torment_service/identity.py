@@ -53,6 +53,11 @@ class AgentIdentity:
         d = asdict(self)
         return d
 
+
+class PersistentIdentityCollisionError(RuntimeError):
+    """A requested logical ID resolves to a differently declared stored identity."""
+
+
 class IdentityStore:
     """Persists agent identities as JSON files."""
     def __init__(self, data_dir: str) -> None:
@@ -85,9 +90,22 @@ class IdentityStore:
             return None
         with open(p, "r", encoding="utf-8") as f:
             obj = json.load(f)
+        persisted_workspace_id = obj.get("workspace_id") if isinstance(obj, dict) else None
+        persisted_agent_id = obj.get("agent_id") if isinstance(obj, dict) else None
+        if (
+            not isinstance(persisted_workspace_id, str)
+            or not isinstance(persisted_agent_id, str)
+            or persisted_workspace_id != workspace_id
+            or persisted_agent_id != agent_id
+        ):
+            raise PersistentIdentityCollisionError(
+                "Persistent identity collision: requested "
+                f"workspace_id={workspace_id!r}, agent_id={agent_id!r}; "
+                "stored declaration does not exactly match"
+            )
         return AgentIdentity(
-            workspace_id=obj["workspace_id"],
-            agent_id=obj["agent_id"],
+            workspace_id=persisted_workspace_id,
+            agent_id=persisted_agent_id,
             seed=obj.get("seed", DEFAULT_AGENT_SEED),
             overlay={k: float(v) for k, v in obj.get("overlay", DEFAULT_AGENT_OVERLAY).items()},
             created_ts=int(obj.get("created_ts", _now_ts())),
