@@ -190,6 +190,66 @@ class VerificationReportV2:
                 "active_open_tails": self.active_open_tails, "issues": self.issues, "notices": self.notices}
 
 
+def _path_is_within(path: Path, base: Path) -> bool:
+    """Return whether resolved *path* remains under resolved *base*."""
+    normalized_path = os.path.normcase(str(path))
+    normalized_base = os.path.normcase(str(base))
+    return normalized_path == normalized_base or normalized_path.startswith(normalized_base + os.sep)
+
+
+def _canonical_chunks_root(paths: TrajectoryPathsV2) -> Path:
+    """Resolve and verify that the chunks root itself remains under V2 base."""
+    base = paths.base.resolve()
+    chunks = paths.chunks.resolve()
+    if chunks == base or not _path_is_within(chunks, base):
+        raise TrajectoryIntegrityError("trajectory chunks root escapes trajectory base")
+    return chunks
+
+
+def _iter_physical_chunk_paths(
+    paths: TrajectoryPathsV2,
+    pattern: str,
+    *,
+    report: Optional[VerificationReportV2] = None,
+) -> Iterator[Path]:
+    """Yield recursively discovered chunks only when physically contained.
+
+    A Windows directory junction can be traversed by ``Path.rglob``. Resolve
+    each discovered candidate back against the original physical chunks root
+    before its name, header, or content can influence trajectory state.
+    """
+    chunks_root = _canonical_chunks_root(paths)
+    if not chunks_root.is_dir():
+        return
+    for candidate in chunks_root.rglob(pattern):
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            if report is None:
+                raise TrajectoryIntegrityError(
+                    f"unable to resolve discovered chunk path: {candidate}"
+                ) from exc
+            report.add(
+                "DISCOVERED_CHUNK_PATH_INVALID",
+                "filesystem-discovered chunk path is unreadable",
+                path=str(candidate),
+            )
+            continue
+        if not _path_is_within(resolved, chunks_root):
+            if report is None:
+                raise TrajectoryIntegrityError(
+                    f"discovered chunk path escapes canonical chunks root: {candidate}"
+                )
+            report.add(
+                "DISCOVERED_CHUNK_PATH_INVALID",
+                "filesystem-discovered chunk path escapes canonical chunks root",
+                path=str(candidate),
+                resolved_path=str(resolved),
+            )
+            continue
+        yield resolved
+
+
 def _vec3(value: Any) -> Tuple[float, float, float]:
     arr = np.asarray(value, dtype=np.float64).reshape(3)
     return (float(arr[0]), float(arr[1]), float(arr[2]))
@@ -239,7 +299,7 @@ def _has_persisted_trajectory_artifacts(paths: TrajectoryPathsV2) -> bool:
     try:
         if paths.chunks.exists() and not paths.chunks.is_dir():
             return True
-        return any(path.is_file() for path in paths.chunks.rglob("*"))
+        return any(path.is_file() for path in _iter_physical_chunk_paths(paths, "*"))
     except OSError:
         return True
 
@@ -293,7 +353,9 @@ class TrajectoryV2Writer:
     def __init__(self, root_dir: str, *, chunk_steps: int = CHUNK_STEPS,
                  chunk_max_bytes: int = CHUNK_MAX_BYTES) -> None:
         self.paths = TrajectoryPathsV2(Path(root_dir).resolve())
+        _canonical_chunks_root(self.paths)
         self.paths.ensure_dirs()
+        _canonical_chunks_root(self.paths)
         self.chunk_steps = int(chunk_steps)
         self.chunk_max_bytes = int(chunk_max_bytes)
         self._genesis_eids = self._load_genesis_eids()
@@ -325,7 +387,7 @@ class TrajectoryV2Writer:
         except Exception:
             pass
         for suffix in ("chunk-*.partial", "chunk-*.trj2"):
-            for path in self.paths.chunks.rglob(suffix):
+            for path in _iter_physical_chunk_paths(self.paths, suffix):
                 try:
                     highest = max(highest, int(path.name.split("-")[1].split(".")[0]))
                 except (IndexError, ValueError):
@@ -360,7 +422,7 @@ class TrajectoryV2Writer:
     def _chunk_header_epochs(self) -> List[int]:
         epochs = []
         for suffix in ("*.trj2", "*.partial"):
-            for path in self.paths.chunks.rglob(suffix):
+            for path in _iter_physical_chunk_paths(self.paths, suffix):
                 try:
                     _seq, epoch = TrajectoryChunkReaderV2(path).header()
                     if epoch >= 1:
@@ -394,7 +456,7 @@ class TrajectoryV2Writer:
 
     def _report_prior_epoch_partials(self) -> None:
         """Preserve crash remnants and make their orphan status explicit."""
-        for partial in sorted(self.paths.chunks.rglob("*.partial")):
+        for partial in sorted(_iter_physical_chunk_paths(self.paths, "*.partial")):
             try:
                 _seq, partial_epoch = TrajectoryChunkReaderV2(partial).header()
                 if partial_epoch < self.epoch:
@@ -530,6 +592,13 @@ class TrajectoryV2Verifier:
     def __init__(self, root_dir: str) -> None:
         self.paths = TrajectoryPathsV2(Path(root_dir).resolve())
 
+    def _physical_chunks_root(self, report: VerificationReportV2) -> Optional[Path]:
+        try:
+            return _canonical_chunks_root(self.paths)
+        except TrajectoryIntegrityError as exc:
+            report.add("CHUNKS_ROOT_INVALID", str(exc))
+            return None
+
     def _manifest_entries(self, report: VerificationReportV2) -> List[Dict[str, Any]]:
         try:
             return list(_read_jsonl(self.paths.manifest))
@@ -598,14 +667,15 @@ class TrajectoryV2Verifier:
         return expected_frame_seq
 
     def _check_entry(self, report: VerificationReportV2, entry: Dict[str, Any], *, previous_sha: str,
-                     expected_frames: Dict[int, int], genesis_eids: set[int]) -> Tuple[str, Optional[int]]:
+                     expected_frames: Dict[int, int], genesis_eids: set[int],
+                     chunks_root: Optional[Path]) -> Tuple[str, Optional[int]]:
         seq, epoch = int(entry["seq"]), int(entry["epoch"])
         if str(entry.get("schema_version", "")) != SCHEMA_VERSION:
             report.add("MANIFEST_SCHEMA_MISMATCH", "manifest entry schema does not match V2 format", seq=seq)
         if str(entry.get("previous_chunk_sha256", "")) != previous_sha:
             report.add("MANIFEST_HASH_LINK_BROKEN", "previous chunk hash does not match", seq=seq)
         chunk = (self.paths.base / str(entry["path"])).resolve()
-        if not str(chunk).startswith(str(self.paths.chunks.resolve()) + os.sep):
+        if chunks_root is None or not _path_is_within(chunk, chunks_root):
             report.add("CHUNK_PATH_INVALID", "manifest chunk path escapes chunks directory", seq=seq)
             return previous_sha, None
         if not chunk.is_file():
@@ -668,6 +738,7 @@ class TrajectoryV2Verifier:
         if mode not in {"sealed", "live"}:
             raise ValueError("mode must be sealed or live")
         report = VerificationReportV2()
+        chunks_root = self._physical_chunks_root(report)
         entries = self._manifest_entries(report)
         boundary_records, boundary_evidence_valid = self._boundary_records(report)
         latest_boundary_epoch = self._latest_boundary_epoch(boundary_records)
@@ -692,12 +763,17 @@ class TrajectoryV2Verifier:
                     report.add("MANIFEST_SEQUENCE_GAP", "non-monotonic chunk sequence", expected=expected_seq, actual=seq)
                 expected_seq = seq + 1
                 previous_sha, epoch = self._check_entry(report, entry, previous_sha=previous_sha,
-                    expected_frames=expected_frames, genesis_eids=genesis_eids)
+                    expected_frames=expected_frames, genesis_eids=genesis_eids,
+                    chunks_root=chunks_root)
                 if epoch is not None:
                     last_manifest_epoch = max(last_manifest_epoch, epoch)
             except (KeyError, TypeError, ValueError, TrajectoryIntegrityError) as exc:
                 report.add("INVALID_CHUNK_ENTRY", str(exc), entry=entry)
-        partials = sorted(self.paths.chunks.rglob("*.partial")) if self.paths.chunks.is_dir() else []
+        partials = (
+            sorted(_iter_physical_chunk_paths(self.paths, "*.partial", report=report))
+            if chunks_root is not None
+            else []
+        )
         if mode == "sealed":
             for partial in partials:
                 report.add("INCOMPLETE_FINAL_CHUNK", "unclosed partial chunk retained", path=str(partial))
@@ -716,10 +792,15 @@ class TrajectoryV2Verifier:
                         current_epoch = tail_epoch
                 self._check_live_tail(report, partials[0], current_epoch=current_epoch,
                                        expected_seq=expected_seq, expected_frames=expected_frames, genesis_eids=genesis_eids)
-        manifested = {str((self.paths.base / str(entry.get("path", ""))).resolve()) for entry in entries}
-        for complete in self.paths.chunks.rglob("*.trj2") if self.paths.chunks.is_dir() else []:
-            if str(complete.resolve()) not in manifested:
-                report.add("ORPHAN_CHUNK", "closed chunk is not present in manifest", path=str(complete))
+        manifested = set()
+        if chunks_root is not None:
+            for entry in entries:
+                candidate = (self.paths.base / str(entry.get("path", ""))).resolve()
+                if _path_is_within(candidate, chunks_root):
+                    manifested.add(str(candidate))
+            for complete in _iter_physical_chunk_paths(self.paths, "*.trj2", report=report):
+                if str(complete) not in manifested:
+                    report.add("ORPHAN_CHUNK", "closed chunk is not present in manifest", path=str(complete))
         return report
 
 

@@ -9,6 +9,7 @@ Covers:
 """
 
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,18 @@ from pathlib import Path
 import numpy as np
 
 from torment_service.deep_memory import DeepMemoryStore
+
+
+def _make_directory_junction(link: str, target: str) -> None:
+    if os.name != "nt":
+        raise unittest.SkipTest("directory junctions are a Windows-specific regression surface")
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", link, target],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise unittest.SkipTest("directory junction creation is unavailable on this host")
 
 
 class TestDeepMemoryRootCanonicalization(unittest.TestCase):
@@ -37,9 +50,29 @@ class TestDeepMemoryRootCanonicalization(unittest.TestCase):
             real_dir = os.path.join(td, "real")
             os.makedirs(real_dir)
             link_dir = os.path.join(td, "link")
-            os.symlink(real_dir, link_dir)
+            try:
+                os.symlink(real_dir, link_dir)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink creation requires unavailable Windows privilege")
+                raise
             with DeepMemoryStore(Path(link_dir), dim=8) as store:
                 self.assertEqual(str(store.base_dir), os.path.realpath(real_dir))
+
+    def test_trusted_root_rejects_junction_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            trusted_root = Path(td) / "trusted"
+            outside = Path(td) / "outside"
+            trusted_root.mkdir()
+            outside.mkdir()
+            alias = trusted_root / "alias"
+            _make_directory_junction(str(alias), str(outside))
+
+            with self.assertRaises(ValueError):
+                DeepMemoryStore(alias, dim=8, trusted_root=str(trusted_root))
+
+            self.assertFalse((outside / "memories.jsonl").exists())
+            self.assertFalse((outside / "embeddings").exists())
 
 
 class TestDeepMemoryChildPaths(unittest.TestCase):

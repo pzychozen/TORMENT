@@ -125,8 +125,11 @@ class ArchiveStore:
         archive_dir: str,
         embedder: Optional[Embedder] = None,
         sqlite_index=None,
+        trusted_root: Optional[str] = None,
     ) -> None:
         self.archive_dir = os.path.realpath(archive_dir)
+        if trusted_root is not None:
+            self.archive_dir = _ensure_within_base(self.archive_dir, trusted_root)
         self.embedder = embedder or HashEmbedding()
         # Optional SQLite sidecar index (Phase 4).
         # Mirror writes go to SQLite after JSONL. Failure is non-fatal.

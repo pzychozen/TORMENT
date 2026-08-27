@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,18 @@ from torment_service.spirit_reflection import (
     _ensure_within_base,
     _safe_log_value,
 )
+
+
+def _make_directory_junction(link: str, target: str) -> None:
+    if os.name != "nt":
+        pytest.skip("directory junctions are a Windows-specific regression surface")
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", link, target],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip("directory junction creation is unavailable on this host")
 
 
 @pytest.fixture
@@ -51,9 +64,26 @@ class TestPathSanitization:
         outside = tempfile.mkdtemp(prefix="torment_outside_")
         try:
             link = os.path.join(base_dir, "sneaky_link")
-            os.symlink(outside, link)
+            try:
+                os.symlink(outside, link)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    pytest.skip("directory symlink creation requires unavailable Windows privilege")
+                raise
             with pytest.raises(ValueError, match="escapes base directory"):
                 SpiritReflectionStore(Path(link), base_dir=base_dir)
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_junction_escape_rejected(self, base_dir):
+        """A Windows directory junction pointing outside base_dir is rejected."""
+        outside = tempfile.mkdtemp(prefix="torment_outside_")
+        try:
+            junction = os.path.join(base_dir, "sneaky_junction")
+            _make_directory_junction(junction, outside)
+            with pytest.raises(ValueError, match="escapes base directory"):
+                SpiritReflectionStore(Path(junction), base_dir=base_dir)
+            assert not (Path(outside) / "reflections.jsonl").exists()
         finally:
             shutil.rmtree(outside, ignore_errors=True)
 

@@ -1478,15 +1478,22 @@ def _get_archive_store(workspace_id: str, agent_id: str) -> ArchiveStore:
     safe_ag = _validate_path_component(agent_id, "agent_id")
     key = f"{safe_ws}/{safe_ag}"
     if key not in _archive_stores:
-        archive_dir = _safe_join_data_dir(
-            "workspaces", safe_ws, "agents", safe_ag, "memory_archive",
-            validate_parts=False,  # already validated above
-        )
+        from .pathing import safe_join
+
+        data_root = os.path.realpath(DATA_DIR)
+        try:
+            archive_dir = safe_join(
+                data_root,
+                "workspaces", safe_ws, "agents", safe_ag, "memory_archive",
+            )
+        except ValueError as exc:
+            raise HTTPException(400, "Archive path escapes data directory") from exc
         sq_idx = fabric._get_sqlite_index(workspace_id, agent_id)
         _archive_stores[key] = ArchiveStore(
             archive_dir=archive_dir,
             embedder=fabric.kernel.embedder,
             sqlite_index=sq_idx,
+            trusted_root=data_root,
         )
     return _archive_stores[key]
 

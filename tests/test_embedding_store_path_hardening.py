@@ -10,6 +10,7 @@ Covers:
 """
 
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -22,6 +23,18 @@ from torment_service.embedding_store import (
     EmbeddingShardReader,
     load_legacy_embedding,
 )
+
+
+def _make_directory_junction(link: str, target: str) -> None:
+    if os.name != "nt":
+        raise unittest.SkipTest("directory junctions are a Windows-specific regression surface")
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", link, target],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise unittest.SkipTest("directory junction creation is unavailable on this host")
 
 
 class TestCanonicalStorageRoot(unittest.TestCase):
@@ -43,8 +56,24 @@ class TestCanonicalStorageRoot(unittest.TestCase):
             real_dir = os.path.join(td, "real")
             os.makedirs(real_dir)
             link_dir = os.path.join(td, "link")
-            os.symlink(real_dir, link_dir)
+            try:
+                os.symlink(real_dir, link_dir)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink creation requires unavailable Windows privilege")
+                raise
             root = _canonical_storage_root(link_dir)
+            self.assertEqual(root, os.path.realpath(real_dir))
+
+    def test_resolves_directory_junctions(self):
+        with tempfile.TemporaryDirectory() as td:
+            real_dir = os.path.join(td, "real")
+            os.makedirs(real_dir)
+            junction_dir = os.path.join(td, "junction")
+            _make_directory_junction(junction_dir, real_dir)
+
+            root = _canonical_storage_root(junction_dir)
+
             self.assertEqual(root, os.path.realpath(real_dir))
 
     def test_mkdir_at_caller_site(self):

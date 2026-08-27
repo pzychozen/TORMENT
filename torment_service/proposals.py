@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import os, json, time, uuid
 import numpy as np
 
-from .pathing import validate_structural_path_component
+from .pathing import safe_join, validate_structural_path_component
 
 def _now_ts() -> int:
     return int(time.time())
@@ -44,18 +44,39 @@ class ProposalRegistry:
     are written as new records in an events file (proposals_events.jsonl).
     """
     def __init__(self, data_dir: str, workspace_id: str, domain_id: str) -> None:
-        self.data_dir = data_dir
+        self.data_dir = os.path.realpath(data_dir)
+        self._trusted_root = self.data_dir
         self.workspace_id = workspace_id
         self.domain_id = domain_id
         _validate_path_component(workspace_id, "workspace_id")
         _validate_path_component(domain_id, "domain_id")
-        safe_dir = os.path.normpath(data_dir)
-        root = os.path.normpath(os.path.join(safe_dir, "workspaces", workspace_id, "domains", domain_id))
-        if not root.startswith(safe_dir):
-            raise ValueError("Path escapes data directory")
-        os.makedirs(root, exist_ok=True)
-        self.path = os.path.join(root, "proposals.jsonl")
-        self.events_path = os.path.join(root, "proposal_events.jsonl")
+        self._domain_root(create=True)
+
+    def _domain_root(self, *, create: bool) -> str:
+        """Resolve the domain root against the original trusted data root."""
+        parts = ("workspaces", self.workspace_id, "domains", self.domain_id)
+        root = safe_join(self._trusted_root, *parts)
+        if create:
+            os.makedirs(root, exist_ok=True)
+            # A directory may have been replaced while it was being created.
+            root = safe_join(self._trusted_root, *parts)
+        return root
+
+    def _sink_path(self, filename: str) -> str:
+        """Re-establish physical containment immediately before a file sink."""
+        self._domain_root(create=True)
+        return safe_join(
+            self._trusted_root,
+            "workspaces", self.workspace_id, "domains", self.domain_id, filename,
+        )
+
+    @property
+    def path(self) -> str:
+        return self._sink_path("proposals.jsonl")
+
+    @property
+    def events_path(self) -> str:
+        return self._sink_path("proposal_events.jsonl")
 
     def submit(
         self,
