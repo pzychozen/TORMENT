@@ -31,14 +31,18 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from .coherence_field import compute_coherence_field
+from .pathing import validate_structural_path_component
 
 logger = logging.getLogger(__name__)
 
 
 def _validate_path_component(value: str, label: str) -> str:
-    if not value or ".." in value or "/" in value or "\\" in value:
+    try:
+        return validate_structural_path_component(value, label)
+    except ValueError as exc:
+        if value == ".":
+            raise ValueError(f"Invalid {label}: must not be '.'") from exc
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
 
 
 # ---------------------------------------------------------------------------

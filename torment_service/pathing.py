@@ -43,43 +43,80 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# 1. safe_slug — validate a dynamic path component
+# 1. Identifier validation — structural safety and new-ID admission
 # ---------------------------------------------------------------------------
 
-def safe_slug(value: str, label: str = "identifier") -> str:
-    """Validate that *value* is safe to embed in a filesystem path.
+_WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
 
-    This is a **strict validator**, not a transformer — it returns *value*
-    unchanged when valid and raises ``ValueError`` when the value contains
-    path-traversal sequences or separators.
 
-    Rejected patterns: empty strings, ``..``, ``/``, ``\\``.
+def validate_structural_path_component(value: str, label: str = "identifier") -> str:
+    """Validate a component used in a filesystem path on every read and write.
 
-    Parameters
-    ----------
-    value : str
-        The dynamic component to validate (workspace ID, agent ID, etc.).
-    label : str
-        Human-readable name used in the error message (e.g. ``"workspace_id"``).
+    This is deliberately a validator rather than a normalizer: it returns the
+    original value unchanged.  It preserves the legacy structural rules for
+    empty values, traversal sequences, and separators, and additionally
+    rejects exactly ``"."`` because it collapses a logical component into its
+    parent directory on every supported platform.
 
-    Returns
-    -------
-    str
-        *value* unchanged, if it passes validation.
-
-    Raises
-    ------
-    ValueError
-        If *value* is empty or contains path separators / traversal sequences.
-
-    This replaces the per-module ``_validate_path_component`` duplicates.
+    Portable filesystem-name restrictions belong in
+    :func:`validate_portable_new_identifier`; do not apply them to legacy
+    lookups through this function.
     """
     if not value or ".." in value or "/" in value or "\\" in value:
         raise ValueError(
             f"Invalid {label}: must be non-empty and free of "
             f"path separators or '..'; got {value!r}"
         )
+    if value == ".":
+        raise ValueError(f"Invalid {label}: '.' is not a valid path component; got {value!r}")
     return value
+
+
+def validate_portable_new_identifier(value: str, label: str = "identifier") -> str:
+    """Admit a *new* filesystem-backed logical identifier portably.
+
+    Layer B intentionally calls Layer A first, then rejects names that Windows
+    rejects or aliases and a small set of unsafe portable forms.  It never
+    transforms accepted values and must be called only at first-creation seams;
+    existing legacy identifiers remain readable through Layer A alone.
+    """
+    validate_structural_path_component(value, label)
+
+    if value.startswith(" "):
+        reason = "must not begin with a space"
+    elif value.endswith("."):
+        reason = "must not end with a period"
+    elif value.endswith(" "):
+        reason = "must not end with a space"
+    elif any(ord(char) <= 0x1F or ord(char) == 0x7F for char in value):
+        reason = "must not contain control characters"
+    elif any(char in value for char in ':<>"|?*'):
+        reason = "must not contain portable-filesystem reserved characters"
+    else:
+        basename = value.split(".", 1)[0].upper()
+        reason = (
+            "must not use a reserved Windows device basename"
+            if basename in _WINDOWS_RESERVED_BASENAMES
+            else ""
+        )
+
+    if reason:
+        raise ValueError(f"Invalid {label}: {reason}; got {value!r}")
+    return value
+
+
+def safe_slug(value: str, label: str = "identifier") -> str:
+    """Validate a dynamic path component without transforming it.
+
+    ``safe_slug`` is the legacy/read-path Layer A entry point.  New logical
+    filesystem identities must additionally pass
+    :func:`validate_portable_new_identifier` at their creation seam.
+    """
+    return validate_structural_path_component(value, label)
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +260,10 @@ def stable_filename(root: str, filename: str) -> str:
     This is the centralised replacement for the per-module
     ``_child_path`` helper.
     """
-    if not filename or ".." in filename or os.sep in filename or "/" in filename or "\\" in filename:
-        raise ValueError(f"Invalid filename: {filename!r}")
+    try:
+        validate_structural_path_component(filename, "filename")
+    except ValueError as exc:
+        raise ValueError(f"Invalid filename: {filename!r}") from exc
     real_root = os.path.realpath(root)
     child = os.path.realpath(os.path.join(real_root, filename))
     if not child.startswith(real_root + os.sep):

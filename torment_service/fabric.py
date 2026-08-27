@@ -41,6 +41,7 @@ from .checkpoint import (
 )
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .candidate_types import CandidateShapedValue
+from .pathing import validate_portable_new_identifier, validate_structural_path_component
 
 log = logging.getLogger("torment.fabric")
 hivemind_log = logging.getLogger("torment.hivemind")
@@ -589,6 +590,7 @@ class Workspace:
                 added = False
                 for d in requested_domains:
                     if d not in existing:
+                        _validate_new_path_component(d, "domain_id")
                         existing.append(d)
                         added = True
                 if added:
@@ -598,6 +600,8 @@ class Workspace:
         # New workspace — use requested domains or single-agent default.
         # For multi-agent hive-mind, pass domains explicitly (e.g. DEFAULT_DOMAINS).
         domains = list(requested_domains) if requested_domains else [SINGLE_AGENT_DOMAIN]
+        for d in domains:
+            _validate_new_path_component(d, "domain_id")
         with open(p, "w", encoding="utf-8") as f:
             json.dump({"domains": domains}, f, indent=2)
         return domains
@@ -624,11 +628,9 @@ class Workspace:
         return outpol
 
     def add_domain(self, domain_id: str) -> None:
-        domain_id = domain_id.strip()
-        if not domain_id:
-            return
         if domain_id in self.domains:
             return
+        _validate_new_path_component(domain_id, "domain_id")
         self.domains.append(domain_id)
         # persist domains
         with open(self._domains_path(), "w", encoding="utf-8") as f:
@@ -657,9 +659,20 @@ def _validate_path_component(value: str, label: str = "identifier") -> str:
     Raises HTTPException(400) if the value is empty or contains '/', '\\', or '..'.
     Returns the value unchanged for valid inputs.
     """
-    if not value or ".." in value or "/" in value or "\\" in value:
+    try:
+        return validate_structural_path_component(value, label)
+    except ValueError as exc:
+        if value == ".":
+            raise HTTPException(status_code=400, detail=f"Invalid {label}: must not be '.'") from exc
         raise HTTPException(status_code=400, detail=f"Invalid {label}: must not contain path separators or '..'")
-    return value
+
+
+def _validate_new_path_component(value: str, label: str = "identifier") -> str:
+    """Apply portable admission rules at a new filesystem-identity seam."""
+    try:
+        return validate_portable_new_identifier(value, label)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +951,11 @@ class TormentFabric:
         _validate_path_component(workspace_id, "workspace_id")
         ws = self.workspaces.get(workspace_id)
         if ws is None:
+            # Preserve structural-only access to an existing legacy workspace.
+            # A missing root is a first-creation seam and must be admitted
+            # portably before Workspace can write workspace-level artefacts.
+            if not os.path.exists(_ws_root(self.data_dir, workspace_id)):
+                _validate_new_path_component(workspace_id, "workspace_id")
             try:
                 ws = Workspace(data_dir=self.data_dir, workspace_id=workspace_id,
                                kernel=self.kernel, requested_domains=domains)
@@ -947,30 +965,8 @@ class TormentFabric:
             self.workspaces[workspace_id] = ws
         elif domains:
             # Workspace exists in memory — ensure requested domains are present
-            added = False
             for d in domains:
-                if d not in ws.domains:
-                    # Add domain infrastructure
-                    dom_dir = _domain_shared_dir(self.data_dir, workspace_id, d)
-                    ws.shared_graphs[d] = MemoryGraph(data_dir=dom_dir, embedder=self.kernel.embedder)
-                    ws.motif_regs[d] = MotifRegistry(
-                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d,
-                        shard_reader=ws.shared_graphs[d]._shard_reader,
-                        entity_payload_fn=lambda eid, _d=d: ws._entity_payload_for_motif(eid, _d),
-                    )
-                    ws.proposals[d] = ProposalRegistry(
-                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d)
-                    ws.conflicts[d] = ConflictRegistry(
-                        data_dir=self.data_dir, workspace_id=workspace_id, domain_id=d)
-                    ws.domains.append(d)
-                    added = True
-            if added:
-                # Persist updated domain list
-                p = ws._domains_path()
-                with open(p, "w", encoding="utf-8") as f:
-                    json.dump({"domains": ws.domains}, f, indent=2)
-                # Rebuild router with new motif registries
-                ws.router = DomainRouter(ws.motif_regs, embed_dim=int(ws.embed_dim))
+                ws.add_domain(d)
         return ws
 
     def list_workspaces_meta(self) -> List[Dict[str, Any]]:
@@ -1943,6 +1939,7 @@ class TormentFabric:
         """
         _validate_path_component(source_workspace_id, "source_workspace_id")
         _validate_path_component(target_workspace_id, "target_workspace_id")
+        _validate_new_path_component(target_workspace_id, "target_workspace_id")
         now = time.time()
         if self._clone_min_gap_s and (now - float(self._last_clone_ts or 0.0)) < float(self._clone_min_gap_s):
             wait_s = int(max(1.0, float(self._clone_min_gap_s) - (now - float(self._last_clone_ts or 0.0))))
@@ -2227,6 +2224,12 @@ class TormentFabric:
 
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
         _validate_path_component(agent_id, "agent_id")
+        # IdentityStore.load derives a validated path with mkdir=False, so this
+        # existence probe cannot create an agent directory.  Preserve access to
+        # legacy identities through Layer A while applying Layer B before any
+        # new identity can be written.
+        if self.ident_store.load(workspace_id, agent_id) is None:
+            _validate_new_path_component(agent_id, "agent_id")
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         # Serialize creation by workspace before the per-agent initializer so a
@@ -2235,11 +2238,13 @@ class TormentFabric:
             ident = self.ident_store.load(workspace_id, agent_id)
             if ident is None:
                 effective_seed = seed or DEFAULT_AGENT_SEED
-                effective_seed_id = str(effective_seed.get("seed_id", "") or "").strip()
+                effective_seed_id = str(effective_seed.get("seed_id", "") or "")
                 if self._character_enable and effective_seed_id:
                     existing_character_seed = self.character_store.load_seed(
                         workspace_id, effective_seed_id
                     )
+                    if existing_character_seed is None:
+                        _validate_new_path_component(effective_seed_id, "seed_id")
                     if existing_character_seed is not None:
                         owner_agent_id = str(existing_character_seed.owner_agent_id or "").strip()
                         if not owner_agent_id or owner_agent_id != agent_id:
@@ -2308,7 +2313,7 @@ class TormentFabric:
             # --- Character seed planting (optional, non-blocking) ---
             if self._character_enable:
                 seed_text = str(ident.seed.get("seed_text", "") or "").strip()
-                seed_id = str(ident.seed.get("seed_id", "") or "").strip()
+                seed_id = str(ident.seed.get("seed_id", "") or "")
                 if seed_text and seed_id:
                     try:
                         char_seed = self.character_store.load_seed(workspace_id, seed_id)

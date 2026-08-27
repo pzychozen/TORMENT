@@ -11,6 +11,7 @@ from . import spine as _spine_module
 from . import thinking_controller as _thinking_controller_module
 from .fabric import TormentFabric
 from .conflicts import ConflictRegistryError
+from .pathing import validate_portable_new_identifier, validate_structural_path_component
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
 from .auth import (
@@ -50,9 +51,12 @@ def is_public_safe_rest_route(method: str, path: str) -> bool:
 
 def _validate_path_component(name: str, label: str = "identifier") -> str:
     """Reject path-separator characters and traversal sequences in user input."""
-    if not name or ".." in name or "/" in name or "\\" in name:
+    try:
+        return validate_structural_path_component(name, label)
+    except ValueError as exc:
+        if name == ".":
+            raise HTTPException(400, f"Invalid {label}: must not be '.'") from exc
         raise HTTPException(400, f"Invalid {label}: must not contain path separators or '..'")
-    return name
 
 
 DATA_DIR = os.path.normpath(
@@ -665,6 +669,10 @@ def embedder_check() -> Dict[str, Any]:
 
 @app.post("/workspace/create")
 def workspace_create(req: WorkspaceCreateReq) -> Dict[str, Any]:
+    try:
+        validate_portable_new_identifier(req.workspace_id, "workspace_id")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     ws = fabric.get_workspace(req.workspace_id, domains=req.domains)
     return {"workspace_id": ws.workspace_id, "domains": ws.domains}
 

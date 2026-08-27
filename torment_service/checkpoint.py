@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .embedding_store import _canonical_storage_root, _child_path
+from .pathing import validate_structural_path_component
 
 log = logging.getLogger("torment.checkpoint")
 
@@ -47,9 +48,12 @@ def _sanitize_log(value: str) -> str:
 
 def _validate_path_component(value: str, label: str) -> str:
     """Reject path separators and traversal sequences in identifiers."""
-    if not value or ".." in value or "/" in value or "\\" in value:
+    try:
+        return validate_structural_path_component(value, label)
+    except ValueError as exc:
+        if value == ".":
+            raise ValueError(f"Invalid {label}: must not be '.'") from exc
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
 
 
 def _ensure_within_base(path: str, base_dir: str) -> str:

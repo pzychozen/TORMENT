@@ -5,14 +5,19 @@ from typing import Dict, List, Optional
 import os, json, time, uuid
 import numpy as np
 
+from .pathing import validate_structural_path_component
+
 def _now_ts() -> int:
     return int(time.time())
 
 def _validate_path_component(value: str, label: str = "identifier") -> str:
     """Reject empty values and path traversal characters in user-provided identifiers."""
-    if not value or ".." in value or "/" in value or "\\" in value:
+    try:
+        return validate_structural_path_component(value, label)
+    except ValueError as exc:
+        if value == ".":
+            raise ValueError(f"Invalid {label}: must not be '.'") from exc
         raise ValueError(f"Invalid {label}: must not contain path separators or '..'")
-    return value
 
 @dataclass
 class ShareProposal:
