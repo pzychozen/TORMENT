@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -244,7 +245,7 @@ class TestIdentifierAdmissionSeams(unittest.TestCase):
         request = app_module.WorkspaceCreateReq(workspace_id="rest-workspace.")
 
         with self.assertRaises(HTTPException) as raised:
-            app_module.workspace_create(request)
+            app_module.workspace_create(request, SimpleNamespace())
 
         self.assertEqual(raised.exception.status_code, 400)
 

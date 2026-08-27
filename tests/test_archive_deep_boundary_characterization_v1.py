@@ -541,6 +541,7 @@ def _endpoint_request(path: str) -> Request:
 def _bootstrap_endpoint(appmod: Any, workspace_id: str, agent_id: str) -> None:
     workspace = appmod.workspace_create(
         appmod.WorkspaceCreateReq(workspace_id=workspace_id),
+        _endpoint_request("/workspace/create"),
     )
     assert workspace["workspace_id"] == workspace_id
     agent = appmod.agent_create(
@@ -548,7 +549,8 @@ def _bootstrap_endpoint(appmod: Any, workspace_id: str, agent_id: str) -> None:
             workspace_id=workspace_id,
             agent_id=agent_id,
             seed={"coupling_mode": "read_only", "coupling_strength": 0.2},
-        )
+        ),
+        _endpoint_request("/agent/create"),
     )
     assert agent["agent_id"] == agent_id
 

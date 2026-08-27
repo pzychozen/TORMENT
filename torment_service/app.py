@@ -16,6 +16,8 @@ from .pathing import validate_portable_new_identifier, validate_structural_path_
 from .profiles import PROFILES, apply_profile_env
 from .config_view import build_config_view
 from .auth import (
+    get_request_context,
+    require_request_trust,
     resolve_request_context,
     handle_trust_error,
     AUTH_ENABLED,
@@ -669,7 +671,8 @@ def embedder_check() -> Dict[str, Any]:
 
 
 @app.post("/workspace/create")
-def workspace_create(req: WorkspaceCreateReq) -> Dict[str, Any]:
+def workspace_create(req: WorkspaceCreateReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "workspace_create", workspace_id=req.workspace_id)
     try:
         validate_portable_new_identifier(req.workspace_id, "workspace_id")
     except ValueError as exc:
@@ -796,7 +799,13 @@ def list_domains(workspace_id: str) -> Dict[str, Any]:
     return {"workspace_id": ws.workspace_id, "domains": ws.domains}
 
 @app.post("/agent/create")
-def agent_create(req: AgentCreateReq) -> Dict[str, Any]:
+def agent_create(req: AgentCreateReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(
+        request,
+        "agent_create",
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
     ident = fabric.create_agent(req.workspace_id, req.agent_id, seed=req.seed)
     return {"workspace_id": ident.workspace_id, "agent_id": ident.agent_id, "seed": ident.seed, "overlay": ident.overlay}
 
@@ -895,7 +904,7 @@ def set_governance_flags(req: GovernanceSetRequest, request: Request) -> Dict[st
     """Legacy governance set endpoint — now shimmed through Spine governance."""
     from .spine import SpineRequest, submit_task
 
-    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    ctx = get_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     spine_req = SpineRequest(
         workspace_id=req.workspace_id, agent_id=req.agent_id,
         operation="memory_governance_set",
@@ -1031,13 +1040,9 @@ class CollectiveReingestRequest(BaseModel):
 def collective_reingest(workspace_id: str, req: CollectiveReingestRequest, request: Request) -> Dict[str, Any]:
     """Legacy collective reingest endpoint — now shimmed through Spine governance."""
     from .spine import SpineRequest, submit_task
-    ctx = resolve_request_context(request, workspace_id=workspace_id, agent_id=req.agent_id)
+    ctx = get_request_context(request, workspace_id=workspace_id, agent_id=req.agent_id)
     if not fabric._hivemind_enable:
         raise HTTPException(status_code=404, detail="Hivemind not enabled")
-    try:
-        fabric.create_agent(workspace_id, req.agent_id)
-    except Exception as e:
-        _log.debug("Agent may already exist: %s", e)
     spine_req = SpineRequest(
         workspace_id=workspace_id, agent_id=req.agent_id,
         operation="collective_reingest",
@@ -1099,11 +1104,7 @@ def collective_proposals_status(workspace_id: str) -> Dict[str, Any]:
 def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
     """Legacy ingest endpoint — now shimmed through Spine governance."""
     from .spine import SpineRequest, submit_task
-    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
-    try:
-        fabric.create_agent(req.workspace_id, req.agent_id)
-    except Exception as e:
-        _log.debug("Agent may already exist: %s", e)
+    ctx = get_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     spine_req = SpineRequest(
         workspace_id=req.workspace_id, agent_id=req.agent_id,
         operation="ingest",
@@ -1129,7 +1130,7 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
 def ingest_route_probe(req: IngestRouteProbeReq, request: Request) -> Dict[str, Any]:
     """Read-only route prediction for explicit ingest preflight."""
     from .spine import SpineRequest, preview_route_decision
-    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    ctx = get_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     spine_req = SpineRequest(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -1282,7 +1283,7 @@ def memory_trace_view(req: TraceViewReq) -> Dict[str, Any]:
 def feedback(req: FeedbackReq, request: Request) -> Dict[str, Any]:
     """Legacy feedback endpoint — shimmed through Spine for governed execution."""
     from .spine import SpineRequest, submit_task
-    ctx = resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    ctx = get_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     spine_req = SpineRequest(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -1324,7 +1325,8 @@ def bridges_queue(workspace_id: str, status: str = "suggested", limit: int = 200
     return fabric.list_bridges(workspace_id=workspace_id, status=status, limit=limit)
 
 @app.post("/workspace/bridges/decide")
-def decide_bridge(req: DecideBridgeReq) -> Dict[str, Any]:
+def decide_bridge(req: DecideBridgeReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "bridges_decide", workspace_id=req.workspace_id)
     return fabric.decide_bridge(
         workspace_id=req.workspace_id,
         from_domain=req.from_domain,
@@ -1335,7 +1337,13 @@ def decide_bridge(req: DecideBridgeReq) -> Dict[str, Any]:
     )
 
 @app.post("/agent/propose_share")
-def propose_share(req: ProposeShareReq) -> Dict[str, Any]:
+def propose_share(req: ProposeShareReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(
+        request,
+        "propose_share",
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
     return fabric.propose_share(
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -1348,7 +1356,8 @@ def propose_share(req: ProposeShareReq) -> Dict[str, Any]:
     )
 
 @app.post("/workspace/process_proposals")
-def process_proposals(req: ProcessProposalsReq) -> Dict[str, Any]:
+def process_proposals(req: ProcessProposalsReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "process_proposals", workspace_id=req.workspace_id)
     return fabric.process_proposals(
         workspace_id=req.workspace_id,
         domain_id=req.domain_id,
@@ -1365,7 +1374,8 @@ def list_proposals(workspace_id: str, domain_id: str, status: str = "pending", l
     return fabric.list_proposals(workspace_id=workspace_id, domain_id=domain_id, status=status, limit=limit)
 
 @app.post("/workspace/domain/proposals/decide")
-def decide_proposal(req: DecideProposalReq) -> Dict[str, Any]:
+def decide_proposal(req: DecideProposalReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "proposals_decide", workspace_id=req.workspace_id)
     return fabric.decide_proposal(
         workspace_id=req.workspace_id,
         domain_id=req.domain_id,
@@ -1413,7 +1423,8 @@ def list_motif_merges(workspace_id: str, domain_id: str, status: str = "suggeste
         raise HTTPException(status_code=404, detail="Motif merges not found for this domain")
 
 @app.post("/workspace/motif_merges/decide")
-def decide_motif_merge(req: MotifMergeDecideReq) -> Dict[str, Any]:
+def decide_motif_merge(req: MotifMergeDecideReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "motif_merges_decide", workspace_id=req.workspace_id)
     try:
         return fabric.decide_motif_merge(req.workspace_id, req.domain_id, req.suggestion_id, req.decision, note=req.note)
     except ValueError as e:
@@ -1434,7 +1445,8 @@ def list_conflicts(workspace_id: str, domain_id: str, status: str = "open", limi
 
 
 @app.post("/workspace/conflicts/decide")
-def decide_conflict(req: ConflictDecideReq) -> Dict[str, Any]:
+def decide_conflict(req: ConflictDecideReq, request: Request) -> Dict[str, Any]:
+    require_request_trust(request, "conflicts_decide", workspace_id=req.workspace_id)
     try:
         return fabric.decide_conflict(req.workspace_id, req.domain_id, req.conflict_id, req.decision, note=req.note)
     except ValueError as e:
@@ -1501,7 +1513,12 @@ def ingest_document(req: IngestDocumentReq, request: Request) -> Dict[str, Any]:
     Chunks the text and stores embeddings in the archive lane.
     This never touches motifs, kernel, drift, or character state.
     """
-    resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    require_request_trust(
+        request,
+        "archive_ingest",
+        workspace_id=req.workspace_id,
+        agent_id=req.agent_id,
+    )
     store = _get_archive_store(req.workspace_id, req.agent_id)
     return store.ingest_document(
         text=req.text,
@@ -1518,7 +1535,7 @@ def ingest_document(req: IngestDocumentReq, request: Request) -> Dict[str, Any]:
 @app.post("/archive/query")
 def archive_query(req: ArchiveQueryReq, request: Request) -> Dict[str, Any]:
     """Query archive memory by cosine similarity (no physics, no identity)."""
-    resolve_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
+    get_request_context(request, workspace_id=req.workspace_id, agent_id=req.agent_id)
     store = _get_archive_store(req.workspace_id, req.agent_id)
     results = store.retrieve(
         query=req.query,
@@ -1532,7 +1549,7 @@ def archive_query(req: ArchiveQueryReq, request: Request) -> Dict[str, Any]:
 @app.get("/archive/{workspace_id}/{agent_id}/documents")
 def archive_list_documents(workspace_id: str, agent_id: str, request: Request) -> Dict[str, Any]:
     """List all documents in an agent's archive memory."""
-    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
+    get_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     docs = store.list_documents()
     return {"documents": docs, "count": len(docs)}
@@ -1541,7 +1558,7 @@ def archive_list_documents(workspace_id: str, agent_id: str, request: Request) -
 @app.get("/archive/{workspace_id}/{agent_id}/document/{doc_id}")
 def archive_get_document(workspace_id: str, agent_id: str, doc_id: str, request: Request) -> Dict[str, Any]:
     """Get a specific document and its chunks."""
-    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
+    get_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     doc = store.get_document(doc_id)
     if not doc:
@@ -1553,7 +1570,7 @@ def archive_get_document(workspace_id: str, agent_id: str, doc_id: str, request:
 @app.delete("/archive/{workspace_id}/{agent_id}/document/{doc_id}")
 def archive_delete_document(workspace_id: str, agent_id: str, doc_id: str, request: Request) -> Dict[str, Any]:
     """Delete a document from archive memory. Safe — never affects core identity."""
-    resolve_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
+    get_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
     store = _get_archive_store(workspace_id, agent_id)
     ok = store.delete_document(doc_id)
     if not ok:
@@ -2068,8 +2085,18 @@ class PromoteReq(BaseModel):
     step: int = 0
 
 @app.post("/promote")
-def promote_chunk_endpoint(req: PromoteReq) -> Dict[str, Any]:
+def promote_chunk_endpoint(req: PromoteReq, request: Request) -> Dict[str, Any]:
     """Evaluate and optionally promote an archive chunk to core memory."""
+    # The force bypass has separate authority semantics and remains parked for
+    # Batch A2.  Ordinary evaluator-governed promotion follows the established
+    # promote policy before touching the archive store.
+    if not req.force:
+        require_request_trust(
+            request,
+            "promote",
+            workspace_id=req.workspace_id,
+            agent_id=req.agent_id,
+        )
     from .promotion import (
         evaluate_promotion, promote_chunk,
         load_retrieval_counts,
@@ -2221,8 +2248,18 @@ class CompressTriggerRequest(BaseModel):
     step: int
 
 @app.post("/workspace/{workspace_id}/compress/trigger")
-async def trigger_compression(workspace_id: str, req: CompressTriggerRequest):
+async def trigger_compression(
+    workspace_id: str,
+    req: CompressTriggerRequest,
+    request: Request,
+):
     """Manual compression trigger. Bypasses event detection, runs scorer+router+executor."""
+    require_request_trust(
+        request,
+        "compress_trigger",
+        workspace_id=workspace_id,
+        agent_id=req.agent_id,
+    )
     if not fabric._compress_enable:
         return {"ok": False, "error": "compression disabled (set TORMENT_COMPRESS_ENABLE=1)"}
     try:
@@ -2656,7 +2693,7 @@ def cognition_run(req: CognitionRunReq, request: Request) -> Dict[str, Any]:
     # /cognition/run predates Spine routing, but it can become write-capable
     # through the archivist-writeback gate. Use the same registry authority
     # threshold as the governed cognition operation before touching Fabric.
-    ctx = resolve_request_context(
+    ctx = get_request_context(
         request,
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -2824,7 +2861,7 @@ def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
     from .spine import SpineRequest, submit_task, OPERATION_REGISTRY
 
     # Resolve auth context
-    ctx = resolve_request_context(
+    ctx = get_request_context(
         request,
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
@@ -2839,9 +2876,11 @@ def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
         mode=req.mode,
     )
 
-    # Ensure agent exists (create if needed for write ops)
+    # Preserve the established pre-dispatch provisioning for authorized write
+    # operations, but never create state for an operation the caller cannot
+    # perform.  Spine remains the dispatcher and final policy authority.
     spec = OPERATION_REGISTRY.get(req.operation)
-    if spec and spec.min_trust > 0:
+    if spec and spec.min_trust > 0 and ctx.trust_tier >= spec.min_trust:
         try:
             fabric.create_agent(req.workspace_id, req.agent_id)
         except Exception as exc:
@@ -2910,17 +2949,11 @@ def tool_result_ingest(req: ToolResultIngestReq, request: Request) -> Dict[str, 
     """
     from .spine import SpineRequest, submit_task
 
-    ctx = resolve_request_context(
+    ctx = get_request_context(
         request,
         workspace_id=req.workspace_id,
         agent_id=req.agent_id,
     )
-
-    # Ensure agent exists
-    try:
-        fabric.create_agent(req.workspace_id, req.agent_id)
-    except Exception as exc:
-        _log.debug("Agent setup skipped (may already exist): %s", exc)
 
     spine_req = SpineRequest(
         workspace_id=req.workspace_id,

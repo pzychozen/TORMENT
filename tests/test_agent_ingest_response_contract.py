@@ -54,7 +54,7 @@ def _call_ingest(monkeypatch, response):
     monkeypatch.setattr(appmod, "fabric", fabric)
     monkeypatch.setattr(
         appmod,
-        "resolve_request_context",
+        "get_request_context",
         lambda request, workspace_id, agent_id: _ctx(workspace_id, agent_id),
     )
     monkeypatch.setattr(spine, "submit_task", fake_submit_task)
@@ -90,7 +90,7 @@ def test_agent_ingest_stored_response_exposes_storage_outcome_and_eid(monkeypatc
     assert payload["escalated"] is False
     assert payload["result_code"] == "stored"
     assert payload["decision_code"] == "fast_allowed"
-    assert fabric.create_agent_calls == [("ws", "ag")]
+    assert fabric.create_agent_calls == []
     assert captured["req"].payload == {
         "text": "memory text",
         "step": 7,

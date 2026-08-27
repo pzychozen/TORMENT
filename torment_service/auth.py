@@ -221,9 +221,73 @@ def resolve_request_context(
     )
 
 
+def get_request_context(
+    request: Request,
+    workspace_id: str = "default",
+    agent_id: Optional[str] = None,
+) -> RequestContext:
+    """Return the request's authenticated context rebound to route metadata.
+
+    The REST middleware authenticates once and stores its context on the
+    request.  Handlers use this accessor so they do not repeat API-key lookup
+    merely to attach their workspace/agent locator metadata.  Those locators
+    remain audit context; they are not object-level access controls.
+
+    A direct handler invocation outside the middleware remains compatible by
+    falling back to ``resolve_request_context`` when authentication is enabled
+    and no middleware context is present.  In local auth-disabled mode, always
+    construct the established operator-equivalent context instead of relying
+    on request state.
+    """
+    if not AUTH_ENABLED:
+        return RequestContext(
+            client_id=_DEFAULT_CLIENT_ID,
+            trust_tier=TRUST_OPERATOR,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+
+    authenticated = getattr(request.state, "torment_auth_context", None)
+    if authenticated is None:
+        return resolve_request_context(
+            request,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+
+    return RequestContext(
+        client_id=authenticated.client_id,
+        trust_tier=authenticated.trust_tier,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        session_id=authenticated.session_id,
+        timestamp=authenticated.timestamp,
+        metadata=dict(authenticated.metadata),
+    )
+
+
 def handle_trust_error(e: InsufficientTrustError) -> None:
     """Convert a trust error to an HTTP 403 response."""
     raise HTTPException(
         status_code=403,
         detail=str(e),
     )
+
+
+def require_request_trust(
+    request: Request,
+    operation: str,
+    workspace_id: str = "default",
+    agent_id: Optional[str] = None,
+) -> RequestContext:
+    """Return the request context after enforcing an operation's trust tier."""
+    context = get_request_context(
+        request,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
+    try:
+        context.require_trust(operation)
+    except InsufficientTrustError as exc:
+        handle_trust_error(exc)
+    return context
