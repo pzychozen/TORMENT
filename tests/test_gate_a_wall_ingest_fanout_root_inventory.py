@@ -100,6 +100,16 @@ _CLASSIFIED_READ_ONLY_POST_HANDLERS = {
     },
 }
 
+# Observational method names can match the writer-ish verb heuristic.  Keep
+# their classification separate from writer/fan-out roots so the latter remains
+# a complete inventory of mutation-capable surfaces.
+_CLASSIFIED_OBSERVABILITY_SURFACES = {
+    "_emit_hivemind_packet_telemetry": (
+        "TormentFabric",
+        "optional process-local structured logging; no packet emission or durable-state write",
+    ),
+}
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -249,8 +259,15 @@ class TestWriterSurfaceInventory(unittest.TestCase):
 
     def test_tormentfabric_writer_surface(self):
         ft = _tree("fabric.py")
-        self._assert_no_new(_writish(_class_method_names(ft, "TormentFabric")),
-                            _TORMENTFABRIC_WRITERS, "TormentFabric")
+        observability = {
+            name for name, (where, _desc) in _CLASSIFIED_OBSERVABILITY_SURFACES.items()
+            if where == "TormentFabric"
+        }
+        self._assert_no_new(
+            _writish(_class_method_names(ft, "TormentFabric")) - observability,
+            _TORMENTFABRIC_WRITERS,
+            "TormentFabric",
+        )
 
     def test_workspace_writer_surface(self):
         ft = _tree("fabric.py")
@@ -316,6 +333,31 @@ class TestClassifiedParkedSurfaces(unittest.TestCase):
         # an inventory cross-check, NOT a claim any of them is a solved crossing.
         self.assertEqual(missing, [],
                          msg=f"classified surface(s) no longer found (re-inventory): {missing}")
+
+
+class TestClassifiedObservabilitySurfaces(unittest.TestCase):
+
+    def test_telemetry_surface_is_explicitly_observational(self):
+        ft = _tree("fabric.py")
+        telemetry = next(
+            (
+                method for method in _class(ft, "TormentFabric").body
+                if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and method.name == "_emit_hivemind_packet_telemetry"
+            ),
+            None,
+        )
+
+        self.assertEqual(
+            set(_CLASSIFIED_OBSERVABILITY_SURFACES),
+            {"_emit_hivemind_packet_telemetry"},
+        )
+        self.assertEqual(
+            _CLASSIFIED_OBSERVABILITY_SURFACES["_emit_hivemind_packet_telemetry"][0],
+            "TormentFabric",
+        )
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(_called_names(telemetry), {"getattr", "info", "time"})
 
 
 # --------------------------------------------------------------------------- #

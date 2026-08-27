@@ -15,6 +15,7 @@ import numpy as np
 
 from torment_service.embeddings import HashEmbedding
 from torment_service.fabric import TormentFabric
+from torment_service.kernel.trajectory_v2 import iter_v2_dynamic_records
 from torment_service.memory_graph import MemoryGraph
 from torment_service.sqlite_index import IndexManager
 
@@ -175,10 +176,13 @@ class TestGateACoreInvariants:
             if reopened is not None:
                 reopened.close()
 
-    def test_a2_ephemeral_changes_do_not_become_canonical(self, tmp_path):
+    def test_a2_ephemeral_changes_do_not_become_canonical(self, tmp_path, monkeypatch):
+        # This is the current default contract, not an ambient test-runner choice.
+        monkeypatch.delenv("TORMENT_TRAJECTORY_FORMAT", raising=False)
         graph = _graph(tmp_path / "ephemeral")
         reopened = None
         try:
+            assert graph._trajectory_format == "v2"
             durable = _add(
                 graph,
                 "durable before physics",
@@ -223,7 +227,10 @@ class TestGateACoreInvariants:
             assert unflushed not in reopened.entities
             # Diagnostic/residue artifacts are intentionally independent of node
             # authority and remain observable after the restart.
-            assert list(Path(graph.data_dir, "logs", "trajectories", "daily").glob("*.jsonl"))
+            assert any(
+                int(row["eid"]) == durable
+                for row in iter_v2_dynamic_records(graph.data_dir)
+            )
             assert any(int(row["eid"]) == unflushed for row in _map_rows(reopened))
         finally:
             graph.close()
@@ -602,8 +609,9 @@ class TestGateBSuspiciousSeams:
             if root.exists():
                 shutil.rmtree(root)
 
-    def test_b3_admin_rebuild_includes_current_daily_and_legacy_trajectory_records(self, tmp_path):
+    def test_b3_admin_rebuild_includes_current_daily_and_legacy_trajectory_records(self, tmp_path, monkeypatch):
         """Mirror app.index_rebuild's daily and legacy source paths exactly."""
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
         root = tmp_path / "trajectory-rebuild"
         fabric = TormentFabric(str(root))
         try:
@@ -659,6 +667,7 @@ class TestGateBSuspiciousSeams:
         self, tmp_path, monkeypatch, caplog,
     ):
         """Unreadable daily logs warn while preserving best-effort rebuild behavior."""
+        monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "legacy")
         root = tmp_path / "unreadable-trajectory-rebuild"
         fabric = TormentFabric(str(root))
         try:
