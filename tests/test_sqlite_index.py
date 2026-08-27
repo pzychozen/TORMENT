@@ -306,7 +306,8 @@ class TestRebuild:
                 ]
             ]
             assert writer.write_step(entities, 1).ok
-            assert writer.close().ok
+            writer_close_result = writer.close()
+            assert writer_close_result.ok
 
             idx = IndexManager(os.path.join(tmp, "index"))
             counts = idx.rebuild_from_jsonl(
@@ -354,7 +355,8 @@ class TestRebuild:
             complete_root = os.path.join(tmp, "complete")
             complete = TrajectoryV2Writer(complete_root)
             assert complete.write_step([entity], 1).ok
-            assert complete.close().ok
+            complete_close_result = complete.close()
+            assert complete_close_result.ok
             legacy = os.path.join(tmp, "legacy_trajectories.jsonl")
             with open(legacy, "w", encoding="utf-8") as handle:
                 handle.write(json.dumps({"step": 1, "eid": 7, "pos": [1.0, 2.0, 3.0]}) + "\n")

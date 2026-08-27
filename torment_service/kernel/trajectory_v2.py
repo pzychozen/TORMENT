@@ -229,6 +229,21 @@ def _read_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
             yield value
 
 
+def _has_persisted_trajectory_artifacts(paths: TrajectoryPathsV2) -> bool:
+    for path in (paths.manifest, paths.genesis, paths.boundaries, paths.diagnostics):
+        try:
+            if path.exists():
+                return True
+        except OSError:
+            return True
+    try:
+        if paths.chunks.exists() and not paths.chunks.is_dir():
+            return True
+        return any(path.is_file() for path in paths.chunks.rglob("*"))
+    except OSError:
+        return True
+
+
 class TrajectoryChunkReaderV2:
     """Read one V2 chunk, including a current tail when requested by live verification."""
 
@@ -291,7 +306,10 @@ class TrajectoryV2Writer:
         self._chunk_seq: Optional[int] = None
         self._chunk_step_frames: List[StepFrameV2] = []
         self._report_prior_epoch_partials()
-        self._append_boundary("EPOCH_START", epoch=self.epoch, previous_epoch=self.epoch - 1)
+        if self._boundary_append_allowed:
+            self._append_boundary("EPOCH_START", epoch=self.epoch, previous_epoch=self.epoch - 1)
+        else:
+            self._diagnostic("BOUNDARY_EVIDENCE_UNAVAILABLE", self._boundary_evidence_detail)
 
     def _load_genesis_eids(self) -> set[int]:
         try:
@@ -321,14 +339,50 @@ class TrajectoryV2Writer:
         except Exception:
             return ""
 
-    def _discover_next_epoch(self) -> int:
-        highest = 0
+    def _boundary_epoch_evidence(self) -> Tuple[List[int], bool, str]:
         try:
+            if not self.paths.boundaries.exists():
+                return [], False, "boundary evidence is missing"
+            if not self.paths.boundaries.is_file():
+                return [], False, "boundary evidence is not a regular file"
+            epochs = []
             for record in _read_jsonl(self.paths.boundaries):
-                highest = max(highest, int(record.get("epoch", 0)))
-        except Exception:
-            pass
-        return highest + 1
+                if record.get("type") != "EPOCH_START":
+                    continue
+                epoch = int(record.get("epoch", 0))
+                if epoch < 1:
+                    raise TrajectoryIntegrityError("boundary EPOCH_START epoch must be positive")
+                epochs.append(epoch)
+            return epochs, True, ""
+        except Exception as exc:
+            return [], False, f"boundary evidence is unreadable: {exc}"
+
+    def _chunk_header_epochs(self) -> List[int]:
+        epochs = []
+        for suffix in ("*.trj2", "*.partial"):
+            for path in self.paths.chunks.rglob(suffix):
+                try:
+                    _seq, epoch = TrajectoryChunkReaderV2(path).header()
+                    if epoch >= 1:
+                        epochs.append(epoch)
+                except (OSError, TrajectoryIntegrityError):
+                    continue
+        return epochs
+
+    def _discover_next_epoch(self) -> int:
+        boundary_epochs, boundary_valid, boundary_detail = self._boundary_epoch_evidence()
+        chunk_epochs = self._chunk_header_epochs()
+        persisted_artifacts = _has_persisted_trajectory_artifacts(self.paths)
+        self._boundary_append_allowed = boundary_valid or not persisted_artifacts
+        self._boundary_evidence_detail = boundary_detail
+        observed_epochs = [*boundary_epochs, *chunk_epochs]
+        if observed_epochs:
+            return max(observed_epochs) + 1
+        if persisted_artifacts:
+            raise TrajectoryIntegrityError(
+                "unable to determine next trajectory epoch from persisted V2 evidence"
+            )
+        return 1
 
     def _diagnostic(self, code: str, detail: str, **extra: Any) -> None:
         try:
@@ -483,14 +537,33 @@ class TrajectoryV2Verifier:
             report.add("MANIFEST_INVALID", str(exc))
             return []
 
-    def _latest_boundary_epoch(self) -> int:
-        highest = 0
+    def _boundary_records(self, report: VerificationReportV2) -> Tuple[List[Dict[str, Any]], bool]:
         try:
-            for record in _read_jsonl(self.paths.boundaries):
+            if self.paths.boundaries.exists() and not self.paths.boundaries.is_file():
+                report.add("BOUNDARIES_INVALID", "boundary evidence is not a regular file")
+                return [], False
+            if not self.paths.boundaries.exists():
+                if _has_persisted_trajectory_artifacts(self.paths):
+                    report.add("BOUNDARIES_INVALID", "boundary evidence is missing despite persisted trajectory state")
+                    return [], False
+                return [], True
+            records = list(_read_jsonl(self.paths.boundaries))
+            for record in records:
                 if record.get("type") == "EPOCH_START":
-                    highest = max(highest, int(record.get("epoch", 0)))
-        except (TrajectoryIntegrityError, TypeError, ValueError):
-            pass
+                    epoch = int(record.get("epoch", 0))
+                    if epoch < 1:
+                        raise TrajectoryIntegrityError("boundary EPOCH_START epoch must be positive")
+            return records, True
+        except Exception as exc:
+            report.add("BOUNDARIES_INVALID", f"boundary evidence is unreadable: {exc}")
+            return [], False
+
+    @staticmethod
+    def _latest_boundary_epoch(records: Sequence[Mapping[str, Any]]) -> int:
+        highest = 0
+        for record in records:
+            if record.get("type") == "EPOCH_START":
+                highest = max(highest, int(record.get("epoch", 0)))
         return highest
 
     @staticmethod
@@ -596,6 +669,8 @@ class TrajectoryV2Verifier:
             raise ValueError("mode must be sealed or live")
         report = VerificationReportV2()
         entries = self._manifest_entries(report)
+        boundary_records, boundary_evidence_valid = self._boundary_records(report)
+        latest_boundary_epoch = self._latest_boundary_epoch(boundary_records)
         genesis_eids: set[int] = set()
         try:
             for genesis in _read_jsonl(self.paths.genesis):
@@ -630,8 +705,17 @@ class TrajectoryV2Verifier:
             if len(partials) != 1:
                 report.add("LIVE_PARTIAL_COUNT_INVALID", "live verification permits exactly one open tail", count=len(partials))
             else:
-                self._check_live_tail(report, partials[0], current_epoch=max(self._latest_boundary_epoch(), last_manifest_epoch),
-                                      expected_seq=expected_seq, expected_frames=expected_frames, genesis_eids=genesis_eids)
+                current_epoch = max(latest_boundary_epoch, last_manifest_epoch)
+                if not boundary_evidence_valid:
+                    tail_epoch = None
+                    try:
+                        _seq, tail_epoch = TrajectoryChunkReaderV2(partials[0]).header()
+                    except TrajectoryIntegrityError:
+                        tail_epoch = None
+                    if tail_epoch is not None:
+                        current_epoch = tail_epoch
+                self._check_live_tail(report, partials[0], current_epoch=current_epoch,
+                                       expected_seq=expected_seq, expected_frames=expected_frames, genesis_eids=genesis_eids)
         manifested = {str((self.paths.base / str(entry.get("path", ""))).resolve()) for entry in entries}
         for complete in self.paths.chunks.rglob("*.trj2") if self.paths.chunks.is_dir() else []:
             if str(complete.resolve()) not in manifested:

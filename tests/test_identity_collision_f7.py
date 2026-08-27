@@ -19,6 +19,11 @@ from torment_service.fabric import (
 from torment_service.identity import IdentityStore, PersistentIdentityCollisionError
 
 
+def _read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
 class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="torment_identity_collision_f7_")
@@ -80,7 +85,7 @@ class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
             declared_workspace_id="workspace",
             declared_agent_id="Alice",
         )
-        before = open(path, "rb").read()
+        before = _read_bytes(path)
 
         with self.assertRaises(PersistentIdentityCollisionError):
             self.store.load("workspace", "alice")
@@ -92,7 +97,7 @@ class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
                 app_module.get_identity("alice", workspace_id="workspace")
         self.assertEqual(api_error.exception.status_code, 409)
 
-        self.assertEqual(open(path, "rb").read(), before)
+        self.assertEqual(_read_bytes(path), before)
         self.assertNotIn(self.fabric._agent_key("workspace", "alice"), self.fabric.private_graphs)
 
     def test_persisted_workspace_mismatch_fails_closed(self):
@@ -139,6 +144,7 @@ class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
         alias_path = self._identity_path(workspace_id, "alice")
         if not os.path.exists(alias_path):
             self.skipTest("host filesystem permits distinct Alice/alice agent directories")
+        aliases = False
         try:
             aliases = os.path.samefile(original_path, alias_path)
         except OSError as exc:
@@ -146,7 +152,7 @@ class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
         if not aliases:
             self.skipTest("host filesystem permits distinct Alice/alice agent directories")
 
-        before = open(original_path, "rb").read()
+        before = _read_bytes(original_path)
         with self.assertRaises(HTTPException) as raised:
             self.fabric.create_agent(workspace_id, "alice")
         self.assertEqual(raised.exception.status_code, 409)
@@ -154,7 +160,7 @@ class TestPersistentAgentIdentityCollisionF7(unittest.TestCase):
             self.store.load(workspace_id, "alice")
 
         self.assertEqual(original.agent_id, "Alice")
-        self.assertEqual(open(original_path, "rb").read(), before)
+        self.assertEqual(_read_bytes(original_path), before)
         self.assertNotIn(self.fabric._agent_key(workspace_id, "alice"), self.fabric.private_graphs)
 
     def test_case_sensitive_host_allows_distinct_exact_identities(self):
@@ -240,6 +246,7 @@ class TestWorkspaceIdentityCollisionF7(unittest.TestCase):
         alias_root = self._workspace_root("legacy")
         if not os.path.exists(alias_root):
             self.skipTest("host filesystem permits distinct Legacy/legacy workspace directories")
+        aliases = False
         try:
             aliases = os.path.samefile(self._workspace_root("Legacy"), alias_root)
         except OSError as exc:

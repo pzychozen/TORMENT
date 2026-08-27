@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from torment_service.kernel.trajectory_v2 import (
     CHUNK_HEADER,
@@ -17,6 +16,7 @@ from torment_service.kernel.trajectory_v2 import (
     STEP_HEADER,
     DynamicRecordV2,
     TrajectoryChunkReaderV2,
+    TrajectoryIntegrityError,
     TrajectoryPathsV2,
     TrajectoryV2Verifier,
     TrajectoryV2Writer,
@@ -68,7 +68,8 @@ class TestTrajectoryV2FrameIdentity:
         writer = TrajectoryV2Writer(str(self.root))
         duplicate = entity(7)
         assert writer.write_step([duplicate, duplicate], 1).ok
-        assert writer.close().ok
+        close_result = writer.close()
+        assert close_result.ok
         report = TrajectoryV2Verifier(str(self.root)).verify()
         assert not report.valid
         assert any(issue["code"] == "DUPLICATE_EID_IN_FRAME" for issue in report.issues)
@@ -77,7 +78,8 @@ class TestTrajectoryV2FrameIdentity:
         writer = TrajectoryV2Writer(str(self.root))
         assert writer.write_step([entity(7)], 1).ok
         assert writer.write_step([entity(7)], 1).ok
-        assert writer.close().ok
+        close_result = writer.close()
+        assert close_result.ok
         chunk = next(TrajectoryPathsV2(self.root).chunks.rglob("*.trj2"))
         raw = bytearray(chunk.read_bytes())
         second_header = CHUNK_HEADER.size + STEP_HEADER.size + DYNAMIC_RECORD.size
@@ -97,7 +99,8 @@ class TestTrajectoryV2FrameIdentity:
         writer = TrajectoryV2Writer(str(self.root))
         assert writer.write_step([entity(7)], 25).ok
         assert writer.write_step([entity(7)], 25).ok
-        assert writer.close().ok
+        close_result = writer.close()
+        assert close_result.ok
         entry = json.loads(TrajectoryPathsV2(self.root).manifest.read_text(encoding="utf-8"))
         assert entry["schema_version"] == "trajectory-v2.2"
         assert {"frame_seq_from", "frame_seq_to", "frame_count", "step_from", "step_to"} <= set(entry)
@@ -110,10 +113,12 @@ class TestTrajectoryV2FrameIdentity:
         assert live.valid, live.to_dict()
         assert live.active_open_tails == 1
         assert any(note["code"] == "ACTIVE_OPEN_TAIL" for note in live.notices)
+        assert not any(issue["code"] == "ORPHANED_CRASH_PARTIAL" for issue in live.issues)
         sealed = TrajectoryV2Verifier(str(self.root)).verify(mode="sealed")
         assert not sealed.valid
         assert any(issue["code"] == "INCOMPLETE_FINAL_CHUNK" for issue in sealed.issues)
-        assert writer.close().ok
+        close_result = writer.close()
+        assert close_result.ok
         sealed_after_close = TrajectoryV2Verifier(str(self.root)).verify()
         assert sealed_after_close.valid, sealed_after_close.to_dict()
         assert not list(TrajectoryPathsV2(self.root).chunks.rglob("*.partial"))
@@ -126,12 +131,193 @@ class TestTrajectoryV2FrameIdentity:
         first._chunk_handle = None
         second = TrajectoryV2Writer(str(self.root))
         assert second.write_step([entity(7)], 2).ok
-        assert second.close().ok
+        second_close_result = second.close()
+        assert second_close_result.ok
         report = TrajectoryV2Verifier(str(self.root)).verify(mode="live")
         assert not report.valid
         assert any(issue["code"] == "ORPHANED_CRASH_PARTIAL" for issue in report.issues)
         diagnostics = TrajectoryPathsV2(self.root).diagnostics.read_text(encoding="utf-8")
         assert "ORPHANED_CRASH_PARTIAL" in diagnostics
+
+    def test_reopen_uses_chunk_epoch_when_boundaries_are_malformed(self):
+        paths = TrajectoryPathsV2(self.root)
+        initial = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        initial_write = initial.write_step([entity(7)], 1)
+        initial_close = initial.close()
+        assert initial_write.ok
+        assert initial_close.ok
+        corrupted_boundaries = "{\"truncated\":"
+        paths.boundaries.write_text(corrupted_boundaries, encoding="utf-8")
+
+        reopened = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        assert reopened.epoch == 2
+        assert paths.boundaries.read_text(encoding="utf-8") == corrupted_boundaries
+        reopened_write = reopened.write_step([entity(8)], 2)
+        reopened_close = reopened.close()
+        assert reopened_write.ok
+        assert reopened_close.ok
+
+        frame_identities = []
+        for chunk in sorted(paths.chunks.rglob("*.trj2")):
+            frame_identities.extend(
+                (frame.epoch, frame.frame_seq)
+                for frame in TrajectoryChunkReaderV2(chunk).iter_steps()
+            )
+        assert frame_identities == [(1, 1), (2, 1)]
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+        assert not report.valid
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+
+    def test_reopen_uses_highest_persisted_chunk_epoch_when_boundaries_are_malformed(self):
+        paths = TrajectoryPathsV2(self.root)
+        first = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        first_write = first.write_step([entity(7)], 1)
+        first_close = first.close()
+        assert first_write.ok
+        assert first_close.ok
+        second = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        assert second.epoch == 2
+        second_write = second.write_step([entity(8)], 2)
+        second_close = second.close()
+        assert second_write.ok
+        assert second_close.ok
+        paths.boundaries.write_text("{\"truncated\":", encoding="utf-8")
+
+        reopened = TrajectoryV2Writer(str(self.root))
+
+        assert reopened.epoch == 3
+
+    def test_epoch_discovery_uses_maximum_of_boundary_and_chunk_epochs(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        paths.boundaries.write_text(
+            json.dumps({"type": "EPOCH_START", "epoch": 5}) + "\n",
+            encoding="utf-8",
+        )
+
+        reopened = TrajectoryV2Writer(str(self.root))
+
+        assert reopened.epoch == 6
+
+    def test_epoch_discovery_fails_closed_when_all_identity_sources_are_corrupt(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root), chunk_steps=1)
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        chunks = sorted(paths.chunks.rglob("*.trj2"))
+        assert len(chunks) == 1
+        paths.boundaries.write_text("{\"truncated\":", encoding="utf-8")
+        chunks[0].write_bytes(b"corrupt chunk header")
+
+        failed_closed = False
+        try:
+            TrajectoryV2Writer(str(self.root))
+        except TrajectoryIntegrityError:
+            failed_closed = True
+
+        assert failed_closed, "writer must fail closed without trustworthy epoch evidence"
+        assert not list(paths.chunks.rglob("*.partial"))
+        assert sorted(paths.chunks.rglob("*.trj2")) == chunks
+
+    def test_clean_new_root_starts_epoch_one(self):
+        writer = TrajectoryV2Writer(str(self.root))
+
+        assert writer.epoch == 1
+        close_result = writer.close()
+        assert close_result.ok
+
+    def test_malformed_boundaries_invalidate_sealed_verification(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root))
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        paths.boundaries.write_text("{\"truncated\":", encoding="utf-8")
+
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+
+        assert not report.valid
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+
+    def test_boundary_directory_invalidates_sealed_verification(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root))
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        paths.boundaries.unlink()
+        paths.boundaries.mkdir()
+
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+
+        assert not report.valid
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+
+    def test_missing_boundaries_invalidate_persisted_trajectory_verification(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root))
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        paths.boundaries.unlink()
+
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+
+        assert not report.valid
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+
+    def test_unreadable_boundaries_invalidate_verification(self, monkeypatch):
+        from torment_service.kernel import trajectory_v2 as trajectory_v2_module
+
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root))
+        write_result = writer.write_step([entity(7)], 1)
+        close_result = writer.close()
+        assert write_result.ok
+        assert close_result.ok
+        original_read_jsonl = trajectory_v2_module._read_jsonl
+
+        def unreadable_boundaries(path):
+            if path == paths.boundaries:
+                raise OSError("forced unreadable boundaries")
+            return original_read_jsonl(path)
+
+        monkeypatch.setattr(trajectory_v2_module, "_read_jsonl", unreadable_boundaries)
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+
+        assert not report.valid
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+
+    def test_invalid_boundaries_do_not_misclassify_current_live_tail_as_orphan(self):
+        paths = TrajectoryPathsV2(self.root)
+        writer = TrajectoryV2Writer(str(self.root))
+        write_result = writer.write_step([entity(7)], 1)
+        assert write_result.ok
+        paths.boundaries.write_text("{\"truncated\":", encoding="utf-8")
+
+        report = TrajectoryV2Verifier(str(self.root)).verify(mode="live")
+
+        assert not report.valid
+        assert report.active_open_tails == 1
+        assert any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
+        assert not any(issue["code"] == "ORPHANED_CRASH_PARTIAL" for issue in report.issues)
+        close_result = writer.close()
+        assert close_result.ok
+
+    def test_empty_root_without_boundary_evidence_remains_valid(self):
+        report = TrajectoryV2Verifier(str(self.root)).verify()
+
+        assert report.valid, report.to_dict()
+        assert not any(issue["code"] == "BOUNDARIES_INVALID" for issue in report.issues)
 
 
 class TestTrajectoryV2CacheAndSurfaces:
@@ -147,7 +333,8 @@ class TestTrajectoryV2CacheAndSurfaces:
         assert writer.write_step([subject], 90).ok
         subject.pos = np.asarray((2.0, 2.0, 2.0), dtype=np.float64)
         assert writer.write_step([subject], 90).ok
-        assert writer.close().ok
+        close_result = writer.close()
+        assert close_result.ok
         idx = IndexManager(str(self.root / "index"))
         try:
             counts = idx.rebuild_from_jsonl(nodes_path="", trajectory_v2_root=str(self.root))
@@ -200,8 +387,7 @@ class TestTrajectoryV2CacheAndSurfaces:
         from torment_service.fabric import TormentFabric
         from torment_service import app as appmod
         monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
-        fabric = TormentFabric(data_dir=str(self.root / "fabric"))
-        try:
+        with TormentFabric(data_dir=str(self.root / "fabric")) as fabric:
             fabric.create_agent("ws", "agent")
             graph = fabric.private_graphs[fabric._agent_key("ws", "agent")]
             graph.add_memory("shutdown integration", np.ones(384), "episode", 0.5, 0.5, 30.0)
@@ -211,8 +397,6 @@ class TestTrajectoryV2CacheAndSurfaces:
             report = TrajectoryV2Verifier(str(graph.data_dir)).verify(mode="sealed")
             assert report.valid, report.to_dict()
             assert not list(TrajectoryPathsV2(Path(graph.data_dir)).chunks.rglob("*.partial"))
-        finally:
-            fabric.close()
 
 
 class TestMemoryGraphTrajectoryV2Integration:
@@ -222,13 +406,10 @@ class TestMemoryGraphTrajectoryV2Integration:
 
         root = Path(tempfile.mkdtemp(prefix="torment_graph_trajectory_v2_"))
         monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
-        graph = MemoryGraph(str(root), embedder=HashEmbedding())
-        try:
+        with MemoryGraph(str(root), embedder=HashEmbedding()) as graph:
             eid = graph.add_memory("trajectory V2 integration", np.ones(384), "episode", 0.5, 0.5, 30.0)
             graph.step_world(1, classify_every=0, log_every=1)
             graph.update_payload(eid, {"pos": [8.0, 9.0, 10.0]})
-        finally:
-            graph.close()
         report = TrajectoryV2Verifier(str(root)).verify()
         assert report.valid, report.to_dict()
         boundaries = [json.loads(line) for line in TrajectoryPathsV2(root).boundaries.read_text(encoding="utf-8").splitlines()]
