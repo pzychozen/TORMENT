@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from . import AdapterUnavailable
+from . import AdapterUnavailable, redact_provider_error_text
 
 
 class AnthropicAdapter:
@@ -42,7 +42,9 @@ class AnthropicAdapter:
                 max_tokens=1024,
             )
         except Exception as exc:
-            raise AdapterUnavailable(f"Anthropic call failed: {exc}") from exc
+            raise AdapterUnavailable(
+                f"Anthropic call failed: {redact_provider_error_text(exc)}"
+            ) from exc
         # Anthropic returns content as a list of blocks; first text block wins.
         parts = []
         for block in getattr(resp, "content", []) or []:

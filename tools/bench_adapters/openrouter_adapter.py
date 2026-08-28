@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 
-from . import AdapterUnavailable
+from . import AdapterUnavailable, redact_provider_error_text
 
 _DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -68,5 +68,7 @@ class OpenRouterAdapter:
                 max_tokens=1024,
             )
         except Exception as exc:
-            raise AdapterUnavailable(f"OpenRouter call failed: {exc}") from exc
+            raise AdapterUnavailable(
+                f"OpenRouter call failed: {redact_provider_error_text(exc)}"
+            ) from exc
         return (resp.choices[0].message.content or "").strip()

@@ -100,6 +100,7 @@ from tools.bench_adapters import (  # noqa: E402
     AdapterUnavailable,
     ProviderAdapter,
     get_adapter,
+    redact_provider_error_text,
 )
 
 
@@ -474,7 +475,7 @@ def run_cell(
     try:
         adapter: ProviderAdapter = get_adapter(provider_name, model)
     except AdapterUnavailable as exc:
-        rec.cell_error = f"adapter_unavailable: {exc}"
+        rec.cell_error = f"adapter_unavailable: {redact_provider_error_text(exc)}"
         return rec
 
     # 3. Create the agent inside TORMENT — only in torment_seeded mode.
@@ -501,7 +502,7 @@ def run_cell(
             torment.create_workspace(matrix.workspace_id)
             torment.create_agent(matrix.workspace_id, agent_id, seed=seed_payload)
         except Exception as exc:
-            rec.cell_error = f"torment_setup_failed: {exc}"
+            rec.cell_error = f"torment_setup_failed: {redact_provider_error_text(exc)}"
             return rec
 
     # 4. Iterate scenarios that apply to this character, in matrix order.
@@ -528,14 +529,14 @@ def run_cell(
         try:
             response_text = adapter.chat(system_prompt, transcript)
         except AdapterUnavailable as exc:
-            turn.error = f"adapter_call_failed: {exc}"
+            turn.error = f"adapter_call_failed: {redact_provider_error_text(exc)}"
             rec.turns.append(turn)
             # Pop the user turn so the next scenario does not see a dangling user message
             # without a paired assistant response.
             transcript.pop()
             continue
         except Exception as exc:  # noqa: BLE001
-            turn.error = f"adapter_call_unexpected: {exc!r}"
+            turn.error = f"adapter_call_unexpected: {redact_provider_error_text(repr(exc))}"
             rec.turns.append(turn)
             transcript.pop()
             continue
@@ -555,7 +556,9 @@ def run_cell(
                     torment.ingest(matrix.workspace_id, agent_id, f"ASSISTANT: {response_text}", step)
                     step += 1
                 except Exception as exc:  # noqa: BLE001
-                    turn.error = (turn.error or "") + f" | ingest_failed: {exc}"
+                    turn.error = (turn.error or "") + (
+                        f" | ingest_failed: {redact_provider_error_text(exc)}"
+                    )
 
             if matrix.run_config.save_character_state_snapshots:
                 try:
@@ -563,7 +566,9 @@ def run_cell(
                         matrix.workspace_id, agent_id
                     )
                 except Exception as exc:  # noqa: BLE001
-                    turn.character_state_after = {"error": str(exc)}
+                    turn.character_state_after = {
+                        "error": redact_provider_error_text(exc)
+                    }
         else:
             # controlled_role_baseline: no TORMENT involvement at all.
             turn.character_state_after = {
@@ -871,7 +876,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 get_adapter(provider, model)
                 print(f"[dry-run] adapter ok: {provider}:{model}")
             except AdapterUnavailable as exc:
-                print(f"[dry-run] adapter UNAVAILABLE: {provider}:{model} -> {exc}")
+                print(
+                    "[dry-run] adapter UNAVAILABLE: "
+                    f"{provider}:{model} -> {redact_provider_error_text(exc)}"
+                )
         print(f"[dry-run] no LLM calls made. Output dir: {out_dir}")
         return 0
 
@@ -903,10 +911,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         run_id=run_id,
                         agent_id="",
                         system_prompt="",
-                        cell_error=f"unhandled_exception: {exc!r}",
+                        cell_error=(
+                            "unhandled_exception: "
+                            f"{redact_provider_error_text(repr(exc))}"
+                        ),
                     )
-                    print(f"    [exception] {exc!r}")
-                    traceback.print_exc()
+                    print(f"    [exception] {redact_provider_error_text(repr(exc))}")
+                    sys.stderr.write(
+                        redact_provider_error_text(traceback.format_exc())
+                    )
                 cells.append(cell)
                 print(f"    done in {time.time() - t0:.1f}s")
 
@@ -918,4 +931,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 if __name__ == "__main__":
     sys.exit(main())
 # end of runner v0 (--bench-mode added 2026-05-14)
-

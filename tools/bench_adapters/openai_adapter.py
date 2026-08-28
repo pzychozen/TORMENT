@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from . import AdapterUnavailable
+from . import AdapterUnavailable, redact_provider_error_text
 
 
 class OpenAIAdapter:
@@ -43,5 +43,7 @@ class OpenAIAdapter:
                 max_tokens=1024,
             )
         except Exception as exc:
-            raise AdapterUnavailable(f"OpenAI call failed: {exc}") from exc
+            raise AdapterUnavailable(
+                f"OpenAI call failed: {redact_provider_error_text(exc)}"
+            ) from exc
         return (resp.choices[0].message.content or "").strip()

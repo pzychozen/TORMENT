@@ -12,7 +12,26 @@ with a clear actionable message.
 
 from __future__ import annotations
 
+import os
 from typing import Protocol
+
+
+_PROVIDER_API_KEY_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+_REDACTED_API_KEY_MARKER = "[REDACTED_API_KEY]"
+
+
+def redact_provider_error_text(error: object) -> str:
+    """Redact configured provider API keys from arbitrary error text."""
+    text = str(error)
+    for env_name in _PROVIDER_API_KEY_ENV_NAMES:
+        credential = os.environ.get(env_name, "").strip()
+        if credential:
+            text = text.replace(credential, _REDACTED_API_KEY_MARKER)
+    return text
 
 
 class AdapterUnavailable(RuntimeError):
