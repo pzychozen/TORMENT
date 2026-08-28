@@ -1,5 +1,6 @@
 # app.py
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
 import os, json
@@ -97,7 +98,16 @@ PROFILE_KNOWN = bool(ACTIVE_PROFILE) and (ACTIVE_PROFILE in PROFILES)
 TEST_CONDITION = os.environ.get("TORMENT_TEST_CONDITION", "").strip()
 SERVER_LAUNCHER_PATH = os.environ.get("TORMENT_SERVER_LAUNCHER_PATH", "").strip()
 
-app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.0' )
+
+@asynccontextmanager
+async def _fabric_lifespan(_: FastAPI):
+    try:
+        yield
+    finally:
+        await _close_fabric_on_shutdown()
+
+
+app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.0', lifespan=_fabric_lifespan)
 
 
 @app.middleware("http")
@@ -117,7 +127,6 @@ async def enforce_rest_auth_boundary(request: Request, call_next):
 fabric = TormentFabric(data_dir=DATA_DIR)
 
 
-@app.on_event("shutdown")
 async def _close_fabric_on_shutdown() -> None:
     """Seal opt-in trajectory V2 tails before the service releases graphs."""
     fabric.close()
