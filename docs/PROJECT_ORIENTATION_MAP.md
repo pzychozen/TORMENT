@@ -67,6 +67,11 @@
 - Identity definition is separable from experiential history.
 - Full character runtime remains memory-backed.
 - Future reduced-mode term: **historyless character**; no implementation opened.
+- **PRE-DATABASE INVARIANT 2 — MODALITY-INDEPENDENT INGEST: CLOSED / REQUIREMENT-LEVEL.**
+- Current generic text ingress is modality-blind and provenance-lossy.
+- Future memory semantics must separate origin, channel, representation, and derivation.
+- Unknown provenance is legitimate; raw media need not be retained.
+- Richer audio remains deferred; no implementation opened.
 
 ### Current authorized activity
 
