@@ -30,6 +30,40 @@ from typing import Any, Deque, Dict, List, Optional
 
 logger = logging.getLogger("torment.incidents")
 
+_REDACTED_API_KEY_MARKER = "[REDACTED_API_KEY]"
+_PROVIDER_API_KEY_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
+
+def _configured_incident_secret_values() -> tuple[str, ...]:
+    """Return configured secret values eligible for incident diagnostics only."""
+    values = set()
+
+    for env_name in _PROVIDER_API_KEY_ENV_NAMES:
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            values.add(value)
+
+    # Match the current auth configuration format while retaining only each
+    # individual key, never the complete comma-separated configuration value.
+    for entry in os.environ.get("TORMENT_API_KEYS", "").split(","):
+        parts = entry.strip().split(":")
+        if len(parts) >= 3 and parts[0].strip():
+            values.add(parts[0].strip())
+
+    return tuple(sorted(values, key=len, reverse=True))
+
+
+def _redact_dispatch_reason(reason: object) -> str:
+    """Redact exact configured secrets while preserving diagnostic prose."""
+    text = str(reason)
+    for secret in _configured_incident_secret_values():
+        text = text.replace(secret, _REDACTED_API_KEY_MARKER)
+    return text
+
 # ---------------------------------------------------------------------------
 # Incident record
 # ---------------------------------------------------------------------------
@@ -249,7 +283,11 @@ def log_spine_decision(
         elapsed_ms=resp.elapsed_ms,
         escalated=resp.escalated,
         escalation_reasons=list(resp.escalation_reasons),
-        reason=resp.reason,
+        reason=(
+            _redact_dispatch_reason(resp.reason)
+            if resp.decision_code == "error_dispatch"
+            else resp.reason
+        ),
         client_id=getattr(ctx, "client_id", ""),
         session_id=getattr(ctx, "session_id", ""),
         task_id=resp.task_id,
