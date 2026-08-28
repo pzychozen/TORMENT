@@ -50,6 +50,14 @@ step6_export_bridge.py
 # Bench output directory — large, regenerable, not part of the published repo
 out/
 
+# Generated pytest evidence
+/.pytest_cache/
+/.pytest-tmp/
+/.pytest_*/
+/.pytest_*.log
+/.pytest_*.exit*
+/.codex_pytest_*/
+
 # Internal-only doc — not part of the public TORMENT repo
 docs/MEMORY_DIGESTION_DOCTRINE_v0.1.md
 # Internal brainstorm artifacts — not part of the published repo
