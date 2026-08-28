@@ -709,11 +709,11 @@ def _prune_old_checkpoints(root_guard: _CheckpointRootGuard, keep: int) -> None:
             continue
         safe_dir = _revalidate_checkpoint_root(root_guard, "prune")
         try:
-            candidate = _child_path(safe_dir, name)
             # A symlink/reparse candidate is not a normal checkpoint file.  Do
             # not rely on remove()'s link behaviour for a destructive flow.
             if _is_link_or_reparse(os.path.join(safe_dir, name)):
                 raise _checkpoint_containment_failure(root_guard, "prune")
+            candidate = _child_path(safe_dir, name)
             os.remove(candidate)
         except CheckpointContainmentError:
             raise

@@ -153,6 +153,31 @@ def test_checkpoint_prune_substitution_aborts_without_outside_delete(tmp_path, c
         _restore_replaced_directory(private_dir, parked)
 
 
+def test_checkpoint_prune_rejects_junction_candidate_before_delete(tmp_path, caplog):
+    data_dir = tmp_path / "data"
+    _save(data_dir, 1)
+    _save(data_dir, 2)
+    guard = _get_checkpoint_root_guard(str(data_dir), "ws_f5b", "agent_f5b")
+    checkpoint_dir = Path(guard.checkpoint_root.canonical_path)
+    candidate = checkpoint_dir / "checkpoint_000001.json"
+    candidate.unlink()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_text("outside", encoding="utf-8")
+    _make_directory_junction(candidate, outside)
+    try:
+        with caplog.at_level(logging.ERROR, logger="torment.checkpoint"):
+            with pytest.raises(CheckpointContainmentError):
+                _prune_old_checkpoints(guard, 1)
+        assert sentinel.read_text(encoding="utf-8") == "outside"
+        assert "security_incident=filesystem_containment_substitution" in caplog.text
+        assert "operation=prune" in caplog.text
+    finally:
+        if candidate.exists():
+            os.rmdir(candidate)
+
+
 def test_persisted_job_sweep_substitution_aborts_and_recovers(tmp_path, monkeypatch, caplog):
     fabric = _persisted_job_fabric(tmp_path, monkeypatch)
     try:
