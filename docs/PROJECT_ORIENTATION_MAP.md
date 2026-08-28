@@ -63,10 +63,14 @@
 - Deep-memory, restart, and lifecycle repairs.
 - Trajectory V2 qualification and default promotion.
 - Bounded security hardening: REST authentication/trust, persistent identity verification, filesystem/checkpoint/job containment, canonical commit integrity, redaction, CodeQL action pinning, and FastAPI lifecycle shutdown.
+- **PRE-DATABASE INVARIANT 1 — MEMORY-OPTIONAL IDENTITY: CLOSED / REQUIREMENT-LEVEL.**
+- Identity definition is separable from experiential history.
+- Full character runtime remains memory-backed.
+- Future reduced-mode term: **historyless character**; no implementation opened.
 
 ### Current authorized activity
 
-**Orientation restoration only.** The newly saved future roadmap is direction, never automatic authorization. Do not mark memory-optional identity, audio, autonomy, or database design active. After this restoration closes, any next activity requires a fresh explicit operator decision; this patch does not recommend or open it.
+**None / HOLD pending explicit operator opening of the next roadmap item.**
 
 ## 1. Current main project thread
 
