@@ -1,5 +1,8 @@
 # TORMENT Pre-Database Layer Status Board v0.1
 
+> **STATUS NOTICE — HISTORICAL/SECONDARY SNAPSHOT.**
+> This file previously served as a living administrative bridge, but its baseline and row-level state are no longer current after substantial later work. `docs/PROJECT_ORIENTATION_MAP.md` §0 is the sole current project-orientation/work-order authority. This board remains useful as historical pre-database evidence and must not be used to infer the present active lane, current HEAD, or current subsystem status unless separately reconciled.
+
 **Purpose:** A compact, living checklist of where each pre-database layer actually stands — to fix
 direction confusion and to be reused in handoffs. **Not a gate, registry, roadmap, or doctrine artifact.**
 
@@ -12,7 +15,7 @@ direction confusion and to be reused in handoffs. **Not a gate, registry, roadma
 
 - **HEAD / baseline:** `24bd268` *docs(project): record first model-api audit tests-only characterization*
 - **Expected Windows state:** `main...origin/main` (clean)
-- **Board status:** living checklist; update the rows + the handoff block each session.
+- **Board status:** historical/secondary snapshot; not current authority. See `PROJECT_ORIENTATION_MAP.md` §0.
 
 ## 2. Status legend
 
@@ -24,7 +27,7 @@ exist, zero build.
 
 ## 3. Current active direction
 
-- **This board is the current administrative bridge.**
+- **This board formerly served as an administrative bridge; it is retained as historical/secondary evidence. `docs/PROJECT_ORIENTATION_MAP.md` §0 governs current orientation.**
 - **Ephemeral structured cognition** lane (see §5) — **Slice 1 CLOSED** (`4e164c3`) and **Slice 2
   IMPLEMENTED + CLOSED** (impl `06a9536`, docs `3564b79`); **Slice 3 core-lane shaping ALSO ALREADY
   LANDED** (`TORMENT_COGNITION_CORE_SHAPING_V1` / `_apply_cognition_core_shaping_v1`; plus later
