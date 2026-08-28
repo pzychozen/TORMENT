@@ -4,78 +4,31 @@
 
 ### Current repository state
 
-- Authoritative Windows working state: clean main...origin/main, matching origin/main, at 2ebd64cd591b89b71cd58c99f62a04e8088f71b4. The security-hardening pass is closed for its current bounded scope. This supersedes only the stale orientation statement at 9ff8e7a; material below §0 remains historical evidence, not current scheduling authority.
-- This map’s §0 is the live orientation and work-order authority. It is not a roadmap authorization.
+- This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 
-### Current system state
+### Pre-database invariant closure
 
-- **Core / MemoryGraph.** Live production canonical node truth is nodes.jsonl; SQLite is derived/rebuildable; existing embedding artifacts are canonical. EID graph locality is private workspace + agent + EID and shared workspace + domain + EID. A canonical-node append failure is terminal for that ingest, with a non-queryable stored-memory outcome; precommit residue may remain for reconciliation but is not committed truth.
-- **Character / identity.** CharacterSeed / CharacterState and current character modulation are production-connected. There is no designed memory-disabled or stateless character mode; that absence is a fact, not a future shell lane.
-- **Thinking.** Advisory ThinkingController / MemoryPlan retrieval planning is production-connected and base behavior is default-ON. Later named shaping refinements are individually default-OFF. The layer is stateless, content-free advisory shaping: it has no tool, write, model-call, autonomous, or execution authority.
-- **Four-role cognition.** The real production cognition/ path is reachable only through explicit elevated-trust invocation; it is not background cognition or autonomy. Archivist writeback exists but is default-OFF. Spine’s full-cognition path deliberately supplies no write callbacks and is therefore read-only.
-- **Hivemind.** The actual collective path is optional and default-OFF. When enabled, it runs synchronously in externally initiated work and produces packet, convergence, echo, and proposal machinery. CONTENT CONTRIBUTION != AUTHORITY CONTRIBUTION: collective content cannot manufacture independent quorum authority, and there is no autonomous swarm, scheduler, or self-directed orchestration. Meridian/Hivemind characterization remains experimental evidence about production machinery, not runtime authority.
-- **SRG.** Main SRG computation is optional and default-OFF, with no tool, execution, or admission authority. Historical SRG payload markers already written can still affect retention or placement readers after computation is off; default-OFF does not erase their historical consequences.
-- **Brainvision production.** Brainvision v1a is qualified production code. TormentFabric unconditionally constructs and hosts its lifecycle manager, sharing Fabric-level data-root, identity-store, locks, and shutdown lifecycle resources. Brainvision is functionally unconsumed by ordinary ingest, MemoryGraph, character, cognition, SRG, Hivemind, Spine, prompts, and model inference: its existence changes no ordinary language or memory behavior. Its recursive visual state is not TORMENT memory; mandatory integration HOLD remains.
-- **Brainvision research.** research/brainvision/ is a separately held, offline, quarantined, non-core, evidence-only lineage. Its old hold was not superseded merely because the separate production Brainvision package was later built: these are two lineages with one shared name.
-- **Model providers.** Fabric, Spine, app, and MCP contain no TORMENT-owned general generative-model runtime or caller. Dormant/manual non-Spine provider machinery and external voice/model client machinery exist, predate the stale §0, and do not supersede the model-boundary hold. One later frozen experiment exercised the manual provider surface. External/manual model use != TORMENT owning an authority-bearing caller; provider output has no canonical, authority, schedule, or autonomy power.
-- **Agent runtime.** AgentRunner/tool/action-policy code exists but is dormant and unowned: no app, Fabric, Spine, or MCP reachability makes it a shippable autonomous agent. It is not described as production-isolated in the Brainvision sense.
-- **Spine / MCP.** The governed memory route is:
+- **PRE-DATABASE INVARIANT 1 — MEMORY-OPTIONAL IDENTITY: CLOSED / REQUIREMENT-LEVEL.** Identity definition is separable from experiential history; full character runtime remains memory-backed; the future reduced-mode term is **historyless character**. No implementation opened.
+- **PRE-DATABASE INVARIANT 2 — MODALITY-INDEPENDENT INGEST: CLOSED / REQUIREMENT-LEVEL.** Current generic text ingress is modality-blind and provenance-lossy; future memory semantics must separate origin, channel, representation, and derivation; unknown provenance is legitimate and raw media need not be retained. No richer-audio implementation opened.
+- **PRE-DATABASE INVARIANT 3 — AGENCY / AUTHORITY SEPARATION: CLOSED / REQUIREMENT-LEVEL.** Content/evidence does not create present authority; intent/proposal is distinct from permission; future durable, delegated, and AI-held authority remains permitted only under legitimate non-circular conferral; execution and autonomous initiation are distinct. No authority or autonomy runtime was opened.
 
-    MCP -> Spine -> Fabric
+> **All three pre-database invariants are CLOSED.**
+>
+> 1. Memory-Optional Identity
+> 2. Modality-Independent Ingest
+> 3. Agency / Authority Separation
 
-  MCP is a governed memory interface, not generic tool execution or autonomous action authority. Spine does not dispatch every REST mutation: direct Fabric REST paths use a separate trust-enforcement table and remain a coverage debt.
-- **Audio / voice.** The external client formerly named live_agent/ is now voice_client/; the rename does not open an audio lane. It performs STT / memory retrieval / external model inference / TTS outside Fabric core, then transcript ingest reaches TORMENT through the Spine endpoint. It is not a canonical Fabric modality, stamps no explicit audio/modality provenance, has no API-key header support when REST auth is enabled, and does not open richer audio work.
-- **UI.** start/torment_character_creator.html is substantial static/local character-configuration tooling, but has not been comprehensively updated to every recent backend/system change. It is not an authoritative inventory of current TORMENT capabilities, and there is no integrated one-stop control center.
+### Current authority and autonomy boundary
 
-### Current isolations
-
-- Brainvision production state is not consumed by ordinary memory, cognition, prompt, or model paths.
-- Quarantined offline Brainvision research is separate from production Brainvision.
-- AgentRunner/tool execution is dormant and not runtime-owned.
-- Voice is an external client, not a Fabric modality.
-- Collective content cannot grant itself authority.
-- External/manual model callers are not TORMENT-owned caller authority.
-- Hivemind experiments are downstream evidence, not runtime wiring.
-
-### Current holds
-
-- **Autonomy:** MODE 0 / AUTOMATIC-FIRST only: TORMENT reacts to external input, invocation, or bounded external events. No self-starting scheduler, objective generation, model self-continuation, autonomous tool invocation, perception-to-action loop, self-modification, standing cognitive trigger, or authority escalation is open. A bounded externally triggered maintenance thread does not change this classification.
-- **Database / substrate:** Database/substrate mechanics and design remain unopened. A bounded Stage-B-to-framing opening occurred under f309b0a and now rests; that framing opening authorized no schema, store, carrier, substrate-root, transaction model, migration target, or implementation.
-- **M3:** direction only. The general live TORMENT-owned model/runtime/caller remains closed; manual or external providers do not supersede that closure.
-- **Caller owner:** unresolved. External clients assembling context do not answer the internal authority-bearing caller question.
-- **MCP / action:** governed memory operations exist; generic action or movement is closed.
-- **H3:** /promote force=True authority semantics remain unresolved; later trust/security enforcement did not answer the semantic question.
-- **Carrier:** carrier choice rests unselected.
-
-### Current unresolved debt
-
-1. Spine contract/comments claim universal external-write coverage while actual direct-Fabric REST mutation paths and parallel trust enforcement remain; this is known governance/contract debt.
-2. MCP documentation/comments say internal exposure is never v1, while the generic helper mechanically accepts an internal ceiling if configured and configured exposure is trusted; this is maintenance/config-validation debt, not a new authorized surface.
-3. Voice remains unresolved for auth compatibility and modality/provenance.
-4. Trajectory documentation contains a stale default statement while code is V2.
-5. The pre-database status board was stale; this companion patch demotes it to historical/secondary evidence.
-
-### Recently closed
-
-- Core / MemoryGraph archaeology and bounded repairs.
-- Shared / Hivemind archaeology and collective-authority repairs.
-- Brainvision production Phases 0–13 and corrected v1a qualification.
-- Deep-memory, restart, and lifecycle repairs.
-- Trajectory V2 qualification and default promotion.
-- Bounded security hardening: REST authentication/trust, persistent identity verification, filesystem/checkpoint/job containment, canonical commit integrity, redaction, CodeQL action pinning, and FastAPI lifecycle shutdown.
-- **PRE-DATABASE INVARIANT 1 — MEMORY-OPTIONAL IDENTITY: CLOSED / REQUIREMENT-LEVEL.**
-- Identity definition is separable from experiential history.
-- Full character runtime remains memory-backed.
-- Future reduced-mode term: **historyless character**; no implementation opened.
-- **PRE-DATABASE INVARIANT 2 — MODALITY-INDEPENDENT INGEST: CLOSED / REQUIREMENT-LEVEL.**
-- Current generic text ingress is modality-blind and provenance-lossy.
-- Future memory semantics must separate origin, channel, representation, and derivation.
-- Unknown provenance is legitimate; raw media need not be retained.
-- Richer audio remains deferred; no implementation opened.
+- `CONTENT_AND_AUTHORITY_ARE_MOSTLY_SEPARATED_WITH_EXPLICIT_EXCEPTIONS` is the factual archaeology verdict. Trust/request authorization is external/config/request-derived, not memory-derived. Ordinary memory, canon, retrieval rank, tool result, model output, ThinkingResult, cognition result, Hivemind echo/proposal, character state, kernel signal, and stored intent do not create execution permission merely by existing or becoming influential.
+- Current Mode 0 contains no memory-triggered wake loop or autonomous initiation path. AgentRunner/tool execution remains dormant and unowned. Managed autonomy is a future concept only; no scheduler, wake condition, active authorization runtime, capability system, or generic action authority exists today.
+- Canon is epistemic/identity standing, not execution permission. Retrieval may reveal authority-related information but is non-authorizing. Collective content cannot manufacture independent authority. `CONTENT CONTRIBUTION != AUTHORITY CONTRIBUTION` remains current Hivemind posture.
+- Current TORMENT has parallel REST and Spine trust enforcement; Fabric generally assumes caller-side authorization. This is enforcement-placement debt, not content/authority entanglement. `/promote force=True` remains `SEPARATELY_GATED_AUTHORITY_QUESTION`; Gate B is unresolved.
+- Existing persisted authority-shaped state that has never been load-bearing must not automatically become active authority in any future migration merely because it is preserved or normalized.
 
 ### Current authorized activity
 
-**None / HOLD pending explicit operator opening of the next roadmap item.**
+**None / HOLD pending explicit operator decision to open Memory Substrate architecture.**
 
 ## 1. Current main project thread
 
