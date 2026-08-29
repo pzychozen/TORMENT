@@ -39,13 +39,15 @@ _CLASS = "CandidateShapedValue"
 _TOKEN = "CandidateShapedValue"
 
 # The ONLY service modules that may reference the inert sentinel: its definition +
-# the five landed Layer-4 negative-refusal surfaces (memory_graph holds two).
+# the six landed Layer-4 negative-refusal surfaces (memory_graph holds two;
+# substrate compat adds a type-only create/patch refusal, not candidate storage).
 _FOOTPRINT_MODULES = frozenset({
     "candidate_types.py",
     "fabric.py",
     "memory_graph.py",
     "environment_memory.py",
     "reference_memory.py",
+    "compat.py",
 })
 
 # The class must define EXACTLY these methods — the inert minimal API.
@@ -359,7 +361,7 @@ class TestNoProducerAndPerimeterFootprint(unittest.TestCase):
         self.assertEqual(offenders, {},
                          msg=f"production constructs CandidateShapedValue (producer drift): {offenders}")
 
-    def test_footprint_is_exactly_the_classified_five(self):
+    def test_footprint_is_exactly_the_classified_negative_refusal_perimeter(self):
         bearing = {os.path.basename(rel) for rel, src_text, _t in _iter_service()
                    if _TOKEN in src_text}
         new = bearing - _FOOTPRINT_MODULES
