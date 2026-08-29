@@ -178,7 +178,7 @@ def classify_artifact(relative_locator: str) -> str:
         return "LEGACY_MOTIF_EVENT_EVIDENCE"
     if "deep" in name and "memory" in name:
         return "LEGACY_DEEP_MEMORY_EVIDENCE"
-    if "identity" in name or "character" in name:
+    if name in {"identity.json", "seed.json", "character_state.json"}:
         return "LEGACY_IDENTITY_CHARACTER_EVIDENCE"
     if any(token in name for token in ("proposal", "closure", "conflict", "ledger")):
         return "LEGACY_GOVERNANCE_LEDGER_EVIDENCE"
