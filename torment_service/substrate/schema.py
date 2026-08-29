@@ -170,6 +170,12 @@ CREATE TRIGGER immutable_payload_update BEFORE UPDATE ON representation_payloads
 CREATE TRIGGER immutable_payload_delete BEFORE DELETE ON representation_payloads BEGIN SELECT RAISE(ABORT,'immutable representation payload'); END;
 CREATE TRIGGER immutable_representation_dependency_update BEFORE UPDATE ON representation_dependencies BEGIN SELECT RAISE(ABORT,'immutable representation dependency'); END;
 CREATE TRIGGER immutable_representation_dependency_delete BEFORE DELETE ON representation_dependencies BEGIN SELECT RAISE(ABORT,'immutable representation dependency'); END;
+CREATE TRIGGER immutable_legacy_artifact_record_update BEFORE UPDATE ON legacy_artifact_records BEGIN SELECT RAISE(ABORT,'immutable legacy artifact record'); END;
+CREATE TRIGGER immutable_legacy_artifact_record_delete BEFORE DELETE ON legacy_artifact_records BEGIN SELECT RAISE(ABORT,'immutable legacy artifact record'); END;
+CREATE TRIGGER immutable_legacy_admission_record_update BEFORE UPDATE ON legacy_admission_records BEGIN SELECT RAISE(ABORT,'immutable legacy admission record'); END;
+CREATE TRIGGER immutable_legacy_admission_record_delete BEFORE DELETE ON legacy_admission_records BEGIN SELECT RAISE(ABORT,'immutable legacy admission record'); END;
+CREATE TRIGGER immutable_legacy_admission_effect_update BEFORE UPDATE ON legacy_admission_effects BEGIN SELECT RAISE(ABORT,'immutable legacy admission effect'); END;
+CREATE TRIGGER immutable_legacy_admission_effect_delete BEFORE DELETE ON legacy_admission_effects BEGIN SELECT RAISE(ABORT,'immutable legacy admission effect'); END;
 CREATE TRIGGER immutable_expectation_update BEFORE UPDATE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
 CREATE TRIGGER immutable_expectation_delete BEFORE DELETE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
 CREATE TRIGGER immutable_measurement_update BEFORE UPDATE ON integrity_measurements BEGIN SELECT RAISE(ABORT,'immutable integrity measurement'); END;
