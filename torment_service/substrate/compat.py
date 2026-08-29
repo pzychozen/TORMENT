@@ -12,10 +12,13 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
+import time
 from types import MappingProxyType
 from typing import Any, Mapping
 from uuid import UUID
 import sqlite3
+
+import numpy as np
 
 from torment_service.candidate_types import CandidateShapedValue
 from torment_service.lifecycle import LifecycleActor, derive_protected_lifecycle_from_legacy_markers, validate_lifecycle_envelope
@@ -38,6 +41,12 @@ from .representations import (
 from .schema import open_schema
 
 _MEMORY_OBJECT_KIND = "LEGACY_CORE_NODE"
+_COMPAT_EMBEDDING_REPRESENTATION_CLASS = "COMPAT_EMBEDDING"
+_COMPAT_EMBEDDING_GENERATION = 1
+_COMPAT_EMBEDDING_DERIVATION_CONTRACT = "compat-embedding-v1"
+_COMPAT_EMBEDDING_ENCODING = "RAW_VECTOR"
+_COMPAT_EMBEDDING_DTYPE = "float32"
+_DECAY_RANKING_FLOOR = 0.03
 
 
 @dataclass(frozen=True)
@@ -89,6 +98,32 @@ class CompatibilityMemoryRelationshipView:
     source_eid: int; target_eid: int; relationship_id: UUID; revision_id: UUID
     revision_ordinal: int; semantic_scope_id: UUID; relationship_kind: str
     weight: float; legacy_timestamp: str | int | float | None; payload: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class CompatibilityEmbeddingSearchResult:
+    """An immutable current-memory compatibility result from one native vector lane."""
+    eid: int; object_id: UUID; revision_id: UUID; representation_id: UUID
+    score: float; raw_score: float; decay_factor: float
+    summary: str; memory_type: str; strength: float; confidence: float; step: int; ts: int
+    semantic_scope_id: UUID; lifecycle_state: str; lifecycle_authoritative: bool
+    governance_state: str; authority_category: str; payload: Mapping[str, Any]
+
+    def to_legacy_dict(self) -> dict[str, Any]:
+        """Return a fresh legacy-shaped projection with structural truth last."""
+        result = dict(self.payload)
+        result.update({
+            "eid": self.eid, "score": self.score, "raw_score": self.raw_score,
+            "decay_factor": self.decay_factor, "summary": self.summary,
+            "type": self.memory_type, "strength": self.strength,
+            "confidence": self.confidence, "step": self.step, "ts": self.ts,
+            "semantic_scope_id": str(self.semantic_scope_id),
+            "lifecycle_state": self.lifecycle_state,
+            "lifecycle_authoritative": self.lifecycle_authoritative,
+            "governance_state": self.governance_state,
+            "authority_category": self.authority_category,
+        })
+        return result
 
 
 @dataclass(frozen=True)
@@ -543,6 +578,150 @@ class NativeMemoryCompatibilityFacade:
             native_id_from_bytes(row[3]), row[0], float(weight), timestamp, MappingProxyType(payload),
         )
 
+    def search_by_embedding(
+        self,
+        *,
+        legacy_source_namespace_id: UUID,
+        embedding: Any,
+        dimension: int,
+        representation_class: str = _COMPAT_EMBEDDING_REPRESENTATION_CLASS,
+        generation: int = _COMPAT_EMBEDDING_GENERATION,
+        derivation_contract_version: str = _COMPAT_EMBEDDING_DERIVATION_CONTRACT,
+        encoding_id: str = _COMPAT_EMBEDDING_ENCODING,
+        dtype: str = _COMPAT_EMBEDDING_DTYPE,
+        top_k: int = 8,
+        user_id: str | None = None,
+        min_score: float | None = None,
+        type_filter: tuple[str, ...] | list[str] | None = None,
+        canon_only: bool = False,
+        now_ts: float | int | None = None,
+    ) -> tuple[CompatibilityEmbeddingSearchResult, ...]:
+        """Read-only exact cosine search over one explicit native embedding lane.
+
+        The method never imports ``MemoryGraph`` or examines legacy files. Only
+        representations with durable READY/USABLE/MATCH state and a source equal
+        to the current native core-memory revision are considered.
+        """
+        query, limit, score_floor, type_set, effective_now = _validate_search_inputs(
+            legacy_source_namespace_id, embedding, dimension, representation_class,
+            generation, derivation_contract_version, encoding_id, dtype, top_k,
+            user_id, min_score, type_filter, canon_only, now_ts,
+        )
+        candidates = self._eligible_embedding_candidates(
+            legacy_source_namespace_id=legacy_source_namespace_id,
+            representation_class=representation_class,
+            generation=generation,
+            derivation_contract_version=derivation_contract_version,
+            encoding_id=encoding_id,
+            dtype=dtype,
+            dimension=dimension,
+        )
+        representations = NativeRepresentationService(self._connection)
+        scored: list[tuple[float, int, bytes, bytes, bytes]] = []
+        seen_objects: set[bytes] = set()
+        for representation_id, object_id, source_revision_id, expected_length, alias_value in candidates:
+            if object_id in seen_objects:
+                raise SubstrateInvariantViolation("compatibility search lane has contradictory eligible representations")
+            seen_objects.add(object_id)
+            eid = _canonical_eid(alias_value)
+            metadata = representations.get_representation_metadata(UUID(bytes=representation_id))
+            if not _metadata_is_search_eligible(metadata):
+                continue
+            payload = representations.read_representation_payload(UUID(bytes=representation_id))
+            vector = _decode_compat_embedding_payload(payload, expected_length, dtype, dimension)
+            if vector is None:
+                continue
+            raw_score = float(np.dot(vector, query))
+            scored.append((raw_score, eid, representation_id, object_id, source_revision_id))
+
+        # This intentionally takes the raw-score top-k before all legacy-facing
+        # filters. A filter may therefore leave fewer than ``top_k`` results.
+        scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+        results: list[CompatibilityEmbeddingSearchResult] = []
+        for raw_score, eid, representation_id, object_id, source_revision_id in scored[:limit]:
+            if score_floor is not None and raw_score < score_floor:
+                continue
+            current = self._current_row(legacy_source_namespace_id, eid)
+            if current[0] != object_id or current[1] != source_revision_id:
+                # The source advanced after candidate selection. Never return a
+                # historical vector as though it described the new current state.
+                continue
+            payload = _payload_mapping(current[10], current[11])
+            if canon_only and not payload.get("canon", False):
+                continue
+            if user_id is not None and str(payload.get("user_id", "")) != user_id:
+                continue
+            memory_type = str(payload.get("type") or payload.get("mtype") or "")
+            if type_set and memory_type and memory_type not in type_set:
+                continue
+            decay = _compat_half_life_decay_factor(payload, effective_now)
+            results.append(CompatibilityEmbeddingSearchResult(
+                eid, native_id_from_bytes(current[0]), native_id_from_bytes(current[1]),
+                UUID(bytes=representation_id), raw_score * decay, raw_score, decay,
+                _compat_summary(payload), memory_type or "memory",
+                _compat_number(payload.get("strength")), _compat_number(payload.get("confidence")),
+                _compat_int(payload.get("step") or payload.get("born_step") or payload.get("created_at")),
+                _compat_int(payload.get("ts") or payload.get("created_ts")),
+                native_id_from_bytes(current[3]), current[5], bool(current[6]), current[7], current[8],
+                MappingProxyType(payload),
+            ))
+        results.sort(key=lambda item: (-item.score, item.eid, item.representation_id.bytes))
+        return tuple(results)
+
+    def _eligible_embedding_candidates(
+        self,
+        *,
+        legacy_source_namespace_id: UUID,
+        representation_class: str,
+        generation: int,
+        derivation_contract_version: str,
+        encoding_id: str,
+        dtype: str,
+        dimension: int,
+    ) -> tuple[tuple[bytes, bytes, bytes, int | None, str], ...]:
+        """Return metadata only; usable bytes are later loaded via the native service."""
+        rows = self._connection.execute(
+            """
+            SELECT r.representation_id,r.source_object_id,r.source_object_revision_id,
+                   r.expected_payload_byte_length,a.alias_value
+            FROM representations r
+            JOIN representation_current_state s USING(representation_id)
+            JOIN integrity_measurements m ON m.measurement_id=s.selected_integrity_measurement_id
+            JOIN objects o ON o.object_id=r.source_object_id
+            JOIN legacy_object_aliases a ON a.object_id=o.object_id
+            WHERE r.source_kind='OBJECT_REVISION'
+              AND o.object_kind=?
+              AND r.source_object_revision_id=o.current_revision_id
+              AND r.source_object_revision_ordinal=o.current_revision_ordinal
+              AND a.legacy_source_namespace_id=? AND a.alias_kind='EID'
+              AND r.representation_class=? AND r.generation=?
+              AND r.derivation_contract_version=? AND r.encoding_id=?
+              AND r.dtype=? AND r.dimension=?
+              AND s.readiness='READY' AND s.operational_disposition='USABLE'
+              AND m.result='MATCH'
+              AND EXISTS (
+                  SELECT 1 FROM integrity_expectations e
+                  WHERE e.subject_kind='REPRESENTATION' AND e.representation_id=r.representation_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM reconciliation_cases c
+                  JOIN reconciliation_case_states cs
+                    ON cs.reconciliation_case_id=c.reconciliation_case_id
+                   AND cs.reconciliation_state_id=c.current_state_id
+                   AND cs.state_ordinal=c.current_state_ordinal
+                  WHERE c.subject_kind='REPRESENTATION' AND c.representation_id=r.representation_id
+                    AND cs.operational_disposition<>'USABLE'
+              )
+            ORDER BY a.alias_value,r.representation_id
+            """,
+            (
+                _MEMORY_OBJECT_KIND, native_id_to_bytes(legacy_source_namespace_id),
+                representation_class, generation, derivation_contract_version, encoding_id, dtype, dimension,
+            ),
+        ).fetchall()
+        return tuple((row[0], row[1], row[2], row[3], row[4]) for row in rows)
+
     def _current_row(self, namespace: UUID, eid: int) -> tuple[Any, ...]:
         _validate_eid(eid)
         row = self._connection.execute("""SELECT o.object_id,r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,r.authority_category,r.provenance_id,r.payload_format,r.payload_text FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?""", (native_id_to_bytes(namespace), str(eid))).fetchone()
@@ -710,6 +889,160 @@ def _relationship_flexible_mapping(value: Mapping[str, Any] | None, *, field: st
         if key.casefold() in _RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS:
             raise ValueError(f"{field} cannot overwrite structural relationship semantics")
     return copied
+
+
+def _validate_search_inputs(
+    legacy_source_namespace_id: Any, embedding: Any, dimension: Any,
+    representation_class: Any, generation: Any, derivation_contract_version: Any,
+    encoding_id: Any, dtype: Any, top_k: Any, user_id: Any, min_score: Any,
+    type_filter: Any, canon_only: Any, now_ts: Any,
+) -> tuple[np.ndarray, int, float | None, frozenset[str], float]:
+    if not isinstance(legacy_source_namespace_id, UUID):
+        raise ValueError("legacy_source_namespace_id must be a UUID")
+    if not isinstance(dimension, int) or isinstance(dimension, bool) or dimension < 1:
+        raise ValueError("dimension must be a positive integer")
+    if (
+        representation_class,
+        generation,
+        derivation_contract_version,
+        encoding_id,
+        dtype,
+    ) != (
+        _COMPAT_EMBEDDING_REPRESENTATION_CLASS,
+        _COMPAT_EMBEDDING_GENERATION,
+        _COMPAT_EMBEDDING_DERIVATION_CONTRACT,
+        _COMPAT_EMBEDDING_ENCODING,
+        _COMPAT_EMBEDDING_DTYPE,
+    ):
+        raise ValueError("only the qualified COMPAT_EMBEDDING/1 RAW_VECTOR float32 lane is supported")
+    if not isinstance(top_k, int) or isinstance(top_k, bool):
+        raise ValueError("top_k must be an integer")
+    limit = max(1, top_k)
+    if user_id is not None and not isinstance(user_id, str):
+        raise ValueError("user_id must be a string when supplied")
+    if min_score is None:
+        score_floor = None
+    else:
+        if isinstance(min_score, bool):
+            raise ValueError("min_score must be a finite number")
+        try:
+            score_floor = float(min_score)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("min_score must be a finite number") from exc
+        if not math.isfinite(score_floor):
+            raise ValueError("min_score must be a finite number")
+    if type_filter is None:
+        type_set = frozenset()
+    else:
+        if not isinstance(type_filter, (list, tuple)) or any(not isinstance(value, str) for value in type_filter):
+            raise ValueError("type_filter must be a list or tuple of strings when supplied")
+        type_set = frozenset(type_filter)
+    if not isinstance(canon_only, bool):
+        raise ValueError("canon_only must be a boolean")
+    try:
+        raw = np.asarray(embedding)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("embedding must be a numeric vector") from exc
+    if not np.issubdtype(raw.dtype, np.number) or np.issubdtype(raw.dtype, np.bool_):
+        raise ValueError("embedding must be a numeric vector")
+    try:
+        query = np.asarray(raw, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("embedding must be a numeric vector") from exc
+    if query.size == 0:
+        raise ValueError("embedding must be non-empty")
+    if query.size != dimension:
+        raise ValueError("query dimension does not match the explicit representation lane")
+    if not np.all(np.isfinite(query)):
+        raise ValueError("embedding must contain only finite values")
+    norm = float(np.linalg.norm(query))
+    if not math.isfinite(norm) or norm <= 0.0:
+        raise ValueError("embedding must have a positive finite norm")
+    if now_ts is None:
+        effective_now = float(time.time())
+    else:
+        if isinstance(now_ts, bool):
+            raise ValueError("now_ts must be a finite number when supplied")
+        try:
+            effective_now = float(now_ts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("now_ts must be a finite number when supplied") from exc
+        if not math.isfinite(effective_now):
+            raise ValueError("now_ts must be a finite number when supplied")
+    return query / norm, limit, score_floor, type_set, effective_now
+
+
+def _metadata_is_search_eligible(metadata: RepresentationMetadata) -> bool:
+    return (
+        metadata.source_kind == "OBJECT_REVISION"
+        and metadata.readiness == "READY"
+        and metadata.disposition == "USABLE"
+        and metadata.integrity_expectation_id is not None
+        and metadata.selected_measurement_id is not None
+    )
+
+
+def _decode_compat_embedding_payload(
+    payload: bytes, expected_payload_byte_length: int | None, dtype: str, dimension: int,
+) -> np.ndarray | None:
+    if dtype != _COMPAT_EMBEDDING_DTYPE:
+        raise SubstrateInvariantViolation("compatibility search does not support this representation dtype")
+    expected_length = np.dtype(dtype).itemsize * dimension
+    if (
+        not isinstance(expected_payload_byte_length, int)
+        or isinstance(expected_payload_byte_length, bool)
+        or expected_payload_byte_length != expected_length
+        or len(payload) != expected_length
+    ):
+        raise SubstrateInvariantViolation("compatibility embedding payload length does not match frozen metadata")
+    vector = np.frombuffer(payload, dtype=np.dtype(dtype))
+    if vector.size != dimension:
+        raise SubstrateInvariantViolation("compatibility embedding payload dimension is inconsistent")
+    vector64 = vector.astype(np.float64, copy=False)
+    if not np.all(np.isfinite(vector64)):
+        return None
+    norm = float(np.linalg.norm(vector64))
+    if not math.isfinite(norm) or norm <= 0.0:
+        return None
+    return vector64 / norm
+
+
+def _compat_half_life_decay_factor(payload: Mapping[str, Any], now_ts: float) -> float:
+    try:
+        half_life = float(payload.get("half_life", 0) or 0)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(half_life) or half_life <= 0.0:
+        return 1.0
+    anchor = _compat_number(payload.get("last_reinforced_ts"), default=0.0)
+    if anchor <= 0.0:
+        anchor = _compat_number(payload.get("created_ts"), default=0.0)
+    if anchor <= 0.0:
+        return 1.0
+    age_days = max(0.0, (now_ts - anchor) / 86400.0)
+    if age_days <= 0.0:
+        return 1.0
+    return max(_DECAY_RANKING_FLOOR, float(2.0 ** (-age_days / half_life)))
+
+
+def _compat_summary(payload: Mapping[str, Any]) -> str:
+    value = payload.get("summary") or payload.get("text") or ""
+    return str(value)
+
+
+def _compat_number(value: Any, *, default: float = 0.0) -> float:
+    try:
+        result = float(value or 0.0)
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _compat_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def _validate_eid(eid: int) -> None:
