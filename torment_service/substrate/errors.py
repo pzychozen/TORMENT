@@ -27,3 +27,19 @@ class SubstrateIdentifierError(SubstrateError):
 
 class CanonicalIntentError(SubstrateError):
     """Raised when a value cannot participate in TMS-INTENT-1 encoding."""
+
+
+class SubstrateIdempotencyConflict(SubstrateError):
+    """Raised when a retry identity is reused with different canonical intent."""
+
+
+class SubstrateRevisionConflict(SubstrateError):
+    """Raised when an object no longer has the expected current revision."""
+
+
+class SubstrateObjectNotFound(SubstrateError):
+    """Raised when a native object identity has no durable carrier row."""
+
+
+class SubstrateInvariantViolation(SubstrateError):
+    """Raised when a current-slice helper-owned invariant is not satisfied."""
