@@ -21,7 +21,7 @@ class ObjectRevisionView:
 
 class SubstrateTx:
     """The sole BEGIN IMMEDIATE/COMMIT/ROLLBACK owner for one semantic operation."""
-    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None: self.connection,self.operation_id,self.transitions,self.published=connection,operation_id,[],[]
+    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None: self.connection,self.operation_id,self.transitions,self.published,self.relationship_published=connection,operation_id,[],[],[]
     def execute(self, sql: str, parameters: tuple[object,...]=()) -> sqlite3.Cursor: return self.connection.execute(sql,parameters)
     def validate(self) -> None:
         for oid,rid,ordinal in self.published:
@@ -29,7 +29,11 @@ class SubstrateTx:
             if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='OBJECT' AND object_id=? AND object_revision_id=? AND object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output does not match publication")
             if self.execute("SELECT 1 FROM object_revision_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.object_id=? AND e.object_revision_id=? AND e.object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output is not published")
         for tid in self.transitions:
-            if self.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=?",(tid,)).fetchone() is None: raise SubstrateInvariantViolation("H2 transition has no typed effect")
+            if self.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=? UNION SELECT 1 FROM relationship_revision_effects WHERE transition_id=?",(tid,tid)).fetchone() is None: raise SubstrateInvariantViolation("H2 transition has no typed effect")
+        for rid,revision,ordinal in self.relationship_published:
+            if self.execute("SELECT current_revision_id,current_revision_ordinal FROM relationships WHERE relationship_id=?",(rid,)).fetchone() != (revision,ordinal): raise SubstrateInvariantViolation("H1 relationship current pointer is incomplete")
+            if self.execute("SELECT 1 FROM relationship_revision_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.relationship_id=? AND e.relationship_revision_id=? AND e.relationship_revision_ordinal=?",(self.operation_id,rid,revision,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H2 relationship effect is missing")
+            if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='RELATIONSHIP' AND relationship_id=? AND relationship_revision_id=? AND relationship_revision_ordinal=?",(self.operation_id,rid,revision,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 relationship output does not match publication")
         if self.execute("SELECT 1 FROM semantic_transitions t JOIN operation_rejections r ON r.operation_id=t.operation_id WHERE t.operation_id=?",(self.operation_id,)).fetchone() is not None: raise SubstrateInvariantViolation("H3 operation has transition and durable rejection")
 
 class NativeObjectService:
@@ -47,21 +51,8 @@ class NativeObjectService:
         if row is None: raise SubstrateObjectNotFound("native object was not found")
         return ObjectRevisionView(UUID(bytes=row[0]),UUID(bytes=row[1]),row[2],UUID(bytes=row[3]),*row[4:])
     def _execute(self, namespace:UUID,key:str,kind:str,intent:str,mutate:Any)->ObjectResult:
-        if not key: raise ValueError("idempotency key is required")
-        self._connection.execute("BEGIN IMMEDIATE")
-        try:
-            row=self._connection.execute("SELECT operation_id,canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",(_blob(namespace),key)).fetchone()
-            if row:
-                if row[1].encode()!=intent.encode(): raise SubstrateIdempotencyConflict("idempotency intent differs")
-                prior=self._result(row[0])
-                if prior: self._connection.execute("COMMIT"); return prior
-                op=row[0]
-            else:
-                op=_new(); self._connection.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,0)",(op,_blob(namespace),key,kind,"TMS-INTENT-1",intent))
-            tx=SubstrateTx(self._connection,op); result=mutate(tx); tx.validate(); self._connection.execute("COMMIT"); return result
-        except Exception:
-            if self._connection.in_transaction:self._connection.execute("ROLLBACK")
-            raise
+        return execute_semantic(self._connection,namespace,key,kind,intent,self._result,mutate)
+
     def _create(self,tx:SubstrateTx,state:ObjectState,requested:UUID|None)->ObjectResult:
         oid=_blob(requested) if requested else _new(); rid,tid=_new(),_new(); self._state(state)
         tx.execute("INSERT INTO objects(object_id,identity_namespace_id,object_kind,created_at_ns) VALUES (?,?,?,0)",(oid,_blob(state.identity_namespace_id),state.object_kind)); self._revision(tx,rid,oid,1,"NATIVE_CREATION",None,None,state); self._publish(tx,oid,rid,1,tid); return _res(oid,rid,tid,tx.operation_id)
@@ -80,6 +71,22 @@ class NativeObjectService:
     def _intent(kind:str,state:ObjectState,oid:UUID|None,expected:UUID|None)->str:return canonical_intent_text({"kind":kind,"object_id":str(oid) if oid else None,"expected_revision_id":str(expected) if expected else None,"identity_namespace_id":str(state.identity_namespace_id),"semantic_scope_id":str(state.semantic_scope_id),"object_kind":state.object_kind,"existence_state":state.existence_state,"lifecycle_state":state.lifecycle_state,"lifecycle_authoritative":state.lifecycle_authoritative,"governance_state":state.governance_state,"authority_category":state.authority_category,"payload":state.payload,"payload_format":state.payload_format,"provenance_id":str(state.provenance_id) if state.provenance_id else None})
     def _result(self,op:bytes)->ObjectResult|None:
         row=self._connection.execute("SELECT o.object_id,o.object_revision_id,t.transition_id,t.operation_id FROM operation_outputs o JOIN semantic_transitions t ON t.operation_id=o.operation_id WHERE o.operation_id=? AND o.output_kind='OBJECT' ORDER BY o.output_ordinal LIMIT 1",(op,)).fetchone(); return _res(*row) if row else None
+def execute_semantic(connection:sqlite3.Connection,namespace:UUID,key:str,kind:str,intent:str,resolver:Any,mutate:Any)->Any:
+    if not key: raise ValueError("idempotency key is required")
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        row=connection.execute("SELECT operation_id,canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",(_blob(namespace),key)).fetchone()
+        if row:
+            if row[1].encode()!=intent.encode(): raise SubstrateIdempotencyConflict("idempotency intent differs")
+            prior=resolver(row[0])
+            if prior: connection.execute("COMMIT"); return prior
+            op=row[0]
+        else:
+            op=_new(); connection.execute("INSERT INTO operations VALUES (?,?,?,?,?,?,0)",(op,_blob(namespace),key,kind,"TMS-INTENT-1",intent))
+        tx=SubstrateTx(connection,op); result=mutate(tx); tx.validate(); connection.execute("COMMIT"); return result
+    except Exception:
+        if connection.in_transaction:connection.execute("ROLLBACK")
+        raise
 def _payload(state:ObjectState)->tuple[str,str|None]:
     if state.payload is None and state.payload_format=="NONE":return "NONE",None
     if state.payload_format=="TEXT" and isinstance(state.payload,str):return "TEXT",state.payload
