@@ -41,6 +41,14 @@ class SubstrateIntegrityMismatch(SubstrateError):
     """Raised when a payload does not satisfy its pre-established integrity expectation."""
 
 
+class SubstrateSnapshotManifestError(SubstrateError):
+    """Raised when a legacy evidence manifest is malformed or incompatible."""
+
+
+class SubstrateEvidenceIntegrityMismatch(SubstrateError):
+    """Raised when frozen snapshot bytes differ from recorded evidence digests."""
+
+
 class SubstrateObjectNotFound(SubstrateError):
     """Raised when a native object identity has no durable carrier row."""
 
