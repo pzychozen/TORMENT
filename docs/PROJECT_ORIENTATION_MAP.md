@@ -5,7 +5,7 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
-- **TORMENT Memory Substrate Phases 0–5 are frozen at requirement/physical-design level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), and [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md). No production implementation, test change, detailed DDL, migration, benchmark, or qualification has opened.
+- **TORMENT Memory Substrate Phases 0–6 are frozen at requirement/engineering-blueprint level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md). No production implementation, test change, runtime upgrade, database creation, migration, benchmark, or qualification has opened.
 
 ### Memory substrate closure
 
@@ -15,11 +15,12 @@
 - **Phase 3 physical architecture:** `INITIAL_PHYSICAL_SHAPE = SINGLE_TRANSACTIONAL_CORE`. The initial transactional core carries authoritative durable semantics and may initially retain materialized-representation payloads and required semantic history without collapsing their logical roles. `ACCELERATION` remains rebuildable and non-authoritative. A future separate representation-payload lane is compatible but not required.
 - **Phase 4 SQLite transactional-core contract:** `TRANSACTIONAL_CORE_ENGINE = SQLITE`. One semantic commit set is one SQLite core-database transaction; WAL and `synchronous=FULL` are required for semantic commitment; every semantic connection has a controlled initialization/verification path; semantic writes begin with `BEGIN IMMEDIATE`; and immutable transition evidence commits with successor state. SQLite physical writer serialization never replaces predecessor/revision validation. The current SQLite 3.51.2 environment is **not eligible** for the new WAL core: the WAL-reset fix, runtime admissibility policy, and fail-closed startup qualification are required.
 - **Phase 5 native schema/transaction/migration design:** logical objects and relationships use immutable revisions with primary current-revision selection pointers; committed revisions are semantically closed; operations provide recoverable idempotency intent and allocated outputs; each semantic commit has immutable transition evidence and typed effects; representations, integrity, reconciliation, aliases, and admission remain distinct structural families. Migration is an offline one-shot admission cutover; after new-core writes resume, the legacy store is evidence only. Exact DDL remains deferred.
+- **Phase 6 detailed SQLite engineering blueprint:** the native core uses UUIDv4 16-byte BLOB identities; separate identity, semantic-scope, and legacy-source namespaces; composite same-carrier revision ownership/linearity constraints; typed operation, transition-effect, integrity, reconciliation, and legacy-admission structures; controlled connection qualification; and a deployment cutover fence. The blueprint freezes no production implementation or runtime qualification result.
 - **Preserved boundaries:** semantic scope, fate domain, authority, current state, history, commit truth, representation readiness, integrity measurement, and operational disposition remain distinct. `COMMITTED / REPRESENTATION_PENDING` remains valid. Motif reconstruction remains unproven; motifs are non-disposable derived logical objects with derived logical membership relationships.
 
 ### Next memory substrate phase
 
-**Phase 6 — Detailed SQLite DDL / Storage API / Implementation Roadmap** is the next separately authorized phase. It may turn the frozen Phase 5 structural families and transaction/migration design into exact SQLite DDL, storage APIs, helper boundaries, admission tooling design, qualification planning, and an implementation work breakdown. It remains subordinate to the frozen TORMENT logical substrate and does not itself authorize production implementation.
+**Phase 7 — Bounded Implementation in Slices** is the next separately authorized phase. It begins construction only through the frozen dependency order: eligible runtime, isolated substrate package, runtime qualification, connection discipline, schema/bootstrap, and tests before any authority cutover or legacy-runtime replacement. It must not dual-write or wire a half-built core into current TORMENT runtime.
 
 ### Pre-database invariant closure
 
@@ -44,7 +45,7 @@
 
 ### Current authorized activity
 
-**NONE / HOLD pending explicit Phase 6 opening: Detailed SQLite DDL / Storage API / Implementation Roadmap.**
+**NONE / HOLD pending explicit Phase 7 opening: Bounded Implementation in Slices.**
 
 ## 1. Current main project thread
 
