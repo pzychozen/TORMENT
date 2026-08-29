@@ -12,6 +12,9 @@ memory dependency; derived ``character_state.json`` remains evidence.  It does
 Motif admission recognizes only the current workspace/domain ``motifs.json``
 registry and atomically admits its resolved EID memberships; motif events
 remain evidence only.
+Deep-memory admission recognizes only selected workspace-agent
+``deep_memory/memories.jsonl`` records corroborated by imported source export
+markers; it preserves those captures as non-READY representations.
 """
 
 from .inventory import InventoryArtifact, InventorySnapshot, get_inventory, inventory_snapshot
@@ -39,6 +42,11 @@ from .motif_admission import (
     LegacyMotifMembershipResult,
     NativeLegacyMotifAdmissionService,
 )
+from .deep_memory_admission import (
+    LegacyDeepMemoryAdmissionResult,
+    LegacyDeepMemoryAdmissionRun,
+    NativeLegacyDeepMemoryAdmissionService,
+)
 from .snapshot import (
     LegacyArtifact,
     LegacySnapshotManifest,
@@ -53,6 +61,8 @@ __all__ = [
     "InventorySnapshot",
     "LegacyEdgeAdmissionRun",
     "LegacyEmbeddingAdmissionRun",
+    "LegacyDeepMemoryAdmissionResult",
+    "LegacyDeepMemoryAdmissionRun",
     "LegacyIdentityAdmissionResult",
     "LegacyIdentityAdmissionRun",
     "LegacyMotifAdmissionResult",
@@ -69,6 +79,7 @@ __all__ = [
     "NativeLegacyMotifAdmissionService",
     "NativeLegacyRelationshipAdmissionService",
     "NativeLegacyRepresentationAdmissionService",
+    "NativeLegacyDeepMemoryAdmissionService",
     "SnapshotVerification",
     "create_snapshot_manifest",
     "get_inventory",

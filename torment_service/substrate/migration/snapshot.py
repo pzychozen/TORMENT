@@ -176,6 +176,8 @@ def classify_artifact(relative_locator: str) -> str:
         return "LEGACY_MOTIF_STATE_EVIDENCE"
     if name in {"motif_events.jsonl", "motifs_events.jsonl"}:
         return "LEGACY_MOTIF_EVENT_EVIDENCE"
+    if "deep_memory" in parent_names and name == "memories.jsonl":
+        return "LEGACY_DEEP_MEMORY_EVIDENCE"
     if "deep" in name and "memory" in name:
         return "LEGACY_DEEP_MEMORY_EVIDENCE"
     if name in {"identity.json", "seed.json", "character_state.json"}:
