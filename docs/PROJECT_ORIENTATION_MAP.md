@@ -5,6 +5,14 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
+- **TORMENT Memory Substrate Phase 0 is reconciled and Phase 1 is frozen at requirement level.** The binding record is [TORMENT Memory Substrate — Phase 1 Logical Model v0.1](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md). No physical storage design, runtime change, migration, or implementation has opened.
+
+### Memory substrate closure
+
+- **Phase 0 baseline:** `CURRENT_STORAGE_IS_AN_EMBRYONIC_CUSTOM_SUBSTRATE`; `CANONICAL_OPERATIONAL_TRUTH_SHOULD_LEAVE_LOOSE_JSONL`; `TORMENT_OWNED_LOGICAL_SUBSTRATE_REQUIRED`; `MULTIPLE_ACCESS_MODELS_REQUIRED`; `MULTIPLE_PHYSICAL_ENGINES_LIKELY_BUT_NOT_REQUIRED`; `NEW_LOW_LEVEL_DATABASE_ENGINE_NOT_REQUIRED`. JSONL is not inherently the problem; unmanaged canonical persistence lacks adequate durability discipline, cross-process exclusion, localized integrity, logical commit boundaries, and recovery semantics.
+- **Phase 1 logical model:** durable semantics are carried by logical objects and first-class logical relationships, not files, rows, or engines. Primary durable state, materialized derivations, semantic history, and acceleration are distinct. Representation generations and dependencies are explicit; consumers declare the generations they require.
+- **Transition semantics:** each durable carrier state transition becomes real at one logical commit boundary. Commit truth, representation readiness, integrity measurement, and operational disposition are orthogonal. `COMMITTED / VECTOR_PENDING` is valid; carrier existence is distinct from representation-dependent capability readiness.
+- **Boundaries:** semantic scope, fate domain, and authority are separate. Current state and history are separate. Motif reconstruction and motif-event completeness remain unproven; physical storage design remains unopened.
 
 ### Pre-database invariant closure
 
@@ -21,6 +29,7 @@
 ### Current authority and autonomy boundary
 
 - `CONTENT_AND_AUTHORITY_ARE_MOSTLY_SEPARATED_WITH_EXPLICIT_EXCEPTIONS` is the factual archaeology verdict. Trust/request authorization is external/config/request-derived, not memory-derived. Ordinary memory, canon, retrieval rank, tool result, model output, ThinkingResult, cognition result, Hivemind echo/proposal, character state, kernel signal, and stored intent do not create execution permission merely by existing or becoming influential.
+- The frozen substrate model preserves this boundary: stored carriers and representations—including future executable-artifact representations—never become execution authority merely through persistence. `STORED != EXECUTABLE`; `EXECUTABLE != ACTIVATED`; `ACTIVATED != AUTHORIZED`.
 - Current Mode 0 contains no memory-triggered wake loop or autonomous initiation path. AgentRunner/tool execution remains dormant and unowned. Managed autonomy is a future concept only; no scheduler, wake condition, active authorization runtime, capability system, or generic action authority exists today.
 - Canon is epistemic/identity standing, not execution permission. Retrieval may reveal authority-related information but is non-authorizing. Collective content cannot manufacture independent authority. `CONTENT CONTRIBUTION != AUTHORITY CONTRIBUTION` remains current Hivemind posture.
 - Current TORMENT has parallel REST and Spine trust enforcement; Fabric generally assumes caller-side authorization. This is enforcement-placement debt, not content/authority entanglement. `/promote force=True` remains `SEPARATELY_GATED_AUTHORITY_QUESTION`; Gate B is unresolved.
@@ -28,7 +37,7 @@
 
 ### Current authorized activity
 
-**None / HOLD pending explicit operator decision to open Memory Substrate architecture.**
+**NONE / HOLD pending explicit Phase 2 opening.**
 
 ## 1. Current main project thread
 
