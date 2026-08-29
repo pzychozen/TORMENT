@@ -17,6 +17,8 @@ Deep-memory admission recognizes only selected workspace-agent
 markers; it preserves those captures as non-READY representations.
 Proposal admission recognizes only frozen ``proposals.jsonl`` submissions and
 uses paired proposal-event evidence solely to capture their effective status.
+Integrated rehearsal verifies those existing families in dependency order using
+only synthetic frozen snapshots; it creates no live migration wiring.
 """
 
 from .inventory import InventoryArtifact, InventorySnapshot, get_inventory, inventory_snapshot
@@ -54,6 +56,13 @@ from .proposal_admission import (
     LegacyProposalAdmissionRun,
     NativeLegacyProposalAdmissionService,
 )
+from .rehearsal import (
+    ArtifactCoverage,
+    FamilyAdmissionCount,
+    MigrationRehearsalConfig,
+    MigrationRehearsalReport,
+    NativeLegacyMigrationRehearsal,
+)
 from .snapshot import (
     LegacyArtifact,
     LegacySnapshotManifest,
@@ -66,6 +75,8 @@ from .snapshot import (
 __all__ = [
     "InventoryArtifact",
     "InventorySnapshot",
+    "ArtifactCoverage",
+    "FamilyAdmissionCount",
     "LegacyEdgeAdmissionRun",
     "LegacyEmbeddingAdmissionRun",
     "LegacyDeepMemoryAdmissionResult",
@@ -90,6 +101,9 @@ __all__ = [
     "NativeLegacyRepresentationAdmissionService",
     "NativeLegacyDeepMemoryAdmissionService",
     "NativeLegacyProposalAdmissionService",
+    "MigrationRehearsalConfig",
+    "MigrationRehearsalReport",
+    "NativeLegacyMigrationRehearsal",
     "SnapshotVerification",
     "create_snapshot_manifest",
     "get_inventory",
