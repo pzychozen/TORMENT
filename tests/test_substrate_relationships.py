@@ -24,6 +24,7 @@ def test_relationship_create_retry_binding_cross_scope_and_successor(tmp_path:Pa
   second=r.transition_relationship(idempotency_namespace_id=idem,idempotency_key="rel2",relationship_id=first.relationship_id,expected_revision_id=first.revision_id,state=state)
   with pytest.raises(SubstrateRevisionConflict):r.transition_relationship(idempotency_namespace_id=idem,idempotency_key="stale",relationship_id=first.relationship_id,expected_revision_id=first.revision_id,state=state)
   assert r.get_relationship_revision(first.revision_id).endpoints[0].object_revision_id==a.revision_id and r.get_current_relationship(first.relationship_id).revision_id==second.revision_id
+  with pytest.raises(Exception):c.execute("DELETE FROM relationship_revision_endpoints WHERE relationship_revision_id=?",(native_id_to_bytes(first.revision_id),))
  finally:q.close()
 
 def test_joint_operation_is_atomic_idempotent_and_requires_both_effects(tmp_path:Path):

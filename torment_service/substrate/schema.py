@@ -158,6 +158,8 @@ CREATE TRIGGER immutable_object_revision_update BEFORE UPDATE ON object_revision
 CREATE TRIGGER immutable_object_revision_delete BEFORE DELETE ON object_revisions BEGIN SELECT RAISE(ABORT,'immutable object revision'); END;
 CREATE TRIGGER immutable_relationship_revision_update BEFORE UPDATE ON relationship_revisions BEGIN SELECT RAISE(ABORT,'immutable relationship revision'); END;
 CREATE TRIGGER immutable_relationship_revision_delete BEFORE DELETE ON relationship_revisions BEGIN SELECT RAISE(ABORT,'immutable relationship revision'); END;
+CREATE TRIGGER immutable_relationship_endpoint_update BEFORE UPDATE ON relationship_revision_endpoints BEGIN SELECT RAISE(ABORT,'immutable relationship endpoint'); END;
+CREATE TRIGGER immutable_relationship_endpoint_delete BEFORE DELETE ON relationship_revision_endpoints BEGIN SELECT RAISE(ABORT,'immutable relationship endpoint'); END;
 CREATE TRIGGER immutable_provenance_update BEFORE UPDATE ON provenance_records BEGIN SELECT RAISE(ABORT,'immutable provenance'); END;
 CREATE TRIGGER immutable_provenance_delete BEFORE DELETE ON provenance_records BEGIN SELECT RAISE(ABORT,'immutable provenance'); END;
 CREATE TRIGGER immutable_transition_update BEFORE UPDATE ON semantic_transitions BEGIN SELECT RAISE(ABORT,'immutable transition'); END;
