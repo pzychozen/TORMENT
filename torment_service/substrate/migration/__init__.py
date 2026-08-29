@@ -9,7 +9,9 @@ object-revision-linked evidence chains as UNKNOWN, non-usable representations.
 Identity admission recognizes only the current durable workspace-agent
 ``identity.json`` and workspace ``seed.json`` definition shapes, with no
 memory dependency; derived ``character_state.json`` remains evidence.  It does
-not admit motifs.
+Motif admission recognizes only the current workspace/domain ``motifs.json``
+registry and atomically admits its resolved EID memberships; motif events
+remain evidence only.
 """
 
 from .inventory import InventoryArtifact, InventorySnapshot, get_inventory, inventory_snapshot
@@ -31,6 +33,12 @@ from .identity_admission import (
     LegacyIdentityAdmissionRun,
     NativeLegacyIdentityAdmissionService,
 )
+from .motif_admission import (
+    LegacyMotifAdmissionResult,
+    LegacyMotifAdmissionRun,
+    LegacyMotifMembershipResult,
+    NativeLegacyMotifAdmissionService,
+)
 from .snapshot import (
     LegacyArtifact,
     LegacySnapshotManifest,
@@ -47,6 +55,9 @@ __all__ = [
     "LegacyEmbeddingAdmissionRun",
     "LegacyIdentityAdmissionResult",
     "LegacyIdentityAdmissionRun",
+    "LegacyMotifAdmissionResult",
+    "LegacyMotifAdmissionRun",
+    "LegacyMotifMembershipResult",
     "LegacyNodeAdmissionRun",
     "LegacyObjectAdmissionResult",
     "LegacyRelationshipAdmissionResult",
@@ -55,6 +66,7 @@ __all__ = [
     "LegacySnapshotManifest",
     "NativeLegacyObjectAdmissionService",
     "NativeLegacyIdentityAdmissionService",
+    "NativeLegacyMotifAdmissionService",
     "NativeLegacyRelationshipAdmissionService",
     "NativeLegacyRepresentationAdmissionService",
     "SnapshotVerification",
