@@ -1,7 +1,7 @@
 # fabric.py
 from __future__ import annotations
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 import os, time, json, re, atexit, tempfile, threading, uuid, logging, math
 from pathlib import Path
 import numpy as np
@@ -49,6 +49,12 @@ from .checkpoint import (
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .candidate_types import CandidateShapedValue
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
+
+if TYPE_CHECKING:
+    from .substrate.runtime_binding import (
+        NativeMemoryBindingReadiness,
+        NativeMemoryRuntimeBinding,
+    )
 
 log = logging.getLogger("torment.fabric")
 hivemind_log = logging.getLogger("torment.hivemind")
@@ -905,7 +911,12 @@ class TormentFabric:
         """
         return f"{workspace_id}/{agent_id}"
 
-    def __init__(self, data_dir: str) -> None:
+    def __init__(
+        self,
+        data_dir: str,
+        *,
+        native_memory_binding: Optional["NativeMemoryRuntimeBinding"] = None,
+    ) -> None:
         # Block C1 (Windows): map data_dir=":memory:" to a real
         # TemporaryDirectory so every sub-store's os.makedirs call
         # works cross-platform. ':' is an illegal filename character
@@ -943,6 +954,19 @@ class TormentFabric:
             # Degraded mode: fall back to deterministic hash so the service can still start.
             from .embeddings import HashEmbedding
             self.embedder = HashEmbedding()
+        # Phase 7G4 retains a prevalidated native STAGING binding only as inert
+        # configuration.  The conditional import keeps ordinary Fabric startup
+        # free of any substrate runtime dependency.  No existing runtime path
+        # reads from or writes to this value.
+        self._native_memory_binding: Optional["NativeMemoryRuntimeBinding"] = None
+        self._native_memory_binding_readiness: Optional["NativeMemoryBindingReadiness"] = None
+        if native_memory_binding is not None:
+            from .substrate.runtime_binding import validate_fabric_embedder
+
+            self._native_memory_binding_readiness = validate_fabric_embedder(
+                native_memory_binding, self.embedder,
+            )
+            self._native_memory_binding = native_memory_binding
         self.kernel = TriOctaMemoryKernel(embedder=self.embedder)  # base kernel template
         self.ident_store = IdentityStore(data_dir=self.data_dir)
         self.role_store = RoleStore(data_dir=self.data_dir)
@@ -1138,6 +1162,16 @@ class TormentFabric:
             for d in domains:
                 ws.add_domain(d)
         return ws
+
+    @property
+    def native_memory_binding(self) -> Optional["NativeMemoryRuntimeBinding"]:
+        """Return the inert 7G4 binding, if explicitly injected by a caller."""
+        return self._native_memory_binding
+
+    @property
+    def native_memory_binding_readiness(self) -> Optional["NativeMemoryBindingReadiness"]:
+        """Return operational binding readiness, never semantic authority."""
+        return self._native_memory_binding_readiness
 
     def list_workspaces_meta(self) -> List[Dict[str, Any]]:
         """Return persisted workspace embedding locks and basic metadata.
