@@ -24,6 +24,7 @@ from .canonical_intent import canonical_intent_text
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound, SubstrateRevisionConflict
 from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from .objects import NativeObjectService, ObjectResult, ObjectState, SubstrateTx, execute_semantic
+from .relationships import Endpoint, NativeRelationshipService, RelationshipResult, RelationshipState
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
     INTEGRITY_VALUE_ENCODING_RAW,
@@ -73,6 +74,21 @@ class LegacyMemoryView:
 class CompatibilityMemoryWriteResult:
     """The native publication result plus its stable scoped EID alias."""
     eid: int; object_id: UUID; revision_id: UUID; transition_id: UUID; operation_id: UUID
+
+
+@dataclass(frozen=True)
+class CompatibilityMemoryRelationshipResult:
+    """A native LINK publication addressed by the caller's scoped endpoint EIDs."""
+    source_eid: int; target_eid: int; relationship_id: UUID; revision_id: UUID
+    transition_id: UUID; operation_id: UUID
+
+
+@dataclass(frozen=True)
+class CompatibilityMemoryRelationshipView:
+    """Scoped compatibility projection of a native identity-bound LINK relationship."""
+    source_eid: int; target_eid: int; relationship_id: UUID; revision_id: UUID
+    revision_ordinal: int; semantic_scope_id: UUID; relationship_kind: str
+    weight: float; legacy_timestamp: str | int | float | None; payload: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -402,6 +418,131 @@ class NativeMemoryCompatibilityFacade:
             mutate,
         )
 
+    def create_memory_relationship(
+        self,
+        *,
+        source_legacy_source_namespace_id: UUID,
+        source_eid: int,
+        target_legacy_source_namespace_id: UUID,
+        target_eid: int,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        identity_namespace_id: UUID,
+        semantic_scope_id: UUID,
+        relationship_kind: str = "LINK",
+        weight: float = 1.0,
+        legacy_timestamp: str | int | float | None = None,
+        extra_payload: Mapping[str, Any] | None = None,
+        governance_state: str = "UNKNOWN",
+    ) -> CompatibilityMemoryRelationshipResult:
+        """Publish one native, identity-bound LINK between two committed memories.
+
+        Endpoint EIDs are intentionally scoped aliases rather than global native
+        identifiers. This primitive does not consume drafts, edge dictionaries,
+        or MemoryGraph state, and it has no endpoint-based de-duplication rule.
+        """
+        _validate_relationship_inputs(
+            source_legacy_source_namespace_id, source_eid,
+            target_legacy_source_namespace_id, target_eid,
+            idempotency_namespace_id, idempotency_key,
+            identity_namespace_id, semantic_scope_id, relationship_kind,
+            weight, legacy_timestamp, governance_state,
+        )
+        flexible = _relationship_flexible_mapping(extra_payload, field="extra_payload")
+
+        # Resolve and carrier-check both aliases before a semantic operation is
+        # opened. A failed draft token, unknown EID, or incompatible carrier
+        # therefore cannot publish even a partial relationship.
+        source = self._current_row(source_legacy_source_namespace_id, source_eid)
+        target = self._current_row(target_legacy_source_namespace_id, target_eid)
+        payload: dict[str, Any] = {"weight": float(weight)}
+        if legacy_timestamp is not None:
+            payload["legacy_timestamp"] = legacy_timestamp
+        payload.update(flexible)
+        state = RelationshipState(
+            identity_namespace_id, semantic_scope_id, "LINK", "EXISTS", "UNSET", True,
+            governance_state, "NOT_APPLICABLE",
+            (
+                Endpoint(0, "SOURCE", native_id_from_bytes(source[3]), native_id_from_bytes(source[0]), "IDENTITY"),
+                Endpoint(1, "TARGET", native_id_from_bytes(target[3]), native_id_from_bytes(target[0]), "IDENTITY"),
+            ),
+            payload, "JSON",
+        )
+        intent = canonical_intent_text({
+            "kind": "CREATE_COMPAT_MEMORY_RELATIONSHIP",
+            "source": {"legacy_source_namespace_id": str(source_legacy_source_namespace_id), "eid": source_eid},
+            "target": {"legacy_source_namespace_id": str(target_legacy_source_namespace_id), "eid": target_eid},
+            "state": _relationship_state_intent(state),
+        })
+        native = NativeRelationshipService(self._connection)
+
+        def mutate(tx: SubstrateTx) -> CompatibilityMemoryRelationshipResult:
+            result = native._create(tx, state, None)
+            return _relationship_result(source_eid, target_eid, result)
+
+        return execute_semantic(
+            self._connection, idempotency_namespace_id, idempotency_key,
+            "CREATE_COMPAT_MEMORY_RELATIONSHIP", intent,
+            lambda operation_id: self._relationship_result_for_operation(operation_id, source_eid, target_eid),
+            mutate,
+        )
+
+    def get_memory_relationship(
+        self,
+        *,
+        relationship_id: UUID,
+        source_legacy_source_namespace_id: UUID,
+        target_legacy_source_namespace_id: UUID,
+    ) -> CompatibilityMemoryRelationshipView:
+        """Project a compatibility-created LINK through caller-supplied namespaces.
+
+        Reverse alias lookup is deliberately scoped. The projection fails rather
+        than fabricating an EID when either endpoint has no unique alias in the
+        requested namespace.
+        """
+        if not isinstance(relationship_id, UUID):
+            raise ValueError("relationship_id must be a UUID")
+        for field, value in (
+            ("source_legacy_source_namespace_id", source_legacy_source_namespace_id),
+            ("target_legacy_source_namespace_id", target_legacy_source_namespace_id),
+        ):
+            if not isinstance(value, UUID):
+                raise ValueError(f"{field} must be a UUID")
+        row = self._connection.execute(
+            """SELECT h.relationship_kind,r.relationship_revision_id,r.revision_ordinal,
+                      r.effective_semantic_scope_id,r.payload_format,r.payload_text
+                 FROM relationships h JOIN relationship_revisions r
+                   ON r.relationship_revision_id=h.current_revision_id
+                WHERE h.relationship_id=?""",
+            (native_id_to_bytes(relationship_id),),
+        ).fetchone()
+        if row is None:
+            raise SubstrateObjectNotFound("native relationship was not found")
+        if row[0] != "LINK":
+            raise SubstrateInvariantViolation("native relationship is not an admissible compatibility LINK")
+        endpoints = NativeRelationshipService(self._connection).get_current_relationship(relationship_id).endpoints
+        if len(endpoints) != 2 or tuple((item.ordinal, item.role) for item in endpoints) != ((0, "SOURCE"), (1, "TARGET")):
+            raise SubstrateInvariantViolation("compatibility LINK endpoint aggregate is incomplete")
+        source, target = endpoints
+        if any(item.binding_mode != "IDENTITY" or item.object_revision_id is not None for item in endpoints):
+            raise SubstrateInvariantViolation("compatibility LINK endpoints must use identity binding")
+        source_eid = self.resolve_native_memory_legacy_eid(
+            legacy_source_namespace_id=source_legacy_source_namespace_id, native_object_id=source.object_id,
+        )
+        target_eid = self.resolve_native_memory_legacy_eid(
+            legacy_source_namespace_id=target_legacy_source_namespace_id, native_object_id=target.object_id,
+        )
+        payload = _payload_mapping(row[4], row[5])
+        value = payload.get("legacy_timestamp")
+        timestamp = value if isinstance(value, (str, int, float)) and not isinstance(value, bool) else None
+        weight = payload.get("weight")
+        if not isinstance(weight, (int, float)) or isinstance(weight, bool) or not math.isfinite(float(weight)):
+            raise SubstrateInvariantViolation("compatibility LINK has no finite weight payload")
+        return CompatibilityMemoryRelationshipView(
+            source_eid, target_eid, relationship_id, native_id_from_bytes(row[1]), row[2],
+            native_id_from_bytes(row[3]), row[0], float(weight), timestamp, MappingProxyType(payload),
+        )
+
     def _current_row(self, namespace: UUID, eid: int) -> tuple[Any, ...]:
         _validate_eid(eid)
         row = self._connection.execute("""SELECT o.object_id,r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,r.authority_category,r.provenance_id,r.payload_format,r.payload_text FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?""", (native_id_to_bytes(namespace), str(eid))).fetchone()
@@ -430,6 +571,23 @@ class NativeMemoryCompatibilityFacade:
             native_id_from_bytes(row[2]), native_id_from_bytes(row[3]),
         ))
 
+    def _relationship_result_for_operation(
+        self, operation_id: bytes, source_eid: int, target_eid: int,
+    ) -> CompatibilityMemoryRelationshipResult | None:
+        row = self._connection.execute(
+            """SELECT o.relationship_id,o.relationship_revision_id,t.transition_id,t.operation_id
+                 FROM operation_outputs o JOIN semantic_transitions t ON t.operation_id=o.operation_id
+                WHERE o.operation_id=? AND o.output_kind='RELATIONSHIP'
+                ORDER BY o.output_ordinal LIMIT 1""",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _relationship_result(source_eid, target_eid, RelationshipResult(
+            native_id_from_bytes(row[0]), native_id_from_bytes(row[1]),
+            native_id_from_bytes(row[2]), native_id_from_bytes(row[3]),
+        ))
+
     def _view(self, eid: int, row: tuple[Any, ...]) -> LegacyMemoryView:
         refs = tuple(LegacyRepresentationReference(native_id_from_bytes(item[0]), item[1], item[2], item[3], item[4], item[3] == "READY" and item[4] == "USABLE") for item in self._connection.execute("""SELECT r.representation_id,r.representation_class,r.generation,s.readiness,s.operational_disposition FROM representations r JOIN representation_current_state s USING(representation_id) WHERE r.source_kind='OBJECT_REVISION' AND r.source_object_id=? AND r.source_object_revision_id=? AND r.source_object_revision_ordinal=? ORDER BY r.representation_class,r.generation,r.representation_id""", (row[0], row[1], row[2])))
         return LegacyMemoryView(eid, native_id_from_bytes(row[0]), native_id_from_bytes(row[1]), row[2], native_id_from_bytes(row[3]), row[4], row[5], bool(row[6]), row[7], row[8], native_id_from_bytes(row[9]) if row[9] is not None else None, MappingProxyType(_payload_mapping(row[10], row[11])), refs)
@@ -454,6 +612,104 @@ _STRUCTURAL_PAYLOAD_KEYS = frozenset({
     "representation_readiness", "integrity", "integrity_expectation", "integrity_measurement",
     "reconciliation", "operation_id", "transition_id",
 })
+
+_RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS = _STRUCTURAL_PAYLOAD_KEYS | frozenset({
+    "relationship_id", "relationship_kind", "relationship_revision_id",
+    "relationship_revision_ordinal", "endpoint", "endpoints", "endpoint_ordinal",
+    "endpoint_role", "endpoint_semantic_scope_id", "source", "source_eid",
+    "target", "target_eid", "binding", "binding_mode", "bound_object_revision_id",
+    "bound_object_revision_ordinal", "weight", "legacy_timestamp", "authority",
+    "active_authorization", "authorization_state",
+})
+
+
+def _relationship_result(
+    source_eid: int, target_eid: int, result: RelationshipResult,
+) -> CompatibilityMemoryRelationshipResult:
+    return CompatibilityMemoryRelationshipResult(
+        source_eid, target_eid, result.relationship_id, result.revision_id,
+        result.transition_id, result.operation_id,
+    )
+
+
+def _relationship_state_intent(state: RelationshipState) -> dict[str, Any]:
+    return {
+        "identity_namespace_id": str(state.identity_namespace_id),
+        "semantic_scope_id": str(state.semantic_scope_id),
+        "relationship_kind": state.relationship_kind,
+        "existence_state": state.existence_state,
+        "lifecycle_state": state.lifecycle_state,
+        "lifecycle_authoritative": state.lifecycle_authoritative,
+        "governance_state": state.governance_state,
+        "authority_category": state.authority_category,
+        "payload": state.payload,
+        "payload_format": state.payload_format,
+        "endpoints": [
+            {
+                "ordinal": endpoint.ordinal, "role": endpoint.role,
+                "semantic_scope_id": str(endpoint.semantic_scope_id),
+                "object_id": str(endpoint.object_id), "binding_mode": endpoint.binding_mode,
+                "object_revision_id": str(endpoint.object_revision_id) if endpoint.object_revision_id else None,
+            }
+            for endpoint in state.endpoints
+        ],
+    }
+
+
+def _validate_relationship_inputs(
+    source_namespace: Any, source_eid: Any, target_namespace: Any, target_eid: Any,
+    idempotency_namespace: Any, idempotency_key: Any, identity_namespace: Any,
+    semantic_scope: Any, relationship_kind: Any, weight: Any, legacy_timestamp: Any,
+    governance_state: Any,
+) -> None:
+    for field, value in (
+        ("source_legacy_source_namespace_id", source_namespace),
+        ("target_legacy_source_namespace_id", target_namespace),
+        ("idempotency_namespace_id", idempotency_namespace),
+        ("identity_namespace_id", identity_namespace),
+        ("semantic_scope_id", semantic_scope),
+    ):
+        if not isinstance(value, UUID):
+            raise ValueError(f"{field} must be a UUID")
+    _validate_eid(source_eid)
+    _validate_eid(target_eid)
+    if not isinstance(idempotency_key, str) or not idempotency_key:
+        raise ValueError("idempotency_key must be a non-empty string")
+    if relationship_kind != "LINK":
+        raise ValueError("only the LINK compatibility relationship kind is supported")
+    if isinstance(weight, bool):
+        raise ValueError("weight must be a finite number")
+    try:
+        numeric_weight = float(weight)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("weight must be a finite number") from exc
+    if not math.isfinite(numeric_weight):
+        raise ValueError("weight must be a finite number")
+    if legacy_timestamp is not None:
+        if isinstance(legacy_timestamp, bool) or not isinstance(legacy_timestamp, (str, int, float)):
+            raise ValueError("legacy_timestamp must be a string or finite number when supplied")
+        if isinstance(legacy_timestamp, float) and not math.isfinite(legacy_timestamp):
+            raise ValueError("legacy_timestamp must be a string or finite number when supplied")
+    if not isinstance(governance_state, str) or not governance_state:
+        raise ValueError("governance_state must be a non-empty string")
+
+
+def _relationship_flexible_mapping(value: Mapping[str, Any] | None, *, field: str) -> dict[str, Any]:
+    if isinstance(value, CandidateShapedValue):
+        raise TypeError(f"candidate-shaped value cannot be written as relationship {field}")
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must be an ordinary mapping")
+    copied = dict(value)
+    for key, item in copied.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{field} keys must be strings")
+        if isinstance(item, CandidateShapedValue):
+            raise TypeError("candidate-shaped value cannot be written into relationship payload")
+        if key.casefold() in _RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS:
+            raise ValueError(f"{field} cannot overwrite structural relationship semantics")
+    return copied
 
 
 def _validate_eid(eid: int) -> None:
