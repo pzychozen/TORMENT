@@ -21,7 +21,7 @@ class ObjectRevisionView:
 
 class SubstrateTx:
     """The sole BEGIN IMMEDIATE/COMMIT/ROLLBACK owner for one semantic operation."""
-    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None: self.connection,self.operation_id,self.transitions,self.published,self.relationship_published=connection,operation_id,[],[],[]
+    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None: self.connection,self.operation_id,self.transitions,self.published,self.relationship_published,self.representation_published=connection,operation_id,[],[],[],[]
     def execute(self, sql: str, parameters: tuple[object,...]=()) -> sqlite3.Cursor: return self.connection.execute(sql,parameters)
     def validate(self) -> None:
         for oid,rid,ordinal in self.published:
@@ -29,11 +29,13 @@ class SubstrateTx:
             if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='OBJECT' AND object_id=? AND object_revision_id=? AND object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output does not match publication")
             if self.execute("SELECT 1 FROM object_revision_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.object_id=? AND e.object_revision_id=? AND e.object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output is not published")
         for tid in self.transitions:
-            if self.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=? UNION SELECT 1 FROM relationship_revision_effects WHERE transition_id=?",(tid,tid)).fetchone() is None: raise SubstrateInvariantViolation("H2 transition has no typed effect")
+            if self.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=? UNION SELECT 1 FROM relationship_revision_effects WHERE transition_id=? UNION SELECT 1 FROM representation_state_effects WHERE transition_id=?",(tid,tid,tid)).fetchone() is None: raise SubstrateInvariantViolation("H2 transition has no typed effect")
         for rid,revision,ordinal in self.relationship_published:
             if self.execute("SELECT current_revision_id,current_revision_ordinal FROM relationships WHERE relationship_id=?",(rid,)).fetchone() != (revision,ordinal): raise SubstrateInvariantViolation("H1 relationship current pointer is incomplete")
             if self.execute("SELECT 1 FROM relationship_revision_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.relationship_id=? AND e.relationship_revision_id=? AND e.relationship_revision_ordinal=?",(self.operation_id,rid,revision,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H2 relationship effect is missing")
             if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='RELATIONSHIP' AND relationship_id=? AND relationship_revision_id=? AND relationship_revision_ordinal=?",(self.operation_id,rid,revision,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 relationship output does not match publication")
+        for representation_id in self.representation_published:
+            if self.execute("SELECT 1 FROM representation_state_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.representation_id=?",(self.operation_id,representation_id)).fetchone() is None or self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='REPRESENTATION' AND representation_id=?",(self.operation_id,representation_id)).fetchone() is None: raise SubstrateInvariantViolation("H8 representation output does not match publication")
         if self.execute("SELECT 1 FROM semantic_transitions t JOIN operation_rejections r ON r.operation_id=t.operation_id WHERE t.operation_id=?",(self.operation_id,)).fetchone() is not None: raise SubstrateInvariantViolation("H3 operation has transition and durable rejection")
 
 class NativeObjectService:

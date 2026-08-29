@@ -168,6 +168,8 @@ CREATE TRIGGER immutable_representation_fields BEFORE UPDATE OF source_kind,sour
 CREATE TRIGGER immutable_representation_delete BEFORE DELETE ON representations BEGIN SELECT RAISE(ABORT,'immutable representation'); END;
 CREATE TRIGGER immutable_payload_update BEFORE UPDATE ON representation_payloads BEGIN SELECT RAISE(ABORT,'immutable representation payload'); END;
 CREATE TRIGGER immutable_payload_delete BEFORE DELETE ON representation_payloads BEGIN SELECT RAISE(ABORT,'immutable representation payload'); END;
+CREATE TRIGGER immutable_representation_dependency_update BEFORE UPDATE ON representation_dependencies BEGIN SELECT RAISE(ABORT,'immutable representation dependency'); END;
+CREATE TRIGGER immutable_representation_dependency_delete BEFORE DELETE ON representation_dependencies BEGIN SELECT RAISE(ABORT,'immutable representation dependency'); END;
 CREATE TRIGGER immutable_expectation_update BEFORE UPDATE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
 CREATE TRIGGER immutable_expectation_delete BEFORE DELETE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
 CREATE TRIGGER immutable_reconciliation_state_update BEFORE UPDATE ON reconciliation_case_states BEGIN SELECT RAISE(ABORT,'immutable reconciliation state'); END;
