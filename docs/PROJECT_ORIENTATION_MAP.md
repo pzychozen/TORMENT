@@ -5,7 +5,7 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
-- **TORMENT Memory Substrate Phases 0–4 are frozen at requirement/physical-contract level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), and [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md). No production implementation, test change, detailed schema, migration, benchmark, or qualification has opened.
+- **TORMENT Memory Substrate Phases 0–5 are frozen at requirement/physical-design level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), and [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md). No production implementation, test change, detailed DDL, migration, benchmark, or qualification has opened.
 
 ### Memory substrate closure
 
@@ -13,12 +13,13 @@
 - **Phase 1 logical model:** durable semantics are carried by logical objects and first-class logical relationships, not files, rows, or engines. `PRIMARY_DURABLE_STATE`, `MATERIALIZED_DERIVATION`, `HISTORICAL_EVIDENCE`, and `ACCELERATION` remain distinct; representation generations and dependencies are explicit.
 - **Phase 2 reliability contract:** commitment requires explicit, durable, non-residue evidence sufficient for non-guessing recovery. Historical outcome is separate from present determination; retries require stable idempotency identity and revision compatibility; integrity is localized; incomplete joint semantic invariants are withheld; and legacy ambiguity attaches to the smallest affected unit.
 - **Phase 3 physical architecture:** `INITIAL_PHYSICAL_SHAPE = SINGLE_TRANSACTIONAL_CORE`. The initial transactional core carries authoritative durable semantics and may initially retain materialized-representation payloads and required semantic history without collapsing their logical roles. `ACCELERATION` remains rebuildable and non-authoritative. A future separate representation-payload lane is compatible but not required.
-- **Phase 4 SQLite transactional-core contract:** `TRANSACTIONAL_CORE_ENGINE = SQLITE`. One semantic commit set is one SQLite core-database transaction; WAL and `synchronous=FULL` are required for semantic commitment; every semantic connection has a controlled initialization/verification path; semantic writes begin with `BEGIN IMMEDIATE`; and immutable transition evidence commits with successor state. SQLite physical writer serialization never replaces predecessor/revision validation. The current SQLite 3.51.2 environment is **not eligible** for the new WAL core: the WAL-reset fix, runtime admissibility policy, and fail-closed startup qualification are required. Detailed schema remains deferred.
+- **Phase 4 SQLite transactional-core contract:** `TRANSACTIONAL_CORE_ENGINE = SQLITE`. One semantic commit set is one SQLite core-database transaction; WAL and `synchronous=FULL` are required for semantic commitment; every semantic connection has a controlled initialization/verification path; semantic writes begin with `BEGIN IMMEDIATE`; and immutable transition evidence commits with successor state. SQLite physical writer serialization never replaces predecessor/revision validation. The current SQLite 3.51.2 environment is **not eligible** for the new WAL core: the WAL-reset fix, runtime admissibility policy, and fail-closed startup qualification are required.
+- **Phase 5 native schema/transaction/migration design:** logical objects and relationships use immutable revisions with primary current-revision selection pointers; committed revisions are semantically closed; operations provide recoverable idempotency intent and allocated outputs; each semantic commit has immutable transition evidence and typed effects; representations, integrity, reconciliation, aliases, and admission remain distinct structural families. Migration is an offline one-shot admission cutover; after new-core writes resume, the legacy store is evidence only. Exact DDL remains deferred.
 - **Preserved boundaries:** semantic scope, fate domain, authority, current state, history, commit truth, representation readiness, integrity measurement, and operational disposition remain distinct. `COMMITTED / REPRESENTATION_PENDING` remains valid. Motif reconstruction remains unproven; motifs are non-disposable derived logical objects with derived logical membership relationships.
 
 ### Next memory substrate phase
 
-**Phase 5 — Schema / Transaction Protocol / Migration Design** is the next separately authorized phase. It may design the TORMENT-owned SQLite schema and semantic transaction protocol from the frozen logical model and Phase 4 physical contract. It must not translate current JSONL payloads directly into generic database blobs or collapse the frozen structural distinctions into an `id / type / status / payload_json` shape.
+**Phase 6 — Detailed SQLite DDL / Storage API / Implementation Roadmap** is the next separately authorized phase. It may turn the frozen Phase 5 structural families and transaction/migration design into exact SQLite DDL, storage APIs, helper boundaries, admission tooling design, qualification planning, and an implementation work breakdown. It remains subordinate to the frozen TORMENT logical substrate and does not itself authorize production implementation.
 
 ### Pre-database invariant closure
 
@@ -43,7 +44,7 @@
 
 ### Current authorized activity
 
-**NONE / HOLD pending explicit Phase 5 opening: Schema / Transaction Protocol / Migration Design.**
+**NONE / HOLD pending explicit Phase 6 opening: Detailed SQLite DDL / Storage API / Implementation Roadmap.**
 
 ## 1. Current main project thread
 
