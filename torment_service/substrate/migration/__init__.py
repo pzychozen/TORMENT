@@ -15,6 +15,8 @@ remain evidence only.
 Deep-memory admission recognizes only selected workspace-agent
 ``deep_memory/memories.jsonl`` records corroborated by imported source export
 markers; it preserves those captures as non-READY representations.
+Proposal admission recognizes only frozen ``proposals.jsonl`` submissions and
+uses paired proposal-event evidence solely to capture their effective status.
 """
 
 from .inventory import InventoryArtifact, InventorySnapshot, get_inventory, inventory_snapshot
@@ -47,6 +49,11 @@ from .deep_memory_admission import (
     LegacyDeepMemoryAdmissionRun,
     NativeLegacyDeepMemoryAdmissionService,
 )
+from .proposal_admission import (
+    LegacyProposalAdmissionResult,
+    LegacyProposalAdmissionRun,
+    NativeLegacyProposalAdmissionService,
+)
 from .snapshot import (
     LegacyArtifact,
     LegacySnapshotManifest,
@@ -68,6 +75,8 @@ __all__ = [
     "LegacyMotifAdmissionResult",
     "LegacyMotifAdmissionRun",
     "LegacyMotifMembershipResult",
+    "LegacyProposalAdmissionResult",
+    "LegacyProposalAdmissionRun",
     "LegacyNodeAdmissionRun",
     "LegacyObjectAdmissionResult",
     "LegacyRelationshipAdmissionResult",
@@ -80,6 +89,7 @@ __all__ = [
     "NativeLegacyRelationshipAdmissionService",
     "NativeLegacyRepresentationAdmissionService",
     "NativeLegacyDeepMemoryAdmissionService",
+    "NativeLegacyProposalAdmissionService",
     "SnapshotVerification",
     "create_snapshot_manifest",
     "get_inventory",

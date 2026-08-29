@@ -182,6 +182,10 @@ def classify_artifact(relative_locator: str) -> str:
         return "LEGACY_DEEP_MEMORY_EVIDENCE"
     if name in {"identity.json", "seed.json", "character_state.json"}:
         return "LEGACY_IDENTITY_CHARACTER_EVIDENCE"
+    if name == "proposals.jsonl":
+        return "LEGACY_PROPOSAL_STATE_EVIDENCE"
+    if name == "proposal_events.jsonl":
+        return "LEGACY_PROPOSAL_EVENT_EVIDENCE"
     if any(token in name for token in ("proposal", "closure", "conflict", "ledger")):
         return "LEGACY_GOVERNANCE_LEDGER_EVIDENCE"
     if path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
