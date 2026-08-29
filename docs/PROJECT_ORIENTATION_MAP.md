@@ -5,7 +5,7 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
-- **TORMENT Memory Substrate Phase 0 is reconciled and Phase 1 is frozen at requirement level.** The binding record is [TORMENT Memory Substrate — Phase 1 Logical Model v0.1](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md). No physical storage design, runtime change, migration, or implementation has opened.
+- **TORMENT Memory Substrate Phases 0–2 are frozen at requirement level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md) and [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md). No physical storage design, runtime change, migration, or implementation has opened.
 
 ### Memory substrate closure
 
@@ -13,6 +13,7 @@
 - **Phase 1 logical model:** durable semantics are carried by logical objects and first-class logical relationships, not files, rows, or engines. Primary durable state, materialized derivations, semantic history, and acceleration are distinct. Representation generations and dependencies are explicit; consumers declare the generations they require.
 - **Transition semantics:** each durable carrier state transition becomes real at one logical commit boundary. Commit truth, representation readiness, integrity measurement, and operational disposition are orthogonal. `COMMITTED / VECTOR_PENDING` is valid; carrier existence is distinct from representation-dependent capability readiness.
 - **Boundaries:** semantic scope, fate domain, and authority are separate. Current state and history are separate. Motif reconstruction and motif-event completeness remain unproven; physical storage design remains unopened.
+- **Phase 2 reliability contract:** commitment requires explicit, durable, non-residue evidence sufficient for non-guessing recovery; historical outcome is separate from present determination. Retries require stable idempotency identity and revision compatibility; integrity is localized; incomplete joint semantic invariants are withheld; and legacy ambiguity is attached to the smallest affected unit. Phase 3 is the next, separately opened phase: physical substrate architecture.
 
 ### Pre-database invariant closure
 
@@ -37,7 +38,7 @@
 
 ### Current authorized activity
 
-**NONE / HOLD pending explicit Phase 2 opening.**
+**NONE / HOLD pending explicit Phase 3 opening: Physical Substrate Architecture.**
 
 ## 1. Current main project thread
 
