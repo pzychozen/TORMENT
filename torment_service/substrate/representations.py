@@ -1,8 +1,9 @@
-"""Phase 7E2 native representation readiness and explicit failure operations.
+"""Native representation readiness, later integrity verification, and facts.
 
-This module deliberately stops before reconciliation, legacy admission, embedding
-generation, and caller wiring.  It owns only representation facts, integrity
-evidence, and the PENDING -> READY or PENDING -> FAILED semantic transitions.
+This module deliberately stops before legacy admission, embedding generation,
+and caller wiring.  Reconciliation case lineage is owned by the separate
+``reconciliation`` module; this boundary owns representation state and its
+append-only integrity evidence.
 """
 
 from __future__ import annotations
@@ -91,6 +92,23 @@ class RepresentationFailureRequest:
 
 
 @dataclass(frozen=True)
+class RepresentationIntegrityVerificationRequest:
+    """Request a new append-only measurement of an already READY payload."""
+
+    representation_id: UUID
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RepresentationIntegrityVerification:
+    representation_id: UUID
+    measurement_id: UUID
+    result: str
+    transition_id: UUID
+    operation_id: UUID
+
+
+@dataclass(frozen=True)
 class RepresentationMetadata:
     representation_id: UUID
     source_kind: str
@@ -101,6 +119,8 @@ class RepresentationMetadata:
     dependencies: tuple[UUID, ...]
     integrity_expectation_id: UUID | None = None
     selected_measurement_id: UUID | None = None
+    active_reconciliation_case_id: UUID | None = None
+    active_reconciliation_state_id: UUID | None = None
 
 
 class NativeRepresentationService:
@@ -198,6 +218,29 @@ class NativeRepresentationService:
             lambda tx: self._fail(tx, request),
         )
 
+    def verify_published_representation_integrity(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        request: RepresentationIntegrityVerificationRequest,
+    ) -> RepresentationIntegrityVerification:
+        """Append a fresh measurement and withhold use on a later mismatch.
+
+        This reads the durable payload inside the semantic transaction; ordinary
+        callers still only obtain payload bytes through the explicit usable read.
+        """
+        self._validate_verification_request(request)
+        return execute_semantic(
+            self._connection,
+            idempotency_namespace_id,
+            idempotency_key,
+            "VERIFY_PUBLISHED_REPRESENTATION_INTEGRITY",
+            self._verification_intent(request),
+            self._verification_result,
+            lambda tx: self._verify_published_integrity(tx, request),
+        )
+
     def get_representation_metadata(self, representation_id: UUID) -> RepresentationMetadata:
         """Read identity/state metadata only; payload bytes are never selected here."""
         row = self._connection.execute(
@@ -230,6 +273,32 @@ class NativeRepresentationService:
         ).fetchall()
         if len(expectation_rows) > 1:
             raise SubstrateInvariantViolation("representation has multiple integrity expectations")
+        reconciliation_rows = self._connection.execute(
+            """
+            SELECT current_state_id,current_state_ordinal
+            FROM reconciliation_cases
+            WHERE subject_kind='REPRESENTATION' AND representation_id=?
+            ORDER BY opened_at_ns DESC,reconciliation_case_id DESC
+            """,
+            (row[0],),
+        ).fetchall()
+        if len(reconciliation_rows) > 1:
+            raise SubstrateInvariantViolation("representation has multiple active reconciliation cases")
+        active_case_id = None
+        active_state_id = None
+        if reconciliation_rows:
+            active_case = self._connection.execute(
+                """
+                SELECT reconciliation_case_id,current_state_id
+                FROM reconciliation_cases
+                WHERE subject_kind='REPRESENTATION' AND representation_id=?
+                """,
+                (row[0],),
+            ).fetchone()
+            if active_case is None or active_case[1] is None:
+                raise SubstrateInvariantViolation("reconciliation case has no current state")
+            active_case_id = UUID(bytes=active_case[0])
+            active_state_id = UUID(bytes=active_case[1])
         return RepresentationMetadata(
             representation_id=UUID(bytes=row[0]),
             source_kind=row[1],
@@ -240,6 +309,8 @@ class NativeRepresentationService:
             dependencies=dependencies,
             integrity_expectation_id=UUID(bytes=expectation_rows[0][0]) if expectation_rows else None,
             selected_measurement_id=UUID(bytes=row[6]) if row[6] is not None else None,
+            active_reconciliation_case_id=active_case_id,
+            active_reconciliation_state_id=active_state_id,
         )
 
     def get_representation_integrity_expectation(
@@ -559,6 +630,103 @@ class NativeRepresentationService:
         tx.representation_failed.append((representation_id, None))
         return self.get_representation_metadata(request.representation_id)
 
+    def _verify_published_integrity(
+        self, tx: SubstrateTx, request: RepresentationIntegrityVerificationRequest
+    ) -> RepresentationIntegrityVerification:
+        representation_id = _blob(request.representation_id)
+        state = tx.execute(
+            "SELECT readiness,operational_disposition FROM representation_current_state WHERE representation_id=?",
+            (representation_id,),
+        ).fetchone()
+        if state is None:
+            raise SubstrateObjectNotFound("representation was not found")
+        if state[0] != "READY":
+            raise SubstrateRevisionConflict("later integrity verification requires a ready representation")
+        payload = tx.execute(
+            """
+            SELECT p.payload_bytes,p.observed_payload_byte_length,r.expected_payload_byte_length
+            FROM representation_payloads p
+            JOIN representations r USING(representation_id)
+            WHERE p.representation_id=?
+            """,
+            (representation_id,),
+        ).fetchone()
+        if payload is None or payload[1] != len(payload[0]) or (
+            payload[2] is not None and payload[2] != payload[1]
+        ):
+            raise SubstrateInvariantViolation("published representation payload is not exact")
+        expectation = self._expectation_for_representation(tx, representation_id)
+        observed_value = _measure_payload(
+            payload[0], expectation.algorithm_id, expectation.value_encoding
+        )
+        result = "MATCH" if observed_value == expectation.expected_value else "MISMATCH"
+        disposition = state[1] if result == "MATCH" else "RECONCILIATION_REQUIRED"
+        measurement_id, transition_id = _new(), _new()
+        now_ns = time.time_ns()
+        tx.execute(
+            "INSERT INTO integrity_measurements VALUES (?,?,?,?,?,?)",
+            (
+                measurement_id,
+                _blob(expectation.expectation_id),
+                result,
+                observed_value,
+                request.reason,
+                now_ns,
+            ),
+        )
+        tx.execute(
+            """
+            UPDATE representation_current_state
+            SET operational_disposition=?,selected_integrity_measurement_id=?
+            WHERE representation_id=?
+            """,
+            (disposition, measurement_id, representation_id),
+        )
+        tx.execute(
+            "INSERT INTO semantic_transitions VALUES (?,?,?,?,?)",
+            (transition_id, tx.operation_id, "REPRESENTATION_INTEGRITY_VERIFIED", "NATIVE", now_ns),
+        )
+        tx.execute(
+            "INSERT INTO representation_state_effects VALUES (?,?,?,?,?)",
+            (transition_id, representation_id, "READY", disposition, measurement_id),
+        )
+        tx.execute(
+            "INSERT INTO integrity_measurement_effects VALUES (?,?)",
+            (transition_id, measurement_id),
+        )
+        tx.execute(
+            """
+            INSERT INTO operation_outputs(
+                operation_id,output_ordinal,output_role,output_kind,representation_id
+            ) VALUES (?,?,?,?,?)
+            """,
+            (
+                tx.operation_id,
+                0,
+                "REPRESENTATION_INTEGRITY_VERIFIED",
+                "REPRESENTATION",
+                representation_id,
+            ),
+        )
+        tx.transitions.append(transition_id)
+        tx.representation_published.append(representation_id)
+        tx.representation_verified.append(
+            (
+                representation_id,
+                _blob(expectation.expectation_id),
+                measurement_id,
+                result,
+                disposition,
+            )
+        )
+        return RepresentationIntegrityVerification(
+            request.representation_id,
+            UUID(bytes=measurement_id),
+            result,
+            UUID(bytes=transition_id),
+            UUID(bytes=tx.operation_id),
+        )
+
     def _expectation_for_representation(
         self, tx: SubstrateTx, representation_id: bytes
     ) -> RepresentationIntegrityExpectation:
@@ -655,6 +823,13 @@ class NativeRepresentationService:
             raise ValueError("representation failure reason must be a string when supplied")
 
     @staticmethod
+    def _validate_verification_request(
+        request: RepresentationIntegrityVerificationRequest,
+    ) -> None:
+        if request.reason is not None and not isinstance(request.reason, str):
+            raise ValueError("integrity verification reason must be a string when supplied")
+
+    @staticmethod
     def _pending_intent(request: RepresentationRequest) -> str:
         return canonical_intent_text(
             {
@@ -713,6 +888,16 @@ class NativeRepresentationService:
             }
         )
 
+    @staticmethod
+    def _verification_intent(request: RepresentationIntegrityVerificationRequest) -> str:
+        return canonical_intent_text(
+            {
+                "kind": "VERIFY_PUBLISHED_REPRESENTATION_INTEGRITY",
+                "representation_id": str(request.representation_id),
+                "reason": request.reason,
+            }
+        )
+
     def _pending_result(self, operation_id: bytes) -> RepresentationMetadata | None:
         row = self._connection.execute(
             """
@@ -765,6 +950,32 @@ class NativeRepresentationService:
             (operation_id,),
         ).fetchone()
         return self.get_representation_metadata(UUID(bytes=row[0])) if row else None
+
+    def _verification_result(
+        self, operation_id: bytes
+    ) -> RepresentationIntegrityVerification | None:
+        row = self._connection.execute(
+            """
+            SELECT o.representation_id,m.measurement_id,m.result,t.transition_id,t.operation_id
+            FROM operation_outputs o
+            JOIN semantic_transitions t ON t.operation_id=o.operation_id
+            JOIN representation_state_effects s ON s.transition_id=t.transition_id
+            JOIN integrity_measurement_effects e ON e.transition_id=t.transition_id
+            JOIN integrity_measurements m ON m.measurement_id=e.measurement_id
+            WHERE o.operation_id=? AND o.output_kind='REPRESENTATION'
+              AND o.output_role='REPRESENTATION_INTEGRITY_VERIFIED'
+              AND s.representation_id=o.representation_id
+              AND s.selected_measurement_id=m.measurement_id
+            """,
+            (operation_id,),
+        ).fetchone()
+        return (
+            RepresentationIntegrityVerification(
+                UUID(bytes=row[0]), UUID(bytes=row[1]), row[2], UUID(bytes=row[3]), UUID(bytes=row[4])
+            )
+            if row
+            else None
+        )
 
 
 def _measure_payload(payload_bytes: bytes, algorithm_id: str, value_encoding: str) -> bytes:
