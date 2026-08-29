@@ -172,6 +172,8 @@ CREATE TRIGGER immutable_representation_dependency_update BEFORE UPDATE ON repre
 CREATE TRIGGER immutable_representation_dependency_delete BEFORE DELETE ON representation_dependencies BEGIN SELECT RAISE(ABORT,'immutable representation dependency'); END;
 CREATE TRIGGER immutable_expectation_update BEFORE UPDATE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
 CREATE TRIGGER immutable_expectation_delete BEFORE DELETE ON integrity_expectations BEGIN SELECT RAISE(ABORT,'immutable integrity expectation'); END;
+CREATE TRIGGER immutable_measurement_update BEFORE UPDATE ON integrity_measurements BEGIN SELECT RAISE(ABORT,'immutable integrity measurement'); END;
+CREATE TRIGGER immutable_measurement_delete BEFORE DELETE ON integrity_measurements BEGIN SELECT RAISE(ABORT,'immutable integrity measurement'); END;
 CREATE TRIGGER immutable_reconciliation_state_update BEFORE UPDATE ON reconciliation_case_states BEGIN SELECT RAISE(ABORT,'immutable reconciliation state'); END;
 CREATE TRIGGER immutable_reconciliation_state_delete BEFORE DELETE ON reconciliation_case_states BEGIN SELECT RAISE(ABORT,'immutable reconciliation state'); END;
 """

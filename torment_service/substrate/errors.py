@@ -37,6 +37,10 @@ class SubstrateRevisionConflict(SubstrateError):
     """Raised when an object no longer has the expected current revision."""
 
 
+class SubstrateIntegrityMismatch(SubstrateError):
+    """Raised when a payload does not satisfy its pre-established integrity expectation."""
+
+
 class SubstrateObjectNotFound(SubstrateError):
     """Raised when a native object identity has no durable carrier row."""
 

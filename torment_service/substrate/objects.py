@@ -21,8 +21,19 @@ class ObjectRevisionView:
 
 class SubstrateTx:
     """The sole BEGIN IMMEDIATE/COMMIT/ROLLBACK owner for one semantic operation."""
-    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None: self.connection,self.operation_id,self.transitions,self.published,self.relationship_published,self.representation_published=connection,operation_id,[],[],[],[]
+
+    def __init__(self, connection: sqlite3.Connection, operation_id: bytes) -> None:
+        self.connection = connection
+        self.operation_id = operation_id
+        self.transitions: list[bytes] = []
+        self.published: list[tuple[bytes, bytes, int]] = []
+        self.relationship_published: list[tuple[bytes, bytes, int]] = []
+        self.representation_published: list[bytes] = []
+        self.representation_ready: list[tuple[bytes, bytes, bytes]] = []
+        self.representation_failed: list[tuple[bytes, bytes | None]] = []
+
     def execute(self, sql: str, parameters: tuple[object,...]=()) -> sqlite3.Cursor: return self.connection.execute(sql,parameters)
+
     def validate(self) -> None:
         for oid,rid,ordinal in self.published:
             if self.execute("SELECT current_revision_id,current_revision_ordinal FROM objects WHERE object_id=?",(oid,)).fetchone() != (rid,ordinal): raise SubstrateInvariantViolation("H1 current pointer is incomplete or cross-carrier")
@@ -36,6 +47,25 @@ class SubstrateTx:
             if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='RELATIONSHIP' AND relationship_id=? AND relationship_revision_id=? AND relationship_revision_ordinal=?",(self.operation_id,rid,revision,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 relationship output does not match publication")
         for representation_id in self.representation_published:
             if self.execute("SELECT 1 FROM representation_state_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.representation_id=?",(self.operation_id,representation_id)).fetchone() is None or self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='REPRESENTATION' AND representation_id=?",(self.operation_id,representation_id)).fetchone() is None: raise SubstrateInvariantViolation("H8 representation output does not match publication")
+        for representation_id, expectation_id, measurement_id in self.representation_ready:
+            state = self.execute("SELECT readiness,operational_disposition,selected_integrity_measurement_id FROM representation_current_state WHERE representation_id=?",(representation_id,)).fetchone()
+            if state != ("READY","USABLE",measurement_id): raise SubstrateInvariantViolation("H4 representation is not published as ready and usable")
+            payload = self.execute("SELECT p.payload_bytes,p.observed_payload_byte_length,r.expected_payload_byte_length FROM representation_payloads p JOIN representations r USING(representation_id) WHERE p.representation_id=?",(representation_id,)).fetchone()
+            if payload is None or payload[1] != len(payload[0]) or (payload[2] is not None and payload[2] != payload[1]): raise SubstrateInvariantViolation("H4 representation payload is not exact")
+            expectation = self.execute("SELECT expected_value FROM integrity_expectations WHERE expectation_id=? AND subject_kind='REPRESENTATION' AND representation_id=?",(expectation_id,representation_id)).fetchone()
+            measurement = self.execute("SELECT expectation_id,result,observed_value FROM integrity_measurements WHERE measurement_id=?",(measurement_id,)).fetchone()
+            if expectation is None or measurement != (expectation_id,"MATCH",expectation[0]): raise SubstrateInvariantViolation("H4 representation integrity measurement is not acceptable")
+            if self.execute("SELECT 1 FROM representation_dependencies d JOIN representation_current_state s ON s.representation_id=d.dependency_representation_id WHERE d.representation_id=? AND (s.readiness!='READY' OR s.operational_disposition!='USABLE')",(representation_id,)).fetchone() is not None: raise SubstrateInvariantViolation("H4 representation dependencies are not ready")
+            if self.execute("SELECT 1 FROM representation_state_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.representation_id=? AND e.readiness='READY' AND e.operational_disposition='USABLE' AND e.selected_measurement_id=?",(self.operation_id,representation_id,measurement_id)).fetchone() is None: raise SubstrateInvariantViolation("H4 representation readiness effect is missing")
+            if self.execute("SELECT 1 FROM integrity_measurement_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.measurement_id=?",(self.operation_id,measurement_id)).fetchone() is None: raise SubstrateInvariantViolation("H4 integrity measurement effect is missing")
+            if self.execute("SELECT 1 FROM operation_outputs o JOIN semantic_transitions t ON t.operation_id=o.operation_id JOIN representation_state_effects e ON e.transition_id=t.transition_id WHERE o.operation_id=? AND o.output_kind='REPRESENTATION' AND o.output_role='REPRESENTATION_READY' AND o.representation_id=? AND e.representation_id=? AND e.readiness='READY'",(self.operation_id,representation_id,representation_id)).fetchone() is None: raise SubstrateInvariantViolation("H8 ready representation output does not match publication")
+        for representation_id, measurement_id in self.representation_failed:
+            state = self.execute("SELECT readiness,operational_disposition,selected_integrity_measurement_id FROM representation_current_state WHERE representation_id=?",(representation_id,)).fetchone()
+            if state != ("FAILED","WITHHELD",measurement_id): raise SubstrateInvariantViolation("failed representation state is incomplete")
+            if self.execute("SELECT 1 FROM representation_payloads WHERE representation_id=?",(representation_id,)).fetchone() is not None: raise SubstrateInvariantViolation("failed representation must not publish payload")
+            if self.execute("SELECT 1 FROM representation_state_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.representation_id=? AND e.readiness='FAILED' AND e.operational_disposition='WITHHELD' AND e.selected_measurement_id IS ?",(self.operation_id,representation_id,measurement_id)).fetchone() is None: raise SubstrateInvariantViolation("failed representation effect is missing")
+            if self.execute("SELECT 1 FROM operation_outputs o JOIN semantic_transitions t ON t.operation_id=o.operation_id JOIN representation_state_effects e ON e.transition_id=t.transition_id WHERE o.operation_id=? AND o.output_kind='REPRESENTATION' AND o.output_role='REPRESENTATION_FAILED' AND o.representation_id=? AND e.representation_id=? AND e.readiness='FAILED'",(self.operation_id,representation_id,representation_id)).fetchone() is None: raise SubstrateInvariantViolation("H8 failed representation output does not match publication")
+            if measurement_id is not None and self.execute("SELECT 1 FROM integrity_measurement_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.measurement_id=?",(self.operation_id,measurement_id)).fetchone() is None: raise SubstrateInvariantViolation("failed representation integrity measurement effect is missing")
         if self.execute("SELECT 1 FROM semantic_transitions t JOIN operation_rejections r ON r.operation_id=t.operation_id WHERE t.operation_id=?",(self.operation_id,)).fetchone() is not None: raise SubstrateInvariantViolation("H3 operation has transition and durable rejection")
 
 class NativeObjectService:
