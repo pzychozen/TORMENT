@@ -31,14 +31,17 @@ Current geometry follows:
 
 ```text
 memory identity → current revision → qualified current COMPAT_EMBEDDING
-→ raw finite float32 bytes → shared motif radius math
+→ current qualified raw float32 embedding → legacy-compatible motif _unit()
+→ shared radius calculation
 ```
 
 The exact lane is `COMPAT_EMBEDDING/1`, `compat-embedding-v1`, `RAW_VECTOR`,
 `float32`, and caller-supplied dimension. It requires current-source binding,
 READY/USABLE state, one integrity expectation, selected MATCH measurement, and
 no non-usable current reconciliation state. Zero vectors are returned raw; no
-normalization is performed by the representation reader.
+normalization is performed by the representation reader. The native radius
+caller separately applies the existing motif `_unit()` semantics before passing
+each qualified raw vector to the shared radius calculation.
 
 A member without current qualified geometry remains a member and contributes to
 member count, but is absent from the radius sample. Native coherence rows use

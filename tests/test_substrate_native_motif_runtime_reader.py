@@ -400,6 +400,61 @@ def test_current_raw_embedding_read_is_qualified_unscaled_and_current_revision_o
         values["qualified"].close()
 
 
+@pytest.mark.parametrize(
+    ("raw_vector", "raw_geometry_matches_legacy"),
+    (
+        ((2.0, 0.6, 0.0), False),
+        ((1e-12, 3e-13, 0.0), False),
+        ((0.0, 0.0, 0.0), True),
+    ),
+    ids=("nonunit", "small-nonzero", "zero"),
+)
+def test_native_radius_applies_legacy_unit_to_raw_qualified_embeddings(
+    tmp_path: Path,
+    raw_vector: tuple[float, float, float],
+    raw_geometry_matches_legacy: bool,
+):
+    """Native radius consumes raw representation bytes through legacy ``_unit`` math."""
+    values = _database(tmp_path)
+    try:
+        source = _memory(values, "radius-unit")
+        _ready(values, source, "radius-unit", raw_vector)
+        motif = _create(
+            values,
+            source,
+            "motif_personal_0001",
+            key="radius-unit",
+            centroid=(1.0, 0.0, 0.0),
+        )
+        reader = NativeMotifRuntimeReader(values["connection"])
+        raw_embedding = reader.read_current_compat_embedding(
+            source.object_id,
+            expected_dimension=3,
+        )
+        assert raw_embedding is not None
+        assert np.array_equal(raw_embedding, np.asarray(raw_vector, dtype=np.float32))
+
+        expected_legacy_radius = motif_radius_from_member_vectors(
+            (1.0, 0.0, 0.0),
+            (_unit(raw_embedding),),
+        )
+        raw_native_radius = motif_radius_from_member_vectors(
+            (1.0, 0.0, 0.0),
+            (raw_embedding,),
+        )
+        if raw_geometry_matches_legacy:
+            assert raw_native_radius == expected_legacy_radius
+        else:
+            assert raw_native_radius != expected_legacy_radius
+
+        assert reader.motif_radius(
+            motif.motif_object_id,
+            expected_dimension=3,
+        ) == expected_legacy_radius
+    finally:
+        values["qualified"].close()
+
+
 def test_native_radius_projection_and_centroid_are_read_only_and_math_shared(tmp_path: Path):
     values = _database(tmp_path)
     try:

@@ -366,18 +366,22 @@ class NativeMotifRuntimeReader:
     def motif_radius(
         self, motif_object_id: UUID, *, expected_dimension: int
     ) -> float:
-        """Calculate radius from current member identities and qualified raw vectors."""
+        """Calculate radius through the legacy-compatible member-unit-vector path."""
         _positive_dimension(expected_dimension)
         view = self._motifs.get_current_motif(motif_object_id)
         members = self.list_ordered_current_motif_members(motif_object_id)
+
+        def legacy_unit_member_vectors():
+            for member in members:
+                raw_vector = self.read_current_compat_embedding(
+                    member.member_object_id,
+                    expected_dimension=expected_dimension,
+                )
+                yield None if raw_vector is None else _unit(raw_vector)
+
         return motif_radius_from_member_vectors(
             view.state.centroid,
-            (
-                self.read_current_compat_embedding(
-                    member.member_object_id, expected_dimension=expected_dimension
-                )
-                for member in members
-            ),
+            legacy_unit_member_vectors(),
         )
 
     def project_coherence_field_rows(
