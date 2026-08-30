@@ -19,6 +19,7 @@ from ..motif_decision import (
     motif_gravity_bonus,
 )
 from ..motif_geometry import motif_radius_from_member_vectors
+from .compat_embedding_reader import NativeCompatEmbeddingReader
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .ids import native_id_to_bytes
 from .motifs import (
@@ -92,6 +93,9 @@ class NativeMotifRuntimeReader:
         open_schema(connection, writable=False)
         self._connection = connection
         self._representations = _ReadOnlyRepresentationPayloadReader(connection)
+        self._compat_embeddings = NativeCompatEmbeddingReader(
+            connection, payload_reader=self._representations
+        )
 
     def list_runtime_motifs(
         self,
@@ -273,117 +277,10 @@ class NativeMotifRuntimeReader:
         self, member_object_id: UUID, *, expected_dimension: int
     ) -> np.ndarray | None:
         """Read one current qualified raw float32 vector, or ``None`` if unavailable."""
-        _require_uuid("member_object_id", member_object_id)
-        _positive_dimension(expected_dimension)
-        current = self._connection.execute(
-            """
-            SELECT o.object_kind,o.current_revision_id,o.current_revision_ordinal
-              FROM objects o
-             WHERE o.object_id=?
-            """,
-            (native_id_to_bytes(member_object_id),),
-        ).fetchone()
-        if current is None:
-            raise SubstrateObjectNotFound("native motif member object was not found")
-        if current[0] != _MEMORY_OBJECT_KIND:
-            raise SubstrateInvariantViolation(
-                "native motif geometry requires a LEGACY_CORE_NODE member"
-            )
-        rows = self._connection.execute(
-            """
-            SELECT r.representation_id,r.expected_payload_byte_length
-              FROM representations r
-              JOIN representation_current_state state USING(representation_id)
-              JOIN integrity_expectations expectation
-                ON expectation.subject_kind='REPRESENTATION'
-               AND expectation.representation_id=r.representation_id
-              JOIN integrity_measurements measurement
-                ON measurement.measurement_id=state.selected_integrity_measurement_id
-               AND measurement.expectation_id=expectation.expectation_id
-             WHERE r.source_kind='OBJECT_REVISION'
-               AND r.source_object_id=?
-               AND r.source_object_revision_id=?
-               AND r.source_object_revision_ordinal=?
-               AND r.representation_class=? AND r.generation=?
-               AND r.derivation_contract_version=? AND r.encoding_id=?
-               AND r.dtype=? AND r.dimension=?
-               AND state.readiness='READY' AND state.operational_disposition='USABLE'
-               AND measurement.result='MATCH'
-               AND (
-                   SELECT count(*) FROM integrity_expectations e
-                    WHERE e.subject_kind='REPRESENTATION'
-                      AND e.representation_id=r.representation_id
-               )=1
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM reconciliation_cases c
-                     JOIN reconciliation_case_states reconciliation_state
-                       ON reconciliation_state.reconciliation_case_id=c.reconciliation_case_id
-                      AND reconciliation_state.reconciliation_state_id=c.current_state_id
-                      AND reconciliation_state.state_ordinal=c.current_state_ordinal
-                    WHERE c.subject_kind='REPRESENTATION'
-                      AND c.representation_id=r.representation_id
-                      AND reconciliation_state.operational_disposition<>'USABLE'
-               )
-            """,
-            (
-                native_id_to_bytes(member_object_id),
-                current[1],
-                current[2],
-                _REPRESENTATION_CLASS,
-                _GENERATION,
-                _DERIVATION_CONTRACT,
-                _ENCODING,
-                _DTYPE,
-                expected_dimension,
-            ),
-        ).fetchall()
-        if not rows:
-            return None
-        if len(rows) != 1:
-            raise SubstrateInvariantViolation(
-                "current native member has contradictory qualified embedding candidates"
-            )
-        representation_id, expected_length = rows[0]
-        required_length = np.dtype(np.float32).itemsize * expected_dimension
-        if (
-            not isinstance(expected_length, int)
-            or isinstance(expected_length, bool)
-            or expected_length != required_length
-        ):
-            raise SubstrateInvariantViolation(
-                "qualified native embedding metadata has an invalid byte length"
-            )
-        payload_row = self._connection.execute(
-            "SELECT 1 FROM representation_payloads WHERE representation_id=?",
-            (representation_id,),
-        ).fetchone()
-        if payload_row is None:
-            raise SubstrateInvariantViolation(
-                "qualified native embedding is READY without durable payload bytes"
-            )
-        try:
-            payload = self._representations.read_representation_payload(
-                UUID(bytes=representation_id)
-            )
-        except SubstrateObjectNotFound as exc:
-            raise SubstrateInvariantViolation(
-                "qualified native embedding became unavailable during payload read"
-            ) from exc
-        if len(payload) != required_length:
-            raise SubstrateInvariantViolation(
-                "qualified native embedding payload length contradicts metadata"
-            )
-        vector = np.frombuffer(payload, dtype=np.float32)
-        if vector.size != expected_dimension:
-            raise SubstrateInvariantViolation(
-                "qualified native embedding payload dimension contradicts metadata"
-            )
-        if not np.all(np.isfinite(vector)):
-            raise SubstrateInvariantViolation(
-                "qualified native embedding payload contains non-finite values"
-            )
-        return vector
+        qualified = self._compat_embeddings.read_current(
+            member_object_id, expected_dimension=expected_dimension
+        )
+        return None if qualified is None else qualified.float32_vector()
 
     def motif_radius(
         self, motif_object_id: UUID, *, expected_dimension: int
