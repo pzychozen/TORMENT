@@ -577,3 +577,24 @@ def test_split_gate_refuses_a_real_ninety_sixth_attach_without_compound_residue(
         assert _semantic_counts(values["connection"]) == before
     finally:
         values["qualified"].close()
+
+
+def test_explicit_ordered_catalog_preserves_a3d_tie_order_while_verifying_current_witness(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        _seed_motif(values, runtime_id="motif_research_0001", centroid=(1.0, 0.0, 0.0), key="ordered-a")
+        _seed_motif(values, runtime_id="motif_research_0002", centroid=(0.0, 1.0, 0.0), key="ordered-b")
+        service = NativeMemoryMotifCompositionService(values["connection"])
+        catalog = service._reader.list_runtime_motifs(  # test-only inspection of the reader boundary
+            motif_alias_namespace_id=values["motif_alias"], domain_id="research", semantic_scope_id=values["scope"],
+        )
+        preview = service.prepare_plan_from_ordered_catalog(
+            _request(values, key="ordered-tie", embedding=(1.0, 1.0, 0.0)),
+            tuple(reversed(catalog)),
+        )
+        assert preview.decision.selected is not None
+        assert preview.decision.selected.runtime_motif_id == "motif_research_0002"
+        result = service.commit(preview)
+        assert result.runtime_motif_id == "motif_research_0002"
+    finally:
+        values["qualified"].close()

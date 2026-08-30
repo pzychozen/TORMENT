@@ -66,6 +66,7 @@ class NativeMemoryReinforcementRequest:
     last_reinforced_ts: int
     expected_dimension: int
     last_tool_refresh_ts: int | None = None
+    routing_input_digest: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -90,6 +91,12 @@ class NativeMemoryReinforcementRequest:
             or self.last_tool_refresh_ts < 0
         ):
             raise ValueError("last_tool_refresh_ts must be a non-negative integer when supplied")
+        if self.routing_input_digest is not None and (
+            not isinstance(self.routing_input_digest, str)
+            or len(self.routing_input_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.routing_input_digest)
+        ):
+            raise ValueError("routing_input_digest must be a lowercase SHA-256 hex digest when supplied")
 
 
 @dataclass(frozen=True)
@@ -527,6 +534,7 @@ def _retry_contract(request: NativeMemoryReinforcementRequest) -> dict[str, Any]
         "last_reinforced_ts": request.last_reinforced_ts,
         "last_tool_refresh_ts": request.last_tool_refresh_ts,
         "expected_dimension": request.expected_dimension,
+        "routing_input_digest": request.routing_input_digest,
     }
 
 

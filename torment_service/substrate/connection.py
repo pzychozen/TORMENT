@@ -1,4 +1,4 @@
-"""Temporary/test-only SQLite connection boundary for Phase 7A."""
+"""Qualified SQLite connection boundaries for the native substrate."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ import sqlite3
 
 from .errors import SubstrateConfigurationError, SubstrateConnectionError
 from .runtime_qualification import RuntimeQualificationPolicy, RuntimeQualificationResult, qualify_runtime
+from .schema import require_current_schema
 
 
 DEFAULT_TEST_BUSY_TIMEOUT_MS = 1_000
+DEFAULT_EXISTING_CORE_BUSY_TIMEOUT_MS = 1_000
 
 
 @dataclass
@@ -25,6 +27,30 @@ class QualifiedTemporaryConnection:
         self.connection.close()
 
     def __enter__(self) -> "QualifiedTemporaryConnection":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
+
+@dataclass
+class QualifiedExistingCoreConnection:
+    """One same-thread, existing-v1.1-core connection owned by its caller.
+
+    This deliberately differs from :class:`QualifiedTemporaryConnection`:
+    it opens only a pre-existing database with SQLite's ``mode=rw`` and then
+    requires the current schema.  It never bootstraps, migrates, upgrades, or
+    otherwise creates durable state.
+    """
+
+    connection: sqlite3.Connection
+    qualification: RuntimeQualificationResult
+    database_path: Path
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def __enter__(self) -> "QualifiedExistingCoreConnection":
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -64,6 +90,40 @@ def open_temporary_test_connection(
     return QualifiedTemporaryConnection(connection, qualification, path)
 
 
+def open_existing_native_core_connection(
+    database_path: str | Path,
+    *,
+    busy_timeout_ms: int = DEFAULT_EXISTING_CORE_BUSY_TIMEOUT_MS,
+    runtime_policy: RuntimeQualificationPolicy | None = None,
+) -> QualifiedExistingCoreConnection:
+    """Open one already-existing, current native core without creating it.
+
+    A3D routes own these connections per bounded operation.  The URI uses
+    ``mode=rw`` in addition to the pre-open existence check so a raced-away
+    path is refused by SQLite instead of being recreated.
+    """
+    path = _validate_existing_core_database_path(database_path)
+    if not isinstance(busy_timeout_ms, int) or busy_timeout_ms < 0:
+        raise SubstrateConfigurationError("busy_timeout_ms must be a non-negative integer")
+    qualification = qualify_runtime(policy=runtime_policy)
+    try:
+        connection = sqlite3.connect(
+            f"{path.as_uri()}?mode=rw",
+            uri=True,
+            isolation_level=None,
+            check_same_thread=True,
+        )
+    except sqlite3.Error as exc:
+        raise SubstrateConnectionError("unable to open the existing native core") from exc
+    try:
+        _configure_connection(connection, busy_timeout_ms=busy_timeout_ms)
+        require_current_schema(connection)
+    except Exception:
+        connection.close()
+        raise
+    return QualifiedExistingCoreConnection(connection, qualification, path)
+
+
 def _validate_test_database_path(database_path: str | Path) -> Path:
     if not isinstance(database_path, (str, Path)):
         raise SubstrateConfigurationError("a file-backed temporary database path is required")
@@ -72,6 +132,19 @@ def _validate_test_database_path(database_path: str | Path) -> Path:
     path = Path(database_path).expanduser().resolve()
     if path.suffix.lower() != ".db":
         raise SubstrateConfigurationError("temporary substrate database path must use a .db suffix")
+    return path
+
+
+def _validate_existing_core_database_path(database_path: str | Path) -> Path:
+    if not isinstance(database_path, (str, Path)):
+        raise SubstrateConfigurationError("an existing native core database path is required")
+    if str(database_path).strip() in {"", ":memory:"}:
+        raise SubstrateConfigurationError("existing native core connection requires a file-backed database")
+    path = Path(database_path).expanduser().resolve()
+    if path.suffix.lower() != ".db":
+        raise SubstrateConfigurationError("existing native core database path must use a .db suffix")
+    if not path.is_file():
+        raise SubstrateConfigurationError("native core database must already exist")
     return path
 
 

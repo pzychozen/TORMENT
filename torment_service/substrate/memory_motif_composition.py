@@ -188,6 +188,7 @@ class NativeMemoryMotifCompositionPreview:
 
     request: NativeMemoryMotifCompositionRequest
     catalog_witness: tuple[NativeMotifCatalogWitnessEntry, ...]
+    catalog_order_kind: Literal["RESTART_LEXICOGRAPHIC", "PROCESS_ORDER"]
     decision: MotifDecision
     selected_motif_object_id: UUID | None
     selected_motif_identity_namespace_id: UUID | None
@@ -243,7 +244,43 @@ class NativeMemoryMotifCompositionService:
             domain_id=request.domain_id,
             semantic_scope_id=request.semantic_scope_id,
         )
-        return _prepare_preview(request, catalog, self._reader)
+        return _prepare_preview(
+            request, catalog, self._reader, catalog_order_kind="RESTART_LEXICOGRAPHIC"
+        )
+
+    def prepare_plan_from_ordered_catalog(
+        self,
+        request: NativeMemoryMotifCompositionRequest,
+        ordered_catalog: tuple[NativeRuntimeMotif, ...],
+    ) -> NativeMemoryMotifCompositionPreview:
+        """Prepare against one caller-owned, freshly verified motif order.
+
+        Standalone A3C2 retains :meth:`prepare_plan`'s restart-style sorted
+        reader order.  A3D alone supplies a process-owned ordering snapshot;
+        this method verifies that it is an exact permutation of the current
+        catalog before preserving that order for the frozen decision layer.
+        """
+        if not isinstance(request, NativeMemoryMotifCompositionRequest):
+            raise ValueError("a NativeMemoryMotifCompositionRequest is required")
+        if not isinstance(ordered_catalog, tuple) or any(
+            not isinstance(item, NativeRuntimeMotif) for item in ordered_catalog
+        ):
+            raise ValueError("ordered_catalog must be a tuple of NativeRuntimeMotif values")
+        _reject_deferred_links(request)
+        current = self._reader.list_runtime_motifs(
+            motif_alias_namespace_id=request.motif_alias_namespace_id,
+            domain_id=request.domain_id,
+            semantic_scope_id=request.semantic_scope_id,
+        )
+        current_by_id = {item.motif_object_id: item for item in current}
+        supplied_ids = tuple(item.motif_object_id for item in ordered_catalog)
+        if len(set(supplied_ids)) != len(supplied_ids) or set(supplied_ids) != set(current_by_id):
+            raise StaleMotifCatalogError("ordered motif catalog does not match current native motifs")
+        if any(current_by_id[item.motif_object_id] != item for item in ordered_catalog):
+            raise StaleMotifCatalogError("ordered motif catalog revision differs from current native motifs")
+        return _prepare_preview(
+            request, ordered_catalog, self._reader, catalog_order_kind="PROCESS_ORDER"
+        )
 
     def commit(
         self,
@@ -551,7 +588,23 @@ class NativeMemoryMotifCompositionService:
             semantic_scope_id=request.semantic_scope_id,
         )
         actual = tuple(_witness_entry(item) for item in current)
-        if actual != preview.catalog_witness:
+        if preview.catalog_order_kind == "RESTART_LEXICOGRAPHIC":
+            if actual != preview.catalog_witness:
+                raise StaleMotifCatalogError("native motif catalog differs from the prepared witness")
+            return
+        if preview.catalog_order_kind != "PROCESS_ORDER":
+            raise SubstrateInvariantViolation("A3C2 preview has an unknown catalog ordering kind")
+        # The standalone reader remains lexicographic.  A3D may instead carry
+        # its own frozen process order (restart baseline plus local creates
+        # appended).  Durable freshness is the exact set of motif identities
+        # and revisions, not the read-order used for tie breaking.
+        actual_by_object = {item.motif_object_id: item for item in actual}
+        prepared_by_object = {item.motif_object_id: item for item in preview.catalog_witness}
+        if (
+            len(actual_by_object) != len(actual)
+            or len(prepared_by_object) != len(preview.catalog_witness)
+            or actual_by_object != prepared_by_object
+        ):
             raise StaleMotifCatalogError("native motif catalog differs from the prepared witness")
 
     def _assert_required_identities(self, request: NativeMemoryMotifCompositionRequest) -> None:
@@ -624,10 +677,10 @@ def _prepare_preview(
     request: NativeMemoryMotifCompositionRequest,
     catalog: tuple[NativeRuntimeMotif, ...],
     reader: NativeMotifRuntimeReader,
+    *,
+    catalog_order_kind: Literal["RESTART_LEXICOGRAPHIC", "PROCESS_ORDER"],
 ) -> NativeMemoryMotifCompositionPreview:
     witness = tuple(_witness_entry(item) for item in catalog)
-    if tuple(item.runtime_motif_id for item in witness) != tuple(sorted(item.runtime_motif_id for item in witness)):
-        raise ValueError("catalog witness must be in frozen lexicographic runtime motif-ID order")
     decision = decide_attach_or_create(
         tuple(item.read_model for item in catalog),
         np.asarray(request.incoming_embedding, dtype=np.float32),
@@ -679,6 +732,7 @@ def _prepare_preview(
     return NativeMemoryMotifCompositionPreview(
         request=request,
         catalog_witness=witness,
+        catalog_order_kind=catalog_order_kind,
         decision=decision,
         selected_motif_object_id=selected_id,
         selected_motif_identity_namespace_id=selected_identity_namespace_id,
@@ -892,6 +946,7 @@ def _composition_intent(preview: NativeMemoryMotifCompositionPreview) -> str:
                 "sha256": preview.incoming_embedding_sha256,
             },
             "catalog_witness": [_witness_intent(item) for item in preview.catalog_witness],
+            "catalog_order_kind": preview.catalog_order_kind,
             "decision": _decision_intent(preview.decision),
             "selected_motif_object_id": str(preview.selected_motif_object_id) if preview.selected_motif_object_id else None,
             "selected_motif_identity_namespace_id": str(preview.selected_motif_identity_namespace_id) if preview.selected_motif_identity_namespace_id else None,
