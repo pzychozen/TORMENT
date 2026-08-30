@@ -24,6 +24,7 @@ from .motif_decision import (
     realize_attach_next_state,
     realize_create_next_state,
 )
+from .motif_geometry import motif_radius_from_member_vectors
 
 def _now_ts() -> int:
     return int(time.time())
@@ -229,18 +230,10 @@ class MotifRegistry:
             return None
 
     def _motif_radius(self, m: Motif) -> float:
-        c = m.centroid_np()
-        if c.size == 0 or not m.members:
-            return 0.0
-        ds = []
-        for eid in m.members:
-            emb = self._member_embedding(eid)
-            if emb is None or emb.size != c.size:
-                continue
-            ds.append(1.0 - cosine(c, emb))
-        if not ds:
-            return 0.0
-        return float(np.mean(ds))
+        return motif_radius_from_member_vectors(
+            m.centroid,
+            (self._member_embedding(eid) for eid in m.members),
+        )
 
     def _two_means_split(self, X: np.ndarray, seed_a: int, seed_b: int, iters: int = 12) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         ca = X[seed_a].copy()
