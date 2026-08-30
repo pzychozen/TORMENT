@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, Protocol
 import numpy as np
 
 from .character import CharacterState, gravity_correction, measure_drift
+from .derived_memory_runtime import DerivedMemoryRuntimeContext, DerivedMemoryRuntimePort
 from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
 from .srg_runtime_state import SRGTransientRuntimePort
 from .world_runtime import WorldRuntimePort
@@ -96,6 +97,7 @@ class LegacyFabricPostWriteDependencies:
     workspace: Any
     graph: Any
     world_runtime: WorldRuntimePort
+    derived_memory_runtime: DerivedMemoryRuntimePort
     memory_access: PostWriteMemoryReadPort
     memory_enumeration: PostWriteMemoryEnumerationPort
     srg_runtime: SRGTransientRuntimePort
@@ -387,25 +389,25 @@ class LegacyFabricPostWriteAdapter:
             )
         except Exception as exc:
             deps.owner._log.debug("motif entropy update failed for domain=%s: %s", context.chosen_domain, exc)
+        derived_context = DerivedMemoryRuntimeContext(
+            workspace_id=context.workspace_id,
+            agent_id=context.agent_id,
+            domain_id=context.chosen_domain,
+            step=int(context.step),
+            motif_ids=tuple(context.motif_ids),
+            affect_tag=context.affect_tag,
+            affect_conf=context.affect_conf,
+        )
         try:
-            deps.owner._maybe_emit_identity_anchor(
-                deps.workspace, agent_id=context.agent_id, domain_id=context.chosen_domain,
-                step=int(context.step), motif_ids=list(context.motif_ids),
-            )
+            deps.derived_memory_runtime.maybe_emit_identity_anchor(derived_context)
         except Exception as exc:
             deps.owner._log.debug("identity anchor emission failed: %s", exc)
         try:
-            deps.owner._refine_identity_anchors(
-                deps.workspace, agent_id=context.agent_id, domain_id=context.chosen_domain,
-                motif_ids=list(context.motif_ids),
-            )
+            deps.derived_memory_runtime.refine_identity_anchors(derived_context)
         except Exception as exc:
             deps.owner._log.debug("identity anchor refinement failed: %s", exc)
         try:
-            deps.owner._maybe_emit_mood_drift(
-                deps.workspace, agent_id=context.agent_id, domain_id=context.chosen_domain,
-                step=int(context.step), affect_tag=context.affect_tag, affect_conf=context.affect_conf,
-            )
+            deps.derived_memory_runtime.maybe_emit_mood_drift(derived_context)
         except Exception as exc:
             deps.owner._log.debug("mood drift emission failed: %s", exc)
 

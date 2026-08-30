@@ -55,6 +55,10 @@ from .native_srg_runtime import (
     NativeSRGTransientRuntime,
     SRGSuccessorMaterialization,
 )
+from .native_derived_memory_runtime import (
+    NativeDerivedMemoryRuntime,
+    NativeDerivedMemoryRuntimeConfiguration,
+)
 from .native_world_runtime import (
     NativeWorldProcessState,
     NativeWorldRuntime,
@@ -385,6 +389,45 @@ class NativeFabricMemoryRouter:
         except ValueError:
             return NativeFabricRouteQualification(False, scope, "REPRESENTATION_NOT_QUALIFIED")
         return NativeFabricRouteQualification(True, scope, "QUALIFIED")
+
+    def bind_derived_memory_runtime(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        configuration: NativeDerivedMemoryRuntimeConfiguration,
+    ) -> NativeDerivedMemoryRuntime:
+        """Bind one qualified connection to the closed A3D9 runtime port.
+
+        This is deliberately not a post-write adapter and does not select or
+        activate native storage.  It only proves that the already-prepared
+        capability owns the native memory/motif read scope and the same
+        process-local SRG/world owners needed by the derived boundary.
+        """
+        if not isinstance(configuration, NativeDerivedMemoryRuntimeConfiguration):
+            raise SubstrateConfigurationError("derived runtime requires explicit A3D9 configuration")
+        _revalidate_capability_for_route(self._capability, connection)
+        scope = self._capability.claimed_scope(
+            workspace_id=configuration.workspace_id,
+            scope="private",
+            agent_id=configuration.agent_id,
+            domain_id=configuration.domain_id,
+        )
+        if scope is None:
+            raise SubstrateConfigurationError("derived runtime scope is not claimed")
+        if (
+            configuration.legacy_source_namespace_id != scope.runtime_scope.legacy_source_namespace_id
+            or configuration.memory_identity_namespace_id != scope.runtime_scope.identity_namespace_id
+            or configuration.semantic_scope_id != scope.runtime_scope.semantic_scope_id
+            or configuration.motif_alias_namespace_id != scope.motif_alias_namespace_id
+            or configuration.idempotency_namespace_id != scope.idempotency_namespace_id
+        ):
+            raise SubstrateConfigurationError("derived runtime configuration does not match claimed native scope")
+        return NativeDerivedMemoryRuntime(
+            connection,
+            configuration=configuration,
+            world_process_state=self._capability.world_process_state,
+            srg_process_state=self._capability.srg_process_state,
+        )
 
     def route(
         self,

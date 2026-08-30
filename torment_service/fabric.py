@@ -51,6 +51,7 @@ from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .memory_runtime_access import LegacyPostWriteMemoryAccess
 from .srg_runtime_state import LegacySRGTransientRuntime
 from .candidate_types import CandidateShapedValue
+from .derived_memory_runtime import LegacyDerivedMemoryRuntime
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
 from .post_write_runtime import (
     FabricPostWriteContext,
@@ -3713,6 +3714,7 @@ class TormentFabric:
             workspace=ws,
             graph=graph,
             world_runtime=LegacyWorldRuntime(graph),
+            derived_memory_runtime=LegacyDerivedMemoryRuntime(owner=self, workspace=ws),
             memory_access=memory_access,
             memory_enumeration=memory_access,
             srg_runtime=LegacySRGTransientRuntime(graph),

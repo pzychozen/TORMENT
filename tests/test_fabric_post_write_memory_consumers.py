@@ -162,10 +162,16 @@ def _adapter(port, *, field: _Field | None = None):
         _get_proposal_bridge=lambda _workspace_id: SimpleNamespace(maybe_draft_proposal=lambda **_kwargs: None),
     )
     owner._emit_hivemind_packet_telemetry = lambda **values: owner.hivemind_events.append(values)
+    derived_runtime = SimpleNamespace(
+        maybe_emit_identity_anchor=lambda _context: None,
+        refine_identity_anchors=lambda _context: None,
+        maybe_emit_mood_drift=lambda _context: None,
+    )
     dependencies = LegacyFabricPostWriteDependencies(
         owner=owner,
         workspace=SimpleNamespace(conflicts={"personal": conflicts}, proposals={}),
-        graph=_NoGraph(), world_runtime=_NoWorldRuntime(), memory_access=port, memory_enumeration=port,
+        graph=_NoGraph(), world_runtime=_NoWorldRuntime(), derived_memory_runtime=derived_runtime,
+        memory_access=port, memory_enumeration=port,
         srg_runtime=_NoSRGRuntime(), embedding_dimension=3,
         identity=None, motif_registry=None, motif_runtime=None,
         model_state=None, kernel_context=None, agent_key="ws::aria",

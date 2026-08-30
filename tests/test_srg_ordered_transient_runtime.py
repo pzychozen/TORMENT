@@ -166,11 +166,17 @@ class _NoWorldRuntime:
 
 def _adapter(memory_access, memory_enumeration, srg_runtime):
     owner = SimpleNamespace(_srg_enable=True, _log=logging.getLogger("a3d5-srg"))
+    derived_runtime = SimpleNamespace(
+        maybe_emit_identity_anchor=lambda _context: None,
+        refine_identity_anchors=lambda _context: None,
+        maybe_emit_mood_drift=lambda _context: None,
+    )
     dependencies = LegacyFabricPostWriteDependencies(
         owner=owner,
         workspace=None,
         graph=_ForbiddenGraph(),
         world_runtime=_NoWorldRuntime(),
+        derived_memory_runtime=derived_runtime,
         memory_access=memory_access,
         memory_enumeration=memory_enumeration,
         srg_runtime=srg_runtime,
