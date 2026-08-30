@@ -12,19 +12,21 @@ from .embedding_store import (
     _child_path,
 )
 from .pathing import safe_slug
+from .motif_decision import (
+    MotifDecisionPolicy,
+    MotifReadModel,
+    _unit,
+    cosine,
+    decide_attach_or_create,
+    motif_density,
+    motif_gravity_bonus,
+    motif_label_from_summary,
+    realize_attach_next_state,
+    realize_create_next_state,
+)
 
 def _now_ts() -> int:
     return int(time.time())
-
-def cosine(a: np.ndarray, b: np.ndarray) -> float:
-    na = float(np.linalg.norm(a) + 1e-12)
-    nb = float(np.linalg.norm(b) + 1e-12)
-    return float(np.dot(a, b) / (na * nb))
-
-def _unit(v: np.ndarray) -> np.ndarray:
-    v = np.asarray(v, dtype=np.float32).reshape(-1)
-    n = float(np.linalg.norm(v) + 1e-12)
-    return (v / n).astype(np.float32)
 
 @dataclass
 class Motif:
@@ -155,16 +157,31 @@ class MotifRegistry:
     def _density(self, m: Motif) -> float:
         # Basin depth extends to 128 members — epistemic principle:
         # deeper basins (more reinforcing observations) remain distinguishable
-        return float(min(1.0, np.log1p(max(0, len(m.members))) / np.log(129.0)))
+        return motif_density(len(m.members))
 
     def _gravity_bonus(self, m: Motif) -> float:
-        strength = float(np.clip(m.strength, 0.0, 1.0))
-        density = self._density(m)
-        stability = float(np.clip(m.stability_score, 0.0, 1.0))
-        return float(
-            self.GRAVITY_STRENGTH_W * strength
-            + self.GRAVITY_DENSITY_W * density
-            + self.GRAVITY_STABILITY_W * stability
+        return motif_gravity_bonus(self._read_model(m), self._decision_policy())
+
+    def _decision_policy(self) -> MotifDecisionPolicy:
+        return MotifDecisionPolicy(
+            self.GRAVITY_STRENGTH_W,
+            self.GRAVITY_DENSITY_W,
+            self.GRAVITY_STABILITY_W,
+        )
+
+    @staticmethod
+    def _read_model(motif: Motif) -> MotifReadModel:
+        return MotifReadModel(
+            motif.motif_id,
+            motif.domain_id,
+            motif.label,
+            tuple(motif.centroid),
+            motif.strength,
+            len(motif.members),
+            tuple(motif.contributing_agents),
+            motif.stability_score,
+            motif.created_ts,
+            motif.last_active_ts,
         )
 
     def domain_centroid(self, dim: int) -> np.ndarray:
@@ -329,79 +346,68 @@ class MotifRegistry:
         summary: str,
         attach_threshold: float = 0.72,
     ) -> Tuple[List[str], Optional[str]]:
-        embedding = _unit(embedding)
-        dim = int(embedding.size)
+        decision = decide_attach_or_create(
+            tuple(self._read_model(motif) for motif in self.motifs.values()),
+            embedding,
+            attach_threshold,
+            self._decision_policy(),
+        )
 
-        best_mid: Optional[str] = None
-        best_raw_sim = -1.0
-        best_attach_score = -1.0
-        best_eff_threshold = attach_threshold
-
-        for mid, m in self.motifs.items():
-            c = m.centroid_np()
-            if c.size != dim:
-                continue
-            raw_sim = cosine(embedding, c)
-            density = self._density(m)
-            gravity_bonus = self._gravity_bonus(m)
-            attach_score = float(raw_sim + gravity_bonus)
-            eff_threshold = float(max(0.62, attach_threshold - (0.04 * density + 0.03 * float(np.clip(m.strength, 0.0, 1.0)))))
-            if attach_score > best_attach_score:
-                best_attach_score = attach_score
-                best_raw_sim = raw_sim
-                best_mid = mid
-                best_eff_threshold = eff_threshold
-
-        if best_mid is not None and best_attach_score >= best_eff_threshold:
-            m = self.motifs[best_mid]
-            c = _unit(m.centroid_np())
-            density = self._density(m)
-            member_n = max(1, len(m.members))
-            lr = float(np.clip(0.12 / np.sqrt(1.0 + member_n / 8.0), 0.025, 0.08))
-            newc = _unit((1.0 - lr) * c + lr * embedding)
-            m.centroid = newc.tolist()
+        if decision.kind == "ATTACH_EXISTING":
+            m = self.motifs[decision.selected.runtime_motif_id]
+            next_state = realize_attach_next_state(
+                decision, agent_id=agent_id, last_active_ts=_now_ts()
+            )
+            m.centroid = list(next_state.centroid)
+            # Legacy list semantics intentionally remain append-only, including repeats.
             m.members.append(int(memory_eid))
-            if agent_id not in m.contributing_agents:
-                m.contributing_agents.append(agent_id)
-            target_strength = float(0.12 + 0.88 * (1.0 - np.exp(-len(m.members) / 24.0)))
-            m.strength = float(max(m.strength, min(1.0, target_strength)))
-            m.stability_score = float(np.clip(0.90 * m.stability_score + 0.10 * max(0.0, best_raw_sim), 0.0, 1.0))
-            m.last_active_ts = _now_ts()
+            m.contributing_agents = list(next_state.contributing_agents)
+            m.strength = next_state.strength
+            m.stability_score = next_state.stability_score
+            m.last_active_ts = next_state.last_active_ts
 
             self.save()
             self._log_event({
                 "type": "MOTIF_ATTACH",
-                "motif_id": best_mid,
+                "motif_id": m.motif_id,
                 "memory_eid": int(memory_eid),
                 "agent_id": agent_id,
-                "raw_sim": float(best_raw_sim),
-                "attach_score": float(best_attach_score),
-                "effective_threshold": float(best_eff_threshold),
-                "density": float(density),
+                "raw_sim": float(decision.raw_similarity),
+                "attach_score": float(decision.attach_score),
+                "effective_threshold": float(decision.effective_threshold),
+                "density": float(decision.pre_mutation_density),
                 "gravity_bonus": float(self._gravity_bonus(m)),
                 "stability_score": float(m.stability_score),
                 "strength": float(m.strength),
             })
 
-            split_evt = self._maybe_split_motif(best_mid)
+            split_evt = self._maybe_split_motif(m.motif_id)
             if split_evt is not None:
                 return [split_evt["parent"], split_evt["child"]], None
 
-            return [best_mid], None
+            return [m.motif_id], None
 
         mid = self._next_motif_id()
-        label = self._label_from_summary(summary)
-        self.motifs[mid] = Motif(
-            motif_id=mid,
+        next_state = realize_create_next_state(
+            decision,
+            runtime_motif_id=mid,
             domain_id=self.domain_id,
-            label=label,
-            centroid=embedding.tolist(),
-            strength=0.10,
-            members=[int(memory_eid)],
-            contributing_agents=[agent_id],
-            stability_score=0.5,
+            summary=summary,
+            agent_id=agent_id,
             created_ts=_now_ts(),
             last_active_ts=_now_ts(),
+        )
+        self.motifs[mid] = Motif(
+            motif_id=mid,
+            domain_id=next_state.domain_id,
+            label=next_state.label,
+            centroid=list(next_state.centroid),
+            strength=next_state.strength,
+            members=[int(memory_eid)],
+            contributing_agents=list(next_state.contributing_agents),
+            stability_score=next_state.stability_score,
+            created_ts=next_state.created_ts,
+            last_active_ts=next_state.last_active_ts,
         )
         self.save()
         self._log_event({
@@ -409,17 +415,12 @@ class MotifRegistry:
             "motif_id": mid,
             "memory_eid": int(memory_eid),
             "agent_id": agent_id,
-            "label": label,
+            "label": next_state.label,
         })
         return [mid], mid
 
     def _label_from_summary(self, summary: str) -> str:
-        s = (summary or "").strip()
-        toks = [t.strip(".,:;!?()[]{}\\\"\\\'").lower() for t in s.split()]
-        toks = [t for t in toks if t and len(t) > 2][:5]
-        if not toks:
-            return f"{self.domain_id} motif"
-        return " ".join(toks)
+        return motif_label_from_summary(self.domain_id, summary)
 
     def entropy_report(self, target_n: int = 24) -> Dict[str, Any]:
         n = len(self.motifs)
