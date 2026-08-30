@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, Protocol
 import numpy as np
 
 from .character import CharacterState, gravity_correction, measure_drift
+from .memory_runtime_access import PostWriteMemoryReadPort
 
 
 class PostWriteStorageOutcome(str, Enum):
@@ -92,6 +93,7 @@ class LegacyFabricPostWriteDependencies:
     owner: Any
     workspace: Any
     graph: Any
+    memory_access: PostWriteMemoryReadPort
     identity: Any
     motif_registry: Any | None
     motif_runtime: Any | None
@@ -140,18 +142,20 @@ class LegacyFabricPostWriteAdapter:
         if not (context.scope == "private" and context.memory_class == "core" and context.eid is not None):
             return
         try:
-            hits = deps.graph.search_by_embedding(
-                np.asarray(context.embedding, dtype=np.float32), top_k=3, user_id=context.agent_id,
+            outcome = deps.memory_access.search_by_embedding(
+                context.embedding, top_k=3, user_id=context.agent_id,
             )
-            for hit in hits:
-                old_eid = int(hit.get("eid", 0))
+            if outcome.status == "ZERO_NORM":
+                return
+            for hit in outcome.hits:
+                old_eid = int(hit.eid)
                 if old_eid <= 0 or old_eid == context.eid:
                     continue
-                if hit.get("memory_class", "core") != "core":
+                if hit.view.memory_class != "core":
                     continue
-                similarity = float(hit.get("raw_score", hit.get("score", 0)))
+                similarity = float(hit.raw_score)
                 is_conflict, score, reason = deps.detect_canon_conflict(
-                    context.summary, str(hit.get("summary", "")), similarity,
+                    context.summary, hit.view.summary, similarity,
                 )
                 if is_conflict:
                     deps.workspace.conflicts[context.chosen_domain].add(
@@ -217,22 +221,20 @@ class LegacyFabricPostWriteAdapter:
         if owner._hivemind_enable and context.stored and context.eid is not None and not context.skip_packet_emission:
             try:
                 from .collective_models import ResonancePacket
-                from .governance import should_emit_packet
 
                 emit_ok = True
                 skip_reason = None
                 provenance_class = None
                 try:
-                    entity = deps.graph.entities.get(int(context.eid))
-                    if entity is not None:
-                        emit_ok = should_emit_packet(entity.payload)
+                    view = deps.memory_access.get_current(int(context.eid))
+                    if view is not None:
+                        emit_ok = not (
+                            view.governance.non_shareable
+                            or view.governance.collective_export_blocked
+                        )
                         if not emit_ok:
                             skip_reason = "governance: non_shareable or export_blocked"
-                        provenance = (entity.payload or {}).get("provenance")
-                        collective = provenance == "collective" or (
-                            isinstance(provenance, dict) and provenance.get("source_type") == "collective_echo"
-                        )
-                        if collective:
+                        if view.provenance.collective_echo:
                             provenance_class = "collective_echo"
                             emit_ok = False
                             skip_reason = "governance: collective provenance (echo invariant)"
@@ -251,10 +253,10 @@ class LegacyFabricPostWriteAdapter:
                     resonance_score = None
                     loop_type = None
                     try:
-                        entity = deps.graph.entities.get(int(context.eid))
-                        if entity and entity.payload:
-                            resonance_score = entity.payload.get("resonance_score")
-                            loop_type = entity.payload.get("loop_type")
+                        view = deps.memory_access.get_current(int(context.eid))
+                        if view is not None:
+                            resonance_score = view.payload.get("resonance_score")
+                            loop_type = view.payload.get("loop_type")
                     except Exception as exc:
                         owner._log.debug("Failed to extract resonance data for packet: %s", exc)
                     drift = drift_direction = seed_id = None

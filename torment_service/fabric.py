@@ -48,6 +48,7 @@ from .checkpoint import (
     build_motif_summary, build_shard_snapshot,
 )
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
+from .memory_runtime_access import LegacyPostWriteMemoryAccess
 from .candidate_types import CandidateShapedValue
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
 from .post_write_runtime import (
@@ -3706,6 +3707,7 @@ class TormentFabric:
             owner=self,
             workspace=ws,
             graph=graph,
+            memory_access=LegacyPostWriteMemoryAccess(graph, expected_dimension=int(ws.embed_dim)),
             identity=ident,
             motif_registry=legacy_registry,
             motif_runtime=motif_runtime,

@@ -13,6 +13,7 @@ import pytest
 import torment_service.fabric as fabric_module
 from torment_service.fabric import TormentFabric
 from torment_service.memory_kernel import KernelSignals
+from torment_service.memory_runtime_access import LegacyPostWriteMemoryAccess
 from torment_service.post_write_runtime import (
     LegacyFabricPostWriteAdapter,
     PostWriteStorageOutcome,
@@ -388,6 +389,7 @@ def test_adapter_receives_selected_legacy_graph_registry_and_storage_outcome(
 
         def run(adapter, context):
             observed["graph"] = adapter._deps.graph
+            observed["memory_access"] = adapter._deps.memory_access
             observed["registry"] = adapter._deps.motif_registry
             observed["outcome"] = context.storage_outcome
             return original_run(adapter, context)
@@ -403,10 +405,10 @@ def test_adapter_receives_selected_legacy_graph_registry_and_storage_outcome(
         )
 
         assert result["stored"] is True
-        assert observed == {
-            "graph": graph,
-            "registry": workspace.motif_regs["personal"],
-            "outcome": PostWriteStorageOutcome.CREATED_NEW,
-        }
+        assert observed["graph"] is graph
+        assert isinstance(observed["memory_access"], LegacyPostWriteMemoryAccess)
+        assert observed["memory_access"]._graph is graph
+        assert observed["registry"] is workspace.motif_regs["personal"]
+        assert observed["outcome"] is PostWriteStorageOutcome.CREATED_NEW
     finally:
         fabric.close()
