@@ -28,6 +28,7 @@ class SubstrateTx:
         self.operation_id = operation_id
         self.transitions: list[bytes] = []
         self.published: list[tuple[bytes, bytes, int]] = []
+        self.governance_published: list[tuple[bytes, bytes, int, tuple[int, int, int, int, int]]] = []
         self.relationship_published: list[tuple[bytes, bytes, int]] = []
         self.representation_published: list[bytes] = []
         self.representation_ready: list[tuple[bytes, bytes, bytes]] = []
@@ -49,6 +50,10 @@ class SubstrateTx:
             if self.execute("SELECT current_revision_id,current_revision_ordinal FROM objects WHERE object_id=?",(oid,)).fetchone() != (rid,ordinal): raise SubstrateInvariantViolation("H1 current pointer is incomplete or cross-carrier")
             if self.execute("SELECT 1 FROM operation_outputs WHERE operation_id=? AND output_kind='OBJECT' AND object_id=? AND object_revision_id=? AND object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output does not match publication")
             if self.execute("SELECT 1 FROM object_revision_effects e JOIN semantic_transitions t ON t.transition_id=e.transition_id WHERE t.operation_id=? AND e.object_id=? AND e.object_revision_id=? AND e.object_revision_ordinal=?",(self.operation_id,oid,rid,ordinal)).fetchone() is None: raise SubstrateInvariantViolation("H8 output is not published")
+        for oid,rid,ordinal,facts in self.governance_published:
+            if (oid,rid,ordinal) not in self.published: raise SubstrateInvariantViolation("revision governance does not belong to a published object revision")
+            actual = self.execute("SELECT protected,non_shareable,collective_export_blocked,collective_reingest_blocked,decay_accelerated FROM object_revision_governance WHERE object_id=? AND object_revision_id=? AND object_revision_ordinal=?",(oid,rid,ordinal)).fetchone()
+            if actual != facts: raise SubstrateInvariantViolation("revision governance facts are incomplete or do not match publication")
         for tid in self.transitions:
             if self.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=? UNION SELECT 1 FROM relationship_revision_effects WHERE transition_id=? UNION SELECT 1 FROM representation_state_effects WHERE transition_id=? UNION SELECT 1 FROM reconciliation_state_effects WHERE transition_id=? UNION SELECT 1 FROM legacy_admission_effects WHERE transition_id=?",(tid,tid,tid,tid,tid)).fetchone() is None: raise SubstrateInvariantViolation("H2 transition has no typed effect")
         for rid,revision,ordinal in self.relationship_published:

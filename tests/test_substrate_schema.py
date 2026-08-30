@@ -245,8 +245,8 @@ def test_schema_refuses_missing_trigger_and_version_mismatch(database: sqlite3.C
         open_schema(database)
 
 
-def test_schema_refuses_unknown_or_unupgraded_metadata(database: sqlite3.Connection) -> None:
-    database.execute("UPDATE core_metadata SET schema_minor=1")
+def test_schema_refuses_unsupported_metadata_version(database: sqlite3.Connection) -> None:
+    database.execute("UPDATE core_metadata SET schema_minor=?", (SCHEMA_MINOR + 1,))
     with pytest.raises(SubstrateSchemaCompatibilityError):
         open_schema(database)
 
