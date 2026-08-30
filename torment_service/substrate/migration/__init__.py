@@ -91,6 +91,13 @@ from .runtime_readiness import (
     SideStoreDisposition,
     SideStoreReadinessItem,
 )
+from .runtime_normalization import (
+    MigrationRuntimeNormalizationRefused,
+    MigrationRuntimeNormalizationRequest,
+    MigrationRuntimeNormalizationResult,
+    NativeMigrationRuntimeNormalizationService,
+    PreparedLegacyMemoryNormalization,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -148,4 +155,9 @@ __all__ = [
     "ScopePlanReadiness",
     "SideStoreDisposition",
     "SideStoreReadinessItem",
+    "MigrationRuntimeNormalizationRefused",
+    "MigrationRuntimeNormalizationRequest",
+    "MigrationRuntimeNormalizationResult",
+    "NativeMigrationRuntimeNormalizationService",
+    "PreparedLegacyMemoryNormalization",
 ]

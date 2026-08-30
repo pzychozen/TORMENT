@@ -25,6 +25,9 @@ from uuid import UUID
 
 import numpy as np
 
+from torment_service.lifecycle import validate_lifecycle_envelope
+from torment_service.provenance_v1 import ProvenanceV1
+
 from ..canonical_intent import canonical_intent_text
 from ..compat_embedding_reader import NativeCompatEmbeddingReader
 from ..errors import SubstrateInvariantViolation
@@ -572,6 +575,12 @@ class NativeMigrationRuntimeReadinessPreflight:
         revision_id = UUID(bytes=revision_blob)
         plan_state, plan = _plan_for_current_scope(plans, UUID(bytes=scope_blob))
         payload = _json_mapping(payload_text) if payload_format in {"TEXT", "JSON"} else None
+        # A 7F core-node R1 stores the whole selected JSONL row as TEXT.  Its
+        # actual runtime payload is the nested ``row[\"payload\"]`` mapping,
+        # exactly as MemoryGraph._load() observes it; an arbitrary top-level
+        # ``text`` field remains evidence, not a runtime-payload shortcut.
+        if object_kind == _MEMORY_OBJECT_KIND and payload_format == "TEXT":
+            payload = _legacy_node_runtime_payload(payload)
         if object_kind != _MEMORY_OBJECT_KIND:
             return ObjectRuntimeReadinessItem(
                 object_id=object_id,
@@ -679,6 +688,8 @@ class NativeMigrationRuntimeReadinessPreflight:
     ) -> ProvenanceEvidenceReadiness:
         descriptive = payload is not None and "provenance" in payload
         if provenance_blob is None:
+            if descriptive and _is_exact_provenance_v1(payload["provenance"]):
+                return ProvenanceEvidenceReadiness.DETERMINISTIC_LEGACY_PROVENANCE_TRANSLATION
             return (
                 ProvenanceEvidenceReadiness.DESCRIPTIVE_EVIDENCE_ONLY
                 if descriptive else ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE
@@ -691,7 +702,12 @@ class NativeMigrationRuntimeReadinessPreflight:
         if len(rows) != 1:
             return ProvenanceEvidenceReadiness.CONFLICTING_PROVENANCE
         origin, channel, role, derivation, uncertainty = rows[0]
-        if not all(isinstance(value, str) and value for value in (origin, channel, role, derivation, uncertainty)):
+        # ProvenanceV1 legitimately permits source_role to be absent for
+        # direct user/tool/memory sources.  Requiring a role here would make
+        # a correctly translated native provenance child look contradictory.
+        if not all(isinstance(value, str) and value for value in (origin, channel, derivation, uncertainty)) or (
+            role is not None and (not isinstance(role, str) or not role)
+        ):
             return ProvenanceEvidenceReadiness.CONFLICTING_PROVENANCE
         return ProvenanceEvidenceReadiness.EXPLICIT_PROVENANCE_V1
 
@@ -964,6 +980,13 @@ def _json_mapping(value: object) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
+def _legacy_node_runtime_payload(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    payload = value.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
 def _payload_governance(payload: dict[str, Any] | None) -> tuple[bool, ...] | str | None:
     if payload is None or "governance" not in payload:
         return None
@@ -981,8 +1004,19 @@ def _payload_governance(payload: dict[str, Any] | None) -> tuple[bool, ...] | st
 def _lifecycle_readiness(
     state: object, authoritative: object, payload: dict[str, Any] | None,
 ) -> LifecycleEvidenceReadiness:
-    payload_lifecycle = payload.get("lifecycle") if payload else None
     explicit = authoritative == 1 and isinstance(state, str) and state not in {"", "UNKNOWN"}
+    payload_lifecycle = payload.get("lifecycle") if payload else None
+    payload_status = payload.get("lifecycle_status") if payload else None
+    if payload_status is not None:
+        try:
+            status = validate_lifecycle_envelope(payload_status)
+        except (TypeError, ValueError):
+            return LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE
+        if status.to_dict() != payload_status or not status.is_authoritative_on_row:
+            return LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE
+        if explicit and state != status.state.value.upper():
+            return LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE
+        return LifecycleEvidenceReadiness.EXPLICIT_LIFECYCLE_ENVELOPE
     if payload_lifecycle is not None and not isinstance(payload_lifecycle, dict):
         return LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE
     if explicit:
@@ -992,6 +1026,15 @@ def _lifecycle_readiness(
     if authoritative == 0 and state == "UNKNOWN":
         return LifecycleEvidenceReadiness.UNKNOWN_LIFECYCLE
     return LifecycleEvidenceReadiness.ORDINARY_OR_UNSET_DERIVATION
+
+
+def _is_exact_provenance_v1(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    try:
+        return ProvenanceV1.from_dict(value).to_dict() == value
+    except (TypeError, ValueError):
+        return False
 
 
 def _valid_capture_payload(dtype: object, dimension: object, expected_length: object, payload: object) -> bool:
