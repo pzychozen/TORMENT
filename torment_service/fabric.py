@@ -50,6 +50,12 @@ from .checkpoint import (
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .candidate_types import CandidateShapedValue
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
+from .post_write_runtime import (
+    FabricPostWriteContext,
+    LegacyFabricPostWriteAdapter,
+    LegacyFabricPostWriteDependencies,
+    PostWriteStorageOutcome,
+)
 
 if TYPE_CHECKING:
     from .substrate.runtime_binding import (
@@ -3337,6 +3343,9 @@ class TormentFabric:
         motif_ids: list = []
         created_motif: Optional[str] = None
         _reinforced_eid: Optional[int] = None
+        legacy_registry: Optional[MotifRegistry] = None
+        motif_runtime: Optional[LegacyMotifRuntimeAdapter] = None
+        state_symbol: Optional[str] = None
 
         # choose graph early so world can evolve even when we don't store
         if scope == "shared":
@@ -3548,8 +3557,8 @@ class TormentFabric:
 
                 _mark_embed_audit_dirty(self.data_dir, workspace_id)
 
-                reg = ws.motif_regs[chosen_domain]
-                motif_runtime = LegacyMotifRuntimeAdapter(reg)
+                legacy_registry = ws.motif_regs[chosen_domain]
+                motif_runtime = LegacyMotifRuntimeAdapter(legacy_registry)
                 motif_mutation = motif_runtime.attach_or_create(
                     emb,
                     memory_eid=int(eid),
@@ -3655,539 +3664,65 @@ class TormentFabric:
                         "domain_chosen": chosen_domain,
                     }
                 stored = True
+                state_symbol = sym.get("state_symbol")
 
-                # --- Private-ingest contradiction surfacing (Block A, §8) ---
-                # When a private core ingest's content is similar-plus-
-                # contradictory to an existing same-agent entry, record a
-                # conflict in the existing ConflictRegistry. Does NOT block
-                # the write; does NOT auto-resolve.
-                #
-                # Scope (v0.1): private core only. Baton is explicitly
-                # excluded because it is lifecycle state, not claim state.
-                # Per docs/BLOCK_A_DESIGN.md §8 framing: "core" is NOT the
-                # eternal contradiction-bearing class — future memory
-                # classes must make an explicit design decision here
-                # rather than inheriting by accident.
-                if (scope == "private"
-                        and memory_class == "core"
-                        and eid is not None):
-                    try:
-                        _cs_hits = graph.search_by_embedding(
-                            np.asarray(emb, dtype=np.float32),
-                            top_k=3,
-                            user_id=agent_id,
-                        )
-                        for _csh in _cs_hits:
-                            _old_eid = int(_csh.get("eid", 0))
-                            if _old_eid <= 0 or _old_eid == eid:
-                                continue
-                            # Only compare against other core entries —
-                            # cross-class contradiction (core vs baton)
-                            # is a category mistake (§8 scope framing).
-                            if _csh.get("memory_class", "core") != "core":
-                                continue
-                            _sim = float(_csh.get("raw_score",
-                                                  _csh.get("score", 0)))
-                            _old_sum = str(_csh.get("summary", ""))
-                            is_conflict, cscore, reason = _detect_canon_conflict(
-                                summary, _old_sum, _sim
-                            )
-                            if is_conflict:
-                                ws.conflicts[chosen_domain].add(
-                                    eid_a=int(_old_eid),
-                                    eid_b=int(eid),
-                                    sim=float(_sim),
-                                    conflict_score=float(cscore),
-                                    reason=str(reason or "heuristic"),
-                                    origin_scope="private",
-                                    origin_agent_id=agent_id,
-                                    origin_domain_id=None,
-                                )
-                                break  # one conflict per new node is enough
-                    except Exception as e:
-                        self._log.debug(
-                            "private contradiction surface skipped: %s", e
-                        )
+        if not stored:
+            storage_outcome = PostWriteStorageOutcome.NO_WRITE
+        elif _reinforced_eid is not None:
+            storage_outcome = PostWriteStorageOutcome.REINFORCED_EXISTING
+        else:
+            storage_outcome = PostWriteStorageOutcome.CREATED_NEW
 
-                # --- SRG collision detection (Phase 3) ---
-                if self._srg_enable and _srg_dict and eid is not None:
-                    try:
-                        from .srg_engine import SRGMemoryState, collision as srg_collision, evolve_breathing
-                        from .embedding_store import load_embedding as _load_emb_srg
-                        # Find closest existing memory by embedding similarity
-                        _new_emb_norm = emb / (np.linalg.norm(emb) + 1e-12)
-                        _best_sim = 0.0
-                        _best_eid = None
-                        for _oid, _oent in graph.entities.items():
-                            if int(_oid) == int(eid):
-                                continue
-                            _opay = getattr(_oent, "payload", {}) or {}
-                            if not _opay.get("srg"):
-                                continue
-                            _raw = _load_emb_srg(
-                                _oid, _opay, graph._shard_reader, graph.data_dir
-                            )
-                            if _raw is None:
-                                continue
-                            _ov = np.asarray(_raw, dtype=np.float32).reshape(-1)
-                            _on = float(np.linalg.norm(_ov))
-                            if _on < 1e-12:
-                                continue
-                            _sim = float(np.dot(_new_emb_norm, _ov / _on))
-                            if _sim > _best_sim:
-                                _best_sim = _sim
-                                _best_eid = int(_oid)
-
-                        if _best_eid is not None and _best_sim >= 0.75:
-                            _exist_ent = graph.entities.get(_best_eid)
-                            if _exist_ent is not None:
-                                _exist_srg = SRGMemoryState.from_dict(
-                                    (_exist_ent.payload or {}).get("srg", {})
-                                )
-                                _new_srg = SRGMemoryState.from_dict(_srg_dict)
-                                _col_report = srg_collision(
-                                    _exist_srg, _new_srg, _best_sim, int(step)
-                                )
-                                if _col_report.get("collision"):
-                                    # Write back updated states
-                                    _exist_ent.payload["srg"] = _exist_srg.to_dict()
-                                    _my_ent = graph.entities.get(int(eid))
-                                    if _my_ent is not None:
-                                        _my_ent.payload["srg"] = _new_srg.to_dict()
-                                        _my_ent.payload["srg_collision"] = _col_report
-                    except Exception as e:
-                        self._log.debug("Failed to process SRG collision for eid=%s: %s", eid, e)
-
-                # --- Hivemind: emit ResonancePacket into collective field ---
-                if self._hivemind_enable and stored and eid is not None and not skip_packet_emission:
-                    try:
-                        from .collective_models import ResonancePacket
-                        from .governance import should_emit_packet as _gov_should_emit
-
-                        # Gate 1: governance — non_shareable / export_blocked memories never emit
-                        # Check at emission time (earliest boundary), not at convergence time.
-                        _hm_emit_ok = True
-                        _hm_skip_reason = None
-                        _hm_provenance_class = None
-                        try:
-                            _hm_ent_gov = graph.entities.get(int(eid))
-                            if _hm_ent_gov is not None:
-                                _hm_emit_ok = _gov_should_emit(_hm_ent_gov.payload)
-                                if not _hm_emit_ok:
-                                    _hm_skip_reason = "governance: non_shareable or export_blocked"
-                                # Gate 1b: collective-provenance memories never emit packets
-                                # (terminal echo invariant — echoes don't echo)
-                                _hm_prov = (_hm_ent_gov.payload or {}).get("provenance")
-                                _hm_is_collective = (
-                                    _hm_prov == "collective"  # legacy bare string
-                                    or (isinstance(_hm_prov, dict) and _hm_prov.get("source_type") == "collective_echo")
-                                )
-                                if _hm_is_collective:
-                                    _hm_provenance_class = "collective_echo"
-                                    _hm_emit_ok = False
-                                    _hm_skip_reason = "governance: collective provenance (echo invariant)"
-                        except Exception as _gov_exc:
-                            hivemind_log.exception(
-                                "Hivemind packet governance evaluation failed ws=%s agent=%s eid=%s: %s",
-                                workspace_id,
-                                agent_id,
-                                eid,
-                                _gov_exc,
-                            )
-
-                        # Gate 2: coherence minimum threshold
-                        # Restored to 0.15 after DISP_SCALE recalibration (7e-4 → 0.10)
-                        # and distributed Omega extraction fix.
-                        _HM_COH_THRESHOLD = 0.15
-                        _hm_coherence = float(debug.get("coherence", 0.0) or 0.0)
-
-                        if _hm_emit_ok and _hm_coherence >= _HM_COH_THRESHOLD:
-                            _hm_emb_hash = ""
-                            try:
-                                import hashlib
-                                _hm_emb_hash = hashlib.md5(emb.tobytes()).hexdigest()[:12]
-                            except Exception as e:
-                                self._log.debug("Failed to compute embedding hash: %s", e)
-
-                            # Safely extract resonance data (may not exist if sym enrichment failed)
-                            _hm_res_score = None
-                            _hm_loop_type = None
-                            try:
-                                _hm_ent = graph.entities.get(int(eid))
-                                if _hm_ent and _hm_ent.payload:
-                                    _hm_res_score = _hm_ent.payload.get("resonance_score")
-                                    _hm_loop_type = _hm_ent.payload.get("loop_type")
-                            except Exception as e:
-                                self._log.debug("Failed to extract resonance data for packet: %s", e)
-
-                            # Drift info (may not exist yet)
-                            _hm_drift = None
-                            _hm_drift_dir = None
-                            _hm_seed_id = None
-                            try:
-                                _hm_cstate = self.character_store.load_state(workspace_id, agent_id)
-                                if _hm_cstate:
-                                    _hm_drift = _hm_cstate.drift_score
-                                    _hm_drift_dir = _hm_cstate.drift_direction
-                                    _hm_seed_id = _hm_cstate.seed_id
-                            except Exception as e:
-                                self._log.debug("Failed to load character state for packet: %s", e)
-
-                            # SRG fields
-                            _hm_srg_band = None
-                            _hm_srg_hb = None
-                            _hm_srg_crystal = False
-                            if _srg_dict and isinstance(_srg_dict, dict):
-                                _hm_srg_band = _srg_dict.get("R_band")
-                                _hm_srg_hb = _srg_dict.get("heartbeat_class")
-                                _hm_srg_crystal = bool(_srg_dict.get("is_crystal", False))
-
-                            _hm_packet = ResonancePacket(
-                                workspace_id=workspace_id,
-                                agent_id=agent_id,
-                                domain_id=chosen_domain,
-                                source_eid=int(eid),
-                                summary=str(summary),
-                                embedding_hash=_hm_emb_hash,
-                                cycle_stage=str(tri_mod.get("cycle_stage", "")),
-                                identity_state=str(tri_mod.get("identity_state", "")),
-                                coherence=_hm_coherence,
-                                stability_delta=float(signals.stability_delta),
-                                corridor_angle_deg=_pt_durations.get("corridor_angle_deg") if _pt_durations else None,
-                                corridor_duration_steps=int(_pt_durations.get("corridor_duration_steps", 0)) if _pt_durations else None,
-                                phase_duration_steps=int(_pt_durations.get("phase_duration_steps", 0)) if _pt_durations else None,
-                                motifs=list(motif_ids),
-                                created_motif=created_motif,
-                                state_symbol=sym.get("state_symbol"),
-                                resonance_score=float(_hm_res_score) if _hm_res_score is not None else None,
-                                loop_type=str(_hm_loop_type) if _hm_loop_type else None,
-                                drift_score=float(_hm_drift) if _hm_drift is not None else None,
-                                drift_direction=str(_hm_drift_dir) if _hm_drift_dir else None,
-                                seed_id=str(_hm_seed_id) if _hm_seed_id else None,
-                                srg_band=_hm_srg_band,
-                                srg_heartbeat_class=_hm_srg_hb,
-                                srg_is_crystal=_hm_srg_crystal,
-                            )
-                            _hm_field = self._get_collective_field(workspace_id)
-                            _hm_conv_event = _hm_field.append_packet(_hm_packet, embedding=emb)
-
-                            if self._hivemind_telemetry_enable:
-                                self._emit_hivemind_packet_telemetry(
-                                    workspace_id=workspace_id,
-                                    agent_id=agent_id,
-                                    domain_id=chosen_domain,
-                                    source_eid=int(eid),
-                                    packet_emitted=True,
-                                    gate_outcome="emitted",
-                                    skip_reason=None,
-                                    coherence=_hm_coherence,
-                                    provenance_class=_hm_provenance_class,
-                                    convergence_event=_hm_conv_event,
-                                )
-
-                            # Phase D4: Light proposal bridge
-                            # If convergence was detected, feed it to the proposal bridge.
-                            # Proposals are auto-drafted (pending), never auto-approved.
-                            if _hm_conv_event is not None:
-                                try:
-                                    _hm_prop_bridge = self._get_proposal_bridge(workspace_id)
-                                    _hm_prop_reg = ws.proposals.get(chosen_domain)
-                                    _hm_prop_bridge.maybe_draft_proposal(
-                                        event=_hm_conv_event.to_dict(),
-                                        proposal_registry=_hm_prop_reg,
-                                        embedding=emb,
-                                    )
-                                except Exception:
-                                    pass  # Proposal bridge is optional
-                        else:
-                            if self._hivemind_telemetry_enable:
-                                self._emit_hivemind_packet_telemetry(
-                                    workspace_id=workspace_id,
-                                    agent_id=agent_id,
-                                    domain_id=chosen_domain,
-                                    source_eid=int(eid),
-                                    packet_emitted=False,
-                                    gate_outcome="skipped",
-                                    skip_reason=(
-                                        _hm_skip_reason
-                                        if not _hm_emit_ok
-                                        else "coherence_below_threshold"
-                                    ),
-                                    coherence=_hm_coherence,
-                                    provenance_class=_hm_provenance_class,
-                                )
-                    except Exception as _hm_exc:
-                        hivemind_log.exception(
-                            "Hivemind packet emission failed ws=%s agent=%s eid=%s: %s",
-                            workspace_id,
-                            agent_id,
-                            eid,
-                            _hm_exc,
-                        )
-                        if self._hivemind_telemetry_enable:
-                            self._emit_hivemind_packet_telemetry(
-                                workspace_id=workspace_id,
-                                agent_id=agent_id,
-                                domain_id=chosen_domain,
-                                source_eid=int(eid),
-                                packet_emitted=False,
-                                gate_outcome="error",
-                                skip_reason="packet_emission_error",
-                                coherence=None,
-                            )
-                else:
-                    _hm_reasons = []
-                    if not self._hivemind_enable:
-                        _hm_reasons.append("hivemind_disabled")
-                    # Note: 'stored' is always True here (both reinforcement and
-                    # spawn branches set it; exceptions propagate before reaching
-                    # this else block), so the old `if not stored:` check was
-                    # unreachable and has been removed.
-                    if eid is None:
-                        _hm_reasons.append("source_eid_missing")
-                    if skip_packet_emission:
-                        _hm_reasons.append("packet_emission_skipped")
-                    if self._hivemind_telemetry_enable:
-                        self._emit_hivemind_packet_telemetry(
-                            workspace_id=workspace_id,
-                            agent_id=agent_id,
-                            domain_id=chosen_domain,
-                            source_eid=int(eid) if eid is not None else None,
-                            packet_emitted=False,
-                            gate_outcome="blocked",
-                            skip_reason=",".join(_hm_reasons) or "outer_gate_blocked",
-                            coherence=None,
-                        )
-
-                pol = ws.domain_policies.get(chosen_domain, {})
-                try:
-                    motif_runtime.update_entropy_and_suggest(
-                        target_n=int(pol.get("motif_entropy_target_n", 24)),
-                        entropy_high=float(pol.get("motif_entropy_high", 0.72)),
-                        sim_threshold=float(pol.get("motif_merge_similarity", 0.93)),
-                        max_suggestions=int(pol.get("motif_merge_max_suggestions", 20)),
-                        auto_merge=bool(pol.get("auto_merge_motifs", False)),
-                        auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
-                    )
-                except Exception as e:
-                    self._log.debug("motif entropy update failed for domain=%s: %s", chosen_domain, e)
-
-                # optional B-layers (safe to keep wrapped)
-                try:
-                    _ = self._maybe_emit_identity_anchor(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), motif_ids=list(motif_ids))
-                except Exception as e:
-                    self._log.debug("identity anchor emission failed: %s", e)
-                try:
-                    self._refine_identity_anchors(ws, agent_id=agent_id, domain_id=chosen_domain, motif_ids=list(motif_ids))
-                except Exception as e:
-                    self._log.debug("identity anchor refinement failed: %s", e)
-                try:
-                    self._maybe_emit_mood_drift(ws, agent_id=agent_id, domain_id=chosen_domain, step=int(step), affect_tag=affect_tag, affect_conf=affect_conf)
-                except Exception as e:
-                    self._log.debug("mood drift emission failed: %s", e)
-
-        # world evolves continuously (non-finite seeds), even if no memory stored this tick
-        try:
-            graph.step_world(step=int(step), classify_every=50, log_every=1)
-        except Exception as e:
-            self._log.debug("step_world failed at step=%s for workspace_id=%s agent_id=%s: %s", step, workspace_id, agent_id, e)
-
-        # --- Character drift check (periodic, non-blocking) ---
-        if self._character_enable and stored and int(step) > 0 and int(step) % self._character_drift_every == 0:
-            try:
-                _seed_id = str(ident.seed.get("seed_id", "") or "").strip()
-                if _seed_id:
-                    _cseed = self.character_store.load_seed(workspace_id, _seed_id)
-                    if _cseed and _cseed.seed_motif_id:
-                        _cstate = self.character_store.load_state(workspace_id, agent_id)
-                        _drift = measure_drift(
-                            graph=graph,
-                            motif_registry=reg,
-                            coherence_field=None,
-                            seed=_cseed,
-                            agent_id=agent_id,
-                            current_step=int(step),
-                            previous_state=_cstate,
-                        )
-                        # Update state
-                        if _cstate is None:
-                            _cstate = CharacterState(
-                                workspace_id=workspace_id,
-                                agent_id=agent_id,
-                                seed_id=_seed_id,
-                            )
-                        _cstate.drift_score = float(_drift["drift_score"])
-                        _cstate.drift_direction = str(_drift["drift_direction"])
-                        _cstate.distance_to_seed = float(_drift["distance_to_seed"])
-                        _cstate.seed_basin_phi = float(_drift.get("seed_basin_phi", 0.0))
-                        _cstate.seed_basin_kappa = float(_drift.get("seed_basin_kappa", 0.0))
-                        _cstate.seed_basin_tension = float(_drift.get("seed_basin_tension", 0.0))
-                        _cstate.seed_basin_role = str(_drift.get("seed_basin_role", "plateau"))
-                        _cstate.core_count = int(_drift.get("core_count", 0))
-                        _cstate.relational_count = int(_drift.get("relational_count", 0))
-                        _cstate.situational_count = int(_drift.get("situational_count", 0))
-                        _cstate.drift_history.append((int(step), float(_drift["drift_score"])))
-                        _cstate.drift_history = _cstate.drift_history[-50:]  # cap history
-                        self.character_store.save_state(workspace_id, _cstate)
-
-                        # Gravity correction if needed
-                        _is_high_drift = (
-                            float(_drift["drift_score"]) < -_cseed.drift_correction_threshold
-                            and str(_drift["drift_direction"]) == "away_seed"
-                        )
-                        if _is_high_drift:
-                            gravity_correction(
-                                graph=graph,
-                                motif_registry=reg,
-                                embedder=self.kernel.embedder,
-                                seed=_cseed,
-                                agent_id=agent_id,
-                                step=int(step),
-                                drift_info=_drift,
-                            )
-
-                        # v0.1.0a: fire drift-reflex callback on below→above
-                        # transition only. Prevents recursive re-triggering
-                        # because the reflex turn's own ingest re-runs this
-                        # check — at that point _was_high is True, so no
-                        # re-fire. Also suppresses spammy firing when drift
-                        # sits above threshold across multiple checks.
-                        _reflex_key = (workspace_id, agent_id)
-                        _was_high = self._last_drift_was_high.get(_reflex_key, False)
-                        self._last_drift_was_high[_reflex_key] = _is_high_drift
-
-                        if (
-                            _is_high_drift
-                            and not _was_high
-                            and self.drift_reflex_callback is not None
-                        ):
-                            try:
-                                self.drift_reflex_callback(
-                                    workspace_id,
-                                    agent_id,
-                                    dict(_drift),
-                                )
-                            except Exception:
-                                # Callback failures must not abort the
-                                # ingest pipeline. Log and move on.
-                                self._log.exception(
-                                    "drift_reflex_callback raised for ws=%s agent=%s",
-                                    workspace_id,
-                                    agent_id,
-                                )
-            except Exception:
-                pass  # Character drift is optional — never blocks ingest
-
-        # --- Periodic checkpoint (Phase 5) — non-blocking ---
-        if self._checkpoint_enable and int(step) > 0 and int(step) % self._checkpoint_interval == 0:
-            try:
-                _motif_summary = None
-                try:
-                    _ckpt_reg = ws.motif_regs.get(chosen_domain)
-                    if _ckpt_reg:
-                        _motif_summary = build_motif_summary(_ckpt_reg)
-                except Exception as e:
-                    self._log.debug("checkpoint motif summary build failed: %s", e)
-                _shard_snap = None
-                try:
-                    _priv_dir = os.path.join(
-                        self.data_dir, "workspaces", workspace_id,
-                        "agents", agent_id, "private", "embeddings",
-                    )
-                    _shard_snap = build_shard_snapshot(_priv_dir, base_dir=self.data_dir)
-                except Exception as e:
-                    self._log.debug("checkpoint shard snapshot build failed for path=%s: %s", _priv_dir, e)
-                _char_state_dict = None
-                try:
-                    _ckpt_cstate = self.character_store.load_state(workspace_id, agent_id)
-                    if _ckpt_cstate:
-                        from dataclasses import asdict as _da
-                        _char_state_dict = _da(_ckpt_cstate)
-                except Exception as e:
-                    self._log.debug("checkpoint character state load failed: %s", e)
-                _checkpoint_ctx = self._kernel_contexts.get(ak)
-                if _checkpoint_ctx is None:
-                    self._log.debug(
-                        "checkpoint skipped: KernelRuntimeContext missing for %s",
-                        ak,
-                    )
-                else:
-                    save_checkpoint(
-                        data_dir=self.data_dir,
-                        workspace_id=workspace_id,
-                        agent_id=agent_id,
-                        step=int(step),
-                        model_state=state,
-                        corridor_monitor=_checkpoint_ctx.mon,
-                        kernel_runtime_context=_checkpoint_ctx,
-                        character_state_dict=_char_state_dict,
-                        motif_summary=_motif_summary,
-                        shard_snapshot=_shard_snap,
-                        max_checkpoints=self._checkpoint_max_keep,
-                    )
-            except Exception as e:
-                self._log.debug("checkpoint save failed for step=%s: %s", step, e)
-
-        # --- Event-gated compression (Phase 6) — non-blocking ---
-        if self._compress_enable and int(step) >= self._compress_min_step:
-            try:
-                from .compression import try_compress, check_hard_cap
-                _comp_event = try_compress(self, agent_id, tri_mod, int(step), workspace_id=workspace_id)
-                if _comp_event and (_comp_event.compressed + _comp_event.exported_deep) > 0:
-                    logging.getLogger("torment.compression").info(
-                        "compression at step %s: %d compressed, %d exported deep (trigger=%s)",
-                        step, _comp_event.compressed, _comp_event.exported_deep,
-                        _comp_event.trigger,
-                    )
-                # Hard cap safety net — fires independently of event triggers
-                _hc_event = check_hard_cap(self, agent_id, int(step), workspace_id=workspace_id)
-                if _hc_event and (_hc_event.compressed + _hc_event.exported_deep) > 0:
-                    logging.getLogger("torment.compression").warning(
-                        "HARD CAP compression at step %s: %d compressed, %d exported deep",
-                        step, _hc_event.compressed, _hc_event.exported_deep,
-                    )
-            except Exception:
-                pass  # Compression failure is always non-fatal
-
-        # auto share-proposal emission (optional coupling)
-        coupling_mode = str(ident.seed.get("coupling_mode", "read_only"))
-        if stored and scope == "private" and coupling_mode in ("propose", "sync") and (half_life_days is not None):
-            # auto-propose with throttling + novelty filter
-            if _proposal_allowed(
-                ident,
-                ws.domain_policies.get(chosen_domain, {}),
-                created_motif,
-                float(signals.promotion_score),
-                float(signals.strength),
-                float(signals.confidence),
-                tri_mod=tri_mod,
-            ):
-                regp = ws.proposals.get(chosen_domain)
-                if regp is not None:
-                    p = regp.submit(
-                        agent_id=agent_id,
-                        summary=summary,
-                        embedding=emb,
-                        mtype=signals.memory_type,
-                        confidence=signals.confidence,
-                        strength=signals.strength,
-                        half_life_days=float(half_life_days),
-                    )
-                    proposal_id = p.proposal_id
-                    # persist overlay counters
-                    self.ident_store.save(ident)
-
-        # periodically suggest bridges
-        tear = float(tri_mod.get("tearing_risk", 0.0))
-
-        p_bridge = float(tri_mod.get("bridge_p", 0.08)) * (1.0 - 0.40 * tear)
-        sim_thr  = float(tri_mod.get("bridge_sim", 0.86)) + (0.03 * tear)
-
-        p_bridge = float(np.clip(p_bridge, 0.02, 0.12))
-        sim_thr  = float(np.clip(sim_thr, 0.84, 0.92))
-
-        if stored and random_chance(p_bridge):
-            ws.bridges.suggest(ws.motif_regs, sim_threshold=sim_thr, max_new=5)
+        post_write_context = FabricPostWriteContext.make(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            scope=scope,
+            chosen_domain=chosen_domain,
+            step=int(step),
+            storage_outcome=storage_outcome,
+            stored=stored,
+            eid=int(eid) if eid is not None else None,
+            created_motif=created_motif,
+            motif_ids=motif_ids,
+            half_life_days=half_life_days,
+            summary=summary,
+            embedding=emb,
+            memory_class=memory_class,
+            memory_type=signals.memory_type,
+            strength=float(signals.strength),
+            confidence=float(signals.confidence),
+            promotion_score=float(signals.promotion_score),
+            stability_delta=float(signals.stability_delta),
+            tri_mod=tri_mod,
+            debug=debug,
+            srg_state=_srg_dict,
+            phase_durations=_pt_durations,
+            state_symbol=state_symbol,
+            affect_tag=affect_tag,
+            affect_conf=affect_conf,
+            skip_packet_emission=skip_packet_emission,
+        )
+        post_write_dependencies = LegacyFabricPostWriteDependencies(
+            owner=self,
+            workspace=ws,
+            graph=graph,
+            identity=ident,
+            motif_registry=legacy_registry,
+            motif_runtime=motif_runtime,
+            model_state=state,
+            kernel_context=runtime_ctx,
+            agent_key=ak,
+            detect_canon_conflict=_detect_canon_conflict,
+            proposal_allowed=_proposal_allowed,
+            random_chance=random_chance,
+            save_checkpoint=save_checkpoint,
+            build_motif_summary=build_motif_summary,
+            build_shard_snapshot=build_shard_snapshot,
+            hivemind_log=hivemind_log,
+        )
+        proposal_id = LegacyFabricPostWriteAdapter(post_write_dependencies).run(
+            post_write_context
+        ).proposal_id
 
         return {
             "stored": stored,
