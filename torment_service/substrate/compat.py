@@ -27,6 +27,12 @@ from .canonical_intent import canonical_intent_text
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound, SubstrateRevisionConflict
 from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from .objects import NativeObjectService, ObjectResult, ObjectState, SubstrateTx, execute_semantic
+from .payload_policy import (
+    MEMORY_STRUCTURAL_PAYLOAD_KEYS as _STRUCTURAL_PAYLOAD_KEYS,
+    RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS as _RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS,
+    copy_memory_flexible_payload as _flexible_mapping,
+    copy_relationship_flexible_payload as _relationship_flexible_mapping,
+)
 from .relationships import Endpoint, NativeRelationshipService, RelationshipResult, RelationshipState
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -781,27 +787,6 @@ def _payload_mapping(payload_format: str, payload_text: str | None) -> dict[str,
     return {}
 
 
-_STRUCTURAL_PAYLOAD_KEYS = frozenset({
-    "semantic_scope_id", "scope", "lifecycle", "lifecycle_state", "lifecycle_status",
-    "lifecycle_authoritative", "governance", "governance_state", "authority_category",
-    "authorization", "provenance", "provenance_id", "identity_namespace_id", "object_id",
-    "object_kind", "eid", "revision", "revision_id", "object_revision_id",
-    "object_revision_ordinal", "predecessor", "predecessor_revision_id",
-    "predecessor_revision_ordinal", "representation", "representation_id", "readiness",
-    "representation_readiness", "integrity", "integrity_expectation", "integrity_measurement",
-    "reconciliation", "operation_id", "transition_id",
-})
-
-_RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS = _STRUCTURAL_PAYLOAD_KEYS | frozenset({
-    "relationship_id", "relationship_kind", "relationship_revision_id",
-    "relationship_revision_ordinal", "endpoint", "endpoints", "endpoint_ordinal",
-    "endpoint_role", "endpoint_semantic_scope_id", "source", "source_eid",
-    "target", "target_eid", "binding", "binding_mode", "bound_object_revision_id",
-    "bound_object_revision_ordinal", "weight", "legacy_timestamp", "authority",
-    "active_authorization", "authorization_state",
-})
-
-
 def _relationship_result(
     source_eid: int, target_eid: int, result: RelationshipResult,
 ) -> CompatibilityMemoryRelationshipResult:
@@ -871,24 +856,6 @@ def _validate_relationship_inputs(
             raise ValueError("legacy_timestamp must be a string or finite number when supplied")
     if not isinstance(governance_state, str) or not governance_state:
         raise ValueError("governance_state must be a non-empty string")
-
-
-def _relationship_flexible_mapping(value: Mapping[str, Any] | None, *, field: str) -> dict[str, Any]:
-    if isinstance(value, CandidateShapedValue):
-        raise TypeError(f"candidate-shaped value cannot be written as relationship {field}")
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{field} must be an ordinary mapping")
-    copied = dict(value)
-    for key, item in copied.items():
-        if not isinstance(key, str):
-            raise ValueError(f"{field} keys must be strings")
-        if isinstance(item, CandidateShapedValue):
-            raise TypeError("candidate-shaped value cannot be written into relationship payload")
-        if key.casefold() in _RELATIONSHIP_STRUCTURAL_PAYLOAD_KEYS:
-            raise ValueError(f"{field} cannot overwrite structural relationship semantics")
-    return copied
 
 
 def _validate_search_inputs(
@@ -1058,24 +1025,6 @@ def _canonical_eid(value: Any) -> int:
     if str(eid) != value or eid < 0:
         raise SubstrateInvariantViolation("EID alias is not canonical non-negative integer text")
     return eid
-
-
-def _flexible_mapping(value: Mapping[str, Any] | None, *, field: str) -> dict[str, Any]:
-    if isinstance(value, CandidateShapedValue):
-        raise TypeError(f"candidate-shaped value cannot be written as ordinary memory {field}")
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{field} must be an ordinary mapping")
-    copied = dict(value)
-    for key, item in copied.items():
-        if not isinstance(key, str):
-            raise ValueError(f"{field} keys must be strings")
-        if isinstance(item, CandidateShapedValue):
-            raise TypeError("candidate-shaped value cannot be written into ordinary memory payload")
-        if key.casefold() in _STRUCTURAL_PAYLOAD_KEYS:
-            raise ValueError(f"{field} cannot overwrite structural substrate semantics")
-    return copied
 
 
 def _validate_create_inputs(summary: Any, memory_type: Any, memory_class: Any, user_id: Any, logical_step: Any) -> None:

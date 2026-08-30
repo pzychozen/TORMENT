@@ -18,22 +18,8 @@ from .object_revision_governance import (
     _insert_published_governance_for_qualification,
 )
 from .objects import ObjectState, NativeObjectService, SubstrateTx, execute_semantic
+from .provenance import NativeProvenanceRecord
 from .schema import require_current_schema
-
-
-@dataclass(frozen=True)
-class NativeProvenanceRecord:
-    """Exact existing provenance-row fields for closed-child qualification."""
-
-    origin_kind: str
-    source_channel: str | None
-    source_role: str | None
-    derivation_status: str
-    uncertainty_state: str
-    source_time_ns: int | None = None
-    capture_time_ns: int | None = None
-    memory_role: str | None = None
-    descriptive_notes: str | None = None
 
 
 @dataclass(frozen=True)
