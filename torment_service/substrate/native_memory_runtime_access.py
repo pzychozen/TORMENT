@@ -64,6 +64,75 @@ class NativePostWriteMemoryAccess:
             return None
         return self._project_current(source)
 
+    def list_current(self) -> tuple[RuntimeMemoryView, ...]:
+        """Return all current compatibility memories in their qualified order.
+
+        The carrier is not inferred from EID, SQLite row order, timestamps, or
+        UUIDs.  Any discrepancy between aliases, current objects, and the
+        immutable namespace order fails closed rather than inventing a tail.
+        """
+        namespace = native_id_to_bytes(self._legacy_source_namespace_id)
+        alias_rows = self._connection.execute(
+            """
+            SELECT alias_value,object_id FROM legacy_object_aliases
+             WHERE legacy_source_namespace_id=? AND alias_kind='EID'
+            """,
+            (namespace,),
+        ).fetchall()
+        aliases: dict[bytes, int] = {}
+        for alias_value, object_id in alias_rows:
+            eid = _canonical_eid_alias(alias_value)
+            if not isinstance(object_id, bytes) or len(object_id) != 16:
+                raise SubstrateInvariantViolation("runtime EID alias has an invalid object identity")
+            if object_id in aliases:
+                raise SubstrateInvariantViolation("runtime enumeration has an ambiguous object alias")
+            aliases[object_id] = eid
+
+        order_rows = self._connection.execute(
+            """
+            SELECT object_id,runtime_ordinal
+              FROM memory_runtime_enumeration_orders
+             WHERE legacy_source_namespace_id=?
+             ORDER BY runtime_ordinal
+            """,
+            (namespace,),
+        ).fetchall()
+        ordered: list[tuple[bytes, int]] = []
+        seen_ordinals: set[int] = set()
+        seen_objects: set[bytes] = set()
+        for object_id, ordinal in order_rows:
+            if not isinstance(object_id, bytes) or len(object_id) != 16:
+                raise SubstrateInvariantViolation("runtime enumeration order has an invalid object identity")
+            if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+                raise SubstrateInvariantViolation("runtime enumeration order has an invalid ordinal")
+            if ordinal in seen_ordinals or object_id in seen_objects:
+                raise SubstrateInvariantViolation("runtime enumeration order is ambiguous")
+            kind = self._connection.execute(
+                "SELECT object_kind FROM objects WHERE object_id=?", (object_id,)
+            ).fetchone()
+            if kind is None or kind != ("LEGACY_CORE_NODE",):
+                raise SubstrateInvariantViolation("runtime enumeration order does not point at a core memory")
+            seen_ordinals.add(ordinal)
+            seen_objects.add(object_id)
+            ordered.append((object_id, ordinal))
+        if seen_objects != set(aliases):
+            raise SubstrateInvariantViolation("current memory aliases and runtime enumeration order disagree")
+
+        views: list[RuntimeMemoryView] = []
+        seen_eids: set[int] = set()
+        for object_id, _ordinal in ordered:
+            eid = aliases.get(object_id)
+            if eid is None:
+                raise SubstrateInvariantViolation("runtime enumeration order has no EID alias")
+            if eid in seen_eids:
+                raise SubstrateInvariantViolation("runtime enumeration has duplicate EIDs")
+            source = self._get_native_current(eid)
+            if source is None or native_id_to_bytes(source.object_id) != object_id:
+                raise SubstrateInvariantViolation("runtime enumeration current memory is absent or ambiguous")
+            views.append(self._project_current(source))
+            seen_eids.add(eid)
+        return tuple(views)
+
     def search_by_embedding(
         self, embedding: Any, *, top_k: int, user_id: str | None = None,
     ) -> RuntimeMemorySearchOutcome:
@@ -203,6 +272,19 @@ class NativePostWriteMemoryAccess:
 def _validate_eid(eid: object) -> None:
     if not isinstance(eid, int) or isinstance(eid, bool) or eid < 0:
         raise ValueError("eid must be a non-negative integer")
+
+
+def _canonical_eid_alias(value: object) -> int:
+    if not isinstance(value, str) or not value:
+        raise SubstrateInvariantViolation("runtime EID alias is invalid")
+    try:
+        eid = int(value)
+    except ValueError as exc:
+        raise SubstrateInvariantViolation("runtime EID alias is invalid") from exc
+    if str(eid) != value:
+        raise SubstrateInvariantViolation("runtime EID alias is not canonical")
+    _validate_eid(eid)
+    return eid
 
 
 def _required_text(payload: Mapping[str, Any], field: str) -> str:

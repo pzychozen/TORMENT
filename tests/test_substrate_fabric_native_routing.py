@@ -180,7 +180,7 @@ def test_existing_core_opener_refuses_v1_without_upgrading(tmp_path: Path):
         path = qualified.database_path
     finally:
         qualified.close()
-    with pytest.raises(SubstrateSchemaCompatibilityError, match="v1.1"):
+    with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
         open_existing_native_core_connection(path)
     raw = sqlite3.connect(path)
     try:

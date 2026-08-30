@@ -87,6 +87,9 @@ class _Port:
         self.current_calls.append(eid)
         return self.views.get(eid)
 
+    def list_current(self):
+        return tuple(self.views.values())
+
 
 class _NoGraph:
     @property
@@ -95,6 +98,17 @@ class _NoGraph:
 
     def search_by_embedding(self, *_args, **_kwargs):
         raise AssertionError("adapted consumer called graph.search_by_embedding")
+
+
+class _NoSRGRuntime:
+    def effective_srg_state(self, _memory):
+        raise AssertionError("unexpected SRG state read")
+
+    def effective_collision_report(self, _memory):
+        raise AssertionError("unexpected SRG collision report read")
+
+    def apply_collision(self, **_kwargs):
+        raise AssertionError("unexpected SRG collision mutation")
 
 
 class _Conflicts:
@@ -146,7 +160,9 @@ def _adapter(port, *, field: _Field | None = None):
     dependencies = LegacyFabricPostWriteDependencies(
         owner=owner,
         workspace=SimpleNamespace(conflicts={"personal": conflicts}, proposals={}),
-        graph=_NoGraph(), memory_access=port, identity=None, motif_registry=None, motif_runtime=None,
+        graph=_NoGraph(), memory_access=port, memory_enumeration=port,
+        srg_runtime=_NoSRGRuntime(), embedding_dimension=3,
+        identity=None, motif_registry=None, motif_runtime=None,
         model_state=None, kernel_context=None, agent_key="ws::aria",
         detect_canon_conflict=_detect_canon_conflict, proposal_allowed=lambda **_kwargs: False,
         random_chance=lambda _probability: False, save_checkpoint=lambda **_kwargs: None,

@@ -184,6 +184,22 @@ class LegacyPostWriteMemoryAccess:
             raise ValueError("legacy memory payload must be a mapping")
         return runtime_memory_view_from_legacy_payload(int(eid), payload)
 
+    def list_current(self) -> tuple[RuntimeMemoryView, ...]:
+        """Return the selected graph's current entities in insertion order."""
+        views: list[RuntimeMemoryView] = []
+        seen: set[int] = set()
+        for object_id in self._graph.entities:
+            if not isinstance(object_id, int) or isinstance(object_id, bool) or object_id < 0:
+                raise ValueError("legacy current-memory enumeration has an invalid EID")
+            if object_id in seen:
+                raise ValueError("legacy current-memory enumeration has a duplicate EID")
+            view = self.get_current(object_id)
+            if view is None:
+                raise ValueError("legacy current-memory enumeration lost an entity")
+            seen.add(object_id)
+            views.append(view)
+        return tuple(views)
+
     def search_by_embedding(
         self, embedding: Any, *, top_k: int, user_id: str | None = None,
     ) -> RuntimeMemorySearchOutcome:

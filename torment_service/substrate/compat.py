@@ -26,6 +26,7 @@ from torment_service.lifecycle import LifecycleActor, derive_protected_lifecycle
 from .canonical_intent import canonical_intent_text
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound, SubstrateRevisionConflict
 from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
+from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .objects import NativeObjectService, ObjectResult, ObjectState, SubstrateTx, execute_semantic
 from .payload_policy import (
     MEMORY_STRUCTURAL_PAYLOAD_KEYS as _STRUCTURAL_PAYLOAD_KEYS,
@@ -276,6 +277,15 @@ class NativeMemoryCompatibilityFacade:
                 (native_id_to_bytes(legacy_source_namespace_id), str(eid), native_id_to_bytes(result.object_id)),
             )
             _assert_exact_alias(tx, legacy_source_namespace_id, eid, result.object_id)
+            # A3D5 structural compatibility fact.  BEGIN IMMEDIATE and this
+            # enclosing semantic transaction make memory, EID alias, and
+            # runtime order one atomic publication.
+            publish_runtime_order(
+                tx,
+                legacy_source_namespace_id=legacy_source_namespace_id,
+                object_id=result.object_id,
+                runtime_ordinal=allocate_next_runtime_ordinal(tx, legacy_source_namespace_id),
+            )
             return _write_result(eid, result)
 
         return execute_semantic(

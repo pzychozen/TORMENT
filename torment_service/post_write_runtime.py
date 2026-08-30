@@ -17,7 +17,8 @@ from typing import Any, Callable, Mapping, Protocol
 import numpy as np
 
 from .character import CharacterState, gravity_correction, measure_drift
-from .memory_runtime_access import PostWriteMemoryReadPort
+from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
+from .srg_runtime_state import SRGTransientRuntimePort
 
 
 class PostWriteStorageOutcome(str, Enum):
@@ -94,6 +95,9 @@ class LegacyFabricPostWriteDependencies:
     workspace: Any
     graph: Any
     memory_access: PostWriteMemoryReadPort
+    memory_enumeration: PostWriteMemoryEnumerationPort
+    srg_runtime: SRGTransientRuntimePort
+    embedding_dimension: int
     identity: Any
     motif_registry: Any | None
     motif_runtime: Any | None
@@ -177,41 +181,55 @@ class LegacyFabricPostWriteAdapter:
         if not (deps.owner._srg_enable and context.srg_state and context.eid is not None):
             return
         try:
-            from .embedding_store import load_embedding
             from .srg_engine import SRGMemoryState, collision
 
             new_normalized = context.embedding / (np.linalg.norm(context.embedding) + 1e-12)
             best_similarity = 0.0
-            best_eid = None
-            for object_id, entity in deps.graph.entities.items():
-                if int(object_id) == int(context.eid):
+            selected = None
+            selected_state = None
+            for candidate in deps.memory_enumeration.list_current():
+                if candidate.eid == int(context.eid):
                     continue
-                payload = getattr(entity, "payload", {}) or {}
-                if not payload.get("srg"):
+                effective_state = deps.srg_runtime.effective_srg_state(candidate)
+                if not effective_state:
                     continue
-                raw = load_embedding(object_id, payload, deps.graph._shard_reader, deps.graph.data_dir)
-                if raw is None:
+                qualified = deps.memory_access.read_current_embedding(
+                    candidate.eid, expected_dimension=deps.embedding_dimension,
+                )
+                if qualified is None:
                     continue
-                vector = np.asarray(raw, dtype=np.float32).reshape(-1)
+                vector = qualified.as_float32()
                 norm = float(np.linalg.norm(vector))
                 if norm < 1e-12:
                     continue
                 similarity = float(np.dot(new_normalized, vector / norm))
                 if similarity > best_similarity:
                     best_similarity = similarity
-                    best_eid = int(object_id)
-            if best_eid is not None and best_similarity >= 0.75:
-                existing_entity = deps.graph.entities.get(best_eid)
-                if existing_entity is not None:
-                    existing = SRGMemoryState.from_dict((existing_entity.payload or {}).get("srg", {}))
-                    incoming = SRGMemoryState.from_dict(dict(context.srg_state))
-                    report = collision(existing, incoming, best_similarity, int(context.step))
-                    if report.get("collision"):
-                        existing_entity.payload["srg"] = existing.to_dict()
-                        own_entity = deps.graph.entities.get(int(context.eid))
-                        if own_entity is not None:
-                            own_entity.payload["srg"] = incoming.to_dict()
-                            own_entity.payload["srg_collision"] = report
+                    selected = candidate
+                    selected_state = effective_state
+            if selected is not None and selected_state is not None and best_similarity >= 0.75:
+                incoming_view = deps.memory_access.get_current(int(context.eid))
+                if incoming_view is None:
+                    return
+                # The freshly created legacy payload normally contains this
+                # exact context state.  Prefer an already-effective overlay
+                # for a same-process retry, but retain the original context
+                # fallback when a live payload has not exposed it yet.
+                incoming_state = (
+                    deps.srg_runtime.effective_srg_state(incoming_view)
+                    or context.srg_state
+                )
+                existing = SRGMemoryState.from_dict(dict(selected_state))
+                incoming = SRGMemoryState.from_dict(dict(incoming_state))
+                report = collision(existing, incoming, best_similarity, int(context.step))
+                if report.get("collision"):
+                    deps.srg_runtime.apply_collision(
+                        existing=selected,
+                        incoming=incoming_view,
+                        existing_state=existing.to_dict(),
+                        incoming_state=incoming.to_dict(),
+                        incoming_report=report,
+                    )
         except Exception as exc:
             deps.owner._log.debug("Failed to process SRG collision for eid=%s: %s", context.eid, exc)
 

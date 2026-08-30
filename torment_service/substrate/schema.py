@@ -19,12 +19,17 @@ from .runtime_qualification import qualify_runtime
 
 SCHEMA_ID: Final[str] = "torment.memory.substrate"
 SCHEMA_MAJOR: Final[int] = 1
-SCHEMA_MINOR: Final[int] = 1
+SCHEMA_MINOR: Final[int] = 2
 SCHEMA_V1_MAJOR: Final[int] = 1
 SCHEMA_V1_MINOR: Final[int] = 0
+SCHEMA_V1_1_MAJOR: Final[int] = 1
+SCHEMA_V1_1_MINOR: Final[int] = 1
 CORE_ROLE_STAGING: Final[str] = "STAGING"
 SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY: Final[str] = (
     "TMS_SCHEMA_V1_TO_V1_1_GOVERNANCE"
+)
+SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY: Final[str] = (
+    "TMS_SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER"
 )
 
 HELPER_OWNED_INVARIANTS: Final[dict[str, str]] = {
@@ -211,6 +216,26 @@ CREATE TRIGGER immutable_object_revision_governance_update BEFORE UPDATE ON obje
 CREATE TRIGGER immutable_object_revision_governance_delete BEFORE DELETE ON object_revision_governance BEGIN SELECT RAISE(ABORT,'immutable object revision governance'); END;
 """
 
+# A3D5: compatibility structure only.  This is deliberately separate from
+# memory payload, revision ordinals, EID aliases, and governance.  It records
+# the first-appearance enumeration position required by the legacy source.
+SCHEMA_V1_2_DDL: Final[str] = """
+CREATE TABLE memory_runtime_enumeration_orders (
+ legacy_source_namespace_id BLOB NOT NULL CHECK (length(legacy_source_namespace_id) = 16),
+ object_id BLOB NOT NULL CHECK (length(object_id) = 16),
+ runtime_ordinal INTEGER NOT NULL CHECK (runtime_ordinal >= 0),
+ PRIMARY KEY (legacy_source_namespace_id,object_id),
+ UNIQUE (legacy_source_namespace_id,runtime_ordinal),
+ FOREIGN KEY (legacy_source_namespace_id) REFERENCES legacy_source_namespaces(legacy_source_namespace_id),
+ FOREIGN KEY (object_id) REFERENCES objects(object_id)
+) STRICT;
+"""
+
+SCHEMA_V1_2_TRIGGER_DDL: Final[str] = """
+CREATE TRIGGER immutable_memory_runtime_enumeration_order_update BEFORE UPDATE ON memory_runtime_enumeration_orders BEGIN SELECT RAISE(ABORT,'immutable memory runtime enumeration order'); END;
+CREATE TRIGGER immutable_memory_runtime_enumeration_order_delete BEFORE DELETE ON memory_runtime_enumeration_orders BEGIN SELECT RAISE(ABORT,'immutable memory runtime enumeration order'); END;
+"""
+
 EXPECTED_TABLES_V1: Final[frozenset[str]] = frozenset(
     statement.split()[2]
     for statement in _statements(SCHEMA_V1_DDL)
@@ -226,23 +251,44 @@ EXPECTED_TRIGGERS_V1: Final[frozenset[str]] = frozenset(
     for statement in _statements(TRIGGER_DDL)
     if statement.startswith("CREATE TRIGGER")
 )
-EXPECTED_TABLES: Final[frozenset[str]] = EXPECTED_TABLES_V1 | frozenset(
+EXPECTED_TABLES_V1_1: Final[frozenset[str]] = EXPECTED_TABLES_V1 | frozenset(
     statement.split()[2]
     for statement in _statements(SCHEMA_V1_1_DDL)
     if statement.startswith("CREATE TABLE")
 )
-EXPECTED_INDEXES: Final[frozenset[str]] = EXPECTED_INDEXES_V1
-EXPECTED_TRIGGERS: Final[frozenset[str]] = EXPECTED_TRIGGERS_V1 | frozenset(
+EXPECTED_INDEXES_V1_1: Final[frozenset[str]] = EXPECTED_INDEXES_V1
+EXPECTED_TRIGGERS_V1_1: Final[frozenset[str]] = EXPECTED_TRIGGERS_V1 | frozenset(
     statement.split()[2]
     for statement in _statements(SCHEMA_V1_1_TRIGGER_DDL)
     if statement.startswith("CREATE TRIGGER")
 )
+EXPECTED_TABLES: Final[frozenset[str]] = EXPECTED_TABLES_V1_1 | frozenset(
+    statement.split()[2]
+    for statement in _statements(SCHEMA_V1_2_DDL)
+    if statement.startswith("CREATE TABLE")
+)
+EXPECTED_INDEXES: Final[frozenset[str]] = EXPECTED_INDEXES_V1_1
+EXPECTED_TRIGGERS: Final[frozenset[str]] = EXPECTED_TRIGGERS_V1_1 | frozenset(
+    statement.split()[2]
+    for statement in _statements(SCHEMA_V1_2_TRIGGER_DDL)
+    if statement.startswith("CREATE TRIGGER")
+)
 _SCHEMA_V1_VERSION: Final[tuple[int, int]] = (SCHEMA_V1_MAJOR, SCHEMA_V1_MINOR)
+_SCHEMA_V1_1_VERSION: Final[tuple[int, int]] = (SCHEMA_V1_1_MAJOR, SCHEMA_V1_1_MINOR)
 _CURRENT_SCHEMA_VERSION: Final[tuple[int, int]] = (SCHEMA_MAJOR, SCHEMA_MINOR)
 _V1_TO_V1_1_MAINTENANCE_DETAIL: Final[str] = json.dumps(
     {
         "from": {"major": SCHEMA_V1_MAJOR, "minor": SCHEMA_V1_MINOR},
         "migration_key": SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY,
+        "to": {"major": SCHEMA_V1_1_MAJOR, "minor": SCHEMA_V1_1_MINOR},
+    },
+    separators=(",", ":"),
+    sort_keys=True,
+)
+_V1_1_TO_V1_2_MAINTENANCE_DETAIL: Final[str] = json.dumps(
+    {
+        "from": {"major": SCHEMA_V1_1_MAJOR, "minor": SCHEMA_V1_1_MINOR},
+        "migration_key": SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,
         "to": {"major": SCHEMA_MAJOR, "minor": SCHEMA_MINOR},
     },
     separators=(",", ":"),
@@ -251,25 +297,32 @@ _V1_TO_V1_1_MAINTENANCE_DETAIL: Final[str] = json.dumps(
 
 
 def create_schema(connection: sqlite3.Connection) -> SchemaMetadata:
-    """Create the current v1.1 schema, never upgrading an existing core."""
-    return _create_schema(connection, evolved=True)
+    """Create the current v1.2 schema, never upgrading an existing core."""
+    return _create_schema(connection, target_version=_CURRENT_SCHEMA_VERSION)
 
 
 def create_schema_v1(connection: sqlite3.Connection) -> SchemaMetadata:
     """Create historical v1.0 only for explicit evolution qualification."""
-    return _create_schema(connection, evolved=False)
+    return _create_schema(connection, target_version=_SCHEMA_V1_VERSION)
 
 
-def _create_schema(connection: sqlite3.Connection, *, evolved: bool) -> SchemaMetadata:
+def create_schema_v1_1(connection: sqlite3.Connection) -> SchemaMetadata:
+    """Create historical v1.1 only for explicit v1.2 evolution qualification."""
+    return _create_schema(connection, target_version=_SCHEMA_V1_1_VERSION)
+
+
+def _create_schema(connection: sqlite3.Connection, *, target_version: tuple[int, int]) -> SchemaMetadata:
+    if target_version not in {_SCHEMA_V1_VERSION, _SCHEMA_V1_1_VERSION, _CURRENT_SCHEMA_VERSION}:
+        raise ValueError("target schema version is unsupported")
     _require_qualified_connection(connection)
     existing = _user_tables(connection)
     if existing:
         if "core_metadata" not in existing:
             raise SubstrateSchemaCompatibilityError("native schema is incomplete or unknown")
         metadata = validate_schema(connection)
-        if evolved and (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
+        if (metadata.schema_major, metadata.schema_minor) != target_version:
             raise SubstrateSchemaCompatibilityError(
-                "current schema bootstrap requires explicit v1.1 schema upgrade"
+                "schema bootstrap requires an explicit versioned schema upgrade"
             )
         return metadata
 
@@ -279,12 +332,13 @@ def _create_schema(connection: sqlite3.Connection, *, evolved: bool) -> SchemaMe
     try:
         _execute_statements(connection, SCHEMA_V1_DDL)
         _execute_statements(connection, TRIGGER_DDL)
-        if evolved:
+        if target_version in {_SCHEMA_V1_1_VERSION, _CURRENT_SCHEMA_VERSION}:
             _execute_statements(connection, SCHEMA_V1_1_DDL)
             _execute_statements(connection, SCHEMA_V1_1_TRIGGER_DDL)
-            version = _CURRENT_SCHEMA_VERSION
-        else:
-            version = _SCHEMA_V1_VERSION
+        if target_version == _CURRENT_SCHEMA_VERSION:
+            _execute_statements(connection, SCHEMA_V1_2_DDL)
+            _execute_statements(connection, SCHEMA_V1_2_TRIGGER_DDL)
+        version = target_version
         connection.execute(
             "INSERT INTO core_metadata VALUES (1,?,?,?,?,?,?)",
             (SCHEMA_ID, version[0], version[1], core_id, CORE_ROLE_STAGING, now_ns),
@@ -307,7 +361,7 @@ def open_schema(connection: sqlite3.Connection, *, writable: bool = True) -> Sch
     metadata = _validate_schema(connection)
     if writable and (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
         raise SubstrateSchemaCompatibilityError(
-            "schema v1.0 is read-only; explicit v1.1 schema upgrade is required for writes"
+            "older schema is read-only; explicit schema upgrade is required for writes"
         )
     return metadata
 
@@ -319,11 +373,11 @@ def validate_schema(connection: sqlite3.Connection) -> SchemaMetadata:
 
 
 def require_current_schema(connection: sqlite3.Connection) -> SchemaMetadata:
-    """Require v1.1 for APIs that need revision-bound governance facts."""
+    """Require v1.2 for APIs that need revision-bound runtime order facts."""
     metadata = open_schema(connection)
     if (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
         raise SubstrateSchemaCompatibilityError(
-            "revision-bound governance requires explicit v1.1 schema upgrade"
+            "runtime enumeration order requires explicit v1.2 schema upgrade"
         )
     return metadata
 
@@ -338,7 +392,7 @@ def upgrade_schema_v1_to_v1_1(connection: sqlite3.Connection) -> SchemaMetadata:
     _require_qualified_connection(connection)
     metadata = _validate_schema(connection)
     version = (metadata.schema_major, metadata.schema_minor)
-    if version == _CURRENT_SCHEMA_VERSION:
+    if version in {_SCHEMA_V1_1_VERSION, _CURRENT_SCHEMA_VERSION}:
         return metadata
     if version != _SCHEMA_V1_VERSION:
         raise SubstrateSchemaCompatibilityError("schema is not an exact v1.0 upgrade source")
@@ -360,13 +414,60 @@ def upgrade_schema_v1_to_v1_1(connection: sqlite3.Connection) -> SchemaMetadata:
                 SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY,
                 SCHEMA_V1_MAJOR,
                 SCHEMA_V1_MINOR,
+                SCHEMA_V1_1_MAJOR,
+                SCHEMA_V1_1_MINOR,
+                maintenance_id,
+                now_ns,
+            ),
+        )
+        _before_upgrade_metadata_write(connection)
+        connection.execute(
+            "UPDATE core_metadata SET schema_major=?,schema_minor=? WHERE singleton=1",
+            (SCHEMA_V1_1_MAJOR, SCHEMA_V1_1_MINOR),
+        )
+        metadata = _validate_schema(connection)
+        connection.execute("COMMIT")
+        return metadata
+    except Exception:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+
+
+def upgrade_schema_v1_1_to_v1_2(connection: sqlite3.Connection) -> SchemaMetadata:
+    """Explicitly and atomically evolve one exact v1.1 core to v1.2."""
+    _require_qualified_connection(connection)
+    metadata = _validate_schema(connection)
+    version = (metadata.schema_major, metadata.schema_minor)
+    if version == _CURRENT_SCHEMA_VERSION:
+        return metadata
+    if version != _SCHEMA_V1_1_VERSION:
+        raise SubstrateSchemaCompatibilityError("schema is not an exact v1.1 upgrade source")
+
+    maintenance_id = native_id_to_bytes(generate_native_id())
+    now_ns = time.time_ns()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        _execute_statements(connection, SCHEMA_V1_2_DDL)
+        _execute_statements(connection, SCHEMA_V1_2_TRIGGER_DDL)
+        _validate_runtime_order_structure(connection)
+        connection.execute(
+            "INSERT INTO maintenance_events VALUES (?, 'SCHEMA_UPGRADE', ?, ?, ?)",
+            (maintenance_id, now_ns, now_ns, _V1_1_TO_V1_2_MAINTENANCE_DETAIL),
+        )
+        connection.execute(
+            "INSERT INTO schema_migration_ledger VALUES (?,?,?,?,?,?,?)",
+            (
+                SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,
+                SCHEMA_V1_1_MAJOR,
+                SCHEMA_V1_1_MINOR,
                 SCHEMA_MAJOR,
                 SCHEMA_MINOR,
                 maintenance_id,
                 now_ns,
             ),
         )
-        _before_upgrade_metadata_write(connection)
+        _before_v1_1_to_v1_2_metadata_write(connection)
         connection.execute(
             "UPDATE core_metadata SET schema_major=?,schema_minor=? WHERE singleton=1",
             (SCHEMA_MAJOR, SCHEMA_MINOR),
@@ -382,6 +483,11 @@ def upgrade_schema_v1_to_v1_1(connection: sqlite3.Connection) -> SchemaMetadata:
 
 def _before_upgrade_metadata_write(connection: sqlite3.Connection) -> None:
     """Narrow test seam for forced-failure rollback qualification."""
+    del connection
+
+
+def _before_v1_1_to_v1_2_metadata_write(connection: sqlite3.Connection) -> None:
+    """Narrow test seam for forced v1.2-upgrade rollback qualification."""
     del connection
 
 
@@ -430,8 +536,10 @@ def _validate_schema(connection: sqlite3.Connection) -> SchemaMetadata:
     table_rows = {row[1]: row[5] for row in connection.execute("PRAGMA table_list")}
     if any(table_rows.get(name) != 1 for name in expected_tables):
         raise SubstrateSchemaCompatibilityError("all native schema tables must be STRICT")
-    if (major, minor) == _CURRENT_SCHEMA_VERSION:
+    if (major, minor) in {_SCHEMA_V1_1_VERSION, _CURRENT_SCHEMA_VERSION}:
         _validate_governance_structure(connection)
+    if (major, minor) == _CURRENT_SCHEMA_VERSION:
+        _validate_runtime_order_structure(connection)
     _validate_migration_ledger(connection, major, minor)
     if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise SubstrateSchemaCompatibilityError("foreign-key structural health check failed")
@@ -447,6 +555,8 @@ def _schema_expectations(
     version = (major, minor)
     if version == _SCHEMA_V1_VERSION:
         return EXPECTED_TABLES_V1, EXPECTED_INDEXES_V1, EXPECTED_TRIGGERS_V1
+    if version == _SCHEMA_V1_1_VERSION:
+        return EXPECTED_TABLES_V1_1, EXPECTED_INDEXES_V1_1, EXPECTED_TRIGGERS_V1_1
     if version == _CURRENT_SCHEMA_VERSION:
         return EXPECTED_TABLES, EXPECTED_INDEXES, EXPECTED_TRIGGERS
     raise SubstrateSchemaCompatibilityError("native core schema version is unsupported")
@@ -518,37 +628,117 @@ def _validate_governance_structure(connection: sqlite3.Connection) -> None:
         raise SubstrateSchemaCompatibilityError("revision governance immutability triggers are incompatible")
 
 
+def _validate_runtime_order_structure(connection: sqlite3.Connection) -> None:
+    expected_columns = (
+        ("legacy_source_namespace_id", "BLOB", 1, 1),
+        ("object_id", "BLOB", 1, 2),
+        ("runtime_ordinal", "INTEGER", 1, 0),
+    )
+    actual_columns = tuple(
+        (row[1], row[2].upper(), row[3], row[5])
+        for row in connection.execute("PRAGMA table_info(memory_runtime_enumeration_orders)")
+    )
+    if actual_columns != expected_columns:
+        raise SubstrateSchemaCompatibilityError("runtime enumeration order columns are incompatible")
+    foreign_keys = frozenset(
+        (row[2], row[3], row[4])
+        for row in connection.execute(
+            "PRAGMA foreign_key_list(memory_runtime_enumeration_orders)"
+        )
+    )
+    if foreign_keys != {
+        ("legacy_source_namespaces", "legacy_source_namespace_id", "legacy_source_namespace_id"),
+        ("objects", "object_id", "object_id"),
+    }:
+        raise SubstrateSchemaCompatibilityError("runtime enumeration order foreign keys are incompatible")
+    indexes = frozenset(
+        (row[2], row[3], row[4])
+        for row in connection.execute("PRAGMA index_list(memory_runtime_enumeration_orders)")
+    )
+    if indexes != {(1, "pk", 0), (1, "u", 0)}:
+        raise SubstrateSchemaCompatibilityError("runtime enumeration order key structure is incompatible")
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_runtime_enumeration_orders'"
+    ).fetchone()
+    normalized = "" if row is None or row[0] is None else "".join(row[0].split())
+    if "CHECK(runtime_ordinal>=0)" not in normalized:
+        raise SubstrateSchemaCompatibilityError("runtime enumeration ordinal is not non-negative")
+    expected_triggers = {
+        statement.split()[2]: _normalize_schema_sql(statement)
+        for statement in _statements(SCHEMA_V1_2_TRIGGER_DDL)
+    }
+    actual_triggers = {
+        name: _normalize_schema_sql(sql)
+        for name, sql in connection.execute(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' "
+            "AND tbl_name='memory_runtime_enumeration_orders'"
+        )
+    }
+    if actual_triggers != expected_triggers:
+        raise SubstrateSchemaCompatibilityError("runtime enumeration order immutability triggers are incompatible")
+
+
 def _validate_migration_ledger(connection: sqlite3.Connection, major: object, minor: object) -> None:
     rows = connection.execute(
-        "SELECT migration_key,from_major,from_minor,to_major,to_minor,maintenance_id FROM schema_migration_ledger"
+        "SELECT migration_key,from_major,from_minor,to_major,to_minor,maintenance_id "
+        "FROM schema_migration_ledger"
     ).fetchall()
     if (major, minor) == _SCHEMA_V1_VERSION:
         if rows:
             raise SubstrateSchemaCompatibilityError("schema v1 cannot carry an upgrade ledger entry")
         return
-    if len(rows) > 1:
-        raise SubstrateSchemaCompatibilityError("schema migration ledger has unexpected entries")
-    if not rows:
-        return  # Fresh v1.1 bootstrap has no historical upgrade to record.
-    expected = (
+    v1_to_v1_1 = (
         SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY,
         SCHEMA_V1_MAJOR,
         SCHEMA_V1_MINOR,
+        SCHEMA_V1_1_MAJOR,
+        SCHEMA_V1_1_MINOR,
+    )
+    v1_1_to_v1_2 = (
+        SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,
+        SCHEMA_V1_1_MAJOR,
+        SCHEMA_V1_1_MINOR,
         SCHEMA_MAJOR,
         SCHEMA_MINOR,
     )
-    row = rows[0]
-    if row[:5] != expected:
-        raise SubstrateSchemaCompatibilityError("schema migration ledger entry is incompatible")
+    version = (major, minor)
+    if version == _SCHEMA_V1_1_VERSION:
+        if not rows:
+            return  # Fresh v1.1 bootstrap has no historical upgrade to record.
+        if len(rows) != 1 or rows[0][:5] != v1_to_v1_1:
+            raise SubstrateSchemaCompatibilityError("schema v1.1 migration ledger entry is incompatible")
+        _validate_migration_maintenance(connection, rows[0][5], _V1_TO_V1_1_MAINTENANCE_DETAIL)
+        return
+    if version != _CURRENT_SCHEMA_VERSION:
+        raise SubstrateSchemaCompatibilityError("schema migration ledger version is unsupported")
+    if not rows:
+        return  # Fresh v1.2 bootstrap has no historical upgrade to record.
+    expected_rows = (v1_1_to_v1_2,) if len(rows) == 1 else (v1_to_v1_1, v1_1_to_v1_2)
+    rows_by_key = {row[0]: row for row in rows}
+    if len(rows) != len(expected_rows) or set(rows_by_key) != {row[0] for row in expected_rows}:
+        raise SubstrateSchemaCompatibilityError("schema v1.2 migration ledger entries are incompatible")
+    for expected, detail in zip(
+        expected_rows,
+        (_V1_TO_V1_1_MAINTENANCE_DETAIL, _V1_1_TO_V1_2_MAINTENANCE_DETAIL)[-len(rows):],
+    ):
+        row = rows_by_key[expected[0]]
+        if row[:5] != expected:
+            raise SubstrateSchemaCompatibilityError("schema v1.2 migration ledger entries are incompatible")
+        _validate_migration_maintenance(connection, row[5], detail)
+
+
+def _validate_migration_maintenance(
+    connection: sqlite3.Connection, maintenance_id: bytes, expected_detail: str,
+) -> None:
     maintenance = connection.execute(
         "SELECT maintenance_kind,completed_at_ns,detail_json FROM maintenance_events WHERE maintenance_id=?",
-        (row[5],),
+        (maintenance_id,),
     ).fetchone()
     if (
         maintenance is None
         or maintenance[0] != "SCHEMA_UPGRADE"
         or maintenance[1] is None
-        or maintenance[2] != _V1_TO_V1_1_MAINTENANCE_DETAIL
+        or maintenance[2] != expected_detail
     ):
         raise SubstrateSchemaCompatibilityError("schema migration maintenance evidence is incomplete")
 

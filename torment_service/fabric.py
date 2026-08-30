@@ -49,6 +49,7 @@ from .checkpoint import (
 )
 from .governance import filter_llm_facing, SURFACE_LLM_CONTEXT
 from .memory_runtime_access import LegacyPostWriteMemoryAccess
+from .srg_runtime_state import LegacySRGTransientRuntime
 from .candidate_types import CandidateShapedValue
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
 from .post_write_runtime import (
@@ -3703,11 +3704,17 @@ class TormentFabric:
             affect_conf=affect_conf,
             skip_packet_emission=skip_packet_emission,
         )
+        memory_access = LegacyPostWriteMemoryAccess(
+            graph, expected_dimension=int(ws.embed_dim),
+        )
         post_write_dependencies = LegacyFabricPostWriteDependencies(
             owner=self,
             workspace=ws,
             graph=graph,
-            memory_access=LegacyPostWriteMemoryAccess(graph, expected_dimension=int(ws.embed_dim)),
+            memory_access=memory_access,
+            memory_enumeration=memory_access,
+            srg_runtime=LegacySRGTransientRuntime(graph),
+            embedding_dimension=int(ws.embed_dim),
             identity=ident,
             motif_registry=legacy_registry,
             motif_runtime=motif_runtime,

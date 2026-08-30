@@ -31,11 +31,16 @@ from torment_service.substrate.schema import (
     SCHEMA_MINOR,
     SCHEMA_V1_MAJOR,
     SCHEMA_V1_MINOR,
+    SCHEMA_V1_1_MAJOR,
+    SCHEMA_V1_1_MINOR,
     SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY,
+    SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,
     create_schema,
     create_schema_v1,
+    create_schema_v1_1,
     open_schema,
     upgrade_schema_v1_to_v1_1,
+    upgrade_schema_v1_1_to_v1_2,
 )
 
 
@@ -43,10 +48,15 @@ def _id():
     return generate_native_id()
 
 
-def _database(tmp_path: Path, *, v1: bool = False):
+def _database(tmp_path: Path, *, v1: bool = False, v1_1: bool = False):
     qualified = open_temporary_test_connection(tmp_path / "schema-evolution-governance.db")
     try:
-        (create_schema_v1 if v1 else create_schema)(qualified.connection)
+        if v1:
+            create_schema_v1(qualified.connection)
+        elif v1_1:
+            create_schema_v1_1(qualified.connection)
+        else:
+            create_schema(qualified.connection)
         return qualified
     except Exception:
         qualified.close()
@@ -159,12 +169,12 @@ def _semantic_counts(connection: sqlite3.Connection) -> tuple[int, ...]:
     )
 
 
-def test_current_bootstrap_is_v1_1_with_exact_governance_shape(tmp_path: Path):
+def test_current_bootstrap_is_v1_2_with_exact_governance_and_runtime_order_shape(tmp_path: Path):
     qualified = _database(tmp_path)
     try:
         connection = qualified.connection
         metadata = open_schema(connection)
-        assert (metadata.schema_major, metadata.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR) == (1, 1)
+        assert (metadata.schema_major, metadata.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR) == (1, 2)
         assert open_schema(connection, writable=False) == metadata
         assert connection.execute(
             "SELECT count(*) FROM object_revision_governance"
@@ -198,6 +208,13 @@ def test_current_bootstrap_is_v1_1_with_exact_governance_shape(tmp_path: Path):
         assert connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='immutable_object_revision_governance_update'"
         ).fetchone() == (1,)
+        assert connection.execute(
+            "PRAGMA table_info(memory_runtime_enumeration_orders)"
+        ).fetchall()[0][1:3] == ("legacy_source_namespace_id", "BLOB")
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+            "AND name='immutable_memory_runtime_enumeration_order_update'"
+        ).fetchone() == (1,)
     finally:
         qualified.close()
 
@@ -208,7 +225,7 @@ def test_explicit_v1_upgrade_is_additive_idempotent_and_preserves_deployment(tmp
         connection = qualified.connection
         before = open_schema(connection, writable=False)
         assert (before.schema_major, before.schema_minor) == (SCHEMA_V1_MAJOR, SCHEMA_V1_MINOR)
-        with pytest.raises(SubstrateSchemaCompatibilityError, match="explicit v1.1 schema upgrade"):
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="explicit versioned schema upgrade"):
             create_schema(connection)
         with pytest.raises(SubstrateSchemaCompatibilityError):
             NativeObjectRevisionGovernanceService(connection)
@@ -217,35 +234,75 @@ def test_explicit_v1_upgrade_is_additive_idempotent_and_preserves_deployment(tmp
             "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
         ).fetchone()
 
-        upgraded = upgrade_schema_v1_to_v1_1(connection)
-        assert (upgraded.schema_major, upgraded.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR)
-        assert upgraded.core_id == before.core_id and upgraded.core_role == CORE_ROLE_STAGING
+        upgraded_v1_1 = upgrade_schema_v1_to_v1_1(connection)
+        assert (upgraded_v1_1.schema_major, upgraded_v1_1.schema_minor) == (SCHEMA_V1_1_MAJOR, SCHEMA_V1_1_MINOR)
+        assert upgraded_v1_1.core_id == before.core_id and upgraded_v1_1.core_role == CORE_ROLE_STAGING
         assert connection.execute(
             "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
         ).fetchone() == deployment == ("LEGACY_ACTIVE", None)
-        ledger = connection.execute(
+        ledger_v1_1 = connection.execute(
             "SELECT migration_key,from_major,from_minor,to_major,to_minor FROM schema_migration_ledger"
         ).fetchall()
-        assert ledger == [
+        assert ledger_v1_1 == [
             (
                 SCHEMA_V1_TO_V1_1_GOVERNANCE_MIGRATION_KEY,
                 SCHEMA_V1_MAJOR,
                 SCHEMA_V1_MINOR,
-                SCHEMA_MAJOR,
-                SCHEMA_MINOR,
+                SCHEMA_V1_1_MAJOR,
+                SCHEMA_V1_1_MINOR,
             )
         ]
         assert connection.execute(
             "SELECT maintenance_kind,completed_at_ns IS NOT NULL FROM maintenance_events"
         ).fetchall() == [("SCHEMA_UPGRADE", 1)]
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            NativeObjectRevisionGovernanceService(connection)
+        upgraded = upgrade_schema_v1_1_to_v1_2(connection)
+        assert (upgraded.schema_major, upgraded.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR)
         assert NativeObjectRevisionGovernanceService(connection).get_current_object_governance(
             object_id=historical
         ) is None
         assert isinstance(NativeObjectService(connection), NativeObjectService)
 
         assert upgrade_schema_v1_to_v1_1(connection) == upgraded
-        assert connection.execute("SELECT count(*) FROM schema_migration_ledger").fetchone()[0] == 1
-        assert connection.execute("SELECT count(*) FROM maintenance_events").fetchone()[0] == 1
+        assert upgrade_schema_v1_1_to_v1_2(connection) == upgraded
+        assert connection.execute("SELECT count(*) FROM schema_migration_ledger").fetchone()[0] == 2
+        assert connection.execute("SELECT count(*) FROM maintenance_events").fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT migration_key FROM schema_migration_ledger WHERE migration_key=?",
+            (SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,),
+        ).fetchone() == (SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,)
+    finally:
+        qualified.close()
+
+
+def test_explicit_v1_1_upgrade_adds_only_runtime_order_and_records_its_own_ledger(tmp_path: Path):
+    qualified = _database(tmp_path, v1_1=True)
+    try:
+        connection = qualified.connection
+        assert open_schema(connection, writable=False).schema_minor == SCHEMA_V1_1_MINOR
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            open_schema(connection)
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="explicit versioned schema upgrade"):
+            create_schema(connection)
+        upgraded = upgrade_schema_v1_1_to_v1_2(connection)
+        assert upgraded.schema_minor == SCHEMA_MINOR
+        assert connection.execute(
+            "SELECT count(*) FROM memory_runtime_enumeration_orders"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT migration_key,from_major,from_minor,to_major,to_minor "
+            "FROM schema_migration_ledger"
+        ).fetchall() == [
+            (
+                SCHEMA_V1_1_TO_V1_2_RUNTIME_ORDER_MIGRATION_KEY,
+                SCHEMA_V1_1_MAJOR,
+                SCHEMA_V1_1_MINOR,
+                SCHEMA_MAJOR,
+                SCHEMA_MINOR,
+            )
+        ]
+        assert upgrade_schema_v1_1_to_v1_2(connection) == upgraded
     finally:
         qualified.close()
 
@@ -316,7 +373,8 @@ def test_v1_is_read_only_for_current_semantic_services_until_explicit_upgrade(tm
             semantic_scope_id=_id(),
         ) == ()
 
-        assert upgrade_schema_v1_to_v1_1(connection).schema_minor == SCHEMA_MINOR
+        assert upgrade_schema_v1_to_v1_1(connection).schema_minor == SCHEMA_V1_1_MINOR
+        assert upgrade_schema_v1_1_to_v1_2(connection).schema_minor == SCHEMA_MINOR
         assert open_schema(connection).schema_minor == SCHEMA_MINOR
         assert isinstance(NativeObjectService(connection), NativeObjectService)
         assert isinstance(NativeRelationshipService(connection), NativeRelationshipService)

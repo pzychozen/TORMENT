@@ -9,12 +9,14 @@ from types import SimpleNamespace
 import numpy as np
 
 from torment_service.memory_graph import MemoryGraph
+from torment_service.memory_runtime_access import LegacyPostWriteMemoryAccess
 from torment_service.post_write_runtime import (
     FabricPostWriteContext,
     LegacyFabricPostWriteAdapter,
     PostWriteStorageOutcome,
 )
 from torment_service.srg_engine import SRGMemoryState
+from torment_service.srg_runtime_state import LegacySRGTransientRuntime
 
 
 class _ThreeDimensionalEmbedder:
@@ -166,9 +168,13 @@ def test_actual_srg_collision_mutates_live_payloads_but_is_not_durable_without_a
         incoming = _add_memory(graph, "incoming", extra={"srg": incoming_srg.to_dict()})
         before_existing = deepcopy(graph.entities[existing].payload["srg"])
         before_incoming = deepcopy(graph.entities[incoming].payload["srg"])
+        access = LegacyPostWriteMemoryAccess(graph, expected_dimension=3)
         adapter = LegacyFabricPostWriteAdapter(SimpleNamespace(
             owner=SimpleNamespace(_srg_enable=True, _log=logging.getLogger("a3d4-archaeology")),
-            graph=graph,
+            memory_access=access,
+            memory_enumeration=access,
+            srg_runtime=LegacySRGTransientRuntime(graph),
+            embedding_dimension=3,
         ))
 
         adapter._run_srg_collision(_collision_context(incoming, incoming_srg.to_dict()))

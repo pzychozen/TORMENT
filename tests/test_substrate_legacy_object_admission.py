@@ -153,6 +153,41 @@ def test_last_current_candidate_admission_is_typed_idempotent_and_non_authoritat
         qualified.close()
 
 
+def test_admission_publishes_first_appearance_runtime_order_without_eid_sorting(tmp_path: Path):
+    qualified, identity_namespace, scope, idempotency_namespace = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        root, manifest_path, manifest = _snapshot(
+            tmp_path,
+            "runtime-order-source",
+            [
+                b'{"eid":42,"text":"first 42"}\n',
+                b'{"eid":7,"text":"first 7"}\n',
+                b'{"eid":42,"text":"current 42"}\n',
+            ],
+        )
+        run = _admit(
+            NativeLegacyObjectAdmissionService(connection), root, manifest_path,
+            idempotency_namespace, identity_namespace, scope,
+        )
+        admitted = [result for result in run.results if result.admission_status == "ADMITTED"]
+        # Admission execution may retain its independently frozen EID sort;
+        # the structural runtime carrier records source first appearance.
+        assert [result.raw_eid for result in admitted] == [7, 42]
+        assert connection.execute(
+            """
+            SELECT a.alias_value,o.runtime_ordinal
+              FROM memory_runtime_enumeration_orders o
+              JOIN legacy_object_aliases a ON a.object_id=o.object_id
+             WHERE o.legacy_source_namespace_id=? AND a.alias_kind='EID'
+             ORDER BY o.runtime_ordinal
+            """,
+            (native_id_to_bytes(manifest.legacy_source_namespace_id),),
+        ).fetchall() == [("42", 0), ("7", 1)]
+    finally:
+        qualified.close()
+
+
 def test_moved_snapshot_retry_and_same_eid_in_different_namespaces_do_not_collide(tmp_path: Path):
     qualified, identity_namespace, scope, idempotency_namespace = _database(tmp_path)
     try:

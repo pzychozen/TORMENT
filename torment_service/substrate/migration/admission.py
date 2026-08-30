@@ -29,6 +29,7 @@ from ..errors import (
     SubstrateRevisionConflict,
 )
 from ..ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
+from ..memory_runtime_order import publish_runtime_order
 from ..objects import SubstrateTx, execute_semantic
 from ..schema import open_schema
 from .inventory import inventory_snapshot
@@ -51,6 +52,7 @@ class LegacyNodeCandidate:
     line_ordinal: int
     raw_eid: int
     raw_row_bytes: bytes
+    runtime_order_ordinal: int = 0
 
 
 @dataclass(frozen=True)
@@ -268,6 +270,12 @@ class NativeLegacyObjectAdmissionService:
         tx.execute(
             "INSERT INTO legacy_object_aliases VALUES (?,'EID',?,?)",
             (source_namespace_id, alias_value, object_id),
+        )
+        publish_runtime_order(
+            tx,
+            legacy_source_namespace_id=manifest.legacy_source_namespace_id,
+            object_id=native_id_from_bytes(object_id),
+            runtime_ordinal=candidate.runtime_order_ordinal,
         )
         tx.execute(
             """
@@ -515,7 +523,21 @@ def _extract_nodes(
             )
     for raw_eid in blocked_eids:
         current.pop(raw_eid, None)
-    return tuple(current.values()), tuple(malformed)
+    # Python dict assignment retains an existing key's original position while
+    # a removed-and-later-reintroduced EID receives a new first-surviving
+    # position.  That matches MemoryGraph's observed current enumeration.
+    candidates = tuple(
+        LegacyNodeCandidate(
+            item.legacy_snapshot_id,
+            item.legacy_artifact_id,
+            item.line_ordinal,
+            item.raw_eid,
+            item.raw_row_bytes,
+            runtime_order_ordinal,
+        )
+        for runtime_order_ordinal, item in enumerate(current.values())
+    )
+    return candidates, tuple(malformed)
 
 
 def _parse_node_record(raw_row_bytes: bytes) -> tuple[int | None, str]:
@@ -611,6 +633,7 @@ def _admission_intent(kind: str, candidate: LegacyNodeCandidate) -> str:
             "legacy_artifact_id": str(candidate.legacy_artifact_id),
             "record_identity": _record_identity(candidate.line_ordinal),
             "raw_eid": candidate.raw_eid,
+            "runtime_order_ordinal": candidate.runtime_order_ordinal,
         }
     )
 
