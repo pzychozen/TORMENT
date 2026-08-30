@@ -389,6 +389,17 @@ class LegacyFabricPostWriteAdapter:
             )
         except Exception as exc:
             deps.owner._log.debug("motif entropy update failed for domain=%s: %s", context.chosen_domain, exc)
+        self._run_derived_memory(context)
+
+    def _run_derived_memory(self, context: FabricPostWriteContext) -> None:
+        """Run the fixed derived-memory slot with its three legacy boundaries.
+
+        The native staging adapter reuses this semantic orchestration after
+        explicitly reserving the operationally-excluded motif-maintenance
+        slot.  The legacy caller above retains its existing ``motif_runtime``
+        gate, so production behavior is unchanged.
+        """
+        deps = self._deps
         derived_context = DerivedMemoryRuntimeContext(
             workspace_id=context.workspace_id,
             agent_id=context.agent_id,
