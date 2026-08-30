@@ -11,6 +11,7 @@ from torment_service.substrate.closed_child_qualification import (
     NativeProvenanceRecord,
 )
 from torment_service.substrate.connection import open_temporary_test_connection
+from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.errors import (
     SubstrateIdempotencyConflict,
     SubstrateSchemaCompatibilityError,
@@ -20,7 +21,9 @@ from torment_service.substrate.object_revision_governance import (
     NativeMemoryGovernanceFacts,
     NativeObjectRevisionGovernanceService,
 )
+from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
 from torment_service.substrate.objects import NativeObjectService, ObjectState
+from torment_service.substrate.relationships import NativeRelationshipService
 from torment_service.substrate import schema as schema_module
 from torment_service.substrate.schema import (
     CORE_ROLE_STAGING,
@@ -112,12 +115,57 @@ def _insert_governance(connection, result, facts: NativeMemoryGovernanceFacts):
     )
 
 
+def _historical_v1_object(connection: sqlite3.Connection):
+    """Insert pre-existing v1 history without invoking current semantic APIs."""
+    identity, scope, object_id, revision_id = _id(), _id(), _id(), _id()
+    connection.execute(
+        "INSERT INTO identity_namespaces VALUES (?,?,0)",
+        (native_id_to_bytes(identity), f"historical-identity-{identity}"),
+    )
+    connection.execute(
+        "INSERT INTO semantic_scopes VALUES (?,?,0)",
+        (native_id_to_bytes(scope), f"historical-scope-{scope}"),
+    )
+    connection.execute(
+        "INSERT INTO objects(object_id,identity_namespace_id,object_kind,created_at_ns) "
+        "VALUES (?,?,?,0)",
+        (native_id_to_bytes(object_id), native_id_to_bytes(identity), "LEGACY_CORE_NODE"),
+    )
+    connection.execute(
+        """
+        INSERT INTO object_revisions(
+            object_revision_id,object_id,revision_ordinal,lineage_kind,
+            predecessor_revision_id,predecessor_revision_ordinal,
+            effective_semantic_scope_id,existence_state,lifecycle_state,
+            lifecycle_authoritative,governance_state,authority_category,
+            payload_format,created_at_ns
+        ) VALUES (?,?,1,'NATIVE_CREATION',NULL,NULL,?,'EXISTS','UNSET',1,
+                  'UNKNOWN','NOT_APPLICABLE','NONE',0)
+        """,
+        (native_id_to_bytes(revision_id), native_id_to_bytes(object_id), native_id_to_bytes(scope)),
+    )
+    connection.execute(
+        "UPDATE objects SET current_revision_id=?,current_revision_ordinal=1 WHERE object_id=?",
+        (native_id_to_bytes(revision_id), native_id_to_bytes(object_id)),
+    )
+    connection.commit()
+    return object_id
+
+
+def _semantic_counts(connection: sqlite3.Connection) -> tuple[int, ...]:
+    return tuple(
+        connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        for table in ("objects", "relationships", "operations", "semantic_transitions")
+    )
+
+
 def test_current_bootstrap_is_v1_1_with_exact_governance_shape(tmp_path: Path):
     qualified = _database(tmp_path)
     try:
         connection = qualified.connection
         metadata = open_schema(connection)
         assert (metadata.schema_major, metadata.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR) == (1, 1)
+        assert open_schema(connection, writable=False) == metadata
         assert connection.execute(
             "SELECT count(*) FROM object_revision_governance"
         ).fetchone()[0] == 0
@@ -158,17 +206,13 @@ def test_explicit_v1_upgrade_is_additive_idempotent_and_preserves_deployment(tmp
     qualified = _database(tmp_path, v1=True)
     try:
         connection = qualified.connection
-        before = open_schema(connection)
+        before = open_schema(connection, writable=False)
         assert (before.schema_major, before.schema_minor) == (SCHEMA_V1_MAJOR, SCHEMA_V1_MINOR)
-        assert create_schema(connection) == before
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="explicit v1.1 schema upgrade"):
+            create_schema(connection)
         with pytest.raises(SubstrateSchemaCompatibilityError):
             NativeObjectRevisionGovernanceService(connection)
-        identity, scope, idem = _foundation(connection)
-        historical = NativeObjectService(connection).create_object(
-            idempotency_namespace_id=idem,
-            idempotency_key="historical-v1-object",
-            state=_state(identity, scope),
-        )
+        historical = _historical_v1_object(connection)
         deployment = connection.execute(
             "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
         ).fetchone()
@@ -195,8 +239,9 @@ def test_explicit_v1_upgrade_is_additive_idempotent_and_preserves_deployment(tmp
             "SELECT maintenance_kind,completed_at_ns IS NOT NULL FROM maintenance_events"
         ).fetchall() == [("SCHEMA_UPGRADE", 1)]
         assert NativeObjectRevisionGovernanceService(connection).get_current_object_governance(
-            object_id=historical.object_id
+            object_id=historical
         ) is None
+        assert isinstance(NativeObjectService(connection), NativeObjectService)
 
         assert upgrade_schema_v1_to_v1_1(connection) == upgraded
         assert connection.execute("SELECT count(*) FROM schema_migration_ledger").fetchone()[0] == 1
@@ -235,12 +280,47 @@ def test_upgrade_rolls_back_all_evolution_state_on_forced_failure(tmp_path: Path
         monkeypatch.setattr(schema_module, "_before_upgrade_metadata_write", fail)
         with pytest.raises(RuntimeError, match="forced upgrade rollback"):
             upgrade_schema_v1_to_v1_1(connection)
-        assert (open_schema(connection).schema_major, open_schema(connection).schema_minor) == (1, 0)
+        assert (
+            open_schema(connection, writable=False).schema_major,
+            open_schema(connection, writable=False).schema_minor,
+        ) == (1, 0)
         assert connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='object_revision_governance'"
         ).fetchone() is None
         assert connection.execute("SELECT count(*) FROM schema_migration_ledger").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM maintenance_events").fetchone()[0] == 0
+    finally:
+        qualified.close()
+
+
+def test_v1_is_read_only_for_current_semantic_services_until_explicit_upgrade(tmp_path: Path):
+    qualified = _database(tmp_path, v1=True)
+    try:
+        connection = qualified.connection
+        assert open_schema(connection, writable=False) == schema_module.validate_schema(connection)
+        before = _semantic_counts(connection)
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            open_schema(connection)
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            NativeObjectService(connection)
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            NativeRelationshipService(connection)
+        with pytest.raises(SubstrateSchemaCompatibilityError, match="read-only"):
+            NativeMemoryCompatibilityFacade(connection)
+        assert _semantic_counts(connection) == before
+
+        reader = NativeMotifRuntimeReader(connection)
+        assert reader.list_runtime_motifs(
+            motif_alias_namespace_id=_id(),
+            domain_id="read-only-domain",
+            semantic_scope_id=_id(),
+        ) == ()
+
+        assert upgrade_schema_v1_to_v1_1(connection).schema_minor == SCHEMA_MINOR
+        assert open_schema(connection).schema_minor == SCHEMA_MINOR
+        assert isinstance(NativeObjectService(connection), NativeObjectService)
+        assert isinstance(NativeRelationshipService(connection), NativeRelationshipService)
+        assert isinstance(NativeMemoryCompatibilityFacade(connection), NativeMemoryCompatibilityFacade)
     finally:
         qualified.close()
 

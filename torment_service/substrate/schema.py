@@ -266,7 +266,12 @@ def _create_schema(connection: sqlite3.Connection, *, evolved: bool) -> SchemaMe
     if existing:
         if "core_metadata" not in existing:
             raise SubstrateSchemaCompatibilityError("native schema is incomplete or unknown")
-        return validate_schema(connection)
+        metadata = validate_schema(connection)
+        if evolved and (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
+            raise SubstrateSchemaCompatibilityError(
+                "current schema bootstrap requires explicit v1.1 schema upgrade"
+            )
+        return metadata
 
     core_id = native_id_to_bytes(generate_native_id())
     now_ns = time.time_ns()
@@ -297,10 +302,14 @@ def _create_schema(connection: sqlite3.Connection, *, evolved: bool) -> SchemaMe
 
 
 def open_schema(connection: sqlite3.Connection, *, writable: bool = True) -> SchemaMetadata:
-    """Open an exact supported v1.0 or current v1.1 core without migration."""
-    del writable  # Opening never upgrades; callers choose the explicit upgrade boundary.
+    """Open a validated core, refusing writes against older supported versions."""
     _require_qualified_connection(connection)
-    return _validate_schema(connection)
+    metadata = _validate_schema(connection)
+    if writable and (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
+        raise SubstrateSchemaCompatibilityError(
+            "schema v1.0 is read-only; explicit v1.1 schema upgrade is required for writes"
+        )
+    return metadata
 
 
 def validate_schema(connection: sqlite3.Connection) -> SchemaMetadata:

@@ -25,9 +25,9 @@ from .motifs import (
     DERIVED_MOTIF_OBJECT_KIND,
     MOTIF_ID_ALIAS_KIND,
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
-    NativeMotifService,
+    NativeMotifView,
+    _state_from_payload,
 )
-from .representations import NativeRepresentationService
 from .schema import open_schema
 
 
@@ -37,6 +37,29 @@ _GENERATION = 1
 _DERIVATION_CONTRACT = "compat-embedding-v1"
 _ENCODING = "RAW_VECTOR"
 _DTYPE = "float32"
+
+
+class _ReadOnlyRepresentationPayloadReader:
+    """Explicit payload boundary for this read-only runtime reader."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+
+    def read_representation_payload(self, representation_id: UUID) -> bytes:
+        row = self._connection.execute(
+            """
+            SELECT p.payload_bytes
+            FROM representation_payloads p
+            JOIN representation_current_state state USING(representation_id)
+            WHERE p.representation_id=?
+              AND state.readiness='READY'
+              AND state.operational_disposition='USABLE'
+            """,
+            (native_id_to_bytes(representation_id),),
+        ).fetchone()
+        if row is None:
+            raise SubstrateObjectNotFound("usable representation payload was not found")
+        return row[0]
 
 
 @dataclass(frozen=True)
@@ -68,8 +91,7 @@ class NativeMotifRuntimeReader:
     def __init__(self, connection: sqlite3.Connection) -> None:
         open_schema(connection, writable=False)
         self._connection = connection
-        self._motifs = NativeMotifService(connection)
-        self._representations = NativeRepresentationService(connection)
+        self._representations = _ReadOnlyRepresentationPayloadReader(connection)
 
     def list_runtime_motifs(
         self,
@@ -124,7 +146,7 @@ class NativeMotifRuntimeReader:
                     "native motif has multiple MOTIF_ID aliases in one runtime namespace"
                 )
             alias_value = aliases[0]
-            view = self._motifs.get_current_motif(UUID(bytes=object_id))
+            view = self._get_current_motif(UUID(bytes=object_id))
             state = view.state
             if state.runtime_motif_id != alias_value:
                 raise SubstrateInvariantViolation(
@@ -166,7 +188,7 @@ class NativeMotifRuntimeReader:
     ) -> tuple[NativeOrderedMotifMember, ...]:
         """Recover append sequence from shared membership/motif publication evidence."""
         _require_uuid("motif_object_id", motif_object_id)
-        self._motifs.get_current_motif(motif_object_id)
+        self._get_current_motif(motif_object_id)
         memberships = self._connection.execute(
             """
             SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,
@@ -368,7 +390,7 @@ class NativeMotifRuntimeReader:
     ) -> float:
         """Calculate radius through the legacy-compatible member-unit-vector path."""
         _positive_dimension(expected_dimension)
-        view = self._motifs.get_current_motif(motif_object_id)
+        view = self._get_current_motif(motif_object_id)
         members = self.list_ordered_current_motif_members(motif_object_id)
 
         def legacy_unit_member_vectors():
@@ -382,6 +404,37 @@ class NativeMotifRuntimeReader:
         return motif_radius_from_member_vectors(
             view.state.centroid,
             legacy_unit_member_vectors(),
+        )
+
+    def _get_current_motif(self, motif_object_id: UUID) -> NativeMotifView:
+        """Read one current motif without constructing a write-capable service."""
+        _require_uuid("motif_object_id", motif_object_id)
+        row = self._connection.execute(
+            """
+            SELECT o.object_id,o.identity_namespace_id,o.object_kind,
+                   r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,
+                   r.payload_format,r.payload_text
+              FROM objects o
+              JOIN object_revisions r
+                ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id
+               AND r.revision_ordinal=o.current_revision_ordinal
+             WHERE o.object_id=?
+            """,
+            (native_id_to_bytes(motif_object_id),),
+        ).fetchone()
+        if row is None:
+            raise SubstrateObjectNotFound("native motif was not found")
+        if row[2] != DERIVED_MOTIF_OBJECT_KIND:
+            raise SubstrateInvariantViolation("object is not a native derived motif")
+        if row[6] != "JSON" or row[7] is None:
+            raise SubstrateInvariantViolation("native motif current state is not JSON")
+        return NativeMotifView(
+            UUID(bytes=row[0]),
+            UUID(bytes=row[3]),
+            row[4],
+            UUID(bytes=row[1]),
+            _state_from_payload(UUID(bytes=row[5]), row[7]),
         )
 
     def project_coherence_field_rows(

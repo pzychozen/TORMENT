@@ -26,9 +26,28 @@ governance values or infer historical meaning from `governance_state`.
 `SCHEMA_V1_DDL` is retained as the real historical bootstrap. Normal
 `create_schema()` creates a new v1.1 core; `create_schema_v1()` exists only to
 make historical-v1 recognition and evolution qualification explicit. Both
-versions are structurally recognized by `open_schema()`. Opening never mutates
-a core. APIs that require the new carrier use `require_current_schema()` and
-refuse v1.0 until the named upgrade has completed.
+versions are structurally recognized. `open_schema(..., writable=False)`
+opens an exact v1.0 core read-only; default writable open and
+`create_schema(existing_v1)` refuse until the named upgrade has completed.
+Opening never mutates a core. APIs that require the new carrier use
+`require_current_schema()` and refuse v1.0 until the named upgrade has
+completed.
+
+### Older-schema write gate
+
+Structural compatibility and runtime write permission are separate:
+
+| Declared schema | `writable=False` | `writable=True` / default |
+| --- | --- | --- |
+| v1.0 | recognized read-only | refused; explicit v1.1 upgrade required |
+| v1.1 | allowed | allowed |
+
+`validate_schema()` can structurally recognize either exact version. It grants
+no semantic write permission. The explicit upgrade validates v1.0 through its
+internal structural path, so the write gate cannot block the one authorized
+v1.0-to-v1.1 evolution. `NativeMotifRuntimeReader` is a real read-only caller:
+it uses only read-only motif and representation boundaries rather than
+constructing write-capable services after its read-only schema open.
 
 ## Revision-bound governance carrier
 
@@ -93,7 +112,9 @@ fails closed.
 The upgrade leaves `core_role`, `deployment_state`, and activation state
 unchanged. It creates no governance rows for pre-existing revisions and makes
 no deployment or authority claim. There is no automatic upgrade on open and no
-generic migration framework.
+generic migration framework. Structural recognition is deliberately separate
+from current-runtime write permission: a valid v1.0 core is readable but never
+writable by current semantic APIs.
 
 ## Closed-child provenance qualification
 
