@@ -74,6 +74,7 @@ def _fixture(
     model: str = "synthetic",
     dtype: str = "float32",
     include_vector: bool = True,
+    payload: dict[str, object] | None = None,
 ):
     qualified = open_temporary_test_connection(tmp_path / "b3a.db")
     connection = qualified.connection
@@ -88,7 +89,9 @@ def _fixture(
 
     root = tmp_path / "frozen" / "legacy"
     root.mkdir(parents=True)
-    node: dict[str, object] = {"eid": 7, "born_step": 12, "channel": 4, "payload": _payload()}
+    node: dict[str, object] = {
+        "eid": 7, "born_step": 12, "channel": 4, "payload": payload if payload is not None else _payload(),
+    }
     actual = vector if vector is not None else np.asarray((2.0, 0.6, 0.0), dtype=np.float32)
     if include_vector:
         node["embedding_ref"] = {

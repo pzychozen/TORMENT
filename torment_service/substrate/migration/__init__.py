@@ -105,6 +105,13 @@ from .runtime_representation_bootstrap import (
     NativeMigrationRuntimeRepresentationBootstrapService,
     PreparedLegacyCaptureRepresentationBootstrap,
 )
+from .runtime_reembedding_bootstrap import (
+    MigrationRuntimeReembeddingBootstrapRefused,
+    MigrationRuntimeReembeddingBootstrapRequest,
+    MigrationRuntimeReembeddingBootstrapResult,
+    NativeMigrationRuntimeReembeddingBootstrapService,
+    PreparedRuntimeReembeddingBootstrap,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -172,4 +179,9 @@ __all__ = [
     "MigrationRuntimeRepresentationBootstrapResult",
     "NativeMigrationRuntimeRepresentationBootstrapService",
     "PreparedLegacyCaptureRepresentationBootstrap",
+    "MigrationRuntimeReembeddingBootstrapRefused",
+    "MigrationRuntimeReembeddingBootstrapRequest",
+    "MigrationRuntimeReembeddingBootstrapResult",
+    "NativeMigrationRuntimeReembeddingBootstrapService",
+    "PreparedRuntimeReembeddingBootstrap",
 ]

@@ -50,6 +50,10 @@ from .representation_admission import (
 from .runtime_normalization import _OPERATION_KIND as _B2_OPERATION_KIND
 from .runtime_normalization import _OUTPUT_ROLE as _B2_OUTPUT_ROLE
 from .runtime_normalization import _TRANSITION_KIND as _B2_TRANSITION_KIND
+from .runtime_embedding_input import (
+    CanonicalEmbeddingInputUnavailable,
+    require_embedding_input_continuity,
+)
 from .snapshot import LegacySnapshotManifest, load_snapshot_manifest, verify_snapshot
 
 
@@ -307,7 +311,12 @@ class NativeMigrationRuntimeRepresentationBootstrapService:
         source = self._source_facts(request, manifest)
         r2 = self._b2_r2_facts(request, source)
         capture = self._capture_facts(request, manifest, source)
-        input_field, input_digest = _embedding_input_continuity(source["r1_payload"], r2["payload"])
+        try:
+            embedding_input = require_embedding_input_continuity(source["r1_payload"], r2["payload"])
+        except CanonicalEmbeddingInputUnavailable as exc:
+            raise MigrationRuntimeRepresentationBootstrapRefused(
+                "B3A_EMBEDDING_INPUT_CONTINUITY_BLOCKED"
+            ) from exc
         plan_values: dict[str, Any] = {
             "native_core_id": core_id,
             "legacy_snapshot_id": request.legacy_snapshot_id,
@@ -323,8 +332,8 @@ class NativeMigrationRuntimeRepresentationBootstrapService:
             "capture_dtype": capture["dtype"], "capture_dimension": capture["dimension"],
             "capture_encoding_id": capture["encoding_id"],
             "capture_derivation_contract_version": capture["derivation_contract_version"],
-            "target_lane": request.target_lane, "embedding_input_field": input_field,
-            "embedding_input_digest": input_digest,
+            "target_lane": request.target_lane, "embedding_input_field": embedding_input.field,
+            "embedding_input_digest": embedding_input.digest,
             "idempotency_namespace_id": request.idempotency_namespace_id,
         }
         representation_id = _deterministic_native_id(_plan_identity(plan_values))
@@ -579,17 +588,6 @@ def _validate_target_lane(lane: NativeRepresentationLane) -> None:
                 COMPAT_EMBEDDING_DERIVATION_CONTRACT, COMPAT_EMBEDDING_ENCODING, COMPAT_EMBEDDING_DTYPE)
     if actual != expected or lane.dimension < 1:
         raise MigrationRuntimeRepresentationBootstrapRefused("B3A_TARGET_LANE_INVALID")
-
-
-def _embedding_input_continuity(r1_payload: dict[str, Any], r2_payload: dict[str, Any]) -> tuple[str, str]:
-    """Freeze the legacy embedding input: summary first, then text when summary is absent."""
-    for field in ("summary", "text"):
-        if field in r1_payload:
-            value = r1_payload[field]
-            if not isinstance(value, str) or r2_payload.get(field) != value:
-                raise MigrationRuntimeRepresentationBootstrapRefused("B3A_EMBEDDING_INPUT_CONTINUITY_BLOCKED")
-            return field, _sha256(canonical_intent_text({"field": field, "value": value}).encode("utf-8"))
-    raise MigrationRuntimeRepresentationBootstrapRefused("B3A_EMBEDDING_INPUT_CONTINUITY_BLOCKED")
 
 
 def _administrative_intent(plan: PreparedLegacyCaptureRepresentationBootstrap) -> dict[str, object]:
