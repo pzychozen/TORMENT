@@ -28,10 +28,16 @@ from torment_service.substrate.memory_reinforcement import (
     realize_reinforcement_patch,
 )
 from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
+from torment_service.substrate.native_memory_runtime_access import NativePostWriteMemoryAccess
+from torment_service.substrate.native_srg_runtime import (
+    NativeSRGProcessState,
+    NativeSRGTransientRuntime,
+)
 from torment_service.substrate.object_revision_governance import (
     NativeMemoryGovernanceFacts,
     NativeObjectRevisionGovernanceService,
 )
+from torment_service.substrate.objects import execute_semantic
 from torment_service.substrate.provenance import NativeProvenanceRecord
 from torment_service.substrate.representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -78,12 +84,18 @@ def _database(tmp_path: Path):
     return values
 
 
-def _composition_request(values, *, key="compose", source_channel="user_input", strength=0.7):
+def _composition_request(
+    values, *, key="compose", source_channel="user_input", strength=0.7,
+    flexible_payload=None,
+):
     return NativeMemoryMotifCompositionRequest(
         legacy_source_namespace_id=values["memory_alias"], memory_identity_namespace_id=values["memory_identity"],
         semantic_scope_id=values["scope"], summary="reinforce fixture", memory_type="reflection", memory_class="core",
         strength=strength, confidence=0.8, half_life_days=7.0, user_id="aria", logical_step=10,
-        flexible_payload={"state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5},
+        flexible_payload=(
+            {"state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5}
+            if flexible_payload is None else flexible_payload
+        ),
         lifecycle_state="ORDINARY", lifecycle_authoritative=False, governance_state="DERIVED",
         provenance=NativeProvenanceRecord("DIRECT", source_channel, "user", "DIRECT", "KNOWN", 1, 2, "INPUT", "fixture"),
         governance=NativeMemoryGovernanceFacts(protected=True, non_shareable=True),
@@ -124,13 +136,19 @@ def _ready_e1(values, source, *, key="e1", vector=(2.0, 0.6, 0.0), dependencies=
     )
 
 
-def _source(values, *, source_channel="user_input", strength=0.7, vector=(2.0, 0.6, 0.0)):
+def _source(
+    values, *, key="compose", source_channel="user_input", strength=0.7, vector=(2.0, 0.6, 0.0),
+    flexible_payload=None,
+):
     composition = NativeMemoryMotifCompositionService(values["connection"]).commit(
         NativeMemoryMotifCompositionService(values["connection"]).prepare_plan(
-            _composition_request(values, source_channel=source_channel, strength=strength)
+            _composition_request(
+                values, key=key, source_channel=source_channel, strength=strength,
+                flexible_payload=flexible_payload,
+            )
         )
     )
-    e1 = _ready_e1(values, composition, vector=vector)
+    e1 = _ready_e1(values, composition, key=f"e1:{key}", vector=vector)
     return composition, e1
 
 
@@ -193,6 +211,248 @@ def test_reinforcement_creates_r2_then_exact_e2_without_motif_or_symbol_mutation
         assert _counts(connection) == tuple(a + b for a, b in zip(before, (0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 4, 3)))
         assert connection.execute("SELECT count(*) FROM objects WHERE object_kind='DERIVED_MOTIF'", ()).fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM relationship_revisions").fetchone()[0] == 1
+        intent = json.loads(connection.execute(
+            "SELECT canonical_intent_json FROM operations WHERE operation_id=?",
+            (native_id_to_bytes(result.source.operation_id),),
+        ).fetchone()[0])
+        assert "srg_materialization" not in intent["retry_contract"]
+    finally:
+        values["qualified"].close()
+
+
+def test_typed_srg_overlay_materializes_only_in_authorized_reinforcement_successor(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        baseline_srg = {"R": 0.1, "band": 1, "heartbeat": "A", "last_collision_step": -1}
+        effective_srg = {"R": 0.42, "band": 1, "heartbeat": "A", "last_collision_step": 20}
+        report = {"collision": True, "score": 0.95, "step": 20}
+        source, e1 = _source(values, flexible_payload={
+            "state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5,
+            "srg": baseline_srg,
+        })
+        connection = values["connection"]
+        process = NativeSRGProcessState()
+        runtime = NativeSRGTransientRuntime(
+            connection, legacy_source_namespace_id=values["memory_alias"], process_state=process,
+        )
+        reads = NativePostWriteMemoryAccess(
+            connection, legacy_source_namespace_id=values["memory_alias"], expected_dimension=3,
+        )
+        view = reads.get_current(source.memory_eid)
+        runtime.apply_collision(
+            existing=view, incoming=view, existing_state=effective_srg,
+            incoming_state=effective_srg, incoming_report=report,
+        )
+        materialization = runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        )
+        assert materialization is not None
+        before = _counts(connection)
+        order_before = connection.execute(
+            "SELECT count(*) FROM memory_runtime_enumeration_orders"
+        ).fetchone()[0]
+        request = replace(
+            _request(values, source, e1, key="overlay-reinforce"),
+            srg_materialization=materialization,
+        )
+        result = NativeMemoryReinforcementService(connection).reinforce(request)
+        r1, r2 = _payload(connection, source.memory_revision_id), _payload(connection, result.source.revision_id)
+        assert r1["srg"] == baseline_srg and "srg_collision" not in r1
+        assert r2["srg"] == effective_srg and r2["srg_collision"] == report
+        assert (r2["reinforcement_count"], r2["last_reinforced"]) == (1, 20)
+        assert result.source.revision_ordinal == 2
+        assert connection.execute(
+            "SELECT count(*) FROM object_revisions WHERE object_id=?",
+            (native_id_to_bytes(source.memory_object_id),),
+        ).fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT count(*) FROM memory_runtime_enumeration_orders"
+        ).fetchone()[0] == order_before
+        assert connection.execute(
+            "SELECT effective_semantic_scope_id,authority_category,provenance_id FROM object_revisions WHERE object_revision_id=?",
+            (native_id_to_bytes(result.source.revision_id),),
+        ).fetchone() == (
+            native_id_to_bytes(values["scope"]), "NOT_APPLICABLE",
+            native_id_to_bytes(source.provenance_id),
+        )
+        assert _counts(connection) == tuple(a + b for a, b in zip(
+            before, (0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 4, 3),
+        ))
+        stored_contract = json.loads(connection.execute(
+            "SELECT canonical_intent_json FROM operations WHERE operation_id=?",
+            (native_id_to_bytes(result.source.operation_id),),
+        ).fetchone()[0])["retry_contract"]
+        assert stored_contract["srg_materialization"] == materialization.intent()
+        assert NativeRepresentationService(connection).read_representation_payload(
+            result.e2_representation_id
+        ) == NativeRepresentationService(connection).read_representation_payload(e1.representation_id)
+        runtime.acknowledge_materialized_successor(
+            materialization, eid=source.memory_eid, successor_revision_id=result.source.revision_id,
+        )
+        assert runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=result.source.revision_id,
+        ) is None
+    finally:
+        values["qualified"].close()
+
+
+def test_typed_srg_only_overlay_does_not_fabricate_collision_report_removal_or_addition(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        baseline = {"R": 0.1, "band": 1, "heartbeat": "A", "last_collision_step": -1}
+        source, e1 = _source(values, flexible_payload={
+            "state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5,
+            "srg": baseline,
+        })
+        other, _other_e1 = _source(values, key="compose-other", flexible_payload={
+            "state_symbol": "◇", "symbol_trace": ["◇"], "resonance_score": 0.4,
+            "srg": baseline,
+        })
+        connection = values["connection"]
+        runtime = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=values["memory_alias"],
+            process_state=NativeSRGProcessState(),
+        )
+        reads = NativePostWriteMemoryAccess(
+            connection, legacy_source_namespace_id=values["memory_alias"], expected_dimension=3,
+        )
+        target_view, incoming_view = reads.get_current(source.memory_eid), reads.get_current(other.memory_eid)
+        effective = {"R": 0.4, "band": 1, "heartbeat": "A", "last_collision_step": 20}
+        runtime.apply_collision(
+            existing=target_view, incoming=incoming_view, existing_state=effective,
+            incoming_state=baseline, incoming_report={"collision": True, "score": 0.95, "step": 20},
+        )
+        materialization = runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        )
+        assert materialization is not None and materialization.effective_collision_report is None
+        result = NativeMemoryReinforcementService(connection).reinforce(replace(
+            _request(values, source, e1, key="srg-only"), srg_materialization=materialization,
+        ))
+        payload = _payload(connection, result.source.revision_id)
+        assert payload["srg"] == effective and "srg_collision" not in payload
+    finally:
+        values["qualified"].close()
+
+
+def test_failed_srg_materialization_source_keeps_the_exact_overlay_for_retry(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        source, e1 = _source(values, flexible_payload={
+            "state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5,
+            "srg": {"R": 0.1, "band": 1, "heartbeat": "A", "last_collision_step": -1},
+        })
+        connection = values["connection"]
+        runtime = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=values["memory_alias"],
+            process_state=NativeSRGProcessState(),
+        )
+        view = NativePostWriteMemoryAccess(
+            connection, legacy_source_namespace_id=values["memory_alias"], expected_dimension=3,
+        ).get_current(source.memory_eid)
+        runtime.apply_collision(
+            existing=view, incoming=view,
+            existing_state={"R": 0.4, "band": 1, "heartbeat": "A", "last_collision_step": 20},
+            incoming_state={"R": 0.4, "band": 1, "heartbeat": "A", "last_collision_step": 20},
+            incoming_report={"collision": True, "score": 0.95, "step": 20},
+        )
+        materialization = runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        )
+        assert materialization is not None
+        request = replace(
+            _request(values, source, e1, key="overlay-failure"),
+            srg_materialization=materialization,
+        )
+        with pytest.raises(RuntimeError, match="after R2 insertion"):
+            NativeMemoryReinforcementService(connection).reinforce(
+                request, _test_source_fail_after="revision",
+            )
+        current = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=values["memory_alias"], eid=source.memory_eid,
+        )
+        assert current.revision_id == source.memory_revision_id
+        assert runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        ) == materialization
+        changed_state = {"R": 0.5, "band": 1, "heartbeat": "A", "last_collision_step": 21}
+        runtime.apply_collision(
+            existing=view, incoming=view, existing_state=changed_state,
+            incoming_state=changed_state,
+            incoming_report={"collision": True, "score": 0.96, "step": 21},
+        )
+        changed = runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        )
+        assert changed is not None and changed.canonical_digest != materialization.canonical_digest
+        committed = NativeMemoryReinforcementService(connection).reinforce(
+            replace(request, srg_materialization=changed),
+        )
+        assert _payload(connection, committed.source.revision_id)["srg"] == changed_state
+        with pytest.raises(SubstrateIdempotencyConflict, match="intent differs"):
+            NativeMemoryReinforcementService(connection).reinforce(request)
+        runtime.acknowledge_materialized_successor(
+            changed, eid=source.memory_eid, successor_revision_id=committed.source.revision_id,
+        )
+    finally:
+        values["qualified"].close()
+
+
+def test_srg_materialization_refuses_when_the_durable_predecessor_changes_before_commit(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        source, e1 = _source(values, flexible_payload={
+            "state_symbol": "◈", "symbol_trace": ["◯", "◈"], "resonance_score": 0.5,
+            "srg": {"R": 0.1, "band": 1, "heartbeat": "A", "last_collision_step": -1},
+        })
+        connection = values["connection"]
+        runtime = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=values["memory_alias"],
+            process_state=NativeSRGProcessState(),
+        )
+        view = NativePostWriteMemoryAccess(
+            connection, legacy_source_namespace_id=values["memory_alias"], expected_dimension=3,
+        ).get_current(source.memory_eid)
+        state = {"R": 0.4, "band": 1, "heartbeat": "A", "last_collision_step": 20}
+        runtime.apply_collision(
+            existing=view, incoming=view, existing_state=state, incoming_state=state,
+            incoming_report={"collision": True, "score": 0.95, "step": 20},
+        )
+        materialization = runtime.prepare_successor_materialization(
+            eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+        )
+        assert materialization is not None
+        request = replace(
+            _request(values, source, e1, key="stale-before-commit"),
+            srg_materialization=materialization,
+        )
+        service = NativeMemoryReinforcementService(connection)
+        plan = service._prepare_source(request)
+        NativeMemoryCompatibilityFacade(connection).patch_memory_state(
+            legacy_source_namespace_id=values["memory_alias"], eid=source.memory_eid,
+            patch={"ordinary": "independent-successor"},
+            idempotency_namespace_id=values["idempotency"], idempotency_key="advance-before-commit",
+        )
+        with pytest.raises(StaleReinforcementPlanError, match="predecessor changed"):
+            execute_semantic(
+                connection, values["idempotency"], "stale-commit-guard", "TEST_STALE", "{}",
+                lambda _operation_id: None,
+                lambda tx: service._commit_source(
+                    tx, plan, _test_fail_after=None, _test_omit_effect=False,
+                    _test_omit_output=False, _test_omit_governance=False,
+                ),
+            )
+        assert connection.execute(
+            "SELECT count(*) FROM object_revisions WHERE object_id=?",
+            (native_id_to_bytes(source.memory_object_id),),
+        ).fetchone()[0] == 2
+        with pytest.raises(SubstrateInvariantViolation, match="current revision changed"):
+            runtime.prepare_successor_materialization(
+                eid=source.memory_eid, expected_revision_id=source.memory_revision_id,
+            )
     finally:
         values["qualified"].close()
 

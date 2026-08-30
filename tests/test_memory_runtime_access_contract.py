@@ -70,7 +70,7 @@ def _payload(**overrides: object) -> dict:
     return value
 
 
-def test_legacy_current_view_is_immutable_and_structurally_separated(tmp_path: Path):
+def test_legacy_current_view_is_immutable_and_exposes_ordered_enumeration(tmp_path: Path):
     graph = _graph(tmp_path)
     payload = _payload()
     payload["embedding_ref"] = {"opaque": "structural"}
@@ -78,7 +78,8 @@ def test_legacy_current_view_is_immutable_and_structurally_separated(tmp_path: P
     access = LegacyPostWriteMemoryAccess(graph, expected_dimension=3)
 
     assert isinstance(access, PostWriteMemoryReadPort)
-    assert not isinstance(access, PostWriteMemoryEnumerationPort)
+    assert isinstance(access, PostWriteMemoryEnumerationPort)
+    assert tuple(item.eid for item in access.list_current()) == (7,)
     view = access.get_current(7)
     assert view is not None
     assert (view.eid, view.summary, view.memory_type, view.memory_class) == (7, "contract memory", "reflection", "core")

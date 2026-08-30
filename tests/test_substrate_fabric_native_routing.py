@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 import sqlite3
 
@@ -28,6 +29,11 @@ from torment_service.substrate.fabric_native_routing import (
 )
 from torment_service.substrate.ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
+from torment_service.substrate.native_memory_runtime_access import NativePostWriteMemoryAccess
+from torment_service.substrate.native_srg_runtime import (
+    NativeSRGProcessState,
+    NativeSRGTransientRuntime,
+)
 from torment_service.substrate.motifs import NativeMotifService
 from torment_service.substrate.representations import NativeRepresentationService
 from torment_service.substrate.runtime_binding import (
@@ -164,6 +170,25 @@ def _counts(connection):
         "representations", "representation_payloads", "operations", "semantic_transitions",
     )
     return tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables)
+
+
+def _apply_srg_overlay(connection, capability, private, *, eid, state, report):
+    runtime = NativeSRGTransientRuntime(
+        connection,
+        legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+        process_state=capability.srg_process_state,
+    )
+    reads = NativePostWriteMemoryAccess(
+        connection,
+        legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+        expected_dimension=3,
+    )
+    view = reads.get_current(eid)
+    runtime.apply_collision(
+        existing=view, incoming=view, existing_state=state,
+        incoming_state=state, incoming_report=report,
+    )
+    return runtime, view
 
 
 def test_existing_core_opener_refuses_absent_path_without_creating_a_database(tmp_path: Path):
@@ -318,6 +343,144 @@ def test_private_native_duplicate_selection_reinforces_exact_current_r1_e1(tmp_p
         assert connection.execute("SELECT count(*) FROM relationships").fetchone()[0] == 1
     finally:
         qualified.close()
+
+
+def test_srg_overlay_survives_connection_boundary_and_materializes_in_the_duplicate_r2(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    closed = False
+    try:
+        router = NativeFabricMemoryRouter(capability)
+        baseline = {"R": 0.10, "band": 1, "heartbeat": "A", "last_collision_step": -1}
+        effective = {"R": 0.48, "band": 1, "heartbeat": "A", "last_collision_step": 20}
+        report = {"collision": True, "score": 0.95, "step": 20}
+        seed = router.route(_request(
+            key="srg-boundary-seed", vector=(1.0, 0.0, 0.0),
+            flexible_payload={"qualification_marker": "a3d", "srg": baseline},
+        )).result
+        assert seed is not None
+        _apply_srg_overlay(
+            connection, capability, private, eid=seed.eid, state=effective, report=report,
+        )
+        # The overlay belongs to the prepared capability, not this handle.
+        qualified.close()
+        closed = True
+        reinforcement_request = _request(
+            key="srg-boundary-reinforce", vector=(1.0, 0.0, 0.0), logical_step=20,
+            last_reinforced_ts=200,
+        )
+        reinforced = router.route(reinforcement_request).result
+        assert reinforced is not None and reinforced.reinforced is True
+        with open_existing_native_core_connection(capability.core_database_path) as reopened:
+            current = NativeMemoryCompatibilityFacade(reopened.connection).get_memory_by_eid(
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                eid=seed.eid,
+            )
+            assert current.revision_id == reinforced.memory_revision_id
+            assert current.revision_ordinal == 2
+            assert current.payload["srg"] == effective
+            assert current.payload["srg_collision"] == report
+            assert current.payload["reinforcement_count"] == 1
+            assert reopened.connection.execute(
+                "SELECT count(*) FROM object_revisions WHERE object_id=?",
+                (native_id_to_bytes(seed.memory_object_id),),
+            ).fetchone()[0] == 2
+            assert NativeRepresentationService(reopened.connection).read_representation_payload(
+                reinforced.representation_id
+            ) == NativeRepresentationService(reopened.connection).read_representation_payload(
+                seed.representation_id
+            )
+            assert NativeSRGTransientRuntime(
+                reopened.connection,
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                process_state=capability.srg_process_state,
+            ).prepare_successor_materialization(
+                eid=seed.eid, expected_revision_id=reinforced.memory_revision_id,
+            ) is None
+            restarted = NativeSRGTransientRuntime(
+                reopened.connection,
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                process_state=NativeSRGProcessState(),
+            )
+            restarted_view = NativePostWriteMemoryAccess(
+                reopened.connection,
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                expected_dimension=3,
+            ).get_current(seed.eid)
+            assert restarted.effective_srg_state(restarted_view) == effective
+            assert restarted.effective_collision_report(restarted_view) == report
+            restarted_capability = prepare_native_fabric_routing_capability(
+                binding=capability.binding,
+                connection=reopened.connection,
+                routing_scopes=(private,),
+                expected_core_id=capability.core_id,
+            )
+            assert NativeFabricMemoryRouter(restarted_capability).route(
+                reinforcement_request
+            ).result == reinforced
+    finally:
+        if not closed:
+            qualified.close()
+
+
+@pytest.mark.parametrize("stop", ("source", "pending", "expectation"))
+def test_srg_overlay_lost_response_recovery_reuses_r2_then_consumes_the_overlay(
+    tmp_path: Path, stop: str,
+):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    closed = False
+    try:
+        router = NativeFabricMemoryRouter(capability)
+        effective = {"R": 0.48, "band": 1, "heartbeat": "A", "last_collision_step": 20}
+        report = {"collision": True, "score": 0.95, "step": 20}
+        seed = router.route(_request(
+            key="srg-lost-seed", vector=(1.0, 0.0, 0.0),
+            flexible_payload={
+                "qualification_marker": "a3d",
+                "srg": {"R": 0.10, "band": 1, "heartbeat": "A", "last_collision_step": -1},
+            },
+        )).result
+        assert seed is not None
+        _apply_srg_overlay(
+            connection, capability, private, eid=seed.eid, state=effective, report=report,
+        )
+        qualified.close()
+        closed = True
+        retry = _request(
+            key="srg-lost-reinforce", vector=(1.0, 0.0, 0.0), logical_step=20,
+            last_reinforced_ts=200,
+        )
+        with pytest.raises(RuntimeError, match="forced interruption"):
+            router.route(retry, _test_stop_after=stop)
+        completed = router.route(retry).result
+        assert completed is not None and completed.reinforced is True
+        with open_existing_native_core_connection(capability.core_database_path) as reopened:
+            current = NativeMemoryCompatibilityFacade(reopened.connection).get_memory_by_eid(
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                eid=seed.eid,
+            )
+            assert current.revision_id == completed.memory_revision_id
+            assert current.revision_ordinal == 2
+            assert current.payload["srg"] == effective
+            assert current.payload["srg_collision"] == report
+            assert reopened.connection.execute(
+                "SELECT count(*) FROM object_revisions WHERE object_id=?",
+                (native_id_to_bytes(seed.memory_object_id),),
+            ).fetchone()[0] == 2
+            source_intent = json.loads(reopened.connection.execute(
+                "SELECT canonical_intent_json FROM operations WHERE idempotency_key=?",
+                ("NATIVE_REINFORCEMENT:SOURCE:NATIVE_FABRIC_REINFORCEMENT:srg-lost-reinforce",),
+            ).fetchone()[0])
+            assert source_intent["retry_contract"]["srg_materialization"]["canonical_digest"]
+            assert NativeSRGTransientRuntime(
+                reopened.connection,
+                legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+                process_state=capability.srg_process_state,
+            ).prepare_successor_materialization(
+                eid=seed.eid, expected_revision_id=completed.memory_revision_id,
+            ) is None
+    finally:
+        if not closed:
+            qualified.close()
 
 
 def test_reinforcement_retry_after_committed_r2_recovers_e2_without_reselection(tmp_path: Path):

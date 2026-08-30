@@ -26,6 +26,7 @@ from .errors import (
     SubstrateRevisionConflict,
 )
 from .ids import generate_native_id, native_id_to_bytes
+from .native_srg_runtime import SRGSuccessorMaterialization
 from .object_revision_governance import (
     NativeMemoryGovernanceFacts,
     NativeObjectRevisionGovernanceService,
@@ -67,6 +68,7 @@ class NativeMemoryReinforcementRequest:
     expected_dimension: int
     last_tool_refresh_ts: int | None = None
     routing_input_digest: str | None = None
+    srg_materialization: SRGSuccessorMaterialization | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -97,6 +99,10 @@ class NativeMemoryReinforcementRequest:
             or any(character not in "0123456789abcdef" for character in self.routing_input_digest)
         ):
             raise ValueError("routing_input_digest must be a lowercase SHA-256 hex digest when supplied")
+        if self.srg_materialization is not None and not isinstance(
+            self.srg_materialization, SRGSuccessorMaterialization
+        ):
+            raise ValueError("srg_materialization must be SRGSuccessorMaterialization when supplied")
 
 
 @dataclass(frozen=True)
@@ -143,6 +149,7 @@ class _SourcePlan:
     provenance_source_channel: str | None
     patch: ReinforcementPatch
     e1_witness: QualifiedCompatEmbedding
+    srg_materialization: SRGSuccessorMaterialization | None
 
 
 class NativeMemoryReinforcementService:
@@ -291,15 +298,26 @@ class NativeMemoryReinforcementService:
             last_reinforced_ts=request.last_reinforced_ts,
             last_tool_refresh_ts=request.last_tool_refresh_ts,
         )
+        materialization = request.srg_materialization
+        if materialization is not None and not materialization.validates_predecessor(
+            revision_id=current["revision_id"], revision_ordinal=current["revision_ordinal"],
+        ):
+            raise StaleReinforcementPlanError(
+                "SRG materialization predecessor is not the current reinforcement source"
+            )
         state = ObjectState(
             current["identity_namespace_id"], current["semantic_scope_id"], current["object_kind"],
             current["existence_state"], current["lifecycle_state"], current["lifecycle_authoritative"],
             current["governance_state"], current["authority_category"],
-            {**current["payload"], **dict(patch.values)}, "JSON", provenance_id,
+            {
+                **current["payload"],
+                **({} if materialization is None else materialization.payload_contribution()),
+                **dict(patch.values),
+            }, "JSON", provenance_id,
         )
         return _SourcePlan(
             request, current["object_id"], current["revision_ordinal"], state,
-            governance.facts, provenance[0], patch, embedding,
+            governance.facts, provenance[0], patch, embedding, materialization,
         )
 
     def _commit_source(
@@ -318,6 +336,12 @@ class NativeMemoryReinforcementService:
             raise StaleReinforcementPlanError("reinforcement predecessor changed before source commit")
         if current["revision_ordinal"] != plan.revision_ordinal:
             raise StaleReinforcementPlanError("reinforcement predecessor ordinal changed before source commit")
+        if plan.srg_materialization is not None and not plan.srg_materialization.validates_predecessor(
+            revision_id=current["revision_id"], revision_ordinal=current["revision_ordinal"],
+        ):
+            raise StaleReinforcementPlanError(
+                "SRG materialization predecessor changed before source commit"
+            )
         current_embedding = self._embeddings.read_current(
             plan.object_id, expected_dimension=request.expected_dimension
         )
@@ -525,7 +549,7 @@ def realize_reinforcement_patch(
 
 
 def _retry_contract(request: NativeMemoryReinforcementRequest) -> dict[str, Any]:
-    return {
+    contract = {
         "legacy_source_namespace_id": str(request.legacy_source_namespace_id),
         "eid": request.eid,
         "expected_revision_id": str(request.expected_revision_id),
@@ -536,6 +560,9 @@ def _retry_contract(request: NativeMemoryReinforcementRequest) -> dict[str, Any]
         "expected_dimension": request.expected_dimension,
         "routing_input_digest": request.routing_input_digest,
     }
+    if request.srg_materialization is not None:
+        contract["srg_materialization"] = request.srg_materialization.intent()
+    return contract
 
 
 def _source_intent(plan: _SourcePlan) -> str:
@@ -590,6 +617,7 @@ __all__ = [
     "NativeMemoryReinforcementService",
     "NativeMemoryReinforcementSourceResult",
     "ReinforcementPatch",
+    "SRGSuccessorMaterialization",
     "StaleReinforcementPlanError",
     "realize_reinforcement_patch",
 ]

@@ -50,6 +50,11 @@ from .memory_reinforcement import (
     NativeMemoryReinforcementRequest,
     NativeMemoryReinforcementService,
 )
+from .native_srg_runtime import (
+    NativeSRGProcessState,
+    NativeSRGTransientRuntime,
+    SRGSuccessorMaterialization,
+)
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -179,6 +184,7 @@ class NativeFabricRoutingCapability:
     core_id: UUID
     routing_scopes: tuple[NativeFabricRoutingScope, ...]
     process_order: NativeMotifProcessOrder = field(repr=False, compare=False)
+    srg_process_state: NativeSRGProcessState = field(repr=False, compare=False)
     production_activation_allowed: bool = False
     qualification_only: bool = True
     _prepared_marker: object = field(repr=False, compare=False, default=None)
@@ -340,6 +346,7 @@ def prepare_native_fabric_routing_capability(
         core_id=core_id,
         routing_scopes=routing_scopes,
         process_order=NativeMotifProcessOrder(),
+        srg_process_state=NativeSRGProcessState(),
         _prepared_marker=_PREPARED,
     )
 
@@ -455,9 +462,20 @@ class NativeFabricMemoryRouter:
                 raise SubstrateIdempotencyConflict(
                     "native routing operation key was reused with different Fabric inputs"
                 )
+            srg_runtime = NativeSRGTransientRuntime(
+                connection,
+                legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
+                process_state=self._capability.srg_process_state,
+            )
             reinforced = NativeMemoryReinforcementService(connection).reinforce(
                 recovered, _test_stop_after=_test_stop_after,
             )
+            if recovered.srg_materialization is not None:
+                srg_runtime.acknowledge_materialized_successor(
+                    recovered.srg_materialization,
+                    eid=reinforced.source.eid,
+                    successor_revision_id=reinforced.source.revision_id,
+                )
             return NativeFabricRouteResult(
                 True, True, reinforced.source.eid, request.domain_id, (),
                 reinforced.source.memory_object_id, reinforced.source.revision_id,
@@ -470,6 +488,14 @@ class NativeFabricMemoryRouter:
         if selected is not None:
             hit, source_channel = selected
             tool_refresh = request.last_tool_refresh_ts if source_channel == "tool_result" else None
+            srg_runtime = NativeSRGTransientRuntime(
+                connection,
+                legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
+                process_state=self._capability.srg_process_state,
+            )
+            materialization = srg_runtime.prepare_successor_materialization(
+                eid=hit.eid, expected_revision_id=hit.revision_id,
+            )
             reinforcement_request = NativeMemoryReinforcementRequest(
                 legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
                 eid=hit.eid,
@@ -482,10 +508,17 @@ class NativeFabricMemoryRouter:
                 expected_dimension=request.embedder_lane.dimension,
                 last_tool_refresh_ts=tool_refresh,
                 routing_input_digest=_routing_input_digest(request, routing_scope, vector),
+                srg_materialization=materialization,
             )
             reinforced = NativeMemoryReinforcementService(connection).reinforce(
                 reinforcement_request, _test_stop_after=_test_stop_after,
             )
+            if materialization is not None:
+                srg_runtime.acknowledge_materialized_successor(
+                    materialization,
+                    eid=reinforced.source.eid,
+                    successor_revision_id=reinforced.source.revision_id,
+                )
             return NativeFabricRouteResult(
                 True, True, reinforced.source.eid, request.domain_id, (),
                 reinforced.source.memory_object_id, reinforced.source.revision_id,
@@ -674,6 +707,7 @@ def _recover_reinforcement_request(
         return None
     try:
         contract = json.loads(row[0])["retry_contract"]
+        materialization_intent = contract.get("srg_materialization")
         return NativeMemoryReinforcementRequest(
             legacy_source_namespace_id=UUID(contract["legacy_source_namespace_id"]),
             eid=int(contract["eid"]),
@@ -686,6 +720,10 @@ def _recover_reinforcement_request(
             expected_dimension=int(contract["expected_dimension"]),
             last_tool_refresh_ts=contract.get("last_tool_refresh_ts"),
             routing_input_digest=contract.get("routing_input_digest"),
+            srg_materialization=(
+                None if materialization_intent is None
+                else SRGSuccessorMaterialization.from_intent(materialization_intent)
+            ),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SubstrateInvariantViolation("stored native reinforcement route is malformed") from exc

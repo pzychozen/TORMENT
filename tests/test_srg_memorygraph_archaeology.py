@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -190,5 +191,52 @@ def test_actual_srg_collision_mutates_live_payloads_but_is_not_durable_without_a
         assert reloaded.entities[existing].payload["srg"] == before_existing
         assert reloaded.entities[incoming].payload["srg"] == before_incoming
         assert "srg_collision" not in reloaded.entities[incoming].payload
+    finally:
+        reloaded.close()
+
+
+def test_later_legacy_payload_update_serializes_effective_collision_srg_with_reinforcement(tmp_path: Path):
+    existing_srg = SRGMemoryState(R=0.10, R_band=0, L=8.0, L_phase=0.2, heartbeat_class="A")
+    incoming_srg = SRGMemoryState(R=0.15, R_band=0, L=10.0, L_phase=-0.3, heartbeat_class="B")
+    graph = MemoryGraph(str(tmp_path), embedder=_ThreeDimensionalEmbedder())
+    try:
+        existing = _add_memory(graph, "existing", extra={"srg": existing_srg.to_dict()})
+        incoming = _add_memory(graph, "incoming", extra={"srg": incoming_srg.to_dict()})
+        adapter = LegacyFabricPostWriteAdapter(SimpleNamespace(
+            owner=SimpleNamespace(_srg_enable=True, _log=logging.getLogger("a3d6-archaeology")),
+            memory_access=LegacyPostWriteMemoryAccess(graph, expected_dimension=3),
+            memory_enumeration=LegacyPostWriteMemoryAccess(graph, expected_dimension=3),
+            srg_runtime=LegacySRGTransientRuntime(graph), embedding_dimension=3,
+        ))
+        embedding_before = LegacyPostWriteMemoryAccess(
+            graph, expected_dimension=3,
+        ).read_current_embedding(incoming, expected_dimension=3).payload_bytes
+        adapter._run_srg_collision(_collision_context(incoming, incoming_srg.to_dict()))
+        effective_srg = deepcopy(graph.entities[incoming].payload["srg"])
+        effective_report = deepcopy(graph.entities[incoming].payload["srg_collision"])
+
+        graph.update_payload(incoming, {
+            "reinforcement_count": 1,
+            "last_reinforced": 20,
+            "last_reinforced_ts": 200,
+        })
+
+        record = json.loads(Path(graph.meta_path).read_text(encoding="utf-8").splitlines()[-1])
+        assert record["eid"] == incoming
+        assert record["payload"]["srg"] == effective_srg
+        assert record["payload"]["srg_collision"] == effective_report
+        assert record["payload"]["reinforcement_count"] == 1
+        assert LegacyPostWriteMemoryAccess(
+            graph, expected_dimension=3,
+        ).read_current_embedding(incoming, expected_dimension=3).payload_bytes == embedding_before
+        assert existing in graph.entities
+    finally:
+        graph.close()
+
+    reloaded = MemoryGraph(str(tmp_path), embedder=_ThreeDimensionalEmbedder())
+    try:
+        assert reloaded.entities[incoming].payload["srg"] == effective_srg
+        assert reloaded.entities[incoming].payload["srg_collision"] == effective_report
+        assert reloaded.entities[incoming].payload["reinforcement_count"] == 1
     finally:
         reloaded.close()
