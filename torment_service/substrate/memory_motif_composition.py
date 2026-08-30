@@ -32,6 +32,7 @@ from torment_service.motif_decision import (
 from torment_service.motif_geometry import motif_radius_from_member_vectors
 from torment_service.resonance import append_symbol, summarize_resonance
 from torment_service.symbols import assign_symbol_state
+from torment_service.world_runtime import legacy_world_genesis_payload
 
 from .canonical_intent import canonical_intent_text
 from .errors import (
@@ -46,6 +47,7 @@ from .fabric_translation import (
     prepare_flexible_payload,
 )
 from .ids import generate_native_id, native_id_to_bytes
+from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
 from .motifs import (
     DERIVED_MOTIF_OBJECT_KIND,
@@ -365,6 +367,18 @@ class NativeMemoryMotifCompositionService:
         tx.execute(
             "INSERT INTO legacy_object_aliases VALUES (?,'EID',?,?)",
             (native_id_to_bytes(request.legacy_source_namespace_id), str(memory_eid), memory_object_id),
+        )
+        # A3D5's immutable runtime-order carrier is a structural part of
+        # current compatibility-memory publication.  Publish it in this same
+        # A3C2 transaction; the native world owner may then validate order
+        # rather than derive one from EID, UUID, or SQLite row placement.
+        publish_runtime_order(
+            tx,
+            legacy_source_namespace_id=request.legacy_source_namespace_id,
+            object_id=UUID(bytes=memory_object_id),
+            runtime_ordinal=allocate_next_runtime_ordinal(
+                tx, request.legacy_source_namespace_id
+            ),
         )
         _insert_published_governance_for_qualification(
             tx,
@@ -849,6 +863,10 @@ def _memory_state(
     }
     payload.update(dict(request.flexible_payload))
     payload.update(dict(enrichment))
+    # ``MemoryGraph.spawn_memory`` overwrites caller live-physics fields with
+    # vec3-normalized seed genesis values before its first durable node record.
+    # Preserve that narrow source-write fact inside A3C2's existing transaction.
+    payload.update(legacy_world_genesis_payload(payload))
     return ObjectState(
         request.memory_identity_namespace_id, request.semantic_scope_id, _MEMORY_OBJECT_KIND,
         "EXISTS", request.lifecycle_state, request.lifecycle_authoritative,

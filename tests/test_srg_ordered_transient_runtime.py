@@ -159,12 +159,18 @@ class _ForbiddenGraph:
         raise AssertionError("SRG consumer directly enumerated graph entities")
 
 
+class _NoWorldRuntime:
+    def advance_for_post_write(self, *, step: int) -> None:
+        raise AssertionError(f"SRG consumer unexpectedly stepped world {step}")
+
+
 def _adapter(memory_access, memory_enumeration, srg_runtime):
     owner = SimpleNamespace(_srg_enable=True, _log=logging.getLogger("a3d5-srg"))
     dependencies = LegacyFabricPostWriteDependencies(
         owner=owner,
         workspace=None,
         graph=_ForbiddenGraph(),
+        world_runtime=_NoWorldRuntime(),
         memory_access=memory_access,
         memory_enumeration=memory_enumeration,
         srg_runtime=srg_runtime,

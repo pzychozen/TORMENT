@@ -19,6 +19,7 @@ import numpy as np
 from .character import CharacterState, gravity_correction, measure_drift
 from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
 from .srg_runtime_state import SRGTransientRuntimePort
+from .world_runtime import WorldRuntimePort
 
 
 class PostWriteStorageOutcome(str, Enum):
@@ -94,6 +95,7 @@ class LegacyFabricPostWriteDependencies:
     owner: Any
     workspace: Any
     graph: Any
+    world_runtime: WorldRuntimePort
     memory_access: PostWriteMemoryReadPort
     memory_enumeration: PostWriteMemoryEnumerationPort
     srg_runtime: SRGTransientRuntimePort
@@ -410,7 +412,7 @@ class LegacyFabricPostWriteAdapter:
     def _run_world_step(self, context: FabricPostWriteContext) -> None:
         deps = self._deps
         try:
-            deps.graph.step_world(step=int(context.step), classify_every=50, log_every=1)
+            deps.world_runtime.advance_for_post_write(step=int(context.step))
         except Exception as exc:
             deps.owner._log.debug(
                 "step_world failed at step=%s for workspace_id=%s agent_id=%s: %s",

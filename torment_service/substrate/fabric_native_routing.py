@@ -55,6 +55,11 @@ from .native_srg_runtime import (
     NativeSRGTransientRuntime,
     SRGSuccessorMaterialization,
 )
+from .native_world_runtime import (
+    NativeWorldProcessState,
+    NativeWorldRuntime,
+    WorldDiagnosticSuccessorMaterialization,
+)
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -185,6 +190,7 @@ class NativeFabricRoutingCapability:
     routing_scopes: tuple[NativeFabricRoutingScope, ...]
     process_order: NativeMotifProcessOrder = field(repr=False, compare=False)
     srg_process_state: NativeSRGProcessState = field(repr=False, compare=False)
+    world_process_state: NativeWorldProcessState = field(repr=False, compare=False)
     production_activation_allowed: bool = False
     qualification_only: bool = True
     _prepared_marker: object = field(repr=False, compare=False, default=None)
@@ -347,6 +353,7 @@ def prepare_native_fabric_routing_capability(
         routing_scopes=routing_scopes,
         process_order=NativeMotifProcessOrder(),
         srg_process_state=NativeSRGProcessState(),
+        world_process_state=NativeWorldProcessState(),
         _prepared_marker=_PREPARED,
     )
 
@@ -416,8 +423,16 @@ class NativeFabricMemoryRouter:
                     NativeFabricRouteQualification(False, qualification.route_scope, "LINKS_DEFERRED")
                 )
             try:
+                world_runtime = NativeWorldRuntime(
+                    connection,
+                    legacy_source_namespace_id=(
+                        qualification.route_scope.runtime_scope.legacy_source_namespace_id
+                    ),
+                    expected_dimension=request.embedder_lane.dimension,
+                    process_state=self._capability.world_process_state,
+                )
                 result = self._route_qualified(
-                    connection, request, qualification.route_scope, translation, vector,
+                    connection, request, qualification.route_scope, translation, vector, world_runtime,
                     _test_stop_after=_test_stop_after,
                 )
             except NativeMotifProcessOrderError:
@@ -448,6 +463,7 @@ class NativeFabricMemoryRouter:
         routing_scope: NativeFabricRoutingScope,
         translation: Any,
         vector: np.ndarray,
+        world_runtime: NativeWorldRuntime,
         *,
         _test_stop_after: str | None,
     ) -> NativeFabricRouteResult:
@@ -467,12 +483,23 @@ class NativeFabricMemoryRouter:
                 legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
                 process_state=self._capability.srg_process_state,
             )
+            # R2 is the first source operation in this branch, so capture the
+            # pre-operation current world before recovering it.
+            world_runtime.ensure_initialized()
             reinforced = NativeMemoryReinforcementService(connection).reinforce(
-                recovered, _test_stop_after=_test_stop_after,
+                recovered,
+                _test_stop_after=_test_stop_after,
+                on_source_committed=lambda source: _synchronize_world_successor(world_runtime, source),
             )
             if recovered.srg_materialization is not None:
                 srg_runtime.acknowledge_materialized_successor(
                     recovered.srg_materialization,
+                    eid=reinforced.source.eid,
+                    successor_revision_id=reinforced.source.revision_id,
+                )
+            if recovered.world_diagnostic_materialization is not None:
+                world_runtime.acknowledge_materialized_successor(
+                    recovered.world_diagnostic_materialization,
                     eid=reinforced.source.eid,
                     successor_revision_id=reinforced.source.revision_id,
                 )
@@ -496,6 +523,9 @@ class NativeFabricMemoryRouter:
             materialization = srg_runtime.prepare_successor_materialization(
                 eid=hit.eid, expected_revision_id=hit.revision_id,
             )
+            world_materialization = world_runtime.prepare_successor_materialization(
+                eid=hit.eid, expected_revision_id=hit.revision_id,
+            )
             reinforcement_request = NativeMemoryReinforcementRequest(
                 legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
                 eid=hit.eid,
@@ -509,13 +539,22 @@ class NativeFabricMemoryRouter:
                 last_tool_refresh_ts=tool_refresh,
                 routing_input_digest=_routing_input_digest(request, routing_scope, vector),
                 srg_materialization=materialization,
+                world_diagnostic_materialization=world_materialization,
             )
             reinforced = NativeMemoryReinforcementService(connection).reinforce(
-                reinforcement_request, _test_stop_after=_test_stop_after,
+                reinforcement_request,
+                _test_stop_after=_test_stop_after,
+                on_source_committed=lambda source: _synchronize_world_successor(world_runtime, source),
             )
             if materialization is not None:
                 srg_runtime.acknowledge_materialized_successor(
                     materialization,
+                    eid=reinforced.source.eid,
+                    successor_revision_id=reinforced.source.revision_id,
+                )
+            if world_materialization is not None:
+                world_runtime.acknowledge_materialized_successor(
+                    world_materialization,
                     eid=reinforced.source.eid,
                     successor_revision_id=reinforced.source.revision_id,
                 )
@@ -571,6 +610,10 @@ class NativeFabricMemoryRouter:
             preview = composition.prepare_plan_from_ordered_catalog(
                 composition_request, ordered_catalog
             )
+            # A3C2 is the first source operation in this branch.  Planning is
+            # read-only; initialization must happen immediately before commit
+            # so a newly committed row receives fresh rather than reload state.
+            world_runtime.ensure_initialized()
             composition_result = composition.commit(preview)
             if composition_result.runtime_motif_id not in {
                 item.read_model.runtime_motif_id for item in ordered_catalog
@@ -580,6 +623,14 @@ class NativeFabricMemoryRouter:
                     domain_id=request.domain_id,
                     runtime_motif_id=composition_result.runtime_motif_id,
                 )
+            world_runtime.register_fresh_created(
+                eid=composition_result.memory_eid,
+                memory_object_id=composition_result.memory_object_id,
+                memory_revision_id=composition_result.memory_revision_id,
+                memory_revision_ordinal=composition_result.memory_revision_ordinal,
+                born_step=request.logical_step,
+                channel=0,
+            )
         if _test_stop_after == "source":
             raise RuntimeError("forced interruption after committed native new-memory source")
         representation = _publish_new_memory_representation(
@@ -690,6 +741,18 @@ def _translate_route(
     )
 
 
+def _synchronize_world_successor(world_runtime: NativeWorldRuntime, source: Any) -> None:
+    """Synchronize the process world once R2 is committed, even before E2."""
+    world_runtime.synchronize_reinforcement_successor(
+        eid=source.eid,
+        memory_object_id=source.memory_object_id,
+        predecessor_revision_id=source.predecessor_revision_id,
+        predecessor_revision_ordinal=source.predecessor_revision_ordinal,
+        successor_revision_id=source.revision_id,
+        successor_revision_ordinal=source.revision_ordinal,
+    )
+
+
 def _recover_reinforcement_request(
     connection: sqlite3.Connection,
     idempotency_namespace_id: UUID,
@@ -708,6 +771,7 @@ def _recover_reinforcement_request(
     try:
         contract = json.loads(row[0])["retry_contract"]
         materialization_intent = contract.get("srg_materialization")
+        world_materialization_intent = contract.get("world_diagnostic_materialization")
         return NativeMemoryReinforcementRequest(
             legacy_source_namespace_id=UUID(contract["legacy_source_namespace_id"]),
             eid=int(contract["eid"]),
@@ -723,6 +787,12 @@ def _recover_reinforcement_request(
             srg_materialization=(
                 None if materialization_intent is None
                 else SRGSuccessorMaterialization.from_intent(materialization_intent)
+            ),
+            world_diagnostic_materialization=(
+                None if world_materialization_intent is None
+                else WorldDiagnosticSuccessorMaterialization.from_intent(
+                    world_materialization_intent
+                )
             ),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:

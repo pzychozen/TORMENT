@@ -58,6 +58,7 @@ from .post_write_runtime import (
     LegacyFabricPostWriteDependencies,
     PostWriteStorageOutcome,
 )
+from .world_runtime import LegacyWorldRuntime
 
 if TYPE_CHECKING:
     from .substrate.runtime_binding import (
@@ -3711,6 +3712,7 @@ class TormentFabric:
             owner=self,
             workspace=ws,
             graph=graph,
+            world_runtime=LegacyWorldRuntime(graph),
             memory_access=memory_access,
             memory_enumeration=memory_access,
             srg_runtime=LegacySRGTransientRuntime(graph),

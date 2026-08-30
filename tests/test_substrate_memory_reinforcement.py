@@ -32,7 +32,9 @@ from torment_service.substrate.native_memory_runtime_access import NativePostWri
 from torment_service.substrate.native_srg_runtime import (
     NativeSRGProcessState,
     NativeSRGTransientRuntime,
+    SRGSuccessorMaterialization,
 )
+from torment_service.substrate.native_world_runtime import WorldDiagnosticSuccessorMaterialization
 from torment_service.substrate.object_revision_governance import (
     NativeMemoryGovernanceFacts,
     NativeObjectRevisionGovernanceService,
@@ -733,6 +735,54 @@ def test_changed_tool_refresh_timestamp_conflicts_after_tool_reinforcement(tmp_p
         service.reinforce(request)
         with pytest.raises(SubstrateIdempotencyConflict):
             service.reinforce(replace(request, last_tool_refresh_ts=301))
+    finally:
+        values["qualified"].close()
+
+
+def test_srg_and_world_diagnostics_share_one_authorized_r2(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        source, e1 = _source(values, flexible_payload={
+            "srg": {"R": 0.1, "band": 1, "heartbeat": "A", "last_collision_step": -1},
+        })
+        srg = SRGSuccessorMaterialization.create(
+            predecessor_revision_id=source.memory_revision_id,
+            predecessor_revision_ordinal=1,
+            effective_srg_state={"R": 0.4, "band": 1, "heartbeat": "A", "last_collision_step": 50},
+            effective_collision_report={"collision": True, "score": 0.95, "step": 50},
+        )
+        world = WorldDiagnosticSuccessorMaterialization.create(
+            predecessor_revision_id=source.memory_revision_id,
+            predecessor_revision_ordinal=1,
+            traj_label="spiral",
+            traj_last_classify_step=50,
+        )
+        connection = values["connection"]
+        before = _counts(connection)
+        result = NativeMemoryReinforcementService(connection).reinforce(replace(
+            _request(values, source, e1, key="both-typed"),
+            srg_materialization=srg,
+            world_diagnostic_materialization=world,
+        ))
+        payload = _payload(connection, result.source.revision_id)
+        assert payload["srg"] == srg.payload_contribution()["srg"]
+        assert payload["srg_collision"] == srg.payload_contribution()["srg_collision"]
+        assert payload["traj_label"] == "spiral"
+        assert payload["traj_last_classify_step"] == 50
+        assert result.source.revision_ordinal == 2
+        assert connection.execute(
+            "SELECT count(*) FROM object_revisions WHERE object_id=?",
+            (native_id_to_bytes(source.memory_object_id),),
+        ).fetchone()[0] == 2
+        assert _counts(connection) == tuple(a + b for a, b in zip(
+            before, (0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 4, 3),
+        ))
+        contract = json.loads(connection.execute(
+            "SELECT canonical_intent_json FROM operations WHERE operation_id=?",
+            (native_id_to_bytes(result.source.operation_id),),
+        ).fetchone()[0])["retry_contract"]
+        assert contract["srg_materialization"] == srg.intent()
+        assert contract["world_diagnostic_materialization"] == world.intent()
     finally:
         values["qualified"].close()
 

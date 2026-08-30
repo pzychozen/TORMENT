@@ -111,6 +111,11 @@ class _NoSRGRuntime:
         raise AssertionError("unexpected SRG collision mutation")
 
 
+class _NoWorldRuntime:
+    def advance_for_post_write(self, *, step: int) -> None:
+        raise AssertionError(f"unexpected world step {step}")
+
+
 class _Conflicts:
     def __init__(self) -> None:
         self.rows: list[dict] = []
@@ -160,7 +165,7 @@ def _adapter(port, *, field: _Field | None = None):
     dependencies = LegacyFabricPostWriteDependencies(
         owner=owner,
         workspace=SimpleNamespace(conflicts={"personal": conflicts}, proposals={}),
-        graph=_NoGraph(), memory_access=port, memory_enumeration=port,
+        graph=_NoGraph(), world_runtime=_NoWorldRuntime(), memory_access=port, memory_enumeration=port,
         srg_runtime=_NoSRGRuntime(), embedding_dimension=3,
         identity=None, motif_registry=None, motif_runtime=None,
         model_state=None, kernel_context=None, agent_key="ws::aria",

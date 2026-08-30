@@ -20,6 +20,7 @@ from torment_service.substrate.errors import (
     SubstrateConfigurationError,
     SubstrateIdempotencyConflict,
     SubstrateSchemaCompatibilityError,
+    SubstrateInvariantViolation,
 )
 from torment_service.substrate.fabric_native_routing import (
     NativeFabricMemoryRouter,
@@ -33,6 +34,10 @@ from torment_service.substrate.native_memory_runtime_access import NativePostWri
 from torment_service.substrate.native_srg_runtime import (
     NativeSRGProcessState,
     NativeSRGTransientRuntime,
+)
+from torment_service.substrate.native_world_runtime import (
+    NativeWorldProcessState,
+    NativeWorldRuntime,
 )
 from torment_service.substrate.motifs import NativeMotifService
 from torment_service.substrate.representations import NativeRepresentationService
@@ -189,6 +194,15 @@ def _apply_srg_overlay(connection, capability, private, *, eid, state, report):
         incoming_state=state, incoming_report=report,
     )
     return runtime, view
+
+
+def _world_runtime(connection, capability, private, *, process_state=None):
+    return NativeWorldRuntime(
+        connection,
+        legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+        expected_dimension=3,
+        process_state=(capability.world_process_state if process_state is None else process_state),
+    )
 
 
 def test_existing_core_opener_refuses_absent_path_without_creating_a_database(tmp_path: Path):
@@ -726,5 +740,208 @@ def test_lane_mismatch_and_structural_payload_refusal_are_pre_source_fail_closed
         structural = router.route(_request(key="structural", flexible_payload={"governance": "forged"}))
         assert structural.qualification.reason_code == "STRUCTURAL_PAYLOAD_REFUSED"
         assert _counts(connection) == before
+    finally:
+        qualified.close()
+
+
+def test_a3d8_fresh_world_state_has_exact_genesis_and_steps_without_native_writes(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        result = NativeFabricMemoryRouter(capability).route(_request(
+            key="world-fresh",
+            vector=(1.0, 0.0, 0.0),
+            logical_step=17,
+            flexible_payload={
+                "qualification_marker": "a3d",
+                "seed_pos0": [2.0, 3.0],
+                "seed_v0": [1.0, -1.0, 0.5],
+            },
+        )).result
+        assert result is not None
+        current = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            eid=result.eid,
+        )
+        assert current.payload["pos"] == [2.0, 3.0, 0.0]
+        assert current.payload["vel"] == current.payload["vel0"] == [1.0, -1.0, 0.5]
+
+        runtime = _world_runtime(connection, capability, private)
+        assert runtime.snapshot_for_testing().eids == (result.eid,)
+        assert runtime.snapshot_for_testing().positions == ((2.0, 3.0, 0.0),)
+        assert runtime.snapshot_for_testing().trail_lengths == (1,)
+        assert runtime.snapshot_for_testing().history_lengths == (1,)
+        assert runtime.snapshot_for_testing().born_steps == (17,)
+        assert runtime.snapshot_for_testing().channels == (0,)
+        before = _counts(connection)
+        runtime.advance_for_post_write(step=1)
+        after = runtime.snapshot_for_testing()
+        assert after.positions[0] == pytest.approx((2.98, 2.02, 0.49))
+        assert after.velocities[0] == pytest.approx((0.98, -0.98, 0.49))
+        assert after.trail_lengths == after.history_lengths == (2,)
+        assert _counts(connection) == before
+
+        # The process owner is independent of the connection-scoped adapter.
+        with open_existing_native_core_connection(capability.core_database_path) as reopened:
+            rebound = _world_runtime(reopened.connection, capability, private)
+            rebound.ensure_initialized()
+            assert rebound.snapshot_for_testing() == after
+
+        # A replacement owner models restart: durable payload kinematics are
+        # reloaded, while fresh-process trail/history and origin facts vanish.
+        restarted = _world_runtime(
+            connection, capability, private, process_state=NativeWorldProcessState(),
+        )
+        restarted.ensure_initialized()
+        snapshot = restarted.snapshot_for_testing()
+        assert snapshot.positions == ((2.0, 3.0, 0.0),)
+        assert snapshot.trail_lengths == snapshot.history_lengths == (0,)
+        assert snapshot.born_steps == snapshot.channels == (None,)
+    finally:
+        qualified.close()
+
+
+def test_a3d8_source_response_loss_keeps_one_fresh_world_entity(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router = NativeFabricMemoryRouter(capability)
+        request = _request(
+            key="world-source-loss",
+            vector=(1.0, 0.0, 0.0),
+            logical_step=23,
+            flexible_payload={"qualification_marker": "a3d", "seed_v0": [1.0, 0.0, 0.0]},
+        )
+        with pytest.raises(RuntimeError, match="committed native new-memory source"):
+            router.route(request, _test_stop_after="source")
+        after_source = _counts(connection)
+        runtime = _world_runtime(connection, capability, private)
+        first = runtime.snapshot_for_testing()
+        assert first.eids == (0,) and first.trail_lengths == first.history_lengths == (1,)
+        assert first.born_steps == (23,)
+
+        completed = router.route(request).result
+        assert completed is not None and completed.eid == 0
+        second = runtime.snapshot_for_testing()
+        assert second == first
+        assert _counts(connection)[0:3] == after_source[0:3]
+    finally:
+        qualified.close()
+
+
+def test_a3d8_fresh_alive_payload_quirk_matches_legacy_reload_behavior(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        result = NativeFabricMemoryRouter(capability).route(_request(
+            key="world-alive-quirk",
+            vector=(1.0, 0.0, 0.0),
+            flexible_payload={
+                "qualification_marker": "a3d",
+                "alive": False,
+                "seed_v0": [1.0, 0.0, 0.0],
+            },
+        )).result
+        assert result is not None
+        fresh = _world_runtime(connection, capability, private)
+        fresh.advance_for_post_write(step=1)
+        assert fresh.snapshot_for_testing().positions == ((0.98, 0.0, 0.0),)
+
+        restarted = _world_runtime(
+            connection, capability, private, process_state=NativeWorldProcessState(),
+        )
+        restarted.ensure_initialized()
+        restarted.advance_for_post_write(step=2)
+        assert restarted.snapshot_for_testing().positions == ((0.0, 0.0, 0.0),)
+    finally:
+        qualified.close()
+
+
+def test_a3d8_world_diagnostic_materializes_only_in_r2_and_retry_does_not_reset_twice(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router = NativeFabricMemoryRouter(capability)
+        seed = router.route(_request(
+            key="world-r2-seed",
+            vector=(1.0, 0.0, 0.0),
+            flexible_payload={
+                "qualification_marker": "a3d",
+                "seed_pos0": [2.0, 0.0, 0.0],
+                "seed_v0": [1.0, 0.0, 0.0],
+            },
+        )).result
+        assert seed is not None
+        runtime = _world_runtime(connection, capability, private)
+        before_step = _counts(connection)
+        runtime.advance_for_post_write(step=50)
+        overlay = runtime.snapshot_for_testing()
+        assert overlay.positions[0][0] == pytest.approx(2.98)
+        assert overlay.classifications[0] is not None
+        assert _counts(connection) == before_step
+        r1 = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            eid=seed.eid,
+        )
+        assert "traj_label" not in r1.payload
+
+        request = _request(
+            key="world-r2",
+            vector=(1.0, 0.0, 0.0),
+            logical_step=50,
+            last_reinforced_ts=500,
+        )
+        with pytest.raises(RuntimeError, match="committed reinforcement source"):
+            router.route(request, _test_stop_after="source")
+        after_source = runtime.snapshot_for_testing()
+        assert after_source.positions == ((2.0, 0.0, 0.0),)
+        assert after_source.trail_lengths == after_source.history_lengths == (2,)
+        assert after_source.classifications[0] is not None
+        with pytest.raises(SubstrateInvariantViolation, match="unacknowledged materialized"):
+            runtime.advance_for_post_write(step=51)
+        reinforced = router.route(request).result
+        assert reinforced is not None and reinforced.reinforced is True
+        r2 = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            eid=seed.eid,
+        )
+        assert r2.revision_ordinal == 2
+        assert r2.payload["traj_last_classify_step"] == 50
+        assert isinstance(r2.payload["traj_label"], str)
+        reset = runtime.snapshot_for_testing()
+        assert reset.positions == ((2.0, 0.0, 0.0),)
+        assert reset.trail_lengths == reset.history_lengths == (2,)
+        assert reset.classifications == (None,)
+        source_intent = json.loads(connection.execute(
+            "SELECT canonical_intent_json FROM operations WHERE idempotency_key=?",
+            ("NATIVE_REINFORCEMENT:SOURCE:NATIVE_FABRIC_REINFORCEMENT:world-r2",),
+        ).fetchone()[0])
+        assert source_intent["retry_contract"]["world_diagnostic_materialization"]["canonical_digest"]
+
+        runtime.advance_for_post_write(step=51)
+        advanced = runtime.snapshot_for_testing()
+        assert advanced.positions[0][0] == pytest.approx(2.98)
+        assert router.route(request).result == reinforced
+        assert runtime.snapshot_for_testing() == advanced
+        assert NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            eid=seed.eid,
+        ).revision_ordinal == 2
+    finally:
+        qualified.close()
+
+
+def test_a3d8_process_owner_fails_closed_when_a_memory_appears_externally(tmp_path: Path):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        first = NativeFabricMemoryRouter(capability)
+        assert first.route(_request(key="world-current-seed", vector=(1.0, 0.0, 0.0))).result is not None
+        other_capability = prepare_native_fabric_routing_capability(
+            binding=capability.binding,
+            connection=connection,
+            routing_scopes=(private,),
+            expected_core_id=capability.core_id,
+        )
+        assert NativeFabricMemoryRouter(other_capability).route(
+            _request(key="world-current-external", vector=(0.0, 1.0, 0.0))
+        ).result is not None
+        with pytest.raises(SubstrateInvariantViolation, match="topology changed"):
+            _world_runtime(connection, capability, private).ensure_initialized()
     finally:
         qualified.close()

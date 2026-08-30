@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import json
 import math
 import sqlite3
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 from uuid import UUID
 
 from .canonical_intent import canonical_intent_text
@@ -27,6 +27,7 @@ from .errors import (
 )
 from .ids import generate_native_id, native_id_to_bytes
 from .native_srg_runtime import SRGSuccessorMaterialization
+from .native_world_runtime import WorldDiagnosticSuccessorMaterialization
 from .object_revision_governance import (
     NativeMemoryGovernanceFacts,
     NativeObjectRevisionGovernanceService,
@@ -69,6 +70,7 @@ class NativeMemoryReinforcementRequest:
     last_tool_refresh_ts: int | None = None
     routing_input_digest: str | None = None
     srg_materialization: SRGSuccessorMaterialization | None = None
+    world_diagnostic_materialization: WorldDiagnosticSuccessorMaterialization | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -103,6 +105,12 @@ class NativeMemoryReinforcementRequest:
             self.srg_materialization, SRGSuccessorMaterialization
         ):
             raise ValueError("srg_materialization must be SRGSuccessorMaterialization when supplied")
+        if self.world_diagnostic_materialization is not None and not isinstance(
+            self.world_diagnostic_materialization, WorldDiagnosticSuccessorMaterialization
+        ):
+            raise ValueError(
+                "world_diagnostic_materialization must be WorldDiagnosticSuccessorMaterialization when supplied"
+            )
 
 
 @dataclass(frozen=True)
@@ -150,6 +158,7 @@ class _SourcePlan:
     patch: ReinforcementPatch
     e1_witness: QualifiedCompatEmbedding
     srg_materialization: SRGSuccessorMaterialization | None
+    world_diagnostic_materialization: WorldDiagnosticSuccessorMaterialization | None
 
 
 class NativeMemoryReinforcementService:
@@ -172,6 +181,7 @@ class NativeMemoryReinforcementService:
         _test_omit_source_effect: bool = False,
         _test_omit_source_output: bool = False,
         _test_omit_governance: bool = False,
+        on_source_committed: Callable[[NativeMemoryReinforcementSourceResult], None] | None = None,
     ) -> NativeMemoryReinforcementResult:
         """Publish/recover R2, then independently carry E1 bytes to E2."""
         if not isinstance(request, NativeMemoryReinforcementRequest):
@@ -183,6 +193,8 @@ class NativeMemoryReinforcementService:
             _test_omit_output=_test_omit_source_output,
             _test_omit_governance=_test_omit_governance,
         )
+        if on_source_committed is not None:
+            on_source_committed(source)
         if _test_stop_after == "source":
             raise RuntimeError("forced interruption after committed reinforcement source")
 
@@ -305,6 +317,13 @@ class NativeMemoryReinforcementService:
             raise StaleReinforcementPlanError(
                 "SRG materialization predecessor is not the current reinforcement source"
             )
+        world_materialization = request.world_diagnostic_materialization
+        if world_materialization is not None and not world_materialization.validates_predecessor(
+            revision_id=current["revision_id"], revision_ordinal=current["revision_ordinal"],
+        ):
+            raise StaleReinforcementPlanError(
+                "world diagnostic materialization predecessor is not the current reinforcement source"
+            )
         state = ObjectState(
             current["identity_namespace_id"], current["semantic_scope_id"], current["object_kind"],
             current["existence_state"], current["lifecycle_state"], current["lifecycle_authoritative"],
@@ -312,12 +331,13 @@ class NativeMemoryReinforcementService:
             {
                 **current["payload"],
                 **({} if materialization is None else materialization.payload_contribution()),
+                **({} if world_materialization is None else world_materialization.payload_contribution()),
                 **dict(patch.values),
             }, "JSON", provenance_id,
         )
         return _SourcePlan(
             request, current["object_id"], current["revision_ordinal"], state,
-            governance.facts, provenance[0], patch, embedding, materialization,
+            governance.facts, provenance[0], patch, embedding, materialization, world_materialization,
         )
 
     def _commit_source(
@@ -341,6 +361,12 @@ class NativeMemoryReinforcementService:
         ):
             raise StaleReinforcementPlanError(
                 "SRG materialization predecessor changed before source commit"
+            )
+        if plan.world_diagnostic_materialization is not None and not plan.world_diagnostic_materialization.validates_predecessor(
+            revision_id=current["revision_id"], revision_ordinal=current["revision_ordinal"],
+        ):
+            raise StaleReinforcementPlanError(
+                "world diagnostic materialization predecessor changed before source commit"
             )
         current_embedding = self._embeddings.read_current(
             plan.object_id, expected_dimension=request.expected_dimension
@@ -562,6 +588,8 @@ def _retry_contract(request: NativeMemoryReinforcementRequest) -> dict[str, Any]
     }
     if request.srg_materialization is not None:
         contract["srg_materialization"] = request.srg_materialization.intent()
+    if request.world_diagnostic_materialization is not None:
+        contract["world_diagnostic_materialization"] = request.world_diagnostic_materialization.intent()
     return contract
 
 
