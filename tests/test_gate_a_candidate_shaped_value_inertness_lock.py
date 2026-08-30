@@ -39,7 +39,7 @@ _CLASS = "CandidateShapedValue"
 _TOKEN = "CandidateShapedValue"
 
 # The ONLY service modules that may reference the inert sentinel: its definition +
-# the six landed Layer-4 negative-refusal surfaces (memory_graph holds two;
+# the landed Layer-4 negative-refusal surfaces (memory_graph holds two;
 # substrate compat adds a type-only create/patch refusal, not candidate storage).
 _FOOTPRINT_MODULES = frozenset({
     "candidate_types.py",
@@ -48,6 +48,7 @@ _FOOTPRINT_MODULES = frozenset({
     "environment_memory.py",
     "reference_memory.py",
     "compat.py",
+    "payload_policy.py",
 })
 
 # The class must define EXACTLY these methods — the inert minimal API.

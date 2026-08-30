@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import hashlib
+import json
 import sqlite3
 import time
 from uuid import UUID
@@ -49,6 +50,7 @@ class RepresentationRequest:
     dependencies: tuple[UUID, ...] = ()
     representation_id: UUID | None = None
     expected_payload_byte_length: int | None = None
+    administrative_derivation_intent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -771,6 +773,11 @@ class NativeRepresentationService:
             request.encoding_id,
         ):
             raise ValueError("representation identity fields must be non-empty strings")
+        if request.administrative_derivation_intent is not None:
+            _canonical_mapping_text(
+                request.administrative_derivation_intent,
+                "administrative derivation intent",
+            )
         if request.source_kind == "OBJECT_REVISION" and (
             request.object_id is None
             or request.object_revision_id is None
@@ -831,8 +838,7 @@ class NativeRepresentationService:
 
     @staticmethod
     def _pending_intent(request: RepresentationRequest) -> str:
-        return canonical_intent_text(
-            {
+        intent: dict[str, object] = {
                 "kind": "PENDING_REPRESENTATION",
                 "representation_id": str(request.representation_id) if request.representation_id else None,
                 "source_kind": request.source_kind,
@@ -848,8 +854,13 @@ class NativeRepresentationService:
                 "dimension": request.dimension,
                 "dependencies": [str(dependency_id) for dependency_id in request.dependencies],
                 "expected_payload_byte_length": request.expected_payload_byte_length,
-            }
-        )
+        }
+        if request.administrative_derivation_intent is not None:
+            intent["administrative_derivation"] = _canonical_mapping_text(
+                request.administrative_derivation_intent,
+                "administrative derivation intent",
+            )
+        return canonical_intent_text(intent)
 
     @staticmethod
     def _expectation_intent(request: RepresentationIntegrityExpectationRequest) -> str:
@@ -997,6 +1008,19 @@ def _validate_positive_int(value: object, name: str) -> None:
 
 def _nonempty_strings(*values: object) -> bool:
     return all(isinstance(value, str) and value for value in values)
+
+
+def _canonical_mapping_text(value: object, name: str) -> dict[str, object]:
+    """Accept only a canonical mapping for an optional administrative witness."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a non-empty canonical JSON mapping")
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} must be a canonical JSON mapping") from exc
+    if not isinstance(parsed, dict) or canonical_intent_text(parsed) != value:
+        raise ValueError(f"{name} must be a canonical JSON mapping")
+    return parsed
 
 
 def _blob(value: UUID) -> bytes:

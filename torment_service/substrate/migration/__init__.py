@@ -98,6 +98,13 @@ from .runtime_normalization import (
     NativeMigrationRuntimeNormalizationService,
     PreparedLegacyMemoryNormalization,
 )
+from .runtime_representation_bootstrap import (
+    MigrationRuntimeRepresentationBootstrapRefused,
+    MigrationRuntimeRepresentationBootstrapRequest,
+    MigrationRuntimeRepresentationBootstrapResult,
+    NativeMigrationRuntimeRepresentationBootstrapService,
+    PreparedLegacyCaptureRepresentationBootstrap,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -160,4 +167,9 @@ __all__ = [
     "MigrationRuntimeNormalizationResult",
     "NativeMigrationRuntimeNormalizationService",
     "PreparedLegacyMemoryNormalization",
+    "MigrationRuntimeRepresentationBootstrapRefused",
+    "MigrationRuntimeRepresentationBootstrapRequest",
+    "MigrationRuntimeRepresentationBootstrapResult",
+    "NativeMigrationRuntimeRepresentationBootstrapService",
+    "PreparedLegacyCaptureRepresentationBootstrap",
 ]
