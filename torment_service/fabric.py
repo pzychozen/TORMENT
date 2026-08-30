@@ -19,6 +19,7 @@ from .identity import (
     DEFAULT_AGENT_OVERLAY,
 )
 from .motifs import MotifRegistry, cosine as cos_sim
+from .motif_runtime import LegacyMotifRuntimeAdapter
 from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
@@ -3548,13 +3549,16 @@ class TormentFabric:
                 _mark_embed_audit_dirty(self.data_dir, workspace_id)
 
                 reg = ws.motif_regs[chosen_domain]
-                motif_ids, created_motif = reg.attach_or_create(
+                motif_runtime = LegacyMotifRuntimeAdapter(reg)
+                motif_mutation = motif_runtime.attach_or_create(
                     emb,
                     memory_eid=int(eid),
                     agent_id=agent_id,
                     summary=summary,
                     attach_threshold=float(0.62 + 0.2 * ident.overlay.get("motif_sensitivity", 0.7)),
                 )
+                motif_ids = list(motif_mutation.affected_runtime_ids)
+                created_motif = motif_mutation.created_runtime_id
 
                 sym_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
                 prev_symbol = str(sym_state.get("last_symbol", "") or "")
@@ -3571,20 +3575,9 @@ class TormentFabric:
                 current_tension = 0.0
 
                 try:
-                    # Build motif rows for the whole chosen domain
-                    motif_rows = []
-                    for mid, mm in reg.motifs.items():
-                        motif_rows.append({
-                            "motif_id": mid,
-                            "label": getattr(mm, "label", mid),
-                            "centroid": list(getattr(mm, "centroid", []) or []),
-                            "strength": float(getattr(mm, "strength", 0.0) or 0.0),
-                            "stability_score": float(getattr(mm, "stability_score", 0.0) or 0.0),
-                            "members": list(getattr(mm, "members", []) or []),
-                            "radius": float(reg._motif_radius(mm)) if hasattr(reg, "_motif_radius") else 0.0,
-                        })
-
-                    field_rows = compute_coherence_field(motif_rows)
+                    field_rows = compute_coherence_field(
+                        motif_runtime.project_coherence_field_rows()
+                    )
                     field_by_id = {row["motif_id"]: row for row in field_rows}
 
                     primary_motif_id = created_motif or (motif_ids[0] if motif_ids else None)
@@ -3968,7 +3961,7 @@ class TormentFabric:
 
                 pol = ws.domain_policies.get(chosen_domain, {})
                 try:
-                    reg.update_entropy_and_suggest(
+                    motif_runtime.update_entropy_and_suggest(
                         target_n=int(pol.get("motif_entropy_target_n", 24)),
                         entropy_high=float(pol.get("motif_entropy_high", 0.72)),
                         sim_threshold=float(pol.get("motif_merge_similarity", 0.93)),
