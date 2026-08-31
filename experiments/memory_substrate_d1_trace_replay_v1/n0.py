@@ -1,7 +1,7 @@
 """Experiment-local L0 snapshot packaging and N0 B-series orchestration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import shutil
 import sqlite3
@@ -39,6 +39,17 @@ class N0BaselineRefused(D1ProtocolError):
     """A D1 input requires a migration capability outside the frozen protocol."""
 
 
+def require_d1_motif_alias_separation(
+    plans: tuple[MigrationRuntimeScopePlan, ...],
+) -> None:
+    """Reject a harness topology that would collapse source and runtime motifs."""
+    if any(
+        plan.motif_alias_namespace_id == plan.legacy_source_namespace_id
+        for plan in plans
+    ):
+        raise N0BaselineRefused("D1_N0_MOTIF_ALIAS_NAMESPACE_COLLAPSED")
+
+
 def materialize_l0_snapshot(
     *, baseline: LegacyBaselineFingerprint, destination: str | Path,
 ) -> Path:
@@ -57,14 +68,17 @@ def materialize_l0_snapshot(
         raise N0BaselineRefused("D1 snapshot destination must be outside the legacy L0 root")
     workspace = Path("workspaces") / baseline.workspace_id
     private = workspace / "agents" / baseline.agent_id / "private"
-    required = (
+    required = [
         private / "nodes.jsonl",
         workspace / "workspace_meta.json",
         workspace / "agents" / baseline.agent_id / "identity.json",
-        workspace / "agents" / baseline.agent_id / "character_state.json",
-        workspace / "seeds" / str(baseline.character_seed.value["seed_id"]) / "seed.json",
         workspace / "domains" / "research" / "motifs.json",
-    )
+    ]
+    if baseline.character_seed is not None and baseline.character_state is not None:
+        required.extend((
+            workspace / "agents" / baseline.agent_id / "character_state.json",
+            workspace / "seeds" / str(baseline.character_seed.value["seed_id"]) / "seed.json",
+        ))
     optional_private_records = (private / "edges.jsonl", private / "memory_events.jsonl")
     try:
         for relative in required:
@@ -136,6 +150,7 @@ class N0BaselineBuilder:
             raise N0BaselineRefused("B5 request does not name the supplied STAGING core")
         if plan.readiness_request.target_lane != plan.target_lane or plan.readiness_request.scope_plans != plan.scope_plans:
             raise N0BaselineRefused("B5 request does not match the frozen D1 scope/lane plan")
+        require_d1_motif_alias_separation(plan.scope_plans)
         manifest = create_snapshot_manifest(
             snapshot_root=snapshot_root,
             manifest_path=manifest_path,
@@ -192,7 +207,12 @@ class N0BaselineBuilder:
                 f"D1:N0:B4A:{item.runtime_motif_id}",
             ))
             b4a_ids.append(item.runtime_motif_id)
-        readiness = NativeWorkspaceRuntimeReadiness(self._connection).run(plan.readiness_request)
+        # The concrete snapshot ID is allocated only when the new immutable
+        # manifest is written above.  B5 must observe that same snapshot, never
+        # an operator placeholder supplied before capture.
+        readiness = NativeWorkspaceRuntimeReadiness(self._connection).run(
+            replace(plan.readiness_request, legacy_snapshot_id=manifest.legacy_snapshot_id)
+        )
         validate_n0_readiness(readiness)
         return N0BuildResult(
             manifest.legacy_snapshot_id, rehearsal, tuple(sorted(normalized)), tuple(sorted(b3a_eids)),

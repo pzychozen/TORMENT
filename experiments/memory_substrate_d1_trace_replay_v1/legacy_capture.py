@@ -15,6 +15,24 @@ from .protocol import D1ProtocolError, sha256_value
 
 
 @dataclass(frozen=True)
+class InitialPostWritePlaceholderPosture:
+    """The only D1 posture where native-owned output placeholders are safe."""
+
+    hivemind_enabled: bool
+    identity_coupling_mode: str | None
+    hivemind_packet_parity_tested: bool = False
+    proposal_parity_tested: bool = False
+
+    def validate(self) -> None:
+        if self.hivemind_enabled:
+            raise D1ProtocolError("D1 initial profile requires TORMENT_HIVEMIND_ENABLE=false")
+        if self.identity_coupling_mode not in (None, "", "read_only"):
+            raise D1ProtocolError("D1 initial profile requires absent/read_only identity coupling")
+        if self.hivemind_packet_parity_tested or self.proposal_parity_tested:
+            raise D1ProtocolError("D1 initial profile may not claim Hivemind/proposal parity")
+
+
+@dataclass(frozen=True)
 class LegacyStorageFacingFacts:
     """Only facts legitimately accepted by the current native route contract."""
 
@@ -32,6 +50,7 @@ class LegacyStorageFacingFacts:
     memory_class: str
     strength: float
     confidence: float
+    promotion_score: float
     half_life_days: float
     logical_step: int
     created_ts: int
@@ -90,7 +109,8 @@ class LegacyStorageFacingFacts:
             "operation_key": self.native_operation_key, "text": self.text, "summary": self.summary,
             "embedding_sha256": self.embedding_sha256, "lane": self.embedder_lane.__dict__,
             "memory_type": self.memory_type, "memory_class": self.memory_class,
-            "strength": self.strength, "confidence": self.confidence, "half_life_days": self.half_life_days,
+            "strength": self.strength, "confidence": self.confidence,
+            "promotion_score": self.promotion_score, "half_life_days": self.half_life_days,
             "logical_step": self.logical_step, "created_ts": self.created_ts,
             "last_active_ts": self.last_active_ts, "last_reinforced_ts": self.last_reinforced_ts,
             "provenance": self.provenance.to_dict(), "governance": self.governance.__dict__,

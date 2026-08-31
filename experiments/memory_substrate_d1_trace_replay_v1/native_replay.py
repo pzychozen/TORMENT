@@ -10,7 +10,7 @@ from torment_service.post_write_runtime import FabricPostWriteContext, PostWrite
 from torment_service.substrate.fabric_native_routing import NativeFabricMemoryRouter, NativeFabricRouteRequest
 from torment_service.substrate.native_post_write_runtime import NativeFabricPostWriteAdapter, NativePostWriteRouteWitness
 
-from .legacy_capture import LegacyCapturedEvent, LegacyStorageFacingFacts
+from .legacy_capture import InitialPostWritePlaceholderPosture, LegacyCapturedEvent, LegacyStorageFacingFacts
 from .protocol import D1ProtocolError
 
 
@@ -58,10 +58,12 @@ class NativeReplayHarness:
         router: NativeFabricMemoryRouter,
         post_write: NativeFabricPostWriteAdapter,
         native_storage_snapshot: Callable[[], NativeCoreStorageSnapshot],
+        placeholder_posture: InitialPostWritePlaceholderPosture,
     ) -> None:
         self._router = router
         self._post_write = post_write
         self._native_storage_snapshot = native_storage_snapshot
+        placeholder_posture.validate()
 
     @staticmethod
     def _request(facts: LegacyStorageFacingFacts) -> NativeFabricRouteRequest:
@@ -90,7 +92,7 @@ class NativeReplayHarness:
             created_motif=None, motif_ids=motifs, half_life_days=facts.half_life_days,
             summary=facts.summary, embedding=facts.embedding, memory_class=facts.memory_class,
             memory_type=facts.memory_type, strength=facts.strength, confidence=facts.confidence,
-            promotion_score=0.0, stability_delta=facts.stability_delta, tri_mod=facts.tri_mod,
+            promotion_score=facts.promotion_score, stability_delta=facts.stability_delta, tri_mod=facts.tri_mod,
             debug=facts.debug, srg_state=facts.srg_state, phase_durations=facts.phase_durations,
             state_symbol=None, affect_tag=facts.affect_tag, affect_conf=facts.affect_conf,
             skip_packet_emission=facts.skip_packet_emission,

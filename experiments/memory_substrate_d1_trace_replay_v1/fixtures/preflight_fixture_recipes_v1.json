@@ -15,7 +15,16 @@
     "sequential": "SEQUENTIAL",
     "character": "CHARACTER_SUBARM",
     "micro_clones_are_independent": true,
-    "character_uses_separate_baseline": true
+    "character_uses_separate_baseline": true,
+    "event_roles": {
+      "M1_CREATE": ["CREATE"],
+      "M2_REINFORCE": ["CREATE", "REINFORCE"],
+      "M3_DISTINCT": ["CREATE", "DISTINCT"],
+      "M4_CONTRADICTION": ["CREATE", "CONTRADICTION"],
+      "M5_NO_WRITE": ["NO_WRITE"],
+      "SEQUENTIAL": ["CREATE", "REINFORCE", "DISTINCT", "CONTRADICTION"],
+      "CHARACTER_SUBARM": ["CHARACTER_PREPARATION", "CHARACTER_ADMINISTRATION"]
+    }
   },
   "scope": {
     "workspace_domain": "research",
@@ -23,12 +32,31 @@
     "raw_links": [],
     "qualified_link_targets": []
   },
+  "core_baseline": {
+    "profile": "CORE_CHARACTER_FREE",
+    "workspace_domain": "research",
+    "active_character_seed_planting": false,
+    "agent_seed_fields_forbidden": ["seed_id", "seed_text", "character_name"],
+    "ordinary_hard_stored_core_memory_count": 1,
+    "migration_governance_rule": "LEGACY_ABSENT_GOVERNANCE_DEFAULT_V1",
+    "migration_vector_rule": "LEGACY_COMPACT_SHARD_REFERENCE_TRANSLATION_V1"
+  },
   "qualification": {
     "write_hard_margin": 0.02,
     "storage_hard_margin": 0.02,
     "max_pre_event_motif_members": 79,
     "legacy_only": true,
     "native_outcomes_must_not_influence_selection": true
+  },
+  "post_write_placeholder_posture": {
+    "TORMENT_HIVEMIND_ENABLE": false,
+    "identity_coupling_mode": "read_only",
+    "D1_HIVEMIND_PACKET_PARITY_TESTED": false,
+    "D1_PROPOSAL_PARITY_TESTED": false
+  },
+  "store_presence": {
+    "known_optional_out_of_profile": ["motif_merge_suggestions.jsonl"],
+    "unknown_store_is_harness_failure": true
   },
   "replay": {
     "representation_input": "captured_float32_bytes_exact",
@@ -39,6 +67,8 @@
     "b4b_allowed_count": 0
   },
   "character_subarm": {
+    "status": "DEFERRED_PENDING_PROVENANCE_VOCABULARY",
+    "character_baseline_status": "BLOCKED_BY_PROVENANCE_VOCABULARY",
     "separate_baseline_recipe": true,
     "required_logical_step": 25,
     "requires_recent_non_seed_memories": true,

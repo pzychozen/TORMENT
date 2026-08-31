@@ -19,6 +19,7 @@ D1_RUNTIME_FLAG_NAMES = (
     "TORMENT_EMBED_PROVIDER",
     "TORMENT_EMBED_MODEL",
     "TORMENT_EMBED_STRICT",
+    "TORMENT_HASH_DIM",
     "TORMENT_REINFORCE_SIM_THRESHOLD",
     "TORMENT_CHARACTER_ENABLE",
     "TORMENT_CHARACTER_DRIFT_CHECK_EVERY",
@@ -28,6 +29,7 @@ D1_RUNTIME_FLAG_NAMES = (
     "TORMENT_COMPRESS_MIN_STEP",
     "TORMENT_HIVEMIND_ENABLE",
     "TORMENT_SRG_ENABLE",
+    "TORMENT_AFFECT_ENABLE",
 )
 _TOLERANCE_INTENT = {
     "centroid_rtol": 1e-6,
@@ -118,23 +120,42 @@ class StoreDisposition(StrEnum):
     PROCESS_LOCAL = "PROCESS_LOCAL"
 
 
+class StorePresence(StrEnum):
+    REQUIRED_PRESENT = "REQUIRED_PRESENT"
+    OPTIONAL_PRESENT = "OPTIONAL_PRESENT"
+
+
+@dataclass(frozen=True)
+class StoreDispositionRule:
+    path: str
+    disposition: StoreDisposition
+    presence: StorePresence = StorePresence.REQUIRED_PRESENT
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path:
+            raise D1ProtocolError("store disposition path is required")
+        if not isinstance(self.disposition, StoreDisposition) or not isinstance(self.presence, StorePresence):
+            raise D1ProtocolError("store disposition rule uses unrecognized frozen vocabulary")
+
+
 @dataclass(frozen=True)
 class StoreDispositionManifest:
     """Complete, predeclared disposition for every observed store path."""
 
-    dispositions: tuple[tuple[str, StoreDisposition], ...]
+    rules: tuple[StoreDispositionRule, ...]
 
     def __post_init__(self) -> None:
-        paths = [path for path, _ in self.dispositions]
-        if any(not isinstance(path, str) or not path for path in paths) or len(set(paths)) != len(paths):
+        paths = [rule.path for rule in self.rules]
+        if len(set(paths)) != len(paths):
             raise D1ProtocolError("store dispositions require unique non-empty paths")
-        if any(not isinstance(disposition, StoreDisposition) for _, disposition in self.dispositions):
-            raise D1ProtocolError("store dispositions must use the frozen D1 vocabulary")
 
     def validate_observed(self, observed_paths: set[str]) -> None:
-        declared = {path for path, _ in self.dispositions}
+        declared = {rule.path for rule in self.rules}
         unknown = sorted(observed_paths - declared)
-        missing = sorted(declared - observed_paths)
+        missing = sorted(
+            rule.path for rule in self.rules
+            if rule.presence is StorePresence.REQUIRED_PRESENT and rule.path not in observed_paths
+        )
         if unknown:
             raise D1ProtocolError(f"unclassified observed stores: {unknown}")
         if missing:
@@ -142,7 +163,7 @@ class StoreDispositionManifest:
 
     @property
     def digest(self) -> str:
-        return sha256_value([(path, disposition.value) for path, disposition in self.dispositions])
+        return sha256_value([(rule.path, rule.disposition.value, rule.presence.value) for rule in self.rules])
 
 
 @dataclass(frozen=True)
@@ -164,7 +185,7 @@ class EnvironmentFingerprint:
         *,
         embedder: Any,
         repository_head: str,
-        runtime_flag_names: tuple[str, ...],
+        runtime_flag_names: tuple[str, ...] = D1_RUNTIME_FLAG_NAMES,
     ) -> "EnvironmentFingerprint":
         import numpy
         import sqlite3

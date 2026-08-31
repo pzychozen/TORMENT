@@ -6,9 +6,11 @@ protocol. They do not administer the formal native comparison.
 
 ## Boundary
 
-D1 is a bounded experiment over one dedicated, private `research` workspace
-and one frozen Character seed. The normal service is started in the existing
-`torment` environment using its normal HTTP surface. Native snapshot
+D1 is a bounded experiment over one dedicated, private `research` workspace.
+The selected CORE D1 baseline is Character-free: it has one agent with no
+active Character seed planting and one ordinary hard-stored core memory. The
+normal service is started in the existing `torment` environment using its
+normal HTTP surface. Native snapshot
 qualification and any later replay are performed only in the already qualified
 `torment-substrate` environment. Neither environment is installed into,
 modified, selected by a runtime flag, or used to change production authority.
@@ -19,6 +21,41 @@ change, activation, fallback, dual read/write, or production startup path.
 C2A remains deferred. Checkpoints, bridge suggestions, compression/deep
 memory, shared-lane/Character query contexts, migrations, and cutover are not
 implemented by this phase.
+
+## 7G5D1B migration compatibility decision
+
+Real-L0 archaeology established exactly two deterministic legacy facts that
+the migration boundary had not recognized:
+
+- `GOVERNANCE_TRANSLATION = DETERMINISTIC_LEGACY_SEMANTIC_TRANSLATION`
+- `VECTOR_TRANSLATION = DETERMINISTIC_LEGACY_STORAGE_LAYOUT_TRANSLATION`
+- `SEED_WRITER_UNIQUELY_IDENTIFIED = YES`
+- `SEED_PROVENANCE_TRANSLATION = NOT_REPRESENTABLE_IN_CURRENT_VOCABULARY`
+- `CHARACTER_PROVENANCE_VOCABULARY_CHANGE = NOT_AUTHORIZED`
+- `NEW_CHARACTER_L0_WOULD_REPEAT_BLOCKER = YES`
+- `CORE_D1_WITHOUT_CHARACTER = SELECTED`
+- `CHARACTER_D1_SUBARM = DEFERRED`
+
+`LEGACY_ABSENT_GOVERNANCE_DEFAULT_V1` records only the legacy resolver's
+exact all-default result where a nested source payload has no governance
+carrier, no outer governance carrier exists, and lifecycle evidence is
+independently valid. It does not treat null, malformed, partial, or conflicting
+governance as absence. `LEGACY_COMPACT_SHARD_REFERENCE_TRANSLATION_V1` maps
+only the production `{shard,row,dim}` reference through the production shard
+filename law after its node, map, manifest, workspace lock, and NPY evidence
+all agree. Both preserve the source bytes; neither makes captured bytes READY.
+
+The existing Character-bearing L0 and its frozen fixture inputs remain
+scientific evidence with `CHARACTER_BASELINE_STATUS =
+BLOCKED_BY_PROVENANCE_VOCABULARY`. They are not a CORE D1 baseline and no
+Character provenance is inferred or translated.
+
+For CORE N0 B4A, the source `MOTIF_ID` alias remains in the legacy snapshot
+source namespace while the projected runtime `DERIVED_MOTIF` receives the same
+textual alias in the dedicated `d1-n0-runtime-motif-aliases` namespace. The
+two UUIDs must differ; the harness refuses the collapsed topology before B4A
+is invoked. This is configuration for the existing B4A invariant, not a B4A
+semantic change.
 
 ## What D1 does and does not test
 
@@ -77,13 +114,18 @@ be preserved exactly; `TIMESTAMP_GENERATION_PARITY_TESTED = NO` and
 1. Start a real, normal HTTP service in `torment` with a new dedicated
    `TORMENT_DATA_DIR`; do not use a fake/in-process Fabric or MemoryGraph.
 2. Create one research-only workspace and one agent via `/workspace/create` and
-   `/agent/create`, passing the frozen Character seed. Ordinary seed planting is
-   therefore owned by the normal service.
-3. Do not administer a microtrace during construction. Stop the service cleanly.
-4. Hash every regular file in the dedicated root, then require and hash the
-   workspace embedding lock, identity, seed, Character state, private memory
-   rows, raw embedding evidence, research motif state, and all retained side
-   stores. The tree rejects symlinks and any subsequent change fails recheck.
+   `/agent/create`, using a truthy core-only identity marker with no
+   `seed_id`, `seed_text`, or `character_name`, while
+   `TORMENT_CHARACTER_ENABLE=0` is set for this disposable construction. This
+   prevents legacy default seed fallback and active Character seed planting.
+3. Ingest exactly one ordinary deterministic hard-stored private core memory
+   through the real HTTP Fabric surface. Do not administer a microtrace.
+4. Stop the service cleanly.
+5. Hash every regular file in the dedicated root, then require and hash the
+   workspace embedding lock, identity, private memory rows, raw embedding
+   evidence, research motif state, and all retained side stores. The core
+   profile rejects Character seed and Character-state artifacts. The tree
+   rejects symlinks and any subsequent change fails recheck.
 
 The L0 source remains immutable. N0 packages byte-for-byte evidence into a
 separate snapshot root rather than running migration semantics against the L0
@@ -112,6 +154,30 @@ disposition: exact comparison, tolerance comparison, out-of-profile,
 acceleration-excluded, or process-local; any unknown or unobserved declared
 store fails preflight.
 
+## 7G5D1E retained-side-store observation witness
+
+B5 remains a read-only, caller-observed qualification boundary. It does not
+crawl a legacy filesystem or infer that an omitted reference list means zero
+references. Its additive typed input distinguishes `INCOMPLETE`,
+`COMPLETE_ABSENT`, `COMPLETE_PRESENT_ZERO_EIDS`, and
+`COMPLETE_PRESENT_WITH_EIDS`. A complete zero observation closes only the
+corresponding B1 EID-capable store and causes no alias lookup; a positive
+observation still requires every namespace-qualified EID to resolve to exactly
+one native object. The legacy positive-reference input remains supported, but
+conflicting typed and legacy evidence is refused.
+
+For the immutable Character-free core L0, the experiment-local observer first
+re-verifies the complete baseline fingerprint, then reads only the established
+side-store structures and locators. It binds the L0 fingerprint, workspace,
+agent, domain, source namespace, observation state, references, locators, and
+every present-file digest into one canonical D1 evidence digest. It records
+`COMPLETE_ABSENT` for conflicts, anchors, affect history, Character, hivemind,
+bridges, and deep memory; `trajectory_evidence` remains a real
+`COMPLETE_PRESENT_WITH_EIDS` witness for private EID 1. This is experiment
+evidence, not a native schema field or a side-store migration. B1’s
+conservative classifications, including affect history and bridges, remain
+unchanged.
+
 ## Fixture qualification and freezing
 
 The checked-in recipe requires M1 create, M2 reinforce, M3 distinct, M4
@@ -134,17 +200,49 @@ step is process-local and therefore separately recorded.
 Native replay input is limited to storage-facing facts that the current native
 route accepts, including the captured raw float32 bytes, lane, structural
 provenance/governance, memory metadata, timestamps, and explicit empty links.
+`promotion_score` is a captured input and is reproduced exactly in the future
+`FabricPostWriteContext`. In contrast, `created_motif` and `state_symbol` are
+native-owned outputs and are never copied from a legacy response. Their only
+current consumers are closed by the frozen initial posture:
+`TORMENT_HIVEMIND_ENABLE=false`, identity `coupling_mode=read_only` (or the
+existing absent/read-only fallback),
+`D1_HIVEMIND_PACKET_PARITY_TESTED=NO`, and
+`D1_PROPOSAL_PARITY_TESTED=NO`. If either consumer is brought into profile,
+preflight must refuse rather than supplying a legacy output placeholder.
 It deliberately excludes legacy selected EIDs, output motifs, conflict targets,
 and all legacy route answers. Native duplicate selection is consequently
 independent.
 
-The Character sub-arm has a separate L0C/N0C recipe. Before its concrete
-request can freeze, legacy-only qualification must prove recent non-seed memory
-evidence, Character enabled, one genuinely stored hard-gated request at logical
-step 25, no split/checkpoint edge, and byte-stable correction embeddings across
-`torment` and `torment-substrate`. It then measures occurrence/classification,
-direction and score, correction occurrence/text/semantics, and reflex edge as
-separate qualified results; it does not create a Character query context.
+Duplicate evidence has an explicit frozen reason. `REINFORCE_MATCH` requires
+high similarity, a false contradiction guard, and a reinforced legacy result;
+`CREATE_DISTINCT_BELOW_THRESHOLD` requires low similarity and a created legacy
+result; `CREATE_CONTRADICTION_GUARD` requires high similarity, a true legacy
+contradiction guard, and a created legacy result. Consequently M4 cannot be
+misreported as M3. `CREATE_NO_CANDIDATE` and `NOT_APPLICABLE` do not claim a
+threshold decision.
+
+The replay plan assigns every frozen fixture ID exactly once and prohibits both
+legacy and native clone reuse. Its minimum ordered shapes are M1 `CREATE`, M2
+`CREATE, REINFORCE`, M3 `CREATE, DISTINCT`, M4 `CREATE, CONTRADICTION`, M5
+`NO_WRITE`, sequential `CREATE, REINFORCE, DISTINCT, CONTRADICTION`, and a
+separate Character arm consisting of preparation events followed by exactly one
+logical-step-25 administration event. Current legacy Character measurement has
+no higher non-seed-memory minimum; a measured zero count remains meaningful and
+is not rejected by the experiment.
+
+Store dispositions distinguish `REQUIRED_PRESENT` from explicitly named
+`OPTIONAL_PRESENT` stores. A declared optional out-of-profile operational store
+such as `motif_merge_suggestions.jsonl` may be absent or present; arbitrary
+unknown stores still fail the harness. The frozen workspace domain set is
+exactly `["research"]`, so the ordinary bridge draw may be consumed but cannot
+form a cross-domain pair. Bridge code is not disabled.
+
+The Character sub-arm has a separate L0C/N0C recipe and is
+`DEFERRED_PENDING_PROVENANCE_VOCABULARY`. The preserved Character-bearing L0
+must continue to refuse normalisation on `UNKNOWN_PROVENANCE` even after the
+governance and compact-vector repairs. Before a future Character request can
+freeze, an authorized provenance ontology decision is required; no current
+core-D1 work may relabel or bypass that blocker.
 
 ## Comparison contract for a future authorized D1 run
 
@@ -162,6 +260,27 @@ Potential divergences are recorded as results, not resolved by changed fixture
 selection. Formal administration refuses to start until hashes are frozen and
 an authority-bearing future workorder changes the explicit authorization gate;
 this phase leaves that gate false.
+
+## Formal-administration closure mechanics
+
+The experiment-local runner accepts only concrete frozen-input hashes and an
+explicit one-administration authorization bound to an administration ID,
+repository HEAD, protocol hash, fixture hash, tolerance hash, and new result
+root. It checks the concrete bytes and L0/N0 baselines through its supplied
+verification boundary, validates clone identities, writes an exclusive durable
+administration-start marker before any trace contact, and refuses an existing
+marker, result root, or result file. There is no retry, fallback, or
+`D1PreflightReport` result path. A failure after the marker becomes
+`EXPERIMENT_HARNESS_FAILURE` in that one root.
+
+The unpopulated result schema has separate fields for harness validity, storage
+substrate verdict, qualified post-write verdict, optional-feature divergences,
+known unsupported edges, M1/M2/M3/M4/M5/sequential/Character arms, restart
+evidence, retrieval characterization, and native structural invariants. It
+declares `TIMESTAMP_GENERATION_PARITY_TESTED=NO`,
+`TIMESTAMP_PRESERVATION_PARITY_TESTED=YES`, and
+`D1_CLOSED_LOOP_QUERY_PARITY_TESTED=NO`. This workorder creates no
+authorization manifest and starts no formal administration.
 
 Legacy motif entropy logs/merge suggestions and legacy bridge state are retained
 as `OPTIONAL_FEATURE_DIVERGENCE` observations, not native storage failures.

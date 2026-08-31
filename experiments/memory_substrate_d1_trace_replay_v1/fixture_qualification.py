@@ -1,6 +1,7 @@
 """Legacy-only fixture-margin qualification and immutable fixture sealing."""
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any, Mapping
@@ -18,6 +19,26 @@ class FixtureKind(StrEnum):
     CHARACTER_SUBARM = "CHARACTER_SUBARM"
 
 
+class DuplicateDecisionKind(StrEnum):
+    """Frozen legacy-only explanation for a duplicate decision."""
+
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    CREATE_NO_CANDIDATE = "CREATE_NO_CANDIDATE"
+    REINFORCE_MATCH = "REINFORCE_MATCH"
+    CREATE_DISTINCT_BELOW_THRESHOLD = "CREATE_DISTINCT_BELOW_THRESHOLD"
+    CREATE_CONTRADICTION_GUARD = "CREATE_CONTRADICTION_GUARD"
+
+
+class ReplayEventRole(StrEnum):
+    CREATE = "CREATE"
+    REINFORCE = "REINFORCE"
+    DISTINCT = "DISTINCT"
+    CONTRADICTION = "CONTRADICTION"
+    NO_WRITE = "NO_WRITE"
+    CHARACTER_PREPARATION = "CHARACTER_PREPARATION"
+    CHARACTER_ADMINISTRATION = "CHARACTER_ADMINISTRATION"
+
+
 @dataclass(frozen=True)
 class FrozenReplayArm:
     """One future replay arm with explicitly separate legacy/native clones."""
@@ -26,6 +47,7 @@ class FrozenReplayArm:
     legacy_clone_id: str
     native_clone_id: str
     fixture_ids: tuple[str, ...]
+    event_roles: tuple[ReplayEventRole, ...]
     character_specific_baseline: bool = False
 
     def __post_init__(self) -> None:
@@ -33,6 +55,8 @@ class FrozenReplayArm:
             raise D1ProtocolError("D1 replay arm requires explicit clone identities")
         if not self.fixture_ids or any(not isinstance(value, str) or not value for value in self.fixture_ids):
             raise D1ProtocolError("D1 replay arm requires one or more frozen fixture IDs")
+        if len(self.fixture_ids) != len(self.event_roles) or any(not isinstance(role, ReplayEventRole) for role in self.event_roles):
+            raise D1ProtocolError("D1 replay arm requires one frozen role per fixture ID")
 
 
 @dataclass(frozen=True)
@@ -50,23 +74,56 @@ class FrozenReplayPlan:
         if {arm.arm_id for arm in self.micro_arms} != expected or len(self.micro_arms) != 5:
             raise D1ProtocolError("D1 needs five separately cloned micro-trace arms")
         all_arms = (*self.micro_arms, self.sequential_arm, self.character_arm)
-        clone_pairs = [(arm.legacy_clone_id, arm.native_clone_id) for arm in all_arms]
-        if len(clone_pairs) != len(set(clone_pairs)):
-            raise D1ProtocolError("D1 replay arms may not share a legacy/native clone pair")
+        legacy_clones = [arm.legacy_clone_id for arm in all_arms]
+        native_clones = [arm.native_clone_id for arm in all_arms]
+        if len(legacy_clones) != len(set(legacy_clones)):
+            raise D1ProtocolError("D1 replay arms may not reuse a legacy clone")
+        if len(native_clones) != len(set(native_clones)):
+            raise D1ProtocolError("D1 replay arms may not reuse a native clone")
         if self.sequential_arm.arm_id != "SEQUENTIAL" or self.character_arm.arm_id != "CHARACTER_SUBARM":
             raise D1ProtocolError("D1 requires named sequential and Character arms")
         if not self.character_arm.character_specific_baseline:
             raise D1ProtocolError("D1 Character sub-arm requires an explicit Character baseline")
-        known_ids = {fixture.fixture_id for fixture in fixture_set.fixtures}
-        used_ids = {fixture_id for arm in all_arms for fixture_id in arm.fixture_ids}
-        if used_ids != known_ids:
-            raise D1ProtocolError("D1 replay plan must account for every frozen fixture exactly by ID")
-        m2 = next(arm for arm in self.micro_arms if arm.arm_id == "M2_REINFORCE")
-        if len(m2.fixture_ids) != 2:
-            raise D1ProtocolError("M2 must preserve its create then duplicate opportunity")
-        m5 = next(arm for arm in self.micro_arms if arm.arm_id == "M5_NO_WRITE")
-        if len(m5.fixture_ids) != 1:
-            raise D1ProtocolError("M5 must be one no-write event")
+        known_ids = [fixture.fixture_id for fixture in fixture_set.fixtures]
+        used_ids = [fixture_id for arm in all_arms for fixture_id in arm.fixture_ids]
+        if Counter(used_ids) != Counter(known_ids):
+            raise D1ProtocolError("D1 replay plan must assign every frozen fixture ID exactly once")
+        fixtures_by_id = {fixture.fixture_id: fixture for fixture in fixture_set.fixtures}
+        expected_kinds = {
+            "M1_CREATE": FixtureKind.M1_CREATE,
+            "M2_REINFORCE": FixtureKind.M2_REINFORCE,
+            "M3_DISTINCT": FixtureKind.M3_DISTINCT,
+            "M4_CONTRADICTION": FixtureKind.M4_CONTRADICTION,
+            "M5_NO_WRITE": FixtureKind.M5_NO_WRITE,
+            "SEQUENTIAL": FixtureKind.SEQUENTIAL,
+            "CHARACTER_SUBARM": FixtureKind.CHARACTER_SUBARM,
+        }
+        for arm in all_arms:
+            if any(fixtures_by_id[fixture_id].kind is not expected_kinds[arm.arm_id] for fixture_id in arm.fixture_ids):
+                raise D1ProtocolError("D1 replay arm contains a fixture from another declared arm")
+        exact_micro_shapes = {
+            "M1_CREATE": (ReplayEventRole.CREATE,),
+            "M2_REINFORCE": (ReplayEventRole.CREATE, ReplayEventRole.REINFORCE),
+            "M3_DISTINCT": (ReplayEventRole.CREATE, ReplayEventRole.DISTINCT),
+            "M4_CONTRADICTION": (ReplayEventRole.CREATE, ReplayEventRole.CONTRADICTION),
+            "M5_NO_WRITE": (ReplayEventRole.NO_WRITE,),
+        }
+        for arm in self.micro_arms:
+            if arm.event_roles != exact_micro_shapes[arm.arm_id]:
+                raise D1ProtocolError(f"D1 {arm.arm_id} event roles are not frozen in the required order")
+        required_sequential = (
+            ReplayEventRole.CREATE, ReplayEventRole.REINFORCE,
+            ReplayEventRole.DISTINCT, ReplayEventRole.CONTRADICTION,
+        )
+        positions = [self.sequential_arm.event_roles.index(role) if role in self.sequential_arm.event_roles else -1 for role in required_sequential]
+        if positions != sorted(positions) or any(position < 0 for position in positions):
+            raise D1ProtocolError("D1 sequential arm lacks CREATE/REINFORCE/DISTINCT/CONTRADICTION order")
+        if (
+            self.character_arm.event_roles.count(ReplayEventRole.CHARACTER_ADMINISTRATION) != 1
+            or self.character_arm.event_roles[-1] is not ReplayEventRole.CHARACTER_ADMINISTRATION
+            or ReplayEventRole.CHARACTER_PREPARATION not in self.character_arm.event_roles
+        ):
+            raise D1ProtocolError("D1 Character arm needs preparation events then one final administration event")
 
 
 @dataclass(frozen=True)
@@ -82,8 +139,8 @@ class CharacterSubarmQualification:
     correction_embedding_bytes_stable_across_environments: bool
 
     def validate(self) -> None:
-        if self.recent_non_seed_memory_count < 1:
-            raise D1ProtocolError("Character sub-arm lacks recent non-seed memory evidence")
+        if self.recent_non_seed_memory_count < 0:
+            raise D1ProtocolError("Character sub-arm recent-memory count is invalid")
         if self.logical_step != 25 or not self.character_enabled or not self.expected_stored:
             raise D1ProtocolError("Character sub-arm requires an enabled hard-stored logical step 25 request")
         if self.split_edge or self.checkpoint_edge:
@@ -112,24 +169,47 @@ class WriteGateEvidence:
 
 @dataclass(frozen=True)
 class StorageDecisionEvidence:
+    duplicate_decision: DuplicateDecisionKind
     raw_similarity: float | None
     reinforce_threshold: float | None
     attach_score: float
     effective_attach_threshold: float
     expected_reinforced: bool | None
+    contradiction_guard_observed: bool | None = None
 
     def validate(self) -> None:
         if abs(self.attach_score - self.effective_attach_threshold) < 0.02:
             raise D1ProtocolError("D1 fixture is too near its motif attach threshold")
-        if self.expected_reinforced is None:
+        kind = self.duplicate_decision
+        if kind is DuplicateDecisionKind.NOT_APPLICABLE:
+            if any(value is not None for value in (self.raw_similarity, self.reinforce_threshold, self.expected_reinforced, self.contradiction_guard_observed)):
+                raise D1ProtocolError("not-applicable duplicate decision may not claim threshold facts")
             return
-        if self.raw_similarity is None or self.reinforce_threshold is None:
-            raise D1ProtocolError("reinforcement fixture lacks raw similarity evidence")
-        if self.expected_reinforced:
-            if self.raw_similarity < self.reinforce_threshold + 0.02:
+        if kind is DuplicateDecisionKind.CREATE_NO_CANDIDATE:
+            if self.expected_reinforced is not False or any(value is not None for value in (self.raw_similarity, self.reinforce_threshold, self.contradiction_guard_observed)):
+                raise D1ProtocolError("no-candidate creation may not pretend a threshold decision occurred")
+            return
+        if self.raw_similarity is None or self.reinforce_threshold is None or self.expected_reinforced is None:
+            raise D1ProtocolError("duplicate-decision fixture lacks raw similarity evidence")
+        if kind is DuplicateDecisionKind.REINFORCE_MATCH:
+            if self.expected_reinforced is not True or self.raw_similarity < self.reinforce_threshold + 0.02:
                 raise D1ProtocolError("reinforcement fixture is too near TORMENT_REINFORCE_SIM_THRESHOLD")
-        elif self.raw_similarity > self.reinforce_threshold - 0.02:
-            raise D1ProtocolError("distinct fixture is too near TORMENT_REINFORCE_SIM_THRESHOLD")
+            if self.contradiction_guard_observed is not False:
+                raise D1ProtocolError("reinforcement match must freeze a false contradiction guard")
+            return
+        if kind is DuplicateDecisionKind.CREATE_DISTINCT_BELOW_THRESHOLD:
+            if self.expected_reinforced is not False or self.raw_similarity > self.reinforce_threshold - 0.02:
+                raise D1ProtocolError("distinct fixture is too near TORMENT_REINFORCE_SIM_THRESHOLD")
+            if self.contradiction_guard_observed not in (False, None):
+                raise D1ProtocolError("low-similarity distinct fixture may not claim contradiction prevention")
+            return
+        if kind is DuplicateDecisionKind.CREATE_CONTRADICTION_GUARD:
+            if self.expected_reinforced is not False or self.raw_similarity < self.reinforce_threshold + 0.02:
+                raise D1ProtocolError("contradiction fixture must have a high-similarity duplicate candidate")
+            if self.contradiction_guard_observed is not True:
+                raise D1ProtocolError("contradiction fixture must freeze a true contradiction guard")
+            return
+        raise D1ProtocolError("unrecognized duplicate-decision qualification")
 
 
 @dataclass(frozen=True)

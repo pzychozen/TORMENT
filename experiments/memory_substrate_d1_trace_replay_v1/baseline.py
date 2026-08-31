@@ -40,7 +40,7 @@ class LegacyBaselineSpec:
     data_root: str | Path
     workspace_id: str
     agent_id: str
-    character_seed: dict[str, Any]
+    character_seed: dict[str, Any] | None = None
     domain_id: str = "research"
 
     def __post_init__(self) -> None:
@@ -49,8 +49,14 @@ class LegacyBaselineSpec:
             raise D1ProtocolError("L0 requires an absolute dedicated root and explicit identifiers")
         if self.domain_id != "research":
             raise D1ProtocolError("D1 L0 is fixed to the research domain")
-        if not isinstance(self.character_seed, dict) or not self.character_seed:
-            raise D1ProtocolError("L0 requires a frozen ordinary Character seed")
+        if self.character_seed is not None and (
+            not isinstance(self.character_seed, dict) or not self.character_seed
+        ):
+            raise D1ProtocolError("a Character L0 requires a non-empty frozen Character seed")
+
+    @property
+    def character_seed_required(self) -> bool:
+        return self.character_seed is not None
 
 
 @dataclass(frozen=True)
@@ -76,7 +82,14 @@ class LegacyBaselineBuilder:
         agent = self._transport.request("POST", "/agent/create", {
             "workspace_id": self._spec.workspace_id,
             "agent_id": self._spec.agent_id,
-            "seed": self._spec.character_seed,
+            # A truthy non-Character marker prevents Fabric's legacy default
+            # seed fallback.  The real service must additionally run with
+            # TORMENT_CHARACTER_ENABLE=0 for the core-only construction.
+            "seed": (
+                self._spec.character_seed
+                if self._spec.character_seed is not None
+                else {"d1_baseline_profile": "core_character_free"}
+            ),
         })
         if agent.get("workspace_id") != self._spec.workspace_id or agent.get("agent_id") != self._spec.agent_id:
             raise D1ProtocolError("legacy service did not create the requested baseline agent")
@@ -88,4 +101,5 @@ class LegacyBaselineBuilder:
         return fingerprint_legacy_baseline(
             root=self._spec.data_root, workspace_id=self._spec.workspace_id,
             agent_id=self._spec.agent_id, domain_id=self._spec.domain_id,
+            character_seed_required=self._spec.character_seed_required,
         )
