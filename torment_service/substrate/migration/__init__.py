@@ -144,6 +144,18 @@ from .workspace_runtime_readiness import (
     WorkspaceReadinessBlockerClass,
     WorkspaceSideStoreReadinessItem,
 )
+from .existing_workspace_admission import (
+    ExistingWorkspaceAdmissionDescriptor,
+    ExistingWorkspaceAdmissionRefused,
+    ExistingWorkspaceAdmissionState,
+    ExistingWorkspaceNativeAdmissionRequest,
+    ExistingWorkspaceNativeAdmissionResult,
+    ExistingWorkspaceNativeAdmissionService,
+    RecoveredExistingWorkspaceNativeReaders,
+    RecoveredExistingWorkspaceNativeRuntime,
+    load_existing_workspace_admission_descriptor,
+    recover_existing_workspace_native_runtime,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -242,4 +254,14 @@ __all__ = [
     "WorkspaceNativeRuntimeReadinessRequest",
     "WorkspaceReadinessBlockerClass",
     "WorkspaceSideStoreReadinessItem",
+    "ExistingWorkspaceAdmissionDescriptor",
+    "ExistingWorkspaceAdmissionRefused",
+    "ExistingWorkspaceAdmissionState",
+    "ExistingWorkspaceNativeAdmissionRequest",
+    "ExistingWorkspaceNativeAdmissionResult",
+    "ExistingWorkspaceNativeAdmissionService",
+    "RecoveredExistingWorkspaceNativeReaders",
+    "RecoveredExistingWorkspaceNativeRuntime",
+    "load_existing_workspace_admission_descriptor",
+    "recover_existing_workspace_native_runtime",
 ]

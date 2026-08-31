@@ -13,6 +13,7 @@ from .schema import require_current_schema
 
 DEFAULT_TEST_BUSY_TIMEOUT_MS = 1_000
 DEFAULT_EXISTING_CORE_BUSY_TIMEOUT_MS = 1_000
+DEFAULT_NEW_CORE_BUSY_TIMEOUT_MS = 1_000
 
 
 @dataclass
@@ -51,6 +52,29 @@ class QualifiedExistingCoreConnection:
         self.connection.close()
 
     def __enter__(self) -> "QualifiedExistingCoreConnection":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
+
+@dataclass
+class QualifiedNewCoreConnection:
+    """One qualified connection to an intentionally new staging-core file.
+
+    The caller remains responsible for immediately creating the schema.  This
+    boundary deliberately refuses an existing destination: a migration cannot
+    accidentally reinterpret an old core as its first admission target.
+    """
+
+    connection: sqlite3.Connection
+    qualification: RuntimeQualificationResult
+    database_path: Path
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def __enter__(self) -> "QualifiedNewCoreConnection":
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -124,6 +148,38 @@ def open_existing_native_core_connection(
     return QualifiedExistingCoreConnection(connection, qualification, path)
 
 
+def open_new_native_core_connection(
+    database_path: str | Path,
+    *,
+    busy_timeout_ms: int = DEFAULT_NEW_CORE_BUSY_TIMEOUT_MS,
+    runtime_policy: RuntimeQualificationPolicy | None = None,
+) -> QualifiedNewCoreConnection:
+    """Open one qualified, previously nonexistent native-core destination.
+
+    This is intentionally separate from the test-only temporary connection and
+    from the existing-core reader.  It neither initializes schema nor upgrades
+    a file; callers can use it only for an explicit first-core bootstrap.
+    """
+    path = _validate_new_core_database_path(database_path)
+    if not isinstance(busy_timeout_ms, int) or busy_timeout_ms < 0:
+        raise SubstrateConfigurationError("busy_timeout_ms must be a non-negative integer")
+    qualification = qualify_runtime(policy=runtime_policy)
+    try:
+        connection = sqlite3.connect(
+            str(path),
+            isolation_level=None,
+            check_same_thread=True,
+        )
+    except sqlite3.Error as exc:
+        raise SubstrateConnectionError("unable to open the new native core destination") from exc
+    try:
+        _configure_connection(connection, busy_timeout_ms=busy_timeout_ms)
+    except Exception:
+        connection.close()
+        raise
+    return QualifiedNewCoreConnection(connection, qualification, path)
+
+
 def _validate_test_database_path(database_path: str | Path) -> Path:
     if not isinstance(database_path, (str, Path)):
         raise SubstrateConfigurationError("a file-backed temporary database path is required")
@@ -145,6 +201,21 @@ def _validate_existing_core_database_path(database_path: str | Path) -> Path:
         raise SubstrateConfigurationError("existing native core database path must use a .db suffix")
     if not path.is_file():
         raise SubstrateConfigurationError("native core database must already exist")
+    return path
+
+
+def _validate_new_core_database_path(database_path: str | Path) -> Path:
+    if not isinstance(database_path, (str, Path)):
+        raise SubstrateConfigurationError("a new native core database path is required")
+    if str(database_path).strip() in {"", ":memory:"}:
+        raise SubstrateConfigurationError("new native core connection requires a file-backed database")
+    path = Path(database_path).expanduser().resolve()
+    if path.suffix.lower() != ".db":
+        raise SubstrateConfigurationError("new native core database path must use a .db suffix")
+    if path.exists():
+        raise SubstrateConfigurationError("new native core destination must not already exist")
+    if not path.parent.is_dir():
+        raise SubstrateConfigurationError("new native core database parent directory must already exist")
     return path
 
 
