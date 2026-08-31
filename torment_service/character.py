@@ -36,7 +36,7 @@ import random
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -191,6 +191,19 @@ class CharacterState:
         dh = filtered.get("drift_history", [])
         filtered["drift_history"] = [(int(t), float(s)) for t, s in dh]
         return cls(**filtered)
+
+
+@dataclass(frozen=True)
+class CharacterDriftMemoryObservation:
+    """One ordered, backend-neutral memory observation for drift measurement.
+
+    The embedding is deliberately not carried here. Character drift reads
+    MemoryGraph's populated cache only after its payload and recency filters.
+    ``measure_drift_from_observations`` keeps that ordering for every reader.
+    """
+
+    eid: int
+    payload: Mapping[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -412,19 +425,22 @@ def plant_seed(
     return seed
 
 
-def measure_drift(
+def measure_drift_from_observations(
     *,
-    graph,            # MemoryGraph (private graph for this agent)
-    motif_registry,   # MotifRegistry
+    observations: List[CharacterDriftMemoryObservation],
+    cached_embedding: Callable[[int], Optional[np.ndarray]],
+    seed_centroid: Callable[[np.ndarray], np.ndarray],
     coherence_field,  # CoherenceField instance (optional — can be None)
     seed: CharacterSeed,
     agent_id: str,
     current_step: int,
     previous_state: Optional[CharacterState] = None,
 ) -> Dict[str, Any]:
-    """Measure how far the character has drifted from the seed basin.
+    """Apply frozen Character drift math to already-qualified observations.
 
-    Returns a drift report dict (also suitable for updating CharacterState).
+    ``cached_embedding`` is called only after the legacy payload
+    ``born_step`` recency test. This keeps Character's cache semantics separate
+    from durable representation retrieval.
     """
     window = seed.drift_window_steps
 
@@ -432,8 +448,9 @@ def measure_drift(
     recent_embs: List[Tuple[float, np.ndarray]] = []  # (weight, embedding)
     tier_counts = {"core_identity": 0, "derived_identity": 0, "relational": 0, "situational": 0}
 
-    for eid, ent in graph.entities.items():
-        payload = ent.payload or {}
+    for observation in observations:
+        eid = observation.eid
+        payload = observation.payload or {}
 
         # Skip seed canon memories (don't measure seed against itself)
         if payload.get("mtype") == "seed_canon" or payload.get("type") == "seed_canon":
@@ -461,7 +478,7 @@ def measure_drift(
             continue
 
         # Load embedding
-        emb = graph._emb_by_eid.get(int(eid))
+        emb = cached_embedding(int(eid))
         if emb is None:
             continue
 
@@ -494,22 +511,9 @@ def measure_drift(
     avg_emb = sum(w * e for w, e in recent_embs) / total_weight
 
     # --- Distance from seed motif centroid ---
-    seed_motif = motif_registry.motifs.get(seed.seed_motif_id)
-    if seed_motif is None:
-        # Seed motif was lost (merge/prune?) — use seed memory embeddings
-        seed_embs = []
-        for seid in seed.seed_eids:
-            se = graph._emb_by_eid.get(seid)
-            if se is not None:
-                seed_embs.append(np.asarray(se, dtype=np.float32).reshape(-1))
-        if seed_embs:
-            seed_centroid = np.mean(seed_embs, axis=0)
-        else:
-            seed_centroid = avg_emb  # no seed data — can't measure
-    else:
-        seed_centroid = seed_motif.centroid_np()
+    seed_centroid_value = seed_centroid(avg_emb)
 
-    raw_sim = float(cosine(avg_emb, seed_centroid))
+    raw_sim = float(cosine(avg_emb, seed_centroid_value))
     distance = 1.0 - raw_sim  # 0.0 = same, 1.0 = orthogonal
 
     # --- Coherence field health at seed basin ---
@@ -576,6 +580,49 @@ def measure_drift(
         "total_recent": len(recent_embs),
         "explanation": explanation,
     }
+
+
+def measure_drift(
+    *,
+    graph,            # MemoryGraph (private graph for this agent)
+    motif_registry,   # MotifRegistry
+    coherence_field,  # CoherenceField instance (optional — can be None)
+    seed: CharacterSeed,
+    agent_id: str,
+    current_step: int,
+    previous_state: Optional[CharacterState] = None,
+) -> Dict[str, Any]:
+    """Measure Character drift through the exact legacy graph/cache path."""
+    observations = [
+        CharacterDriftMemoryObservation(int(eid), ent.payload or {})
+        for eid, ent in graph.entities.items()
+    ]
+
+    def _cached_embedding(eid: int) -> Optional[np.ndarray]:
+        return graph._emb_by_eid.get(int(eid))
+
+    def _seed_centroid(avg_emb: np.ndarray) -> np.ndarray:
+        seed_motif = motif_registry.motifs.get(seed.seed_motif_id)
+        if seed_motif is not None:
+            return seed_motif.centroid_np()
+        # Seed motif was lost (merge/prune?) — use seed memory embeddings.
+        seed_embs = []
+        for seid in seed.seed_eids:
+            se = graph._emb_by_eid.get(seid)
+            if se is not None:
+                seed_embs.append(np.asarray(se, dtype=np.float32).reshape(-1))
+        return np.mean(seed_embs, axis=0) if seed_embs else avg_emb
+
+    return measure_drift_from_observations(
+        observations=observations,
+        cached_embedding=_cached_embedding,
+        seed_centroid=_seed_centroid,
+        coherence_field=coherence_field,
+        seed=seed,
+        agent_id=agent_id,
+        current_step=current_step,
+        previous_state=previous_state,
+    )
 
 
 def gravity_correction(

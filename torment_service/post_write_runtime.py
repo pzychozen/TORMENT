@@ -16,7 +16,11 @@ from typing import Any, Callable, Mapping, Protocol
 
 import numpy as np
 
-from .character import CharacterState, gravity_correction, measure_drift
+from .character import gravity_correction
+from .character_drift_runtime import (
+    CharacterDriftPostWriteRequest,
+    LegacyCharacterDriftRuntime,
+)
 from .derived_memory_runtime import DerivedMemoryRuntimeContext, DerivedMemoryRuntimePort
 from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
 from .srg_runtime_state import SRGTransientRuntimePort
@@ -435,53 +439,42 @@ class LegacyFabricPostWriteAdapter:
     def _run_character_drift(self, context: FabricPostWriteContext) -> None:
         deps = self._deps
         owner = deps.owner
-        if not (owner._character_enable and context.stored and int(context.step) > 0 and int(context.step) % owner._character_drift_every == 0):
-            return
         try:
             seed_id = str(deps.identity.seed.get("seed_id", "") or "").strip()
-            if seed_id:
-                seed = owner.character_store.load_seed(context.workspace_id, seed_id)
-                # `reg` was created only by the legacy CREATED_NEW branch.  The
-                # old outer fail-soft boundary therefore produced no drift side
-                # effects for a reinforcement with a seed.  Preserve that
-                # observed behavior rather than repairing it in this extraction.
-                if seed and seed.seed_motif_id and context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
-                    state = owner.character_store.load_state(context.workspace_id, context.agent_id)
-                    drift = measure_drift(
-                        graph=deps.graph, motif_registry=deps.motif_registry,
-                        coherence_field=None, seed=seed, agent_id=context.agent_id,
-                        current_step=int(context.step), previous_state=state,
-                    )
-                    if state is None:
-                        state = CharacterState(workspace_id=context.workspace_id, agent_id=context.agent_id, seed_id=seed_id)
-                    state.drift_score = float(drift["drift_score"])
-                    state.drift_direction = str(drift["drift_direction"])
-                    state.distance_to_seed = float(drift["distance_to_seed"])
-                    state.seed_basin_phi = float(drift.get("seed_basin_phi", 0.0))
-                    state.seed_basin_kappa = float(drift.get("seed_basin_kappa", 0.0))
-                    state.seed_basin_tension = float(drift.get("seed_basin_tension", 0.0))
-                    state.seed_basin_role = str(drift.get("seed_basin_role", "plateau"))
-                    state.core_count = int(drift.get("core_count", 0))
-                    state.relational_count = int(drift.get("relational_count", 0))
-                    state.situational_count = int(drift.get("situational_count", 0))
-                    state.drift_history.append((int(context.step), float(drift["drift_score"])))
-                    state.drift_history = state.drift_history[-50:]
-                    owner.character_store.save_state(context.workspace_id, state)
-                    high_drift = float(drift["drift_score"]) < -seed.drift_correction_threshold and str(drift["drift_direction"]) == "away_seed"
-                    if high_drift:
-                        gravity_correction(
-                            graph=deps.graph, motif_registry=deps.motif_registry,
-                            embedder=owner.kernel.embedder, seed=seed,
-                            agent_id=context.agent_id, step=int(context.step), drift_info=drift,
-                        )
-                    reflex_key = (context.workspace_id, context.agent_id)
-                    was_high = owner._last_drift_was_high.get(reflex_key, False)
-                    owner._last_drift_was_high[reflex_key] = high_drift
-                    if high_drift and not was_high and owner.drift_reflex_callback is not None:
-                        try:
-                            owner.drift_reflex_callback(context.workspace_id, context.agent_id, dict(drift))
-                        except Exception:
-                            owner._log.exception("drift_reflex_callback raised for ws=%s agent=%s", context.workspace_id, context.agent_id)
+            runtime = LegacyCharacterDriftRuntime(
+                character_enabled=owner._character_enable,
+                drift_every=owner._character_drift_every,
+                seed_id=seed_id,
+                store=owner.character_store,
+                graph=deps.graph,
+                motif_registry=deps.motif_registry,
+            )
+            result = runtime.measure_for_post_write(CharacterDriftPostWriteRequest(
+                workspace_id=context.workspace_id,
+                agent_id=context.agent_id,
+                current_step=int(context.step),
+                stored=context.stored,
+                storage_outcome=context.storage_outcome.value,
+            ))
+            if not result.measured or result.seed is None or result.drift is None:
+                return
+            drift = result.drift
+            if result.high_drift:
+                gravity_correction(
+                    graph=deps.graph, motif_registry=deps.motif_registry,
+                    embedder=owner.kernel.embedder, seed=result.seed,
+                    agent_id=context.agent_id, step=int(context.step), drift_info=dict(drift),
+                )
+            # Reflex remains an ordinary existing Fabric callback. The neutral
+            # measurement port only reports its edge; it cannot invoke actions.
+            reflex_key = (context.workspace_id, context.agent_id)
+            was_high = owner._last_drift_was_high.get(reflex_key, False)
+            owner._last_drift_was_high[reflex_key] = result.high_drift
+            if result.high_drift and not was_high and owner.drift_reflex_callback is not None:
+                try:
+                    owner.drift_reflex_callback(context.workspace_id, context.agent_id, dict(drift))
+                except Exception:
+                    owner._log.exception("drift_reflex_callback raised for ws=%s agent=%s", context.workspace_id, context.agent_id)
         except Exception:
             pass
 
