@@ -9,6 +9,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from torment_service.character import CharacterSeed
+from torment_service.character_drift_runtime import (
+    CharacterDriftMeasurementResult,
+    CharacterDriftMeasurementStatus,
+)
+from torment_service.character_gravity_runtime import (
+    CharacterGravityCorrectionResult,
+    CharacterGravityCorrectionStatus,
+)
 from torment_service.fabric import _detect_canon_conflict
 from torment_service.kernel.seed_entities import SeedEntity
 from torment_service.memory_graph import MemoryGraph
@@ -151,13 +160,21 @@ def _context(
     )
 
 
-def _adapter(port, *, field: _Field | None = None):
+def _adapter(
+    port,
+    *,
+    field: _Field | None = None,
+    character_drift_runtime=None,
+    character_gravity_runtime=None,
+):
     conflicts = _Conflicts()
     field = field or _Field()
     owner = SimpleNamespace(
         _log=logging.getLogger("a3d3-owner"), _hivemind_enable=True,
         _hivemind_telemetry_enable=True, hivemind_events=[],
         character_store=SimpleNamespace(load_state=lambda *_args: None),
+        _character_enable=False, _character_drift_every=1,
+        _last_drift_was_high={}, drift_reflex_callback=None,
         _get_collective_field=lambda _workspace_id: field,
         _get_proposal_bridge=lambda _workspace_id: SimpleNamespace(maybe_draft_proposal=lambda **_kwargs: None),
     )
@@ -173,13 +190,15 @@ def _adapter(port, *, field: _Field | None = None):
         graph=_NoGraph(), world_runtime=_NoWorldRuntime(), derived_memory_runtime=derived_runtime,
         memory_access=port, memory_enumeration=port,
         srg_runtime=_NoSRGRuntime(), embedding_dimension=3,
-        identity=None, motif_registry=None, motif_runtime=None,
+        identity=SimpleNamespace(seed={}), motif_registry=None, motif_runtime=None,
         model_state=None, kernel_context=None, agent_key="ws::aria",
         detect_canon_conflict=_detect_canon_conflict, proposal_allowed=lambda **_kwargs: False,
         random_chance=lambda _probability: False, save_checkpoint=lambda **_kwargs: None,
         build_motif_summary=lambda *_args, **_kwargs: None,
         build_shard_snapshot=lambda *_args, **_kwargs: None,
         hivemind_log=logging.getLogger("torment.hivemind"),
+        character_drift_runtime=character_drift_runtime,
+        character_gravity_runtime=character_gravity_runtime,
     )
     return LegacyFabricPostWriteAdapter(dependencies), conflicts, field
 
@@ -467,3 +486,93 @@ def test_native_port_qualifies_hivemind_structural_admission_read_only(
         assert _native_counts(connection) == before
     finally:
         qualified.close()
+
+
+def _character_correction_seed() -> CharacterSeed:
+    return CharacterSeed(
+        "seed", "Aria", "A durable concept.", seed_motif_id="seed-motif",
+        drift_correction_threshold=0.2, drift_gravity_strength=0.12, core_half_life=3650.0,
+    )
+
+
+class _HighCharacterMeasurement:
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+        self._seed = _character_correction_seed()
+        self._drift = {"drift_score": -0.2, "drift_direction": "away_seed"}
+
+    def measure_for_post_write(self, _request):
+        self._calls.append("measurement")
+        return CharacterDriftMeasurementResult(
+            CharacterDriftMeasurementStatus.CHARACTER_GRAVITY_CORRECTION_REQUIRED,
+            seed=self._seed, drift=self._drift, high_drift=True,
+        )
+
+
+class _RecordingCharacterCorrection:
+    def __init__(self, calls: list[str], *, fail: bool = False) -> None:
+        self._calls = calls
+        self._fail = fail
+        self.requests = []
+
+    def correct_for_post_write(self, request):
+        self._calls.append("correction")
+        self.requests.append(request)
+        if self._fail:
+            raise RuntimeError("correction did not complete")
+        return CharacterGravityCorrectionResult(CharacterGravityCorrectionStatus.APPLIED, True)
+
+
+def test_neutral_character_ports_preserve_correction_then_rising_edge_reflex():
+    calls: list[str] = []
+    measurement = _HighCharacterMeasurement(calls)
+    correction = _RecordingCharacterCorrection(calls)
+    adapter, _conflicts, _field = _adapter(
+        _Port(), character_drift_runtime=measurement, character_gravity_runtime=correction,
+    )
+    adapter._deps.owner.drift_reflex_callback = lambda workspace_id, agent_id, drift: calls.append(
+        f"reflex:{workspace_id}:{agent_id}:{drift['drift_score']}"
+    )
+
+    adapter._run_character_drift(_context())
+    adapter._run_character_drift(_context())
+
+    assert calls == [
+        "measurement", "correction", "reflex:ws:aria:-0.2",
+        "measurement", "correction",
+    ]
+    assert [(request.workspace_id, request.agent_id, request.step) for request in correction.requests] == [
+        ("ws", "aria", 4), ("ws", "aria", 4),
+    ]
+    assert adapter._deps.owner._last_drift_was_high == {("ws", "aria"): True}
+
+
+def test_character_correction_failure_preserves_reflex_edge_and_callback_is_swallowed():
+    failed_calls: list[str] = []
+    failed = _RecordingCharacterCorrection(failed_calls, fail=True)
+    failed_adapter, _conflicts, _field = _adapter(
+        _Port(), character_drift_runtime=_HighCharacterMeasurement(failed_calls),
+        character_gravity_runtime=failed,
+    )
+    failed_adapter._deps.owner.drift_reflex_callback = lambda *_args: failed_calls.append("reflex")
+
+    failed_adapter._run_character_drift(_context())
+
+    assert failed_calls == ["measurement", "correction"]
+    assert failed_adapter._deps.owner._last_drift_was_high == {}
+
+    callback_calls: list[str] = []
+    callback_adapter, _conflicts, _field = _adapter(
+        _Port(), character_drift_runtime=_HighCharacterMeasurement(callback_calls),
+        character_gravity_runtime=_RecordingCharacterCorrection(callback_calls),
+    )
+
+    def failing_callback(*_args):
+        callback_calls.append("reflex")
+        raise RuntimeError("application callback failure")
+
+    callback_adapter._deps.owner.drift_reflex_callback = failing_callback
+    callback_adapter._run_character_drift(_context())
+
+    assert callback_calls == ["measurement", "correction", "reflex"]
+    assert callback_adapter._deps.owner._last_drift_was_high == {("ws", "aria"): True}

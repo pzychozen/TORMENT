@@ -161,6 +161,8 @@ class _Owner:
         self._hivemind_telemetry_enable = True
         self._character_enable = False
         self._character_drift_every = 1
+        self._last_drift_was_high = {}
+        self.drift_reflex_callback = None
         self._compress_enable = False
         self._compress_min_step = 0
         self._checkpoint_enable = False
@@ -179,6 +181,15 @@ class _Owner:
 
     def _emit_hivemind_packet_telemetry(self, **kwargs) -> None:
         self.telemetry.append(kwargs)
+
+
+class _CharacterEmbedder:
+    provider = "synthetic"
+    model = "synthetic-v1"
+    dim = 3
+
+    def embed(self, _text: str):
+        return np.asarray((2.0, 0.6, 0.0), dtype=np.float32)
 
 
 def _environment(scope):
@@ -301,6 +312,41 @@ def test_adapter_requires_explicit_preparation_and_does_not_grant_activation(tmp
         assert capability.qualification_only is True
     finally:
         _qualified.close()
+
+
+def test_explicit_character_profile_admits_only_the_native_character_slot(tmp_path: Path):
+    qualified, connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, _workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._character_enable = True
+        identity.seed["seed_id"] = "unavailable"
+        character_store = SimpleNamespace(
+            load_seed=lambda *_args: None,
+            load_state=lambda *_args: None,
+            save_state=lambda *_args, **_kwargs: None,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_character(),
+            external=replace(
+                configuration.external,
+                character_store=character_store,
+                character_embedder=_CharacterEmbedder(),
+            ),
+        )
+        request = _request("character-profile", 1)
+        result = NativeFabricMemoryRouter(capability).route(request).result
+        assert result is not None
+        before = _counts(connection)
+        _adapter(capability, configuration).run(
+            _context(result, request),
+            route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
+        )
+        assert _counts(connection) == before
+        assert configuration.profile.character.name == "QUALIFIED"
+        assert NativePostWriteQualificationProfile.core_staging().character.name == "UNSUPPORTED"
+    finally:
+        qualified.close()
 
 
 def test_created_new_runs_the_qualified_native_core_in_frozen_order(tmp_path: Path, monkeypatch):

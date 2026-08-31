@@ -16,10 +16,15 @@ from typing import Any, Callable, Mapping, Protocol
 
 import numpy as np
 
-from .character import gravity_correction
 from .character_drift_runtime import (
     CharacterDriftPostWriteRequest,
+    CharacterDriftRuntimePort,
     LegacyCharacterDriftRuntime,
+)
+from .character_gravity_runtime import (
+    CharacterGravityCorrectionRequest,
+    CharacterGravityCorrectionRuntimePort,
+    LegacyCharacterGravityCorrectionRuntime,
 )
 from .derived_memory_runtime import DerivedMemoryRuntimeContext, DerivedMemoryRuntimePort
 from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
@@ -119,6 +124,8 @@ class LegacyFabricPostWriteDependencies:
     build_motif_summary: Callable[..., Any]
     build_shard_snapshot: Callable[..., Any]
     hivemind_log: logging.Logger
+    character_drift_runtime: CharacterDriftRuntimePort | None = None
+    character_gravity_runtime: CharacterGravityCorrectionRuntimePort | None = None
 
 
 class FabricPostWriteRuntimePort(Protocol):
@@ -441,7 +448,7 @@ class LegacyFabricPostWriteAdapter:
         owner = deps.owner
         try:
             seed_id = str(deps.identity.seed.get("seed_id", "") or "").strip()
-            runtime = LegacyCharacterDriftRuntime(
+            runtime = deps.character_drift_runtime or LegacyCharacterDriftRuntime(
                 character_enabled=owner._character_enable,
                 drift_every=owner._character_drift_every,
                 seed_id=seed_id,
@@ -460,11 +467,13 @@ class LegacyFabricPostWriteAdapter:
                 return
             drift = result.drift
             if result.high_drift:
-                gravity_correction(
-                    graph=deps.graph, motif_registry=deps.motif_registry,
-                    embedder=owner.kernel.embedder, seed=result.seed,
-                    agent_id=context.agent_id, step=int(context.step), drift_info=dict(drift),
+                correction = deps.character_gravity_runtime or LegacyCharacterGravityCorrectionRuntime(
+                    graph=deps.graph, motif_registry=deps.motif_registry, embedder=owner.kernel.embedder,
                 )
+                correction.correct_for_post_write(CharacterGravityCorrectionRequest(
+                    workspace_id=context.workspace_id, agent_id=context.agent_id,
+                    step=int(context.step), seed=result.seed, drift=drift,
+                ))
             # Reflex remains an ordinary existing Fabric callback. The neutral
             # measurement port only reports its edge; it cannot invoke actions.
             reflex_key = (context.workspace_id, context.agent_id)

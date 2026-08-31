@@ -35,6 +35,16 @@ from .native_memory_runtime_access import NativePostWriteMemoryAccess
 from .native_srg_runtime import NativeSRGTransientRuntime
 from .native_world_runtime import NativeWorldRuntime
 from .native_derived_memory_runtime import NativeDerivedMemoryRuntimeConfiguration
+from .native_character_drift_runtime import (
+    NativeCharacterDriftRuntime,
+    NativeCharacterDriftRuntimeConfiguration,
+)
+from .native_character_gravity_runtime import (
+    NativeCharacterGravityCorrectionRuntime,
+    NativeCharacterGravityCorrectionRuntimeConfiguration,
+)
+from .motif_runtime_reader import NativeMotifRuntimeReader
+from .runtime_binding import validate_fabric_embedder
 
 
 class NativePostWriteBehavior(str, Enum):
@@ -75,6 +85,11 @@ class NativePostWriteQualificationProfile:
             NativePostWriteBehavior.DISABLED_FOR_PROFILE, NativePostWriteBehavior.DISABLED_FOR_PROFILE,
         )
 
+    @classmethod
+    def core_staging_with_character(cls) -> "NativePostWriteQualificationProfile":
+        """Explicit C1A/C1B staging profile; ``core_staging`` remains frozen."""
+        return replace(cls.core_staging(), character=NativePostWriteBehavior.QUALIFIED)
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -87,6 +102,8 @@ class NativePostWriteExternalDependencies:
     detect_canon_conflict: Callable[[str, str, float], tuple[bool, float, str]]
     proposal_allowed: Callable[..., bool]
     hivemind_log: logging.Logger
+    character_store: Any | None = None
+    character_embedder: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +195,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
                 # then invokes the extracted derived-memory sequence directly.
                 consumers._run_derived_memory(context)
             consumers._run_world_step(context)
+            consumers._run_character_drift(context)
             proposal_id = consumers._run_proposal(context)
             return FabricPostWriteOutcome(proposal_id=proposal_id)
 
@@ -209,6 +227,49 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             configuration=replace(template, parent_native_operation_key=parent_key),
         )
         external = self._configuration.external
+        character_drift = None
+        character_correction = None
+        if self._configuration.profile.character is NativePostWriteBehavior.QUALIFIED:
+            embedder = external.character_embedder
+            if embedder is None:
+                raise SubstrateConfigurationError("Character-qualified post-write requires the caller-owned embedder")
+            validate_fabric_embedder(self._capability.binding, embedder)
+            seed_id = str(external.identity.seed.get("seed_id", "") or "").strip()
+            store = external.character_store
+            if store is None:
+                raise SubstrateConfigurationError("Character-qualified post-write requires CharacterStore")
+            character_drift = NativeCharacterDriftRuntime(
+                configuration=NativeCharacterDriftRuntimeConfiguration(
+                    workspace_id=scope.runtime_scope.workspace_id,
+                    agent_id=scope.runtime_scope.agent_id,
+                    seed_id=seed_id,
+                    domain_id=template.domain_id,
+                    motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                    semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+                    expected_dimension=self._capability.binding.representation_lane.dimension,
+                    character_enabled=bool(getattr(external.owner, "_character_enable", False)),
+                    drift_every=int(getattr(external.owner, "_character_drift_every", 1)),
+                    embedding_cache_enabled=True,
+                ),
+                store=store,
+                memory_read=memory,
+                memory_enumeration=memory,
+                motif_reader=NativeMotifRuntimeReader(connection),
+            )
+            character_correction = NativeCharacterGravityCorrectionRuntime(
+                connection,
+                configuration=NativeCharacterGravityCorrectionRuntimeConfiguration(
+                    workspace_id=scope.runtime_scope.workspace_id,
+                    agent_id=scope.runtime_scope.agent_id,
+                    domain_id=template.domain_id,
+                    parent_native_operation_key=parent_key,
+                    routing_scope=scope,
+                    representation_lane=self._capability.binding.representation_lane,
+                    embedder=embedder,
+                ),
+                world_process_state=self._capability.world_process_state,
+                motif_process_order=self._capability.process_order,
+            )
         return LegacyFabricPostWriteDependencies(
             owner=external.owner, workspace=external.workspace, graph=_ForbiddenNativeGraph(),
             world_runtime=world, derived_memory_runtime=derived, memory_access=memory,
@@ -223,6 +284,8 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             build_motif_summary=_forbidden_checkpoint,
             build_shard_snapshot=_forbidden_checkpoint,
             hivemind_log=external.hivemind_log,
+            character_drift_runtime=character_drift,
+            character_gravity_runtime=character_correction,
         )
 
     def _validate_context_and_route(
@@ -309,7 +372,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         character_due = bool(getattr(owner, "_character_enable", False)) and context.stored and (
             int(context.step) > 0 and int(context.step) % int(getattr(owner, "_character_drift_every", 1)) == 0
         )
-        if character_due:
+        if character_due and profile.character is not NativePostWriteBehavior.QUALIFIED:
             _refuse(profile.character, "Character drift")
         compression_due = bool(getattr(owner, "_compress_enable", False)) and int(context.step) >= int(getattr(owner, "_compress_min_step", 0))
         if compression_due:
