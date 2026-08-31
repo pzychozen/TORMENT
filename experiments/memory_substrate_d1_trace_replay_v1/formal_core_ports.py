@@ -17,7 +17,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import UUID
 
@@ -61,7 +60,10 @@ from .legacy_capture import (
 )
 from .native_replay import NativeCoreStorageSnapshot, NativeReplayHarness
 from .protocol import D1ProtocolError
-from .real_n0 import _configuration
+from .formal_core_post_write import (
+    build_formal_native_post_write_configuration,
+    validate_formal_post_write_external_dependencies,
+)
 from .side_store_observation import (
     CORE_CHARACTER_FREE_L0_FINGERPRINT,
     CORE_SIDE_STORE_OBSERVATION_DIGEST,
@@ -274,7 +276,11 @@ def _uuid_by_key(connection: Any, table: str, id_column: str, key_column: str, k
     return UUID(bytes=rows[0][0])
 
 
-def _prepare_native_scope(database: Path) -> tuple[Any, Any, _NativeScope]:
+def _prepare_native_scope(
+    database: Path,
+    *,
+    mutable_arm_root: Path | None = None,
+) -> tuple[Any, Any, _NativeScope]:
     """Open only an existing qualified core and prepare its frozen A3D wiring."""
     with open_existing_native_core_connection(database) as opened:
         connection = opened.connection
@@ -315,8 +321,16 @@ def _prepare_native_scope(database: Path) -> tuple[Any, Any, _NativeScope]:
         capability = prepare_native_fabric_routing_capability(
             binding=binding, connection=connection, routing_scopes=(routing,), expected_core_id=core_id,
         )
+        configuration = build_formal_native_post_write_configuration(
+            routing_scope=routing,
+            lane=lane,
+            mutable_arm_root=mutable_arm_root,
+        )
+        # This structural-only validation runs before any possible route or
+        # native post-write contact, including when validating a frozen source.
+        validate_formal_post_write_external_dependencies(configuration)
         return capability, prepare_native_fabric_post_write_adapter(
-            capability=capability, configuration=_configuration(plan, lane),
+            capability=capability, configuration=configuration,
         ), _NativeScope(lane, runtime, routing)
 
 
@@ -364,7 +378,10 @@ class QualifiedNativeArmSession:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
         self._database = self._root / "n0_core.db"
-        self._capability, self._post_write, self._scope = _prepare_native_scope(self._database)
+        self._capability, self._post_write, self._scope = _prepare_native_scope(
+            self._database,
+            mutable_arm_root=self._root,
+        )
         self._router = NativeFabricMemoryRouter(self._capability)
         self.router_call_count = 0
 
