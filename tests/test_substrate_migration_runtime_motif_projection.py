@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
@@ -226,6 +228,7 @@ def test_b4a_baseline_membership_remains_auditable_after_native_retirement(tmp_p
             "SELECT existence_state FROM relationship_revisions WHERE relationship_id=? ORDER BY revision_ordinal DESC LIMIT 1",
             (native_id_to_bytes(split.retired_membership_relationship_ids[0]),),
         ).fetchone()[0] == "RETIRED"
+        expected_child_radius = reader.motif_radius(split.child_motif_object_id, expected_dimension=3)
         path = qualified.database_path
         qualified.close()
         with open_existing_native_core_connection(path) as reopened:
@@ -234,4 +237,46 @@ def test_b4a_baseline_membership_remains_auditable_after_native_retirement(tmp_p
             assert [item.member_object_id for item in recovered.list_ordered_current_motif_members(split.child_motif_object_id)] == [
                 facts["normalized"].object_id, candidate.object_id,
             ]
+        # A fresh interpreter must recover the same current topology, alias,
+        # retirement history, ordering, and geometry without legacy JSON.
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
+import sys
+from pathlib import Path
+from uuid import UUID
+from torment_service.substrate.connection import open_existing_native_core_connection
+from torment_service.substrate.ids import native_id_to_bytes
+from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
+from torment_service.substrate.motifs import NativeMotifService
+
+path, parent_text, child_text, member_text, candidate_text, alias_namespace_text, radius_text = sys.argv[1:]
+parent = UUID(parent_text)
+child = UUID(child_text)
+member = UUID(member_text)
+candidate = UUID(candidate_text)
+alias_namespace = UUID(alias_namespace_text)
+with open_existing_native_core_connection(Path(path)) as reopened:
+    connection = reopened.connection
+    reader = NativeMotifRuntimeReader(connection)
+    assert reader.list_ordered_current_motif_members(parent) == ()
+    assert [entry.member_object_id for entry in reader.list_ordered_current_motif_members(child)] == [member, candidate]
+    assert reader.motif_radius(child, expected_dimension=3) == float(radius_text)
+    assert NativeMotifService(connection).resolve_motif_alias(
+        motif_alias_namespace_id=alias_namespace, runtime_motif_id="motif-b4a_split_0001",
+    ) == child
+    assert connection.execute(
+        "SELECT count(*) FROM relationship_revisions WHERE existence_state='RETIRED'"
+    ).fetchone()[0] == 1
+""",
+                str(path), str(projected.motif_object_id), str(split.child_motif_object_id),
+                str(facts["normalized"].object_id), str(candidate.object_id),
+                str(facts["plan"].motif_alias_namespace_id), str(expected_child_radius),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     finally: qualified.close()

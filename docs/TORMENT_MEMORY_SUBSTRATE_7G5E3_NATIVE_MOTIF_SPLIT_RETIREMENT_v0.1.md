@@ -97,8 +97,9 @@ retirement evidence, and rollback seams. Composition tests cover a qualified
 retirement successors and no transient candidate membership; a qualified
 96-member no-split geometry remains one active motif with no retirement or
 child; and a later second split uses current active children only. The B4A
-projection test closes, reopens, and recovers a retired baseline member with
-its original child order and alias.
+projection test closes, reopens, and starts a fresh Python interpreter to
+recover a retired baseline member with its original child order, radius, and
+alias.
 
 `SCHEMA_VERSION_CHANGE_REQUIRED = NO`: relationship revisions already accept
 the required `RETIRED` existence-state text.
