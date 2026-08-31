@@ -10,6 +10,7 @@ import argparse
 import base64
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -20,6 +21,7 @@ import numpy as np
 
 from torment_service.motif_decision import _unit
 from torment_service.motif_geometry import motif_radius_from_member_vectors
+from torment_service.memory_graph import MemoryGraph
 
 from .legacy_fixture_capture import (
     _SERVICE_ENV,
@@ -106,6 +108,7 @@ def _legacy_evidence(
     node = _latest_nodes(private_root / "nodes.jsonl").get(eid) if isinstance(eid, int) else None
     payload = dict((node or {}).get("payload", {}) or {})
     signals = dict(response.get("signals", {}) or {})
+    tri = dict(response.get("tri_mod", {}) or {})
     motifs = list(response.get("motifs", []) or [])
     supplied = request.get("supplied_embedding_base64")
     if not isinstance(supplied, str):
@@ -138,6 +141,14 @@ def _legacy_evidence(
         },
         "post_write": _post_write_intent(response),
         "optional_feature_divergences": [],
+        # This is observation only.  It makes the normal HTTP producer's
+        # pre-write signal and multiplier inputs visible without treating the
+        # signal as a durable payload value.
+        "upstream_half_life_inputs": {
+            "kernel_signal_half_life": float(signals.get("half_life", 0.0)),
+            "survival_steps": float(tri.get("survival_steps", 0.0)),
+            "tearing_risk": float(tri.get("tearing_risk", 0.0)),
+        },
     }
 
 
@@ -204,13 +215,67 @@ class _LegacyWorkerSession:
         surface used by the frozen successor-002 administration.
         """
         evidence, payload = self._replay_http(value)
+        signal_half_life = evidence["storage"].get("half_life_days")
+        upstream_half_life_inputs = evidence.get("upstream_half_life_inputs")
         if payload is None:
-            return {**evidence, "semantic": None}
+            return {
+                **evidence,
+                "semantic": None,
+                "fresh_http_signal_half_life": signal_half_life,
+                "upstream_half_life_inputs": upstream_half_life_inputs,
+            }
         return {
             **evidence,
             "storage": project_legacy_durable_storage(evidence["storage"], payload),
             "semantic": project_legacy_regression_semantics(payload),
+            "fresh_http_signal_half_life": signal_half_life,
+            "upstream_half_life_inputs": upstream_half_life_inputs,
         }
+
+    def characterize_same_input_half_life_storage(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Write supplied half-life inputs through the normal legacy primitive only.
+
+        This is deliberately outside the HTTP/cognition path.  The graph is a
+        disposable sibling inside this already-disposable worker clone, and
+        the returned values are read from durable ``nodes.jsonl`` records.
+        """
+        root = self._require_open()
+        raw_inputs = value.get("half_life_inputs")
+        if not isinstance(raw_inputs, list) or not (1 <= len(raw_inputs) <= 16):
+            raise D1ProtocolError("legacy half-life characterization requires one to sixteen inputs")
+        inputs: list[float] = []
+        for item in raw_inputs:
+            try:
+                half_life = float(item)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise D1ProtocolError("legacy half-life characterization input is invalid") from exc
+            if not math.isfinite(half_life) or half_life <= 0.0:
+                raise D1ProtocolError("legacy half-life characterization input must be finite and positive")
+            inputs.append(half_life)
+        target = root / "d1o_same_input_half_life_storage"
+        if target.exists():
+            raise D1ProtocolError("legacy half-life characterization target must be new")
+        graph = MemoryGraph(str(target))
+        rows: list[dict[str, float]] = []
+        for ordinal, half_life in enumerate(inputs):
+            vector = np.zeros(384, dtype=np.float32)
+            vector[ordinal] = np.float32(1.0)
+            eid = graph.add_memory(
+                summary=f"D1O same-input half-life {ordinal}", embedding=vector,
+                mtype="episode", strength=0.5, confidence=0.5,
+                half_life_days=half_life, user_id="d1o", step=ordinal + 1,
+                memory_class="core",
+            )
+            node = _latest_nodes(target / "nodes.jsonl").get(eid)
+            payload = (node or {}).get("payload")
+            if not isinstance(payload, Mapping) or "half_life" not in payload:
+                raise D1ProtocolError("legacy half-life primitive did not publish a durable payload")
+            try:
+                durable = float(payload["half_life"])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise D1ProtocolError("legacy half-life durable payload is invalid") from exc
+            rows.append({"input_half_life": half_life, "durable_half_life": durable})
+        return {"rows": rows}
 
     def capture_durable_state(self) -> dict[str, Any]:
         return _tree_state(self._require_open())
@@ -290,6 +355,7 @@ def _serve() -> int:
         "open": session.open,
         "replay_http": session.replay_http,
         "replay_http_regression_v1": session.replay_http_regression_v1,
+        "characterize_same_input_half_life_storage": session.characterize_same_input_half_life_storage,
         "capture_durable_state": lambda _value: session.capture_durable_state(),
         "restart_cleanly": lambda _value: session.restart_cleanly(),
         "search_by_embedding": session.search_by_embedding,

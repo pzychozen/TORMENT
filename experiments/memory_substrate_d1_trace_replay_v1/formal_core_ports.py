@@ -331,12 +331,58 @@ class LegacyHttpArmSession:
 
     def replay_identified_defect_regression(
         self, request: Mapping[str, Any],
-    ) -> tuple[CoreReplayEvidence, Mapping[str, Any] | None]:
+    ) -> tuple[CoreReplayEvidence, Mapping[str, Any] | None, float | None, Mapping[str, float] | None]:
         value = self._worker.request("replay_http_regression_v1", request=dict(request))
         semantic = value.pop("semantic", None)
+        signal_half_life = value.pop("fresh_http_signal_half_life", None)
+        upstream = value.pop("upstream_half_life_inputs", None)
         if semantic is not None and not isinstance(semantic, Mapping):
             raise CoreFormalPortFailure("legacy regression semantic evidence is malformed")
-        return _core_replay_evidence(value), (dict(semantic) if semantic is not None else None)
+        if signal_half_life is not None:
+            try:
+                signal_half_life = float(signal_half_life)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise CoreFormalPortFailure("legacy regression signal half-life is malformed") from exc
+        if upstream is not None and not isinstance(upstream, Mapping):
+            raise CoreFormalPortFailure("legacy regression half-life inputs are malformed")
+        normalized_upstream: dict[str, float] | None = None
+        if upstream is not None:
+            try:
+                normalized_upstream = {
+                    "kernel_signal_half_life": float(upstream["kernel_signal_half_life"]),
+                    "survival_steps": float(upstream["survival_steps"]),
+                    "tearing_risk": float(upstream["tearing_risk"]),
+                }
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise CoreFormalPortFailure("legacy regression half-life inputs are invalid") from exc
+        return (
+            _core_replay_evidence(value),
+            (dict(semantic) if semantic is not None else None),
+            signal_half_life,
+            normalized_upstream,
+        )
+
+    def characterize_same_input_half_life_storage(
+        self, half_life_inputs: Sequence[float],
+    ) -> tuple[tuple[float, float], ...]:
+        value = self._worker.request(
+            "characterize_same_input_half_life_storage",
+            half_life_inputs=[float(item) for item in half_life_inputs],
+        )
+        rows = value.get("rows")
+        if not isinstance(rows, list):
+            raise CoreFormalPortFailure("legacy half-life characterization rows are malformed")
+        output: list[tuple[float, float]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise CoreFormalPortFailure("legacy half-life characterization row is malformed")
+            try:
+                output.append((float(row["input_half_life"]), float(row["durable_half_life"])))
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise CoreFormalPortFailure("legacy half-life characterization row is invalid") from exc
+        if len(output) != len(half_life_inputs):
+            raise CoreFormalPortFailure("legacy half-life characterization row count differs from inputs")
+        return tuple(output)
 
     def capture_durable_state(self) -> Mapping[str, Any]:
         return dict(self._worker.request("capture_durable_state"))

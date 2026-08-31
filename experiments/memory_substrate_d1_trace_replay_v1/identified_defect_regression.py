@@ -12,7 +12,10 @@ import argparse
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
+import shutil
 from typing import Any, Mapping
+
+import numpy as np
 
 from torment_service.fabric import _detect_canon_conflict
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
@@ -31,6 +34,7 @@ from .formal_core_executor import CoreFrozenArm, CoreFrozenEvent, CoreFrozenFixt
 from .formal_core_ports import (
     ConcreteCoreFormalExecutionPorts,
     CoreArmRoots,
+    CoreD1SourceLocations,
     CoreFormalPortFailure,
     QualifiedNativeArmSession,
     _facts_from_mapping,
@@ -41,10 +45,18 @@ from .identified_defect_semantics import (
     project_frozen_provenance_intent,
     project_native_regression_semantics,
 )
+from .half_life_input_identity import (
+    RESIDUAL_FIXTURE_IDS,
+    characterize_legacy_http_time_sensitivity,
+    frozen_residual_half_lives,
+    trace_half_life_values,
+    verify_frozen_inputs_match_v1_native_artifact,
+)
 from .protocol import D1ProtocolError, sha256_value
 
 
 REGRESSION_PROFILE = "D1_IDENTIFIED_DEFECT_REGRESSION_V1"
+REGRESSION_PROFILE_V2 = "D1_IDENTIFIED_DEFECT_REGRESSION_V2"
 ORIGINAL_D1_DIFFERENCE_COUNT = 53
 _STORAGE_EXACT_FIELDS = (
     "stored", "reinforced", "compatible_eid", "summary", "memory_type",
@@ -124,13 +136,58 @@ class RegressionNativeArmSession(QualifiedNativeArmSession):
 
 def run_identified_defect_regression_v1(*, work_root: str | Path) -> dict[str, Any]:
     """Run the new isolated comparison profile once over six fresh arm clones."""
+    return _run_identified_defect_regression(
+        work_root=work_root,
+        profile=REGRESSION_PROFILE,
+        use_frozen_storage_facts=False,
+    )
+
+
+def run_identified_defect_regression_v2(*, work_root: str | Path) -> dict[str, Any]:
+    """Run D1O's same-storage-input successor to the retained V1 profile.
+
+    V2 does not modify V1 or the historical D1 result.  It compares native
+    durable scalar storage with the frozen storage-facing inputs, while the
+    fresh legacy HTTP replay remains separately recorded as an upstream
+    recomputation characterization.
+    """
+    return _run_identified_defect_regression(
+        work_root=work_root,
+        profile=REGRESSION_PROFILE_V2,
+        use_frozen_storage_facts=True,
+    )
+
+
+def _run_identified_defect_regression(
+    *, work_root: str | Path, profile: str, use_frozen_storage_facts: bool,
+) -> dict[str, Any]:
+    if profile not in (REGRESSION_PROFILE, REGRESSION_PROFILE_V2):
+        raise D1ProtocolError("D1 identified-defect profile is unknown")
     fixture = CoreFrozenFixture.load()
     validate_frozen_core_input_contract(fixture)
+    frozen_half_lives = frozen_residual_half_lives(fixture) if use_frozen_storage_facts else {}
+    v1_artifact_precheck = (
+        verify_frozen_inputs_match_v1_native_artifact(fixture)
+        if use_frozen_storage_facts else {}
+    )
+    same_input_values = (
+        (0.5, 0.95, *(frozen_half_lives[fixture_id] for fixture_id in RESIDUAL_FIXTURE_IDS))
+        if use_frozen_storage_facts else ()
+    )
+    root = Path(work_root).resolve()
     ports = ConcreteCoreFormalExecutionPorts(
-        administration_work_root=work_root,
+        administration_work_root=root,
         native_session_factory=RegressionNativeArmSession,
     )
     ports.verify_frozen_sources()
+    native_same_input = (
+        characterize_native_same_input_half_life_storage(
+            target_root=root / "D1O_SAME_INPUT_NATIVE",
+            fixture=fixture,
+            half_life_inputs=same_input_values,
+        )
+        if use_frozen_storage_facts else ()
+    )
     roots = {arm.arm_id: ports.allocate_arm_roots(arm) for arm in fixture.arms}
     arm_results: dict[str, dict[str, Any]] = {}
     restart: list[dict[str, Any]] = []
@@ -138,7 +195,13 @@ def run_identified_defect_regression_v1(*, work_root: str | Path) -> dict[str, A
     structural: list[dict[str, Any]] = []
     for arm in fixture.arms:
         result, restart_row, retrieval_row, structural_rows = _run_arm(
-            ports=ports, arm=arm, roots=roots[arm.arm_id],
+            ports=ports,
+            arm=arm,
+            roots=roots[arm.arm_id],
+            frozen_scalar_inputs=use_frozen_storage_facts,
+            same_input_half_lives=(
+                same_input_values if use_frozen_storage_facts and arm.arm_id == "M1_CREATE" else None
+            ),
         )
         arm_results[arm.arm_id] = result
         restart.append(restart_row)
@@ -154,12 +217,9 @@ def run_identified_defect_regression_v1(*, work_root: str | Path) -> dict[str, A
         for arm in arm_results.values()
         for row in arm["post_write_differences"]
     ]
-    return {
+    common = {
         "profile": REGRESSION_PROFILE,
         "original_d1_difference_count": ORIGINAL_D1_DIFFERENCE_COUNT,
-        "regression_v1_difference_count": len(all_differences),
-        "regression_v1_difference_count_by_field": _counts(all_differences, "field"),
-        "regression_v1_difference_count_by_event": _counts(all_differences, "fixture_id"),
         "post_write_difference_count": len(post_write),
         "post_write_difference_count_by_event": _counts(post_write, "fixture_id"),
         "arms": arm_results,
@@ -171,10 +231,48 @@ def run_identified_defect_regression_v1(*, work_root: str | Path) -> dict[str, A
         "formal_administration_created": False,
         "production_activation_changed": False,
     }
+    if profile == REGRESSION_PROFILE:
+        return {
+            **common,
+            "regression_v1_difference_count": len(all_differences),
+            "regression_v1_difference_count_by_field": _counts(all_differences, "field"),
+            "regression_v1_difference_count_by_event": _counts(all_differences, "fixture_id"),
+        }
+
+    traces = _residual_half_life_traces(fixture, arm_results)
+    if not all(trace["frozen_input_equals_native_durable"] for trace in traces):
+        raise D1ProtocolError("D1O found a native half-life persistence defect candidate; V2 is not valid")
+    legacy_same_input = arm_results["M1_CREATE"].get("same_input_legacy_storage")
+    same_input = _compare_same_input_storage(
+        half_life_inputs=same_input_values,
+        legacy_rows=legacy_same_input,
+        native_rows=native_same_input,
+    )
+    if any(any(items for items in row["differences"].values()) for row in same_input):
+        raise D1ProtocolError("D1O same-input storage parity failed; V2 is not valid")
+    return {
+        **common,
+        "profile": REGRESSION_PROFILE_V2,
+        "regression_v2_difference_count": len(all_differences),
+        "regression_v2_difference_count_by_field": _counts(all_differences, "field"),
+        "regression_v2_difference_count_by_event": _counts(all_differences, "fixture_id"),
+        "v1_artifact_frozen_input_precheck": v1_artifact_precheck,
+        "residual_half_life_trace": traces,
+        "same_input_storage_characterization": same_input,
+        "legacy_http_time_sensitivity": characterize_legacy_http_time_sensitivity(
+            l0_root=CoreD1SourceLocations.frozen_default().l0_root,
+        ),
+        "upstream_recomputation_characterization": True,
+    }
 
 
 def _run_arm(
-    *, ports: ConcreteCoreFormalExecutionPorts, arm: CoreFrozenArm, roots: CoreArmRoots,
+    *,
+    ports: ConcreteCoreFormalExecutionPorts,
+    arm: CoreFrozenArm,
+    roots: CoreArmRoots,
+    frozen_scalar_inputs: bool,
+    same_input_half_lives: tuple[float, ...] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     legacy = ports.open_legacy(arm, roots.legacy_root)
     try:
@@ -188,9 +286,14 @@ def _run_arm(
     native_outcomes: list[dict[str, Any]] = []
     metric_characterization: list[dict[str, Any]] = []
     structural: list[dict[str, Any]] = []
+    same_input_legacy_storage: tuple[tuple[float, float], ...] | None = None
     try:
+        if same_input_half_lives is not None:
+            same_input_legacy_storage = legacy.characterize_same_input_half_life_storage(
+                same_input_half_lives,
+            )
         for event in arm.events:
-            legacy_evidence, legacy_semantic = legacy.replay_identified_defect_regression(
+            legacy_evidence, legacy_semantic, fresh_http_signal_half_life, fresh_http_half_life_inputs = legacy.replay_identified_defect_regression(
                 event.legacy_http_request(),
             )
             _verify_legacy_expected(event, legacy_evidence)
@@ -207,7 +310,14 @@ def _run_arm(
                 native_evidence, native_semantic = native.replay_identified_defect_regression(event.native_request())
                 if legacy_semantic is None:
                     raise D1ProtocolError("stored legacy event has no durable semantic projection")
-                event_storage, event_post = _compare_stored(legacy_evidence, native_evidence)
+                event_storage, event_post = _compare_stored(
+                    legacy_evidence,
+                    native_evidence,
+                    frozen_scalar_values=(
+                        event.native_request()
+                        if frozen_scalar_inputs and event.fixture_id in RESIDUAL_FIXTURE_IDS else None
+                    ),
+                )
                 frozen_provenance = project_frozen_provenance_intent(
                     event.native_request()["provenance"],
                 )
@@ -231,6 +341,8 @@ def _run_arm(
                 "fixture_id": event.fixture_id,
                 "legacy": _metric_characterization(legacy_evidence),
                 "native": _metric_characterization(native_evidence),
+                "fresh_legacy_http_signal_half_life": fresh_http_signal_half_life,
+                "fresh_legacy_half_life_inputs": dict(fresh_http_half_life_inputs or {}),
             })
             storage_differences.extend({"fixture_id": event.fixture_id, **item} for item in event_storage)
             post_write_differences.extend({"fixture_id": event.fixture_id, **item} for item in event_post)
@@ -265,6 +377,14 @@ def _run_arm(
                 "semantic_evidence": semantic_evidence,
                 "native_outcomes": native_outcomes,
                 "metric_characterization": metric_characterization,
+                "same_input_legacy_storage": (
+                    [list(row) for row in same_input_legacy_storage]
+                    if same_input_legacy_storage is not None else None
+                ),
+                "storage_scalar_comparator": (
+                    "frozen_half_life_for_named_03B_residuals"
+                    if frozen_scalar_inputs else "fresh_legacy_durable_state"
+                ),
                 "legacy_clone_id": arm.legacy_clone_id,
                 "native_clone_id": arm.native_clone_id,
             },
@@ -289,8 +409,143 @@ def _run_arm(
             legacy.close()
 
 
+def characterize_native_same_input_half_life_storage(
+    *,
+    target_root: str | Path,
+    fixture: CoreFrozenFixture,
+    half_life_inputs: tuple[float, ...],
+) -> tuple[tuple[float, float], ...]:
+    """Persist explicit half-life facts through the qualified native CREATE route.
+
+    The source N0 is copied first and never opened for writes.  Each request
+    carries a caller-supplied, deterministic float32 basis vector, so this
+    characterization neither invokes legacy HTTP cognition nor generates an
+    embedding.
+    """
+    root = Path(target_root).resolve()
+    if root.exists() or not half_life_inputs:
+        raise D1ProtocolError("D1O native same-input root must be new and inputs non-empty")
+    inputs = tuple(float(item) for item in half_life_inputs)
+    if any(not np.isfinite(item) or item <= 0.0 for item in inputs):
+        raise D1ProtocolError("D1O native same-input half-life must be finite and positive")
+    if len(inputs) > 16:
+        raise D1ProtocolError("D1O native same-input inventory exceeds its bounded limit")
+    source = CoreD1SourceLocations.frozen_default().n0_root
+    try:
+        shutil.copytree(source, root)
+    except OSError as exc:
+        raise CoreFormalPortFailure("D1O could not clone the qualified N0 source") from exc
+    stored_events = [event for arm in fixture.arms for event in arm.events if not event.is_no_write]
+    if not stored_events:
+        raise D1ProtocolError("D1O fixture lacks a stored request for native CREATE characterization")
+    base = _facts_from_mapping(stored_events[0].native_request())
+    native = QualifiedNativeArmSession(root)
+    try:
+        rows: list[tuple[float, float]] = []
+        for ordinal, half_life in enumerate(inputs):
+            vector = np.zeros(384, dtype=np.float32)
+            vector[320 + ordinal] = np.float32(1.0)
+            vector.setflags(write=False)
+            facts = replace(
+                base,
+                fixture_id=f"D1O-SAME-INPUT-{ordinal}",
+                native_operation_key=f"D1O:SAME_INPUT_HALF_LIFE:{ordinal}",
+                text=f"D1O same-input native half-life {ordinal}",
+                summary=f"D1O same-input native half-life {ordinal}",
+                embedding=vector,
+                half_life_days=half_life,
+                logical_step=base.logical_step + ordinal + 1,
+                created_ts=base.created_ts + ordinal + 1,
+                last_active_ts=base.last_active_ts + ordinal + 1,
+                last_reinforced_ts=base.last_reinforced_ts + ordinal + 1,
+            )
+            evidence = native._replay_facts(facts)
+            try:
+                durable = float(evidence.storage["half_life_days"])
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise CoreFormalPortFailure("D1O native CREATE did not expose a durable half-life") from exc
+            rows.append((half_life, durable))
+        return tuple(rows)
+    finally:
+        native.close()
+
+
+def _residual_half_life_traces(
+    fixture: CoreFrozenFixture,
+    arm_results: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    frozen = frozen_residual_half_lives(fixture)
+    by_fixture: dict[str, Mapping[str, Any]] = {}
+    for arm in arm_results.values():
+        metrics = arm.get("metric_characterization")
+        if not isinstance(metrics, list):
+            raise D1ProtocolError("D1O arm has no metric characterization")
+        for row in metrics:
+            if isinstance(row, Mapping) and isinstance(row.get("fixture_id"), str):
+                by_fixture[str(row["fixture_id"])] = row
+    traces: list[dict[str, Any]] = []
+    for fixture_id in RESIDUAL_FIXTURE_IDS:
+        row = by_fixture.get(fixture_id)
+        if row is None or not isinstance(row.get("legacy"), Mapping) or not isinstance(row.get("native"), Mapping):
+            raise D1ProtocolError(f"D1O lacks A/B/C/D evidence for {fixture_id}")
+        traces.append(trace_half_life_values(
+            fixture_id=fixture_id,
+            frozen_storage_fact=frozen[fixture_id],
+            native_durable=row["native"].get("half_life_days"),
+            fresh_legacy_durable=row["legacy"].get("half_life_days"),
+            fresh_legacy_signal=row.get("fresh_legacy_http_signal_half_life"),
+            fresh_legacy_half_life_inputs=row.get("fresh_legacy_half_life_inputs"),
+        ))
+    return traces
+
+
+def _compare_same_input_storage(
+    *,
+    half_life_inputs: tuple[float, ...],
+    legacy_rows: Any,
+    native_rows: tuple[tuple[float, float], ...],
+) -> list[dict[str, Any]]:
+    if not isinstance(legacy_rows, list) or len(legacy_rows) != len(half_life_inputs):
+        raise D1ProtocolError("D1O legacy same-input storage evidence is incomplete")
+    if len(native_rows) != len(half_life_inputs):
+        raise D1ProtocolError("D1O native same-input storage evidence is incomplete")
+    output: list[dict[str, Any]] = []
+    for ordinal, supplied in enumerate(half_life_inputs):
+        legacy_row = legacy_rows[ordinal]
+        if not isinstance(legacy_row, list) or len(legacy_row) != 2:
+            raise D1ProtocolError("D1O legacy same-input row is malformed")
+        try:
+            legacy_input, legacy_durable = (float(item) for item in legacy_row)
+            native_input, native_durable = (float(item) for item in native_rows[ordinal])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise D1ProtocolError("D1O same-input storage row is not numeric") from exc
+        if legacy_input != supplied or native_input != supplied:
+            raise D1ProtocolError("D1O same-input storage row changed its supplied fact")
+        comparisons = {
+            "input_vs_legacy_durable": _as_dicts(compare_scalar(
+                supplied, legacy_durable, field="input_half_life/legacy_durable_half_life",
+            )),
+            "input_vs_native_durable": _as_dicts(compare_scalar(
+                supplied, native_durable, field="input_half_life/native_durable_half_life",
+            )),
+            "legacy_durable_vs_native_durable": _as_dicts(compare_scalar(
+                legacy_durable, native_durable, field="legacy_durable_half_life/native_durable_half_life",
+            )),
+        }
+        output.append({
+            "input_half_life": supplied,
+            "legacy_durable_half_life": legacy_durable,
+            "native_durable_half_life": native_durable,
+            "differences": comparisons,
+        })
+    return output
+
+
 def _compare_stored(
-    legacy: CoreReplayEvidence, native: CoreReplayEvidence,
+    legacy: CoreReplayEvidence,
+    native: CoreReplayEvidence,
+    *,
+    frozen_scalar_values: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     _require_fields(legacy.storage, (*_STORAGE_EXACT_FIELDS, *_STORAGE_SCALAR_FIELDS), boundary="legacy")
     _require_fields(native.storage, (*_STORAGE_EXACT_FIELDS, *_STORAGE_SCALAR_FIELDS), boundary="native")
@@ -298,7 +553,16 @@ def _compare_stored(
     _require_fields(native.post_write, _POST_WRITE_EXACT_FIELDS, boundary="native post-write")
     storage = _as_dicts(compare_exact_fields(legacy.storage, native.storage, _STORAGE_EXACT_FIELDS))
     for field in _STORAGE_SCALAR_FIELDS:
-        storage.extend(_as_dicts(compare_scalar(legacy.storage[field], native.storage[field], field=field)))
+        left = legacy.storage[field]
+        # D1O changes only the unresolved 03B half-life comparator.  The
+        # strength/confidence/reinforcement comparisons retain V1's actual
+        # durable-state basis; replacing their basis with pre-write signal
+        # facts would widen this half-life archaeology into unrelated fields.
+        if frozen_scalar_values is not None and field == "half_life_days":
+            if field not in frozen_scalar_values:
+                raise D1ProtocolError(f"D1O frozen storage facts lack scalar {field}")
+            left = frozen_scalar_values[field]
+        storage.extend(_as_dicts(compare_scalar(left, native.storage[field], field=field)))
     storage.extend(_as_dicts(compare_vector(
         legacy.storage["raw_representation_vector"], native.storage["raw_representation_vector"],
     )))
@@ -378,10 +642,36 @@ def _has_independent_create(arm: Mapping[str, Any], *, index: int) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="run D1 identified-defect regression V1")
+    parser = argparse.ArgumentParser(description="run a bounded D1 identified-defect regression profile")
     parser.add_argument("--work-root", required=True)
+    parser.add_argument("--profile", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--summary", action="store_true")
+    parser.add_argument("--summary-json-path")
     args = parser.parse_args(argv)
-    print(json.dumps(run_identified_defect_regression_v1(work_root=args.work_root), sort_keys=True))
+    result = (
+        run_identified_defect_regression_v2(work_root=args.work_root)
+        if args.profile == "v2" else run_identified_defect_regression_v1(work_root=args.work_root)
+    )
+    if args.summary:
+        keys = (
+            "profile", "original_d1_difference_count", "regression_v1_difference_count",
+            "regression_v1_difference_count_by_field", "regression_v1_difference_count_by_event",
+            "regression_v2_difference_count", "regression_v2_difference_count_by_field",
+            "regression_v2_difference_count_by_event", "post_write_difference_count",
+            "m4_native_contradiction_independently_created",
+            "sequential_native_contradiction_independently_created",
+            "residual_half_life_trace", "same_input_storage_characterization",
+            "legacy_http_time_sensitivity", "formal_administration_created",
+            "production_activation_changed",
+        )
+        result = {key: result[key] for key in keys if key in result}
+    rendered = json.dumps(result, sort_keys=True)
+    if args.summary_json_path is not None:
+        destination = Path(args.summary_json_path).resolve()
+        if destination.exists() or destination.parent != Path(args.work_root).resolve():
+            raise D1ProtocolError("D1 regression summary path must be a new direct child of its disposable work root")
+        destination.write_text(rendered + "\n", encoding="utf-8")
+    print(rendered)
     return 0
 
 
@@ -390,6 +680,8 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "ORIGINAL_D1_DIFFERENCE_COUNT", "REGRESSION_PROFILE", "RegressionNativeArmSession",
+    "ORIGINAL_D1_DIFFERENCE_COUNT", "REGRESSION_PROFILE", "REGRESSION_PROFILE_V2",
+    "RegressionNativeArmSession", "characterize_native_same_input_half_life_storage",
     "native_owned_contradiction_guard", "run_identified_defect_regression_v1",
+    "run_identified_defect_regression_v2",
 ]
