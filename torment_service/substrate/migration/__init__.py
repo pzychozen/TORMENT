@@ -119,6 +119,13 @@ from .runtime_motif_projection import (
     NativeMigrationRuntimeMotifProjectionService,
     PreparedLegacyMotifRuntimeProjection,
 )
+from .runtime_motif_regeometry_projection import (
+    MigrationRuntimeMotifRegeometryProjectionRefused,
+    MigrationRuntimeMotifRegeometryProjectionRequest,
+    MigrationRuntimeMotifRegeometryProjectionResult,
+    NativeMigrationRuntimeMotifRegeometryProjectionService,
+    PreparedLegacyMotifRuntimeRegeometryProjection,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -196,4 +203,9 @@ __all__ = [
     "MigrationRuntimeMotifProjectionResult",
     "NativeMigrationRuntimeMotifProjectionService",
     "PreparedLegacyMotifRuntimeProjection",
+    "MigrationRuntimeMotifRegeometryProjectionRefused",
+    "MigrationRuntimeMotifRegeometryProjectionRequest",
+    "MigrationRuntimeMotifRegeometryProjectionResult",
+    "NativeMigrationRuntimeMotifRegeometryProjectionService",
+    "PreparedLegacyMotifRuntimeRegeometryProjection",
 ]

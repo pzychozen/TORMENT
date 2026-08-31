@@ -38,6 +38,16 @@ _GENERATION = 1
 _DERIVATION_CONTRACT = "compat-embedding-v1"
 _ENCODING = "RAW_VECTOR"
 _DTYPE = "float32"
+_MIGRATION_BASELINE_TOPOLOGIES = {
+    "MIGRATION_RUNTIME_MOTIF_PROJECTION": (
+        "MIGRATION_RUNTIME_MOTIF_PROJECTION",
+        "MIGRATION_RUNTIME_MOTIF_PROJECTION_MEMBERSHIP",
+    ),
+    "MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION": (
+        "MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION",
+        "MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION_MEMBERSHIP",
+    ),
+}
 
 
 class _ReadOnlyRepresentationPayloadReader:
@@ -298,11 +308,12 @@ class NativeMotifRuntimeReader:
         if len(rows) != 1:
             raise SubstrateInvariantViolation("native motif creation transition is ambiguous")
         transition_id, operation_id, kind, origin, operation_kind = rows[0]
-        if kind != "MIGRATION_RUNTIME_MOTIF_PROJECTION":
+        topology = _MIGRATION_BASELINE_TOPOLOGIES.get(kind)
+        if topology is None:
             return None
         if origin != "NATIVE":
             raise SubstrateInvariantViolation("migration motif projection has an invalid origin")
-        if operation_kind != "MIGRATION_RUNTIME_MOTIF_PROJECTION":
+        if operation_kind != kind:
             raise SubstrateInvariantViolation("migration motif projection has an invalid operation kind")
         outputs = self._connection.execute(
             """
@@ -313,7 +324,7 @@ class NativeMotifRuntimeReader:
             """, (operation_id,)
         ).fetchall()
         if not outputs or outputs[0][:6] != (
-            0, "MIGRATION_RUNTIME_MOTIF_PROJECTION", "OBJECT",
+            0, topology[0], "OBJECT",
             native_id_to_bytes(motif_object_id), outputs[0][4], 1,
         ):
             raise SubstrateInvariantViolation("migration motif projection baseline output is malformed")
@@ -328,7 +339,7 @@ class NativeMotifRuntimeReader:
         baseline: dict[tuple[bytes, bytes, int], int] = {}
         for expected, output in enumerate(outputs[1:], start=1):
             ordinal, role, output_kind, _object, _revision, _object_ordinal, relationship_id, revision_id, revision_ordinal = output
-            if (ordinal, role, output_kind) != (expected, "MIGRATION_RUNTIME_MOTIF_PROJECTION_MEMBERSHIP", "RELATIONSHIP") or relationship_id is None or revision_id is None or revision_ordinal != 1:
+            if (ordinal, role, output_kind) != (expected, topology[1], "RELATIONSHIP") or relationship_id is None or revision_id is None or revision_ordinal != 1:
                 raise SubstrateInvariantViolation("migration motif projection membership outputs are malformed")
             key = (relationship_id, revision_id, revision_ordinal)
             if key in baseline:

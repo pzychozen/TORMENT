@@ -794,6 +794,7 @@ class NativeMigrationRuntimeReadinessPreflight:
         runtime_id: str | None = None
         member_count = 0
         projected_legacy_motif = False
+        centroid_target_lane_mismatch = False
         payload = _json_mapping(payload_text)
         if payload is None:
             reasons.append("MOTIF_PAYLOAD_INVALID")
@@ -801,11 +802,13 @@ class NativeMigrationRuntimeReadinessPreflight:
             motif_id = payload.get("motif_id")
             runtime_id = motif_id if isinstance(motif_id, str) and motif_id else None
             centroid = payload.get("centroid")
-            if not isinstance(centroid, list) or len(centroid) != lane.dimension or not all(
+            if not isinstance(centroid, list) or not all(
                 isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
                 for value in centroid
             ):
                 reasons.append("MOTIF_CENTROID_NOT_TARGET_LANE_DIMENSION")
+            elif len(centroid) != lane.dimension:
+                centroid_target_lane_mismatch = True
         if plan_state is ScopePlanReadiness.NO_MATCHING_SCOPE_PLAN:
             reasons.append("RUNTIME_SCOPE_PLAN_MISSING")
         elif plan_state is ScopePlanReadiness.AMBIGUOUS_SCOPE_PLAN:
@@ -838,6 +841,8 @@ class NativeMigrationRuntimeReadinessPreflight:
                     reasons.append("MOTIF_ID_ALIAS_PAYLOAD_MISMATCH")
         if not plan_references_valid:
             reasons.append("RUNTIME_SCOPE_PLAN_REFERENCES_UNAVAILABLE_FACTS")
+        if centroid_target_lane_mismatch and not projected_legacy_motif:
+            reasons.append("MOTIF_CENTROID_NOT_TARGET_LANE_DIMENSION")
         reader = NativeMotifRuntimeReader(self._connection)
         if object_kind == DERIVED_MOTIF_OBJECT_KIND:
             try:
@@ -907,18 +912,18 @@ class NativeMigrationRuntimeReadinessPreflight:
             return None
         rows = self._connection.execute(
             """
-            SELECT o.object_id,operation.canonical_intent_json
+            SELECT o.object_id,operation.canonical_intent_json,t.transition_kind
               FROM semantic_transitions t
               JOIN operations operation ON operation.operation_id=t.operation_id
               JOIN operation_outputs o ON o.operation_id=operation.operation_id
-             WHERE t.transition_kind='MIGRATION_RUNTIME_MOTIF_PROJECTION' AND t.origin_kind='NATIVE'
-               AND operation.operation_kind='MIGRATION_RUNTIME_MOTIF_PROJECTION'
-               AND o.output_ordinal=0 AND o.output_role='MIGRATION_RUNTIME_MOTIF_PROJECTION'
+             WHERE t.transition_kind IN ('MIGRATION_RUNTIME_MOTIF_PROJECTION','MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION') AND t.origin_kind='NATIVE'
+               AND operation.operation_kind=t.transition_kind
+               AND o.output_ordinal=0
                AND o.output_kind='OBJECT'
             """
         ).fetchall()
         candidates: list[tuple[bytes, dict[str, Any]]] = []
-        for target_id, intent_text in rows:
+        for target_id, intent_text, transition_kind in rows:
             try:
                 intent = json.loads(intent_text)
             except (TypeError, json.JSONDecodeError):
@@ -927,7 +932,7 @@ class NativeMigrationRuntimeReadinessPreflight:
                 return None
             expected_lane = [lane.provider, lane.model, lane.dimension, lane.representation_class,
                              lane.generation, lane.derivation_contract_version, lane.encoding_id, lane.dtype]
-            if (
+            common = (
                 intent.get("source_motif_object_id") == str(source_object_id)
                 and intent.get("source_motif_revision_id") == str(source_revision_id)
                 and intent.get("runtime_motif_id") == runtime_id
@@ -936,8 +941,17 @@ class NativeMigrationRuntimeReadinessPreflight:
                 and intent.get("target_semantic_scope_id") == str(plan.target_semantic_scope_id)
                 and intent.get("motif_identity_namespace_id") == str(plan.motif_identity_namespace_id)
                 and intent.get("membership_identity_namespace_id") == str(plan.membership_identity_namespace_id)
-                and intent.get("state") == _runtime_motif_state_payload(source_payload)
-            ):
+            )
+            source_state = _runtime_motif_state_payload(source_payload)
+            b4a = transition_kind == "MIGRATION_RUNTIME_MOTIF_PROJECTION" and intent.get("state") == source_state
+            b4b = (
+                transition_kind == "MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION"
+                and intent.get("source_state") == source_state
+                and intent.get("geometry_algorithm") == "ORDERED_CURRENT_MEMBER_REGEOMETRY_V1"
+                and isinstance(intent.get("source_lane"), list)
+                and intent.get("source_lane") != expected_lane[:3]
+            )
+            if common and (b4a or b4b):
                 candidates.append((target_id, intent))
         if len(candidates) != 1:
             return None
@@ -951,6 +965,8 @@ class NativeMigrationRuntimeReadinessPreflight:
             )
             runtime = [item for item in motifs if item.motif_object_id == UUID(bytes=target_id)]
             if len(runtime) != 1:
+                return None
+            if reader._get_current_motif(runtime[0].motif_object_id).state.payload() != intent.get("state"):
                 return None
             members = reader.list_ordered_current_motif_members(runtime[0].motif_object_id)
             expected_members = intent.get("member_object_ids")
