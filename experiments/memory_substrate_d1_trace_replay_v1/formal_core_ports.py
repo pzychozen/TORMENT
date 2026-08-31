@@ -329,6 +329,15 @@ class LegacyHttpArmSession:
     def replay_http(self, request: Mapping[str, Any]) -> CoreReplayEvidence:
         return _core_replay_evidence(self._worker.request("replay_http", request=dict(request)))
 
+    def replay_identified_defect_regression(
+        self, request: Mapping[str, Any],
+    ) -> tuple[CoreReplayEvidence, Mapping[str, Any] | None]:
+        value = self._worker.request("replay_http_regression_v1", request=dict(request))
+        semantic = value.pop("semantic", None)
+        if semantic is not None and not isinstance(semantic, Mapping):
+            raise CoreFormalPortFailure("legacy regression semantic evidence is malformed")
+        return _core_replay_evidence(value), (dict(semantic) if semantic is not None else None)
+
     def capture_durable_state(self) -> Mapping[str, Any]:
         return dict(self._worker.request("capture_durable_state"))
 
@@ -501,7 +510,14 @@ class QualifiedNativeArmSession:
         self.router_call_count = 0
 
     def replay(self, request: Mapping[str, Any]) -> CoreReplayEvidence:
-        facts = _facts_from_mapping(request)
+        return self._replay_facts(_facts_from_mapping(request))
+
+    def _replay_facts(self, facts: LegacyStorageFacingFacts) -> CoreReplayEvidence:
+        outcome = self._replay_outcome(facts)
+        assert outcome.route_attempt is not None and outcome.route_attempt.result is not None
+        return self._evidence_for_result(facts, outcome.route_attempt.result, outcome.post_write_outcome)
+
+    def _replay_outcome(self, facts: LegacyStorageFacingFacts) -> Any:
         self.router_call_count += 1
         outcome = NativeReplayHarness(
             router=self._router, post_write=self._post_write,
@@ -510,7 +526,7 @@ class QualifiedNativeArmSession:
         ).replay(LegacyCapturedEvent(facts, LegacyObservedOutcome(True, False, None)))
         if outcome.route_attempt is None or outcome.route_attempt.result is None:
             raise CoreFormalPortFailure("qualified native STAGING route produced no result")
-        return self._evidence_for_result(facts, outcome.route_attempt.result, outcome.post_write_outcome)
+        return outcome
 
     def replay_no_write(self, request: Mapping[str, Any]) -> CoreReplayEvidence:
         facts = CoreNoWritePostWriteFacts.from_mapping(request)

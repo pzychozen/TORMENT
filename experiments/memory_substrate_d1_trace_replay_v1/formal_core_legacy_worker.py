@@ -32,6 +32,10 @@ from .legacy_fixture_capture import (
     _stop_service,
     _wait_for_service,
 )
+from .identified_defect_semantics import (
+    project_legacy_durable_storage,
+    project_legacy_regression_semantics,
+)
 from .manifest import fingerprint_legacy_baseline, verify_legacy_baseline
 from .protocol import D1ProtocolError, sha256_value
 from .side_store_observation import (
@@ -156,7 +160,7 @@ class _LegacyWorkerSession:
         self._start()
         return {"legacy_environment": "torment", "service_command": "python -m torment_service"}
 
-    def replay_http(self, value: Mapping[str, Any]) -> dict[str, Any]:
+    def _replay_http(self, value: Mapping[str, Any]) -> tuple[dict[str, Any], Mapping[str, Any] | None]:
         root = self._require_open()
         request = value.get("request")
         if not isinstance(request, dict):
@@ -179,7 +183,34 @@ class _LegacyWorkerSession:
         response = _http_post(payload)
         private = root / "workspaces" / self._workspace_id / "agents" / self._agent_id / "private"
         motif = root / "workspaces" / self._workspace_id / "domains" / self._domain_id / "motifs.json"
-        return _legacy_evidence(request=request, response=response, private_root=private, motif_path=motif)
+        evidence = _legacy_evidence(request=request, response=response, private_root=private, motif_path=motif)
+        if not bool(response.get("stored")):
+            return evidence, None
+        eid = response.get("eid")
+        node = _latest_nodes(private / "nodes.jsonl").get(eid) if isinstance(eid, int) else None
+        payload = (node or {}).get("payload")
+        if not isinstance(payload, Mapping):
+            raise D1ProtocolError("legacy stored HTTP response has no selected durable payload")
+        return evidence, dict(payload)
+
+    def replay_http(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        evidence, _payload = self._replay_http(value)
+        return evidence
+
+    def replay_http_regression_v1(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Expose actual legacy durable semantics for the separate D1N profile.
+
+        This additive IPC command does not alter the historical evidence
+        surface used by the frozen successor-002 administration.
+        """
+        evidence, payload = self._replay_http(value)
+        if payload is None:
+            return {**evidence, "semantic": None}
+        return {
+            **evidence,
+            "storage": project_legacy_durable_storage(evidence["storage"], payload),
+            "semantic": project_legacy_regression_semantics(payload),
+        }
 
     def capture_durable_state(self) -> dict[str, Any]:
         return _tree_state(self._require_open())
@@ -258,6 +289,7 @@ def _serve() -> int:
     handlers = {
         "open": session.open,
         "replay_http": session.replay_http,
+        "replay_http_regression_v1": session.replay_http_regression_v1,
         "capture_durable_state": lambda _value: session.capture_durable_state(),
         "restart_cleanly": lambda _value: session.restart_cleanly(),
         "search_by_embedding": session.search_by_embedding,
