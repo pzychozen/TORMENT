@@ -215,6 +215,11 @@ class NativeMotifRuntimeReader:
             """,
             (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, native_id_to_bytes(motif_object_id)),
         ).fetchall()
+        projected_baseline = self._migration_projection_baseline(motif_object_id)
+        if projected_baseline is not None:
+            return self._ordered_projected_members(motif_object_id, memberships, projected_baseline)
+
+        # Ordinary native motifs retain the original publication-order rule.
         effects = self._connection.execute(
             """
             SELECT effect.relationship_id,effect.relationship_revision_id,
@@ -271,6 +276,123 @@ class NativeMotifRuntimeReader:
                     motif_ordinal,
                 )
             )
+        return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
+
+    def _migration_projection_baseline(
+        self, motif_object_id: UUID
+    ) -> dict[tuple[bytes, bytes, int], int] | None:
+        """Return the B4A output-order witness, or ``None`` for ordinary motifs.
+
+        This is deliberately keyed from the motif *creation* transition.  A
+        later ordinary membership append cannot opt an arbitrary motif into the
+        migration ordering path.
+        """
+        rows = self._connection.execute(
+            """
+            SELECT t.transition_id,t.operation_id,t.transition_kind,t.origin_kind,operation.operation_kind
+              FROM objects o JOIN semantic_transitions t ON t.transition_id=o.creating_transition_id
+              JOIN operations operation ON operation.operation_id=t.operation_id
+             WHERE o.object_id=?
+            """, (native_id_to_bytes(motif_object_id),)
+        ).fetchall()
+        if len(rows) != 1:
+            raise SubstrateInvariantViolation("native motif creation transition is ambiguous")
+        transition_id, operation_id, kind, origin, operation_kind = rows[0]
+        if kind != "MIGRATION_RUNTIME_MOTIF_PROJECTION":
+            return None
+        if origin != "NATIVE":
+            raise SubstrateInvariantViolation("migration motif projection has an invalid origin")
+        if operation_kind != "MIGRATION_RUNTIME_MOTIF_PROJECTION":
+            raise SubstrateInvariantViolation("migration motif projection has an invalid operation kind")
+        outputs = self._connection.execute(
+            """
+            SELECT output_ordinal,output_role,output_kind,object_id,object_revision_id,
+                   object_revision_ordinal,relationship_id,relationship_revision_id,
+                   relationship_revision_ordinal
+              FROM operation_outputs WHERE operation_id=? ORDER BY output_ordinal
+            """, (operation_id,)
+        ).fetchall()
+        if not outputs or outputs[0][:6] != (
+            0, "MIGRATION_RUNTIME_MOTIF_PROJECTION", "OBJECT",
+            native_id_to_bytes(motif_object_id), outputs[0][4], 1,
+        ):
+            raise SubstrateInvariantViolation("migration motif projection baseline output is malformed")
+        if outputs[0][4] is None:
+            raise SubstrateInvariantViolation("migration motif projection has no motif R1 output")
+        motif_effect = self._connection.execute(
+            "SELECT object_revision_id,object_revision_ordinal FROM object_revision_effects WHERE transition_id=? AND object_id=?",
+            (transition_id, native_id_to_bytes(motif_object_id)),
+        ).fetchall()
+        if motif_effect != [(outputs[0][4], 1)]:
+            raise SubstrateInvariantViolation("migration motif projection motif effect is malformed")
+        baseline: dict[tuple[bytes, bytes, int], int] = {}
+        for expected, output in enumerate(outputs[1:], start=1):
+            ordinal, role, output_kind, _object, _revision, _object_ordinal, relationship_id, revision_id, revision_ordinal = output
+            if (ordinal, role, output_kind) != (expected, "MIGRATION_RUNTIME_MOTIF_PROJECTION_MEMBERSHIP", "RELATIONSHIP") or relationship_id is None or revision_id is None or revision_ordinal != 1:
+                raise SubstrateInvariantViolation("migration motif projection membership outputs are malformed")
+            key = (relationship_id, revision_id, revision_ordinal)
+            if key in baseline:
+                raise SubstrateInvariantViolation("migration motif projection repeats a baseline membership output")
+            effect = self._connection.execute(
+                "SELECT relationship_revision_id,relationship_revision_ordinal FROM relationship_revision_effects WHERE transition_id=? AND relationship_id=?",
+                (transition_id, relationship_id),
+            ).fetchall()
+            if effect != [(revision_id, 1)]:
+                raise SubstrateInvariantViolation("migration motif projection membership effect is malformed")
+            baseline[key] = ordinal
+        if not baseline:
+            raise SubstrateInvariantViolation("migration motif projection cannot create an empty runtime motif")
+        return baseline
+
+    def _ordered_projected_members(
+        self,
+        motif_object_id: UUID,
+        memberships: list[tuple[Any, ...]],
+        baseline: dict[tuple[bytes, bytes, int], int],
+    ) -> tuple[NativeOrderedMotifMember, ...]:
+        """Combine B4A's fixed baseline with ordinary successor publications."""
+        effects = self._connection.execute(
+            """
+            SELECT effect.relationship_id,effect.relationship_revision_id,effect.relationship_revision_ordinal,
+                   effect.transition_id,motif_effect.object_revision_ordinal,t.transition_kind
+              FROM relationship_revision_effects effect
+              JOIN object_revision_effects motif_effect ON motif_effect.transition_id=effect.transition_id
+               AND motif_effect.object_id=?
+              JOIN semantic_transitions t ON t.transition_id=effect.transition_id
+            """, (native_id_to_bytes(motif_object_id),),
+        ).fetchall()
+        evidence: dict[tuple[bytes, bytes, int], tuple[int, str]] = {}
+        for relationship_id, revision_id, ordinal, _transition, motif_ordinal, transition_kind in effects:
+            key = (relationship_id, revision_id, ordinal)
+            if key in evidence:
+                raise SubstrateInvariantViolation("current motif membership has ambiguous publication evidence")
+            evidence[key] = (motif_ordinal, transition_kind)
+        ordered: list[NativeOrderedMotifMember] = []
+        seen_members: set[bytes] = set()
+        seen_orders: set[int] = set()
+        baseline_count = len(baseline)
+        seen_baseline: set[tuple[bytes, bytes, int]] = set()
+        for relationship_id, revision_id, revision_ordinal, member_object_id, member_scope_id, member_kind in memberships:
+            key = (relationship_id, revision_id, revision_ordinal)
+            if member_kind != _MEMORY_OBJECT_KIND:
+                raise SubstrateInvariantViolation("native motif membership does not target a LEGACY_CORE_NODE")
+            if member_object_id in seen_members:
+                raise SubstrateInvariantViolation("current motif memberships duplicate one member identity")
+            seen_members.add(member_object_id)
+            if key in baseline:
+                order = baseline[key]
+                seen_baseline.add(key)
+            else:
+                item = evidence.get(key)
+                if item is None or item[1] != "NATIVE_MOTIF_ADD_MEMBER" or item[0] <= 1:
+                    raise SubstrateInvariantViolation("post-projection membership has no ordinary append publication evidence")
+                order = baseline_count + item[0]
+            if order in seen_orders:
+                raise SubstrateInvariantViolation("current motif memberships share one publication ordinal")
+            seen_orders.add(order)
+            ordered.append(NativeOrderedMotifMember(UUID(bytes=relationship_id), UUID(bytes=revision_id), revision_ordinal, UUID(bytes=member_object_id), UUID(bytes=member_scope_id), order))
+        if seen_baseline != set(baseline):
+            raise SubstrateInvariantViolation("migration motif projection baseline is not current and complete")
         return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
 
     def read_current_compat_embedding(

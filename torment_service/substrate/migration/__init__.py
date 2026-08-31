@@ -112,6 +112,13 @@ from .runtime_reembedding_bootstrap import (
     NativeMigrationRuntimeReembeddingBootstrapService,
     PreparedRuntimeReembeddingBootstrap,
 )
+from .runtime_motif_projection import (
+    MigrationRuntimeMotifProjectionRefused,
+    MigrationRuntimeMotifProjectionRequest,
+    MigrationRuntimeMotifProjectionResult,
+    NativeMigrationRuntimeMotifProjectionService,
+    PreparedLegacyMotifRuntimeProjection,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -184,4 +191,9 @@ __all__ = [
     "MigrationRuntimeReembeddingBootstrapResult",
     "NativeMigrationRuntimeReembeddingBootstrapService",
     "PreparedRuntimeReembeddingBootstrap",
+    "MigrationRuntimeMotifProjectionRefused",
+    "MigrationRuntimeMotifProjectionRequest",
+    "MigrationRuntimeMotifProjectionResult",
+    "NativeMigrationRuntimeMotifProjectionService",
+    "PreparedLegacyMotifRuntimeProjection",
 ]

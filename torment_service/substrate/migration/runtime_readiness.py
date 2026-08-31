@@ -793,6 +793,7 @@ class NativeMigrationRuntimeReadinessPreflight:
         reasons: list[str] = []
         runtime_id: str | None = None
         member_count = 0
+        projected_legacy_motif = False
         payload = _json_mapping(payload_text)
         if payload is None:
             reasons.append("MOTIF_PAYLOAD_INVALID")
@@ -810,21 +811,31 @@ class NativeMigrationRuntimeReadinessPreflight:
         elif plan_state is ScopePlanReadiness.AMBIGUOUS_SCOPE_PLAN:
             reasons.append("RUNTIME_SCOPE_PLAN_AMBIGUOUS")
         elif plan is not None:
-            if object_kind != DERIVED_MOTIF_OBJECT_KIND:
+            if object_kind == LEGACY_DERIVED_MOTIF_OBJECT_KIND:
+                projected = self._qualified_runtime_projection(
+                    object_id, revision_id, runtime_id, payload, plan, lane
+                )
+                if projected is None:
+                    reasons.append("MOTIF_OBJECT_KIND_NORMALIZATION_REQUIRED")
+                else:
+                    projected_legacy_motif = True
+                    member_count = projected
+            elif object_kind != DERIVED_MOTIF_OBJECT_KIND:
                 reasons.append("MOTIF_OBJECT_KIND_NORMALIZATION_REQUIRED")
-            if identity_blob != native_id_to_bytes(plan.motif_identity_namespace_id):
+            if not projected_legacy_motif and identity_blob != native_id_to_bytes(plan.motif_identity_namespace_id):
                 reasons.append("MOTIF_IDENTITY_NAMESPACE_NORMALIZATION_REQUIRED")
             if plan.motif_domain_id is None:
                 reasons.append("MOTIF_DOMAIN_PLAN_MISSING")
-            aliases = self._connection.execute(
-                """SELECT alias_value FROM legacy_object_aliases
-                     WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND object_id=?""",
-                (native_id_to_bytes(plan.motif_alias_namespace_id), object_blob),
-            ).fetchall()
-            if len(aliases) != 1:
-                reasons.append("MOTIF_ID_ALIAS_NOT_UNIQUE_IN_TARGET_NAMESPACE")
-            elif runtime_id is not None and aliases[0][0] != runtime_id:
-                reasons.append("MOTIF_ID_ALIAS_PAYLOAD_MISMATCH")
+            if not projected_legacy_motif:
+                aliases = self._connection.execute(
+                    """SELECT alias_value FROM legacy_object_aliases
+                         WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND object_id=?""",
+                    (native_id_to_bytes(plan.motif_alias_namespace_id), object_blob),
+                ).fetchall()
+                if len(aliases) != 1:
+                    reasons.append("MOTIF_ID_ALIAS_NOT_UNIQUE_IN_TARGET_NAMESPACE")
+                elif runtime_id is not None and aliases[0][0] != runtime_id:
+                    reasons.append("MOTIF_ID_ALIAS_PAYLOAD_MISMATCH")
         if not plan_references_valid:
             reasons.append("RUNTIME_SCOPE_PLAN_REFERENCES_UNAVAILABLE_FACTS")
         reader = NativeMotifRuntimeReader(self._connection)
@@ -846,11 +857,15 @@ class NativeMigrationRuntimeReadinessPreflight:
                         break
             except (SubstrateInvariantViolation, ValueError):
                 reasons.append("MOTIF_MEMBERSHIP_PUBLICATION_INCOMPLETE")
-        else:
+        elif not projected_legacy_motif:
             member_count = self._legacy_motif_membership_count(object_blob)
             if member_count == 0:
                 reasons.append("MOTIF_HAS_NO_CURRENT_MEMBERS")
-        readiness = _motif_readiness(reasons, plan_state)
+        readiness = (
+            MotifRuntimeReadiness.RUNTIME_READY_AS_IS
+            if projected_legacy_motif and not reasons
+            else _motif_readiness(reasons, plan_state)
+        )
         if readiness is MotifRuntimeReadiness.RUNTIME_READY_AS_IS and plan is not None:
             # The final ready claim uses the actual A3B reader, rather than a
             # lookalike query, so the report cannot overstate its eligibility.
@@ -872,6 +887,83 @@ class NativeMigrationRuntimeReadinessPreflight:
             membership_count=member_count,
             reason_codes=tuple(sorted(set(reasons))),
         )
+
+    def _qualified_runtime_projection(
+        self,
+        source_object_id: UUID,
+        source_revision_id: UUID,
+        runtime_id: str | None,
+        source_payload: dict[str, Any] | None,
+        plan: MigrationRuntimeScopePlan,
+        lane: NativeRepresentationLane,
+    ) -> int | None:
+        """Validate a B4A projection through the actual A3B reader.
+
+        The legacy source remains a ``LEGACY_DERIVED_MOTIF``.  This check
+        therefore never retypes it; it establishes only that one exact source
+        evidence object has a qualified, separately-addressed runtime peer.
+        """
+        if runtime_id is None or source_payload is None or plan.motif_domain_id is None:
+            return None
+        rows = self._connection.execute(
+            """
+            SELECT o.object_id,operation.canonical_intent_json
+              FROM semantic_transitions t
+              JOIN operations operation ON operation.operation_id=t.operation_id
+              JOIN operation_outputs o ON o.operation_id=operation.operation_id
+             WHERE t.transition_kind='MIGRATION_RUNTIME_MOTIF_PROJECTION' AND t.origin_kind='NATIVE'
+               AND operation.operation_kind='MIGRATION_RUNTIME_MOTIF_PROJECTION'
+               AND o.output_ordinal=0 AND o.output_role='MIGRATION_RUNTIME_MOTIF_PROJECTION'
+               AND o.output_kind='OBJECT'
+            """
+        ).fetchall()
+        candidates: list[tuple[bytes, dict[str, Any]]] = []
+        for target_id, intent_text in rows:
+            try:
+                intent = json.loads(intent_text)
+            except (TypeError, json.JSONDecodeError):
+                return None
+            if not isinstance(intent, dict):
+                return None
+            expected_lane = [lane.provider, lane.model, lane.dimension, lane.representation_class,
+                             lane.generation, lane.derivation_contract_version, lane.encoding_id, lane.dtype]
+            if (
+                intent.get("source_motif_object_id") == str(source_object_id)
+                and intent.get("source_motif_revision_id") == str(source_revision_id)
+                and intent.get("runtime_motif_id") == runtime_id
+                and intent.get("target_lane") == expected_lane
+                and intent.get("motif_alias_namespace_id") == str(plan.motif_alias_namespace_id)
+                and intent.get("target_semantic_scope_id") == str(plan.target_semantic_scope_id)
+                and intent.get("motif_identity_namespace_id") == str(plan.motif_identity_namespace_id)
+                and intent.get("membership_identity_namespace_id") == str(plan.membership_identity_namespace_id)
+                and intent.get("state") == _runtime_motif_state_payload(source_payload)
+            ):
+                candidates.append((target_id, intent))
+        if len(candidates) != 1:
+            return None
+        target_id, intent = candidates[0]
+        try:
+            reader = NativeMotifRuntimeReader(self._connection)
+            motifs = reader.list_runtime_motifs(
+                motif_alias_namespace_id=plan.motif_alias_namespace_id,
+                domain_id=plan.motif_domain_id,
+                semantic_scope_id=plan.target_semantic_scope_id,
+            )
+            runtime = [item for item in motifs if item.motif_object_id == UUID(bytes=target_id)]
+            if len(runtime) != 1:
+                return None
+            members = reader.list_ordered_current_motif_members(runtime[0].motif_object_id)
+            expected_members = intent.get("member_object_ids")
+            if not isinstance(expected_members, list) or [str(item.member_object_id) for item in members] != expected_members:
+                return None
+            if not members or runtime[0].read_model.member_count != len(members):
+                return None
+            for member in members:
+                if reader.read_current_compat_embedding(member.member_object_id, expected_dimension=lane.dimension) is None:
+                    return None
+        except (SubstrateInvariantViolation, ValueError):
+            return None
+        return len(members)
 
     def _legacy_motif_membership_count(self, motif_object_id: bytes) -> int:
         """Count current admitted membership identities without treating them as runtime motifs."""
@@ -1098,6 +1190,17 @@ def _motif_readiness(reasons: list[str], scope: ScopePlanReadiness) -> MotifRunt
     ):
         return MotifRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED
     return MotifRuntimeReadiness.RUNTIME_READY_AS_IS
+
+
+def _runtime_motif_state_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Select only the B4A-owned state fields from immutable 7F evidence."""
+    keys = (
+        "motif_id", "domain_id", "label", "centroid", "strength",
+        "stability_score", "contributing_agents", "created_ts", "last_active_ts",
+    )
+    if any(key not in payload for key in keys):
+        return None
+    return {key: payload[key] for key in keys}
 
 
 def _durable_fingerprint(connection: sqlite3.Connection) -> tuple[tuple[str, int], ...]:
