@@ -86,6 +86,18 @@ def _legacy_evidence(
     *, request: Mapping[str, Any], response: Mapping[str, Any], private_root: Path, motif_path: Path,
 ) -> dict[str, Any]:
     stored, reinforced = bool(response.get("stored")), bool(response.get("reinforced"))
+    if not stored:
+        # The supplied embedding is merely an input to the rejected legacy
+        # write.  It is not a persisted representation and must not be
+        # reported as one.
+        return {
+            "storage": {
+                "stored": False, "reinforced": False, "compatible_eid": False,
+                "conflict": None, "created_motif": None, "motif_membership": [], "motif_geometry": [],
+            },
+            "post_write": _post_write_intent(response),
+            "optional_feature_divergences": [],
+        }
     eid = response.get("eid")
     node = _latest_nodes(private_root / "nodes.jsonl").get(eid) if isinstance(eid, int) else None
     payload = dict((node or {}).get("payload", {}) or {})

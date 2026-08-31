@@ -24,6 +24,7 @@ from .compare import (
     compare_rankings,
     compare_scalar,
     compare_vector,
+    validate_native_no_write_structure,
     validate_native_structure,
 )
 from .fixture_qualification import D1ReplayProfile, ReplayEventRole
@@ -81,6 +82,18 @@ _STORAGE_EXACT_FIELDS = (
 )
 _STORAGE_SCALAR_FIELDS = ("strength", "confidence", "half_life_days", "reinforcement_count")
 _POST_WRITE_EXACT_FIELDS = ("qualified_post_write_outputs", "deterministic_runtime_ordering")
+_NO_WRITE_STORAGE_FIELDS = (
+    "stored", "reinforced", "compatible_eid", "conflict", "created_motif", "motif_membership", "motif_geometry",
+)
+_NO_WRITE_STORAGE_EXPECTED = {
+    "stored": False,
+    "reinforced": False,
+    "compatible_eid": False,
+    "conflict": None,
+    "created_motif": None,
+    "motif_membership": [],
+    "motif_geometry": [],
+}
 _FORBIDDEN_NATIVE_FIELDS = {
     "eid",
     "legacy_eid",
@@ -352,6 +365,19 @@ def _compare_replay(legacy: CoreReplayEvidence, native: CoreReplayEvidence) -> t
     return storage, post_write
 
 
+def _compare_no_write_replay(legacy: CoreReplayEvidence, native: CoreReplayEvidence) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compare the semantic absence of M5 storage, not fictional objects."""
+    for boundary, evidence in (("legacy", legacy), ("native", native)):
+        _require_fields(evidence.storage, _NO_WRITE_STORAGE_FIELDS, boundary=f"{boundary} NO_WRITE evidence")
+        _require_fields(evidence.post_write, _POST_WRITE_EXACT_FIELDS, boundary=f"{boundary} NO_WRITE post-write evidence")
+        for field, expected in _NO_WRITE_STORAGE_EXPECTED.items():
+            if evidence.storage[field] != expected:
+                raise D1ProtocolError(f"{boundary} NO_WRITE evidence makes a non-no-write storage claim: {field}")
+    storage = _difference_intents(compare_exact_fields(legacy.storage, native.storage, _NO_WRITE_STORAGE_FIELDS))
+    post_write = _difference_intents(compare_exact_fields(legacy.post_write, native.post_write, _POST_WRITE_EXACT_FIELDS))
+    return storage, post_write
+
+
 class CoreFormalAdministrationExecutor:
     """One non-retrying CORE_ONLY callback for a future formal runner call."""
 
@@ -467,7 +493,10 @@ class CoreFormalAdministrationExecutor:
                         raise D1ProtocolError("M5 NO_WRITE changed durable native storage")
                 else:
                     native_evidence = native.replay(event.native_request())
-                event_storage, event_post = _compare_replay(legacy_evidence, native_evidence)
+                event_storage, event_post = (
+                    _compare_no_write_replay(legacy_evidence, native_evidence)
+                    if event.is_no_write else _compare_replay(legacy_evidence, native_evidence)
+                )
                 storage_differences.extend({"fixture_id": event.fixture_id, **item} for item in event_storage)
                 post_write_differences.extend({"fixture_id": event.fixture_id, **item} for item in event_post)
                 optional.extend(
@@ -476,7 +505,10 @@ class CoreFormalAdministrationExecutor:
                 )
                 if native_evidence.native_structural_invariants is None:
                     raise D1ProtocolError("native formal evidence lacks structural invariants")
-                validate_native_structure(native_evidence.native_structural_invariants)
+                if event.is_no_write:
+                    validate_native_no_write_structure(native_evidence.native_structural_invariants)
+                else:
+                    validate_native_structure(native_evidence.native_structural_invariants)
                 structural.append({"arm_id": arm.arm_id, "fixture_id": event.fixture_id, **dict(native_evidence.native_structural_invariants)})
             legacy_pre_restart = dict(legacy.capture_durable_state())
             legacy.restart_cleanly()

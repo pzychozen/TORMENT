@@ -28,7 +28,7 @@ from .formal_core_executor import (
     CoreFrozenFixture,
     require_core_formal_inputs,
 )
-from .formal_core_ports import ConcreteCoreFormalExecutionPorts
+from .formal_core_ports import ConcreteCoreFormalExecutionPorts, validate_frozen_core_input_contract
 from .protocol import FrozenAdministrationInputs
 from .side_store_observation import (
     CORE_CHARACTER_FREE_L0_FINGERPRINT,
@@ -117,6 +117,7 @@ def build_formal_operator_plan(
             CORE_PROTOCOL_SHA256, CORE_FIXTURE_SHA256, CORE_TOLERANCES_SHA256,
         ):
             raise FormalAdministrationRefused("operator lock changed before formal marker creation")
+        validate_frozen_core_input_contract(reread)
         ports.verify_frozen_sources()
 
     return CoreFormalOperatorPlan(

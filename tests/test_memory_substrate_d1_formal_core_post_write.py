@@ -15,6 +15,10 @@ from experiments.memory_substrate_d1_trace_replay_v1.formal_core_post_write impo
     build_formal_native_post_write_configuration,
     validate_formal_post_write_external_dependencies,
 )
+from experiments.memory_substrate_d1_trace_replay_v1.formal_core_executor import CoreFrozenFixture
+from experiments.memory_substrate_d1_trace_replay_v1.formal_core_ports import CoreNoWritePostWriteFacts
+from experiments.memory_substrate_d1_trace_replay_v1.native_replay import NativeCoreStorageSnapshot, NativeReplayHarness
+from experiments.memory_substrate_d1_trace_replay_v1.legacy_capture import InitialPostWritePlaceholderPosture
 from torment_service.collective_models import MemoryGovernanceFlags
 from torment_service.post_write_runtime import FabricPostWriteContext, PostWriteStorageOutcome
 from torment_service.provenance_v1 import ProvenanceV1
@@ -159,6 +163,36 @@ def test_synthetic_created_reinforced_and_no_write_cross_live_formal_post_write(
             affect_tag=None, affect_conf=None, skip_packet_emission=True,
         )
         assert adapter.run(no_write).proposal_id is None
+        assert configuration.external.workspace.proposals["research"].records == []
+    finally:
+        qualified.close()
+
+
+def test_exact_m5_no_write_facts_cross_live_adapter_without_a_route_or_durable_delta(tmp_path: Path) -> None:
+    """Exercise the repaired input contract on synthetic native state only."""
+    qualified, capability, _scope, _lane_value, configuration = _prepared(tmp_path)
+    try:
+        m5 = next(event for arm in CoreFrozenFixture.load().arms if arm.arm_id == "M5_NO_WRITE" for event in arm.events)
+        facts = CoreNoWritePostWriteFacts.from_mapping(m5.native_request())
+
+        class NoRouteRouter:
+            calls = 0
+
+            def route(self, _request):
+                self.calls += 1
+                raise AssertionError("NO_WRITE must not invoke native routing")
+
+        router = NoRouteRouter()
+        adapter = prepare_native_fabric_post_write_adapter(capability=capability, configuration=configuration)
+        before = NativeCoreStorageSnapshot.capture(qualified.database_path)
+        outcome = NativeReplayHarness(
+            router=router, post_write=adapter,
+            native_storage_snapshot=lambda: NativeCoreStorageSnapshot.capture(qualified.database_path),
+            placeholder_posture=InitialPostWritePlaceholderPosture(False, "read_only"),
+        ).replay_no_write_context(facts.to_post_write_context())
+        after = NativeCoreStorageSnapshot.capture(qualified.database_path)
+        assert outcome.route_attempt is None and outcome.operation_key is None
+        assert router.calls == 0 and before == after
         assert configuration.external.workspace.proposals["research"].records == []
     finally:
         qualified.close()

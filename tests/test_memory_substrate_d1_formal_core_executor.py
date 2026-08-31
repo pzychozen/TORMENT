@@ -55,6 +55,12 @@ _STRUCTURAL = {
     "idempotency": True,
     "retry_stability": True,
 }
+_NO_WRITE_STRUCTURAL = {
+    "router_not_invoked": True,
+    "route_witness_absent": True,
+    "durable_storage_unchanged": True,
+    "stored_object_created": False,
+}
 
 
 def _request(fixture_id: str) -> dict[str, Any]:
@@ -132,6 +138,21 @@ def _storage(event: CoreFrozenEvent, *, mismatch: bool = False) -> dict[str, Any
     return value
 
 
+def _no_write_storage(*, mismatch: bool = False) -> dict[str, Any]:
+    value = {
+        "stored": False,
+        "reinforced": False,
+        "compatible_eid": False,
+        "conflict": None,
+        "created_motif": None,
+        "motif_membership": [],
+        "motif_geometry": [],
+    }
+    if mismatch:
+        value["motif_membership"] = ["fictional"]
+    return value
+
+
 class _LegacySession:
     def __init__(self, ports: "_Ports", arm: CoreFrozenArm) -> None:
         self._ports, self._arm, self._cursor = ports, arm, 0
@@ -140,7 +161,8 @@ class _LegacySession:
         event = self._arm.events[self._cursor]
         self._cursor += 1
         self._ports.legacy_requests.append(dict(request))
-        return CoreReplayEvidence(_storage(event), _post_write())
+        storage = _no_write_storage() if event.is_no_write else _storage(event)
+        return CoreReplayEvidence(storage, _post_write())
 
     def capture_durable_state(self) -> Mapping[str, Any]:
         return {"legacy": self._cursor}
@@ -177,7 +199,10 @@ class _NativeSession:
         self._ports.native_requests.append(dict(request))
         if self._ports.mutate_m5:
             self._durable += 1
-        return CoreReplayEvidence(_storage(event, mismatch=self._ports.mismatch), _post_write(), (), _STRUCTURAL)
+        witness = dict(_NO_WRITE_STRUCTURAL)
+        if self._ports.invalid_no_write_witness:
+            witness.pop("route_witness_absent")
+        return CoreReplayEvidence(_no_write_storage(), _post_write(), (), witness)
 
     def capture_durable_state(self) -> Mapping[str, Any]:
         return {"native": self._durable}
@@ -200,9 +225,10 @@ class _Ports:
     legacy_normal_http_surface = True
     native_qualified_staging_only = True
 
-    def __init__(self, tmp_path: Path, *, same_roots: bool = False, mutate_m5: bool = False, mismatch: bool = False, raise_native: bool = False) -> None:
+    def __init__(self, tmp_path: Path, *, same_roots: bool = False, mutate_m5: bool = False, mismatch: bool = False, raise_native: bool = False, invalid_no_write_witness: bool = False) -> None:
         self._tmp_path, self._same_roots = tmp_path, same_roots
         self.mutate_m5, self.mismatch, self.raise_native = mutate_m5, mismatch, raise_native
+        self.invalid_no_write_witness = invalid_no_write_witness
         self.legacy_requests: list[dict[str, Any]] = []
         self.native_requests: list[dict[str, Any]] = []
         self.legacy_queries: list[np.ndarray] = []
@@ -259,6 +285,8 @@ def test_m5_does_not_route_and_refuses_durable_mutation(tmp_path: Path) -> None:
     assert ports.router_calls == 11
     with pytest.raises(D1ProtocolError, match="NO_WRITE changed"):
         _executor(tmp_path / "mutation", mutate_m5=True)[0].execute(administration_id="synthetic")
+    with pytest.raises(D1ProtocolError, match="NO_WRITE structural qualification"):
+        _executor(tmp_path / "missing-witness", invalid_no_write_witness=True)[0].execute(administration_id="synthetic")
 
 
 def test_executor_keeps_mismatch_and_optional_divergence_separate(tmp_path: Path) -> None:

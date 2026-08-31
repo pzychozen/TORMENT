@@ -75,3 +75,20 @@ def validate_native_structure(values: Mapping[str, bool]) -> None:
     required = {"uuid_uniqueness", "correct_parentage", "revision_advancement", "current_revision_ownership", "operation_ownership", "idempotency", "retry_stability"}
     if set(values) != required or not all(values.values()):
         raise D1ProtocolError("native-only structural qualification is incomplete")
+
+
+def validate_native_no_write_structure(values: Mapping[str, bool]) -> None:
+    """Validate the absence-only witness for a native NO_WRITE replay.
+
+    This deliberately does not assert object, revision, representation, or
+    operation ownership.  A successful NO_WRITE event creates none of those
+    durable entities.
+    """
+    required = {
+        "router_not_invoked": True,
+        "route_witness_absent": True,
+        "durable_storage_unchanged": True,
+        "stored_object_created": False,
+    }
+    if dict(values) != required:
+        raise D1ProtocolError("native NO_WRITE structural qualification is incomplete")

@@ -274,6 +274,27 @@ def test_d1_no_write_performs_zero_native_router_or_tail_mutations() -> None:
     assert witness.route_result is None and witness.native_operation_key is None
 
 
+def test_d1_dedicated_no_write_context_never_routes() -> None:
+    router, post_write = _FakeRouter(), _FakePostWrite()
+    harness = NativeReplayHarness(
+        router=router, post_write=post_write,
+        native_storage_snapshot=lambda: NativeCoreStorageSnapshot((("objects", 1),)),
+        placeholder_posture=_POSTURE,
+    )
+    context = NativeReplayHarness._context(
+        _facts(fixture_id="M5"), outcome=PostWriteStorageOutcome.NO_WRITE, eid=None, motifs=(),
+    )
+    outcome = harness.replay_no_write_context(context)
+    assert outcome.route_attempt is None and outcome.operation_key is None
+    assert router.requests == [] and len(post_write.calls) == 1
+
+    invalid = NativeReplayHarness._context(
+        _facts(fixture_id="M5"), outcome=PostWriteStorageOutcome.CREATED_NEW, eid=1, motifs=(),
+    )
+    with pytest.raises(D1ProtocolError, match="dedicated NO_WRITE replay"):
+        harness.replay_no_write_context(invalid)
+
+
 def test_d1_no_write_rejects_any_durable_native_storage_mutation() -> None:
     router, post_write = _FakeRouter(), _FakePostWrite()
     snapshots = iter((

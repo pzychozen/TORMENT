@@ -23,6 +23,7 @@ from uuid import UUID
 import numpy as np
 
 from torment_service.collective_models import MemoryGovernanceFlags
+from torment_service.post_write_runtime import FabricPostWriteContext, PostWriteStorageOutcome
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.connection import open_existing_native_core_connection
@@ -84,6 +85,94 @@ _IDEMPOTENCY_NAMESPACE_KEY = "d1-n0"
 
 class CoreFormalPortFailure(D1ProtocolError):
     """A concrete process, source, or qualified-STAGING port failed once."""
+
+
+@dataclass(frozen=True)
+class CoreNoWritePostWriteFacts:
+    """Experiment-local facts consumed by the qualified NO_WRITE post-write tail.
+
+    This carrier intentionally has no ``ProvenanceV1``, governance object,
+    representation lane, timestamp, or routing operation.  M5 did not create
+    a stored memory, so those stored-object facts are not applicable.
+    """
+
+    fixture_id: str
+    evidence_operation_key: str
+    workspace_id: str
+    agent_id: str
+    scope: str
+    domain_id: str
+    logical_step: int
+    summary: str
+    embedding: np.ndarray
+    memory_class: str
+    memory_type: str
+    strength: float
+    confidence: float
+    promotion_score: float
+    half_life_days: float
+    stability_delta: float
+    tri_mod: Mapping[str, Any]
+    debug: Mapping[str, Any]
+    srg_state: Mapping[str, Any] | None
+    phase_durations: Mapping[str, Any]
+    affect_tag: str | None
+    affect_conf: float | None
+    skip_packet_emission: bool
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CoreNoWritePostWriteFacts":
+        forbidden = {"eid", "legacy_eid", "reinforcement_target_eid", "selected_reinforcement_eid"}.intersection(value)
+        if forbidden:
+            raise CoreFormalPortFailure(f"native request contains a forbidden legacy selection: {sorted(forbidden)}")
+        if value.get("stored", False) is not False or value.get("provenance") != {}:
+            raise CoreFormalPortFailure("native request does not make the required no-stored-memory claim")
+        embedding = value.get("embedding")
+        if not isinstance(embedding, Mapping) or embedding.get("encoding") != "float32-le-c-384":
+            raise CoreFormalPortFailure("native request lacks frozen no-write post-write embedding facts")
+        try:
+            vector = np.frombuffer(base64.b64decode(str(embedding["base64"]), validate=True), dtype=np.float32).copy()
+            if vector.shape != (384,) or not np.isfinite(vector).all():
+                raise ValueError("invalid float32 embedding")
+            vector.setflags(write=False)
+            operation_key = str(value["native_operation_key"])
+            values = {
+                "fixture_id": str(value.get("fixture_id") or operation_key),
+                "evidence_operation_key": operation_key,
+                "workspace_id": str(value["workspace_id"]), "agent_id": str(value["agent_id"]),
+                "scope": str(value["scope"]), "domain_id": str(value["domain_id"]),
+                "logical_step": int(value["logical_step"]), "summary": str(value["summary"]),
+                "embedding": vector, "memory_class": str(value["memory_class"]),
+                "memory_type": str(value["memory_type"]), "strength": float(value["strength"]),
+                "confidence": float(value["confidence"]), "promotion_score": float(value["promotion_score"]),
+                "half_life_days": float(value["half_life_days"]), "stability_delta": float(value.get("stability_delta", 0.0)),
+                "tri_mod": dict(value.get("tri_mod") or {}), "debug": dict(value.get("debug") or {}),
+                "srg_state": dict(value["srg_state"]) if isinstance(value.get("srg_state"), Mapping) else None,
+                "phase_durations": dict(value.get("phase_durations") or {}),
+                "affect_tag": value.get("affect_tag"), "affect_conf": value.get("affect_conf"),
+                "skip_packet_emission": bool(value.get("skip_packet_emission", False)),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CoreFormalPortFailure("native request contains malformed frozen no-write post-write facts") from exc
+        if not all(values[name] for name in ("fixture_id", "evidence_operation_key", "workspace_id", "agent_id", "scope", "domain_id")):
+            raise CoreFormalPortFailure("native request contains empty frozen no-write identity facts")
+        return cls(**values)
+
+    def to_post_write_context(self) -> FabricPostWriteContext:
+        """Build only the NO_WRITE context; evidence identity is not routed."""
+        return FabricPostWriteContext.make(
+            workspace_id=self.workspace_id, agent_id=self.agent_id, scope=self.scope,
+            chosen_domain=self.domain_id, step=self.logical_step,
+            storage_outcome=PostWriteStorageOutcome.NO_WRITE, stored=False, eid=None,
+            created_motif=None, motif_ids=(), half_life_days=self.half_life_days,
+            summary=self.summary, embedding=self.embedding, memory_class=self.memory_class,
+            memory_type=self.memory_type, strength=self.strength, confidence=self.confidence,
+            promotion_score=self.promotion_score, stability_delta=self.stability_delta,
+            tri_mod=self.tri_mod, debug=self.debug, srg_state=self.srg_state,
+            phase_durations=self.phase_durations, state_symbol=None,
+            affect_tag=self.affect_tag, affect_conf=self.affect_conf,
+            skip_packet_emission=self.skip_packet_emission,
+        )
 
 
 @dataclass(frozen=True)
@@ -372,6 +461,32 @@ def _facts_from_mapping(value: Mapping[str, Any]) -> LegacyStorageFacingFacts:
     )
 
 
+def validate_frozen_core_input_contract(fixture: Any) -> None:
+    """Read and type-check every sealed CORE_ONLY input before a marker exists.
+
+    This validation is intentionally local: it performs no HTTP request,
+    native route, post-write call, filesystem mutation, or administration
+    event.  It makes the M5 no-write contract distinct from the eleven stored
+    input conversions, including the four sequential inputs.
+    """
+    parsed = 0
+    for arm in fixture.arms:
+        for event in arm.events:
+            if arm.arm_id == "M5_NO_WRITE":
+                if not event.is_no_write or event.legacy_expected.get("reinforced") is not False:
+                    raise CoreFormalPortFailure("frozen M5 input does not make the required no-write claim")
+                facts = CoreNoWritePostWriteFacts.from_mapping(event.native_request())
+                if facts.fixture_id != event.native_request().get("native_operation_key"):
+                    raise CoreFormalPortFailure("frozen M5 evidence identity is inconsistent")
+            else:
+                if event.legacy_expected.get("stored") is not True:
+                    raise CoreFormalPortFailure("stored CORE_ONLY arm contains a no-write native input")
+                _facts_from_mapping(event.native_request())
+            parsed += 1
+    if parsed != 12:
+        raise CoreFormalPortFailure("CORE_ONLY frozen input validation requires exactly twelve events")
+
+
 class QualifiedNativeArmSession:
     """One explicit, qualified native STAGING arm; no graph or legacy fallback."""
 
@@ -398,19 +513,17 @@ class QualifiedNativeArmSession:
         return self._evidence_for_result(facts, outcome.route_attempt.result, outcome.post_write_outcome)
 
     def replay_no_write(self, request: Mapping[str, Any]) -> CoreReplayEvidence:
-        facts = _facts_from_mapping(request)
-        before = NativeCoreStorageSnapshot.capture(self._database)
+        facts = CoreNoWritePostWriteFacts.from_mapping(request)
         outcome = NativeReplayHarness(
             router=self._router, post_write=self._post_write,
             native_storage_snapshot=lambda: NativeCoreStorageSnapshot.capture(self._database),
             placeholder_posture=InitialPostWritePlaceholderPosture(False, "read_only"),
-        ).replay(LegacyCapturedEvent(facts, LegacyObservedOutcome(False, False, None)))
-        after = NativeCoreStorageSnapshot.capture(self._database)
-        if outcome.route_attempt is not None or before != after:
+        ).replay_no_write_context(facts.to_post_write_context())
+        if outcome.route_attempt is not None or outcome.operation_key is not None:
             raise CoreFormalPortFailure("M5 no-write native port touched the router or durable core")
         return CoreReplayEvidence(
-            storage=_no_write_storage(facts), post_write=_post_write_intent(outcome.post_write_outcome),
-            native_structural_invariants=_no_write_structural_invariants(),
+            storage=_no_write_storage(), post_write=_post_write_intent(outcome.post_write_outcome),
+            native_structural_invariants=_no_write_structural_witness(),
         )
 
     def capture_durable_state(self) -> Mapping[str, Any]:
@@ -506,24 +619,17 @@ def _post_write_intent(value: Any) -> Mapping[str, Any]:
     }
 
 
-def _no_write_storage(facts: LegacyStorageFacingFacts) -> Mapping[str, Any]:
+def _no_write_storage() -> Mapping[str, Any]:
     return {
-        "stored": False, "reinforced": False, "compatible_eid": False, "summary": facts.summary,
-        "memory_type": facts.memory_type, "memory_class": facts.memory_class,
-        "lifecycle": None, "governance": facts.governance.to_dict(),
-        "provenance": facts.provenance.to_dict(),
-        "raw_representation_bytes": base64.b64encode(facts.embedding_bytes).decode("ascii"),
-        "raw_representation_vector": facts.embedding.tolist(), "motif_membership": [], "motif_geometry": [],
-        "conflict": None, "strength": facts.strength, "confidence": facts.confidence,
-        "half_life_days": facts.half_life_days, "reinforcement_count": 0,
+        "stored": False, "reinforced": False, "compatible_eid": False,
+        "conflict": None, "created_motif": None, "motif_membership": [], "motif_geometry": [],
     }
 
 
-def _no_write_structural_invariants() -> Mapping[str, bool]:
+def _no_write_structural_witness() -> Mapping[str, bool]:
     return {
-        "uuid_uniqueness": True, "correct_parentage": True, "revision_advancement": True,
-        "current_revision_ownership": True, "operation_ownership": True, "idempotency": True,
-        "retry_stability": True,
+        "router_not_invoked": True, "route_witness_absent": True,
+        "durable_storage_unchanged": True, "stored_object_created": False,
     }
 
 
@@ -695,6 +801,6 @@ class ConcreteCoreFormalExecutionPorts:
 
 __all__ = [
     "CORE_AGENT_ID", "CORE_DOMAIN_ID", "CORE_WORKSPACE_ID", "CoreD1SourceLocations",
-    "CoreFormalPortFailure", "ConcreteCoreFormalExecutionPorts", "LegacyHttpArmSession",
-    "QualifiedNativeArmSession",
+    "CoreFormalPortFailure", "CoreNoWritePostWriteFacts", "ConcreteCoreFormalExecutionPorts",
+    "LegacyHttpArmSession", "QualifiedNativeArmSession", "validate_frozen_core_input_contract",
 ]

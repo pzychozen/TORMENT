@@ -31,12 +31,15 @@ from experiments.memory_substrate_d1_trace_replay_v1.formal_core_executor import
     CoreReplayEvidence,
 )
 from experiments.memory_substrate_d1_trace_replay_v1.formal_core_ports import (
+    CoreNoWritePostWriteFacts,
     CoreD1SourceLocations,
     CoreFormalPortFailure,
     ConcreteCoreFormalExecutionPorts,
     QualifiedNativeArmSession,
     _facts_from_mapping,
+    validate_frozen_core_input_contract,
 )
+from experiments.memory_substrate_d1_trace_replay_v1.formal_core_legacy_worker import _legacy_evidence
 from experiments.memory_substrate_d1_trace_replay_v1.protocol import (
     D1ProtocolError,
     FrozenAdministrationInputs,
@@ -110,6 +113,20 @@ def _storage(request: Mapping[str, Any], *, stored: bool, reinforced: bool) -> d
     }
 
 
+def _no_write_storage() -> dict[str, Any]:
+    return {
+        "stored": False, "reinforced": False, "compatible_eid": False,
+        "conflict": None, "created_motif": None, "motif_membership": [], "motif_geometry": [],
+    }
+
+
+def _no_write_witness() -> dict[str, bool]:
+    return {
+        "router_not_invoked": True, "route_witness_absent": True,
+        "durable_storage_unchanged": True, "stored_object_created": False,
+    }
+
+
 def _post_write() -> dict[str, Any]:
     return {
         "qualified_post_write_outputs": {"proposal_id": None},
@@ -131,7 +148,8 @@ class _FakeWorker:
             stored = bool(request["text"])
             reinforced = stored and summary in self.seen
             self.seen.add(summary)
-            return {"storage": _storage(request, stored=stored, reinforced=reinforced), "post_write": _post_write(), "optional_feature_divergences": []}
+            storage = _no_write_storage() if not stored else _storage(request, stored=stored, reinforced=reinforced)
+            return {"storage": storage, "post_write": _post_write(), "optional_feature_divergences": []}
         if command == "capture_durable_state":
             return {"writes": len(self.seen)}
         if command == "search_by_embedding":
@@ -161,7 +179,7 @@ class _FakeNative:
         return CoreReplayEvidence(_storage(request, stored=True, reinforced=reinforced), _post_write(), native_structural_invariants=_structural())
 
     def replay_no_write(self, request: Mapping[str, Any]) -> CoreReplayEvidence:
-        return CoreReplayEvidence(_storage(request, stored=False, reinforced=False), _post_write(), native_structural_invariants=_structural())
+        return CoreReplayEvidence(_no_write_storage(), _post_write(), native_structural_invariants=_no_write_witness())
 
     def capture_durable_state(self) -> Mapping[str, Any]:
         return {"writes": self.stores[self.root]}
@@ -267,6 +285,38 @@ def test_native_input_refuses_selected_legacy_eid_and_has_no_memorygraph_fallbac
     ))
 
 
+def test_exact_frozen_m5_uses_no_write_contract_and_stored_parser_refuses_it() -> None:
+    fixture = CoreFrozenFixture.load()
+    m5 = next(event for arm in fixture.arms if arm.arm_id == "M5_NO_WRITE" for event in arm.events)
+    facts = CoreNoWritePostWriteFacts.from_mapping(m5.native_request())
+    context = facts.to_post_write_context()
+    assert facts.evidence_operation_key == m5.native_request()["native_operation_key"]
+    assert context.stored is False and context.eid is None
+    assert not hasattr(facts, "governance") and not hasattr(facts, "provenance")
+    with pytest.raises(CoreFormalPortFailure, match="malformed frozen storage facts"):
+        _facts_from_mapping(m5.native_request())
+
+
+def test_exact_frozen_input_precontact_validation_parses_all_twelve_without_ports(tmp_path: Path) -> None:
+    fixture = CoreFrozenFixture.load()
+    before = sorted(tmp_path.rglob("*"))
+    validate_frozen_core_input_contract(fixture)
+    assert len([event for arm in fixture.arms for event in arm.events]) == 12
+    assert len([event for arm in fixture.arms if arm.arm_id == "SEQUENTIAL" for event in arm.events]) == 4
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_legacy_no_write_evidence_never_labels_the_supplied_embedding_as_persisted(tmp_path: Path) -> None:
+    evidence = _legacy_evidence(
+        request={"supplied_embedding_base64": "not-a-persisted-representation"},
+        response={"stored": False, "reinforced": False, "eid": None, "motifs": [], "proposal_id": None},
+        private_root=tmp_path / "no-access", motif_path=tmp_path / "no-access" / "motifs.json",
+    )
+    assert evidence["storage"] == _no_write_storage()
+    assert "raw_representation_bytes" not in evidence["storage"]
+    assert "raw_representation_vector" not in evidence["storage"]
+
+
 def test_legacy_worker_is_bound_to_the_normal_service_and_arm_data_directory() -> None:
     worker = (_ROOT / "experiments" / "memory_substrate_d1_trace_replay_v1" / "formal_core_legacy_worker.py").read_text(encoding="utf-8")
     capture = (_ROOT / "experiments" / "memory_substrate_d1_trace_replay_v1" / "legacy_fixture_capture.py").read_text(encoding="utf-8")
@@ -350,6 +400,34 @@ def test_operator_surface_requires_all_authority_values_and_never_touches_real_r
         administration_work_root=work, result_root=result, repository_root=_ROOT,
     )
     assert plan.authorization.authorized is True
+    assert not work.exists() and not result.exists()
+
+
+def test_operator_precontact_validation_runs_before_any_future_marker_or_port_contact(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    class ReadOnlyPorts:
+        legacy_environment = "torment"
+        native_environment = "torment-substrate"
+        legacy_normal_http_surface = True
+        native_qualified_staging_only = True
+
+        def __init__(self, **_values: Any) -> None:
+            return None
+
+        def verify_frozen_sources(self) -> None:
+            calls.append("read-only-source-verification")
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    work, result = tmp_path / "precontact-work", tmp_path / "precontact-result"
+    plan = build_formal_operator_plan(
+        administration_id="synthetic-precontact", expected_repository_head=head,
+        protocol_sha256=CORE_PROTOCOL_SHA256, fixture_sha256=CORE_FIXTURE_SHA256,
+        tolerances_sha256=CORE_TOLERANCES_SHA256, administration_work_root=work,
+        result_root=result, repository_root=_ROOT, ports_factory=ReadOnlyPorts,
+    )
+    plan.verify_baselines_and_fixture()
+    assert calls == ["read-only-source-verification"]
     assert not work.exists() and not result.exists()
 
 

@@ -101,13 +101,9 @@ class NativeReplayHarness:
     def replay(self, event: LegacyCapturedEvent) -> NativeReplayOutcome:
         facts = event.native_input()
         if not event.observed_outcome.stored:
-            before = self._native_storage_snapshot()
-            context = self._context(facts, outcome=PostWriteStorageOutcome.NO_WRITE, eid=None, motifs=())
-            post = self._post_write.run(context, route_witness=NativePostWriteRouteWitness(None, None))
-            after = self._native_storage_snapshot()
-            if after != before:
-                raise D1ProtocolError("M5 NO_WRITE changed durable native storage")
-            return NativeReplayOutcome(None, post, PostWriteStorageOutcome.NO_WRITE, None)
+            return self.replay_no_write_context(
+                self._context(facts, outcome=PostWriteStorageOutcome.NO_WRITE, eid=None, motifs=()),
+            )
         attempt = self._router.route(self._request(facts))
         if not attempt.qualification.eligible or attempt.result is None:
             raise D1ProtocolError(f"qualified native route refused stored D1 request: {attempt.qualification.reason_code}")
@@ -119,3 +115,23 @@ class NativeReplayHarness:
             route_witness=NativePostWriteRouteWitness(result, facts.native_operation_key),
         )
         return NativeReplayOutcome(attempt, post, outcome, facts.native_operation_key)
+
+    def replay_no_write_context(self, context: FabricPostWriteContext) -> NativeReplayOutcome:
+        """Run only the qualified post-write NO_WRITE branch once.
+
+        The dedicated path accepts orchestration context, never a storage
+        request.  It therefore cannot invoke native memory routing or create
+        a routing operation from evidence-only fixture identity.
+        """
+        if (
+            context.storage_outcome is not PostWriteStorageOutcome.NO_WRITE
+            or context.stored is not False
+            or context.eid is not None
+        ):
+            raise D1ProtocolError("D1 dedicated NO_WRITE replay requires NO_WRITE, stored=False, and eid=None")
+        before = self._native_storage_snapshot()
+        post = self._post_write.run(context, route_witness=NativePostWriteRouteWitness(None, None))
+        after = self._native_storage_snapshot()
+        if after != before:
+            raise D1ProtocolError("M5 NO_WRITE changed durable native storage")
+        return NativeReplayOutcome(None, post, PostWriteStorageOutcome.NO_WRITE, None)
