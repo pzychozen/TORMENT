@@ -20,7 +20,9 @@ from ..motif_decision import (
     realize_attach_next_state,
     realize_create_next_state,
 )
-from .motifs import MotifState, NativeMotifMutationResult, NativeMotifService, NativeMotifView
+from .motifs import MotifState, NativeMotifMutationResult, NativeMotifService, NativeMotifSplitResult, NativeMotifView
+from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
+from .native_motif_split import prepare_qualified_native_motif_split
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class NativeMotifDecisionPlan:
 
     decision: MotifDecision
     selected_motif: NativeMotifView | None
+    catalog: tuple[NativeMotifView, ...]
 
 
 class NativeMotifDecisionAdapter:
@@ -73,7 +76,7 @@ class NativeMotifDecisionAdapter:
         selected = next(
             (view for view, model in entries if model is decision.selected), None
         )
-        return NativeMotifDecisionPlan(decision, selected)
+        return NativeMotifDecisionPlan(decision, selected, tuple(view for view, _model in entries))
 
     def apply(
         self,
@@ -94,7 +97,7 @@ class NativeMotifDecisionAdapter:
         created_ts: int | None = None,
         derivation_metadata: Mapping[str, Any] | None = None,
         extra_payload: Mapping[str, Any] | None = None,
-    ) -> NativeMotifMutationResult:
+    ) -> NativeMotifMutationResult | NativeMotifSplitResult:
         """Commit the already-decided branch without retry/staleness bypasses."""
         if plan.decision.kind == "ATTACH_EXISTING":
             if plan.selected_motif is None:
@@ -109,6 +112,28 @@ class NativeMotifDecisionAdapter:
                 source.derivation_metadata,
                 source.extra_payload,
             )
+            selected = NativeRuntimeMotif(
+                plan.selected_motif.motif_object_id, plan.selected_motif.motif_revision_id,
+                plan.selected_motif.revision_ordinal, source.semantic_scope_id,
+                plan.decision.selected,
+            )
+            split_plan = prepare_qualified_native_motif_split(
+                reader=NativeMotifRuntimeReader(self._service._connection), selected=selected,
+                source_state=source, aggregate_state=state, decision=plan.decision,
+                candidate_member_object_id=member_object_id,
+                expected_dimension=len(plan.decision.candidate_embedding),
+                catalog_runtime_ids=tuple(item.state.runtime_motif_id for item in plan.catalog),
+                child_created_ts=last_active_ts,
+            )
+            if split_plan is not None:
+                return self._service.split_motif_with_member(
+                    idempotency_namespace_id=idempotency_namespace_id,
+                    idempotency_key=idempotency_key,
+                    motif_identity_namespace_id=plan.selected_motif.identity_namespace_id,
+                    membership_identity_namespace_id=membership_identity_namespace_id,
+                    motif_alias_namespace_id=motif_alias_namespace_id,
+                    plan=split_plan,
+                )
             return self._service.add_motif_member(
                 idempotency_namespace_id=idempotency_namespace_id,
                 idempotency_key=idempotency_key,

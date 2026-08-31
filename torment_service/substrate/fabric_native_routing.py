@@ -44,7 +44,6 @@ from .memory_motif_composition import (
     NativeMemoryMotifCompositionRequest,
     NativeMemoryMotifCompositionService,
     StaleMotifCatalogError,
-    UnsupportedNativeSplitError,
 )
 from .memory_reinforcement import (
     NativeMemoryReinforcementRequest,
@@ -486,10 +485,6 @@ class NativeFabricMemoryRouter:
                 return NativeFabricRouteAttempt(
                     NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID")
                 )
-            except UnsupportedNativeSplitError:
-                return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "UNSUPPORTED_NATIVE_SPLIT")
-                )
             except ValueError:
                 # Structural translation and A3C2 planning both reject before
                 # a source semantic transaction starts.  This remains an
@@ -658,7 +653,13 @@ class NativeFabricMemoryRouter:
             # so a newly committed row receives fresh rather than reload state.
             world_runtime.ensure_initialized()
             composition_result = composition.commit(preview)
-            if composition_result.runtime_motif_id not in {
+            if composition_result.split_child_runtime_motif_id is not None:
+                self._capability.process_order.append_created(
+                    routing_scope=routing_scope,
+                    domain_id=request.domain_id,
+                    runtime_motif_id=composition_result.split_child_runtime_motif_id,
+                )
+            elif composition_result.runtime_motif_id not in {
                 item.read_model.runtime_motif_id for item in ordered_catalog
             }:
                 self._capability.process_order.append_created(
@@ -681,7 +682,7 @@ class NativeFabricMemoryRouter:
         )
         return NativeFabricRouteResult(
             True, False, composition_result.memory_eid, request.domain_id,
-            (composition_result.runtime_motif_id,), composition_result.memory_object_id,
+            composition_result.affected_runtime_motif_ids or (composition_result.runtime_motif_id,), composition_result.memory_object_id,
             composition_result.memory_revision_id, representation.representation_id,
         )
 

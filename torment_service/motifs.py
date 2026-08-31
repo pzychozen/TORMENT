@@ -25,6 +25,7 @@ from .motif_decision import (
     realize_create_next_state,
 )
 from .motif_geometry import motif_radius_from_member_vectors
+from .motif_split_policy import MotifSplitPlan, decide_motif_auto_split
 
 def _now_ts() -> int:
     return int(time.time())
@@ -250,59 +251,29 @@ class MotifRegistry:
         return assign, ca, cb
 
     def _maybe_split_motif(self, motif_id: str) -> Optional[Dict[str, Any]]:
-        if not self.AUTO_SPLIT_ENABLE:
-            return None
         m = self.motifs.get(motif_id)
-        if m is None or len(m.members) < self.AUTO_SPLIT_MIN_MEMBERS:
+        if m is None:
             return None
-
-        X = []
-        eids = []
-        for eid in m.members:
-            emb = self._member_embedding(eid)
-            if emb is None:
-                continue
-            X.append(emb)
-            eids.append(int(eid))
-        if len(X) < self.AUTO_SPLIT_MIN_MEMBERS:
-            return None
-        X = np.stack(X, axis=0).astype(np.float32)
-
-        c = _unit(m.centroid_np())
-        d = np.sum((X - c[None, :]) ** 2, axis=1)
-        radius = float(np.mean(1.0 - np.clip(X @ c, -1.0, 1.0)))
-        if radius < self.AUTO_SPLIT_RADIUS_THRESHOLD:
-            return None
-
-        seed_a = int(np.argmax(d))
-        # farthest from seed_a
-        d2 = np.sum((X - X[seed_a][None, :]) ** 2, axis=1)
-        seed_b = int(np.argmax(d2))
-        if seed_a == seed_b:
-            return None
-
-        assign, ca, cb = self._two_means_split(X, seed_a, seed_b)
-        n0 = int(np.sum(assign == 0))
-        n1 = int(np.sum(assign == 1))
-        if n0 < 16 or n1 < 16:
-            return None
-
-        base_sse = float(np.sum((X - c[None, :]) ** 2))
-        sse0 = float(np.sum((X[assign == 0] - ca[None, :]) ** 2))
-        sse1 = float(np.sum((X[assign == 1] - cb[None, :]) ** 2))
-        improved = 1.0 - ((sse0 + sse1) / (base_sse + 1e-12))
-        if improved < self.AUTO_SPLIT_IMPROVEMENT_MIN:
+        split = decide_motif_auto_split(
+            ((int(eid), self._member_embedding(eid)) for eid in m.members),
+            m.centroid_np(),
+            enabled=self.AUTO_SPLIT_ENABLE,
+            min_members=self.AUTO_SPLIT_MIN_MEMBERS,
+            radius_threshold=self.AUTO_SPLIT_RADIUS_THRESHOLD,
+            improvement_min=self.AUTO_SPLIT_IMPROVEMENT_MIN,
+        )
+        if not isinstance(split, MotifSplitPlan):
             return None
 
         # rewrite original motif as cluster 0, create child motif for cluster 1
         child_mid = self._next_motif_id(prefix=f"{m.motif_id}_split")
         child_label = f"{m.label} sub-basin"
 
-        members0 = [eids[i] for i in range(len(eids)) if assign[i] == 0]
-        members1 = [eids[i] for i in range(len(eids)) if assign[i] == 1]
+        members0 = list(split.parent_members)
+        members1 = list(split.child_members)
 
         m.members = members0
-        m.centroid = _unit(ca).tolist()
+        m.centroid = list(split.parent_centroid)
         m.strength = float(max(0.18, min(1.0, 0.12 + 0.88 * (1.0 - np.exp(-len(m.members) / 24.0)))))
         m.last_active_ts = _now_ts()
 
@@ -310,7 +281,7 @@ class MotifRegistry:
             motif_id=child_mid,
             domain_id=self.domain_id,
             label=child_label,
-            centroid=_unit(cb).tolist(),
+            centroid=list(split.child_centroid),
             strength=float(max(0.15, min(1.0, 0.12 + 0.88 * (1.0 - np.exp(-len(members1) / 24.0))))),
             members=members1,
             contributing_agents=list(m.contributing_agents),
@@ -325,8 +296,8 @@ class MotifRegistry:
             "child": child_mid,
             "parent_members": len(members0),
             "child_members": len(members1),
-            "radius_before": float(radius),
-            "sse_improvement": float(improved),
+            "radius_before": float(split.radius_before),
+            "sse_improvement": float(split.sse_improvement),
         }
         self._log_event(evt)
         return evt

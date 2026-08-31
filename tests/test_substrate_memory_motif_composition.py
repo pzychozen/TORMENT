@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,6 @@ from torment_service.substrate.memory_motif_composition import (
     NativeMemoryMotifCompositionRequest,
     NativeMemoryMotifCompositionService,
     StaleMotifCatalogError,
-    UnsupportedNativeSplitError,
 )
 from torment_service.substrate.motifs import MotifState, NativeMotifService
 from torment_service.substrate.object_revision_governance import (
@@ -33,6 +33,11 @@ from torment_service.substrate.object_revision_governance import (
     NativeObjectRevisionGovernanceService,
 )
 from torment_service.substrate.provenance import NativeProvenanceRecord
+from torment_service.substrate.representations import (
+    INTEGRITY_ALGORITHM_SHA256, INTEGRITY_VALUE_ENCODING_RAW,
+    NativeRepresentationService, RepresentationIntegrityExpectationRequest,
+    RepresentationReadyRequest, RepresentationRequest,
+)
 from torment_service.substrate.schema import create_schema
 from torment_service.symbols import assign_symbol_state
 
@@ -203,6 +208,49 @@ def _add_member(values, result, *, key: str, eid_label: int):
         motif_object_id=result.motif_object_id, expected_motif_revision_id=current.motif_revision_id,
         state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
         member_object_id=source.object_id,
+    )
+
+
+def _add_represented_member(values, result, *, key: str, eid_label: int, vector):
+    service = NativeMotifService(values["connection"])
+    current = service.get_current_motif(result.motif_object_id)
+    source = _existing_memory_with_embedding(
+        values, key=f"{key}-memory", eid_label=eid_label, vector=vector,
+    )
+    return service.add_motif_member(
+        idempotency_namespace_id=values["idempotency"], idempotency_key=key,
+        motif_alias_namespace_id=values["motif_alias"],
+        membership_identity_namespace_id=values["membership_identity"],
+        motif_object_id=result.motif_object_id, expected_motif_revision_id=current.motif_revision_id,
+        state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
+        member_object_id=source.object_id,
+    )
+
+
+def _publish_composed_representation(values, result, *, key: str, vector):
+    payload = np.asarray(vector, dtype=np.float32).tobytes()
+    service = NativeRepresentationService(values["connection"])
+    pending = service.create_representation_pending(
+        idempotency_namespace_id=values["idempotency"], idempotency_key=f"{key}:pending",
+        request=RepresentationRequest(
+            "OBJECT_REVISION", result.memory_object_id, result.memory_revision_id,
+            None, None, "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR",
+            dtype="float32", dimension=3, expected_payload_byte_length=len(payload),
+        ),
+    )
+    service.establish_representation_integrity_expectation(
+        idempotency_namespace_id=values["idempotency"], idempotency_key=f"{key}:expect",
+        request=RepresentationIntegrityExpectationRequest(
+            pending.representation_id, INTEGRITY_ALGORITHM_SHA256,
+            hashlib.sha256(payload).digest(), INTEGRITY_VALUE_ENCODING_RAW,
+        ),
+    )
+    return service.publish_representation_ready(
+        idempotency_namespace_id=values["idempotency"], idempotency_key=f"{key}:ready",
+        request=RepresentationReadyRequest(
+            pending.representation_id, "COMPAT_EMBEDDING", 1,
+            "compat-embedding-v1", "RAW_VECTOR", payload,
+        ),
     )
 
 
@@ -391,10 +439,6 @@ def test_link_inputs_are_independently_rejected_and_split_boundary_is_fail_close
             with pytest.raises(ValueError, match="defers"):
                 service.prepare_plan(_request(values, **changes))
 
-        # The full native 2-means split is deliberately absent.  The bounded
-        # gate itself is unit-qualified with a synthetic read model below in
-        # the dedicated geometry/decision test path; no live split is invoked.
-        assert UnsupportedNativeSplitError.__name__ == "UnsupportedNativeSplitError"
     finally:
         values["qualified"].close()
 
@@ -564,17 +608,113 @@ def test_lifecycle_governance_and_authority_remain_independent_and_non_authorizi
         values["qualified"].close()
 
 
-def test_split_gate_refuses_a_real_ninety_sixth_attach_without_compound_residue(tmp_path: Path):
+def test_unqualified_ninety_sixth_attach_remains_an_ordinary_no_split(tmp_path: Path):
     values = _database(tmp_path)
     try:
         seed = _seed_motif(values, key="split-seed")
         for offset in range(2, 96):
             _add_member(values, seed, key=f"split-member-{offset}", eid_label=offset)
         service = NativeMemoryMotifCompositionService(values["connection"])
-        before = _semantic_counts(values["connection"])
-        with pytest.raises(UnsupportedNativeSplitError, match="UNSUPPORTED_NATIVE_SPLIT"):
-            service.prepare_plan(_request(values, key="split-refusal"))
-        assert _semantic_counts(values["connection"]) == before
+        preview = service.prepare_plan(_request(values, key="split-no-qualified-vectors"))
+        assert preview.split_plan is None
+        result = service.commit(preview)
+        assert result.affected_runtime_motif_ids == ("motif_research_0001",)
+        assert len(NativeMotifService(values["connection"]).list_current_motif_members(seed.motif_object_id)) == 96
+    finally:
+        values["qualified"].close()
+
+
+def test_qualified_ninety_sixth_attach_without_geometry_split_stays_ordinary(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        first = _existing_memory_with_embedding(
+            values, key="qualified-no-split-first", eid_label=1, vector=(1.0, 0.0, 0.0),
+        )
+        seed = _seed_motif(
+            values, key="qualified-no-split-seed", source=first, centroid=(1.0, 0.0, 0.0),
+        )
+        for offset in range(2, 96):
+            _add_represented_member(
+                values, seed, key=f"qualified-no-split-{offset}", eid_label=offset,
+                vector=(1.0, 0.0, 0.0),
+            )
+        service = NativeMemoryMotifCompositionService(values["connection"])
+        preview = service.prepare_plan(_request(
+            values, key="qualified-no-split-candidate", embedding=(1.0, 0.0, 0.0),
+        ))
+        assert preview.split_plan is None
+        result = service.commit(preview)
+        assert result.affected_runtime_motif_ids == ("motif_research_0001",)
+        assert result.split_child_object_id is None
+        assert len(NativeMotifService(values["connection"]).list_current_motif_members(seed.motif_object_id)) == 96
+        assert values["connection"].execute(
+            "SELECT count(*) FROM relationship_revisions WHERE existence_state='RETIRED'"
+        ).fetchone()[0] == 0
+    finally:
+        values["qualified"].close()
+
+
+def test_qualified_true_split_publishes_final_membership_topology_atomically(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        first = _existing_memory_with_embedding(
+            values, key="split-first", eid_label=1, vector=(1.0, 0.0, 0.0),
+        )
+        seed = _seed_motif(
+            values, key="split-seed", source=first, centroid=(1.0, 0.0, 0.0),
+        )
+        # The frozen source order intentionally interleaves the two lobes;
+        # split membership order must still follow that source evidence.
+        vectors = [(1.0, 0.0, 0.0)] * 47 + [(-1.0, 0.0, 0.0)] * 47
+        for offset, vector in enumerate(vectors, start=2):
+            _add_represented_member(
+                values, seed, key=f"split-represented-{offset}", eid_label=offset, vector=vector,
+            )
+        service = NativeMemoryMotifCompositionService(values["connection"])
+        preview = service.prepare_plan(_request(values, key="true-split", embedding=(1.0, 0.0, 0.0)))
+        assert preview.split_plan is not None
+        assert preview.split_plan.parent_state.runtime_motif_id == "motif_research_0001"
+        assert preview.split_plan.child_state.runtime_motif_id == "motif_research_0001_split_0002"
+        result = service.commit(preview)
+        assert result.affected_runtime_motif_ids == (
+            "motif_research_0001", "motif_research_0001_split_0002",
+        )
+        assert result.split_child_object_id is not None
+        motifs = NativeMotifService(values["connection"])
+        parent = motifs.get_current_motif(seed.motif_object_id)
+        child = motifs.get_current_motif(result.split_child_object_id)
+        parent_members = motifs.list_current_motif_members(parent.motif_object_id)
+        child_members = motifs.list_current_motif_members(child.motif_object_id)
+        assert len(parent_members) + len(child_members) == 96
+        # Seed A is the first farthest negative vector, so legacy cluster 0
+        # remains the negative parent and the positive candidate is child R1.
+        assert len(parent_members) == 47 and len(child_members) == 49
+        assert any(item.member_object_id == result.memory_object_id for item in child_members)
+        assert all(item.member_object_id != result.memory_object_id for item in parent_members)
+        ordered_child = service._reader.list_ordered_current_motif_members(result.split_child_object_id)
+        assert ordered_child[-1].member_object_id == result.memory_object_id
+        assert values["connection"].execute(
+            "SELECT count(*) FROM relationship_revisions WHERE existence_state='RETIRED'"
+        ).fetchone()[0] == 48
+        assert service.commit(service.prepare_plan(_request(values, key="true-split", embedding=(1.0, 0.0, 0.0)))) == result
+        assert values["connection"].execute(
+            "SELECT count(*) FROM objects WHERE object_kind='DERIVED_MOTIF'"
+        ).fetchone()[0] == 2
+        _publish_composed_representation(values, result, key="true-split-first-candidate", vector=(1.0, 0.0, 0.0))
+        # A later qualified, active-only child topology can split again.  The
+        # first parent's retired memberships never feed the second decision.
+        for offset in range(47):
+            _add_represented_member(
+                values, result, key=f"split-second-lobe-{offset}", eid_label=200 + offset,
+                vector=(-1.0, 0.0, 0.0),
+            )
+        second_preview = service.prepare_plan(_request(values, key="true-split-second", embedding=(1.0, 0.0, 0.0)))
+        assert second_preview.split_plan is not None
+        second = service.commit(second_preview)
+        assert second.split_parent_runtime_motif_id == result.split_child_runtime_motif_id
+        assert second.split_child_runtime_motif_id == "motif_research_0001_split_0002_split_0003"
+        assert NativeMotifService(values["connection"]).list_current_motif_members(seed.motif_object_id)
+        assert len(NativeMotifService(values["connection"]).list_current_motif_members(result.split_child_object_id)) == 47
     finally:
         values["qualified"].close()
 

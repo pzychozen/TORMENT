@@ -160,6 +160,50 @@ class NativeMotifMutationResult:
     membership_revision_ordinal: int | None = None
 
 
+@dataclass(frozen=True)
+class NativeMotifSplitPlan:
+    """Storage-shaped final topology for one already-decided auto-split.
+
+    The mathematical partition is deliberately decided by
+    :mod:`torment_service.motif_split_policy`.  This plan contains only the
+    durable relationship identities which must move and the final aggregate
+    states to publish.
+    """
+
+    parent_motif_object_id: UUID
+    expected_parent_revision_id: UUID
+    parent_state: MotifState
+    child_state: MotifState
+    moved_member_object_ids: tuple[UUID, ...]
+    candidate_member_object_id: UUID
+    candidate_in_child: bool
+
+    def __post_init__(self) -> None:
+        if not self.moved_member_object_ids:
+            raise ValueError("native motif split requires at least one moved member")
+        if len(set(self.moved_member_object_ids)) != len(self.moved_member_object_ids):
+            raise ValueError("native motif split moved members must be unique")
+        if self.candidate_member_object_id in self.moved_member_object_ids:
+            raise ValueError("candidate membership is not a pre-existing parent membership")
+        if self.parent_state.runtime_motif_id == self.child_state.runtime_motif_id:
+            raise ValueError("native motif split child must have a distinct runtime motif ID")
+
+
+@dataclass(frozen=True)
+class NativeMotifSplitResult:
+    parent_motif_object_id: UUID
+    parent_motif_revision_id: UUID
+    parent_motif_revision_ordinal: int
+    child_motif_object_id: UUID
+    child_motif_revision_id: UUID
+    child_runtime_motif_id: str
+    retired_membership_relationship_ids: tuple[UUID, ...]
+    child_membership_relationship_ids: tuple[UUID, ...]
+    parent_candidate_membership_relationship_id: UUID | None
+    transition_id: UUID
+    operation_id: UUID
+
+
 class NativeMotifService:
     """Native, persistence-only motif and membership operations.
 
@@ -329,6 +373,58 @@ class NativeMotifService:
             ),
         )
 
+    def split_motif_with_member(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        plan: NativeMotifSplitPlan,
+        _test_fail_after: str | None = None,
+    ) -> NativeMotifSplitResult:
+        """Atomically publish a final parent/child membership topology.
+
+        The candidate has no transient parent relationship when it belongs to
+        the child.  Existing parent memberships moved to the child retain
+        their relationship identity and receive one ``RETIRED`` successor.
+        """
+        if not isinstance(plan, NativeMotifSplitPlan):
+            raise ValueError("a NativeMotifSplitPlan is required")
+        _validate_state(plan.parent_state)
+        _validate_state(plan.child_state)
+        _validate_mutation_ids(
+            idempotency_namespace_id, idempotency_key, motif_identity_namespace_id,
+            membership_identity_namespace_id, motif_alias_namespace_id,
+            plan.parent_motif_object_id, plan.expected_parent_revision_id,
+            *plan.moved_member_object_ids, plan.candidate_member_object_id,
+        )
+        for table, column, value in (
+            ("idempotency_namespaces", "idempotency_namespace_id", idempotency_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", motif_identity_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", membership_identity_namespace_id),
+            ("legacy_source_namespaces", "legacy_source_namespace_id", motif_alias_namespace_id),
+            ("semantic_scopes", "semantic_scope_id", plan.parent_state.semantic_scope_id),
+            ("semantic_scopes", "semantic_scope_id", plan.child_state.semantic_scope_id),
+        ):
+            self._require_row(table, column, value)
+        intent = canonical_intent_text({
+            "kind": "NATIVE_MOTIF_SPLIT_WITH_MEMBER",
+            "motif_identity_namespace_id": str(motif_identity_namespace_id),
+            "membership_identity_namespace_id": str(membership_identity_namespace_id),
+            "motif_alias_namespace_id": str(motif_alias_namespace_id),
+            "plan": _split_plan_intent(plan),
+        })
+        return execute_semantic(
+            self._connection, idempotency_namespace_id, idempotency_key,
+            "NATIVE_MOTIF_SPLIT_WITH_MEMBER", intent, self._split_result_for_operation,
+            lambda tx: self._split_with_member(
+                tx, motif_identity_namespace_id, membership_identity_namespace_id,
+                motif_alias_namespace_id, plan, _test_fail_after=_test_fail_after,
+            ),
+        )
+
     def get_current_motif(self, motif_object_id: UUID) -> NativeMotifView:
         _require_uuid("motif_object_id", motif_object_id)
         row = self._connection.execute(
@@ -379,6 +475,28 @@ class NativeMotifService:
     def list_current_motif_members(self, motif_object_id: UUID) -> tuple[MotifMembershipView, ...]:
         _require_uuid("motif_object_id", motif_object_id)
         self.get_current_motif(motif_object_id)
+        states = self._connection.execute(
+            """
+            SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,r.existence_state
+              FROM relationships h JOIN relationship_revisions r
+                ON r.relationship_id=h.relationship_id
+               AND r.relationship_revision_id=h.current_revision_id
+               AND r.revision_ordinal=h.current_revision_ordinal
+              JOIN relationship_revision_endpoints motif
+                ON motif.relationship_revision_id=r.relationship_revision_id
+               AND motif.endpoint_ordinal=0 AND motif.endpoint_role='MOTIF'
+               AND motif.binding_mode='IDENTITY'
+             WHERE h.relationship_kind=? AND motif.object_id=?
+            """,
+            (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, _blob(motif_object_id)),
+        ).fetchall()
+        if any(row[3] not in {"EXISTS", "RETIRED"} for row in states):
+            raise SubstrateInvariantViolation("current motif membership has an unknown existence state")
+        for relationship_id, revision_id, ordinal, existence_state in states:
+            if existence_state == "RETIRED":
+                _validate_retired_membership_successor(
+                    self._connection, relationship_id, revision_id, ordinal,
+                )
         rows = self._connection.execute(
             """
             SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,
@@ -398,7 +516,7 @@ class NativeMotifService:
                AND member.endpoint_ordinal=1
                AND member.endpoint_role='MEMBER'
                AND member.binding_mode='IDENTITY'
-             WHERE h.relationship_kind=? AND motif.object_id=?
+             WHERE h.relationship_kind=? AND motif.object_id=? AND r.existence_state='EXISTS'
              ORDER BY h.relationship_id
             """,
             (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, _blob(motif_object_id)),
@@ -514,6 +632,244 @@ class NativeMotifService:
             _blob(motif_object_id),
             motif_revision_id,
             ordinal,
+        )
+
+    def _split_with_member(
+        self,
+        tx: SubstrateTx,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        plan: NativeMotifSplitPlan,
+        *,
+        _test_fail_after: str | None,
+    ) -> NativeMotifSplitResult:
+        current = self._assert_current_motif(
+            tx, plan.parent_motif_object_id, plan.expected_parent_revision_id, plan.parent_state,
+        )
+        self._assert_alias_target(
+            tx, motif_alias_namespace_id, plan.parent_state.runtime_motif_id,
+            plan.parent_motif_object_id,
+        )
+        if self._alias_row(tx, motif_alias_namespace_id, plan.child_state.runtime_motif_id) is not None:
+            raise SubstrateRevisionConflict("split child runtime motif ID alias already exists")
+        if plan.parent_state.semantic_scope_id != plan.child_state.semantic_scope_id:
+            raise SubstrateInvariantViolation("split child changes the parent semantic scope")
+        moved = tuple(
+            self._current_active_membership(tx, plan.parent_motif_object_id, member_id)
+            for member_id in plan.moved_member_object_ids
+        )
+        candidate_scope = self._require_compatible_member(tx, plan.candidate_member_object_id)
+        if self._has_current_membership(tx, plan.parent_motif_object_id, plan.candidate_member_object_id):
+            raise SubstrateRevisionConflict("candidate is already a current parent motif member")
+
+        transition_id = _new()
+        parent_revision_id = _new()
+        parent_ordinal = current[1] + 1
+        self._insert_motif_successor(
+            tx, plan.parent_motif_object_id, parent_revision_id, parent_ordinal,
+            plan.expected_parent_revision_id, current[1],
+            _motif_object_state(UUID(bytes=current[2]), plan.parent_state),
+        )
+        if _test_fail_after == "parent_successor":
+            raise RuntimeError("forced native motif split failure after parent successor")
+
+        child_object_id, child_revision_id = _new(), _new()
+        self._insert_motif_creation(
+            tx, child_object_id, child_revision_id, transition_id,
+            _motif_object_state(motif_identity_namespace_id, plan.child_state),
+        )
+        tx.execute(
+            "INSERT INTO legacy_object_aliases VALUES (?,?,?,?)",
+            (_blob(motif_alias_namespace_id), MOTIF_ID_ALIAS_KIND,
+             plan.child_state.runtime_motif_id, child_object_id),
+        )
+        if _test_fail_after == "child_object":
+            raise RuntimeError("forced native motif split failure after child object")
+
+        retired: list[tuple[bytes, bytes, int]] = []
+        for index, membership in enumerate(moved):
+            revision_id = _new()
+            retirement_state = self._retired_membership_state(tx, membership[0], membership[1], membership[2])
+            self._relationships._revision(
+                tx, membership[0], revision_id, membership[2] + 1, "NATIVE_ORDINARY",
+                membership[1], membership[2], retirement_state,
+            )
+            retired.append((membership[0], revision_id, membership[2] + 1))
+            if index == 0 and _test_fail_after == "first_retirement":
+                raise RuntimeError("forced native motif split failure after first retirement")
+
+        child_members: list[tuple[bytes, bytes, int]] = []
+        for _relationship, _revision, _ordinal, member_id, member_scope in moved:
+            membership_id, membership_revision_id = _new(), _new()
+            state = _membership_state(
+                membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                UUID(bytes=child_object_id), UUID(bytes=member_scope), UUID(bytes=member_id),
+            )
+            self._insert_membership(tx, membership_id, membership_revision_id, transition_id, state)
+            child_members.append((membership_id, membership_revision_id, 1))
+        candidate_parent_membership: tuple[bytes, bytes, int] | None = None
+        if plan.candidate_in_child:
+            membership_id, membership_revision_id = _new(), _new()
+            state = _membership_state(
+                membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                UUID(bytes=child_object_id), candidate_scope, plan.candidate_member_object_id,
+            )
+            self._insert_membership(tx, membership_id, membership_revision_id, transition_id, state)
+            child_members.append((membership_id, membership_revision_id, 1))
+        else:
+            membership_id, membership_revision_id = _new(), _new()
+            state = _membership_state(
+                membership_identity_namespace_id, plan.parent_state.semantic_scope_id,
+                plan.parent_motif_object_id, candidate_scope, plan.candidate_member_object_id,
+            )
+            self._insert_membership(tx, membership_id, membership_revision_id, transition_id, state)
+            candidate_parent_membership = (membership_id, membership_revision_id, 1)
+        if _test_fail_after == "child_memberships":
+            raise RuntimeError("forced native motif split failure after child memberships")
+        if _test_fail_after == "before_current_pointer_publication":
+            raise RuntimeError("forced native motif split failure before current-pointer publication")
+
+        self._publish_split(
+            tx, transition_id, _blob(plan.parent_motif_object_id), parent_revision_id,
+            parent_ordinal, child_object_id, child_revision_id, retired, child_members,
+            candidate_parent_membership,
+        )
+        self._validate_split_publication(
+            tx, transition_id, _blob(plan.parent_motif_object_id), parent_revision_id,
+            parent_ordinal, child_object_id, child_revision_id, retired, child_members,
+            candidate_parent_membership,
+        )
+        return NativeMotifSplitResult(
+            plan.parent_motif_object_id, UUID(bytes=parent_revision_id), parent_ordinal,
+            UUID(bytes=child_object_id), UUID(bytes=child_revision_id),
+            plan.child_state.runtime_motif_id,
+            tuple(UUID(bytes=item[0]) for item in retired),
+            tuple(UUID(bytes=item[0]) for item in child_members),
+            UUID(bytes=candidate_parent_membership[0]) if candidate_parent_membership else None,
+            UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
+        )
+
+    def _publish_split(
+        self, tx: SubstrateTx, transition_id: bytes, parent_id: bytes,
+        parent_revision_id: bytes, parent_ordinal: int, child_id: bytes,
+        child_revision_id: bytes, retired: list[tuple[bytes, bytes, int]],
+        child_members: list[tuple[bytes, bytes, int]],
+        candidate_parent_membership: tuple[bytes, bytes, int] | None,
+    ) -> None:
+        tx.execute("INSERT INTO semantic_transitions VALUES (?,?,?,?,0)",
+                   (transition_id, tx.operation_id, "NATIVE_MOTIF_SPLIT_WITH_MEMBER", "NATIVE"))
+        for object_id, revision_id, ordinal in ((parent_id, parent_revision_id, parent_ordinal), (child_id, child_revision_id, 1)):
+            tx.execute("INSERT INTO object_revision_effects VALUES (?,?,?,?)", (transition_id, object_id, revision_id, ordinal))
+        tx.execute("UPDATE objects SET current_revision_id=?,current_revision_ordinal=? WHERE object_id=?", (parent_revision_id, parent_ordinal, parent_id))
+        ordinal = 0
+        for role, object_id, revision_id, object_ordinal in (
+            ("SPLIT_PARENT_MOTIF", parent_id, parent_revision_id, parent_ordinal),
+            ("SPLIT_CHILD_MOTIF", child_id, child_revision_id, 1),
+        ):
+            tx.execute("INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,object_id,object_revision_id,object_revision_ordinal) VALUES (?,?,?,?,?,?,?)", (tx.operation_id, ordinal, role, "OBJECT", object_id, revision_id, object_ordinal))
+            ordinal += 1
+        for role, values in (("RETIRED_PARENT_MEMBERSHIP", retired), ("CHILD_MOTIF_MEMBERSHIP", child_members), ("PARENT_MOTIF_MEMBERSHIP", [] if candidate_parent_membership is None else [candidate_parent_membership])):
+            for relationship_id, revision_id, relationship_ordinal in values:
+                tx.execute("INSERT INTO relationship_revision_effects VALUES (?,?,?,?)", (transition_id, relationship_id, revision_id, relationship_ordinal))
+                tx.execute("INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,relationship_id,relationship_revision_id,relationship_revision_ordinal) VALUES (?,?,?,?,?,?,?)", (tx.operation_id, ordinal, role, "RELATIONSHIP", relationship_id, revision_id, relationship_ordinal))
+                tx.execute("UPDATE relationships SET current_revision_id=?,current_revision_ordinal=? WHERE relationship_id=?", (revision_id, relationship_ordinal, relationship_id))
+                ordinal += 1
+        tx.transitions.append(transition_id)
+        tx.published.extend(((parent_id, parent_revision_id, parent_ordinal), (child_id, child_revision_id, 1)))
+        tx.relationship_published.extend(retired)
+        tx.relationship_published.extend(child_members)
+        if candidate_parent_membership is not None:
+            tx.relationship_published.append(candidate_parent_membership)
+
+    def _validate_split_publication(
+        self, tx: SubstrateTx, transition_id: bytes, parent_id: bytes,
+        parent_revision_id: bytes, parent_ordinal: int, child_id: bytes,
+        child_revision_id: bytes, retired: list[tuple[bytes, bytes, int]],
+        child_members: list[tuple[bytes, bytes, int]],
+        candidate_parent_membership: tuple[bytes, bytes, int] | None,
+    ) -> None:
+        for object_id, revision_id, ordinal in (
+            (parent_id, parent_revision_id, parent_ordinal), (child_id, child_revision_id, 1),
+        ):
+            if tx.execute(
+                "SELECT 1 FROM object_revision_effects WHERE transition_id=? AND object_id=? AND object_revision_id=? AND object_revision_ordinal=?",
+                (transition_id, object_id, revision_id, ordinal),
+            ).fetchone() is None:
+                raise SubstrateInvariantViolation("native split omits a required object revision effect")
+        for relationship_id, revision_id, ordinal in [
+            *retired, *child_members,
+            *(() if candidate_parent_membership is None else (candidate_parent_membership,)),
+        ]:
+            if tx.execute(
+                "SELECT 1 FROM relationship_revision_effects WHERE transition_id=? AND relationship_id=? AND relationship_revision_id=? AND relationship_revision_ordinal=?",
+                (transition_id, relationship_id, revision_id, ordinal),
+            ).fetchone() is None:
+                raise SubstrateInvariantViolation("native split omits a required relationship revision effect")
+        outputs = tx.execute(
+            "SELECT output_ordinal,output_role,output_kind FROM operation_outputs WHERE operation_id=? ORDER BY output_ordinal",
+            (tx.operation_id,),
+        ).fetchall()
+        if outputs[:2] != [
+            (0, "SPLIT_PARENT_MOTIF", "OBJECT"), (1, "SPLIT_CHILD_MOTIF", "OBJECT"),
+        ]:
+            raise SubstrateInvariantViolation("native split durable outputs do not match its publication")
+
+    def _current_active_membership(
+        self, tx: SubstrateTx, motif_id: UUID, member_id: UUID,
+    ) -> tuple[bytes, bytes, int, bytes, bytes]:
+        rows = tx.execute(
+            """
+            SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,
+                   member.object_id,member.endpoint_semantic_scope_id
+              FROM relationships h JOIN relationship_revisions r
+                ON r.relationship_id=h.relationship_id
+               AND r.relationship_revision_id=h.current_revision_id
+               AND r.revision_ordinal=h.current_revision_ordinal
+              JOIN relationship_revision_endpoints motif ON motif.relationship_revision_id=r.relationship_revision_id
+               AND motif.endpoint_ordinal=0 AND motif.endpoint_role='MOTIF' AND motif.binding_mode='IDENTITY'
+              JOIN relationship_revision_endpoints member ON member.relationship_revision_id=r.relationship_revision_id
+               AND member.endpoint_ordinal=1 AND member.endpoint_role='MEMBER' AND member.binding_mode='IDENTITY'
+             WHERE h.relationship_kind=? AND r.existence_state='EXISTS' AND motif.object_id=? AND member.object_id=?
+            """, (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, _blob(motif_id), _blob(member_id)),
+        ).fetchall()
+        if len(rows) != 1:
+            raise SubstrateInvariantViolation("split moved member is not exactly one current active parent membership")
+        return rows[0]
+
+    def _retired_membership_state(
+        self, tx: SubstrateTx, relationship_id: bytes, revision_id: bytes, ordinal: int,
+    ) -> RelationshipState:
+        row = tx.execute(
+            """
+            SELECT h.identity_namespace_id,h.relationship_kind,r.effective_semantic_scope_id,
+                   r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,
+                   r.authority_category,r.payload_format,r.payload_text,r.existence_state
+              FROM relationships h JOIN relationship_revisions r
+                ON r.relationship_id=h.relationship_id
+             WHERE h.relationship_id=? AND r.relationship_revision_id=? AND r.revision_ordinal=?
+            """, (relationship_id, revision_id, ordinal),
+        ).fetchone()
+        if row is None or row[1] != MOTIF_MEMBERSHIP_RELATIONSHIP_KIND or row[9] != "EXISTS":
+            raise SubstrateInvariantViolation("split retirement requires a current active MOTIF_MEMBERSHIP")
+        endpoints = tuple(
+            Endpoint(index, role, UUID(bytes=scope), UUID(bytes=object_id), binding, UUID(bytes=bound) if bound else None)
+            for index, role, scope, object_id, binding, bound in tx.execute(
+                "SELECT endpoint_ordinal,endpoint_role,endpoint_semantic_scope_id,object_id,binding_mode,bound_object_revision_id FROM relationship_revision_endpoints WHERE relationship_revision_id=? ORDER BY endpoint_ordinal", (revision_id,)
+            )
+        )
+        payload: str | dict[str, Any] | None
+        if row[7] == "NONE":
+            payload = None
+        elif row[7] == "TEXT":
+            payload = row[8]
+        elif row[7] == "JSON":
+            payload = json.loads(row[8])
+        else:
+            raise SubstrateInvariantViolation("split retirement has an unsupported membership payload format")
+        return RelationshipState(
+            UUID(bytes=row[0]), UUID(bytes=row[2]), row[1], "RETIRED", row[3], bool(row[4]),
+            row[5], row[6], endpoints, payload, row[7],
         )
 
     def _insert_motif_creation(
@@ -713,7 +1069,7 @@ class NativeMotifService:
                 ON member.relationship_revision_id=r.relationship_revision_id
                AND member.endpoint_ordinal=1 AND member.endpoint_role='MEMBER'
                AND member.binding_mode='IDENTITY'
-             WHERE h.relationship_kind=? AND motif.object_id=? AND member.object_id=?
+             WHERE h.relationship_kind=? AND r.existence_state='EXISTS' AND motif.object_id=? AND member.object_id=?
             """,
             (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, _blob(motif_id), _blob(member_id)),
         ).fetchone() is not None
@@ -769,6 +1125,51 @@ class NativeMotifService:
             membership[11],
         )
 
+    def _split_result_for_operation(self, operation_id: bytes) -> NativeMotifSplitResult | None:
+        rows = self._connection.execute(
+            """
+            SELECT t.transition_id,t.operation_id,o.output_ordinal,o.output_role,o.output_kind,
+                   o.object_id,o.object_revision_id,o.object_revision_ordinal,
+                   o.relationship_id,o.relationship_revision_id,o.relationship_revision_ordinal
+              FROM semantic_transitions t JOIN operation_outputs o ON o.operation_id=t.operation_id
+             WHERE t.operation_id=? AND t.transition_kind='NATIVE_MOTIF_SPLIT_WITH_MEMBER'
+             ORDER BY o.output_ordinal
+            """, (operation_id,),
+        ).fetchall()
+        if len(rows) < 4 or [row[3:5] for row in rows[:2]] != [
+            ("SPLIT_PARENT_MOTIF", "OBJECT"), ("SPLIT_CHILD_MOTIF", "OBJECT"),
+        ]:
+            return None
+        parent, child = rows[:2]
+        retired: list[UUID] = []
+        child_members: list[UUID] = []
+        candidate_parent: UUID | None = None
+        for row in rows[2:]:
+            if row[4] != "RELATIONSHIP" or row[8] is None or row[9] is None:
+                return None
+            if row[3] == "RETIRED_PARENT_MEMBERSHIP":
+                retired.append(UUID(bytes=row[8]))
+            elif row[3] == "CHILD_MOTIF_MEMBERSHIP":
+                child_members.append(UUID(bytes=row[8]))
+            elif row[3] == "PARENT_MOTIF_MEMBERSHIP" and candidate_parent is None:
+                candidate_parent = UUID(bytes=row[8])
+            else:
+                return None
+        if not retired or not child_members:
+            return None
+        alias = self._connection.execute(
+            "SELECT alias_value FROM legacy_object_aliases WHERE object_id=? AND alias_kind=?",
+            (child[5], MOTIF_ID_ALIAS_KIND),
+        ).fetchall()
+        if len(alias) != 1:
+            raise SubstrateInvariantViolation("split child motif alias is incomplete")
+        return NativeMotifSplitResult(
+            UUID(bytes=parent[5]), UUID(bytes=parent[6]), parent[7],
+            UUID(bytes=child[5]), UUID(bytes=child[6]), alias[0][0],
+            tuple(retired), tuple(child_members), candidate_parent,
+            UUID(bytes=parent[0]), UUID(bytes=parent[1]),
+        )
+
     def _require_row(self, table: str, column: str, value: UUID) -> None:
         if self._connection.execute(
             f"SELECT 1 FROM {table} WHERE {column}=?", (_blob(value),)
@@ -789,6 +1190,18 @@ def _motif_object_state(identity_namespace_id: UUID, state: MotifState) -> Objec
         state.payload(),
         "JSON",
     )
+
+
+def _split_plan_intent(plan: NativeMotifSplitPlan) -> dict[str, Any]:
+    return {
+        "parent_motif_object_id": str(plan.parent_motif_object_id),
+        "expected_parent_revision_id": str(plan.expected_parent_revision_id),
+        "parent_state": plan.parent_state.intent(),
+        "child_state": plan.child_state.intent(),
+        "moved_member_object_ids": [str(value) for value in plan.moved_member_object_ids],
+        "candidate_member_object_id": str(plan.candidate_member_object_id),
+        "candidate_in_child": plan.candidate_in_child,
+    }
 
 
 def _membership_state(
@@ -813,6 +1226,71 @@ def _membership_state(
             Endpoint(1, "MEMBER", member_scope_id, member_object_id, "IDENTITY"),
         ),
     )
+
+
+def _validate_retired_membership_successor(
+    connection: sqlite3.Connection,
+    relationship_id: bytes,
+    revision_id: bytes,
+    revision_ordinal: int,
+) -> None:
+    """Validate the immutable evidence carried by a current retirement.
+
+    ``RETIRED`` is not a free-form relationship state: it is exactly one
+    ordinary successor of the active membership that it preserves.  Readers
+    perform this check as well as writers so a malformed historical row never
+    becomes silently invisible merely because it is not active geometry.
+    """
+    row = connection.execute(
+        """
+        SELECT h.relationship_kind,r.lineage_kind,r.predecessor_revision_id,
+               r.predecessor_revision_ordinal,r.effective_semantic_scope_id,
+               r.payload_format,r.payload_text,r.existence_state,
+               predecessor.relationship_id,predecessor.revision_ordinal,
+               predecessor.existence_state,predecessor.effective_semantic_scope_id,
+               predecessor.payload_format,predecessor.payload_text
+          FROM relationships h
+          JOIN relationship_revisions r
+            ON r.relationship_id=h.relationship_id
+          LEFT JOIN relationship_revisions predecessor
+            ON predecessor.relationship_revision_id=r.predecessor_revision_id
+           AND predecessor.revision_ordinal=r.predecessor_revision_ordinal
+         WHERE h.relationship_id=? AND r.relationship_revision_id=?
+           AND r.revision_ordinal=?
+        """,
+        (relationship_id, revision_id, revision_ordinal),
+    ).fetchone()
+    if row is None or row[0] != MOTIF_MEMBERSHIP_RELATIONSHIP_KIND:
+        raise SubstrateInvariantViolation("retired relationship is not a motif membership")
+    if (
+        row[1] != "NATIVE_ORDINARY" or row[2] is None or row[3] is None
+        or revision_ordinal != row[3] + 1 or row[7] != "RETIRED"
+        or row[8] != relationship_id or row[9] != row[3] or row[10] != "EXISTS"
+        or row[4] != row[11] or row[5] != row[12] or row[6] != row[13]
+    ):
+        raise SubstrateInvariantViolation("retired motif membership has invalid predecessor lineage")
+    endpoints = connection.execute(
+        """
+        SELECT endpoint_ordinal,endpoint_role,endpoint_semantic_scope_id,object_id,
+               binding_mode,bound_object_revision_id
+          FROM relationship_revision_endpoints
+         WHERE relationship_revision_id=?
+         ORDER BY endpoint_ordinal
+        """,
+        (revision_id,),
+    ).fetchall()
+    predecessor_endpoints = connection.execute(
+        """
+        SELECT endpoint_ordinal,endpoint_role,endpoint_semantic_scope_id,object_id,
+               binding_mode,bound_object_revision_id
+          FROM relationship_revision_endpoints
+         WHERE relationship_revision_id=?
+         ORDER BY endpoint_ordinal
+        """,
+        (row[2],),
+    ).fetchall()
+    if endpoints != predecessor_endpoints:
+        raise SubstrateInvariantViolation("retired motif membership changes immutable endpoints")
 
 
 def _state_from_payload(scope_id: UUID, payload_text: str) -> MotifState:

@@ -15,7 +15,7 @@ from torment_service.substrate.connection import (
     open_existing_native_core_connection,
     open_temporary_test_connection,
 )
-from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
+from torment_service.substrate.compat import CompatibilityEmbeddingPublicationRequest, NativeMemoryCompatibilityFacade
 from torment_service.substrate.errors import (
     SubstrateConfigurationError,
     SubstrateIdempotencyConflict,
@@ -660,53 +660,77 @@ def test_unknown_external_motif_invalidates_first_process_order_owner(tmp_path: 
         qualified.close()
 
 
-def test_unsupported_split_refuses_claimed_route_before_native_or_legacy_mutation(tmp_path: Path):
+def test_no_split_at_the_legacy_minimum_keeps_the_fabric_route_eligible(tmp_path: Path):
     qualified, connection, capability, private, _shared = _prepared(tmp_path)
     try:
-        seed = NativeFabricMemoryRouter(capability).route(
+        router = NativeFabricMemoryRouter(capability)
+        seed = router.route(
             _request(key="split-seed", vector=(1.0, 0.0, 0.0))
         ).result
         assert seed is not None
-        motif_object_id = connection.execute(
-            "SELECT object_id FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND alias_value='motif_research_0001'",
-            (native_id_to_bytes(private.motif_alias_namespace_id),),
-        ).fetchone()[0]
+        second = router.route(_request(key="split-no-geometry", vector=(.8, .6, 0.0)))
+        assert second.qualification.eligible is True
+        assert second.result is not None
+        assert second.result.motifs == ("motif_research_0001",)
+    finally:
+        qualified.close()
+
+
+def test_fabric_facing_route_publishes_parent_and_child_for_qualified_true_split(tmp_path: Path, monkeypatch):
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router = NativeFabricMemoryRouter(capability)
+        seed = router.route(_request(key="route-split-seed", vector=(1.0, 0.0, 0.0))).result
+        assert seed is not None
+        motif = NativeMotifService(connection)
+        parent = motif.resolve_motif_alias(
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            runtime_motif_id="motif_research_0001",
+        )
         facade = NativeMemoryCompatibilityFacade(connection)
-        motifs = NativeMotifService(connection)
-        for ordinal in range(2, 96):
-            source = facade.create_memory_state(
+        for ordinal, vector in enumerate(
+            [(1.0, 0.0, 0.0)] * 47 + [(-1.0, 0.0, 0.0)] * 47, start=2,
+        ):
+            raw = np.asarray(vector, dtype=np.float32)
+            draft = facade.begin_memory_draft(
                 legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
                 idempotency_namespace_id=private.idempotency_namespace_id,
-                idempotency_key=f"split-source:{ordinal}",
+                idempotency_key=f"route-split-source:{ordinal}",
                 identity_namespace_id=private.runtime_scope.identity_namespace_id,
                 semantic_scope_id=private.runtime_scope.semantic_scope_id,
-                summary=f"split source {ordinal}", memory_type="reflection", logical_step=ordinal,
+                summary=f"route split source {ordinal}", memory_type="reflection", logical_step=ordinal,
+                embedding_request=CompatibilityEmbeddingPublicationRequest(
+                    raw.tobytes(), "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR",
+                    dtype="float32", dimension=3,
+                ),
             )
-            current = motifs.get_current_motif(native_id_from_bytes(motif_object_id))
-            motifs.add_motif_member(
+            source = facade.finalize_memory_draft(draft).source
+            current = motif.get_current_motif(parent)
+            motif.add_motif_member(
                 idempotency_namespace_id=private.idempotency_namespace_id,
-                idempotency_key=f"split-membership:{ordinal}",
+                idempotency_key=f"route-split-member:{ordinal}",
                 motif_alias_namespace_id=private.motif_alias_namespace_id,
                 membership_identity_namespace_id=private.membership_identity_namespace_id,
-                motif_object_id=current.motif_object_id,
-                expected_motif_revision_id=current.motif_revision_id,
+                motif_object_id=parent, expected_motif_revision_id=current.motif_revision_id,
                 state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
                 member_object_id=source.object_id,
             )
-        restarted = prepare_native_fabric_routing_capability(
-            binding=capability.binding,
-            connection=connection,
-            routing_scopes=(private,),
-            expected_core_id=capability.core_id,
+        # This fixture's imported sources deliberately omit post-write world
+        # provenance. World initialization is outside the motif route under
+        # test; leaving it inert keeps the Fabric-facing composition path real.
+        monkeypatch.setattr(NativeWorldRuntime, "ensure_initialized", lambda _self: None)
+        monkeypatch.setattr(NativeWorldRuntime, "register_fresh_created", lambda _self, **_kwargs: None)
+        result = router.route(_request(
+            key="route-qualified-split", vector=(.7, .714, 0.0), attach_threshold=.72,
+        ))
+        assert result.qualification.eligible is True
+        assert result.result is not None
+        assert result.result.motifs == (
+            "motif_research_0001", "motif_research_0001_split_0002",
         )
-        before = _counts(connection)
-        refused = NativeFabricMemoryRouter(restarted).route(
-            _request(key="split-refusal", vector=(0.8, 0.6, 0.0))
-        )
-        assert (refused.qualification.eligible, refused.qualification.reason_code, refused.result) == (
-            False, "UNSUPPORTED_NATIVE_SPLIT", None,
-        )
-        assert _counts(connection) == before
+        assert capability.process_order.runtime_ids_for_testing(
+            routing_scope=private, domain_id="research",
+        ) == ("motif_research_0001", "motif_research_0001_split_0002")
     finally:
         qualified.close()
 

@@ -408,7 +408,7 @@ def test_source_response_recovery_reembeds_exact_text_and_refuses_byte_drift(tmp
         values["qualified"].close()
 
 
-def test_split_eligible_attach_is_explicit_retry_stable_and_never_writes_a_fake_membership(tmp_path: Path):
+def test_catalog_count_without_real_split_geometry_remains_an_ordinary_character_attach(tmp_path: Path):
     values = _database(tmp_path)
     try:
         existing = _existing_memory(values)
@@ -426,15 +426,12 @@ def test_split_eligible_attach_is_explicit_retry_stable_and_never_writes_a_fake_
                     replace(model, member_count=95)),
             ),
         })()
-        before = values["connection"].execute("SELECT count(*) FROM relationships").fetchone()[0]
         result = runtime.correct_for_post_write(_request(_seed(motif_id="truthy")))
-        assert result.status is CharacterGravityCorrectionStatus.CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED
-        assert result.motif_status == "CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED"
-        assert values["connection"].execute("SELECT count(*) FROM relationships").fetchone()[0] == before
+        assert result.status is CharacterGravityCorrectionStatus.APPLIED
+        assert result.motif_status == "MOTIF_ATTACHED"
         retry = runtime.correct_for_post_write(_request(_seed(motif_id="truthy")))
-        assert retry.status is CharacterGravityCorrectionStatus.CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED
-        assert retry.motif_status == "CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED"
+        assert retry.status is CharacterGravityCorrectionStatus.APPLIED
+        assert retry.motif_status == "MOTIF_ATTACHED"
         assert len(embedder.calls) == 1
-        assert values["connection"].execute("SELECT count(*) FROM relationships").fetchone()[0] == before
     finally:
         values["qualified"].close()

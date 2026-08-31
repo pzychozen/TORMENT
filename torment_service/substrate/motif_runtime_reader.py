@@ -28,6 +28,7 @@ from .motifs import (
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
     NativeMotifView,
     _state_from_payload,
+    _validate_retired_membership_successor,
 )
 from .schema import open_schema
 
@@ -203,10 +204,11 @@ class NativeMotifRuntimeReader:
         """Recover append sequence from shared membership/motif publication evidence."""
         _require_uuid("motif_object_id", motif_object_id)
         self._get_current_motif(motif_object_id)
-        memberships = self._connection.execute(
+        all_memberships = self._connection.execute(
             """
             SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,
-                   member.object_id,member.endpoint_semantic_scope_id,member_object.object_kind
+                   member.object_id,member.endpoint_semantic_scope_id,member_object.object_kind,
+                   r.existence_state
               FROM relationships h
               JOIN relationship_revisions r
                 ON r.relationship_id=h.relationship_id
@@ -225,31 +227,60 @@ class NativeMotifRuntimeReader:
             """,
             (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, native_id_to_bytes(motif_object_id)),
         ).fetchall()
+        if any(row[6] not in {"EXISTS", "RETIRED"} for row in all_memberships):
+            raise SubstrateInvariantViolation("current motif membership has an unknown existence state")
+        for relationship_id, revision_id, ordinal, _member, _scope, _kind, existence_state in all_memberships:
+            if existence_state == "RETIRED":
+                _validate_retired_membership_successor(
+                    self._connection, relationship_id, revision_id, ordinal,
+                )
+        memberships = [row[:6] for row in all_memberships if row[6] == "EXISTS"]
         projected_baseline = self._migration_projection_baseline(motif_object_id)
         if projected_baseline is not None:
-            return self._ordered_projected_members(motif_object_id, memberships, projected_baseline)
+            return self._ordered_projected_members(
+                motif_object_id, memberships, projected_baseline, all_memberships,
+            )
 
         # Ordinary native motifs retain the original publication-order rule.
         effects = self._connection.execute(
             """
             SELECT effect.relationship_id,effect.relationship_revision_id,
                    effect.relationship_revision_ordinal,effect.transition_id,
-                   motif_effect.object_revision_ordinal
+                   motif_effect.object_revision_ordinal,output.output_ordinal
               FROM relationship_revision_effects effect
               JOIN object_revision_effects motif_effect
                 ON motif_effect.transition_id=effect.transition_id
                AND motif_effect.object_id=?
+              JOIN semantic_transitions transition ON transition.transition_id=effect.transition_id
+              JOIN operation_outputs output ON output.operation_id=transition.operation_id
+               AND output.output_kind='RELATIONSHIP'
+               AND output.relationship_id=effect.relationship_id
+               AND output.relationship_revision_id=effect.relationship_revision_id
+               AND output.relationship_revision_ordinal=effect.relationship_revision_ordinal
             """,
             (native_id_to_bytes(motif_object_id),),
         ).fetchall()
-        evidence: dict[tuple[bytes, bytes, int], tuple[bytes, int]] = {}
-        for relationship_id, revision_id, ordinal, transition_id, motif_ordinal in effects:
+        evidence: dict[tuple[bytes, bytes, int], tuple[bytes, int, int]] = {}
+        for relationship_id, revision_id, ordinal, transition_id, motif_ordinal, output_ordinal in effects:
             key = (relationship_id, revision_id, ordinal)
             if key in evidence:
                 raise SubstrateInvariantViolation(
                     "current motif membership has ambiguous publication evidence"
                 )
-            evidence[key] = (transition_id, motif_ordinal)
+            evidence[key] = (transition_id, motif_ordinal, output_ordinal)
+
+        # Ordinary append effects use their monotonically advancing parent
+        # motif revision.  A split-created child legitimately publishes its
+        # ordered R1 membership set under one child R1; its operation-output
+        # ordinals are the explicit, durable cluster order witness.
+        current_evidence = [
+            evidence.get((relationship_id, revision_id, ordinal))
+            for relationship_id, revision_id, ordinal, _member, _scope, _kind in memberships
+        ]
+        motif_ordinal_counts: dict[int, int] = {}
+        for item in current_evidence:
+            if item is not None:
+                motif_ordinal_counts[item[1]] = motif_ordinal_counts.get(item[1], 0) + 1
 
         ordered: list[NativeOrderedMotifMember] = []
         seen_members: set[bytes] = set()
@@ -265,17 +296,18 @@ class NativeMotifRuntimeReader:
                 raise SubstrateInvariantViolation(
                     "native motif membership does not target a LEGACY_CORE_NODE"
                 )
-            _, motif_ordinal = item
+            _, motif_ordinal, output_ordinal = item
             if member_object_id in seen_members:
                 raise SubstrateInvariantViolation(
                     "current motif memberships duplicate one member identity"
                 )
-            if motif_ordinal in seen_publication_ordinals:
+            publication_ordinal = motif_ordinal if motif_ordinal_counts[motif_ordinal] == 1 else output_ordinal
+            if publication_ordinal in seen_publication_ordinals:
                 raise SubstrateInvariantViolation(
                     "current motif memberships share one publication ordinal"
                 )
             seen_members.add(member_object_id)
-            seen_publication_ordinals.add(motif_ordinal)
+            seen_publication_ordinals.add(publication_ordinal)
             ordered.append(
                 NativeOrderedMotifMember(
                     UUID(bytes=relationship_id),
@@ -283,7 +315,7 @@ class NativeMotifRuntimeReader:
                     ordinal,
                     UUID(bytes=member_object_id),
                     UUID(bytes=member_scope_id),
-                    motif_ordinal,
+                    publication_ordinal,
                 )
             )
         return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
@@ -360,6 +392,7 @@ class NativeMotifRuntimeReader:
         motif_object_id: UUID,
         memberships: list[tuple[Any, ...]],
         baseline: dict[tuple[bytes, bytes, int], int],
+        all_memberships: list[tuple[Any, ...]],
     ) -> tuple[NativeOrderedMotifMember, ...]:
         """Combine B4A's fixed baseline with ordinary successor publications."""
         effects = self._connection.execute(
@@ -382,6 +415,7 @@ class NativeMotifRuntimeReader:
         seen_members: set[bytes] = set()
         seen_orders: set[int] = set()
         baseline_count = len(baseline)
+        baseline_by_relationship = {key[0]: (key, order) for key, order in baseline.items()}
         seen_baseline: set[tuple[bytes, bytes, int]] = set()
         for relationship_id, revision_id, revision_ordinal, member_object_id, member_scope_id, member_kind in memberships:
             key = (relationship_id, revision_id, revision_ordinal)
@@ -390,21 +424,63 @@ class NativeMotifRuntimeReader:
             if member_object_id in seen_members:
                 raise SubstrateInvariantViolation("current motif memberships duplicate one member identity")
             seen_members.add(member_object_id)
-            if key in baseline:
-                order = baseline[key]
-                seen_baseline.add(key)
+            if relationship_id in baseline_by_relationship:
+                baseline_key, order = baseline_by_relationship[relationship_id]
+                self._validate_projected_baseline_successor(
+                    relationship_id, revision_id, revision_ordinal, "EXISTS", baseline_key,
+                )
+                seen_baseline.add(baseline_key)
             else:
                 item = evidence.get(key)
-                if item is None or item[1] != "NATIVE_MOTIF_ADD_MEMBER" or item[0] <= 1:
+                if item is None or item[1] not in {
+                    "NATIVE_MOTIF_ADD_MEMBER", "NATIVE_MEMORY_MOTIF_COMPOSITION",
+                } or item[0] <= 1:
                     raise SubstrateInvariantViolation("post-projection membership has no ordinary append publication evidence")
                 order = baseline_count + item[0]
             if order in seen_orders:
                 raise SubstrateInvariantViolation("current motif memberships share one publication ordinal")
             seen_orders.add(order)
             ordered.append(NativeOrderedMotifMember(UUID(bytes=relationship_id), UUID(bytes=revision_id), revision_ordinal, UUID(bytes=member_object_id), UUID(bytes=member_scope_id), order))
+        for relationship_id, revision_id, revision_ordinal, _member_id, _scope_id, _kind, existence_state in all_memberships:
+            if relationship_id not in baseline_by_relationship or existence_state != "RETIRED":
+                continue
+            baseline_key, _order = baseline_by_relationship[relationship_id]
+            self._validate_projected_baseline_successor(
+                relationship_id, revision_id, revision_ordinal, "RETIRED", baseline_key,
+            )
+            seen_baseline.add(baseline_key)
         if seen_baseline != set(baseline):
             raise SubstrateInvariantViolation("migration motif projection baseline is not current and complete")
         return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
+
+    def _validate_projected_baseline_successor(
+        self, relationship_id: bytes, revision_id: bytes, revision_ordinal: int,
+        existence_state: str, baseline_key: tuple[bytes, bytes, int],
+    ) -> None:
+        """Keep B4A baseline accountability after a native retirement.
+
+        A projected R1 remains valid as an active successor, or it can be
+        explicitly retired by exactly one ordinary successor.  It may never
+        simply disappear from the active reader.
+        """
+        baseline_relationship_id, baseline_revision_id, baseline_ordinal = baseline_key
+        if relationship_id != baseline_relationship_id:
+            raise SubstrateInvariantViolation("projected baseline relationship identity changed")
+        if existence_state == "EXISTS":
+            if revision_ordinal < baseline_ordinal:
+                raise SubstrateInvariantViolation("projected baseline active revision precedes R1")
+            return
+        if (
+            existence_state != "RETIRED" or revision_ordinal != baseline_ordinal + 1
+            or not self._connection.execute(
+                """SELECT 1 FROM relationship_revisions
+                     WHERE relationship_id=? AND relationship_revision_id=? AND revision_ordinal=?
+                       AND lineage_kind='NATIVE_ORDINARY' AND predecessor_revision_id=?
+                       AND predecessor_revision_ordinal=? AND existence_state='RETIRED'""",
+                (relationship_id, revision_id, revision_ordinal, baseline_revision_id, baseline_ordinal),
+            ).fetchone()
+        ):
+            raise SubstrateInvariantViolation("projected baseline retirement has invalid predecessor lineage")
 
     def read_current_compat_embedding(
         self, member_object_id: UUID, *, expected_dimension: int

@@ -26,7 +26,8 @@ from .fabric_native_routing import NativeFabricRoutingScope
 from .ids import generate_native_id, native_id_to_bytes
 from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
-from .motifs import MotifState, NativeMotifService
+from .motifs import MotifState, NativeMotifService, NativeMotifSplitResult
+from .native_motif_split import prepare_qualified_native_motif_split
 from .object_revision_governance import NativeMemoryGovernanceFacts, _insert_published_governance_for_qualification
 from .objects import ObjectState, SubstrateTx, execute_semantic
 from .provenance import NativeProvenanceRecord
@@ -151,8 +152,6 @@ class NativeCharacterSeedPlantRuntime:
         concepts = tuple(_split_seed_text(seed.seed_text))
         if not concepts:
             raise CharacterSeedPlantRefused("CHARACTER_SEED_CONCEPTS_REQUIRED")
-        if len(concepts) >= 96:
-            raise CharacterSeedPlantRefused("CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED")
         definition_digest = character_seed_definition_digest(seed)
         sources: list[NativeCharacterSeedSourceResult] = []
         vectors: list[np.ndarray] = []
@@ -356,7 +355,10 @@ class NativeCharacterSeedPlantRuntime:
             key = self._motif_key(request.seed.seed_id, f"DECISION:{source.concept_index}")
             prior = self._operation_result(key)
             if prior is not None:
-                affected.append(prior.motif_object_id)
+                if isinstance(prior, NativeMotifSplitResult):
+                    affected.extend((prior.parent_motif_object_id, prior.child_motif_object_id))
+                else:
+                    affected.append(prior.motif_object_id)
                 continue
             catalog = self._motif_reader.list_runtime_motifs(
                 motif_alias_namespace_id=scope.motif_alias_namespace_id,
@@ -371,21 +373,34 @@ class NativeCharacterSeedPlantRuntime:
             if decision.kind == "ATTACH_EXISTING":
                 if selected is None:
                     raise SubstrateInvariantViolation("Character seed motif decision selected no current motif")
-                if selected.read_model.member_count + 1 >= 96:
-                    raise CharacterSeedPlantRefused("CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED")
                 current = self._motifs.get_current_motif(selected.motif_object_id)
                 aggregate = realize_attach_next_state(
                     decision, agent_id=self._config.agent_id, last_active_ts=source.created_ts,
                 )
-                result = self._motifs.add_motif_member(
-                    idempotency_namespace_id=scope.idempotency_namespace_id, idempotency_key=key,
-                    motif_alias_namespace_id=scope.motif_alias_namespace_id,
-                    membership_identity_namespace_id=scope.membership_identity_namespace_id,
-                    motif_object_id=selected.motif_object_id,
-                    expected_motif_revision_id=current.motif_revision_id,
-                    state=_motif_state_from_aggregate(aggregate, scope.runtime_scope.semantic_scope_id, current.state),
-                    member_object_id=source.object_id,
+                state = _motif_state_from_aggregate(aggregate, scope.runtime_scope.semantic_scope_id, current.state)
+                split_plan = prepare_qualified_native_motif_split(
+                    reader=self._motif_reader, selected=selected, source_state=current.state,
+                    aggregate_state=state, decision=decision, candidate_member_object_id=source.object_id,
+                    expected_dimension=self._config.representation_lane.dimension,
+                    catalog_runtime_ids=tuple(item.read_model.runtime_motif_id for item in catalog),
+                    child_created_ts=source.created_ts,
                 )
+                if split_plan is not None:
+                    result = self._motifs.split_motif_with_member(
+                        idempotency_namespace_id=scope.idempotency_namespace_id, idempotency_key=key,
+                        motif_identity_namespace_id=scope.motif_identity_namespace_id,
+                        membership_identity_namespace_id=scope.membership_identity_namespace_id,
+                        motif_alias_namespace_id=scope.motif_alias_namespace_id, plan=split_plan,
+                    )
+                else:
+                    result = self._motifs.add_motif_member(
+                        idempotency_namespace_id=scope.idempotency_namespace_id, idempotency_key=key,
+                        motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                        membership_identity_namespace_id=scope.membership_identity_namespace_id,
+                        motif_object_id=selected.motif_object_id,
+                        expected_motif_revision_id=current.motif_revision_id, state=state,
+                        member_object_id=source.object_id,
+                    )
             else:
                 runtime_id = _next_runtime_motif_id(
                     self._config.domain_id, tuple(item.read_model.runtime_motif_id for item in catalog),
@@ -403,7 +418,10 @@ class NativeCharacterSeedPlantRuntime:
                     state=_motif_state_from_aggregate(aggregate, scope.runtime_scope.semantic_scope_id, None),
                     member_object_id=source.object_id,
                 )
-            affected.append(result.motif_object_id)
+            if isinstance(result, NativeMotifSplitResult):
+                affected.extend((result.parent_motif_object_id, result.child_motif_object_id))
+            else:
+                affected.append(result.motif_object_id)
 
         seed_object_ids = {source.object_id for source in sources}
         # Legacy records the set of motifs affected by the seed loop and uses
@@ -448,6 +466,8 @@ class NativeCharacterSeedPlantRuntime:
         if row is None:
             return None
         result = self._motifs._result_for_operation(row[0])
+        if result is None:
+            result = self._motifs._split_result_for_operation(row[0])
         if result is None:
             raise SubstrateInvariantViolation("stored Character seed motif operation is incomplete")
         return result

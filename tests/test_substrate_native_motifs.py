@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 import sqlite3
 
 import pytest
@@ -15,6 +16,7 @@ from torment_service.substrate.motifs import (
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
     MotifState,
     NativeMotifService,
+    NativeMotifSplitPlan,
 )
 from torment_service.substrate.objects import NativeObjectService
 from torment_service.substrate.relationships import NativeRelationshipService
@@ -214,6 +216,110 @@ def test_add_member_advances_state_atomically_rejects_duplicates_and_preserves_i
         )
         assert advanced_source.revision_id != second_memory.revision_id
         assert NativeRelationshipService(connection).get_current_relationship(added.membership_relationship_id) == relationship_before
+    finally:
+        values["qualified"].close()
+
+
+def test_native_split_retires_parent_memberships_without_reusing_relationship_identity(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        first, moved, retained, candidate = (_memory(values, index) for index in range(1, 5))
+        created = _create(values, first)
+        service = NativeMotifService(values["connection"])
+        for memory, key in ((moved, "split-add-moved"), (retained, "split-add-retained")):
+            current = service.get_current_motif(created.motif_object_id)
+            service.add_motif_member(
+                idempotency_namespace_id=values["idempotency"], idempotency_key=key,
+                motif_alias_namespace_id=values["motif_alias"],
+                membership_identity_namespace_id=values["membership_identity"],
+                motif_object_id=created.motif_object_id, expected_motif_revision_id=current.motif_revision_id,
+                state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
+                member_object_id=memory.object_id,
+            )
+        current = service.get_current_motif(created.motif_object_id)
+        moved_membership = next(item for item in service.list_current_motif_members(created.motif_object_id) if item.member_object_id == moved.object_id)
+        parent_state = replace(current.state, centroid=(0.1, -0.4, 0.8), last_active_ts=current.state.last_active_ts + 1)
+        child_state = _state(
+            values, motif_id="motif_reflection_0001_split_0002", step=parent_state.last_active_ts,
+            centroid=(-0.2, 0.3, 0.7), strength=.6,
+        )
+        plan = NativeMotifSplitPlan(
+            created.motif_object_id, current.motif_revision_id, parent_state, child_state,
+            (moved.object_id,), candidate.object_id, True,
+        )
+        result = service.split_motif_with_member(
+            idempotency_namespace_id=values["idempotency"], idempotency_key="split-native",
+            motif_identity_namespace_id=values["motif_identity"],
+            membership_identity_namespace_id=values["membership_identity"],
+            motif_alias_namespace_id=values["motif_alias"], plan=plan,
+        )
+        assert service.split_motif_with_member(
+            idempotency_namespace_id=values["idempotency"], idempotency_key="split-native",
+            motif_identity_namespace_id=values["motif_identity"],
+            membership_identity_namespace_id=values["membership_identity"],
+            motif_alias_namespace_id=values["motif_alias"], plan=plan,
+        ) == result
+        assert {item.member_object_id for item in service.list_current_motif_members(created.motif_object_id)} == {first.object_id, retained.object_id}
+        assert {item.member_object_id for item in service.list_current_motif_members(result.child_motif_object_id)} == {moved.object_id, candidate.object_id}
+        retired = values["connection"].execute(
+            "SELECT relationship_revision_id,predecessor_revision_id,predecessor_revision_ordinal,existence_state FROM relationship_revisions WHERE relationship_id=? ORDER BY revision_ordinal",
+            (native_id_to_bytes(moved_membership.relationship_id),),
+        ).fetchall()
+        assert retired[0][3] == "EXISTS"
+        assert retired[1][1:] == (native_id_to_bytes(moved_membership.relationship_revision_id), 1, "RETIRED")
+        assert service.resolve_motif_alias(
+            motif_alias_namespace_id=values["motif_alias"], runtime_motif_id="motif_reflection_0001_split_0002",
+        ) == result.child_motif_object_id
+        # Revision rows are immutable.  A malformed retirement cannot be
+        # injected after publication, and both readers defensively validate
+        # current retirement lineage before excluding it from active geometry.
+        with pytest.raises(sqlite3.IntegrityError, match="immutable relationship revision"):
+            values["connection"].execute(
+                "UPDATE relationship_revisions SET predecessor_revision_id=NULL,predecessor_revision_ordinal=NULL WHERE relationship_revision_id=?",
+                (retired[1][0],),
+            )
+    finally:
+        values["qualified"].close()
+
+
+@pytest.mark.parametrize("seam", (
+    "parent_successor", "child_object", "first_retirement",
+    "child_memberships", "before_current_pointer_publication",
+))
+def test_native_split_rolls_back_every_partial_topology_seam(tmp_path: Path, seam: str):
+    values = _database(tmp_path)
+    try:
+        first, moved, candidate = (_memory(values, index) for index in range(11, 14))
+        created = _create(values, first, key=f"split-rollback-create:{seam}")
+        service = NativeMotifService(values["connection"])
+        current = service.get_current_motif(created.motif_object_id)
+        service.add_motif_member(
+            idempotency_namespace_id=values["idempotency"], idempotency_key=f"split-rollback-add:{seam}",
+            motif_alias_namespace_id=values["motif_alias"], membership_identity_namespace_id=values["membership_identity"],
+            motif_object_id=created.motif_object_id, expected_motif_revision_id=current.motif_revision_id,
+            state=replace(current.state, last_active_ts=current.state.last_active_ts + 1), member_object_id=moved.object_id,
+        )
+        current = service.get_current_motif(created.motif_object_id)
+        plan = NativeMotifSplitPlan(
+            created.motif_object_id, current.motif_revision_id,
+            replace(current.state, last_active_ts=current.state.last_active_ts + 1),
+            _state(values, motif_id=f"motif_reflection_0001_split_{seam}", step=current.state.last_active_ts + 1),
+            (moved.object_id,), candidate.object_id, True,
+        )
+        before = tuple(values["connection"].execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
+            "objects", "object_revisions", "relationships", "relationship_revisions", "semantic_transitions", "operation_outputs",
+        ))
+        with pytest.raises(RuntimeError, match="forced native motif split failure"):
+            service.split_motif_with_member(
+                idempotency_namespace_id=values["idempotency"], idempotency_key=f"split-rollback:{seam}",
+                motif_identity_namespace_id=values["motif_identity"], membership_identity_namespace_id=values["membership_identity"],
+                motif_alias_namespace_id=values["motif_alias"], plan=plan, _test_fail_after=seam,
+            )
+        after = tuple(values["connection"].execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
+            "objects", "object_revisions", "relationships", "relationship_revisions", "semantic_transitions", "operation_outputs",
+        ))
+        assert after == before
+        assert len(service.list_current_motif_members(created.motif_object_id)) == 2
     finally:
         values["qualified"].close()
 

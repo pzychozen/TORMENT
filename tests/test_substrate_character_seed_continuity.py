@@ -490,22 +490,21 @@ def test_fresh_seed_partial_resume_and_cold_native_c1a_c1b(tmp_path: Path):
         values["qualified"].close()
 
 
-def test_fresh_seed_refuses_a_prospective_legacy_auto_split(tmp_path: Path):
+def test_fresh_seed_without_real_split_geometry_remains_admissible(tmp_path: Path):
     values = _database(tmp_path)
     try:
         first = _plant(values, parent="first").plant_seed(NativeCharacterSeedPlantRequest(_seed()))
         existing = NativeMotifRuntimeReader(values["connection"]).list_runtime_motifs(
             motif_alias_namespace_id=values["motif_alias"], domain_id="personal", semantic_scope_id=values["scope"],
         )[0]
-        # Freeze the legacy decision's prospective count without mutating the
-        # durable motif.  The second seed would attach at 96 and must refuse,
-        # rather than silently creating a different topology.
+        # Catalog cardinality alone is not a split decision.  The actual
+        # qualified current geometry remains below the split input size.
         inflated_model = replace(existing.read_model, member_count=95)
         values["connection"]  # keep the qualified core explicit in the fixture
         runtime = _plant(values, parent="split")
         runtime._motif_reader.list_runtime_motifs = lambda **_kwargs: (replace(existing, read_model=inflated_model),)  # type: ignore[method-assign]
-        with pytest.raises(Exception, match="CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED"):
-            runtime.plant_seed(NativeCharacterSeedPlantRequest(replace(_seed(), seed_id="aria-seed-split")))
+        result = runtime.plant_seed(NativeCharacterSeedPlantRequest(replace(_seed(), seed_id="aria-seed-split")))
+        assert result.seed_motif_id == existing.read_model.runtime_motif_id
         assert first.seed_motif_id == NativeMotifRuntimeReader(values["connection"]).list_runtime_motifs(
             motif_alias_namespace_id=values["motif_alias"], domain_id="personal", semantic_scope_id=values["scope"],
         )[0].read_model.runtime_motif_id

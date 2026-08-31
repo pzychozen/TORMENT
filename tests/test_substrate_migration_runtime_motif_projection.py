@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from torment_service.provenance_v1 import ProvenanceV1
-from torment_service.substrate.connection import open_temporary_test_connection
+from torment_service.substrate.connection import open_existing_native_core_connection, open_temporary_test_connection
 from torment_service.substrate.errors import SubstrateIdempotencyConflict
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration import (
@@ -23,7 +23,7 @@ from torment_service.substrate.migration import (
     create_snapshot_manifest,
 )
 from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
-from torment_service.substrate.motifs import NativeMotifService
+from torment_service.substrate.motifs import MotifState, NativeMotifService, NativeMotifSplitPlan
 from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.runtime_binding import NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
@@ -179,4 +179,59 @@ def test_b4a_baseline_order_precedes_an_ordinary_native_member_append(tmp_path: 
         )
         ordered = NativeMotifRuntimeReader(connection).list_ordered_current_motif_members(result.motif_object_id)
         assert [member.member_object_id for member in ordered] == [facts["normalized"].object_id, appended.object_id]
+    finally: qualified.close()
+
+
+def test_b4a_baseline_membership_remains_auditable_after_native_retirement(tmp_path: Path):
+    qualified, facts = _context(tmp_path)
+    try:
+        connection = facts["connection"]
+        projected = NativeMigrationRuntimeMotifProjectionService(connection).project_lane_preserving_legacy_motif(facts["request"])
+        candidate = NativeObjectService(connection).create_object(
+            idempotency_namespace_id=facts["request"].idempotency_namespace_id,
+            idempotency_key="b4a-retirement-candidate",
+            state=ObjectState(
+                facts["plan"].target_identity_namespace_id, facts["plan"].target_semantic_scope_id,
+                "LEGACY_CORE_NODE", "EXISTS", "EXPLICIT", True, "DERIVED", "NOT_APPLICABLE",
+                {"summary": "B4A retirement candidate"}, "JSON",
+            ),
+        )
+        motifs = NativeMotifService(connection)
+        current = motifs.get_current_motif(projected.motif_object_id)
+        child = MotifState(
+            facts["plan"].target_semantic_scope_id, "motif-b4a_split_0001", "reflection",
+            "B4A sub-basin", current.state.centroid, current.state.strength,
+            current.state.stability_score, current.state.contributing_agents,
+            current.state.last_active_ts + 1, current.state.last_active_ts + 1,
+            current.state.derivation_metadata, current.state.extra_payload,
+        )
+        split = motifs.split_motif_with_member(
+            idempotency_namespace_id=facts["request"].idempotency_namespace_id,
+            idempotency_key="b4a-retirement-split",
+            motif_identity_namespace_id=facts["plan"].motif_identity_namespace_id,
+            membership_identity_namespace_id=facts["plan"].membership_identity_namespace_id,
+            motif_alias_namespace_id=facts["plan"].motif_alias_namespace_id,
+            plan=NativeMotifSplitPlan(
+                projected.motif_object_id, current.motif_revision_id,
+                replace(current.state, last_active_ts=current.state.last_active_ts + 1), child,
+                (facts["normalized"].object_id,), candidate.object_id, True,
+            ),
+        )
+        reader = NativeMotifRuntimeReader(connection)
+        assert reader.list_ordered_current_motif_members(projected.motif_object_id) == ()
+        assert [item.member_object_id for item in reader.list_ordered_current_motif_members(split.child_motif_object_id)] == [
+            facts["normalized"].object_id, candidate.object_id,
+        ]
+        assert connection.execute(
+            "SELECT existence_state FROM relationship_revisions WHERE relationship_id=? ORDER BY revision_ordinal DESC LIMIT 1",
+            (native_id_to_bytes(split.retired_membership_relationship_ids[0]),),
+        ).fetchone()[0] == "RETIRED"
+        path = qualified.database_path
+        qualified.close()
+        with open_existing_native_core_connection(path) as reopened:
+            recovered = NativeMotifRuntimeReader(reopened.connection)
+            assert recovered.list_ordered_current_motif_members(projected.motif_object_id) == ()
+            assert [item.member_object_id for item in recovered.list_ordered_current_motif_members(split.child_motif_object_id)] == [
+                facts["normalized"].object_id, candidate.object_id,
+            ]
     finally: qualified.close()

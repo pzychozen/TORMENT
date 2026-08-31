@@ -7,7 +7,7 @@ and membership as one transition.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -49,11 +49,15 @@ from .fabric_translation import (
 from .ids import generate_native_id, native_id_to_bytes
 from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
+from .native_motif_split import prepare_qualified_native_motif_split
 from .motifs import (
     DERIVED_MOTIF_OBJECT_KIND,
     MOTIF_ID_ALIAS_KIND,
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
     MotifState,
+    NativeMotifService,
+    NativeMotifSplitPlan,
+    _membership_state,
 )
 from .object_revision_governance import (
     NativeMemoryGovernanceFacts,
@@ -68,16 +72,10 @@ from .schema import require_current_schema
 _MEMORY_OBJECT_KIND = "LEGACY_CORE_NODE"
 _COMPOSITION_KIND = "NATIVE_MEMORY_MOTIF_COMPOSITION"
 _MOTIF_ID_NUMBER = re.compile(r"(\d+)")
-_AUTO_SPLIT_ENABLED = True
-_AUTO_SPLIT_MIN_MEMBERS = 96
 
 
 class StaleMotifCatalogError(SubstrateRevisionConflict):
     """A prepared decision no longer describes the current native catalog."""
-
-
-class UnsupportedNativeSplitError(SubstrateInvariantViolation):
-    """A conservative gate prevents an attach that may need native split."""
 
 
 @dataclass(frozen=True)
@@ -202,6 +200,7 @@ class NativeMemoryMotifCompositionPreview:
     predicted_runtime_motif_id: str | None
     incoming_embedding_sha256: str
     incoming_embedding_byte_length: int
+    split_plan: NativeMotifSplitPlan | None
 
 
 @dataclass(frozen=True)
@@ -222,6 +221,10 @@ class NativeMemoryMotifCompositionResult:
     membership_revision_ordinal: int
     transition_id: UUID
     operation_id: UUID
+    affected_runtime_motif_ids: tuple[str, ...] = ()
+    split_parent_runtime_motif_id: str | None = None
+    split_child_runtime_motif_id: str | None = None
+    split_child_object_id: UUID | None = None
 
 
 class NativeMemoryMotifCompositionService:
@@ -232,6 +235,7 @@ class NativeMemoryMotifCompositionService:
         self._connection = connection
         self._objects = NativeObjectService(connection)
         self._relationships = NativeRelationshipService(connection)
+        self._motifs = NativeMotifService(connection)
         self._reader = NativeMotifRuntimeReader(connection)
 
     def prepare_plan(
@@ -310,6 +314,14 @@ class NativeMemoryMotifCompositionService:
             stored = json.loads(existing[1])
             if stored.get("request_retry_contract") != _request_retry_contract(request):
                 raise SubstrateIdempotencyConflict("idempotency intent differs")
+            # A split's partition is part of its durable semantic result.  It
+            # cannot be recovered from a changed catalog witness under the
+            # same operation key, even though ordinary lost-response retry may
+            # observe an unrelated newer catalog.
+            if stored.get("split_plan") is not None and not _matches_split_retry_witness(
+                self._connection, existing[0], stored, preview,
+            ):
+                raise SubstrateIdempotencyConflict("split idempotency intent differs")
             recovered = self._result_for_operation(existing[0])
             if recovered is None:
                 raise SubstrateInvariantViolation("existing A3C2 operation has no complete durable result")
@@ -391,6 +403,15 @@ class NativeMemoryMotifCompositionService:
             raise RuntimeError("forced composition failure after governance")
         if _test_fail_after == "memory":
             raise RuntimeError("forced composition failure after memory")
+
+        if preview.split_plan is not None:
+            return self._commit_split_preview(
+                tx, preview, transition_id, provenance_id, memory_object_id,
+                memory_revision_id, memory_eid,
+                _test_fail_after=_test_fail_after,
+                _test_omit_effect=_test_omit_effect,
+                _test_omit_output=_test_omit_output,
+            )
 
         motif_state = preview.prospective_motif_state
         if preview.decision.kind == "CREATE_NEW":
@@ -522,6 +543,151 @@ class NativeMemoryMotifCompositionService:
             UUID(bytes=provenance_id), UUID(bytes=motif_object_id), UUID(bytes=motif_revision_id),
             motif_ordinal, runtime_motif_id, UUID(bytes=membership_id), UUID(bytes=membership_revision_id),
             1, UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
+            (runtime_motif_id,),
+        )
+
+    def _commit_split_preview(
+        self, tx: SubstrateTx, preview: NativeMemoryMotifCompositionPreview,
+        transition_id: bytes, provenance_id: bytes, memory_object_id: bytes,
+        memory_revision_id: bytes, memory_eid: int, *, _test_fail_after: str | None,
+        _test_omit_effect: str | None, _test_omit_output: str | None,
+    ) -> NativeMemoryMotifCompositionResult:
+        """Publish the candidate and its final split topology in this one tx."""
+        request = preview.request
+        prepared = preview.split_plan
+        if prepared is None:
+            raise SubstrateInvariantViolation("split commit has no prepared split plan")
+        plan = replace(prepared, candidate_member_object_id=UUID(bytes=memory_object_id))
+        current = self._motifs._assert_current_motif(
+            tx, plan.parent_motif_object_id, plan.expected_parent_revision_id, plan.parent_state,
+        )
+        self._motifs._assert_alias_target(
+            tx, request.motif_alias_namespace_id, plan.parent_state.runtime_motif_id,
+            plan.parent_motif_object_id,
+        )
+        if self._motifs._alias_row(tx, request.motif_alias_namespace_id, plan.child_state.runtime_motif_id) is not None:
+            raise StaleMotifCatalogError("split child runtime motif ID already exists")
+        moved = tuple(
+            self._motifs._current_active_membership(tx, plan.parent_motif_object_id, member_id)
+            for member_id in plan.moved_member_object_ids
+        )
+        candidate_scope = self._motifs._require_compatible_member(tx, plan.candidate_member_object_id)
+
+        parent_revision_id = _new()
+        parent_ordinal = current[1] + 1
+        self._objects._revision(
+            tx, parent_revision_id, native_id_to_bytes(plan.parent_motif_object_id), parent_ordinal,
+            "NATIVE_ORDINARY", native_id_to_bytes(plan.expected_parent_revision_id), current[1],
+            _motif_object_state(UUID(bytes=current[2]), plan.parent_state),
+        )
+        if _test_fail_after in {"motif", "parent_successor"}:
+            raise RuntimeError("forced composition failure after split parent successor")
+
+        child_object_id, child_revision_id = _new(), _new()
+        self._insert_object_creation(
+            tx, child_object_id, child_revision_id, transition_id,
+            _motif_object_state(request.motif_identity_namespace_id, plan.child_state),
+        )
+        tx.execute(
+            "INSERT INTO legacy_object_aliases VALUES (?,?,?,?)",
+            (native_id_to_bytes(request.motif_alias_namespace_id), MOTIF_ID_ALIAS_KIND,
+             plan.child_state.runtime_motif_id, child_object_id),
+        )
+        if _test_fail_after == "child_object":
+            raise RuntimeError("forced composition failure after split child object")
+
+        retired: list[tuple[bytes, bytes, int]] = []
+        for index, membership in enumerate(moved):
+            retired_revision_id = _new()
+            retirement_state = self._motifs._retired_membership_state(
+                tx, membership[0], membership[1], membership[2],
+            )
+            self._relationships._revision(
+                tx, membership[0], retired_revision_id, membership[2] + 1,
+                "NATIVE_ORDINARY", membership[1], membership[2], retirement_state,
+            )
+            retired.append((membership[0], retired_revision_id, membership[2] + 1))
+            if index == 0 and _test_fail_after == "first_retirement":
+                raise RuntimeError("forced composition failure after split retirement")
+
+        child_memberships: list[tuple[bytes, bytes, int]] = []
+        candidate_membership: tuple[bytes, bytes, int] | None = None
+        for _relationship_id, _revision_id, _ordinal, member_id, member_scope_id in moved:
+            new_id, new_revision_id = _new(), _new()
+            self._insert_membership_creation(
+                tx, new_id, new_revision_id, transition_id,
+                _membership_state(
+                    request.membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                    UUID(bytes=child_object_id), UUID(bytes=member_scope_id), UUID(bytes=member_id),
+                ),
+            )
+            child_memberships.append((new_id, new_revision_id, 1))
+        if plan.candidate_in_child:
+            new_id, new_revision_id = _new(), _new()
+            self._insert_membership_creation(
+                tx, new_id, new_revision_id, transition_id,
+                _membership_state(
+                    request.membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                    UUID(bytes=child_object_id), candidate_scope, UUID(bytes=memory_object_id),
+                ),
+            )
+            candidate_membership = (new_id, new_revision_id, 1)
+            child_memberships.append(candidate_membership)
+        else:
+            new_id, new_revision_id = _new(), _new()
+            self._insert_membership_creation(
+                tx, new_id, new_revision_id, transition_id,
+                _membership_state(
+                    request.membership_identity_namespace_id, plan.parent_state.semantic_scope_id,
+                    plan.parent_motif_object_id, candidate_scope, UUID(bytes=memory_object_id),
+                ),
+            )
+            candidate_membership = (new_id, new_revision_id, 1)
+        if _test_fail_after in {"membership", "child_memberships", "before_current_pointer_publication"}:
+            raise RuntimeError("forced composition failure after split membership mutation")
+        if candidate_membership is None:
+            raise SubstrateInvariantViolation("split candidate membership was not published")
+
+        self._publish_compound_split(
+            tx, transition_id, memory_object_id, memory_revision_id,
+            native_id_to_bytes(plan.parent_motif_object_id), parent_revision_id, parent_ordinal,
+            child_object_id, child_revision_id, retired, child_memberships,
+            None if plan.candidate_in_child else candidate_membership,
+            omit_effect=_test_omit_effect, omit_output=_test_omit_output,
+        )
+        self._validate_compound_split_publication(
+            tx, transition_id, memory_object_id, memory_revision_id,
+            native_id_to_bytes(plan.parent_motif_object_id), parent_revision_id, parent_ordinal,
+            child_object_id, child_revision_id, retired, child_memberships,
+            None if plan.candidate_in_child else candidate_membership,
+        )
+        candidate_is_child = plan.candidate_in_child
+        return NativeMemoryMotifCompositionResult(
+            UUID(bytes=memory_object_id), UUID(bytes=memory_revision_id), 1, memory_eid,
+            UUID(bytes=provenance_id),
+            UUID(bytes=child_object_id) if candidate_is_child else plan.parent_motif_object_id,
+            UUID(bytes=child_revision_id) if candidate_is_child else UUID(bytes=parent_revision_id),
+            1 if candidate_is_child else parent_ordinal,
+            plan.child_state.runtime_motif_id if candidate_is_child else plan.parent_state.runtime_motif_id,
+            UUID(bytes=candidate_membership[0]), UUID(bytes=candidate_membership[1]), 1,
+            UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
+            (plan.parent_state.runtime_motif_id, plan.child_state.runtime_motif_id),
+            plan.parent_state.runtime_motif_id, plan.child_state.runtime_motif_id,
+            UUID(bytes=child_object_id),
+        )
+
+    def _insert_membership_creation(
+        self, tx: SubstrateTx, membership_id: bytes, membership_revision_id: bytes,
+        transition_id: bytes, state: RelationshipState,
+    ) -> None:
+        self._relationships._check(state, tx)
+        tx.execute(
+            "INSERT INTO relationships(relationship_id,identity_namespace_id,relationship_kind,creating_transition_id,current_revision_id,current_revision_ordinal,created_at_ns) VALUES (?,?,?,?,?,?,0)",
+            (membership_id, native_id_to_bytes(state.identity_namespace_id),
+             MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, transition_id, membership_revision_id, 1),
+        )
+        self._relationships._revision(
+            tx, membership_id, membership_revision_id, 1, "NATIVE_CREATION", None, None, state,
         )
 
     def _insert_object_creation(
@@ -573,6 +739,52 @@ class NativeMemoryMotifCompositionService:
         tx.published.extend(((memory_object_id, memory_revision_id, 1), (motif_object_id, motif_revision_id, motif_ordinal)))
         tx.relationship_published.append((membership_id, membership_revision_id, 1))
 
+    def _publish_compound_split(
+        self, tx: SubstrateTx, transition_id: bytes, memory_object_id: bytes,
+        memory_revision_id: bytes, parent_id: bytes, parent_revision_id: bytes,
+        parent_ordinal: int, child_id: bytes, child_revision_id: bytes,
+        retired: list[tuple[bytes, bytes, int]], child_memberships: list[tuple[bytes, bytes, int]],
+        parent_candidate_membership: tuple[bytes, bytes, int] | None, *,
+        omit_effect: str | None, omit_output: str | None,
+    ) -> None:
+        tx.execute("INSERT INTO semantic_transitions VALUES (?,?,?,?,0)",
+                   (transition_id, tx.operation_id, _COMPOSITION_KIND, "NATIVE"))
+        object_rows = (
+            ("memory", "MEMORY", memory_object_id, memory_revision_id, 1),
+            ("motif", "SPLIT_PARENT_MOTIF", parent_id, parent_revision_id, parent_ordinal),
+            ("child", "SPLIT_CHILD_MOTIF", child_id, child_revision_id, 1),
+        )
+        for key, role, object_id, revision_id, ordinal in object_rows:
+            if omit_effect != key:
+                tx.execute("INSERT INTO object_revision_effects VALUES (?,?,?,?)", (transition_id, object_id, revision_id, ordinal))
+        output_ordinal = 0
+        for key, role, object_id, revision_id, ordinal in object_rows:
+            if omit_output != key:
+                tx.execute("INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,object_id,object_revision_id,object_revision_ordinal) VALUES (?,?,?,?,?,?,?)", (tx.operation_id, output_ordinal, role, "OBJECT", object_id, revision_id, ordinal))
+                output_ordinal += 1
+        relationship_rows = [
+            ("retirement", "RETIRED_PARENT_MEMBERSHIP", item) for item in retired
+        ] + [
+            ("membership", "CHILD_MOTIF_MEMBERSHIP", item) for item in child_memberships
+        ]
+        if parent_candidate_membership is not None:
+            relationship_rows.append(("membership", "PARENT_MOTIF_MEMBERSHIP", parent_candidate_membership))
+        for key, role, (relationship_id, revision_id, ordinal) in relationship_rows:
+            if omit_effect != key:
+                tx.execute("INSERT INTO relationship_revision_effects VALUES (?,?,?,?)", (transition_id, relationship_id, revision_id, ordinal))
+            if omit_output != key:
+                tx.execute("INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,relationship_id,relationship_revision_id,relationship_revision_ordinal) VALUES (?,?,?,?,?,?,?)", (tx.operation_id, output_ordinal, role, "RELATIONSHIP", relationship_id, revision_id, ordinal))
+                output_ordinal += 1
+        tx.execute("UPDATE objects SET current_revision_id=?,current_revision_ordinal=? WHERE object_id=?", (parent_revision_id, parent_ordinal, parent_id))
+        for relationship_id, revision_id, ordinal in [*retired, *child_memberships, *(() if parent_candidate_membership is None else (parent_candidate_membership,))]:
+            tx.execute("UPDATE relationships SET current_revision_id=?,current_revision_ordinal=? WHERE relationship_id=?", (revision_id, ordinal, relationship_id))
+        tx.transitions.append(transition_id)
+        tx.published.extend(((memory_object_id, memory_revision_id, 1), (parent_id, parent_revision_id, parent_ordinal), (child_id, child_revision_id, 1)))
+        tx.relationship_published.extend(retired)
+        tx.relationship_published.extend(child_memberships)
+        if parent_candidate_membership is not None:
+            tx.relationship_published.append(parent_candidate_membership)
+
     def _validate_compound_publication(
         self, tx: SubstrateTx, transition_id: bytes, memory_object_id: bytes, memory_revision_id: bytes,
         motif_object_id: bytes, motif_revision_id: bytes, motif_ordinal: int, membership_id: bytes,
@@ -593,6 +805,28 @@ class NativeMemoryMotifCompositionService:
         outputs = tx.execute("SELECT output_ordinal,output_role,output_kind FROM operation_outputs WHERE operation_id=? ORDER BY output_ordinal", (tx.operation_id,)).fetchall()
         if outputs != [(0, "MEMORY", "OBJECT"), (1, "MOTIF", "OBJECT"), (2, "MOTIF_MEMBERSHIP", "RELATIONSHIP")]:
             raise SubstrateInvariantViolation("A3C2 durable outputs do not match the compound publication")
+
+    def _validate_compound_split_publication(
+        self, tx: SubstrateTx, transition_id: bytes, memory_object_id: bytes,
+        memory_revision_id: bytes, parent_id: bytes, parent_revision_id: bytes,
+        parent_ordinal: int, child_id: bytes, child_revision_id: bytes,
+        retired: list[tuple[bytes, bytes, int]], child_memberships: list[tuple[bytes, bytes, int]],
+        parent_candidate_membership: tuple[bytes, bytes, int] | None,
+    ) -> None:
+        required_objects = (
+            (memory_object_id, memory_revision_id, 1),
+            (parent_id, parent_revision_id, parent_ordinal),
+            (child_id, child_revision_id, 1),
+        )
+        for object_id, revision_id, ordinal in required_objects:
+            if tx.execute("SELECT 1 FROM object_revision_effects WHERE transition_id=? AND object_id=? AND object_revision_id=? AND object_revision_ordinal=?", (transition_id, object_id, revision_id, ordinal)).fetchone() is None:
+                raise SubstrateInvariantViolation("split composition omits a required object effect")
+        for relationship_id, revision_id, ordinal in [*retired, *child_memberships, *(() if parent_candidate_membership is None else (parent_candidate_membership,))]:
+            if tx.execute("SELECT 1 FROM relationship_revision_effects WHERE transition_id=? AND relationship_id=? AND relationship_revision_id=? AND relationship_revision_ordinal=?", (transition_id, relationship_id, revision_id, ordinal)).fetchone() is None:
+                raise SubstrateInvariantViolation("split composition omits a required relationship effect")
+        outputs = tx.execute("SELECT output_ordinal,output_role,output_kind FROM operation_outputs WHERE operation_id=? ORDER BY output_ordinal", (tx.operation_id,)).fetchall()
+        if outputs[:3] != [(0, "MEMORY", "OBJECT"), (1, "SPLIT_PARENT_MOTIF", "OBJECT"), (2, "SPLIT_CHILD_MOTIF", "OBJECT")]:
+            raise SubstrateInvariantViolation("split composition durable outputs do not match the published topology")
 
     def _verify_catalog_witness(self, preview: NativeMemoryMotifCompositionPreview) -> None:
         request = preview.request
@@ -659,6 +893,60 @@ class NativeMemoryMotifCompositionService:
             """,
             (operation_id, _COMPOSITION_KIND),
         ).fetchall()
+        if len(rows) >= 5 and [(row[2], row[3], row[4]) for row in rows[:3]] == [
+            (0, "MEMORY", "OBJECT"), (1, "SPLIT_PARENT_MOTIF", "OBJECT"),
+            (2, "SPLIT_CHILD_MOTIF", "OBJECT"),
+        ]:
+            memory, parent, child = rows[:3]
+            provenance = self._connection.execute(
+                "SELECT provenance_id FROM object_revisions WHERE object_id=? AND object_revision_id=? AND revision_ordinal=?",
+                (memory[5], memory[6], memory[7]),
+            ).fetchone()
+            aliases = self._connection.execute(
+                "SELECT object_id,alias_value FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind=? AND object_id IN (?,?)",
+                (native_id_to_bytes(motif_namespace), MOTIF_ID_ALIAS_KIND, parent[5], child[5]),
+            ).fetchall()
+            alias_by_object = {row[0]: row[1] for row in aliases}
+            if provenance is None or provenance[0] is None or set(alias_by_object) != {parent[5], child[5]}:
+                raise SubstrateInvariantViolation("split composition result reconstruction is incomplete")
+            candidate = None
+            for row in rows[3:]:
+                if row[4] != "RELATIONSHIP" or row[8] is None:
+                    return None
+                endpoint = self._connection.execute(
+                    """SELECT object_id FROM relationship_revision_endpoints
+                         WHERE relationship_revision_id=? AND endpoint_ordinal=1 AND endpoint_role='MEMBER'""",
+                    (row[9],),
+                ).fetchone()
+                if endpoint is not None and endpoint[0] == memory[5]:
+                    candidate = row
+                    break
+            if candidate is None:
+                raise SubstrateInvariantViolation("split composition has no final candidate membership")
+            candidate_motif = self._connection.execute(
+                """SELECT object_id FROM relationship_revision_endpoints
+                     WHERE relationship_revision_id=? AND endpoint_ordinal=0 AND endpoint_role='MOTIF'""",
+                (candidate[9],),
+            ).fetchone()
+            if candidate_motif is None or candidate_motif[0] not in alias_by_object:
+                raise SubstrateInvariantViolation("split composition candidate membership has no final motif endpoint")
+            candidate_object = candidate_motif[0]
+            alias = self._connection.execute(
+                "SELECT alias_value FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND object_id=? AND alias_kind='EID'",
+                (native_id_to_bytes(memory_namespace), memory[5]),
+            ).fetchall()
+            if len(alias) != 1:
+                raise SubstrateInvariantViolation("split composition memory alias is incomplete")
+            return NativeMemoryMotifCompositionResult(
+                UUID(bytes=memory[5]), UUID(bytes=memory[6]), memory[7], _canonical_eid(alias[0][0]),
+                UUID(bytes=provenance[0]), UUID(bytes=candidate_object),
+                UUID(bytes=child[6]) if candidate_object == child[5] else UUID(bytes=parent[6]),
+                1 if candidate_object == child[5] else parent[7], alias_by_object[candidate_object],
+                UUID(bytes=candidate[8]), UUID(bytes=candidate[9]), candidate[10],
+                UUID(bytes=memory[0]), UUID(bytes=memory[1]),
+                (alias_by_object[parent[5]], alias_by_object[child[5]]),
+                alias_by_object[parent[5]], alias_by_object[child[5]], UUID(bytes=child[5]),
+            )
         if len(rows) != 3 or [(row[2], row[3], row[4]) for row in rows] != [
             (0, "MEMORY", "OBJECT"), (1, "MOTIF", "OBJECT"), (2, "MOTIF_MEMBERSHIP", "RELATIONSHIP"),
         ]:
@@ -683,7 +971,7 @@ class NativeMemoryMotifCompositionService:
             UUID(bytes=memory[5]), UUID(bytes=memory[6]), memory[7], memory_eid,
             UUID(bytes=provenance[0]), UUID(bytes=motif[5]), UUID(bytes=motif[6]), motif[7],
             motif_alias[0][0], UUID(bytes=membership[8]), UUID(bytes=membership[9]), membership[10],
-            UUID(bytes=memory[0]), UUID(bytes=memory[1]),
+            UUID(bytes=memory[0]), UUID(bytes=memory[1]), (motif_alias[0][0],),
         )
 
 
@@ -702,12 +990,10 @@ def _prepare_preview(
         CURRENT_MOTIF_DECISION_POLICY,
     )
     selected = _selected_native_motif(decision, catalog)
+    split_plan: NativeMotifSplitPlan | None = None
     if decision.kind == "ATTACH_EXISTING":
         if selected is None:
             raise SubstrateInvariantViolation("native decision selected no current motif")
-        prospective_count = selected.read_model.member_count + 1
-        if _AUTO_SPLIT_ENABLED and prospective_count >= _AUTO_SPLIT_MIN_MEMBERS:
-            raise UnsupportedNativeSplitError("UNSUPPORTED_NATIVE_SPLIT: attach reaches the legacy split eligibility gate")
         aggregate = realize_attach_next_state(
             decision, agent_id=request.agent_id, last_active_ts=request.last_active_ts
         )
@@ -720,6 +1006,12 @@ def _prepare_preview(
             derivation_metadata=source.state.derivation_metadata,
             extra_payload=source.state.extra_payload,
         )
+        split_plan = _prepare_native_split_plan(
+            request, reader, selected, source, motif_state, decision,
+            tuple(item.runtime_motif_id for item in witness),
+        )
+        if split_plan is not None:
+            motif_state = split_plan.parent_state
         prospective_id = motif_state.runtime_motif_id
         selected_id = selected.motif_object_id
         selected_identity_namespace_id = source.identity_namespace_id
@@ -758,6 +1050,7 @@ def _prepare_preview(
         predicted_runtime_motif_id=prospective_id if decision.kind == "CREATE_NEW" else None,
         incoming_embedding_sha256=hashlib.sha256(raw.tobytes()).hexdigest(),
         incoming_embedding_byte_length=len(raw.tobytes()),
+        split_plan=split_plan,
     )
 
 
@@ -782,6 +1075,23 @@ def _prospective_radius(
             member_vectors.append(_unit(raw))
     member_vectors.append(candidate)
     return motif_radius_from_member_vectors(state.centroid, member_vectors)
+
+
+def _prepare_native_split_plan(
+    request: NativeMemoryMotifCompositionRequest,
+    reader: NativeMotifRuntimeReader,
+    selected: NativeRuntimeMotif,
+    source: Any,
+    aggregate_state: MotifState,
+    decision: MotifDecision,
+    catalog_runtime_ids: tuple[str, ...],
+) -> NativeMotifSplitPlan | None:
+    return prepare_qualified_native_motif_split(
+        reader=reader, selected=selected, source_state=source.state,
+        aggregate_state=aggregate_state, decision=decision,
+        candidate_member_object_id=None, expected_dimension=request.expected_dimension,
+        catalog_runtime_ids=catalog_runtime_ids, child_created_ts=request.last_active_ts,
+    )
 
 
 def _prospective_rows(
@@ -973,8 +1283,72 @@ def _composition_intent(preview: NativeMemoryMotifCompositionPreview) -> str:
             "primary_field_row": dict(preview.primary_field_row),
             "enrichment_patch": dict(preview.enrichment_patch),
             "predicted_runtime_motif_id": preview.predicted_runtime_motif_id,
+            "split_plan": _split_plan_intent(preview.split_plan) if preview.split_plan is not None else None,
         }
     )
+
+
+def _split_plan_intent(plan: NativeMotifSplitPlan | None) -> dict[str, Any] | None:
+    if plan is None:
+        return None
+    return {
+        "parent_motif_object_id": str(plan.parent_motif_object_id),
+        "expected_parent_revision_id": str(plan.expected_parent_revision_id),
+        "parent_state": plan.parent_state.intent(),
+        "child_state": plan.child_state.intent(),
+        "moved_member_object_ids": [str(item) for item in plan.moved_member_object_ids],
+        "candidate_in_child": plan.candidate_in_child,
+    }
+
+
+def _matches_split_retry_witness(
+    connection: sqlite3.Connection, operation_id: bytes, stored: Mapping[str, Any],
+    preview: NativeMemoryMotifCompositionPreview,
+) -> bool:
+    """Permit either the original plan or its exact post-split recovery view."""
+    supplied_witness = [_witness_intent(item) for item in preview.catalog_witness]
+    if (
+        stored.get("catalog_witness") == supplied_witness
+        and stored.get("split_plan") == _split_plan_intent(preview.split_plan)
+    ):
+        return True
+    plan = stored.get("split_plan")
+    if not isinstance(plan, Mapping):
+        return False
+    parent_id = plan.get("parent_motif_object_id")
+    child_runtime_id = plan.get("child_state", {}).get("runtime_motif_id") if isinstance(plan.get("child_state"), Mapping) else None
+    if not isinstance(parent_id, str) or not isinstance(child_runtime_id, str):
+        return False
+    rows = connection.execute(
+        """SELECT output_role,object_id,object_revision_id,object_revision_ordinal
+             FROM operation_outputs WHERE operation_id=? AND output_kind='OBJECT'""",
+        (operation_id,),
+    ).fetchall()
+    published = {row[0]: row[1:] for row in rows}
+    if set(published) != {"MEMORY", "SPLIT_PARENT_MOTIF", "SPLIT_CHILD_MOTIF"}:
+        return False
+    parent = published["SPLIT_PARENT_MOTIF"]
+    child = published["SPLIT_CHILD_MOTIF"]
+    expected: list[dict[str, Any]] = []
+    found_parent = False
+    for item in stored.get("catalog_witness", []):
+        if not isinstance(item, Mapping):
+            return False
+        value = dict(item)
+        if value.get("motif_object_id") == parent_id:
+            value["motif_revision_id"] = str(UUID(bytes=parent[1]))
+            value["motif_revision_ordinal"] = parent[2]
+            found_parent = True
+        expected.append(value)
+    if not found_parent:
+        return False
+    expected.append({
+        "runtime_motif_id": child_runtime_id,
+        "motif_object_id": str(UUID(bytes=child[0])),
+        "motif_revision_id": str(UUID(bytes=child[1])),
+        "motif_revision_ordinal": child[2],
+    })
+    return sorted(expected, key=lambda item: item["runtime_motif_id"]) == supplied_witness
 
 
 def _request_retry_contract(request: NativeMemoryMotifCompositionRequest) -> dict[str, Any]:
@@ -1117,5 +1491,4 @@ __all__ = [
     "NativeMemoryMotifCompositionService",
     "NativeMotifCatalogWitnessEntry",
     "StaleMotifCatalogError",
-    "UnsupportedNativeSplitError",
 ]

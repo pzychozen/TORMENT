@@ -50,7 +50,8 @@ from .fabric_native_routing import NativeFabricRoutingScope, NativeMotifProcessO
 from .ids import native_id_to_bytes
 from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
-from .motifs import MotifState, NativeMotifMutationResult, NativeMotifService
+from .motifs import MotifState, NativeMotifMutationResult, NativeMotifService, NativeMotifSplitResult
+from .native_motif_split import prepare_qualified_native_motif_split
 from .native_world_runtime import NativeWorldProcessState, NativeWorldRuntime
 from .object_revision_governance import (
     NativeMemoryGovernanceFacts,
@@ -152,7 +153,7 @@ class NativeCharacterCorrectionResult:
     representation_id: UUID
     expectation_id: UUID
     motif_status: str
-    motif_result: NativeMotifMutationResult | None = None
+    motif_result: NativeMotifMutationResult | NativeMotifSplitResult | None = None
 
 
 class NativeCharacterGravityCorrectionRuntime:
@@ -405,7 +406,7 @@ class NativeCharacterGravityCorrectionRuntime:
         source: NativeCharacterCorrectionSourceResult,
         request: CharacterGravityCorrectionRequest,
         vector: np.ndarray,
-    ) -> tuple[str, NativeMotifMutationResult | None]:
+    ) -> tuple[str, NativeMotifMutationResult | NativeMotifSplitResult | None]:
         try:
             scope = self._config.routing_scope
             with self._motif_process_order.locked_catalog(
@@ -422,15 +423,33 @@ class NativeCharacterGravityCorrectionRuntime:
                 if decision.kind == "ATTACH_EXISTING":
                     if selected is None:
                         raise SubstrateInvariantViolation("Character motif decision selected no current motif")
-                    if selected.read_model.member_count + 1 >= 96:
-                        return self._record_motif_outcome(
-                            source, request, "CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED",
-                        ), None
                     aggregate = realize_attach_next_state(
                         decision, agent_id=request.agent_id, last_active_ts=source.created_ts,
                     )
                     prior = self._motifs.get_current_motif(selected.motif_object_id)
                     state = _motif_state(aggregate, scope.runtime_scope.semantic_scope_id, prior.state)
+                    split_plan = prepare_qualified_native_motif_split(
+                        reader=self._motif_reader, selected=selected, source_state=prior.state,
+                        aggregate_state=state, decision=decision,
+                        candidate_member_object_id=source.memory_object_id,
+                        expected_dimension=self._config.representation_lane.dimension,
+                        catalog_runtime_ids=tuple(item.read_model.runtime_motif_id for item in catalog),
+                        child_created_ts=source.created_ts,
+                    )
+                    if split_plan is not None:
+                        result = self._motifs.split_motif_with_member(
+                            idempotency_namespace_id=scope.idempotency_namespace_id,
+                            idempotency_key=key,
+                            motif_identity_namespace_id=scope.motif_identity_namespace_id,
+                            membership_identity_namespace_id=scope.membership_identity_namespace_id,
+                            motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                            plan=split_plan,
+                        )
+                        self._motif_process_order.append_created(
+                            routing_scope=scope, domain_id=self._config.domain_id,
+                            runtime_motif_id=result.child_runtime_motif_id,
+                        )
+                        return "MOTIF_SPLIT", result
                     result = self._motifs.add_motif_member(
                         idempotency_namespace_id=scope.idempotency_namespace_id,
                         idempotency_key=key,
@@ -556,7 +575,7 @@ class NativeCharacterGravityCorrectionRuntime:
             raise SubstrateConfigurationError("Character embedder returned an unqualified vector")
         return np.ascontiguousarray(vector, dtype=np.float32)
 
-    def _recover_motif_result(self, source: NativeCharacterCorrectionSourceResult) -> NativeMotifMutationResult | None:
+    def _recover_motif_result(self, source: NativeCharacterCorrectionSourceResult) -> NativeMotifMutationResult | NativeMotifSplitResult | None:
         row = self._connection.execute(
             "SELECT operation_id FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
             (native_id_to_bytes(self._config.routing_scope.idempotency_namespace_id), self._motif_key_from_source(source)),
@@ -566,6 +585,8 @@ class NativeCharacterGravityCorrectionRuntime:
         if self._operation_kind(row[0]) == _MOTIF_OUTCOME_OPERATION_KIND:
             return None
         result = self._motifs._result_for_operation(row[0])
+        if result is None and self._operation_kind(row[0]) == "NATIVE_MOTIF_SPLIT_WITH_MEMBER":
+            result = self._motifs._split_result_for_operation(row[0])
         if result is None:
             raise SubstrateInvariantViolation("stored Character motif operation is incomplete")
         if self._operation_kind(row[0]) == "NATIVE_MOTIF_CREATE_WITH_MEMBER":
@@ -586,6 +607,11 @@ class NativeCharacterGravityCorrectionRuntime:
                 routing_scope=self._config.routing_scope,
                 domain_id=self._config.domain_id,
                 runtime_motif_id=runtime_id,
+            )
+        if isinstance(result, NativeMotifSplitResult):
+            self._motif_process_order.append_created(
+                routing_scope=self._config.routing_scope, domain_id=self._config.domain_id,
+                runtime_motif_id=result.child_runtime_motif_id,
             )
         return result
 
@@ -636,7 +662,9 @@ class NativeCharacterGravityCorrectionRuntime:
             raise SubstrateInvariantViolation("Character motif outcome is unsupported")
         return status
 
-    def _recovered_motif_status(self, result: NativeMotifMutationResult) -> str:
+    def _recovered_motif_status(self, result: NativeMotifMutationResult | NativeMotifSplitResult) -> str:
+        if isinstance(result, NativeMotifSplitResult):
+            return "MOTIF_SPLIT"
         return "MOTIF_CREATED" if result.motif_revision_ordinal == 1 else "MOTIF_ATTACHED"
 
     def _operation_kind(self, operation_id: bytes) -> str:
@@ -650,7 +678,7 @@ class NativeCharacterGravityCorrectionRuntime:
         source: NativeCharacterCorrectionSourceResult,
         ready: Any,
         motif_status: str,
-        motif_result: NativeMotifMutationResult | None = None,
+        motif_result: NativeMotifMutationResult | NativeMotifSplitResult | None = None,
     ) -> CharacterGravityCorrectionResult:
         status = (
             CharacterGravityCorrectionStatus.CHARACTER_MOTIF_SPLIT_PARITY_REQUIRED

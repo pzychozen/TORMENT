@@ -4,8 +4,9 @@ This is deliberately an orchestration layer over the qualified B-series
 services.  It has no selector, Fabric runtime import, legacy fallback, or
 write-capable recovery surface.  The first supported profile is intentionally
 small: one already-existing private agent workspace, ordinary core memories,
-one locked captured embedding lane, and lane-preserving motifs below the
-auto-split boundary.
+one locked captured embedding lane, and lane-preserving motifs.  An observed
+legacy motif at or above the auto-split minimum remains admissible: only its
+next native attachment may evaluate the frozen split policy.
 """
 
 from __future__ import annotations
@@ -78,7 +79,6 @@ _DESCRIPTOR_SCHEMA = "TORMENT_EXISTING_WORKSPACE_NATIVE_ADMISSION"
 _DESCRIPTOR_VERSION = 1
 _COMPLETE = "ADMISSION_COMPLETE"
 _INCOMPLETE = "ADMISSION_INCOMPLETE_RESUMABLE"
-_MAX_SUPPORTED_MOTIF_MEMBERS = 95
 _EID_OBSERVATION_STORES = (
     "conflicts", "anchors", "affect_history", "character_store",
     "hivemind_collective", "bridges", "trajectory_evidence", "deep_memory",
@@ -897,8 +897,8 @@ def _verify_motif_profile(request: ExistingWorkspaceNativeAdmissionRequest, root
     if not isinstance(motifs, dict) or not motifs:
         raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_MOTIF_PROFILE_NOT_ADMISSIBLE")
     for motif in motifs.values():
-        if not isinstance(motif, dict) or not isinstance(motif.get("members"), list) or len(motif["members"]) > _MAX_SUPPORTED_MOTIF_MEMBERS:
-            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_MOTIF_RETIREMENT_UNSUPPORTED")
+        if not isinstance(motif, dict) or not isinstance(motif.get("members"), list):
+            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_MOTIF_PROFILE_NOT_ADMISSIBLE")
 
 
 def _raise_if_interrupted(selected: str | None, stage: str) -> None:
