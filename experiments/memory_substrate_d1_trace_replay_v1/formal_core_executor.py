@@ -439,7 +439,18 @@ class CoreFormalAdministrationExecutor:
         self, arm: CoreFrozenArm, roots: CoreArmRoots,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
         legacy = self._ports.open_legacy(arm, roots.legacy_root)
-        native = self._ports.open_native(arm, roots.native_root)
+        try:
+            native = self._ports.open_native(arm, roots.native_root)
+        except Exception:
+            # Opening the concrete legacy port starts an ordinary child
+            # service. If the paired native core cannot open, cleanly release
+            # that service before propagating the one original port failure.
+            # This is cleanup only: there is no fallback, replay, or retry.
+            try:
+                legacy.close()
+            except Exception:
+                pass
+            raise
         storage_differences: list[dict[str, Any]] = []
         post_write_differences: list[dict[str, Any]] = []
         structural: list[dict[str, Any]] = []
