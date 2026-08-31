@@ -19,6 +19,13 @@ class FixtureKind(StrEnum):
     CHARACTER_SUBARM = "CHARACTER_SUBARM"
 
 
+class D1ReplayProfile(StrEnum):
+    """The explicit D1 administration shape selected before any replay exists."""
+
+    CORE_ONLY = "CORE_ONLY"
+    CHARACTER_EXTENDED = "CHARACTER_EXTENDED"
+
+
 class DuplicateDecisionKind(StrEnum):
     """Frozen legacy-only explanation for a duplicate decision."""
 
@@ -65,25 +72,35 @@ class FrozenReplayPlan:
 
     micro_arms: tuple[FrozenReplayArm, ...]
     sequential_arm: FrozenReplayArm
-    character_arm: FrozenReplayArm
+    character_arm: FrozenReplayArm | None = None
+    profile: D1ReplayProfile = D1ReplayProfile.CHARACTER_EXTENDED
 
     def validate(self, fixture_set: "FrozenFixtureSet") -> None:
+        if not isinstance(self.profile, D1ReplayProfile) or self.profile is not fixture_set.profile:
+            raise D1ProtocolError("D1 replay plan and fixture set must name the same explicit profile")
+        if self.profile is D1ReplayProfile.CORE_ONLY:
+            if self.character_arm is not None:
+                raise D1ProtocolError("CORE_ONLY D1 replay explicitly forbids a Character arm")
+            all_arms = (*self.micro_arms, self.sequential_arm)
+        else:
+            if self.character_arm is None or self.character_arm.arm_id != "CHARACTER_SUBARM":
+                raise D1ProtocolError("CHARACTER_EXTENDED D1 replay requires the Character arm")
+            if not self.character_arm.character_specific_baseline:
+                raise D1ProtocolError("D1 Character sub-arm requires an explicit Character baseline")
+            all_arms = (*self.micro_arms, self.sequential_arm, self.character_arm)
         expected = {
             "M1_CREATE", "M2_REINFORCE", "M3_DISTINCT", "M4_CONTRADICTION", "M5_NO_WRITE",
         }
         if {arm.arm_id for arm in self.micro_arms} != expected or len(self.micro_arms) != 5:
             raise D1ProtocolError("D1 needs five separately cloned micro-trace arms")
-        all_arms = (*self.micro_arms, self.sequential_arm, self.character_arm)
+        if self.sequential_arm.arm_id != "SEQUENTIAL":
+            raise D1ProtocolError("D1 requires the named sequential arm")
         legacy_clones = [arm.legacy_clone_id for arm in all_arms]
         native_clones = [arm.native_clone_id for arm in all_arms]
         if len(legacy_clones) != len(set(legacy_clones)):
             raise D1ProtocolError("D1 replay arms may not reuse a legacy clone")
         if len(native_clones) != len(set(native_clones)):
             raise D1ProtocolError("D1 replay arms may not reuse a native clone")
-        if self.sequential_arm.arm_id != "SEQUENTIAL" or self.character_arm.arm_id != "CHARACTER_SUBARM":
-            raise D1ProtocolError("D1 requires named sequential and Character arms")
-        if not self.character_arm.character_specific_baseline:
-            raise D1ProtocolError("D1 Character sub-arm requires an explicit Character baseline")
         known_ids = [fixture.fixture_id for fixture in fixture_set.fixtures]
         used_ids = [fixture_id for arm in all_arms for fixture_id in arm.fixture_ids]
         if Counter(used_ids) != Counter(known_ids):
@@ -96,8 +113,9 @@ class FrozenReplayPlan:
             "M4_CONTRADICTION": FixtureKind.M4_CONTRADICTION,
             "M5_NO_WRITE": FixtureKind.M5_NO_WRITE,
             "SEQUENTIAL": FixtureKind.SEQUENTIAL,
-            "CHARACTER_SUBARM": FixtureKind.CHARACTER_SUBARM,
         }
+        if self.profile is D1ReplayProfile.CHARACTER_EXTENDED:
+            expected_kinds["CHARACTER_SUBARM"] = FixtureKind.CHARACTER_SUBARM
         for arm in all_arms:
             if any(fixtures_by_id[fixture_id].kind is not expected_kinds[arm.arm_id] for fixture_id in arm.fixture_ids):
                 raise D1ProtocolError("D1 replay arm contains a fixture from another declared arm")
@@ -118,12 +136,14 @@ class FrozenReplayPlan:
         positions = [self.sequential_arm.event_roles.index(role) if role in self.sequential_arm.event_roles else -1 for role in required_sequential]
         if positions != sorted(positions) or any(position < 0 for position in positions):
             raise D1ProtocolError("D1 sequential arm lacks CREATE/REINFORCE/DISTINCT/CONTRADICTION order")
-        if (
-            self.character_arm.event_roles.count(ReplayEventRole.CHARACTER_ADMINISTRATION) != 1
-            or self.character_arm.event_roles[-1] is not ReplayEventRole.CHARACTER_ADMINISTRATION
-            or ReplayEventRole.CHARACTER_PREPARATION not in self.character_arm.event_roles
-        ):
-            raise D1ProtocolError("D1 Character arm needs preparation events then one final administration event")
+        if self.profile is D1ReplayProfile.CHARACTER_EXTENDED:
+            assert self.character_arm is not None
+            if (
+                self.character_arm.event_roles.count(ReplayEventRole.CHARACTER_ADMINISTRATION) != 1
+                or self.character_arm.event_roles[-1] is not ReplayEventRole.CHARACTER_ADMINISTRATION
+                or ReplayEventRole.CHARACTER_PREPARATION not in self.character_arm.event_roles
+            ):
+                raise D1ProtocolError("D1 Character arm needs preparation events then one final administration event")
 
 
 @dataclass(frozen=True)
@@ -245,6 +265,7 @@ class FrozenFixtureEvidence:
 class FrozenFixtureSet:
     protocol_sha256: str
     fixtures: tuple[FrozenFixtureEvidence, ...]
+    profile: D1ReplayProfile = D1ReplayProfile.CHARACTER_EXTENDED
 
     def __post_init__(self) -> None:
         if not isinstance(self.protocol_sha256, str) or len(self.protocol_sha256) != 64:
@@ -254,12 +275,19 @@ class FrozenFixtureSet:
             raise D1ProtocolError("fixture IDs must be unique")
 
     def validate(self) -> None:
+        if not isinstance(self.profile, D1ReplayProfile):
+            raise D1ProtocolError("D1 fixture set must name an explicit replay profile")
         for fixture in self.fixtures:
             fixture.validate()
-        expected = {FixtureKind.M1_CREATE, FixtureKind.M2_REINFORCE, FixtureKind.M3_DISTINCT, FixtureKind.M4_CONTRADICTION, FixtureKind.M5_NO_WRITE, FixtureKind.SEQUENTIAL, FixtureKind.CHARACTER_SUBARM}
+        expected = {
+            FixtureKind.M1_CREATE, FixtureKind.M2_REINFORCE, FixtureKind.M3_DISTINCT,
+            FixtureKind.M4_CONTRADICTION, FixtureKind.M5_NO_WRITE, FixtureKind.SEQUENTIAL,
+        }
+        if self.profile is D1ReplayProfile.CHARACTER_EXTENDED:
+            expected.add(FixtureKind.CHARACTER_SUBARM)
         present = {fixture.kind for fixture in self.fixtures}
         if present != expected:
-            raise D1ProtocolError("D1 fixture set is missing a required frozen arm")
+            raise D1ProtocolError("D1 fixture set does not match its explicit replay profile")
 
     @property
     def digest(self) -> str:

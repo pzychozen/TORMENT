@@ -118,6 +118,35 @@ def canonical_trace_specs() -> dict[str, tuple[dict[str, Any], ...]]:
     }
 
 
+def core_only_trace_specs() -> dict[str, tuple[dict[str, Any], ...]]:
+    """Fresh core-L0 requests; these intentionally do not reuse the Character fixture bytes."""
+    stable_m2 = "Core-only M2 calibration claim is stable and independently verified."
+    stable_m4 = "Core-only M4 calibration claim is stable and verified; independently evidenced."
+    stable_seq = "Core-only sequential calibration claim is stable and verified; independently evidenced."
+    return {
+        "M1_CREATE": (_event("CORE-M1-create", "Core-only M1 calibration claim is stable and independently verified.", 10, 101, kind="M1_CREATE", expected="CREATE_NO_CANDIDATE"),),
+        "M2_REINFORCE": (
+            _event("CORE-M2-create", stable_m2, 10, 101, kind="M2_REINFORCE", expected="CREATE_NO_CANDIDATE"),
+            _event("CORE-M2-reinforce", stable_m2, 10, 102, kind="M2_REINFORCE", expected="REINFORCE_MATCH"),
+        ),
+        "M3_DISTINCT": (
+            _event("CORE-M3-create", "Core-only M3 calibration claim is stable and independently verified.", 10, 101, kind="M3_DISTINCT", expected="CREATE_NO_CANDIDATE"),
+            _event("CORE-M3-distinct", "Core-only independent measurement three is verified separately.", 11, 102, kind="M3_DISTINCT", expected="CREATE_DISTINCT_BELOW_THRESHOLD"),
+        ),
+        "M4_CONTRADICTION": (
+            _event("CORE-M4-create", stable_m4, 10, 101, kind="M4_CONTRADICTION", expected="CREATE_NO_CANDIDATE"),
+            _event("CORE-M4-contradiction", "Core-only M4 calibration claim is not stable and verified; independently evidenced.", 10, 102, kind="M4_CONTRADICTION", expected="CREATE_CONTRADICTION_GUARD"),
+        ),
+        "M5_NO_WRITE": (_event("CORE-M5-no-write", "", 11, 101, kind="M5_NO_WRITE", expected="NOT_APPLICABLE"),),
+        "SEQUENTIAL": (
+            _event("CORE-S-create", stable_seq, 10, 101, kind="SEQUENTIAL", expected="CREATE_NO_CANDIDATE"),
+            _event("CORE-S-reinforce", stable_seq, 10, 102, kind="SEQUENTIAL", expected="REINFORCE_MATCH"),
+            _event("CORE-S-distinct", "Core-only sequential independent measurement is verified separately.", 11, 103, kind="SEQUENTIAL", expected="CREATE_DISTINCT_BELOW_THRESHOLD"),
+            _event("CORE-S-contradiction", "Core-only sequential calibration claim is not stable and verified; independently evidenced.", 10, 104, kind="SEQUENTIAL", expected="CREATE_CONTRADICTION_GUARD"),
+        ),
+    }
+
+
 def _read_json(path: Path, default: Any) -> Any:
     if not path.is_file():
         return default
@@ -426,9 +455,10 @@ def _qualify_event(
     return result
 
 
-def capture_legacy_only_fixture_set(
+def _capture_legacy_only_fixture_set(
     *, l0_root: str | Path, clone_root: str | Path, destination: str | Path,
-    workspace_id: str, agent_id: str,
+    workspace_id: str, agent_id: str, profile: str,
+    character_seed_required: bool, specs: dict[str, tuple[dict[str, Any], ...]],
 ) -> dict[str, Any]:
     """Run the fixed trace suite against fresh L0 clones and seal legacy evidence.
 
@@ -441,15 +471,19 @@ def capture_legacy_only_fixture_set(
     output = Path(destination).resolve()
     if output.exists() or clones.exists():
         raise D1ProtocolError("legacy D1 capture destinations must be new")
-    baseline = fingerprint_legacy_baseline(root=l0, workspace_id=workspace_id, agent_id=agent_id)
+    baseline = fingerprint_legacy_baseline(
+        root=l0, workspace_id=workspace_id, agent_id=agent_id,
+        character_seed_required=character_seed_required,
+    )
     verify_legacy_baseline(baseline)
-    specs = canonical_trace_specs()
     captures: list[dict[str, Any]] = []
     for arm_id, events in specs.items():
         clone = clones / arm_id
         shutil.copytree(l0, clone)
         _require_port_available()
-        service = _start_service(clone)
+        service = _start_service(
+            clone, {"TORMENT_CHARACTER_ENABLE": "0"} if not character_seed_required else None,
+        )
         try:
             _wait_for_service(service)
             workspace = clone / "workspaces" / workspace_id
@@ -485,6 +519,7 @@ def capture_legacy_only_fixture_set(
         "schema": "memory-substrate-d1-legacy-only-http-capture-v1",
         "l0_fingerprint_sha256": baseline.digest,
         "l0_root": str(l0), "workspace_id": workspace_id, "agent_id": agent_id,
+        "profile": profile,
         "service_environment": dict(sorted(_SERVICE_ENV.items())),
         "workspace_domains": [_WORKSPACE_DOMAIN],
         "captures": captures,
@@ -498,8 +533,36 @@ def capture_legacy_only_fixture_set(
     return document
 
 
+def capture_legacy_only_fixture_set(
+    *, l0_root: str | Path, clone_root: str | Path, destination: str | Path,
+    workspace_id: str, agent_id: str,
+) -> dict[str, Any]:
+    """Capture the original Character-extended preflight shape."""
+    return _capture_legacy_only_fixture_set(
+        l0_root=l0_root, clone_root=clone_root, destination=destination,
+        workspace_id=workspace_id, agent_id=agent_id,
+        profile="CHARACTER_EXTENDED", character_seed_required=True,
+        specs=canonical_trace_specs(),
+    )
+
+
+def capture_core_only_legacy_fixture_set(
+    *, l0_root: str | Path, clone_root: str | Path, destination: str | Path,
+    workspace_id: str, agent_id: str,
+) -> dict[str, Any]:
+    """Capture only M1--M5 and sequential qualification from a Character-free core L0."""
+    return _capture_legacy_only_fixture_set(
+        l0_root=l0_root, clone_root=clone_root, destination=destination,
+        workspace_id=workspace_id, agent_id=agent_id,
+        profile="CORE_ONLY", character_seed_required=False,
+        specs=core_only_trace_specs(),
+    )
+
+
 __all__ = [
     "canonical_trace_specs",
+    "core_only_trace_specs",
+    "capture_core_only_legacy_fixture_set",
     "capture_legacy_only_fixture_set",
     "create_character_free_core_l0",
 ]

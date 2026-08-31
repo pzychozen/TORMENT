@@ -94,6 +94,17 @@ class FormalAdministrationRunner:
         if not self._repository_root.is_dir() or not isinstance(expected_repository_head, str) or len(expected_repository_head) != 40:
             raise FormalAdministrationRefused("formal runner requires an exact repository root and expected HEAD")
 
+    def verify_frozen_inputs(
+        self, *, inputs: FrozenAdministrationInputs, protocol_sha256: str, fixture_sha256: str,
+    ) -> None:
+        """Read-only hash verification usable before authority exists.
+
+        It does not construct an authorization, write a marker/result, inspect a
+        trace, or check the current checkout.  ``run`` remains the only method
+        that can cross the authorization boundary.
+        """
+        inputs.verify(protocol_sha256=protocol_sha256, fixture_sha256=fixture_sha256)
+
     def run(
         self,
         *,

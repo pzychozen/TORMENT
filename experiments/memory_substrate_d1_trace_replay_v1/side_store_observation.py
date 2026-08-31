@@ -28,6 +28,10 @@ from .protocol import D1ProtocolError, sha256_value
 CORE_CHARACTER_FREE_L0_FINGERPRINT = (
     "f74fc5f104a71788f21f0f60ed753d35c029b1427f04e04d850e9c65f78fde63"
 )
+CORE_SIDE_STORE_OBSERVATION_SOURCE_NAMESPACE_ID = UUID("65ba4708-2ced-400c-a35b-0df589600642")
+CORE_SIDE_STORE_OBSERVATION_DIGEST = (
+    "ed86e486a94080671c7eb672bf21cab96ec383a944c13492acc4a9616d081a4c"
+)
 
 
 class D1ObservationLocatorState(StrEnum):
@@ -250,11 +254,30 @@ def observe_frozen_d1_core_retained_side_stores(
     )
 
 
+def verify_frozen_d1_core_retained_side_stores(
+    *, root: str | Path, workspace_id: str, agent_id: str, domain_id: str,
+) -> D1CoreSideStoreObservationArtifact:
+    """Verify the one already-qualified core witness; never choose a replacement."""
+    artifact = observe_frozen_d1_core_retained_side_stores(
+        root=root,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        domain_id=domain_id,
+        legacy_source_namespace_id=CORE_SIDE_STORE_OBSERVATION_SOURCE_NAMESPACE_ID,
+    )
+    if artifact.digest != CORE_SIDE_STORE_OBSERVATION_DIGEST:
+        raise D1ProtocolError("D1 core side-store observation differs from the immutable qualified witness")
+    return artifact
+
+
 __all__ = [
     "CORE_CHARACTER_FREE_L0_FINGERPRINT",
+    "CORE_SIDE_STORE_OBSERVATION_DIGEST",
+    "CORE_SIDE_STORE_OBSERVATION_SOURCE_NAMESPACE_ID",
     "D1CoreSideStoreObservationArtifact",
     "D1ObservationLocator",
     "D1ObservationLocatorState",
     "D1RetainedSideStoreObservationEvidence",
     "observe_frozen_d1_core_retained_side_stores",
+    "verify_frozen_d1_core_retained_side_stores",
 ]

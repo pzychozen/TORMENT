@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-from .fixture_qualification import FrozenFixtureSet, FrozenReplayPlan
+from .fixture_qualification import D1ReplayProfile, FrozenFixtureSet, FrozenReplayPlan
 from .legacy_capture import InitialPostWritePlaceholderPosture
-from .manifest import LegacyBaselineFingerprint
+from .manifest import CORE_CHARACTER_FREE_BASELINE_PROFILE, LegacyBaselineFingerprint
 from .protocol import D1ProtocolError, EnvironmentFingerprint, FrozenAdministrationInputs, StoreDispositionManifest, sha256_value
 from .run import seal_fixture_set
 
@@ -28,10 +28,22 @@ class ConcreteFixtureArtifact:
     placeholder_posture: InitialPostWritePlaceholderPosture
     workspace_domains: tuple[str, ...]
     observed_store_paths: tuple[str, ...]
+    profile: D1ReplayProfile
+    workspace_id: str
+    agent_id: str
+    domain_id: str
+    side_store_observation_digest: str
+    character_subarm_status: str
+    character_arm_administered: bool
+    native_formal_event_count: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.expected_repository_head, str) or len(self.expected_repository_head) != 40:
             raise D1ProtocolError("concrete D1 fixture requires the exact repository HEAD")
+        if not isinstance(self.profile, D1ReplayProfile):
+            raise D1ProtocolError("concrete D1 fixture must name an explicit replay profile")
+        if self.fixture_set.profile is not self.profile or self.replay_plan.profile is not self.profile:
+            raise D1ProtocolError("concrete D1 fixture profile must match its fixture set and replay plan")
         self.fixture_set.validate()
         self.replay_plan.validate(self.fixture_set)
         self.placeholder_posture.validate()
@@ -43,6 +55,20 @@ class ConcreteFixtureArtifact:
             raise D1ProtocolError("concrete D1 fixture request material must bind every fixture exactly once")
         if self.workspace_domains != ("research",):
             raise D1ProtocolError("D1 concrete fixture requires exactly the research workspace domain")
+        if (
+            (self.workspace_id, self.agent_id) != (self.baseline.workspace_id, self.baseline.agent_id)
+            or self.domain_id != "research"
+        ):
+            raise D1ProtocolError("D1 concrete fixture workspace identity is not bound to its L0")
+        if not isinstance(self.side_store_observation_digest, str) or len(self.side_store_observation_digest) != 64:
+            raise D1ProtocolError("concrete D1 fixture requires the immutable side-store observation digest")
+        if self.profile is D1ReplayProfile.CORE_ONLY:
+            if self.baseline.baseline_profile != CORE_CHARACTER_FREE_BASELINE_PROFILE:
+                raise D1ProtocolError("CORE_ONLY concrete fixture requires the Character-free L0 profile")
+            if self.character_arm_administered or self.character_subarm_status != "DEFERRED_PENDING_PROVENANCE_VOCABULARY":
+                raise D1ProtocolError("CORE_ONLY concrete fixture must preserve the deferred Character disposition")
+        if not isinstance(self.native_formal_event_count, int) or self.native_formal_event_count != 0:
+            raise D1ProtocolError("concrete D1 fixture must have no native formal event")
         observed = set(self.observed_store_paths)
         if len(observed) != len(self.observed_store_paths):
             raise D1ProtocolError("concrete D1 observed store inventory must be unique")
@@ -50,7 +76,7 @@ class ConcreteFixtureArtifact:
 
     def binding_payload(self) -> dict[str, Any]:
         return {
-            "schema": "memory-substrate-d1-concrete-fixtures-v1",
+            "schema": "memory-substrate-d1-concrete-fixtures-v2",
             "expected_repository_head": self.expected_repository_head,
             "l0_fingerprint_sha256": self.baseline.digest,
             "l0_fingerprint": asdict(self.baseline),
@@ -62,6 +88,14 @@ class ConcreteFixtureArtifact:
             "placeholder_posture": asdict(self.placeholder_posture),
             "workspace_domains": self.workspace_domains,
             "observed_store_paths": self.observed_store_paths,
+            "profile": self.profile.value,
+            "workspace_id": self.workspace_id,
+            "agent_id": self.agent_id,
+            "domain_id": self.domain_id,
+            "side_store_observation_digest": self.side_store_observation_digest,
+            "character_subarm_status": self.character_subarm_status,
+            "character_arm_administered": self.character_arm_administered,
+            "native_formal_event_count": self.native_formal_event_count,
         }
 
     def seal(self, *, protocol_document: str | Path) -> FrozenAdministrationInputs:

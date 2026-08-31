@@ -1,0 +1,3018 @@
+{
+  "administration_inputs": {
+    "fixture_sha256": "dcd32c4c5ed0778d7972d757310da4d090fae2574f145e9d298a7933bc03a580",
+    "protocol_sha256": "4d3e7136735b1fb52b87521b397885d33682402208e4d966bd54ac9f458352b4",
+    "tolerances_sha256": "f98749b86ec4fcc78c97bdcb85167a742558fed66b3d7b1ea690dfccf6950bec"
+  },
+  "binding": {
+    "agent_id": "d1coreagent",
+    "character_arm_administered": false,
+    "character_subarm_status": "DEFERRED_PENDING_PROVENANCE_VOCABULARY",
+    "domain_id": "research",
+    "environments": [
+      [
+        "legacy",
+        {
+          "embedder_dimension": 384,
+          "embedder_model": "hash:384:torment",
+          "embedder_provider": "hash",
+          "numpy": "2.4.4",
+          "platform": "Windows-10-10.0.26200-SP0",
+          "python": "3.11.15",
+          "repository_head": "35b6a3101190b3a75dcd404cbbbcb20881ce2cba",
+          "runtime_flags": [
+            [
+              "TORMENT_AFFECT_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHARACTER_DRIFT_CHECK_EVERY",
+              null
+            ],
+            [
+              "TORMENT_CHARACTER_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHECKPOINT_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHECKPOINT_INTERVAL",
+              null
+            ],
+            [
+              "TORMENT_COMPRESS_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_COMPRESS_MIN_STEP",
+              null
+            ],
+            [
+              "TORMENT_DATA_DIR",
+              null
+            ],
+            [
+              "TORMENT_EMBED_MODEL",
+              null
+            ],
+            [
+              "TORMENT_EMBED_PROVIDER",
+              null
+            ],
+            [
+              "TORMENT_EMBED_STRICT",
+              null
+            ],
+            [
+              "TORMENT_HASH_DIM",
+              null
+            ],
+            [
+              "TORMENT_HIVEMIND_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_REINFORCE_SIM_THRESHOLD",
+              null
+            ],
+            [
+              "TORMENT_SRG_ENABLE",
+              null
+            ]
+          ],
+          "sqlite_module": "2.6.0",
+          "sqlite_runtime": "3.51.2"
+        }
+      ],
+      [
+        "native",
+        {
+          "embedder_dimension": 384,
+          "embedder_model": "hash:384:torment",
+          "embedder_provider": "hash",
+          "numpy": "2.4.4",
+          "platform": "Windows-10-10.0.26200-SP0",
+          "python": "3.11.15",
+          "repository_head": "35b6a3101190b3a75dcd404cbbbcb20881ce2cba",
+          "runtime_flags": [
+            [
+              "TORMENT_AFFECT_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHARACTER_DRIFT_CHECK_EVERY",
+              null
+            ],
+            [
+              "TORMENT_CHARACTER_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHECKPOINT_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_CHECKPOINT_INTERVAL",
+              null
+            ],
+            [
+              "TORMENT_COMPRESS_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_COMPRESS_MIN_STEP",
+              null
+            ],
+            [
+              "TORMENT_DATA_DIR",
+              null
+            ],
+            [
+              "TORMENT_EMBED_MODEL",
+              null
+            ],
+            [
+              "TORMENT_EMBED_PROVIDER",
+              null
+            ],
+            [
+              "TORMENT_EMBED_STRICT",
+              null
+            ],
+            [
+              "TORMENT_HASH_DIM",
+              null
+            ],
+            [
+              "TORMENT_HIVEMIND_ENABLE",
+              null
+            ],
+            [
+              "TORMENT_REINFORCE_SIM_THRESHOLD",
+              null
+            ],
+            [
+              "TORMENT_SRG_ENABLE",
+              null
+            ]
+          ],
+          "sqlite_module": "2.6.0",
+          "sqlite_runtime": "3.53.4"
+        }
+      ]
+    ],
+    "expected_repository_head": "35b6a3101190b3a75dcd404cbbbcb20881ce2cba",
+    "fixture_set": {
+      "fixtures": [
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": null,
+            "reinforce_threshold": null
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M1-create",
+          "kind": "M1_CREATE",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "4995769dd1d613a64034dac34ce34dba596e2e8f901aef34b8d8dd861ec74f46",
+          "write_gate": {
+            "effective_write_threshold": 0.472768679025,
+            "strength": 0.999943,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": null,
+            "reinforce_threshold": null
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M2-create",
+          "kind": "M2_REINFORCE",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "e1607d7787f5b20ec9779eddd1ed1953d25b42626783cb6bdb803edd30513423",
+          "write_gate": {
+            "effective_write_threshold": 0.472768679025,
+            "strength": 0.999943,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 1.0449839867472352,
+            "contradiction_guard_observed": false,
+            "duplicate_decision": "REINFORCE_MATCH",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": true,
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M2-reinforce",
+          "kind": "M2_REINFORCE",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "b3109cb2c95918e81a908a9e15db38925aa2a0e30b3461b06de0a07888b53c16",
+          "write_gate": {
+            "effective_write_threshold": 0.47221715478693044,
+            "strength": 0.999943,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": null,
+            "reinforce_threshold": null
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M3-create",
+          "kind": "M3_DISTINCT",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "55d15989114a63813337140ac005f0cab36c64626d65baaecbabbba4d13776ed",
+          "write_gate": {
+            "effective_write_threshold": 0.4727064952517366,
+            "strength": 0.9972597735377172,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_DISTINCT_BELOW_THRESHOLD",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": 0.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M3-distinct",
+          "kind": "M3_DISTINCT",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "7876c5ec799a14a163cc82542be7669722148f94860c33ae40042f64a319e645",
+          "write_gate": {
+            "effective_write_threshold": 0.47209411764934534,
+            "strength": 0.9949846158456903,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": null,
+            "reinforce_threshold": null
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M4-create",
+          "kind": "M4_CONTRADICTION",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "1c31f6dcb929821ee103c85ab717a34e637146311e6be64cd85988d723e33d92",
+          "write_gate": {
+            "effective_write_threshold": 0.472768679025,
+            "strength": 0.999943,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 1.0449839867472352,
+            "contradiction_guard_observed": true,
+            "duplicate_decision": "CREATE_CONTRADICTION_GUARD",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-M4-contradiction",
+          "kind": "M4_CONTRADICTION",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "c83642ef0583fc03423acb9948422ca4db3173df02fbeff609c3cdbb057a42a5",
+          "write_gate": {
+            "effective_write_threshold": 0.4721455936412069,
+            "strength": 0.9966681195672598,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": null,
+          "expected_stored": false,
+          "fixture_id": "CORE-M5-no-write",
+          "kind": "M5_NO_WRITE",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "59e2958051367491da5d2efa029a866491eda95c0e1f939bdded2b8703878589",
+          "write_gate": {
+            "effective_write_threshold": 0.45899871750000004,
+            "strength": 0.999943,
+            "write_band": 0.08,
+            "write_intent": false
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": null,
+            "reinforce_threshold": null
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-S-create",
+          "kind": "SEQUENTIAL",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "21c61e6d767550e53a9ec3696c1f27992b5468127ded9dfd094db4f98ab59290",
+          "write_gate": {
+            "effective_write_threshold": 0.4716560578845075,
+            "strength": 0.9519334577996753,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 1.0449839867472352,
+            "contradiction_guard_observed": false,
+            "duplicate_decision": "REINFORCE_MATCH",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": true,
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-S-reinforce",
+          "kind": "SEQUENTIAL",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "5327794ae89b74b4eda0401dba9de33d8ba8fc7f319a1bb4c2ed0fe81be9d14f",
+          "write_gate": {
+            "effective_write_threshold": 0.47092746931681345,
+            "strength": 0.9444261174532617,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 0.04498398674723521,
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_DISTINCT_BELOW_THRESHOLD",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": 0.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-S-distinct",
+          "kind": "SEQUENTIAL",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "c12325b42d63b4bedefed8f3d28773e00e1be4af0f015c6042b9d5fb6ac74d5d",
+          "write_gate": {
+            "effective_write_threshold": 0.46976544822695704,
+            "strength": 0.9498196471804106,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        },
+        {
+          "decision": {
+            "attach_score": 1.0449839867472352,
+            "contradiction_guard_observed": true,
+            "duplicate_decision": "CREATE_CONTRADICTION_GUARD",
+            "effective_attach_threshold": 0.7512948647158656,
+            "expected_reinforced": false,
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92
+          },
+          "expected_stored": true,
+          "fixture_id": "CORE-S-contradiction",
+          "kind": "SEQUENTIAL",
+          "links": [],
+          "pre_event_motif_member_count": 1,
+          "request_sha256": "8fa27a4ec92e320e9f40bf6c9c3547a0f48b8deef8bbe389c52239863ba1b367",
+          "write_gate": {
+            "effective_write_threshold": 0.45543011161512714,
+            "strength": 0.9489883071284378,
+            "write_band": 0.08,
+            "write_intent": true
+          }
+        }
+      ],
+      "profile": "CORE_ONLY",
+      "protocol_sha256": "4d3e7136735b1fb52b87521b397885d33682402208e4d966bd54ac9f458352b4"
+    },
+    "l0_fingerprint": {
+      "agent_id": "d1coreagent",
+      "baseline_profile": "CORE_CHARACTER_FREE",
+      "character_seed": null,
+      "character_state": null,
+      "embedding_evidence_sha256": "bb96a7e843e4536d08fe6072496f6bb18f2ac9cae4b0e5eaf3b789a5179cb9d9",
+      "files": [
+        {
+          "byte_length": 516,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/identity.json",
+          "sha256": "5028a2c45052214325fbbd1fcbd48c1d96bf1ac1e49c977634168c2ff5584624"
+        },
+        {
+          "byte_length": 4096,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite",
+          "sha256": "2fb9e76bc8b8bb820a77e21342abe7b079f687749503315e13c0cf95106675e0"
+        },
+        {
+          "byte_length": 32768,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-shm",
+          "sha256": "6335b0f715b6cd6adf338a372d84e53bfa17f0298ff5388be393618d63ff98c2"
+        },
+        {
+          "byte_length": 206032,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-wal",
+          "sha256": "d7c99b29b5d9b1d7798eb65a7ba6da14552a0202ee3158a14f0907d0ac1cfdd7"
+        },
+        {
+          "byte_length": 155,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/manifest.json",
+          "sha256": "10389cc7f783d30ead6c1d1d514074a7a69c1c6a1697b850a7674d6055750665"
+        },
+        {
+          "byte_length": 94,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.map.jsonl",
+          "sha256": "e67993268db03a6fd2fff73a7658c91f569b99f0c28db0bdfd3e9465eee14f29"
+        },
+        {
+          "byte_length": 6291584,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.npy",
+          "sha256": "e8ff0ae9a7b5f3defb0ee99d05168e2b7d715fa5ddd0ea90d624d308c55e0640"
+        },
+        {
+          "byte_length": 185,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/memory_events.jsonl",
+          "sha256": "6036f993158032bb146a72656d612abb35c829aa021cdae0aacec90a1e4458fa"
+        },
+        {
+          "byte_length": 1842,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/nodes.jsonl",
+          "sha256": "7ef3fb6dd50e3f11ccc8244b3a874806bd876803dae29e4bd80f8153729eb771"
+        },
+        {
+          "byte_length": 125,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/boundaries.jsonl",
+          "sha256": "ef9c2ce171cbe0f1725d5a377598c008f7a0bb29cf401306f79455b2d6bf0396"
+        },
+        {
+          "byte_length": 157,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/chunks/epoch-00000001/chunk-00000000000000000001.partial",
+          "sha256": "08020c4cde71d4be8bc9b9d86032ebb7047bb6a8a7ff0d0f08bc528fdac51753"
+        },
+        {
+          "byte_length": 205,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/entity_genesis.jsonl",
+          "sha256": "43e7618aec15174d4f883cb6b635cd354fe4f2659ec52a2649ddd7998c7918e9"
+        },
+        {
+          "byte_length": 384,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/roles.json",
+          "sha256": "77a024e5b72d6231a96f39d906996ebd0e748a384fc7ae8966ad8eadff60856b"
+        },
+        {
+          "byte_length": 133,
+          "relative_path": "workspaces/d1core20260831/agents/d1coreagent/symbol_state.json",
+          "sha256": "9a9a913d7293edd41db3fbd00582cdacc69b5beb2c6a4ea2c9dded61d8a7b972"
+        },
+        {
+          "byte_length": 619,
+          "relative_path": "workspaces/d1core20260831/domain_policies.json",
+          "sha256": "9aceae7ecf7101ead62d59e92d656f1e88b6a513283f3daf8b89c01218c3de6c"
+        },
+        {
+          "byte_length": 427,
+          "relative_path": "workspaces/d1core20260831/domains/research/motif_events.jsonl",
+          "sha256": "5884b025ced09f311d3d2c22f6a496e2f9764c7a858ca4147b508c1d91a2a40f"
+        },
+        {
+          "byte_length": 5841,
+          "relative_path": "workspaces/d1core20260831/domains/research/motifs.json",
+          "sha256": "22fa95a7267b76082b8af33d1d03b37e900bafb7ddee393ae7f9348b2c23035b"
+        },
+        {
+          "byte_length": 155,
+          "relative_path": "workspaces/d1core20260831/domains/research/shared/embeddings/manifest.json",
+          "sha256": "8d50eec3ec5e894e7215f2a0bab72badcc5cdb7551b5f56b7a4b9560246354a9"
+        },
+        {
+          "byte_length": 6291584,
+          "relative_path": "workspaces/d1core20260831/domains/research/shared/embeddings/shard_000000.npy",
+          "sha256": "c3b1e0f15da14961b59ab80e94fff45e6aa96f86d51e40c4f87eb4b30894ed61"
+        },
+        {
+          "byte_length": 125,
+          "relative_path": "workspaces/d1core20260831/domains/research/shared/trajectories/v2/boundaries.jsonl",
+          "sha256": "86ed544d793d6c4407e2f0420e656381ba22f97c72fd08cdbfbcce7258da0a63"
+        },
+        {
+          "byte_length": 41,
+          "relative_path": "workspaces/d1core20260831/domains.json",
+          "sha256": "be4fed0df813bf158c4e115c9908b6a60541455cef0ff0ac7d9c9163b1243292"
+        },
+        {
+          "byte_length": 157,
+          "relative_path": "workspaces/d1core20260831/workspace_meta.json",
+          "sha256": "6c84da7822de7fa74cc37d8e1cc72c42ef340d8fa288398d87e07bebdcfbeb8c"
+        }
+      ],
+      "identity": {
+        "relative_path": "workspaces/d1core20260831/agents/d1coreagent/identity.json",
+        "sha256": "5028a2c45052214325fbbd1fcbd48c1d96bf1ac1e49c977634168c2ff5584624",
+        "value": {
+          "agent_id": "d1coreagent",
+          "created_ts": 1788172879,
+          "overlay": {
+            "contradiction_sensitivity": 0.8,
+            "coupling_strength": 0.25,
+            "decay_scale": 1.0,
+            "motif_sensitivity": 0.7,
+            "novelty_bias": 0.5,
+            "promotion_bias": 0.6,
+            "reinforcement_gain": 0.9,
+            "shared_trust": 0.6,
+            "stability_guard": 0.8,
+            "write_threshold": 0.45
+          },
+          "seed": {
+            "d1_baseline_profile": "core_character_free"
+          },
+          "updated_ts": 1788172879,
+          "workspace_id": "d1core20260831"
+        }
+      },
+      "motif_state_sha256": "6b64900a9e66913f0c631bba9506076cb814bc3ec9757e781a2d66067e462439",
+      "private_memory_rows_sha256": "73cb23eb98f932419f10d42687ffae3092b8c864831da969bacd24aeea7ff7ec",
+      "retained_side_store_inventory": [
+        [
+          "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite",
+          "2fb9e76bc8b8bb820a77e21342abe7b079f687749503315e13c0cf95106675e0"
+        ],
+        [
+          "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-shm",
+          "6335b0f715b6cd6adf338a372d84e53bfa17f0298ff5388be393618d63ff98c2"
+        ],
+        [
+          "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-wal",
+          "d7c99b29b5d9b1d7798eb65a7ba6da14552a0202ee3158a14f0907d0ac1cfdd7"
+        ],
+        [
+          "workspaces/d1core20260831/agents/d1coreagent/roles.json",
+          "77a024e5b72d6231a96f39d906996ebd0e748a384fc7ae8966ad8eadff60856b"
+        ],
+        [
+          "workspaces/d1core20260831/agents/d1coreagent/symbol_state.json",
+          "9a9a913d7293edd41db3fbd00582cdacc69b5beb2c6a4ea2c9dded61d8a7b972"
+        ],
+        [
+          "workspaces/d1core20260831/domain_policies.json",
+          "9aceae7ecf7101ead62d59e92d656f1e88b6a513283f3daf8b89c01218c3de6c"
+        ],
+        [
+          "workspaces/d1core20260831/domains/research/motif_events.jsonl",
+          "5884b025ced09f311d3d2c22f6a496e2f9764c7a858ca4147b508c1d91a2a40f"
+        ],
+        [
+          "workspaces/d1core20260831/domains/research/motifs.json",
+          "22fa95a7267b76082b8af33d1d03b37e900bafb7ddee393ae7f9348b2c23035b"
+        ],
+        [
+          "workspaces/d1core20260831/domains.json",
+          "be4fed0df813bf158c4e115c9908b6a60541455cef0ff0ac7d9c9163b1243292"
+        ]
+      ],
+      "root": "C:\\TORMENT\\experiments\\7g5d1_formal_preflight_20260831\\core_character_free_20260831",
+      "workspace_embedding_lock": {
+        "relative_path": "workspaces/d1core20260831/workspace_meta.json",
+        "sha256": "6c84da7822de7fa74cc37d8e1cc72c42ef340d8fa288398d87e07bebdcfbeb8c",
+        "value": {
+          "created_ts": 1788172879,
+          "embed_dim": 384,
+          "embed_model": "hash:384:torment",
+          "embed_provider": "hash",
+          "workspace_id": "d1core20260831"
+        }
+      },
+      "workspace_id": "d1core20260831"
+    },
+    "l0_fingerprint_sha256": "f74fc5f104a71788f21f0f60ed753d35c029b1427f04e04d850e9c65f78fde63",
+    "native_formal_event_count": 0,
+    "observed_store_paths": [
+      "workspaces/d1core20260831/agents/d1coreagent/identity.json",
+      "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite",
+      "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-shm",
+      "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-wal",
+      "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/manifest.json",
+      "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.map.jsonl",
+      "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.npy",
+      "workspaces/d1core20260831/agents/d1coreagent/private/memory_events.jsonl",
+      "workspaces/d1core20260831/agents/d1coreagent/private/nodes.jsonl",
+      "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/boundaries.jsonl",
+      "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/chunks/epoch-00000001/chunk-00000000000000000001.partial",
+      "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/entity_genesis.jsonl",
+      "workspaces/d1core20260831/agents/d1coreagent/roles.json",
+      "workspaces/d1core20260831/agents/d1coreagent/symbol_state.json",
+      "workspaces/d1core20260831/domain_policies.json",
+      "workspaces/d1core20260831/domains/research/motif_events.jsonl",
+      "workspaces/d1core20260831/domains/research/motifs.json",
+      "workspaces/d1core20260831/domains/research/shared/embeddings/manifest.json",
+      "workspaces/d1core20260831/domains/research/shared/embeddings/shard_000000.npy",
+      "workspaces/d1core20260831/domains/research/shared/trajectories/v2/boundaries.jsonl",
+      "workspaces/d1core20260831/domains.json",
+      "workspaces/d1core20260831/workspace_meta.json"
+    ],
+    "placeholder_posture": {
+      "hivemind_enabled": false,
+      "hivemind_packet_parity_tested": false,
+      "identity_coupling_mode": "read_only",
+      "proposal_parity_tested": false
+    },
+    "profile": "CORE_ONLY",
+    "replay_plan": {
+      "character_arm": null,
+      "micro_arms": [
+        {
+          "arm_id": "M1_CREATE",
+          "character_specific_baseline": false,
+          "event_roles": [
+            "CREATE"
+          ],
+          "fixture_ids": [
+            "CORE-M1-create"
+          ],
+          "legacy_clone_id": "L0-M1_CREATE",
+          "native_clone_id": "N0-M1_CREATE"
+        },
+        {
+          "arm_id": "M2_REINFORCE",
+          "character_specific_baseline": false,
+          "event_roles": [
+            "CREATE",
+            "REINFORCE"
+          ],
+          "fixture_ids": [
+            "CORE-M2-create",
+            "CORE-M2-reinforce"
+          ],
+          "legacy_clone_id": "L0-M2_REINFORCE",
+          "native_clone_id": "N0-M2_REINFORCE"
+        },
+        {
+          "arm_id": "M3_DISTINCT",
+          "character_specific_baseline": false,
+          "event_roles": [
+            "CREATE",
+            "DISTINCT"
+          ],
+          "fixture_ids": [
+            "CORE-M3-create",
+            "CORE-M3-distinct"
+          ],
+          "legacy_clone_id": "L0-M3_DISTINCT",
+          "native_clone_id": "N0-M3_DISTINCT"
+        },
+        {
+          "arm_id": "M4_CONTRADICTION",
+          "character_specific_baseline": false,
+          "event_roles": [
+            "CREATE",
+            "CONTRADICTION"
+          ],
+          "fixture_ids": [
+            "CORE-M4-create",
+            "CORE-M4-contradiction"
+          ],
+          "legacy_clone_id": "L0-M4_CONTRADICTION",
+          "native_clone_id": "N0-M4_CONTRADICTION"
+        },
+        {
+          "arm_id": "M5_NO_WRITE",
+          "character_specific_baseline": false,
+          "event_roles": [
+            "NO_WRITE"
+          ],
+          "fixture_ids": [
+            "CORE-M5-no-write"
+          ],
+          "legacy_clone_id": "L0-M5_NO_WRITE",
+          "native_clone_id": "N0-M5_NO_WRITE"
+        }
+      ],
+      "profile": "CORE_ONLY",
+      "sequential_arm": {
+        "arm_id": "SEQUENTIAL",
+        "character_specific_baseline": false,
+        "event_roles": [
+          "CREATE",
+          "REINFORCE",
+          "DISTINCT",
+          "CONTRADICTION"
+        ],
+        "fixture_ids": [
+          "CORE-S-create",
+          "CORE-S-reinforce",
+          "CORE-S-distinct",
+          "CORE-S-contradiction"
+        ],
+        "legacy_clone_id": "L0-SEQUENTIAL",
+        "native_clone_id": "N0-SEQUENTIAL"
+      }
+    },
+    "requests": [
+      [
+        "CORE-M1-create",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.472768679025,
+              "strength": 0.999943,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M1 calibration claim is stable and independently verified.",
+            "text": "Core-only M1 calibration claim is stable and independently verified."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.99993825,
+            "created_ts": 1788181362,
+            "debug": {
+              "S_mag": 0.9999995377950294,
+              "coh_phase": 0.9999998630503727,
+              "coh_raw": 0.999905,
+              "coherence": 0.999905,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s7_high_posZ",
+              "identity_state": 7.0,
+              "phase_disp": 0.0005551006058526168,
+              "phi_coll": 0.004217556113308494,
+              "summary": "Core-only M1 calibration claim is stable and independently verified.",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.1199962,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9999998630503727,
+                "cycle_stage": 2.0,
+                "disp": 0.0005551006058526168,
+                "identity_state": 7.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9700038,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14998812499999994,
+                  0.25978705303199173,
+                  0.0449964375
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.0505970645
+              },
+              "z": 0.18728142562045677
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.9924,
+            "last_active_ts": 1788181362,
+            "last_reinforced_ts": 1788181362,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M1-create:0:4995769dd1d613a64034dac3",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9999525,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:42Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.999943,
+            "summary": "Core-only M1 calibration claim is stable and independently verified.",
+            "text": "Core-only M1 calibration claim is stable and independently verified.",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.1199962,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9999998630503727,
+              "cycle_stage": 2.0,
+              "disp": 0.0005551006058526168,
+              "identity_state": 7.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9700038,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14998812499999994,
+                0.25978705303199173,
+                0.0449964375
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.0505970645
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M2-create",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.472768679025,
+              "strength": 0.999943,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M2 calibration claim is stable and independently verified.",
+            "text": "Core-only M2 calibration claim is stable and independently verified."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.99993825,
+            "created_ts": 1788181364,
+            "debug": {
+              "S_mag": 0.9999967296246622,
+              "coh_phase": 0.9999990309995771,
+              "coh_raw": 0.999905,
+              "coherence": 0.999905,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s7_high_posZ",
+              "identity_state": 7.0,
+              "phase_disp": 0.0014765676441642834,
+              "phi_coll": 0.006813300615565504,
+              "summary": "Core-only M2 calibration claim is stable and independently verified.",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.1199962,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9999990309995771,
+                "cycle_stage": 2.0,
+                "disp": 0.0014765676441642834,
+                "identity_state": 7.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9700038,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14998812499999994,
+                  0.25978705303199173,
+                  0.0449964375
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.0505970645
+              },
+              "z": 0.17748317033436953
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.9924,
+            "last_active_ts": 1788181364,
+            "last_reinforced_ts": 1788181364,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M2-create:0:e1607d7787f5b20ec9779edd",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9999525,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:44Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.999943,
+            "summary": "Core-only M2 calibration claim is stable and independently verified.",
+            "text": "Core-only M2 calibration claim is stable and independently verified.",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.1199962,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9999990309995771,
+              "cycle_stage": 2.0,
+              "disp": 0.0014765676441642834,
+              "identity_state": 7.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9700038,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14998812499999994,
+                0.25978705303199173,
+                0.0449964375
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.0505970645
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M2-reinforce",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [],
+            "reinforced": true,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": false,
+            "duplicate_decision": "REINFORCE_MATCH",
+            "expected_reinforced": true,
+            "links": [],
+            "motif": {
+              "attach_score": 1.0449839867472352,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 1.0,
+              "selected_motif_id": "motif_research_0002"
+            },
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.47221715478693044,
+              "strength": 0.999943,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 102,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M2 calibration claim is stable and independently verified.",
+            "text": "Core-only M2 calibration claim is stable and independently verified."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.99993825,
+            "created_ts": 1788181364,
+            "debug": {
+              "S_mag": 0.9999980531845865,
+              "coh_phase": 0.9999990995831041,
+              "coh_raw": 0.999905,
+              "coherence": 0.999905,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.2005906270576658,
+              "id_label": "s8_high_negZ",
+              "identity_state": 8.0,
+              "phase_disp": 0.0011392442995401984,
+              "phi_coll": 0.009636615773138386,
+              "summary": "Core-only M2 calibration claim is stable and independently verified.",
+              "tri_mod": {
+                "align_ema": 0.0305569382188153,
+                "bridge_p": 0.11952958129397852,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9999990995831041,
+                "cycle_stage": 2.0,
+                "disp": 0.0011392442995401984,
+                "identity_state": 8.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9688722093713169,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14998812499999994,
+                  0.25978705303199173,
+                  -0.0449964375
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.611138764376306,
+                "tearing_risk": 0.0194430617811847,
+                "write_mult": 1.0493714550820676
+              },
+              "z": -0.19683081089582813
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.9924,
+            "last_active_ts": 1788181364,
+            "last_reinforced_ts": 1788181364,
+            "last_tool_refresh_ts": null,
+            "logical_step": 102,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M2-reinforce:0:b3109cb2c95918e81a908a9e",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0002",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9999525,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:44Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.999943,
+            "summary": "Core-only M2 calibration claim is stable and independently verified.",
+            "text": "Core-only M2 calibration claim is stable and independently verified.",
+            "tri_mod": {
+              "align_ema": 0.0305569382188153,
+              "bridge_p": 0.11952958129397852,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9999990995831041,
+              "cycle_stage": 2.0,
+              "disp": 0.0011392442995401984,
+              "identity_state": 8.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9688722093713169,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14998812499999994,
+                0.25978705303199173,
+                -0.0449964375
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.611138764376306,
+              "tearing_risk": 0.0194430617811847,
+              "write_mult": 1.0493714550820676
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M3-create",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.4727064952517366,
+              "strength": 0.9972597735377172,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M3 calibration claim is stable and independently verified.",
+            "text": "Core-only M3 calibration claim is stable and independently verified."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.997031421332527,
+            "created_ts": 1788181366,
+            "debug": {
+              "S_mag": 0.9838018912760734,
+              "coh_phase": 0.9951925851538898,
+              "coh_raw": 0.9954329558961953,
+              "coherence": 0.9954329558961953,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s7_high_posZ",
+              "identity_state": 7.0,
+              "phase_disp": 0.10412860882834339,
+              "phi_coll": 0.6788398841616848,
+              "summary": "Core-only M3 calibration claim is stable and independently verified.",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.11981731823584782,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9951925851538898,
+                "cycle_stage": 2.0,
+                "disp": 0.10412860882834339,
+                "identity_state": 7.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9701826817641522,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14942911948702436,
+                  0.2588188270818069,
+                  0.044828735846107325
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.0504588783371924
+              },
+              "z": 0.1893190478195681
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.63463647169563,
+            "last_active_ts": 1788181366,
+            "last_reinforced_ts": 1788181366,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M3-create:0:55d15989114a63813337140a",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9977164779480976,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:46Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9972597735377172,
+            "summary": "Core-only M3 calibration claim is stable and independently verified.",
+            "text": "Core-only M3 calibration claim is stable and independently verified.",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.11981731823584782,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9951925851538898,
+              "cycle_stage": 2.0,
+              "disp": 0.10412860882834339,
+              "identity_state": 7.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9701826817641522,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14942911948702436,
+                0.2588188270818069,
+                0.044828735846107325
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.0504588783371924
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M3-distinct",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 3,
+            "motifs": [
+              "motif_research_0003"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_DISTINCT_BELOW_THRESHOLD",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": 0.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.47209411764934534,
+              "strength": 0.9949846158456903,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 102,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892",
+            "supplied_summary": "Core-only independent measurement three is verified separately.",
+            "text": "Core-only independent measurement three is verified separately."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9945666671661646,
+            "created_ts": 1788181366,
+            "debug": {
+              "S_mag": 0.9563625874562882,
+              "coh_phase": 0.9818875694110429,
+              "coh_raw": 0.9827931909404908,
+              "coherence": 0.9916410264094839,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.2686050910379447,
+              "id_label": "s8_high_negZ",
+              "identity_state": 8.0,
+              "phase_disp": 0.1715127275948615,
+              "phi_coll": 1.5923457470595672,
+              "summary": "Core-only independent measurement three is verified separately.",
+              "tri_mod": {
+                "align_ema": 0.03026565249909778,
+                "bridge_p": 0.1191933363874744,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9818875694110429,
+                "cycle_stage": 2.0,
+                "disp": 0.1715127275948615,
+                "identity_state": 8.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9691854240177331,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14895512830118543,
+                  0.2579978502655941,
+                  -0.04468653849035564
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": -0.6053130499819556,
+                "tearing_risk": 0.019734347500902222,
+                "write_mult": 1.0490980392207674
+              },
+              "z": -0.2092691703145373
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.33128211275871,
+            "last_active_ts": 1788181366,
+            "last_reinforced_ts": 1788181366,
+            "last_tool_refresh_ts": null,
+            "logical_step": 102,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M3-distinct:0:7876c5ec799a14a163cc8254",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 1
+            },
+            "prior_motif_id": "motif_research_0002",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.995820513204742,
+            "provenance": {
+              "created_at_step": 102,
+              "created_at_ts": "2026-08-31T13:02:46Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9949846158456903,
+            "summary": "Core-only independent measurement three is verified separately.",
+            "text": "Core-only independent measurement three is verified separately.",
+            "tri_mod": {
+              "align_ema": 0.03026565249909778,
+              "bridge_p": 0.1191933363874744,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9818875694110429,
+              "cycle_stage": 2.0,
+              "disp": 0.1715127275948615,
+              "identity_state": 8.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9691854240177331,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14895512830118543,
+                0.2579978502655941,
+                -0.04468653849035564
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": -0.6053130499819556,
+              "tearing_risk": 0.019734347500902222,
+              "write_mult": 1.0490980392207674
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M4-create",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.472768679025,
+              "strength": 0.999943,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M4 calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only M4 calibration claim is stable and verified; independently evidenced."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.99993825,
+            "created_ts": 1788181368,
+            "debug": {
+              "S_mag": 0.9999955292805357,
+              "coh_phase": 0.9999986753417778,
+              "coh_raw": 0.999905,
+              "coherence": 0.999905,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s7_high_posZ",
+              "identity_state": 7.0,
+              "phase_disp": 0.0017264075341709773,
+              "phi_coll": 1.164444650441449,
+              "summary": "Core-only M4 calibration claim is stable and verified; independently evidenced.",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.1199962,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9999986753417778,
+                "cycle_stage": 2.0,
+                "disp": 0.0017264075341709773,
+                "identity_state": 7.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9700038,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14998812499999994,
+                  0.25978705303199173,
+                  0.0449964375
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.0505970645
+              },
+              "z": 0.18575513881491107
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.9924,
+            "last_active_ts": 1788181368,
+            "last_reinforced_ts": 1788181368,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M4-create:0:1c31f6dcb929821ee103c85a",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9999525,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:48Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.999943,
+            "summary": "Core-only M4 calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only M4 calibration claim is stable and verified; independently evidenced.",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.1199962,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9999986753417778,
+              "cycle_stage": 2.0,
+              "disp": 0.0017264075341709773,
+              "identity_state": 7.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9700038,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14998812499999994,
+                0.25978705303199173,
+                0.0449964375
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.0505970645
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M4-contradiction",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 3,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": true,
+            "duplicate_decision": "CREATE_CONTRADICTION_GUARD",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 1.0449839867472352,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 1.0,
+              "selected_motif_id": "motif_research_0002"
+            },
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.4721455936412069,
+              "strength": 0.9966681195672598,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 102,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only M4 calibration claim is not stable and verified; independently evidenced.",
+            "text": "Core-only M4 calibration claim is not stable and verified; independently evidenced."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9963904628645314,
+            "created_ts": 1788181368,
+            "debug": {
+              "S_mag": 0.9534570470227225,
+              "coh_phase": 0.9807486524401151,
+              "coh_raw": 0.9817112198181094,
+              "coherence": 0.9944468659454329,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.2708762918458327,
+              "id_label": "s8_high_negZ",
+              "identity_state": 8.0,
+              "phase_disp": 0.1771907296145812,
+              "phi_coll": 1.254534161847814,
+              "summary": "Core-only M4 calibration claim is not stable and verified; independently evidenced.",
+              "tri_mod": {
+                "align_ema": 0.030706636224527913,
+                "bridge_p": 0.11931569101628926,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9807486524401151,
+                "cycle_stage": 2.0,
+                "disp": 0.1771907296145812,
+                "identity_state": 8.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9690989944577252,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.14930585824317905,
+                  0.2586053323448627,
+                  -0.044791757472953726
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": -0.6141327244905582,
+                "tearing_risk": 0.01929336377547209,
+                "write_mult": 1.049212430313793
+              },
+              "z": -0.2151966487930276
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.55574927563462,
+            "last_active_ts": 1788181368,
+            "last_reinforced_ts": 1788181368,
+            "last_tool_refresh_ts": null,
+            "logical_step": 102,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M4-contradiction:0:c83642ef0583fc03423acb99",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 1
+            },
+            "prior_motif_id": "motif_research_0002",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9972234329727164,
+            "provenance": {
+              "created_at_step": 102,
+              "created_at_ts": "2026-08-31T13:02:48Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9966681195672598,
+            "summary": "Core-only M4 calibration claim is not stable and verified; independently evidenced.",
+            "text": "Core-only M4 calibration claim is not stable and verified; independently evidenced.",
+            "tri_mod": {
+              "align_ema": 0.030706636224527913,
+              "bridge_p": 0.11931569101628926,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9807486524401151,
+              "cycle_stage": 2.0,
+              "disp": 0.1771907296145812,
+              "identity_state": 8.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9690989944577252,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.14930585824317905,
+                0.2586053323448627,
+                -0.044791757472953726
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": -0.6141327244905582,
+              "tearing_risk": 0.01929336377547209,
+              "write_mult": 1.049212430313793
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-M5-no-write",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": null,
+            "motifs": [],
+            "reinforced": false,
+            "stored": false
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "NOT_APPLICABLE",
+            "expected_reinforced": null,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.45899871750000004,
+              "strength": 0.999943,
+              "write_band": 0.08,
+              "write_intent": false
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892",
+            "supplied_summary": "",
+            "text": ""
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.99993825,
+            "created_ts": 0,
+            "debug": {
+              "S_mag": 1.0,
+              "coh_phase": 1.0,
+              "coh_raw": 0.999905,
+              "coherence": 0.999905,
+              "cycle_stage": 3.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s1_low_posZ",
+              "identity_state": 1.0,
+              "phase_disp": 0.0,
+              "phi_coll": 0.0,
+              "summary": "",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.1199962,
+                "bridge_sim": 0.84,
+                "coh_phase": 1.0,
+                "cycle_stage": 3.0,
+                "disp": 0.0,
+                "identity_state": 1.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9700038,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.29997625,
+                  3.673649543827262e-17,
+                  0.0449964375
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.01999715
+              },
+              "z": 0.20373891873425654
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 99.9924,
+            "last_active_ts": 0,
+            "last_reinforced_ts": 0,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-M5-no-write:0:59e2958051367491da5d2efa",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9999525,
+            "provenance": {},
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.999943,
+            "summary": "",
+            "text": "",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.1199962,
+              "bridge_sim": 0.84,
+              "coh_phase": 1.0,
+              "cycle_stage": 3.0,
+              "disp": 0.0,
+              "identity_state": 1.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9700038,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.29997625,
+                3.673649543827262e-17,
+                0.0449964375
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.01999715
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-S-create",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_NO_CANDIDATE",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": null,
+            "reinforce_threshold": null,
+            "write_gate": {
+              "effective_write_threshold": 0.4716560578845075,
+              "strength": 0.9519334577996753,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 101,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is stable and verified; independently evidenced."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9479279126163149,
+            "created_ts": 1788181372,
+            "debug": {
+              "S_mag": 0.724449705338227,
+              "coh_phase": 0.9156727329818865,
+              "coh_raw": 0.9198890963327921,
+              "coherence": 0.9198890963327921,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.5,
+              "id_label": "s7_high_posZ",
+              "identity_state": 7.0,
+              "phase_disp": 0.4452152032895898,
+              "phi_coll": -0.1345932163135835,
+              "summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+              "tri_mod": {
+                "align_ema": 0.0,
+                "bridge_p": 0.11679556385331169,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9156727329818865,
+                "cycle_stage": 2.0,
+                "disp": 0.4452152032895898,
+                "identity_state": 7.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9732044361466883,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.13998613704159896,
+                  0.2424631017113491,
+                  0.041995841112479705
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0,
+                "tearing_risk": 0.0,
+                "write_mult": 1.0481245730766833
+              },
+              "z": 0.18218229299592648
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 93.59112770662337,
+            "last_active_ts": 1788181372,
+            "last_reinforced_ts": 1788181372,
+            "last_tool_refresh_ts": null,
+            "logical_step": 101,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-S-create:0:21c61e6d767550e53a9ec369",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0001",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9599445481663961,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:52Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9519334577996753,
+            "summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "tri_mod": {
+              "align_ema": 0.0,
+              "bridge_p": 0.11679556385331169,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9156727329818865,
+              "cycle_stage": 2.0,
+              "disp": 0.4452152032895898,
+              "identity_state": 7.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9732044361466883,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.13998613704159896,
+                0.2424631017113491,
+                0.041995841112479705
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0,
+              "tearing_risk": 0.0,
+              "write_mult": 1.0481245730766833
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-S-reinforce",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 2,
+            "motifs": [],
+            "reinforced": true,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": false,
+            "duplicate_decision": "REINFORCE_MATCH",
+            "expected_reinforced": true,
+            "links": [],
+            "motif": {
+              "attach_score": 1.0449839867472352,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 1.0,
+              "selected_motif_id": "motif_research_0002"
+            },
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.47092746931681345,
+              "strength": 0.9444261174532617,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 102,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is stable and verified; independently evidenced."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9397949605743668,
+            "created_ts": 1788181372,
+            "debug": {
+              "S_mag": 0.6315703809873513,
+              "coh_phase": 0.8717701578566608,
+              "coh_raw": 0.8781816499638277,
+              "coherence": 0.9073768624221028,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.4087449947053567,
+              "id_label": "s8_high_negZ",
+              "identity_state": 8.0,
+              "phase_disp": 0.5218624867633913,
+              "phi_coll": 0.06246813293737019,
+              "summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+              "tri_mod": {
+                "align_ema": 0.030394943793425194,
+                "bridge_p": 0.11583908020247227,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.8717701578566608,
+                "cycle_stage": 2.0,
+                "disp": 0.5218624867633913,
+                "identity_state": 8.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9725595531155294,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.1384221078027628,
+                  0.2397541236051616,
+                  -0.04152663234082885
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.6078988758685039,
+                "tearing_risk": 0.01960505620657481,
+                "write_mult": 1.0465054873706965
+              },
+              "z": -0.20090077533430412
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 92.59014899376822,
+            "last_active_ts": 1788181372,
+            "last_reinforced_ts": 1788181372,
+            "last_tool_refresh_ts": null,
+            "logical_step": 102,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-S-reinforce:0:5327794ae89b74b4eda0401d",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0002",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9536884312110514,
+            "provenance": {
+              "created_at_step": 101,
+              "created_at_ts": "2026-08-31T13:02:52Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9444261174532617,
+            "summary": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is stable and verified; independently evidenced.",
+            "tri_mod": {
+              "align_ema": 0.030394943793425194,
+              "bridge_p": 0.11583908020247227,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.8717701578566608,
+              "cycle_stage": 2.0,
+              "disp": 0.5218624867633913,
+              "identity_state": 8.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9725595531155294,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.1384221078027628,
+                0.2397541236051616,
+                -0.04152663234082885
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.6078988758685039,
+              "tearing_risk": 0.01960505620657481,
+              "write_mult": 1.0465054873706965
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-S-distinct",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 3,
+            "motifs": [
+              "motif_research_0003"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": null,
+            "duplicate_decision": "CREATE_DISTINCT_BELOW_THRESHOLD",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 0.04498398674723521,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 0.0,
+              "selected_motif_id": "motif_research_0001"
+            },
+            "raw_similarity": 0.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.46976544822695704,
+              "strength": 0.9498196471804106,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 103,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892",
+            "supplied_summary": "Core-only sequential independent measurement is verified separately.",
+            "text": "Core-only sequential independent measurement is verified separately."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9456379511121114,
+            "created_ts": 1788181372,
+            "debug": {
+              "S_mag": 0.8207822931865894,
+              "coh_phase": 0.934043069959809,
+              "coh_raw": 0.9373409164618186,
+              "coherence": 0.9163660786340175,
+              "cycle_stage": 2.0,
+              "effective_disp_scale": 1.3553825452320285,
+              "id_label": "s8_high_negZ",
+              "identity_state": 8.0,
+              "phase_disp": 0.3540448302030499,
+              "phi_coll": 0.8717383549330382,
+              "summary": "Core-only sequential independent measurement is verified separately.",
+              "tri_mod": {
+                "align_ema": 0.032416790822422756,
+                "bridge_p": 0.11513619143708767,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.934043069959809,
+                "cycle_stage": 2.0,
+                "disp": 0.3540448302030499,
+                "identity_state": 8.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9695444504869076,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.13954575982925213,
+                  0.24170034600506887,
+                  -0.04186372794877565
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.0708318843733765,
+                "tearing_risk": 0.06508320917757723,
+                "write_mult": 1.0439232182821268
+              },
+              "z": -0.18733437061784097
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "5985ef17dc481a858f09b7fd5234477c9b19da61c989006c07cd1f429f637892"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 93.3092862907214,
+            "last_active_ts": 1788181372,
+            "last_reinforced_ts": 1788181372,
+            "last_tool_refresh_ts": null,
+            "logical_step": 103,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-S-distinct:0:c12325b42d63b4bedefed8f3",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 2
+            },
+            "prior_motif_id": "motif_research_0002",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9581830393170088,
+            "provenance": {
+              "created_at_step": 103,
+              "created_at_ts": "2026-08-31T13:02:52Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9498196471804106,
+            "summary": "Core-only sequential independent measurement is verified separately.",
+            "text": "Core-only sequential independent measurement is verified separately.",
+            "tri_mod": {
+              "align_ema": 0.032416790822422756,
+              "bridge_p": 0.11513619143708767,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.934043069959809,
+              "cycle_stage": 2.0,
+              "disp": 0.3540448302030499,
+              "identity_state": 8.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9695444504869076,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.13954575982925213,
+                0.24170034600506887,
+                -0.04186372794877565
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.0708318843733765,
+              "tearing_risk": 0.06508320917757723,
+              "write_mult": 1.0439232182821268
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ],
+      [
+        "CORE-S-contradiction",
+        {
+          "legacy_only_observed_outcome": {
+            "eid": 4,
+            "motifs": [
+              "motif_research_0002"
+            ],
+            "reinforced": false,
+            "stored": true
+          },
+          "qualification": {
+            "contradiction_guard_observed": true,
+            "duplicate_decision": "CREATE_CONTRADICTION_GUARD",
+            "expected_reinforced": false,
+            "links": [],
+            "motif": {
+              "attach_score": 1.0449839867472352,
+              "effective_attach_threshold": 0.7512948647158656,
+              "pre_event_motif_member_count": 1,
+              "raw_similarity": 1.0,
+              "selected_motif_id": "motif_research_0002"
+            },
+            "raw_similarity": 1.0,
+            "reinforce_threshold": 0.92,
+            "write_gate": {
+              "effective_write_threshold": 0.45543011161512714,
+              "strength": 0.9489883071284378,
+              "write_band": 0.08,
+              "write_intent": true
+            }
+          },
+          "request": {
+            "domain_id": "research",
+            "scope": "private",
+            "step": 104,
+            "supplied_embedding_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "supplied_embedding_encoding": "float32-le-c-384",
+            "supplied_embedding_sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381",
+            "supplied_summary": "Core-only sequential calibration claim is not stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is not stable and verified; independently evidenced."
+          },
+          "storage_facts": {
+            "affect_conf": null,
+            "affect_tag": null,
+            "agent_id": "d1coreagent",
+            "attach_threshold": 0.76,
+            "confidence": 0.9447373327224743,
+            "created_ts": 1788181372,
+            "debug": {
+              "S_mag": 0.7698319993766868,
+              "coh_phase": 0.9071026555681316,
+              "coh_raw": 0.911747522789725,
+              "coherence": 0.9149805118807297,
+              "cycle_stage": 3.0,
+              "effective_disp_scale": 1.2942044734735916,
+              "id_label": "s1_low_posZ",
+              "identity_state": 1.0,
+              "phase_disp": 0.4041144999181335,
+              "phi_coll": 0.6319483439841689,
+              "summary": "Core-only sequential calibration claim is not stable and verified; independently evidenced.",
+              "tri_mod": {
+                "align_ema": 0.05445516775574582,
+                "bridge_p": 0.11454311373340684,
+                "bridge_sim": 0.84,
+                "coh_phase": 0.9071026555681316,
+                "cycle_stage": 3.0,
+                "disp": 0.4041144999181335,
+                "identity_state": 1.0,
+                "in_corridor": 0.0,
+                "proposal_mult": 0.9682513045185432,
+                "seed_pos0": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "seed_v0": [
+                  -0.2787451279701824,
+                  3.413643287466032e-17,
+                  0.041811769195527364
+                ],
+                "survival_steps": 0.0,
+                "tangent_align": 0.47318432948888406,
+                "tearing_risk": 0.08816983224425418,
+                "write_mult": 1.0120669147002825
+              },
+              "z": 0.21874876651578717
+            },
+            "domain_id": "research",
+            "embedder_lane": {
+              "derivation_contract_version": "compat-embedding-v1",
+              "dimension": 384,
+              "dtype": "float32",
+              "encoding_id": "RAW_VECTOR",
+              "generation": 1,
+              "model": "hash:384:torment",
+              "provider": "hash",
+              "representation_class": "COMPAT_EMBEDDING"
+            },
+            "embedding": {
+              "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "encoding": "float32-le-c-384",
+              "sha256": "440759e99827e03200390fb2fae7850b05aa466d19381b2556eaf215a4eba381"
+            },
+            "flexible_payload": {
+              "links": []
+            },
+            "governance": {
+              "collective_export_blocked": false,
+              "collective_reingest_blocked": false,
+              "decay_accelerated": false,
+              "non_shareable": false,
+              "protected": false
+            },
+            "half_life_days": 93.19844095045838,
+            "last_active_ts": 1788181372,
+            "last_reinforced_ts": 1788181372,
+            "last_tool_refresh_ts": null,
+            "logical_step": 104,
+            "memory_class": "core",
+            "memory_type": "episode",
+            "native_operation_key": "D1:REPLAY:CORE-S-contradiction:0:8fa27a4ec92e320e9f40bf6c",
+            "phase_durations": {
+              "corridor_duration_steps": 0,
+              "phase_duration_steps": 0
+            },
+            "prior_motif_id": "motif_research_0003",
+            "prior_symbol": "◯",
+            "prior_symbol_trace": [
+              "◯",
+              "◯",
+              "◯"
+            ],
+            "prior_tension": 0.0,
+            "promotion_score": 0.9574902559403649,
+            "provenance": {
+              "created_at_step": 104,
+              "created_at_ts": "2026-08-31T13:02:52Z",
+              "parent_eids": [],
+              "schema_version": "1.0",
+              "source_role": null,
+              "source_type": "user_input",
+              "write_path": "direct_ingest"
+            },
+            "scope": "private",
+            "skip_packet_emission": false,
+            "srg_state": null,
+            "stability_delta": 0.0,
+            "strength": 0.9489883071284378,
+            "summary": "Core-only sequential calibration claim is not stable and verified; independently evidenced.",
+            "text": "Core-only sequential calibration claim is not stable and verified; independently evidenced.",
+            "tri_mod": {
+              "align_ema": 0.05445516775574582,
+              "bridge_p": 0.11454311373340684,
+              "bridge_sim": 0.84,
+              "coh_phase": 0.9071026555681316,
+              "cycle_stage": 3.0,
+              "disp": 0.4041144999181335,
+              "identity_state": 1.0,
+              "in_corridor": 0.0,
+              "proposal_mult": 0.9682513045185432,
+              "seed_pos0": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "seed_v0": [
+                -0.2787451279701824,
+                3.413643287466032e-17,
+                0.041811769195527364
+              ],
+              "survival_steps": 0.0,
+              "tangent_align": 0.47318432948888406,
+              "tearing_risk": 0.08816983224425418,
+              "write_mult": 1.0120669147002825
+            },
+            "workspace_id": "d1core20260831"
+          }
+        }
+      ]
+    ],
+    "schema": "memory-substrate-d1-concrete-fixtures-v2",
+    "side_store_observation_digest": "ed86e486a94080671c7eb672bf21cab96ec383a944c13492acc4a9616d081a4c",
+    "store_dispositions": {
+      "rules": [
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/identity.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "ACCELERATION_EXCLUDED",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "ACCELERATION_EXCLUDED",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-shm",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "ACCELERATION_EXCLUDED",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/index/memory_index.sqlite-wal",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/manifest.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.map.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/embeddings/shard_000000.npy",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "OUT_OF_PROFILE",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/memory_events.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/nodes.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "PROCESS_LOCAL",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/boundaries.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "PROCESS_LOCAL",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/chunks/epoch-00000001/chunk-00000000000000000001.partial",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "PROCESS_LOCAL",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/private/trajectories/v2/entity_genesis.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/roles.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/agents/d1coreagent/symbol_state.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/domain_policies.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "OUT_OF_PROFILE",
+          "path": "workspaces/d1core20260831/domains/research/motif_events.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/domains/research/motifs.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/domains/research/shared/embeddings/manifest.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/domains/research/shared/embeddings/shard_000000.npy",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "PROCESS_LOCAL",
+          "path": "workspaces/d1core20260831/domains/research/shared/trajectories/v2/boundaries.jsonl",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/domains.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "IN_SCOPE_EXACT",
+          "path": "workspaces/d1core20260831/workspace_meta.json",
+          "presence": "REQUIRED_PRESENT"
+        },
+        {
+          "disposition": "OUT_OF_PROFILE",
+          "path": "workspaces/d1core20260831/domains/research/motif_merge_suggestions.jsonl",
+          "presence": "OPTIONAL_PRESENT"
+        }
+      ]
+    },
+    "workspace_domains": [
+      "research"
+    ],
+    "workspace_id": "d1core20260831"
+  }
+}

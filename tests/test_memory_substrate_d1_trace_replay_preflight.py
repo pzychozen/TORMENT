@@ -64,7 +64,6 @@ from experiments.memory_substrate_d1_trace_replay_v1.formal import (
     FormalAdministrationAuthorization,
     FormalAdministrationRefused,
     FormalAdministrationRunner,
-    FormalResultSchema,
 )
 from experiments.memory_substrate_d1_trace_replay_v1.protocol import (
     ComparisonTolerances,
@@ -565,50 +564,21 @@ def test_d1_cannot_record_results_or_formally_administer_before_future_authority
         D1PreflightReport(fingerprint, inputs, True, True, True, True, True, True, results=({"native": "result"},))
 
 
-def test_d1_formal_runner_is_marker_first_one_shot_and_requires_bound_authorization(tmp_path: Path) -> None:
+def test_d1_formal_runner_refuses_before_marker_or_trace_contact_without_authority(tmp_path: Path) -> None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_ROOT, check=True, capture_output=True, text=True).stdout.strip()
     runner = FormalAdministrationRunner(repository_root=_ROOT, expected_repository_head=head)
     inputs = FrozenAdministrationInputs("a" * 64, "b" * 64, FROZEN_TOLERANCES.digest)
     calls: list[str] = []
     result_root = tmp_path / "formal-result"
     with pytest.raises(FormalAdministrationRefused, match="absent"):
-        runner.run(authorization=None, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=lambda: FormalResultSchema("never"))
+        runner.run(authorization=None, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=lambda: calls.append("contact"))
     assert calls == []
-    wrong_hashes = FormalAdministrationAuthorization("wrong-hashes", head, "c" * 64, "b" * 64, FROZEN_TOLERANCES.digest, str(tmp_path / "wrong-hashes"), True)
-    with pytest.raises(FormalAdministrationRefused, match="hashes"):
-        runner.run(authorization=wrong_hashes, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=lambda: FormalResultSchema("never"))
-    wrong_head = FormalAdministrationAuthorization("wrong-head", "0" * 40, "a" * 64, "b" * 64, FROZEN_TOLERANCES.digest, str(tmp_path / "wrong-head"), True)
-    with pytest.raises(FormalAdministrationRefused, match="repository HEAD"):
-        runner.run(authorization=wrong_head, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=lambda: FormalResultSchema("never"))
-    authorization = FormalAdministrationAuthorization("once", head, "a" * 64, "b" * 64, FROZEN_TOLERANCES.digest, str(result_root), True)
-    def contact() -> FormalResultSchema:
-        marker = tmp_path / ".once.administration-started.json"
-        assert marker.is_file()
-        calls.append("contact")
-        return FormalResultSchema("once")
-    result = runner.run(authorization=authorization, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=contact)
-    assert result.administration_id == "once" and calls == ["verify", "contact"]
-    bytes_before = (result_root / "result.json").read_bytes()
-    with pytest.raises(FormalAdministrationRefused, match="already used"):
-        runner.run(authorization=authorization, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("retry"), contact_formal_trace=lambda: FormalResultSchema("once"))
-    assert (result_root / "result.json").read_bytes() == bytes_before
-
-
-def test_d1_formal_runner_records_failure_once_without_a_fallback(tmp_path: Path) -> None:
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_ROOT, check=True, capture_output=True, text=True).stdout.strip()
-    runner = FormalAdministrationRunner(repository_root=_ROOT, expected_repository_head=head)
-    inputs = FrozenAdministrationInputs("a" * 64, "b" * 64, FROZEN_TOLERANCES.digest)
-    result_root = tmp_path / "failure-result"
-    authorization = FormalAdministrationAuthorization("failure", head, "a" * 64, "b" * 64, FROZEN_TOLERANCES.digest, str(result_root), True)
-    calls = 0
-    def fail_once() -> FormalResultSchema:
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("native trace failure")
-    with pytest.raises(RuntimeError, match="native trace failure"):
-        runner.run(authorization=authorization, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: None, contact_formal_trace=fail_once)
-    recorded = json.loads((result_root / "result.json").read_text(encoding="utf-8"))
-    assert calls == 1 and recorded["harness_validity"] == "EXPERIMENT_HARNESS_FAILURE"
-    with pytest.raises(FormalAdministrationRefused, match="already used"):
-        runner.run(authorization=authorization, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: None, contact_formal_trace=fail_once)
-    assert calls == 1
+    authorization = FormalAdministrationAuthorization(
+        "still-held", head, "a" * 64, "b" * 64, FROZEN_TOLERANCES.digest, str(result_root), False,
+    )
+    with pytest.raises(FormalAdministrationRefused, match="no explicit"):
+        runner.run(authorization=authorization, inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64, verify_baselines_and_fixture=lambda: calls.append("verify"), contact_formal_trace=lambda: calls.append("contact"))
+    assert calls == []
+    assert not result_root.exists()
+    assert not (tmp_path / ".still-held.administration-started.json").exists()
+    runner.verify_frozen_inputs(inputs=inputs, protocol_sha256="a" * 64, fixture_sha256="b" * 64)

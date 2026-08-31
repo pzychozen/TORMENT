@@ -31,7 +31,10 @@ from torment_service.substrate.schema import create_schema
 from .manifest import fingerprint_legacy_baseline
 from .n0 import N0BaselineBuilder, N0BuildPlan, materialize_l0_snapshot
 from .protocol import D1ProtocolError
-from .side_store_observation import observe_frozen_d1_core_retained_side_stores
+from .side_store_observation import (
+    CORE_SIDE_STORE_OBSERVATION_SOURCE_NAMESPACE_ID,
+    observe_frozen_d1_core_retained_side_stores,
+)
 
 
 class _InertSideStore:
@@ -90,6 +93,7 @@ def build_real_n0(
     workspace_id: str,
     agent_id: str,
     character_seed_required: bool = False,
+    legacy_source_namespace_id: UUID | None = None,
 ) -> dict[str, Any]:
     """Materialize L0 and run only B2/B3A/B4A/B5 on one new STAGING core."""
     root = Path(staging_root).resolve()
@@ -105,7 +109,9 @@ def build_real_n0(
     snapshot = materialize_l0_snapshot(baseline=baseline, destination=root / "l0_snapshot")
     database = root / "n0_core.db"
     manifest = root / "l0_snapshot_manifest.json"
-    source_namespace = generate_native_id()
+    source_namespace = legacy_source_namespace_id or generate_native_id()
+    if not isinstance(source_namespace, UUID):
+        raise D1ProtocolError("real N0 requires a UUID legacy source namespace when one is pinned")
     object_namespace = generate_native_id()
     relationship_namespace = generate_native_id()
     motif_alias_namespace = generate_native_id()
@@ -178,6 +184,9 @@ def build_real_n0(
             "whole_workspace_side_store_retention": result.readiness.side_store_retention_ready,
             "core_staging_runtime_ready": result.readiness.core_staging_runtime_ready,
             "controlled_native_staging_experiment_ready": result.readiness.controlled_native_staging_experiment_ready,
+            "runtime_binding_constructible": result.readiness.runtime_binding_constructible,
+            "routing_capability_constructible": result.readiness.routing_capability_constructible,
+            "post_write_adapter_constructible": result.readiness.post_write_adapter_constructible,
             "b4a_ready_motif_count": result.readiness.b4a_ready_motif_count,
             "b4b_ready_motif_count": result.readiness.b4b_ready_motif_count,
             "readiness_report_digest": result.readiness.report_digest,
@@ -202,4 +211,4 @@ def build_real_n0(
         qualified.close()
 
 
-__all__ = ["build_real_n0"]
+__all__ = ["build_real_n0", "CORE_SIDE_STORE_OBSERVATION_SOURCE_NAMESPACE_ID"]
