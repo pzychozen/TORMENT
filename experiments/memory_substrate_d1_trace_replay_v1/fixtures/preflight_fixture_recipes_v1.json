@@ -1,0 +1,50 @@
+{
+  "schema": "memory-substrate-d1-preflight-fixture-recipes-v1",
+  "formal_administration_authorized": false,
+  "fixture_kinds": [
+    "M1_CREATE",
+    "M2_REINFORCE",
+    "M3_DISTINCT",
+    "M4_CONTRADICTION",
+    "M5_NO_WRITE",
+    "SEQUENTIAL",
+    "CHARACTER_SUBARM"
+  ],
+  "replay_arms": {
+    "micro": ["M1_CREATE", "M2_REINFORCE", "M3_DISTINCT", "M4_CONTRADICTION", "M5_NO_WRITE"],
+    "sequential": "SEQUENTIAL",
+    "character": "CHARACTER_SUBARM",
+    "micro_clones_are_independent": true,
+    "character_uses_separate_baseline": true
+  },
+  "scope": {
+    "workspace_domain": "research",
+    "memory_scope": "private",
+    "raw_links": [],
+    "qualified_link_targets": []
+  },
+  "qualification": {
+    "write_hard_margin": 0.02,
+    "storage_hard_margin": 0.02,
+    "max_pre_event_motif_members": 79,
+    "legacy_only": true,
+    "native_outcomes_must_not_influence_selection": true
+  },
+  "replay": {
+    "representation_input": "captured_float32_bytes_exact",
+    "reinforcement_selection": "native_independent",
+    "no_write_native_mutation": 0,
+    "b3a_required": true,
+    "b4a_required": true,
+    "b4b_allowed_count": 0
+  },
+  "character_subarm": {
+    "separate_baseline_recipe": true,
+    "required_logical_step": 25,
+    "requires_recent_non_seed_memories": true,
+    "requires_character_enabled": true,
+    "forbids_split_edge": true,
+    "forbids_checkpoint_edge": true,
+    "requires_cross_environment_correction_embedding_byte_stability": true
+  }
+}
