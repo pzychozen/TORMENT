@@ -126,6 +126,21 @@ from .runtime_motif_regeometry_projection import (
     NativeMigrationRuntimeMotifRegeometryProjectionService,
     PreparedLegacyMotifRuntimeRegeometryProjection,
 )
+from .workspace_runtime_readiness import (
+    MemoryNormalizationLineage,
+    MotifProjectionLineage,
+    NativeWorkspaceRuntimeReadiness,
+    RetainedSideStoreEIDReference,
+    WorkspaceMemoryReadinessItem,
+    WorkspaceMotifReadinessItem,
+    WorkspaceNativeEmbedderIdentity,
+    WorkspaceNativeFeaturePosture,
+    WorkspaceNativeReadinessVerdict,
+    WorkspaceNativeRuntimeReadinessReport,
+    WorkspaceNativeRuntimeReadinessRequest,
+    WorkspaceReadinessBlockerClass,
+    WorkspaceSideStoreReadinessItem,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -208,4 +223,17 @@ __all__ = [
     "MigrationRuntimeMotifRegeometryProjectionResult",
     "NativeMigrationRuntimeMotifRegeometryProjectionService",
     "PreparedLegacyMotifRuntimeRegeometryProjection",
+    "MemoryNormalizationLineage",
+    "MotifProjectionLineage",
+    "NativeWorkspaceRuntimeReadiness",
+    "RetainedSideStoreEIDReference",
+    "WorkspaceMemoryReadinessItem",
+    "WorkspaceMotifReadinessItem",
+    "WorkspaceNativeEmbedderIdentity",
+    "WorkspaceNativeFeaturePosture",
+    "WorkspaceNativeReadinessVerdict",
+    "WorkspaceNativeRuntimeReadinessReport",
+    "WorkspaceNativeRuntimeReadinessRequest",
+    "WorkspaceReadinessBlockerClass",
+    "WorkspaceSideStoreReadinessItem",
 ]
