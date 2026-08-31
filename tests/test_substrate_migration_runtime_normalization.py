@@ -9,6 +9,7 @@ from uuid import UUID
 import pytest
 
 from torment_service.provenance_v1 import ProvenanceV1
+from torment_service.governance import resolve_governance
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.errors import SubstrateIdempotencyConflict
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
@@ -65,6 +66,12 @@ def _payload(**overrides: object) -> dict[str, object]:
         "provenance": _provenance(), "lifecycle_status": _lifecycle(),
     }
     value.update(overrides)
+    return value
+
+
+def _absent_governance_payload(**overrides: object) -> dict[str, object]:
+    value = _payload(**overrides)
+    value.pop("governance")
     return value
 
 
@@ -195,6 +202,64 @@ def test_evidence_complete_r1_normalizes_once_and_b1_moves_to_representation_gap
         after = NativeMigrationRuntimeReadinessPreflight(connection).run(_readiness_request(facts))
         assert after.object_items[0].readiness is ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED
         assert connection.execute("SELECT count(*) FROM representations WHERE representation_class='COMPAT_EMBEDDING'").fetchone()[0] == 0
+    finally:
+        qualified.close()
+
+
+def test_absent_legacy_governance_uses_only_the_frozen_production_default_rule(tmp_path: Path):
+    row = {"eid": 7, "born_step": 12, "channel": 4, "payload": _absent_governance_payload()}
+    qualified, facts = _fixture(tmp_path, [row])
+    try:
+        connection = qualified.connection
+        source_bytes = (facts["root"] / "nodes.jsonl").read_bytes()
+        _add_r1_ids(connection, facts)
+        before = NativeMigrationRuntimeReadinessPreflight(connection).run(_readiness_request(facts))
+        item = before.object_items[0]
+        assert item.governance.value == "DERIVABLE_BY_FROZEN_LEGACY_RULE"
+        assert item.readiness is ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED
+        assert resolve_governance(row["payload"]).to_dict() == {
+            "protected": False, "non_shareable": False, "decay_accelerated": False,
+            "collective_export_blocked": False, "collective_reingest_blocked": False,
+        }
+        result = NativeMigrationRuntimeNormalizationService(connection).normalize_legacy_core_memory(_request(facts))
+        assert (facts["root"] / "nodes.jsonl").read_bytes() == source_bytes
+        assert connection.execute(
+            """SELECT protected,non_shareable,collective_export_blocked,
+                      collective_reingest_blocked,decay_accelerated
+                 FROM object_revision_governance
+                WHERE object_id=? AND object_revision_id=? AND object_revision_ordinal=2""",
+            (native_id_to_bytes(result.object_id), native_id_to_bytes(result.revision_id)),
+        ).fetchone() == (0, 0, 0, 0, 0)
+        r2_payload = json.loads(connection.execute(
+            "SELECT payload_text FROM object_revisions WHERE object_revision_id=?",
+            (native_id_to_bytes(result.revision_id),),
+        ).fetchone()[0])
+        assert "governance" not in r2_payload
+    finally:
+        qualified.close()
+
+
+def test_absent_governance_and_protected_lifecycle_remain_distinct_r2_facts(tmp_path: Path):
+    protected_lifecycle = {**_lifecycle(), "state": "protected"}
+    payload = _absent_governance_payload(lifecycle_status=protected_lifecycle, canon=True)
+    qualified, facts = _fixture(tmp_path, [{"eid": 7, "payload": payload}])
+    try:
+        connection = qualified.connection
+        _add_r1_ids(connection, facts)
+        result = NativeMigrationRuntimeNormalizationService(connection).normalize_legacy_core_memory(_request(facts))
+        revision = connection.execute(
+            """SELECT lifecycle_state,lifecycle_authoritative,governance_state
+                 FROM object_revisions WHERE object_revision_id=?""",
+            (native_id_to_bytes(result.revision_id),),
+        ).fetchone()
+        governance = connection.execute(
+            """SELECT protected,non_shareable,collective_export_blocked,
+                      collective_reingest_blocked,decay_accelerated
+                 FROM object_revision_governance WHERE object_revision_id=?""",
+            (native_id_to_bytes(result.revision_id),),
+        ).fetchone()
+        assert revision == ("PROTECTED", 1, "EXPLICIT")
+        assert governance == (0, 0, 0, 0, 0)
     finally:
         qualified.close()
 

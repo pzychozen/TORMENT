@@ -36,6 +36,10 @@ from ..motif_runtime_reader import NativeMotifRuntimeReader
 from ..motifs import DERIVED_MOTIF_OBJECT_KIND
 from ..runtime_binding import NativeRepresentationLane
 from ..schema import SCHEMA_MAJOR, SCHEMA_MINOR, open_schema
+from .legacy_governance import (
+    derivable_absent_governance_values,
+    exact_governance_values,
+)
 from .motif_admission import LEGACY_DERIVED_MOTIF_OBJECT_KIND
 
 
@@ -574,13 +578,15 @@ class NativeMigrationRuntimeReadinessPreflight:
         object_id = UUID(bytes=object_blob)
         revision_id = UUID(bytes=revision_blob)
         plan_state, plan = _plan_for_current_scope(plans, UUID(bytes=scope_blob))
-        payload = _json_mapping(payload_text) if payload_format in {"TEXT", "JSON"} else None
+        raw_row = _json_mapping(payload_text) if payload_format in {"TEXT", "JSON"} else None
+        payload = raw_row
         # A 7F core-node R1 stores the whole selected JSONL row as TEXT.  Its
         # actual runtime payload is the nested ``row[\"payload\"]`` mapping,
         # exactly as MemoryGraph._load() observes it; an arbitrary top-level
         # ``text`` field remains evidence, not a runtime-payload shortcut.
         if object_kind == _MEMORY_OBJECT_KIND and payload_format == "TEXT":
-            payload = _legacy_node_runtime_payload(payload)
+            payload = _legacy_node_runtime_payload(raw_row)
+        lifecycle = _lifecycle_readiness(lifecycle_state, lifecycle_authoritative, payload)
         if object_kind != _MEMORY_OBJECT_KIND:
             return ObjectRuntimeReadinessItem(
                 object_id=object_id,
@@ -590,18 +596,21 @@ class NativeMigrationRuntimeReadinessPreflight:
                 runtime_ordinal=None,
                 readiness=ObjectRuntimeReadiness.EVIDENCE_ONLY_NOT_RUNTIME_OBJECT,
                 scope_readiness=plan_state,
-                governance=self._governance(object_blob, revision_blob, revision_ordinal, payload),
+                governance=self._governance(
+                    object_blob, revision_blob, revision_ordinal, payload, raw_row, lifecycle,
+                ),
                 provenance=self._provenance(provenance_blob, payload),
-                lifecycle=_lifecycle_readiness(lifecycle_state, lifecycle_authoritative, payload),
+                lifecycle=lifecycle,
                 legacy_captures=(),
                 qualified_representation_id=None,
                 reason_codes=("OBJECT_KIND_NOT_CORE_RUNTIME_PROFILE",),
             )
         eid, alias_reasons = _unique_eid(self._connection, source_namespace_id, object_blob)
         runtime_ordinal, order_reasons = order.get(object_blob, (None, ("RUNTIME_ORDER_MISSING",)))
-        governance = self._governance(object_blob, revision_blob, revision_ordinal, payload)
+        governance = self._governance(
+            object_blob, revision_blob, revision_ordinal, payload, raw_row, lifecycle,
+        )
         provenance = self._provenance(provenance_blob, payload)
-        lifecycle = _lifecycle_readiness(lifecycle_state, lifecycle_authoritative, payload)
         captures = self._legacy_captures(object_blob, lane)
         reasons = list(alias_reasons) + list(order_reasons)
         if authority_category == "ACTIVE_AUTHORIZATION":
@@ -661,7 +670,13 @@ class NativeMigrationRuntimeReadinessPreflight:
         )
 
     def _governance(
-        self, object_blob: bytes, revision_blob: bytes, ordinal: int, payload: dict[str, Any] | None,
+        self,
+        object_blob: bytes,
+        revision_blob: bytes,
+        ordinal: int,
+        payload: dict[str, Any] | None,
+        raw_row: dict[str, Any] | None,
+        lifecycle: LifecycleEvidenceReadiness,
     ) -> GovernanceEvidenceReadiness:
         row = self._connection.execute(
             """SELECT protected,non_shareable,collective_export_blocked,
@@ -671,16 +686,25 @@ class NativeMigrationRuntimeReadinessPreflight:
             (object_blob, revision_blob, ordinal),
         ).fetchall()
         stored = None if not row else tuple(bool(item) for item in row[0])
-        payload_facts = _payload_governance(payload)
-        if len(row) > 1 or payload_facts == "INVALID":
+        payload_facts = exact_governance_values(payload)
+        outer_facts = exact_governance_values(raw_row)
+        if len(row) > 1 or payload_facts == "INVALID" or outer_facts == "INVALID":
             return GovernanceEvidenceReadiness.CONFLICTING_GOVERNANCE_EVIDENCE
         if stored is not None and isinstance(payload_facts, tuple) and stored != payload_facts:
             return GovernanceEvidenceReadiness.CONFLICTING_GOVERNANCE_EVIDENCE
-        # There is intentionally no default-all-false conversion and no frozen
-        # protected-marker rule in the 7F contract.  The derivable enum is part
-        # of the report vocabulary for a future frozen rule, not an inference.
+        if (
+            raw_row is not payload
+            and outer_facts is not None
+            and outer_facts != payload_facts
+        ):
+            return GovernanceEvidenceReadiness.CONFLICTING_GOVERNANCE_EVIDENCE
         if stored is not None or isinstance(payload_facts, tuple):
             return GovernanceEvidenceReadiness.EXPLICIT_LEGACY_GOVERNANCE
+        if lifecycle not in {
+            LifecycleEvidenceReadiness.UNKNOWN_LIFECYCLE,
+            LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE,
+        } and derivable_absent_governance_values(raw_row, payload) is not None:
+            return GovernanceEvidenceReadiness.DERIVABLE_BY_FROZEN_LEGACY_RULE
         return GovernanceEvidenceReadiness.MISSING_GOVERNANCE
 
     def _provenance(
@@ -1093,20 +1117,6 @@ def _legacy_node_runtime_payload(value: dict[str, Any] | None) -> dict[str, Any]
         return None
     payload = value.get("payload")
     return payload if isinstance(payload, dict) else None
-
-
-def _payload_governance(payload: dict[str, Any] | None) -> tuple[bool, ...] | str | None:
-    if payload is None or "governance" not in payload:
-        return None
-    value = payload["governance"]
-    fields = (
-        "protected", "non_shareable", "collective_export_blocked",
-        "collective_reingest_blocked", "decay_accelerated",
-    )
-    if not isinstance(value, dict) or set(value) != set(fields):
-        return "INVALID"
-    values = tuple(value[name] for name in fields)
-    return tuple(values) if all(isinstance(item, bool) for item in values) else "INVALID"
 
 
 def _lifecycle_readiness(

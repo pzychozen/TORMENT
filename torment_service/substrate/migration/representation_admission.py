@@ -16,6 +16,8 @@ import time
 from typing import Any
 from uuid import UUID
 
+from torment_service.embedding_store import _shard_name
+
 from ..canonical_intent import canonical_intent_text
 from ..errors import SubstrateInvariantViolation, SubstrateObjectNotFound, SubstrateRevisionConflict
 from ..ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
@@ -37,6 +39,8 @@ LEGACY_EMBEDDING_LOCAL_GENERATION = 1
 LEGACY_UNSPECIFIED_DERIVATION_CONTRACT = "LEGACY_UNSPECIFIED"
 _ADMISSION_BATCH_IDENTITY = "TMS-LEGACY-REPRESENTATION-ADMISSION-7F3B"
 _SUPPORTED_ENCODING = "NUMPY_NPY"
+_EXPLICIT_REFERENCE_LAYOUT = "EXPLICIT_LEGACY_EMBEDDING_REFERENCE"
+_COMPACT_REFERENCE_LAYOUT = "LEGACY_COMPACT_SHARD_REFERENCE_TRANSLATION_V1"
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,8 @@ class LegacyEmbeddingReference:
     row_ordinal: int
     dimension: int
     dtype: str | None
+    reference_layout: str
+    shard_ordinal: int | None
 
 
 @dataclass(frozen=True)
@@ -515,7 +521,7 @@ def _extract_embedding_evidence(
         return (), tuple(_uncertain_from_reference(reference, manifest_reason, nodes_artifact.artifact_id) for reference in references)
     candidates: list[LegacyEmbeddingCandidate] = []
     records: list[LegacyEmbeddingAdmissionRecord] = []
-    map_cache: dict[str, tuple[_MapEntry, ...] | str] = {}
+    map_cache: dict[tuple[str, str], tuple[_MapEntry, ...] | str] = {}
     for reference in references:
         result = _candidate_from_reference(
             snapshot_root, reference, artifacts, metadata, map_cache
@@ -532,22 +538,45 @@ def _candidate_from_reference(
     reference: LegacyEmbeddingReference,
     artifacts: dict[str, LegacyArtifact],
     metadata: dict[str, Any],
-    map_cache: dict[str, tuple[_MapEntry, ...] | str],
+    map_cache: dict[tuple[str, str], tuple[_MapEntry, ...] | str],
 ) -> LegacyEmbeddingCandidate | LegacyEmbeddingAdmissionRecord:
     if metadata["encoding_id"] != _SUPPORTED_ENCODING:
         return _uncertain_from_reference(reference, "embedding manifest encoding is unsupported", reference.node_artifact_id)
-    if (reference.shard_locator, reference.map_locator) not in metadata["shards"]:
+    if metadata["layout"] != reference.reference_layout:
+        return _uncertain_from_reference(reference, "embedding manifest layout does not match the node reference", reference.node_artifact_id)
+    if reference.reference_layout == _EXPLICIT_REFERENCE_LAYOUT and (
+        reference.shard_locator, reference.map_locator
+    ) not in metadata["shards"]:
         return _uncertain_from_reference(reference, "node embedding reference is absent from the embedding manifest", reference.node_artifact_id)
+    if reference.reference_layout == _COMPACT_REFERENCE_LAYOUT:
+        if (
+            reference.shard_ordinal is None
+            or reference.shard_ordinal > metadata["active_shard"]
+            or reference.row_ordinal >= metadata["rows_per_shard"]
+            or (
+                reference.shard_ordinal == metadata["active_shard"]
+                and reference.row_ordinal >= metadata["next_row"]
+            )
+        ):
+            return _uncertain_from_reference(reference, "compact embedding reference is outside the manifest's committed rows", reference.node_artifact_id)
     map_artifact = artifacts.get(reference.map_locator)
     shard_artifact = artifacts.get(reference.shard_locator)
     if map_artifact is None or map_artifact.artifact_class != "LEGACY_EMBEDDING_MAP_EVIDENCE":
         return _uncertain_from_reference(reference, "referenced embedding map evidence is absent", reference.node_artifact_id)
     if shard_artifact is None or shard_artifact.artifact_class != "LEGACY_EMBEDDING_NUMERIC_SHARD_EVIDENCE":
         return _uncertain_from_reference(reference, "referenced embedding shard evidence is absent", reference.node_artifact_id)
-    cached = map_cache.get(reference.map_locator)
+    cache_key = (reference.map_locator, reference.reference_layout)
+    cached = map_cache.get(cache_key)
     if cached is None:
-        cached = _map_entries(snapshot_root, map_artifact)
-        map_cache[reference.map_locator] = cached
+        cached = _map_entries(
+            snapshot_root,
+            map_artifact,
+            implied_shard_locator=(
+                reference.shard_locator
+                if reference.reference_layout == _COMPACT_REFERENCE_LAYOUT else None
+            ),
+        )
+        map_cache[cache_key] = cached
     if isinstance(cached, str):
         return _uncertain_from_reference(reference, cached, map_artifact.artifact_id)
     same_eid = [entry for entry in cached if entry.raw_eid == reference.raw_eid]
@@ -562,12 +591,23 @@ def _candidate_from_reference(
         return _uncertain_from_reference(reference, "embedding manifest dimension disagrees with the node reference", map_artifact.artifact_id)
     if reference.dtype is not None and reference.dtype != metadata["dtype"]:
         return _uncertain_from_reference(reference, "node embedding dtype disagrees with the embedding manifest", map_artifact.artifact_id)
+    known_metadata = metadata["known_derivation_metadata"]
+    if reference.reference_layout == _COMPACT_REFERENCE_LAYOUT:
+        known_metadata, reason = _compact_workspace_metadata(
+            snapshot_root, artifacts, reference.dimension,
+        )
+        if known_metadata is None:
+            return _uncertain_from_reference(reference, reason, reference.node_artifact_id)
     payload, reason = _npy_row_bytes(
         snapshot_root,
         shard_artifact,
         entry.row_ordinal,
         metadata["dtype"],
         reference.dimension,
+        expected_rows=(
+            metadata["rows_per_shard"]
+            if reference.reference_layout == _COMPACT_REFERENCE_LAYOUT else None
+        ),
     )
     if payload is None:
         return _uncertain_from_reference(reference, reason, shard_artifact.artifact_id)
@@ -579,7 +619,7 @@ def _candidate_from_reference(
         metadata["encoding_id"],
         metadata["dtype"],
         metadata["derivation_contract_version"],
-        metadata["known_derivation_metadata"],
+        known_metadata,
         payload,
     )
 
@@ -599,13 +639,28 @@ def _node_embedding_references(
                 value = json.loads(text)
             except (UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            if not isinstance(value, dict) or "embedding_ref" not in value:
+            if not isinstance(value, dict):
                 continue
             raw_eid = value.get("eid")
-            reference = value.get("embedding_ref")
-            if not isinstance(raw_eid, int) or isinstance(raw_eid, bool) or raw_eid < 0 or not isinstance(reference, dict):
+            if not isinstance(raw_eid, int) or isinstance(raw_eid, bool) or raw_eid < 0:
                 continue
-            parsed = _parse_node_reference(snapshot_id, artifact.artifact_id, line_ordinal, raw_eid, text, reference)
+            if "embedding_ref" in value:
+                reference = value.get("embedding_ref")
+                parsed = (
+                    _parse_node_reference(
+                        snapshot_id, artifact.artifact_id, line_ordinal, raw_eid, text, reference,
+                    )
+                    if isinstance(reference, dict) else None
+                )
+            else:
+                payload = value.get("payload")
+                reference = payload.get("embedding_ref") if isinstance(payload, dict) else None
+                parsed = (
+                    _parse_compact_node_reference(
+                        snapshot_id, artifact.artifact_id, line_ordinal, raw_eid, text, reference,
+                    )
+                    if isinstance(reference, dict) else None
+                )
             if parsed is not None:
                 references.append(parsed)
     return tuple(references)
@@ -647,6 +702,49 @@ def _parse_node_reference(
         row_ordinal,
         dimension,
         dtype,
+        _EXPLICIT_REFERENCE_LAYOUT,
+        None,
+    )
+
+
+def _parse_compact_node_reference(
+    snapshot_id: UUID,
+    artifact_id: UUID,
+    line_ordinal: int,
+    raw_eid: int,
+    raw_node_text: str,
+    value: dict[str, Any],
+) -> LegacyEmbeddingReference | None:
+    """Translate only the exact reference shape emitted by EmbeddingShardWriter."""
+    if set(value) != {"shard", "row", "dim"}:
+        return None
+    shard_ordinal, row_ordinal, dimension = value["shard"], value["row"], value["dim"]
+    if (
+        not isinstance(shard_ordinal, int)
+        or isinstance(shard_ordinal, bool)
+        or shard_ordinal < 0
+        or not isinstance(row_ordinal, int)
+        or isinstance(row_ordinal, bool)
+        or row_ordinal < 0
+        or not isinstance(dimension, int)
+        or isinstance(dimension, bool)
+        or dimension <= 0
+    ):
+        return None
+    shard_name = _shard_name(shard_ordinal)
+    return LegacyEmbeddingReference(
+        snapshot_id,
+        artifact_id,
+        line_ordinal,
+        raw_eid,
+        raw_node_text,
+        f"embeddings/{shard_name}.map.jsonl",
+        f"embeddings/{shard_name}.npy",
+        row_ordinal,
+        dimension,
+        None,
+        _COMPACT_REFERENCE_LAYOUT,
+        shard_ordinal,
     )
 
 
@@ -659,6 +757,8 @@ def _embedding_manifest_metadata(
         return None, str(exc)
     if not isinstance(raw, dict):
         return None, "embedding manifest is not an object"
+    if "encoding_id" not in raw:
+        return _compact_embedding_manifest_metadata(raw)
     encoding_id, dtype, dimension = raw.get("encoding_id"), raw.get("dtype"), raw.get("dimension")
     if (
         not isinstance(encoding_id, str)
@@ -689,6 +789,7 @@ def _embedding_manifest_metadata(
         if isinstance(value, str) and value
     }
     return {
+        "layout": _EXPLICIT_REFERENCE_LAYOUT,
         "encoding_id": encoding_id,
         "dtype": dtype,
         "dimension": dimension,
@@ -698,7 +799,48 @@ def _embedding_manifest_metadata(
     }, ""
 
 
-def _map_entries(snapshot_root: str | Path, artifact: LegacyArtifact) -> tuple[_MapEntry, ...] | str:
+def _compact_embedding_manifest_metadata(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """Validate the current production EmbeddingShardWriter manifest format."""
+    version = raw.get("version")
+    dimension = raw.get("embedding_dim")
+    rows_per_shard = raw.get("rows_per_shard")
+    active_shard = raw.get("active_shard")
+    next_row = raw.get("next_row")
+    total_rows = raw.get("total_rows")
+    if (
+        type(version) is not int
+        or version != 1
+        or raw.get("dtype") != "float32"
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in (dimension, rows_per_shard, active_shard, next_row, total_rows)
+        )
+        or dimension <= 0
+        or rows_per_shard <= 0
+        or next_row > rows_per_shard
+        or total_rows != active_shard * rows_per_shard + next_row
+    ):
+        return None, "compact embedding manifest has invalid production bookkeeping"
+    return {
+        "layout": _COMPACT_REFERENCE_LAYOUT,
+        "encoding_id": _SUPPORTED_ENCODING,
+        "dtype": "float32",
+        "dimension": dimension,
+        "shards": set(),
+        "rows_per_shard": rows_per_shard,
+        "active_shard": active_shard,
+        "next_row": next_row,
+        "derivation_contract_version": LEGACY_UNSPECIFIED_DERIVATION_CONTRACT,
+        "known_derivation_metadata": {},
+    }, ""
+
+
+def _map_entries(
+    snapshot_root: str | Path,
+    artifact: LegacyArtifact,
+    *,
+    implied_shard_locator: str | None = None,
+) -> tuple[_MapEntry, ...] | str:
     root = Path(snapshot_root).expanduser().resolve()
     path = (root / artifact.observed_relative_locator).resolve()
     if root not in path.parents:
@@ -712,6 +854,11 @@ def _map_entries(snapshot_root: str | Path, artifact: LegacyArtifact) -> tuple[_
                     return "embedding map row is not an object"
                 raw_eid, shard_locator, row_ordinal = value.get("eid"), value.get("shard"), value.get("row")
                 dimension = value.get("dimension")
+                if implied_shard_locator is not None:
+                    if shard_locator is None:
+                        shard_locator = implied_shard_locator
+                    elif shard_locator != implied_shard_locator:
+                        return "compact embedding map row has conflicting shard evidence"
                 if (
                     not isinstance(raw_eid, int)
                     or isinstance(raw_eid, bool)
@@ -730,12 +877,47 @@ def _map_entries(snapshot_root: str | Path, artifact: LegacyArtifact) -> tuple[_
     return tuple(entries)
 
 
+def _compact_workspace_metadata(
+    snapshot_root: str | Path,
+    artifacts: dict[str, LegacyArtifact],
+    expected_dimension: int,
+) -> tuple[dict[str, str] | None, str]:
+    """Read exactly one captured workspace lock; do not invent derivation facts."""
+    locators = sorted(
+        locator for locator in artifacts
+        if locator.startswith("workspaces/") and locator.endswith("/workspace_meta.json")
+    )
+    if len(locators) != 1:
+        return None, "compact embedding evidence requires exactly one workspace metadata lock"
+    try:
+        raw = _load_json(snapshot_root, artifacts[locators[0]])
+    except ValueError as exc:
+        return None, str(exc)
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("embed_provider"), str)
+        or not raw["embed_provider"]
+        or not isinstance(raw.get("embed_model"), str)
+        or not raw["embed_model"]
+        or not isinstance(raw.get("embed_dim"), int)
+        or isinstance(raw["embed_dim"], bool)
+        or raw["embed_dim"] != expected_dimension
+    ):
+        return None, "workspace metadata does not prove compact embedding provider, model, and dimension"
+    return {
+        "provider": raw["embed_provider"],
+        "model": raw["embed_model"],
+    }, ""
+
+
 def _npy_row_bytes(
     snapshot_root: str | Path,
     artifact: LegacyArtifact,
     row_ordinal: int,
     dtype: str,
     dimension: int,
+    *,
+    expected_rows: int | None = None,
 ) -> tuple[bytes | None, str]:
     try:
         import numpy as np
@@ -755,6 +937,8 @@ def _npy_row_bytes(
         return None, "embedding shard dtype disagrees with the embedding manifest"
     if values.shape[1] != dimension:
         return None, "embedding shard dimension disagrees with the embedding evidence"
+    if expected_rows is not None and values.shape[0] != expected_rows:
+        return None, "embedding shard rows disagree with compact manifest bookkeeping"
     if row_ordinal >= values.shape[0]:
         return None, "embedding map row is outside the captured shard bounds"
     return bytes(values[row_ordinal].tobytes(order="C")), ""

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
+from uuid import UUID
 
 import numpy as np
 import pytest
@@ -19,6 +20,12 @@ from torment_service.substrate.errors import (
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration import create_snapshot_manifest
 from torment_service.substrate.migration.admission import NativeLegacyObjectAdmissionService
+from torment_service.substrate.migration.runtime_readiness import (
+    LegacyVectorStrategy,
+    MigrationRuntimeReadinessRequest,
+    MigrationRuntimeScopePlan,
+    NativeMigrationRuntimeReadinessPreflight,
+)
 from torment_service.substrate.migration.representation_admission import (
     LEGACY_EMBEDDING_REPRESENTATION_CLASS,
     LEGACY_UNSPECIFIED_DERIVATION_CONTRACT,
@@ -27,6 +34,7 @@ from torment_service.substrate.migration.representation_admission import (
 from torment_service.substrate.objects import NativeObjectService, ObjectState, SubstrateTx
 from torment_service.substrate.representations import NativeRepresentationService
 from torment_service.substrate.schema import create_schema
+from torment_service.substrate.runtime_binding import NativeRepresentationLane
 
 
 def _id():
@@ -122,6 +130,68 @@ def _snapshot(
     return root, manifest_path, frozen, vectors
 
 
+def _production_compact_snapshot(
+    tmp_path: Path,
+    source_key: str,
+    *,
+    reference: dict[str, object] | None = None,
+    map_rows: list[dict[str, object]] | None = None,
+    manifest_patch: dict[str, object] | None = None,
+    workspace_patch: dict[str, object] | None = None,
+    include_shard: bool = True,
+    corrupt_shard: bool = False,
+):
+    """A byte-level fixture matching the active EmbeddingShardWriter layout."""
+    capture = tmp_path / source_key
+    root = capture / "legacy-snapshot"
+    embeddings = root / "embeddings"
+    embeddings.mkdir(parents=True)
+    reference = reference or {"shard": 0, "row": 0, "dim": 3}
+    node = {
+        "eid": 1,
+        "born_step": 0,
+        "channel": 0,
+        "payload": {"summary": "compact vector evidence", "embedding_ref": reference},
+    }
+    raw_node = _json_line(node)
+    (root / "nodes.jsonl").write_bytes(raw_node)
+    vectors = np.array(
+        [[1.25, -2.0, 3.5], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        dtype=np.float32,
+    )
+    if include_shard:
+        shard = embeddings / "shard_000000.npy"
+        np.save(shard, vectors)
+        if corrupt_shard:
+            shard.write_bytes(b"not-an-npy")
+    map_rows = map_rows if map_rows is not None else [
+        {"row": 0, "eid": 1, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1}
+    ]
+    (embeddings / "shard_000000.map.jsonl").write_bytes(b"".join(_json_line(row) for row in map_rows))
+    manifest = {
+        "version": 1, "embedding_dim": 3, "dtype": "float32", "rows_per_shard": 4,
+        "active_shard": 0, "next_row": 1, "total_rows": 1,
+    }
+    if manifest_patch:
+        manifest.update(manifest_patch)
+    (embeddings / "manifest.json").write_bytes(_json_line(manifest))
+    workspace = root / "workspaces" / "compact" / "workspace_meta.json"
+    workspace.parent.mkdir(parents=True)
+    metadata = {"embed_provider": "hash", "embed_model": "hash:3:compact", "embed_dim": 3}
+    if workspace_patch:
+        metadata.update(workspace_patch)
+    workspace.write_bytes(_json_line(metadata))
+    manifest_path = capture / "snapshot-manifest.json"
+    frozen = create_snapshot_manifest(
+        snapshot_root=root,
+        manifest_path=manifest_path,
+        legacy_source_namespace_id=_id(),
+        legacy_source_namespace_key=source_key,
+        capture_label="production compact shard reference fixture",
+    )
+    return root, manifest_path, frozen, vectors, raw_node
+
+
 def _admit_nodes(service, root, manifest_path, idempotency_namespace, object_namespace, scope):
     return service.admit_nodes_current_state(
         snapshot_root=root,
@@ -200,6 +270,165 @@ def test_valid_vector_admission_preserves_exact_bytes_and_stays_unverified(tmp_p
             connection.execute("UPDATE representation_payloads SET payload_bytes=? WHERE representation_id=?", (b"rewrite", native_id_to_bytes(result.representation_id)))
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute("UPDATE legacy_admission_records SET admission_status='UNKNOWN' WHERE admission_record_id=?", (native_id_to_bytes(result.admission_record_id),))
+    finally:
+        qualified.close()
+
+
+def test_production_compact_reference_is_translated_only_after_all_storage_evidence_agrees(tmp_path: Path):
+    qualified, object_namespace, scope, _successor_scope, idempotency_namespace = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        root, manifest_path, _manifest, vectors, raw_node = _production_compact_snapshot(
+            tmp_path, "production-compact-source",
+        )
+        node_run = _admit_nodes(
+            NativeLegacyObjectAdmissionService(connection), root, manifest_path,
+            idempotency_namespace, object_namespace, scope,
+        )
+        source = node_run.results[0]
+        result = _admit_vectors(
+            NativeLegacyRepresentationAdmissionService(connection), root, manifest_path,
+            idempotency_namespace,
+        ).results[0]
+        assert result.admission_status == "ADMITTED"
+        assert connection.execute(
+            "SELECT payload_text FROM object_revisions WHERE object_revision_id=?",
+            (native_id_to_bytes(source.revision_id),),
+        ).fetchone()[0] == raw_node.decode("utf-8")
+        assert NativeLegacyRepresentationAdmissionService(connection).read_admitted_representation_payload(
+            result.representation_id
+        ) == bytes(vectors[0].tobytes(order="C"))
+        metadata = json.loads(connection.execute(
+            "SELECT unknown_fields_json FROM legacy_admission_records WHERE admission_record_id=?",
+            (native_id_to_bytes(result.admission_record_id),),
+        ).fetchone()[0])
+        assert metadata["derivation_contract_version"] == LEGACY_UNSPECIFIED_DERIVATION_CONTRACT
+        assert metadata["legacy_derivation_metadata"] == {
+            "provider": "hash", "model": "hash:3:compact",
+        }
+        assert connection.execute(
+            "SELECT readiness,operational_disposition FROM representation_current_state WHERE representation_id=?",
+            (native_id_to_bytes(result.representation_id),),
+        ).fetchone() == ("UNKNOWN", "RECONCILIATION_REQUIRED")
+        plan = MigrationRuntimeScopePlan(
+            legacy_source_namespace_id=_manifest.legacy_source_namespace_id,
+            workspace_id="compact", scope_kind="PRIVATE_AGENT", agent_id="compact-agent",
+            target_identity_namespace_id=object_namespace, target_semantic_scope_id=_successor_scope,
+            motif_alias_namespace_id=_manifest.legacy_source_namespace_id,
+            motif_identity_namespace_id=object_namespace, membership_identity_namespace_id=object_namespace,
+            idempotency_namespace_id=idempotency_namespace,
+        )
+        lane = NativeRepresentationLane(
+            provider="hash", model="hash:3:compact", dimension=3,
+            representation_class="COMPAT_EMBEDDING", generation=1,
+            derivation_contract_version="compat-embedding-v1", encoding_id="RAW_VECTOR", dtype="float32",
+        )
+        report = NativeMigrationRuntimeReadinessPreflight(connection).run(
+            MigrationRuntimeReadinessRequest(
+                legacy_snapshot_id=_manifest.legacy_snapshot_id,
+                expected_native_core_id=UUID(bytes=connection.execute(
+                    "SELECT core_id FROM core_metadata"
+                ).fetchone()[0]),
+                scope_plans=(plan,), target_lane=lane,
+            )
+        )
+        capture = report.object_items[0].legacy_captures[0]
+        assert capture.strategy is LegacyVectorStrategy.BYTE_DERIVATION_POSSIBLE
+        assert capture.provider == "hash" and capture.model == "hash:3:compact"
+    finally:
+        qualified.close()
+
+
+@pytest.mark.parametrize(
+    ("source_key", "kwargs", "expect_result"),
+    [
+        (
+            "compact-map-eid-mismatch",
+            {"map_rows": [{"row": 0, "eid": 9, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1}]},
+            "QUARANTINED",
+        ),
+        (
+            "compact-map-duplicate-eid",
+            {"map_rows": [
+                {"row": 0, "eid": 1, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1},
+                {"row": 1, "eid": 1, "memory_class": "core", "kind": "memory", "step": 0, "ts": 2},
+            ]},
+            "QUARANTINED",
+        ),
+        (
+            "compact-map-duplicate-row",
+            {"map_rows": [
+                {"row": 0, "eid": 1, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1},
+                {"row": 0, "eid": 2, "memory_class": "core", "kind": "memory", "step": 0, "ts": 2},
+            ]},
+            "QUARANTINED",
+        ),
+        (
+            "compact-map-wrong-row",
+            {"map_rows": [{"row": 1, "eid": 1, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1}]},
+            "QUARANTINED",
+        ),
+        (
+            "compact-map-wrong-dimension",
+            {"map_rows": [{"row": 0, "eid": 1, "dimension": 4, "memory_class": "core", "kind": "memory", "step": 0, "ts": 1}]},
+            "QUARANTINED",
+        ),
+        (
+            "compact-committed-row-mismatch",
+            {"reference": {"shard": 0, "row": 1, "dim": 3}},
+            "QUARANTINED",
+        ),
+        (
+            "compact-manifest-dimension-mismatch",
+            {"manifest_patch": {"embedding_dim": 4}},
+            "QUARANTINED",
+        ),
+        (
+            "compact-manifest-dtype-mismatch",
+            {"manifest_patch": {"dtype": "float64"}},
+            "QUARANTINED",
+        ),
+        (
+            "compact-workspace-missing-provider",
+            {"workspace_patch": {"embed_provider": ""}},
+            "QUARANTINED",
+        ),
+        (
+            "compact-missing-shard",
+            {"include_shard": False},
+            "QUARANTINED",
+        ),
+        (
+            "compact-corrupt-shard",
+            {"corrupt_shard": True},
+            "QUARANTINED",
+        ),
+        (
+            "compact-bookkeeping-invalid",
+            {"manifest_patch": {"total_rows": 2}},
+            "QUARANTINED",
+        ),
+    ],
+)
+def test_production_compact_reference_refuses_incomplete_or_conflicting_evidence(
+    tmp_path: Path, source_key: str, kwargs: dict[str, object], expect_result: str,
+):
+    qualified, object_namespace, scope, _successor_scope, idempotency_namespace = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        root, manifest_path, _manifest, _vectors, _raw = _production_compact_snapshot(
+            tmp_path, source_key, **kwargs,
+        )
+        _admit_nodes(
+            NativeLegacyObjectAdmissionService(connection), root, manifest_path,
+            idempotency_namespace, object_namespace, scope,
+        )
+        results = _admit_vectors(
+            NativeLegacyRepresentationAdmissionService(connection), root, manifest_path,
+            idempotency_namespace,
+        ).results
+        assert results and results[0].admission_status == expect_result
+        assert connection.execute("SELECT count(*) FROM representations").fetchone()[0] == 0
     finally:
         qualified.close()
 

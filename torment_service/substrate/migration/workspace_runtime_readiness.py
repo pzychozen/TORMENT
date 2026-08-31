@@ -48,6 +48,7 @@ from .runtime_readiness import (
     ObjectRuntimeReadiness,
     SideStoreDisposition,
     SideStoreReadinessItem,
+    _side_store_inventory,
     _scope_plan_digest,
 )
 
@@ -161,6 +162,91 @@ class RetainedSideStoreEIDReference:
             raise ValueError("eid must be a non-negative integer or None")
 
 
+class RetainedSideStoreEIDObservationState(StrEnum):
+    """Completeness state for a retained side-store EID observation."""
+
+    INCOMPLETE = "INCOMPLETE"
+    COMPLETE_ABSENT = "COMPLETE_ABSENT"
+    COMPLETE_PRESENT_ZERO_EIDS = "COMPLETE_PRESENT_ZERO_EIDS"
+    COMPLETE_PRESENT_WITH_EIDS = "COMPLETE_PRESENT_WITH_EIDS"
+
+
+class RetainedSideStoreEIDObservationStatus(StrEnum):
+    """Report-facing status, distinct from the caller's observation input."""
+
+    NOT_OBSERVED = "NOT_OBSERVED"
+    INCOMPLETE = "INCOMPLETE"
+    OBSERVED_ABSENT = "OBSERVED_ABSENT"
+    OBSERVED_PRESENT_ZERO_EIDS = "OBSERVED_PRESENT_ZERO_EIDS"
+    OBSERVED_PRESENT_WITH_EIDS = "OBSERVED_PRESENT_WITH_EIDS"
+
+
+def _canonical_retained_side_store_references(
+    references: tuple[RetainedSideStoreEIDReference, ...],
+) -> tuple[tuple[str, str | None, int | None], ...]:
+    return tuple(
+        sorted(
+            (
+                reference.side_store,
+                str(reference.legacy_source_namespace_id)
+                if reference.legacy_source_namespace_id is not None
+                else None,
+                reference.eid,
+            )
+            for reference in references
+        )
+    )
+
+
+@dataclass(frozen=True)
+class RetainedSideStoreEIDObservation:
+    """A complete typed EID observation for one retained side store."""
+
+    side_store: str
+    state: RetainedSideStoreEIDObservationState
+    references: tuple[RetainedSideStoreEIDReference, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.side_store, str) or not self.side_store.strip():
+            raise ValueError("retained side-store observation side_store must be non-empty")
+        if not isinstance(self.state, RetainedSideStoreEIDObservationState):
+            raise ValueError("retained side-store observation state must be typed")
+        if not isinstance(self.references, tuple) or any(
+            not isinstance(reference, RetainedSideStoreEIDReference)
+            for reference in self.references
+        ):
+            raise ValueError(
+                "retained side-store observation references must be a tuple of "
+                "RetainedSideStoreEIDReference"
+            )
+        if any(reference.side_store != self.side_store for reference in self.references):
+            raise ValueError(
+                "retained side-store observation references must match side_store"
+            )
+        if self.state in {
+            RetainedSideStoreEIDObservationState.INCOMPLETE,
+            RetainedSideStoreEIDObservationState.COMPLETE_ABSENT,
+            RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_ZERO_EIDS,
+        } and self.references:
+            raise ValueError(
+                "incomplete, absent, and zero-EID observations must have no references"
+            )
+        if (
+            self.state
+            is RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_WITH_EIDS
+            and not self.references
+        ):
+            raise ValueError("complete positive EID observations require references")
+        if self.state is RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_WITH_EIDS:
+            if any(
+                reference.legacy_source_namespace_id is None or reference.eid is None
+                for reference in self.references
+            ):
+                raise ValueError(
+                    "complete positive EID observations require namespace-qualified EIDs"
+                )
+
+
 @dataclass(frozen=True)
 class WorkspaceNativeRuntimeReadinessRequest:
     """Immutable, caller-owned B5 qualification inputs.
@@ -183,6 +269,7 @@ class WorkspaceNativeRuntimeReadinessRequest:
     qualification_embedder_identity: WorkspaceNativeEmbedderIdentity
     post_write_configuration: NativePostWriteQualificationConfiguration
     retained_side_store_eid_references: tuple[RetainedSideStoreEIDReference, ...] = ()
+    retained_side_store_eid_observations: tuple[RetainedSideStoreEIDObservation, ...] = ()
     observed_file_roots: tuple[str | Path, ...] = ()
 
     def __post_init__(self) -> None:
@@ -217,6 +304,42 @@ class WorkspaceNativeRuntimeReadinessRequest:
             for item in self.retained_side_store_eid_references
         ):
             raise ValueError("retained_side_store_eid_references must be typed")
+        if not isinstance(self.retained_side_store_eid_observations, tuple) or any(
+            not isinstance(item, RetainedSideStoreEIDObservation)
+            for item in self.retained_side_store_eid_observations
+        ):
+            raise ValueError("retained_side_store_eid_observations must be typed")
+        observation_names = tuple(
+            observation.side_store
+            for observation in self.retained_side_store_eid_observations
+        )
+        if len(set(observation_names)) != len(observation_names):
+            raise ValueError("duplicate retained side-store observations are not allowed")
+        inventory = {item.side_store: item for item in _side_store_inventory()}
+        for observation in self.retained_side_store_eid_observations:
+            item = inventory.get(observation.side_store)
+            if item is None:
+                raise ValueError(
+                    f"unknown retained side-store observation: {observation.side_store}"
+                )
+            if item.eid_readiness is EIDSideStoreReadiness.NO_EID_REFERENCE:
+                raise ValueError(
+                    "NO_EID_REFERENCE side stores must not receive EID observations: "
+                    f"{observation.side_store}"
+                )
+            legacy_references = tuple(
+                reference
+                for reference in self.retained_side_store_eid_references
+                if reference.side_store == observation.side_store
+            )
+            if legacy_references and (
+                _canonical_retained_side_store_references(legacy_references)
+                != _canonical_retained_side_store_references(observation.references)
+            ):
+                raise ValueError(
+                    "typed and legacy retained side-store EID references must agree "
+                    f"exactly for {observation.side_store}"
+                )
         if not isinstance(self.observed_file_roots, tuple) or any(
             not isinstance(item, (str, Path)) or not str(item) for item in self.observed_file_roots
         ):
@@ -251,6 +374,7 @@ class WorkspaceSideStoreReadinessItem:
     eid_readiness: EIDSideStoreReadiness
     required_for_staging_profile: bool
     migration_required: bool
+    observation_status: RetainedSideStoreEIDObservationStatus
     reference_count: int
     compatible: bool
     reason: str
@@ -472,7 +596,15 @@ class NativeWorkspaceRuntimeReadiness:
             "production_feature_posture": request.production_feature_posture.intent(),
             "memory": [(str(item.object_id), item.readiness.value, item.lineage.value) for item in memory_items],
             "motif": [(str(item.source_motif_object_id), item.readiness.value, item.lineage.value) for item in motif_items],
-            "side_stores": [(item.side_store, item.compatible, item.reference_count) for item in side_stores],
+            "side_stores": [
+                (
+                    item.side_store,
+                    item.observation_status.value,
+                    item.compatible,
+                    item.reference_count,
+                )
+                for item in side_stores
+            ],
         }
         return WorkspaceNativeRuntimeReadinessReport(
             legacy_snapshot_id=request.legacy_snapshot_id,
@@ -663,11 +795,49 @@ class NativeWorkspaceRuntimeReadiness:
         blockers: list[tuple[WorkspaceReadinessBlockerClass, str]],
     ) -> tuple[WorkspaceSideStoreReadinessItem, ...]:
         result: list[WorkspaceSideStoreReadinessItem] = []
+        observations = {
+            observation.side_store: observation
+            for observation in request.retained_side_store_eid_observations
+        }
         for item in base:
-            refs = tuple(ref for ref in request.retained_side_store_eid_references if ref.side_store == item.side_store)
-            compatible = not (
-                item.eid_readiness is not EIDSideStoreReadiness.NO_EID_REFERENCE and not refs
+            observation = observations.get(item.side_store)
+            legacy_references = tuple(
+                ref
+                for ref in request.retained_side_store_eid_references
+                if ref.side_store == item.side_store
             )
+            refs = observation.references if observation is not None else legacy_references
+            observation_status = RetainedSideStoreEIDObservationStatus.NOT_OBSERVED
+            compatible = item.eid_readiness is EIDSideStoreReadiness.NO_EID_REFERENCE
+            requires_observation = item.eid_readiness is not EIDSideStoreReadiness.NO_EID_REFERENCE
+            if observation is not None:
+                observation_status = {
+                    RetainedSideStoreEIDObservationState.INCOMPLETE:
+                        RetainedSideStoreEIDObservationStatus.INCOMPLETE,
+                    RetainedSideStoreEIDObservationState.COMPLETE_ABSENT:
+                        RetainedSideStoreEIDObservationStatus.OBSERVED_ABSENT,
+                    RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_ZERO_EIDS:
+                        RetainedSideStoreEIDObservationStatus.OBSERVED_PRESENT_ZERO_EIDS,
+                    RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_WITH_EIDS:
+                        RetainedSideStoreEIDObservationStatus.OBSERVED_PRESENT_WITH_EIDS,
+                }[observation.state]
+                if observation.state is RetainedSideStoreEIDObservationState.INCOMPLETE:
+                    compatible = False
+                elif observation.state in {
+                    RetainedSideStoreEIDObservationState.COMPLETE_ABSENT,
+                    RetainedSideStoreEIDObservationState.COMPLETE_PRESENT_ZERO_EIDS,
+                }:
+                    compatible = True
+                else:
+                    compatible = True
+            elif requires_observation and legacy_references:
+                # Compatibility bridge for pre-typed callers.  This preserves the
+                # original positive-reference semantics without inventing a zero
+                # observation from an absent field.
+                observation_status = RetainedSideStoreEIDObservationStatus.OBSERVED_PRESENT_WITH_EIDS
+                compatible = True
+            elif requires_observation:
+                compatible = False
             for ref in refs:
                 if ref.legacy_source_namespace_id is None or ref.eid is None:
                     compatible = False
@@ -681,9 +851,17 @@ class NativeWorkspaceRuntimeReadiness:
             if refs and item.eid_readiness is EIDSideStoreReadiness.NO_EID_REFERENCE:
                 compatible = False
             if not compatible:
+                observation_required = (
+                    (observation is None and not refs)
+                    or (
+                        observation is not None
+                        and observation.state is RetainedSideStoreEIDObservationState.INCOMPLETE
+                    )
+                )
                 code = (
                     f"SIDE_STORE_EID_OBSERVATION_REQUIRED:{item.side_store}"
-                    if not refs else f"SIDE_STORE_EID_UNRESOLVED:{item.side_store}"
+                    if observation_required
+                    else f"SIDE_STORE_EID_UNRESOLVED:{item.side_store}"
                 )
                 blockers.append((WorkspaceReadinessBlockerClass.SIDE_STORE_COMPATIBILITY_BLOCKER, code))
             result.append(WorkspaceSideStoreReadinessItem(
@@ -695,6 +873,7 @@ class NativeWorkspaceRuntimeReadiness:
                     "conflicts", "anchors", "affect_history", "hivemind_collective", "identity_overlays", "proposals",
                 },
                 migration_required=False,
+                observation_status=observation_status,
                 reference_count=len(refs),
                 compatible=compatible,
                 reason=item.reason,
@@ -1087,7 +1266,8 @@ def _digest(value: object) -> str:
 
 __all__ = [
     "MemoryNormalizationLineage", "MotifProjectionLineage", "NativeWorkspaceRuntimeReadiness",
-    "RetainedSideStoreEIDReference", "WorkspaceMemoryReadinessItem",
+    "RetainedSideStoreEIDObservation", "RetainedSideStoreEIDObservationState",
+    "RetainedSideStoreEIDObservationStatus", "RetainedSideStoreEIDReference", "WorkspaceMemoryReadinessItem",
     "WorkspaceMotifReadinessItem", "WorkspaceNativeEmbedderIdentity",
     "WorkspaceNativeFeaturePosture", "WorkspaceNativeReadinessVerdict",
     "WorkspaceNativeRuntimeReadinessReport", "WorkspaceNativeRuntimeReadinessRequest",

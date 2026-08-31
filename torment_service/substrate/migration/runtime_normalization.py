@@ -39,6 +39,7 @@ from ..objects import SubstrateTx, execute_semantic
 from ..provenance import NativeProvenanceRecord
 from ..schema import CORE_ROLE_STAGING, SCHEMA_MAJOR, SCHEMA_MINOR, require_current_schema
 from .admission import _extract_nodes, _nodes_artifact
+from .legacy_governance import derivable_absent_governance_values, exact_governance_values
 from .runtime_readiness import MigrationRuntimeScopePlan
 from .snapshot import LegacySnapshotManifest, load_snapshot_manifest, verify_snapshot
 
@@ -264,9 +265,9 @@ class NativeMigrationRuntimeNormalizationService:
         raw_row = self._verified_snapshot_row(request, manifest, source)
         payload = _normalised_runtime_payload(raw_row)
         _reject_conflicting_outer_evidence(raw_row, payload)
-        governance = _governance_from_payload(payload)
-        provenance = _provenance_from_payload(payload)
         lifecycle = _lifecycle_from_payload(payload)
+        governance = _governance_from_payload(payload, raw_row)
+        provenance = _provenance_from_payload(payload)
         payload_json = canonical_intent_text(payload)
         return PreparedLegacyMemoryNormalization(
             legacy_snapshot_id=request.legacy_snapshot_id,
@@ -631,14 +632,26 @@ def _normalised_runtime_payload(raw_row: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _governance_from_payload(payload: dict[str, Any]) -> NativeMemoryGovernanceFacts:
-    fields = (
+def _governance_from_payload(
+    payload: dict[str, Any], raw_row: dict[str, Any],
+) -> NativeMemoryGovernanceFacts:
+    values = exact_governance_values(payload)
+    if values is None:
+        # ``payload`` is the canonical runtime copy.  The frozen legacy rule
+        # must instead inspect the original nested carrier that 7F admitted.
+        legacy_payload = raw_row.get("payload")
+        values = derivable_absent_governance_values(
+            raw_row,
+            legacy_payload if isinstance(legacy_payload, dict) else None,
+        )
+        if values is None:
+            raise MigrationRuntimeNormalizationRefused("B2_EXPLICIT_GOVERNANCE_REQUIRED")
+    if values == "INVALID":
+        raise MigrationRuntimeNormalizationRefused("B2_EXPLICIT_GOVERNANCE_REQUIRED")
+    raw = dict(zip((
         "protected", "non_shareable", "collective_export_blocked",
         "collective_reingest_blocked", "decay_accelerated",
-    )
-    raw = payload.get("governance")
-    if not isinstance(raw, dict) or set(raw) != set(fields) or any(type(raw[name]) is not bool for name in fields):
-        raise MigrationRuntimeNormalizationRefused("B2_EXPLICIT_GOVERNANCE_REQUIRED")
+    ), values, strict=True))
     try:
         return translate_governance_flags(MemoryGovernanceFlags(**raw))
     except (TypeError, ValueError) as exc:
