@@ -26,6 +26,11 @@ from ..objects import SubstrateTx, execute_semantic
 from ..runtime_binding import NativeRepresentationLane
 from ..schema import CORE_ROLE_STAGING, require_current_schema
 from .motif_admission import LEGACY_DERIVED_MOTIF_OBJECT_KIND
+from .character_seed_normalization import (
+    CHARACTER_SEED_NORMALIZATION_OPERATION_KIND as _CHARACTER_B2_OPERATION_KIND,
+    CHARACTER_SEED_NORMALIZATION_OUTPUT_ROLE as _CHARACTER_B2_OUTPUT_ROLE,
+    CHARACTER_SEED_NORMALIZATION_TRANSITION_KIND as _CHARACTER_B2_TRANSITION_KIND,
+)
 from .runtime_readiness import MigrationRuntimeScopePlan, _scope_plan_digest, _validate_target_lane
 from .snapshot import LegacyArtifact, LegacySnapshotManifest, load_snapshot_manifest, verify_snapshot
 
@@ -391,14 +396,20 @@ class NativeMigrationRuntimeMotifProjectionService:
                      JOIN operation_outputs output ON output.operation_id=operation.operation_id
                     WHERE o.object_id=?""", (row[8],)
             ).fetchone()
+            ordinary_topology = (
+                2, "NATIVE_ORDINARY", 1, "LEGACY_PREDECESSOR_UNKNOWN",
+                "MIGRATION_RUNTIME_NORMALIZATION", "NATIVE", "MIGRATION_RUNTIME_NORMALIZATION",
+                "MIGRATION_RUNTIME_NORMALIZATION", "OBJECT", row[8], 2,
+            )
+            character_topology = (
+                2, "NATIVE_ORDINARY", 1, "LEGACY_PREDECESSOR_UNKNOWN",
+                _CHARACTER_B2_TRANSITION_KIND, "NATIVE", _CHARACTER_B2_OPERATION_KIND,
+                _CHARACTER_B2_OUTPUT_ROLE, "OBJECT", row[8], 2,
+            )
             if current is None or (
                 current[1], current[3], current[5], current[6], current[7], current[8], current[9],
                 current[10], current[11], current[12], current[14]
-            ) != (
-                2, "NATIVE_ORDINARY", 1, "LEGACY_PREDECESSOR_UNKNOWN",
-                "MIGRATION_RUNTIME_NORMALIZATION", "NATIVE", "MIGRATION_RUNTIME_NORMALIZATION",
-                "MIGRATION_RUNTIME_NORMALIZATION", "OBJECT", row[8], 2
-            ) or current[0] != current[13]:
+            ) not in {ordinary_topology, character_topology} or current[0] != current[13]:
                 raise MigrationRuntimeMotifProjectionRefused("B4A_MEMBER_NOT_RUNTIME_SEMANTIC")
             object_id = UUID(bytes=row[8])
             try:

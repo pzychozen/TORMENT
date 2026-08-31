@@ -21,6 +21,9 @@ from uuid import UUID
 
 from ..compat import NativeMemoryCompatibilityFacade
 from ..compat_embedding_reader import NativeCompatEmbeddingReader
+from ..character_seed_witness import (
+    CharacterSeedWitness, CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
+)
 from ..connection import open_existing_native_core_connection, open_new_native_core_connection
 from ..errors import SubstrateConfigurationError
 from ..fabric_native_routing import NativeFabricRoutingScope
@@ -41,6 +44,10 @@ from .runtime_motif_projection import (
 from .runtime_normalization import (
     MigrationRuntimeNormalizationRequest,
     NativeMigrationRuntimeNormalizationService,
+)
+from .character_seed_normalization import (
+    MigrationCharacterSeedNormalizationRequest,
+    NativeMigrationCharacterSeedNormalizationService,
 )
 from .runtime_readiness import (
     MigrationRuntimeReadinessRequest,
@@ -65,6 +72,7 @@ from .workspace_runtime_readiness import (
 
 
 _PROFILE = "EXISTING_WORKSPACE/PRIVATE_AGENT/ORDINARY_CORE_MEMORY/CHARACTER_FREE/SINGLE_EMBEDDING_LANE"
+_CHARACTER_PROFILE = "EXISTING_WORKSPACE_PRIVATE_CHARACTER"
 _PRIVATE_AGENT = "PRIVATE_AGENT"
 _DESCRIPTOR_SCHEMA = "TORMENT_EXISTING_WORKSPACE_NATIVE_ADMISSION"
 _DESCRIPTOR_VERSION = 1
@@ -124,6 +132,7 @@ class ExistingWorkspaceNativeAdmissionRequest:
     retained_side_store_eid_observations: tuple[RetainedSideStoreEIDObservation, ...] = ()
     scope_kind: str = _PRIVATE_AGENT
     shared_domain_claimed: bool = False
+    character_seed_id: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -154,6 +163,10 @@ class ExistingWorkspaceNativeAdmissionRequest:
             raise ValueError("qualification_embedder_identity must be typed")
         if type(self.shared_domain_claimed) is not bool:
             raise ValueError("shared_domain_claimed must be boolean")
+        if self.character_seed_id is not None and (
+            not isinstance(self.character_seed_id, str) or not self.character_seed_id
+        ):
+            raise ValueError("character_seed_id must be non-empty text when supplied")
 
     @property
     def scope_plan(self) -> MigrationRuntimeScopePlan:
@@ -210,6 +223,17 @@ class ExistingWorkspaceAdmissionDescriptor:
             motif_domain_id=value["motif_domain_id"],
         )
 
+    @property
+    def character_seed_witness(self) -> CharacterSeedWitness | None:
+        value = self.payload.get("character_seed")
+        if value is None:
+            return None
+        plan = self.scope_plan
+        return CharacterSeedWitness.from_descriptor_payload(
+            workspace_id=plan.workspace_id, agent_id=plan.agent_id,
+            domain_id=plan.motif_domain_id, value=value,
+        )
+
 
 @dataclass(frozen=True)
 class ExistingWorkspaceNativeAdmissionResult:
@@ -250,6 +274,7 @@ class RecoveredExistingWorkspaceNativeRuntime:
     memory_runtime_scope: NativeMemoryRuntimeScope
     fabric_routing_scope: NativeFabricRoutingScope
     representation_lane: NativeRepresentationLane
+    character_seed_witness: CharacterSeedWitness | None = None
     state: ExistingWorkspaceAdmissionState = ExistingWorkspaceAdmissionState.RECOVERY_READY
 
     def open_readers(self) -> RecoveredExistingWorkspaceNativeReaders:
@@ -273,6 +298,18 @@ class RecoveredExistingWorkspaceNativeRuntime:
             qualified.close()
             raise
 
+    def require_external_character_seed(self, character_store: Any) -> Any:
+        """Read one retained external seed and bind it to descriptor evidence."""
+        witness = self.character_seed_witness
+        if witness is None:
+            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_PROFILE_NOT_ADMITTED")
+        if character_store is None or not hasattr(character_store, "load_seed"):
+            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_STORE_REQUIRED")
+        seed = character_store.load_seed(self.memory_runtime_scope.workspace_id, witness.seed_id)
+        if seed is None or not hasattr(seed, "to_dict") or seed.to_dict() != dict(witness.seed_definition):
+            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_STORE_SEED_MISMATCH")
+        return seed
+
 
 class ExistingWorkspaceNativeAdmissionService:
     """Coordinate one explicit B1--B5 private-core admission without cutover."""
@@ -295,8 +332,13 @@ class ExistingWorkspaceNativeAdmissionService:
         descriptor = _load_or_create_descriptor(request, paths)
         resumed = descriptor is not None
         source_fingerprint = _tree_fingerprint(paths.source_workspace_root)
+        character_witness: CharacterSeedWitness | None
         if descriptor is None:
-            _verify_character_free(request, paths.source_workspace_root)
+            if request.character_seed_id is None:
+                _verify_character_free(request, paths.source_workspace_root)
+                character_witness = None
+            else:
+                character_witness = _read_character_witness(request, paths.source_workspace_root)
             _verify_workspace_lane(request, paths.source_workspace_root)
             _verify_motif_profile(request, paths.source_workspace_root)
             _create_profile_snapshot(request, paths)
@@ -307,7 +349,7 @@ class ExistingWorkspaceNativeAdmissionService:
                 legacy_source_namespace_key=request.legacy_source_namespace_key,
                 capture_label="7G5E1 existing private workspace admission",
             )
-            descriptor = _new_descriptor(request, source_fingerprint, manifest)
+            descriptor = _new_descriptor(request, source_fingerprint, manifest, character_witness)
             _write_descriptor(paths.descriptor_path, descriptor.payload)
         else:
             _verify_descriptor_matches_request(descriptor, request)
@@ -315,6 +357,7 @@ class ExistingWorkspaceNativeAdmissionService:
                 raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_SOURCE_EVIDENCE_MISMATCH")
             manifest = load_snapshot_manifest(paths.snapshot_manifest_path)
             _verify_descriptor_snapshot(descriptor, manifest, paths.snapshot_manifest_path)
+            character_witness = descriptor.character_seed_witness
 
         verify_snapshot(snapshot_root=paths.snapshot_root, manifest=manifest)
         qualified, core_id = self._open_or_create_core(request, paths, descriptor)
@@ -331,13 +374,18 @@ class ExistingWorkspaceNativeAdmissionService:
             rehearsal = NativeLegacyMigrationRehearsal(connection).run(
                 snapshot_root=paths.snapshot_root, manifest_path=paths.snapshot_manifest_path, config=config,
             )
-            descriptor = _ensure_stage_witnesses(descriptor, connection, request, manifest, core_id)
+            descriptor = _ensure_stage_witnesses(
+                descriptor, connection, request, manifest, core_id, character_witness,
+            )
             _write_descriptor(paths.descriptor_path, descriptor.payload)
             if descriptor.state is ExistingWorkspaceAdmissionState.ADMISSION_COMPLETE:
                 report = _readiness_report(connection, request, manifest, core_id, paths)
                 return ExistingWorkspaceNativeAdmissionResult(descriptor, report, rehearsal.execution_order, len(report.memory_items), len(report.motif_items), resumed)
 
-            self._run_b2(connection, request, manifest, core_id, descriptor, paths, _test_lose_response_after_stage == "B2")
+            self._run_b2(
+                connection, request, manifest, core_id, descriptor, paths, character_witness,
+                _test_lose_response_after_stage == "B2",
+            )
             descriptor = _stage_complete(descriptor, "B2")
             _write_descriptor(paths.descriptor_path, descriptor.payload)
             _raise_if_interrupted(_test_interrupt_after_stage, "B2")
@@ -395,15 +443,29 @@ class ExistingWorkspaceNativeAdmissionService:
             raise
 
     def _run_b2(self, connection: Any, request: ExistingWorkspaceNativeAdmissionRequest, manifest: Any,
-                core_id: UUID, descriptor: ExistingWorkspaceAdmissionDescriptor, paths: "_AdmissionPaths", lose_response: bool) -> None:
+                core_id: UUID, descriptor: ExistingWorkspaceAdmissionDescriptor, paths: "_AdmissionPaths",
+                character_witness: CharacterSeedWitness | None, lose_response: bool) -> None:
         service = NativeMigrationRuntimeNormalizationService(connection)
+        character_service = NativeMigrationCharacterSeedNormalizationService(connection) if character_witness else None
         for witness in descriptor.payload["memory_witnesses"]:
-            result = service.normalize_legacy_core_memory(MigrationRuntimeNormalizationRequest(
+            ordinary_request = MigrationRuntimeNormalizationRequest(
                 paths.snapshot_root, paths.snapshot_manifest_path, manifest.legacy_snapshot_id,
                 request.legacy_source_namespace_id, core_id, witness["eid"], UUID(witness["r1_revision_id"]),
                 (request.scope_plan,), request.idempotency_namespace_id,
                 _stage_key(request, "B2", witness["eid"]),
-            ), _test_lose_response_after_commit=lose_response and witness is descriptor.payload["memory_witnesses"][0])
+            )
+            if witness.get("normalization_kind") == "CHARACTER_SEED":
+                if character_service is None or character_witness is None:
+                    raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_WITNESS_REQUIRED")
+                result = character_service.normalize_character_seed(
+                    MigrationCharacterSeedNormalizationRequest(ordinary_request, character_witness),
+                    _test_lose_response_after_commit=lose_response and witness is descriptor.payload["memory_witnesses"][0],
+                )
+            else:
+                result = service.normalize_legacy_core_memory(
+                    ordinary_request,
+                    _test_lose_response_after_commit=lose_response and witness is descriptor.payload["memory_witnesses"][0],
+                )
             witness["r2_revision_id"] = str(result.revision_id)
 
     def _run_b3a(self, connection: Any, request: ExistingWorkspaceNativeAdmissionRequest, manifest: Any,
@@ -475,6 +537,7 @@ class _AdmissionPaths:
 def recover_existing_workspace_native_runtime(
     *, native_core_database_path: str | Path, admission_descriptor_path: str | Path,
     expected_representation_lane: NativeRepresentationLane | None = None,
+    character_store: Any | None = None,
 ) -> RecoveredExistingWorkspaceNativeRuntime:
     """Recover native read facts using only a complete descriptor and core path."""
     descriptor = load_existing_workspace_admission_descriptor(admission_descriptor_path)
@@ -508,7 +571,12 @@ def recover_existing_workspace_native_runtime(
         membership_identity_namespace_id=plan.membership_identity_namespace_id,
         idempotency_namespace_id=plan.idempotency_namespace_id,
     )
-    return RecoveredExistingWorkspaceNativeRuntime(core_path, descriptor, scope, routing, lane)
+    runtime = RecoveredExistingWorkspaceNativeRuntime(
+        core_path, descriptor, scope, routing, lane, descriptor.character_seed_witness,
+    )
+    if runtime.character_seed_witness is not None:
+        runtime.require_external_character_seed(character_store)
+    return runtime
 
 
 def load_existing_workspace_admission_descriptor(path: str | Path) -> ExistingWorkspaceAdmissionDescriptor:
@@ -545,11 +613,14 @@ def _load_or_create_descriptor(request: ExistingWorkspaceNativeAdmissionRequest,
     return None
 
 
-def _new_descriptor(request: ExistingWorkspaceNativeAdmissionRequest, source_fingerprint: str, manifest: Any) -> ExistingWorkspaceAdmissionDescriptor:
+def _new_descriptor(
+    request: ExistingWorkspaceNativeAdmissionRequest, source_fingerprint: str, manifest: Any,
+    character_witness: CharacterSeedWitness | None = None,
+) -> ExistingWorkspaceAdmissionDescriptor:
     payload: dict[str, Any] = {
         "descriptor_schema": _DESCRIPTOR_SCHEMA,
         "descriptor_version": _DESCRIPTOR_VERSION,
-        "profile": _PROFILE,
+        "profile": _CHARACTER_PROFILE if character_witness is not None else _PROFILE,
         "admission_state": _INCOMPLETE,
         "admission_key": request.admission_key,
         "source_fingerprint": source_fingerprint,
@@ -571,11 +642,14 @@ def _new_descriptor(request: ExistingWorkspaceNativeAdmissionRequest, source_fin
         "motif_witnesses": [],
         "readiness_report_digest": None,
     }
+    if character_witness is not None:
+        payload["character_seed"] = character_witness.descriptor_payload()
     return ExistingWorkspaceAdmissionDescriptor(payload, _digest(payload))
 
 
 def _ensure_stage_witnesses(descriptor: ExistingWorkspaceAdmissionDescriptor, connection: Any,
-                            request: ExistingWorkspaceNativeAdmissionRequest, manifest: Any, core_id: UUID) -> ExistingWorkspaceAdmissionDescriptor:
+                            request: ExistingWorkspaceNativeAdmissionRequest, manifest: Any, core_id: UUID,
+                            character_witness: CharacterSeedWitness | None) -> ExistingWorkspaceAdmissionDescriptor:
     if descriptor.payload["memory_witnesses"]:
         return descriptor
     report = NativeMigrationRuntimeReadinessPreflight(connection).run(
@@ -583,20 +657,34 @@ def _ensure_stage_witnesses(descriptor: ExistingWorkspaceAdmissionDescriptor, co
     )
     if report.reembed_required_count:
         raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_REEMBED_REQUIRED_OUTSIDE_7G5E1_PROFILE")
-    if report.quarantine_or_unsupported_count or report.unresolved_semantic_facts_count:
+    if report.quarantine_or_unsupported_count:
         raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_MEMORY_PROFILE_NOT_ADMISSIBLE")
     witnesses = []
+    seed_eids = set(character_witness.seed_eids) if character_witness is not None else set()
     for item in report.object_items:
         # B1 intentionally reports admitted evidence-only motif objects too;
         # they are not memory candidates and are handled by B4A below.
         if item.eid is None:
             continue
-        if item.readiness not in {
+        allowed = {
             ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
             ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED,
-        }:
+        }
+        # A source seed from the frozen real writer has no ProvenanceV1.  It
+        # is the one and only admissible semantic-facts exception: the exact
+        # external witness is revalidated by the Character-only R1 -> R2
+        # normalizer before any native successor is published.  All ordinary
+        # rows retain B2's previous refusal boundary.
+        if item.eid in seed_eids:
+            allowed.add(ObjectRuntimeReadiness.SEMANTIC_FACTS_UNRESOLVED)
+        if item.readiness not in allowed:
             raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_MEMORY_PROFILE_NOT_ADMISSIBLE")
-        witnesses.append({"eid": item.eid, "r1_revision_id": str(item.current_revision_id)})
+        witnesses.append({
+            "eid": item.eid, "r1_revision_id": str(item.current_revision_id),
+            "normalization_kind": "CHARACTER_SEED" if item.eid in seed_eids else "ORDINARY",
+        })
+    if seed_eids and {value["eid"] for value in witnesses if value["normalization_kind"] == "CHARACTER_SEED"} != seed_eids:
+        raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_SEED_EVIDENCE_INCOMPLETE")
     if not witnesses or not report.motif_items:
         raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_PRIVATE_CORE_EVIDENCE_INCOMPLETE")
     motifs = []
@@ -652,10 +740,28 @@ def _write_descriptor(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _verify_descriptor_matches_request(descriptor: ExistingWorkspaceAdmissionDescriptor, request: ExistingWorkspaceNativeAdmissionRequest) -> None:
-    expected = _new_descriptor(request, "ignored", type("M", (), {"legacy_snapshot_id": UUID(descriptor.payload["legacy_snapshot_id"])})())
-    for key in ("profile", "admission_key", "legacy_source_namespace_id", "legacy_source_namespace_key", "workspace_id", "agent_id", "scope_plan", "scope_plan_digest", "representation_lane", "unknown_semantic_scope_id", "shared_domain_admission"):
-        if descriptor.payload.get(key) != expected.payload.get(key):
+    expected = {
+        "profile": _CHARACTER_PROFILE if request.character_seed_id is not None else _PROFILE,
+        "admission_key": request.admission_key,
+        "legacy_source_namespace_id": str(request.legacy_source_namespace_id),
+        "legacy_source_namespace_key": request.legacy_source_namespace_key,
+        "workspace_id": request.workspace_id,
+        "agent_id": request.agent_id,
+        "scope_plan": _scope_payload(request.scope_plan),
+        "scope_plan_digest": _digest(_scope_payload(request.scope_plan)),
+        "representation_lane": _lane_payload(request.qualified_representation_lane),
+        "unknown_semantic_scope_id": str(request.unknown_semantic_scope_id),
+        "shared_domain_admission": False,
+    }
+    for key, value in expected.items():
+        if descriptor.payload.get(key) != value:
             raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_DESCRIPTOR_REQUEST_MISMATCH")
+    character = descriptor.character_seed_witness
+    if request.character_seed_id is None:
+        if character is not None:
+            raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_DESCRIPTOR_REQUEST_MISMATCH")
+    elif character is None or character.seed_id != request.character_seed_id:
+        raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_DESCRIPTOR_REQUEST_MISMATCH")
 
 
 def _verify_descriptor_snapshot(descriptor: ExistingWorkspaceAdmissionDescriptor, manifest: Any, path: Path) -> None:
@@ -749,6 +855,20 @@ def _verify_workspace_lane(request: ExistingWorkspaceNativeAdmissionRequest, roo
     lane = request.qualified_representation_lane
     if not isinstance(metadata, dict) or (metadata.get("embed_provider"), metadata.get("embed_model"), metadata.get("embed_dim")) != (lane.provider, lane.model, lane.dimension):
         raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_EMBEDDING_LANE_MISMATCH")
+
+
+def _read_character_witness(
+    request: ExistingWorkspaceNativeAdmissionRequest, root: Path,
+) -> CharacterSeedWitness:
+    if request.character_seed_id is None:
+        raise ExistingWorkspaceAdmissionRefused("EXISTING_WORKSPACE_CHARACTER_SEED_ID_REQUIRED")
+    try:
+        return read_legacy_character_seed_witness(
+            workspace_root=root, workspace_id=request.workspace_id, agent_id=request.agent_id,
+            domain_id=request.motif_domain_id, requested_seed_id=request.character_seed_id,
+        )
+    except CharacterSeedWitnessRefused as exc:
+        raise ExistingWorkspaceAdmissionRefused(exc.code) from exc
 
 
 def _verify_character_free(request: ExistingWorkspaceNativeAdmissionRequest, root: Path) -> None:

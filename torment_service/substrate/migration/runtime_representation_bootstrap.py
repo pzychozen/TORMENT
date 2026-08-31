@@ -50,6 +50,11 @@ from .representation_admission import (
 from .runtime_normalization import _OPERATION_KIND as _B2_OPERATION_KIND
 from .runtime_normalization import _OUTPUT_ROLE as _B2_OUTPUT_ROLE
 from .runtime_normalization import _TRANSITION_KIND as _B2_TRANSITION_KIND
+from .character_seed_normalization import (
+    CHARACTER_SEED_NORMALIZATION_OPERATION_KIND as _CHARACTER_B2_OPERATION_KIND,
+    CHARACTER_SEED_NORMALIZATION_OUTPUT_ROLE as _CHARACTER_B2_OUTPUT_ROLE,
+    CHARACTER_SEED_NORMALIZATION_TRANSITION_KIND as _CHARACTER_B2_TRANSITION_KIND,
+)
 from .runtime_embedding_input import (
     CanonicalEmbeddingInputUnavailable,
     require_embedding_input_continuity,
@@ -453,16 +458,17 @@ class NativeMigrationRuntimeRepresentationBootstrapService:
         if len(rows) != 1:
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_TOPOLOGY_NOT_UNIQUE")
         row = rows[0]
-        expected = (
+        common = (
             r2_blob, 2, "NATIVE_ORDINARY", native_id_to_bytes(request.expected_r1_revision_id), 1,
-            "EXISTS", "EXPLICIT", "NOT_APPLICABLE", "JSON", _B2_TRANSITION_KIND, "NATIVE",
-            _B2_OPERATION_KIND, r2_blob, 2, _B2_OUTPUT_ROLE, "OBJECT", object_blob, r2_blob, 2,
+            "EXISTS", "EXPLICIT", "NOT_APPLICABLE", "JSON",
         )
         actual = (
             row[0], row[1], row[2], row[3], row[4], row[5], row[11], row[12], row[14],
             row[18], row[19], row[20], row[21], row[22], row[23], row[24], row[25], row[26], row[27],
         )
-        if actual != expected or row[6] is None or row[7] != 1 or not _nonempty(row[8], row[9]) or not isinstance(row[10], int):
+        ordinary = common + (_B2_TRANSITION_KIND, "NATIVE", _B2_OPERATION_KIND, r2_blob, 2, _B2_OUTPUT_ROLE, "OBJECT", object_blob, r2_blob, 2)
+        character = common + (_CHARACTER_B2_TRANSITION_KIND, "NATIVE", _CHARACTER_B2_OPERATION_KIND, r2_blob, 2, _CHARACTER_B2_OUTPUT_ROLE, "OBJECT", object_blob, r2_blob, 2)
+        if actual not in {ordinary, character} or row[6] is None or row[7] != 1 or not _nonempty(row[8], row[9]) or not isinstance(row[10], int):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_R2_WITNESS_INVALID")
         governance = self._connection.execute(
             """SELECT protected,non_shareable,collective_export_blocked,collective_reingest_blocked,decay_accelerated
@@ -472,13 +478,17 @@ class NativeMigrationRuntimeRepresentationBootstrapService:
         if len(governance) != 1 or any(value not in (0, 1) for value in governance[0]):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_GOVERNANCE_INVALID")
         provenance = self._connection.execute(
-            """SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state
+            """SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,memory_role
                  FROM provenance_records WHERE provenance_id=?""", (row[13],)
         ).fetchall()
         if len(provenance) != 1 or not _nonempty(provenance[0][0], provenance[0][1], provenance[0][3], provenance[0][4]) or (
             provenance[0][2] is not None and not _nonempty(provenance[0][2])
         ):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_PROVENANCE_INVALID")
+        if actual == character and provenance[0] != (
+            "CHARACTER_SEED_PLANT", "character_runtime", "seed_canon", "seed_plant", "KNOWN", "seed_canon",
+        ):
+            raise MigrationRuntimeRepresentationBootstrapRefused("B3A_CHARACTER_SEED_PROVENANCE_INVALID")
         try:
             payload = json.loads(row[15])
         except (TypeError, json.JSONDecodeError) as exc:

@@ -156,6 +156,12 @@ from .existing_workspace_admission import (
     load_existing_workspace_admission_descriptor,
     recover_existing_workspace_native_runtime,
 )
+from .character_seed_normalization import (
+    MigrationCharacterSeedNormalizationRefused,
+    MigrationCharacterSeedNormalizationRequest,
+    NativeMigrationCharacterSeedNormalizationService,
+    PreparedCharacterSeedNormalization,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -264,4 +270,8 @@ __all__ = [
     "RecoveredExistingWorkspaceNativeRuntime",
     "load_existing_workspace_admission_descriptor",
     "recover_existing_workspace_native_runtime",
+    "MigrationCharacterSeedNormalizationRefused",
+    "MigrationCharacterSeedNormalizationRequest",
+    "NativeMigrationCharacterSeedNormalizationService",
+    "PreparedCharacterSeedNormalization",
 ]
