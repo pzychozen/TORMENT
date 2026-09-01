@@ -465,6 +465,7 @@ class LegacyFabricPostWriteAdapter:
                 current_step=int(context.step),
                 stored=context.stored,
                 storage_outcome=context.storage_outcome.value,
+                trigger_scope=context.scope,
             ))
             if not result.measured or result.seed is None or result.drift is None:
                 return

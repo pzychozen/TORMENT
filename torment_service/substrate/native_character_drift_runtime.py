@@ -98,6 +98,13 @@ class NativeCharacterDriftRuntime:
             raise SubstrateConfigurationError("Character request does not match the qualified native scope")
         if not _due(config.character_enabled, config.drift_every, request):
             return CharacterDriftMeasurementResult(CharacterDriftMeasurementStatus.NOT_DUE)
+        # There is no qualified private-Character-seed to shared-domain
+        # identity mapping.  Do not let the scoped reader turn a private bare
+        # EID or motif ID into shared seed geometry.
+        if request.trigger_scope == "shared":
+            return CharacterDriftMeasurementResult(
+                CharacterDriftMeasurementStatus.NOT_APPLICABLE_SCOPE,
+            )
         seed_id = config.seed_id.strip()
         if not seed_id:
             return CharacterDriftMeasurementResult(CharacterDriftMeasurementStatus.SEED_UNAVAILABLE)

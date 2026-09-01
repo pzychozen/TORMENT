@@ -17,6 +17,7 @@ from .character import CharacterSeed, CharacterState, measure_drift
 
 class CharacterDriftMeasurementStatus(str, Enum):
     NOT_DUE = "NOT_DUE"
+    NOT_APPLICABLE_SCOPE = "NOT_APPLICABLE_SCOPE"
     SEED_UNAVAILABLE = "SEED_UNAVAILABLE"
     REINFORCED_EFFECTIVE_NOOP = "REINFORCED_EFFECTIVE_NOOP"
     MEASURED = "MEASURED"
@@ -32,6 +33,7 @@ class CharacterDriftPostWriteRequest:
     current_step: int
     stored: bool
     storage_outcome: str
+    trigger_scope: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace_id, str) or not self.workspace_id:
@@ -44,6 +46,8 @@ class CharacterDriftPostWriteRequest:
             raise ValueError("stored must be a boolean")
         if self.storage_outcome not in {"NO_WRITE", "REINFORCED_EXISTING", "CREATED_NEW"}:
             raise ValueError("storage_outcome is invalid")
+        if self.trigger_scope not in {"private", "shared"}:
+            raise ValueError("trigger_scope is invalid")
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,13 @@ class LegacyCharacterDriftRuntime:
     ) -> CharacterDriftMeasurementResult:
         if not _due(self._character_enabled, self._drift_every, request):
             return CharacterDriftMeasurementResult(CharacterDriftMeasurementStatus.NOT_DUE)
+        # CharacterSeed records identify the private Character lane.  A shared
+        # trigger has no qualified shared seed geometry, so it must stop before
+        # loading the private seed or beginning any graph/motif fallback.
+        if request.trigger_scope == "shared":
+            return CharacterDriftMeasurementResult(
+                CharacterDriftMeasurementStatus.NOT_APPLICABLE_SCOPE,
+            )
         if not self._seed_id:
             return CharacterDriftMeasurementResult(CharacterDriftMeasurementStatus.SEED_UNAVAILABLE)
         seed = self._store.load_seed(request.workspace_id, self._seed_id)

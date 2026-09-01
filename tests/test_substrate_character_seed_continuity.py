@@ -340,7 +340,7 @@ def test_existing_character_cold_recovery_preserves_native_c1a_and_c1b_without_g
             ),
             store=store, memory_read=readers.memory_enumeration, memory_enumeration=readers.memory_enumeration,
             motif_reader=readers.motifs,
-        ).measure_for_post_write(CharacterDriftPostWriteRequest("orchard", "aria", 10, True, "CREATED_NEW"))
+        ).measure_for_post_write(CharacterDriftPostWriteRequest("orchard", "aria", 10, True, "CREATED_NEW", "private"))
         assert drift.drift is not None
         for field in ("drift_score", "distance_to_seed", "drift_direction", "core_count", "relational_count", "situational_count", "seed_basin_role"):
             assert drift.drift[field] == pytest.approx(legacy_drift[field]) if isinstance(legacy_drift[field], float) else drift.drift[field] == legacy_drift[field]
@@ -474,7 +474,7 @@ def test_fresh_seed_partial_resume_and_cold_native_c1a_c1b(tmp_path: Path):
                 configuration=NativeCharacterDriftRuntimeConfiguration("ws", "aria", seed.seed_id, "personal", values["motif_alias"], values["scope"], 3, True, 1),
                 store=store, memory_read=access, memory_enumeration=access, motif_reader=NativeMotifRuntimeReader(reopened.connection),
             )
-            drift_result = drift.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 10, True, "CREATED_NEW"))
+            drift_result = drift.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 10, True, "CREATED_NEW", "private"))
             assert drift_result.drift is not None and drift_result.drift["core_count"] == 0
             correction = NativeCharacterGravityCorrectionRuntime(
                 reopened.connection, configuration=NativeCharacterGravityCorrectionRuntimeConfiguration(

@@ -218,7 +218,7 @@ def _legacy_runtime(values, seed, state, sources_and_vectors, *, motif_present=T
 
 
 def _request(step=10, outcome="CREATED_NEW"):
-    return CharacterDriftPostWriteRequest("ws", "aria", step, True, outcome)
+    return CharacterDriftPostWriteRequest("ws", "aria", step, True, outcome, "private")
 
 
 def _state_without_timestamp(state: CharacterState):
@@ -335,9 +335,40 @@ def test_no_recent_state_cap_gates_and_reinforcement_oddity(tmp_path: Path):
         reinforcement = runtime.measure_for_post_write(_request(outcome="REINFORCED_EXISTING"))
         assert reinforcement.status is CharacterDriftMeasurementStatus.REINFORCED_EFFECTIVE_NOOP
         assert _state_without_timestamp(store.state) == before_state
-        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 0, True, "CREATED_NEW")).status is CharacterDriftMeasurementStatus.NOT_DUE
-        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 9, True, "CREATED_NEW")).status is CharacterDriftMeasurementStatus.NOT_DUE
-        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 10, False, "CREATED_NEW")).status is CharacterDriftMeasurementStatus.NOT_DUE
+        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 0, True, "CREATED_NEW", "private")).status is CharacterDriftMeasurementStatus.NOT_DUE
+        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 9, True, "CREATED_NEW", "private")).status is CharacterDriftMeasurementStatus.NOT_DUE
+        assert runtime.measure_for_post_write(CharacterDriftPostWriteRequest("ws", "aria", 10, False, "CREATED_NEW", "private")).status is CharacterDriftMeasurementStatus.NOT_DUE
+    finally:
+        values["qualified"].close()
+
+
+def test_shared_trigger_stops_before_native_seed_or_scope_reads(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        seed = CharacterSeed(
+            "seed", "Aria", "Private seed text.",
+            seed_motif_id="motif_x", seed_eids=[1, 2],
+        )
+        runtime = _native(values, _Store(seed))
+        runtime._store = SimpleNamespace(
+            load_seed=lambda *_args: pytest.fail("shared trigger must not load a private seed"),
+        )
+        runtime._memory_enumeration = SimpleNamespace(
+            list_current=lambda: pytest.fail("shared trigger must not enumerate shared memories"),
+        )
+        runtime._memory_read = SimpleNamespace(
+            read_current_embedding=lambda *_args, **_kwargs: pytest.fail("shared trigger must not read seed EIDs"),
+        )
+        runtime._motif_reader = SimpleNamespace(
+            list_runtime_motifs=lambda **_kwargs: pytest.fail("shared trigger must not read private motif IDs"),
+        )
+
+        result = runtime.measure_for_post_write(
+            CharacterDriftPostWriteRequest("ws", "aria", 10, True, "CREATED_NEW", "shared")
+        )
+
+        assert result.status is CharacterDriftMeasurementStatus.NOT_APPLICABLE_SCOPE
+        assert not result.measured and result.seed is None and result.drift is None
     finally:
         values["qualified"].close()
 
