@@ -28,6 +28,7 @@ from .character_gravity_runtime import (
 )
 from .derived_memory_runtime import DerivedMemoryRuntimeContext, DerivedMemoryRuntimePort
 from .memory_runtime_access import PostWriteMemoryEnumerationPort, PostWriteMemoryReadPort
+from .motif_geometry_port import MotifGeometryPort
 from .srg_runtime_state import SRGTransientRuntimePort
 from .world_runtime import WorldRuntimePort
 
@@ -126,6 +127,7 @@ class LegacyFabricPostWriteDependencies:
     hivemind_log: logging.Logger
     character_drift_runtime: CharacterDriftRuntimePort | None = None
     character_gravity_runtime: CharacterGravityCorrectionRuntimePort | None = None
+    bridge_geometry: MotifGeometryPort | None = None
 
 
 class FabricPostWriteRuntimePort(Protocol):
@@ -566,13 +568,39 @@ class LegacyFabricPostWriteAdapter:
         return proposal.proposal_id
 
     def _run_bridges(self, context: FabricPostWriteContext) -> None:
-        tear = float(context.tri_mod.get("tearing_risk", 0.0))
-        probability = float(context.tri_mod.get("bridge_p", 0.08)) * (1.0 - 0.40 * tear)
-        threshold = float(context.tri_mod.get("bridge_sim", 0.86)) + (0.03 * tear)
-        probability = float(np.clip(probability, 0.02, 0.12))
-        threshold = float(np.clip(threshold, 0.84, 0.92))
-        if context.stored and self._deps.random_chance(probability):
-            self._deps.workspace.bridges.suggest(self._deps.workspace.motif_regs, sim_threshold=threshold, max_new=5)
+        run_bridge_suggestions(
+            context,
+            workspace=self._deps.workspace,
+            random_chance=self._deps.random_chance,
+            geometry=self._deps.bridge_geometry,
+        )
+
+
+def run_bridge_suggestions(
+    context: FabricPostWriteContext,
+    *,
+    workspace: Any,
+    random_chance: Callable[[float], bool],
+    geometry: MotifGeometryPort | None = None,
+) -> None:
+    """Run the one existing Fabric bridge-suggestion decision.
+
+    ``geometry`` is an explicit read-only override for a qualified native
+    caller.  Omitting it retains the legacy ``workspace.motif_regs`` input
+    exactly.  BridgeRegistry errors intentionally propagate: this helper
+    preserves the legacy post-write failure topology.
+    """
+    tear = float(context.tri_mod.get("tearing_risk", 0.0))
+    probability = float(context.tri_mod.get("bridge_p", 0.08)) * (1.0 - 0.40 * tear)
+    threshold = float(context.tri_mod.get("bridge_sim", 0.86)) + (0.03 * tear)
+    probability = float(np.clip(probability, 0.02, 0.12))
+    threshold = float(np.clip(threshold, 0.84, 0.92))
+    if context.stored and random_chance(probability):
+        workspace.bridges.suggest(
+            geometry if geometry is not None else workspace.motif_regs,
+            sim_threshold=threshold,
+            max_new=5,
+        )
 
 
 __all__ = [
@@ -582,4 +610,5 @@ __all__ = [
     "LegacyFabricPostWriteAdapter",
     "LegacyFabricPostWriteDependencies",
     "PostWriteStorageOutcome",
+    "run_bridge_suggestions",
 ]

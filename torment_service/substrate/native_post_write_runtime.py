@@ -19,8 +19,9 @@ from torment_service.post_write_runtime import (
     LegacyFabricPostWriteAdapter,
     LegacyFabricPostWriteDependencies,
     PostWriteStorageOutcome,
+    run_bridge_suggestions,
 )
-from torment_service.motif_geometry_port import NativeScopedMotifGeometryAdapter
+from torment_service.motif_geometry_port import NativeMotifGeometryAdapter, NativeScopedMotifGeometryAdapter
 from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
 
 from .connection import open_existing_native_core_connection
@@ -75,6 +76,7 @@ class NativePostWriteQualificationProfile:
     checkpoint: NativePostWriteBehavior
     trajectory_evidence: NativePostWriteBehavior
     bridge_suggestions: NativePostWriteBehavior
+    shared_bridge_suggestion: NativePostWriteBehavior
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -86,6 +88,7 @@ class NativePostWriteQualificationProfile:
             NativePostWriteBehavior.UNSUPPORTED, NativePostWriteBehavior.UNSUPPORTED,
             NativePostWriteBehavior.UNSUPPORTED, NativePostWriteBehavior.DISABLED_FOR_PROFILE,
             NativePostWriteBehavior.DISABLED_FOR_PROFILE, NativePostWriteBehavior.DISABLED_FOR_PROFILE,
+            NativePostWriteBehavior.DISABLED_FOR_PROFILE,
         )
 
     @classmethod
@@ -110,6 +113,14 @@ class NativePostWriteQualificationProfile:
             motif_auto_merge=NativePostWriteBehavior.QUALIFIED,
         )
 
+    @classmethod
+    def core_staging_with_shared_bridge_suggestion(cls) -> "NativePostWriteQualificationProfile":
+        """Explicit B1 profile; shared support remains bridge-only."""
+        return replace(
+            cls.core_staging(),
+            shared_bridge_suggestion=NativePostWriteBehavior.QUALIFIED,
+        )
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -124,6 +135,8 @@ class NativePostWriteExternalDependencies:
     hivemind_log: logging.Logger
     character_store: Any | None = None
     character_embedder: Any | None = None
+    shared_bridge_geometry: NativeMotifGeometryAdapter | None = None
+    random_chance: Callable[[float], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -133,12 +146,13 @@ class NativePostWriteQualificationConfiguration:
     routing_scope: NativeFabricRoutingScope
     profile: NativePostWriteQualificationProfile
     external: NativePostWriteExternalDependencies
-    derived_runtime_template: NativeDerivedMemoryRuntimeConfiguration
+    derived_runtime_template: NativeDerivedMemoryRuntimeConfiguration | None
     motif_suggestion_maintenance_required: bool
     persistent_trajectory_evidence_required: bool
     checkpoint_snapshots_required: bool
     bridge_suggestions_required: bool
     deep_memory_required: bool
+    shared_bridge_suggestions_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -147,11 +161,14 @@ class NativePostWriteQualificationConfiguration:
             raise ValueError("profile must be NativePostWriteQualificationProfile")
         if not isinstance(self.external, NativePostWriteExternalDependencies):
             raise ValueError("external must be NativePostWriteExternalDependencies")
-        if not isinstance(self.derived_runtime_template, NativeDerivedMemoryRuntimeConfiguration):
-            raise ValueError("derived_runtime_template must be NativeDerivedMemoryRuntimeConfiguration")
+        if self.derived_runtime_template is not None and not isinstance(
+            self.derived_runtime_template, NativeDerivedMemoryRuntimeConfiguration,
+        ):
+            raise ValueError("derived_runtime_template must be NativeDerivedMemoryRuntimeConfiguration or None")
         for name in (
             "motif_suggestion_maintenance_required", "persistent_trajectory_evidence_required",
             "checkpoint_snapshots_required", "bridge_suggestions_required", "deep_memory_required",
+            "shared_bridge_suggestions_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -200,6 +217,23 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if not isinstance(context, FabricPostWriteContext):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
+        if context.scope == "shared":
+            self._validate_shared_bridge_pre_effect(context)
+            with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+                connection = opened.connection
+                _revalidate_capability_for_route(self._capability, connection)
+                self._validate_context_and_route(connection, context, witness)
+                run_bridge_suggestions(
+                    context,
+                    workspace=self._configuration.external.workspace,
+                    random_chance=self._configuration.external.random_chance,
+                    geometry=self._configuration.external.shared_bridge_geometry,
+                )
+            return FabricPostWriteOutcome()
+        if context.scope != "private":
+            raise SubstrateInvariantViolation("native post-write context has an unsupported scope")
+        if self._configuration.routing_scope.runtime_scope.scope_kind != "PRIVATE_AGENT":
+            raise SubstrateInvariantViolation("private post-write context does not match claimed native scope")
         self._validate_profile_pre_effect(context)
         with open_existing_native_core_connection(self._capability.core_database_path) as opened:
             connection = opened.connection
@@ -242,6 +276,8 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             process_state=self._capability.srg_process_state,
         )
         template = self._configuration.derived_runtime_template
+        if template is None:
+            raise SubstrateInvariantViolation("private native post-write requires a derived runtime template")
         parent_key = witness.native_operation_key or "NATIVE_POST_WRITE_NO_WRITE"
         derived = NativeFabricMemoryRouter(self._capability).bind_derived_memory_runtime(
             connection,
@@ -345,11 +381,24 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         witness: NativePostWriteRouteWitness,
     ) -> None:
         scope = self._configuration.routing_scope.runtime_scope
-        if (
-            context.workspace_id != scope.workspace_id or context.scope != "private"
-            or context.agent_id != scope.agent_id
-            or context.chosen_domain != self._configuration.derived_runtime_template.domain_id
-        ):
+        if scope.scope_kind == "PRIVATE_AGENT":
+            template = self._configuration.derived_runtime_template
+            matches = (
+                template is not None
+                and context.workspace_id == scope.workspace_id
+                and context.scope == "private"
+                and context.agent_id == scope.agent_id
+                and context.chosen_domain == template.domain_id
+            )
+        elif scope.scope_kind == "SHARED_DOMAIN":
+            matches = (
+                context.workspace_id == scope.workspace_id
+                and context.scope == "shared"
+                and context.chosen_domain == scope.domain_id
+            )
+        else:
+            matches = False
+        if not matches:
             raise SubstrateInvariantViolation("post-write context does not match claimed native scope")
         if context.storage_outcome is PostWriteStorageOutcome.NO_WRITE:
             if context.stored or context.eid is not None or witness.route_result is not None:
@@ -440,6 +489,20 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if self._configuration.deep_memory_required:
             _refuse(profile.deep_memory, "deep memory")
 
+    def _validate_shared_bridge_pre_effect(self, context: FabricPostWriteContext) -> None:
+        configuration = self._configuration
+        external = configuration.external
+        if configuration.routing_scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+            raise SubstrateInvariantViolation("shared post-write requires a claimed shared native scope")
+        if not configuration.shared_bridge_suggestions_required:
+            raise SubstrateConfigurationError("shared bridge suggestion capability is not required by this profile")
+        _require_qualified(configuration.profile.shared_bridge_suggestion, "shared bridge suggestion")
+        if configuration.derived_runtime_template is not None:
+            raise SubstrateConfigurationError("shared bridge profile must not bind a derived runtime")
+        _require_shared_bridge_geometry(external.shared_bridge_geometry, self._capability)
+        if not callable(external.random_chance):
+            raise SubstrateConfigurationError("shared bridge profile requires an injected random_chance dependency")
+
 
 def prepare_native_fabric_post_write_adapter(
     *,
@@ -455,16 +518,30 @@ def prepare_native_fabric_post_write_adapter(
         raise SubstrateConfigurationError("post-write configuration scope is not prepared by capability")
     scope = configuration.routing_scope
     template = configuration.derived_runtime_template
-    if (
-        template.workspace_id != scope.runtime_scope.workspace_id
-        or template.agent_id != scope.runtime_scope.agent_id
-        or template.legacy_source_namespace_id != scope.runtime_scope.legacy_source_namespace_id
-        or template.motif_alias_namespace_id != scope.motif_alias_namespace_id
-        or template.memory_identity_namespace_id != scope.runtime_scope.identity_namespace_id
-        or template.semantic_scope_id != scope.runtime_scope.semantic_scope_id
-        or template.idempotency_namespace_id != scope.idempotency_namespace_id
-    ):
-        raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
+    if scope.runtime_scope.scope_kind == "PRIVATE_AGENT":
+        if template is None:
+            raise SubstrateConfigurationError("private post-write configuration requires a derived runtime template")
+        if (
+            template.workspace_id != scope.runtime_scope.workspace_id
+            or template.agent_id != scope.runtime_scope.agent_id
+            or template.legacy_source_namespace_id != scope.runtime_scope.legacy_source_namespace_id
+            or template.motif_alias_namespace_id != scope.motif_alias_namespace_id
+            or template.memory_identity_namespace_id != scope.runtime_scope.identity_namespace_id
+            or template.semantic_scope_id != scope.runtime_scope.semantic_scope_id
+            or template.idempotency_namespace_id != scope.idempotency_namespace_id
+        ):
+            raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
+    elif scope.runtime_scope.scope_kind == "SHARED_DOMAIN":
+        if not configuration.shared_bridge_suggestions_required:
+            raise SubstrateConfigurationError("shared post-write configuration has no qualified consumer")
+        if template is not None:
+            raise SubstrateConfigurationError("shared bridge configuration must not bind a derived runtime")
+        _require_qualified(configuration.profile.shared_bridge_suggestion, "shared bridge suggestion")
+        _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
+        if not callable(configuration.external.random_chance):
+            raise SubstrateConfigurationError("shared bridge configuration requires an injected random_chance dependency")
+    else:
+        raise SubstrateConfigurationError("post-write configuration has an unsupported runtime scope")
     return NativeFabricPostWriteAdapter(capability, configuration, _prepared_marker=_PREPARED)
 
 
@@ -490,6 +567,21 @@ def _refuse(value: NativePostWriteBehavior, name: str) -> None:
     raise SubstrateConfigurationError(
         f"native post-write profile refuses {name} ({value.value}) before effects"
     )
+
+
+def _require_shared_bridge_geometry(
+    geometry: NativeMotifGeometryAdapter | None,
+    capability: NativeFabricRoutingCapability,
+) -> None:
+    if not isinstance(geometry, NativeMotifGeometryAdapter):
+        raise SubstrateConfigurationError("shared bridge profile requires qualified native multi-scope motif geometry")
+    admitted_domains = {
+        scope.runtime_scope.domain_id
+        for scope in capability.routing_scopes
+        if scope.runtime_scope.scope_kind == "SHARED_DOMAIN"
+    }
+    if set(geometry.domain_ids()) != admitted_domains:
+        raise SubstrateConfigurationError("shared bridge geometry does not cover exactly the admitted shared domains")
 
 
 __all__ = [
