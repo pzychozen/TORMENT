@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from torment_service.collective_models import MemoryGovernanceFlags
+from torment_service.collective_models import ConvergenceEvent, MemoryGovernanceFlags
 from torment_service.post_write_runtime import FabricPostWriteContext, PostWriteStorageOutcome
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
@@ -135,6 +135,50 @@ class _SideStore:
         self.affect = event
 
 
+class _HivemindField:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.packets: list[tuple[object, np.ndarray]] = []
+
+    def append_packet(self, packet, *, embedding):
+        if self.fail:
+            raise OSError("injected collective-field failure")
+        self.packets.append((packet, np.asarray(embedding).copy()))
+        return ConvergenceEvent(
+            event_id="d2-convergence", workspace_id="ws", domain_id="research",
+            participating_agents=["aria", "bryn"], source_packets=["other", packet.packet_id],
+            source_eids=[17, packet.source_eid], confidence=.95,
+        )
+
+
+class _HivemindProposalBridge:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def maybe_draft_proposal(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+
+
+class _HivemindOwner:
+    def __init__(self, field: _HivemindField, bridge: _HivemindProposalBridge) -> None:
+        self._log = logging.getLogger("d2.shared.hivemind.owner")
+        self._hivemind_enable = True
+        self._hivemind_telemetry_enable = True
+        self.character_store = SimpleNamespace(load_state=lambda *_args: None)
+        self._field = field
+        self._bridge = bridge
+        self.telemetry: list[dict[str, object]] = []
+
+    def _get_collective_field(self, _workspace_id: str) -> _HivemindField:
+        return self._field
+
+    def _get_proposal_bridge(self, _workspace_id: str) -> _HivemindProposalBridge:
+        return self._bridge
+
+    def _emit_hivemind_packet_telemetry(self, **kwargs) -> None:
+        self.telemetry.append(kwargs)
+
+
 def _policy(*, auto_merge: bool = False) -> dict[str, object]:
     return {
         "motif_entropy_target_n": 2,
@@ -191,6 +235,38 @@ def _configuration(
         checkpoint_snapshots_required=False, bridge_suggestions_required=False, deep_memory_required=False,
         shared_motif_suggestion_maintenance_required=True,
         shared_mood_drift_binding=NativeSharedTriggerMoodDriftBinding(private, template),
+    )
+
+
+def _hivemind_configuration(
+    *,
+    shared: NativeFabricRoutingScope,
+    field: _HivemindField,
+    bridge: _HivemindProposalBridge,
+) -> tuple[NativePostWriteQualificationConfiguration, _HivemindOwner, object]:
+    owner = _HivemindOwner(field, bridge)
+    proposal_registry = object()
+    workspace = SimpleNamespace(
+        domain_policies={"research": _policy()},
+        proposals={"research": proposal_registry},
+    )
+    return (
+        NativePostWriteQualificationConfiguration(
+            routing_scope=shared,
+            profile=NativePostWriteQualificationProfile.core_staging_with_shared_hivemind_packet_emission(),
+            external=NativePostWriteExternalDependencies(
+                owner=owner, workspace=workspace, identity=SimpleNamespace(seed={}), agent_key="aria",
+                detect_canon_conflict=lambda *_args: (False, 0.0, "unused"),
+                proposal_allowed=lambda *_args, **_kwargs: False,
+                hivemind_log=logging.getLogger("d2.shared.hivemind"),
+            ),
+            derived_runtime_template=None, motif_suggestion_maintenance_required=False,
+            persistent_trajectory_evidence_required=False, checkpoint_snapshots_required=False,
+            bridge_suggestions_required=False, deep_memory_required=False,
+            shared_hivemind_packet_emission_required=True,
+        ),
+        owner,
+        proposal_registry,
     )
 
 
@@ -478,6 +554,77 @@ def test_d1_profile_requires_a_separate_admitted_private_mood_target(tmp_path: P
         with pytest.raises(SubstrateConfigurationError, match="must be prepared separately"):
             prepare_native_fabric_post_write_adapter(
                 capability=capability, configuration=replace(configuration, shared_bridge_suggestions_required=True),
+            )
+    finally:
+        qualified.close()
+
+
+def test_d2_shared_hivemind_uses_current_shared_native_source_and_external_owners(tmp_path: Path):
+    qualified, connection, capability, _private, shared = _prepared(tmp_path)
+    try:
+        field = _HivemindField()
+        bridge = _HivemindProposalBridge()
+        configuration, owner, proposal_registry = _hivemind_configuration(
+            shared=shared, field=field, bridge=bridge,
+        )
+        result, request = _shared_created(capability, key="D2:HIVEMIND", step=250, vector=(.2, .8, .1))
+        context = replace(
+            _context(result, request), skip_packet_emission=False,
+            debug={"coherence": .6}, tri_mod={"cycle_stage": "S2", "identity_state": "s4"},
+            srg_state={"R_band": 3, "heartbeat_class": "warm", "is_crystal": True},
+        )
+        adapter = prepare_native_fabric_post_write_adapter(capability=capability, configuration=configuration)
+        tables = ("objects", "object_revisions", "operations", "semantic_transitions", "representations")
+        before = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables)
+
+        adapter.run(context, route_witness=NativePostWriteRouteWitness(result, request.native_operation_key))
+        adapter.run(context, route_witness=NativePostWriteRouteWitness(result, request.native_operation_key))
+
+        after = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables)
+        assert after == before
+        assert len(field.packets) == 2  # Existing CollectiveField remains the external retry/dedup owner.
+        packet, embedding = field.packets[0]
+        assert (packet.workspace_id, packet.agent_id, packet.domain_id, packet.source_eid) == (
+            "ws", "aria", "research", result.eid,
+        )
+        assert packet.srg_band == 3 and packet.srg_heartbeat_class == "warm" and packet.srg_is_crystal is True
+        assert embedding.tolist() == pytest.approx([.2, .8, .1])
+        assert len(bridge.calls) == 2
+        assert bridge.calls[0]["proposal_registry"] is proposal_registry
+        assert bridge.calls[0]["event"]["source_eids"] == [17, result.eid]
+        assert [row["gate_outcome"] for row in owner.telemetry] == ["emitted", "emitted"]
+    finally:
+        qualified.close()
+
+
+def test_d2_shared_hivemind_failure_is_fail_soft_and_profiles_do_not_compose(tmp_path: Path):
+    qualified, connection, capability, private, shared = _prepared(tmp_path)
+    try:
+        field = _HivemindField(fail=True)
+        bridge = _HivemindProposalBridge()
+        configuration, owner, _proposal_registry = _hivemind_configuration(
+            shared=shared, field=field, bridge=bridge,
+        )
+        result, request = _shared_created(capability, key="D2:HIVEMIND-FAIL", step=251, vector=(.2, .8, .1))
+        context = replace(_context(result, request), skip_packet_emission=False, debug={"coherence": .6})
+        tables = ("objects", "object_revisions", "operations", "semantic_transitions", "representations")
+        before = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables)
+        adapter = prepare_native_fabric_post_write_adapter(capability=capability, configuration=configuration)
+
+        assert adapter.run(context, route_witness=NativePostWriteRouteWitness(result, request.native_operation_key)).proposal_id is None
+        assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in tables) == before
+        assert not bridge.calls and owner.telemetry[-1]["gate_outcome"] == "error"
+        with pytest.raises(SubstrateConfigurationError, match="does not qualify"):
+            prepare_native_fabric_post_write_adapter(
+                capability=capability,
+                configuration=replace(configuration, profile=NativePostWriteQualificationProfile.core_staging()),
+            )
+        side = _SideStore()
+        d1 = _configuration(tmp_path, private=private, shared=shared, side=side)
+        with pytest.raises(SubstrateConfigurationError, match="prepared separately"):
+            prepare_native_fabric_post_write_adapter(
+                capability=capability,
+                configuration=replace(d1, shared_hivemind_packet_emission_required=True),
             )
     finally:
         qualified.close()

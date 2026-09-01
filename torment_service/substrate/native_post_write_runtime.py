@@ -80,6 +80,7 @@ class NativePostWriteQualificationProfile:
     shared_motif_suggestion_maintenance: NativePostWriteBehavior
     shared_trigger_identity_anchor: NativePostWriteBehavior
     shared_trigger_mood_drift: NativePostWriteBehavior
+    shared_hivemind_packet_emission: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -136,6 +137,14 @@ class NativePostWriteQualificationProfile:
             shared_trigger_mood_drift=NativePostWriteBehavior.QUALIFIED,
         )
 
+    @classmethod
+    def core_staging_with_shared_hivemind_packet_emission(cls) -> "NativePostWriteQualificationProfile":
+        """D2 profile for the shared-source Hivemind packet boundary only."""
+        return replace(
+            cls.core_staging(),
+            shared_hivemind_packet_emission=NativePostWriteBehavior.QUALIFIED,
+        )
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -184,6 +193,7 @@ class NativePostWriteQualificationConfiguration:
     shared_bridge_suggestions_required: bool = False
     shared_motif_suggestion_maintenance_required: bool = False
     shared_mood_drift_binding: NativeSharedTriggerMoodDriftBinding | None = None
+    shared_hivemind_packet_emission_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -204,6 +214,7 @@ class NativePostWriteQualificationConfiguration:
             "motif_suggestion_maintenance_required", "persistent_trajectory_evidence_required",
             "checkpoint_snapshots_required", "bridge_suggestions_required", "deep_memory_required",
             "shared_bridge_suggestions_required", "shared_motif_suggestion_maintenance_required",
+            "shared_hivemind_packet_emission_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -253,6 +264,18 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
         if context.scope == "shared":
+            if self._configuration.shared_hivemind_packet_emission_required:
+                self._validate_shared_hivemind_pre_effect(context)
+                with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+                    connection = opened.connection
+                    _revalidate_capability_for_route(self._capability, connection)
+                    self._validate_context_and_route(connection, context, witness)
+                    if context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
+                        consumers = LegacyFabricPostWriteAdapter(
+                            self._bind_shared_hivemind_dependencies(connection)
+                        )
+                        consumers._run_hivemind(context)
+                return FabricPostWriteOutcome()
             if self._configuration.shared_motif_suggestion_maintenance_required:
                 self._validate_shared_m1_mood_pre_effect(context)
                 with open_existing_native_core_connection(self._capability.core_database_path) as opened:
@@ -484,6 +507,35 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             hivemind_log=external.hivemind_log,
         )
 
+    def _bind_shared_hivemind_dependencies(
+        self,
+        connection: sqlite3.Connection,
+    ) -> LegacyFabricPostWriteDependencies:
+        """Bind D2's shared-source Hivemind reader and existing external owners only."""
+        scope = self._configuration.routing_scope
+        external = self._configuration.external
+        forbidden = _ForbiddenNativeGraph()
+        memory = NativePostWriteMemoryAccess(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            expected_dimension=self._capability.binding.representation_lane.dimension,
+        )
+        return LegacyFabricPostWriteDependencies(
+            owner=external.owner, workspace=external.workspace, graph=forbidden,
+            world_runtime=forbidden, derived_memory_runtime=forbidden,
+            memory_access=memory, memory_enumeration=forbidden, srg_runtime=forbidden,
+            embedding_dimension=self._capability.binding.representation_lane.dimension,
+            identity=external.identity, motif_registry=None, motif_runtime=None,
+            model_state=None, kernel_context=None, agent_key=external.agent_key,
+            detect_canon_conflict=external.detect_canon_conflict,
+            proposal_allowed=external.proposal_allowed,
+            random_chance=_forbidden_random_chance,
+            save_checkpoint=_forbidden_checkpoint,
+            build_motif_summary=_forbidden_checkpoint,
+            build_shard_snapshot=_forbidden_checkpoint,
+            hivemind_log=external.hivemind_log,
+        )
+
     def _validate_context_and_route(
         self,
         connection: sqlite3.Connection,
@@ -630,6 +682,20 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             _require_qualified(configuration.profile.motif_auto_merge, "motif auto-merge")
         _validate_shared_mood_drift_binding(self._capability, configuration)
 
+    def _validate_shared_hivemind_pre_effect(self, context: FabricPostWriteContext) -> None:
+        configuration = self._configuration
+        if configuration.routing_scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+            raise SubstrateInvariantViolation("shared post-write requires a claimed shared native scope")
+        if not configuration.shared_hivemind_packet_emission_required:
+            raise SubstrateConfigurationError("shared Hivemind packet capability is not required by this profile")
+        _require_qualified(configuration.profile.shared_hivemind_packet_emission, "shared Hivemind packet emission")
+        if configuration.shared_bridge_suggestions_required:
+            raise SubstrateConfigurationError("shared Hivemind and B1 bridge consumers must be prepared separately")
+        if configuration.shared_motif_suggestion_maintenance_required or configuration.shared_mood_drift_binding is not None:
+            raise SubstrateConfigurationError("shared Hivemind and D1 M1/mood consumers must be prepared separately")
+        if configuration.derived_runtime_template is not None:
+            raise SubstrateConfigurationError("shared Hivemind profile must not bind a source-scope derived runtime")
+
 
 def prepare_native_fabric_post_write_adapter(
     *,
@@ -660,9 +726,15 @@ def prepare_native_fabric_post_write_adapter(
             raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
     elif scope.runtime_scope.scope_kind == "SHARED_DOMAIN":
         shared_d1 = configuration.shared_motif_suggestion_maintenance_required
-        if configuration.shared_bridge_suggestions_required and shared_d1:
-            raise SubstrateConfigurationError("shared bridge and D1 M1/mood consumers must be prepared separately")
-        if not configuration.shared_bridge_suggestions_required and not shared_d1:
+        shared_hivemind = configuration.shared_hivemind_packet_emission_required
+        shared_consumers = sum((
+            bool(configuration.shared_bridge_suggestions_required),
+            bool(shared_d1),
+            bool(shared_hivemind),
+        ))
+        if shared_consumers > 1:
+            raise SubstrateConfigurationError("shared post-write consumers must be prepared separately")
+        if shared_consumers == 0:
             raise SubstrateConfigurationError("shared post-write configuration has no qualified consumer")
         if template is not None:
             raise SubstrateConfigurationError("shared post-write configuration must not bind a source-scope derived runtime")
@@ -671,11 +743,15 @@ def prepare_native_fabric_post_write_adapter(
             _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
             if not callable(configuration.external.random_chance):
                 raise SubstrateConfigurationError("shared bridge configuration requires an injected random_chance dependency")
-        else:
+        elif shared_d1:
             _require_qualified(configuration.profile.shared_motif_suggestion_maintenance, "shared motif suggestion maintenance")
             _require_required_noop(configuration.profile.shared_trigger_identity_anchor, "shared trigger identity anchor")
             _require_qualified(configuration.profile.shared_trigger_mood_drift, "shared trigger mood drift")
             _validate_shared_mood_drift_binding(capability, configuration)
+        else:
+            _require_qualified(configuration.profile.shared_hivemind_packet_emission, "shared Hivemind packet emission")
+            if configuration.shared_mood_drift_binding is not None:
+                raise SubstrateConfigurationError("shared Hivemind configuration must not bind a private mood-drift target")
     else:
         raise SubstrateConfigurationError("post-write configuration has an unsupported runtime scope")
     return NativeFabricPostWriteAdapter(capability, configuration, _prepared_marker=_PREPARED)
