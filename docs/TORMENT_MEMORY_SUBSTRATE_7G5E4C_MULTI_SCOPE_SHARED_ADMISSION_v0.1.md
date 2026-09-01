@@ -83,7 +83,8 @@ engineering lanes after service creation, proving that numeric EID overlap is
 isolated by source namespace rather than prohibited globally.
 
 It verifies per-lane native memory/motif/vector parity, raw vector-matrix
-bytes, domain-centroid parity, cross-domain motif-alias refusal, interruption,
+bytes, legacy/native search candidates, raw scores, and top-k order,
+domain-centroid parity, cross-domain motif-alias refusal, interruption,
 source-change refusal, lost B5 response recovery, descriptor removal/insertion
 tamper refusal, wrong-core and wrong-lane refusal, and fresh-interpreter cold
 readers after legacy source removal. Each recovered private/shared runtime is

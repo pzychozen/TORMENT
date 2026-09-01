@@ -276,10 +276,12 @@ def test_real_multi_scope_admission_cold_recovery_vectors_and_resume(tmp_path: P
             qualification_embedder_identity=WorkspaceNativeEmbedderIdentity("hash", "wrong-model", 3),
         ))
     legacy_matrices = {}
+    legacy_vector_hits = {}
     for plan in plans:
         graph = MemoryGraph(str(plan.legacy_graph_source_path), embedder=_Embedder())
         graph._ensure_index()
         legacy_matrices[plan.qualifier] = (tuple(graph._eid_list), graph._emb_mat.copy())
+        legacy_vector_hits[plan.qualifier] = graph.search_by_embedding(graph._emb_mat[0], top_k=8)
     del graph
     gc.collect()
     legacy_centroids = {
@@ -355,6 +357,12 @@ def test_real_multi_scope_admission_cold_recovery_vectors_and_resume(tmp_path: P
                 # reuse of a whole-core query cache.
                 assert vector_runtime.search_by_embedding(np.frombuffer(qualified.payload_bytes, dtype=np.float32), top_k=8) == hits
                 assert vector_runtime.rebuild_count == 1
+                legacy_hits = legacy_vector_hits[scope.memory_runtime_scope.qualifier]
+                assert [item["eid"] for item in hits] == [item["eid"] for item in legacy_hits]
+                assert [item["raw_score"] for item in hits] == pytest.approx(
+                    [item["raw_score"] for item in legacy_hits]
+                )
+                assert [item["score"] for item in hits] == pytest.approx([item["score"] for item in legacy_hits])
                 expected_eids, expected_matrix = legacy_matrices[scope.memory_runtime_scope.qualifier]
                 assert tuple(row.eid for row in vector_runtime.snapshot.rows) == expected_eids
                 assert vector_runtime.snapshot.matrix.tobytes() == expected_matrix.tobytes()
