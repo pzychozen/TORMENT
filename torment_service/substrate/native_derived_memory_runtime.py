@@ -134,6 +134,12 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
         )
 
     def maybe_emit_identity_anchor(self, context: DerivedMemoryRuntimeContext) -> int | None:
+        # D0: a shared trigger is inapplicable to private identity-anchor
+        # semantics.  This must precede all qualified-scope assertions and
+        # SQLite/side-store activity so no cross-scope provenance is read or
+        # written.
+        if context.trigger_scope == "shared":
+            return None
         self._assert_context(context)
         min_count, min_gap, max_examples = _anchor_thresholds(self._config.role_multiplier)
         state = dict(self._config.side_store.load_anchor_state(
@@ -236,6 +242,10 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
         return None
 
     def refine_identity_anchors(self, context: DerivedMemoryRuntimeContext) -> None:
+        # See ``maybe_emit_identity_anchor``: historical private anchors are
+        # never refined in response to a shared trigger.
+        if context.trigger_scope == "shared":
+            return
         self._assert_context(context)
         keep_k = _env_int("TORMENT_ANCHOR_KEEP_PER_MOTIF", 1)
         weak_max = _env_int("TORMENT_ANCHOR_WEAK_MEMBER_MAX", 3)

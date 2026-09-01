@@ -6,6 +6,7 @@ from hashlib import sha256
 import inspect
 import json
 from pathlib import Path
+import sqlite3
 
 import numpy as np
 import pytest
@@ -444,7 +445,9 @@ def test_native_derived_runtime_uses_native_motifs_side_stores_and_fresh_world_s
             seed_eids=(0, 1), now_ts=lambda: 500,
         )
         runtime = router.bind_derived_memory_runtime(connection, configuration=configuration)
-        context = DerivedMemoryRuntimeContext("ws", "aria", "personal", 1000, ("motif_personal_0001",), None, None)
+        context = DerivedMemoryRuntimeContext(
+            "ws", "aria", "personal", "private", 1000, ("motif_personal_0001",), None, None,
+        )
         anchor_eid = runtime.maybe_emit_identity_anchor(context)
         assert anchor_eid == 3
         anchor = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
@@ -463,7 +466,9 @@ def test_native_derived_runtime_uses_native_motifs_side_stores_and_fresh_world_s
         assert router.route(_route_request("ordinary-3", 4)).result is not None
         first_anchor_history = runtime._world.snapshot_for_testing().history_lengths[3]
         second_anchor = runtime.maybe_emit_identity_anchor(
-            DerivedMemoryRuntimeContext("ws", "aria", "personal", 1100, ("motif_personal_0001",), None, None)
+            DerivedMemoryRuntimeContext(
+                "ws", "aria", "personal", "private", 1100, ("motif_personal_0001",), None, None,
+            )
         )
         assert second_anchor == 5
         retired = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
@@ -479,11 +484,11 @@ def test_native_derived_runtime_uses_native_motifs_side_stores_and_fresh_world_s
         # First affect writes side state with no row; the separated transition
         # writes it before source creation and then again with drift history.
         assert runtime.maybe_emit_mood_drift(
-            DerivedMemoryRuntimeContext("ws", "aria", "personal", 1010, (), "sad", 0.75)
+            DerivedMemoryRuntimeContext("ws", "aria", "personal", "private", 1010, (), "sad", 0.75)
         ) is None
         assert side.events[-1] == ("affect-save", 7)
         mood_eid = runtime.maybe_emit_mood_drift(
-            DerivedMemoryRuntimeContext("ws", "aria", "personal", 1140, (), "angry", 0.75)
+            DerivedMemoryRuntimeContext("ws", "aria", "personal", "private", 1140, (), "angry", 0.75)
         )
         assert mood_eid == 6
         assert side.events[-2:] == [("affect-save", 7), ("affect-save", 8)]
@@ -494,5 +499,48 @@ def test_native_derived_runtime_uses_native_motifs_side_stores_and_fresh_world_s
         assert side.affect["drift_hist"] == [{"from": "sad", "to": "angry", "step": 1140, "conf": 0.75}]
         world_after = runtime._world.snapshot_for_testing()
         assert world_after.eids == (0, 1, 2, 3, 4, 5, 6) and world_after.born_steps[-1] == 1140
+    finally:
+        qualified.close()
+
+
+def test_native_derived_runtime_shared_trigger_skips_anchor_sql_and_side_stores(tmp_path: Path):
+    """D0: shared triggers cannot fabricate private anchor provenance."""
+    qualified, connection, capability, scope = _qualified_runtime(tmp_path)
+    try:
+        runtime = NativeFabricMemoryRouter(capability).bind_derived_memory_runtime(
+            connection,
+            configuration=NativeDerivedMemoryRuntimeConfiguration(
+                workspace_id="ws", agent_id="aria", domain_id="personal",
+                legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+                motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                memory_identity_namespace_id=scope.runtime_scope.identity_namespace_id,
+                semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+                idempotency_namespace_id=scope.idempotency_namespace_id,
+                parent_native_operation_key="d0-shared-trigger", expected_dimension=3,
+                embed=lambda _text: np.asarray((2.0, 0.6, 0.0), dtype=np.float32),
+                embedder_provider="synthetic", embedder_model="synthetic-v1", side_store=_SideStore(),
+                now_ts=lambda: 500,
+            ),
+        )
+        context = DerivedMemoryRuntimeContext(
+            "ws", "aria", "personal", "shared", 1000, ("motif_personal_0001",), None, None,
+        )
+        before_changes = connection.total_changes
+        forbidden_actions = {
+            sqlite3.SQLITE_READ, sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+        }
+
+        def reject_anchor_sql(action, _arg1, _arg2, _database, _trigger):
+            if action in forbidden_actions:
+                raise AssertionError("shared anchor no-op touched SQLite")
+            return sqlite3.SQLITE_OK
+
+        connection.set_authorizer(reject_anchor_sql)
+        try:
+            assert runtime.maybe_emit_identity_anchor(context) is None
+            assert runtime.refine_identity_anchors(context) is None
+        finally:
+            connection.set_authorizer(None)
+        assert connection.total_changes == before_changes
     finally:
         qualified.close()

@@ -417,6 +417,7 @@ class LegacyFabricPostWriteAdapter:
             workspace_id=context.workspace_id,
             agent_id=context.agent_id,
             domain_id=context.chosen_domain,
+            trigger_scope=context.scope,
             step=int(context.step),
             motif_ids=tuple(context.motif_ids),
             affect_tag=context.affect_tag,

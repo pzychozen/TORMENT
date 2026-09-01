@@ -6,14 +6,18 @@ the extraction rather than merely testing its new adapter.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import torment_service.fabric as fabric_module
+from torment_service.derived_memory_runtime import LegacyDerivedMemoryRuntime
 from torment_service.fabric import TormentFabric
 from torment_service.memory_kernel import KernelSignals
 from torment_service.memory_runtime_access import LegacyPostWriteMemoryAccess
+from torment_service.motifs import Motif
 from torment_service.post_write_runtime import (
     LegacyFabricPostWriteAdapter,
     PostWriteStorageOutcome,
@@ -60,14 +64,19 @@ def _install_kernel_signals(
     monkeypatch.setattr(fabric.kernel, "process", process)
 
 
-def _fabric_with_agent(tmp_path, monkeypatch: pytest.MonkeyPatch, **env: str):
+def _fabric_with_agent(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    domains: list[str] | None = None,
+    **env: str,
+):
     _configure_legacy_runtime(monkeypatch, **env)
     fabric = TormentFabric(str(tmp_path))
     workspace_id, agent_id = "post-write-workspace", "post-write-agent"
+    workspace = fabric.get_workspace(workspace_id, domains=domains)
     identity = fabric.create_agent(workspace_id, agent_id)
     identity.overlay["write_threshold"] = 0.0
     fabric.ident_store.save(identity)
-    workspace = fabric.get_workspace(workspace_id)
     graph = fabric.private_graphs[fabric._agent_key(workspace_id, agent_id)]
     return fabric, workspace_id, agent_id, workspace, graph
 
@@ -297,6 +306,127 @@ def test_new_memory_post_write_consumer_order_and_public_result_are_characterize
             "world",
             "bridge",
         ]
+    finally:
+        fabric.close()
+
+
+def test_shared_created_new_scope_isolates_colliding_private_anchor_eids(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D0: numeric EID overlap never grants shared motifs private anchor access."""
+    fabric, workspace_id, agent_id, workspace, private_graph = _fabric_with_agent(
+        tmp_path,
+        monkeypatch,
+        domains=["personal", "research"],
+        TORMENT_ID_ANCHOR_MIN_COUNT="2",
+        TORMENT_ID_ANCHOR_MIN_GAP_STEPS="0",
+    )
+    try:
+        _install_kernel_signals(monkeypatch, fabric, write_intent=True)
+        vector = np.full(workspace.embed_dim, 0.5, dtype=np.float32)
+        private_member_eids = []
+        for summary in ("private memory A", "private memory B"):
+            private_member_eids.append(private_graph.spawn_memory(
+                summary=summary, embedding=vector, mtype="episodic", strength=0.7,
+                confidence=0.8, half_life_days=20.0, links=[], canon=False,
+                user_id=agent_id, step=1, memory_class="core", extra_payload={},
+            ))
+        shared_graph = workspace.shared_graphs["research"]
+        shared_member_eids = []
+        for summary in ("shared memory X", "shared memory Y"):
+            shared_member_eids.append(shared_graph.spawn_memory(
+                summary=summary, embedding=vector, mtype="episodic", strength=0.7,
+                confidence=0.8, half_life_days=20.0, links=[], canon=False,
+                user_id="other-agent", step=1, memory_class="core", extra_payload={},
+            ))
+        assert shared_member_eids == private_member_eids
+
+        motif_id = "shared_collision"
+        registry = workspace.motif_regs["research"]
+        registry.motifs[motif_id] = Motif(
+            motif_id=motif_id, domain_id="research", label="unrelated shared rows",
+            centroid=vector.tolist(), strength=0.9, members=list(shared_member_eids),
+            contributing_agents=["other-agent"], stability_score=0.9, created_ts=1, last_active_ts=1,
+        )
+        historical_anchor_eids = []
+        for created_at in (10, 20):
+            historical_anchor_eids.append(private_graph.spawn_memory(
+                summary=f"historical private anchor {created_at}", embedding=vector,
+                mtype="identity_anchor", strength=0.8, confidence=0.85,
+                half_life_days=3650.0, links=[], canon=False, user_id=agent_id,
+                step=created_at, memory_class="core", extra_payload={
+                    "anchor_for_motif": motif_id, "anchor_member_count": 2,
+                    "created_at": created_at,
+                },
+            ))
+        historical_payloads = {
+            eid: deepcopy(private_graph.entities[eid].payload) for eid in historical_anchor_eids
+        }
+        private_eids_before = set(private_graph.entities)
+        calls: list[str] = []
+        original_maintenance = registry.update_entropy_and_suggest
+        original_emit = LegacyDerivedMemoryRuntime.maybe_emit_identity_anchor
+        original_refine = LegacyDerivedMemoryRuntime.refine_identity_anchors
+        original_mood = LegacyDerivedMemoryRuntime.maybe_emit_mood_drift
+        original_step_world = shared_graph.step_world
+
+        def maintenance(*args, **kwargs):
+            calls.append("m1")
+            return original_maintenance(*args, **kwargs)
+
+        def emit(runtime, context):
+            assert context.trigger_scope == "shared"
+            calls.append("anchor")
+            return original_emit(runtime, context)
+
+        def refine(runtime, context):
+            assert context.trigger_scope == "shared"
+            calls.append("refine")
+            return original_refine(runtime, context)
+
+        def mood(runtime, context):
+            assert context.trigger_scope == "shared"
+            calls.append("mood")
+            return original_mood(runtime, context)
+
+        def step_world(*args, **kwargs):
+            calls.append("world")
+            return original_step_world(*args, **kwargs)
+
+        monkeypatch.setattr(registry, "update_entropy_and_suggest", maintenance)
+        monkeypatch.setattr(LegacyDerivedMemoryRuntime, "maybe_emit_identity_anchor", emit)
+        monkeypatch.setattr(LegacyDerivedMemoryRuntime, "refine_identity_anchors", refine)
+        monkeypatch.setattr(LegacyDerivedMemoryRuntime, "maybe_emit_mood_drift", mood)
+        monkeypatch.setattr(shared_graph, "step_world", step_world)
+        monkeypatch.setattr(
+            fabric,
+            "_maybe_emit_identity_anchor",
+            lambda *_args, **_kwargs: pytest.fail("shared trigger entered the private anchor writer"),
+        )
+        monkeypatch.setattr(
+            fabric,
+            "_refine_identity_anchors",
+            lambda *_args, **_kwargs: pytest.fail("shared trigger entered private anchor refinement"),
+        )
+
+        result = fabric.ingest(
+            workspace_id, agent_id, "shared created-new collision fixture", step=100,
+            domain_id="research", scope="shared", supplied_embedding=vector.tolist(),
+        )
+
+        assert result["stored"] is True and result["reinforced"] is False
+        assert result["motifs"] == [motif_id]
+        assert calls == ["m1", "anchor", "refine", "mood", "world"]
+        assert set(private_graph.entities) == private_eids_before
+        assert all(
+            private_graph.entities[eid].payload == payload
+            for eid, payload in historical_payloads.items()
+        )
+        assert all(
+            private_graph.entities[eid].payload.get("type") != "identity_anchor"
+            for eid in private_eids_before - set(historical_anchor_eids)
+        )
     finally:
         fabric.close()
 

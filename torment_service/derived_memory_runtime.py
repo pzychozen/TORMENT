@@ -17,6 +17,7 @@ class DerivedMemoryRuntimeContext:
     workspace_id: str
     agent_id: str
     domain_id: str
+    trigger_scope: str
     step: int
     motif_ids: tuple[str, ...]
     affect_tag: str | None
@@ -58,6 +59,11 @@ class LegacyDerivedMemoryRuntime:
         self._workspace = workspace
 
     def maybe_emit_identity_anchor(self, context: DerivedMemoryRuntimeContext) -> int | None:
+        # D0: shared motif-member EIDs are not private-memory identities.
+        # Select the semantic no-op before entering the historical writer so
+        # it cannot inspect private rows or manufacture anchor provenance.
+        if context.trigger_scope == "shared":
+            return None
         return self._owner._maybe_emit_identity_anchor(
             self._workspace,
             agent_id=context.agent_id,
@@ -67,6 +73,10 @@ class LegacyDerivedMemoryRuntime:
         )
 
     def refine_identity_anchors(self, context: DerivedMemoryRuntimeContext) -> None:
+        # D0 applies the same prospective scope isolation to lifecycle work;
+        # existing private anchors remain untouched on a shared trigger.
+        if context.trigger_scope == "shared":
+            return
         self._owner._refine_identity_anchors(
             self._workspace,
             agent_id=context.agent_id,
