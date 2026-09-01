@@ -18,12 +18,17 @@ import numpy as np
 import pytest
 
 from torment_service.bridges import Bridge, BridgeRegistry
+from torment_service.fabric import TormentFabric
 from torment_service.memory_graph import MemoryGraph
 from torment_service.motif_geometry_port import LegacyMotifGeometryAdapter, NativeMotifGeometryAdapter
 from torment_service.motifs import MotifRegistry
-from torment_service.substrate.connection import open_new_native_core_connection
+from torment_service.substrate.connection import open_existing_native_core_connection, open_new_native_core_connection
+from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.errors import SubstrateInvariantViolation
-from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope
+from torment_service.substrate.fabric_native_routing import (
+    NativeFabricRoutingScope,
+    prepare_native_fabric_routing_capability,
+)
 from torment_service.substrate.ids import generate_native_id
 from torment_service.substrate.migration import (
     ExistingWorkspaceMultiScopeAdmissionRefused,
@@ -43,8 +48,17 @@ from torment_service.substrate.native_post_write_runtime import (
     NativePostWriteQualificationConfiguration,
     NativePostWriteQualificationProfile,
 )
-from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
+from torment_service.substrate.runtime_binding import (
+    NativeMemoryRuntimeScope,
+    NativeRepresentationLane,
+    prepare_native_memory_runtime_binding,
+)
 from torment_service.substrate.schema import create_schema
+from torment_service.substrate.shared_proposal_materialization import (
+    AuthorizedSharedProposalQuorum,
+    NativeAuthorizedSharedProposalMaterializer,
+    NativeSharedProposalStorageClock,
+)
 
 
 def _id():
@@ -477,3 +491,94 @@ def test_multi_scope_request_refuses_colliding_or_mismatched_lane_plans(tmp_path
         request_with(replace(second, motif_alias_namespace_id=first.motif_alias_namespace_id))
     with pytest.raises(ValueError, match="motif_domain_id"):
         ExistingWorkspaceNativeLanePlan("workspace", "SHARED_DOMAIN", root / "domains" / "research" / "shared", _id(), "research", _id(), _id(), _id(), _id(), _id(), _id(), "wrong", representation_lane=_lane(), domain_id="research")
+
+
+def test_admitted_e4c_research_lane_qualifies_authorized_proposal_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Exercise the E4D adapter against an actually admitted E4C shared lane."""
+    data = tmp_path / "e4c-authorized-proposal-source"
+    root = _create_real_workspace(data)
+    plans = _plans(root)
+    _freeze_zero_eid_overlap(root, plans)
+    request = _request(tmp_path, root, plans)
+    request.native_core_database_path.parent.mkdir(parents=True)
+    request.admission_descriptor_path.parent.mkdir(parents=True, exist_ok=True)
+    request.snapshot_root.parent.mkdir(parents=True, exist_ok=True)
+    admitted = ExistingWorkspaceNativeMultiScopeAdmissionService().admit(request)
+    assert admitted.descriptor.state.value == "ADMISSION_COMPLETE"
+    recovered = recover_existing_workspace_native_multi_scope_runtime(
+        native_core_database_path=request.native_core_database_path,
+        admission_descriptor_path=request.admission_descriptor_path,
+    )
+
+    monkeypatch.setenv("TORMENT_EMBED_PROVIDER", "hash")
+    monkeypatch.setenv("TORMENT_HASH_DIM", "3")
+    monkeypatch.setenv("TORMENT_COMPRESS_ENABLE", "0")
+    monkeypatch.setenv("TORMENT_SRG_ENABLE", "0")
+    monkeypatch.setenv("TORMENT_SQLITE_INDEX_ENABLE", "0")
+    import time
+    monkeypatch.setattr(time, "time", lambda: 7_000)
+    with TormentFabric(data_dir=str(data)) as fabric:
+        workspace = fabric.get_workspace("orchard", domains=["personal", "research", "engineering", "creative"])
+
+        def submit(agent_id: str, summary: str, mtype: str, strength: float, vector: tuple[float, float, float]):
+            response = fabric.propose_share(
+                workspace_id="orchard", agent_id=agent_id, summary=summary,
+                embedding=list(vector), domain_id="research", mtype=mtype,
+                confidence=.9, strength=strength,
+            )
+            return workspace.proposals["research"].apply_events()[response["proposal"]["proposal_id"]]
+
+        first = submit("genuine_a", "E4C admitted research proposal.", "fact", .85, (.95, .05, .0))
+        second = submit("genuine_b", "E4C admitted research support.", "fact", .75, (.94, .06, .0))
+        echo = submit("collective_evidence", "E4C collective evidence.", "collective_echo", .99, (.945, .055, .0))
+        legacy = fabric.process_proposals(
+            workspace_id="orchard", domain_id="research", min_distinct_agents=2,
+            sim_threshold=.99, step=77,
+        )
+        assert legacy["approved_groups"] == 1
+        legacy_payload = workspace.shared_graphs["research"].entities[legacy["created_shared_eids"][0]].payload
+        assert legacy_payload["summary"] == first.summary
+        assert legacy_payload["support_agents"] == ["genuine_a", "genuine_b"]
+        assert legacy_payload["source_proposal_ids"] == [first.proposal_id, second.proposal_id, echo.proposal_id]
+
+    with open_existing_native_core_connection(request.native_core_database_path) as qualified:
+        binding = prepare_native_memory_runtime_binding(
+            connection=qualified.connection,
+            core_database_path=request.native_core_database_path,
+            expected_core_id=recovered.native_core_id,
+            scope_bindings=tuple(item.memory_runtime_scope for item in recovered.scopes),
+            representation_lane=recovered.representation_lane,
+        )
+        capability = prepare_native_fabric_routing_capability(
+            binding=binding,
+            connection=qualified.connection,
+            routing_scopes=tuple(item.fabric_routing_scope for item in recovered.scopes),
+            expected_core_id=recovered.native_core_id,
+        )
+        result = NativeAuthorizedSharedProposalMaterializer(capability).materialize_quorum(
+            authorization=AuthorizedSharedProposalQuorum(
+                workspace_id="orchard", domain_id="research", representative=first,
+                participating_proposals=(first, second, echo),
+                support_agents=("genuine_a", "genuine_b"),
+                embedding_provider="hash", embedding_model="hash:3:torment",
+            ),
+            native_operation_key="7G5E4D:QUORUM:orchard:research:e4c-admitted-lane",
+            clock=NativeSharedProposalStorageClock(77, 7_000, 7_000, 7_000),
+        )
+        assert result.qualification.eligible is True
+        assert result.result is not None and result.result.reinforced is False
+        research = recovered.lookup_shared("research")
+        view = NativeMemoryCompatibilityFacade(qualified.connection).get_memory_by_eid(
+            legacy_source_namespace_id=research.memory_runtime_scope.legacy_source_namespace_id,
+            eid=result.result.eid,
+        )
+        assert view.payload["summary"] == legacy_payload["summary"]
+        assert view.payload["source"] == "proposal_group"
+        assert view.payload["support_agents"] == legacy_payload["support_agents"]
+        assert view.payload["source_proposal_ids"] == legacy_payload["source_proposal_ids"]
+        assert (view.lifecycle_state, view.lifecycle_authoritative, view.governance_state) == (
+            "PROTECTED", True, "EXPLICIT",
+        )
