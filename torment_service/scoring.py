@@ -26,6 +26,61 @@ def score_hit(
 # Continuity bonus helpers — shared by query() and trace()
 # ---------------------------------------------------------------------------
 
+
+@dataclass(frozen=True)
+class QueryMemoryIdentity:
+    """Qualified identity for legacy query-time memory comparisons.
+
+    EIDs are only compatibility identifiers within their owning graph.  Query
+    scoring must retain the owning workspace and the authoritative private
+    agent or shared domain before treating two memories as the same anchor.
+    """
+
+    workspace_id: str
+    scope: str
+    qualifier: str
+    eid: int
+
+
+def qualified_query_memory_identity(
+    hit: Dict[str, Any],
+    *,
+    expected_workspace_id: str,
+) -> Optional[QueryMemoryIdentity]:
+    """Return a fully-qualified memory identity from a flattened query hit.
+
+    Missing or mismatched origin metadata fails closed.  In particular, a
+    deep-lane hit is not inferred to be private merely because a source EID
+    happens to exist in a private graph.
+    """
+    workspace_id = str(hit.get("workspace_id") or "")
+    if not workspace_id or workspace_id != str(expected_workspace_id):
+        return None
+
+    try:
+        eid = int(hit.get("eid"))
+    except (TypeError, ValueError):
+        return None
+    if eid < 0:
+        return None
+
+    scope = str(hit.get("scope") or "")
+    if scope == "private":
+        qualifier = str(hit.get("agent_id") or "")
+    elif scope == "shared":
+        qualifier = str(hit.get("domain_id") or "")
+    else:
+        return None
+    if not qualifier:
+        return None
+
+    return QueryMemoryIdentity(
+        workspace_id=workspace_id,
+        scope=scope,
+        qualifier=qualifier,
+        eid=eid,
+    )
+
 @dataclass
 class ContinuityContext:
     """Pre-computed, per-query context for continuity scoring.
@@ -58,10 +113,11 @@ class ContinuityContext:
     # identity-anchor bonus
     anchor_base_bonus: float = 0.12
     self_anchor_bonus_val: float = 0.04
+    workspace_id: str = ""
     # anchor top-k dominance cap
     anchor_topk: int = 3
     anchor_rest_mult: float = 0.35
-    anchor_full_boost_eids: FrozenSet[int] = field(default_factory=frozenset)
+    anchor_full_boost_memory_ids: FrozenSet[QueryMemoryIdentity] = field(default_factory=frozenset)
 
     @classmethod
     def from_env(
@@ -72,7 +128,8 @@ class ContinuityContext:
         q_affect_tag: str,
         q_affect_conf: float,
         spiral_neg_recent: int,
-        anchor_full_boost_eids: FrozenSet[int] = frozenset(),
+        workspace_id: str = "",
+        anchor_full_boost_memory_ids: FrozenSet[QueryMemoryIdentity] = frozenset(),
     ) -> "ContinuityContext":
         """Build from environment variables + caller-supplied values."""
         def _env_float(key: str, default: str) -> float:
@@ -113,9 +170,10 @@ class ContinuityContext:
             self_thread_bonus_val=_env_float("TORMENT_SELF_MEMORY_BONUS", "0.06"),
             anchor_base_bonus=0.12,
             self_anchor_bonus_val=_env_float("TORMENT_SELF_ANCHOR_BONUS", "0.04"),
+            workspace_id=str(workspace_id),
             anchor_topk=_env_int("TORMENT_ANCHOR_BOOST_TOPK", "3"),
             anchor_rest_mult=_env_float("TORMENT_ANCHOR_BOOST_REST_MULT", "0.35"),
-            anchor_full_boost_eids=anchor_full_boost_eids,
+            anchor_full_boost_memory_ids=anchor_full_boost_memory_ids,
         )
 
 
@@ -188,12 +246,13 @@ def compute_continuity_bonuses(
     if mtype == "identity_anchor":
         _ab = ctx.anchor_base_bonus
         # Top-k dominance cap: reduce bonus for non-top anchors
-        try:
-            _eid = int(hit.get("eid", -1))
-        except Exception:
-            _eid = -1
-        if ctx.anchor_full_boost_eids and _eid not in ctx.anchor_full_boost_eids:
-            _ab = float(_ab) * float(ctx.anchor_rest_mult)
+        if ctx.workspace_id and ctx.anchor_topk > 0:
+            _memory_identity = qualified_query_memory_identity(
+                hit,
+                expected_workspace_id=ctx.workspace_id,
+            )
+            if _memory_identity not in ctx.anchor_full_boost_memory_ids:
+                _ab = float(_ab) * float(ctx.anchor_rest_mult)
         r.self_anchor_bonus = float(_ab)
         # Additional lift when anchor belongs to querying agent's private thread
         if hit_scope == "private" and hit_agent == ctx.agent_id:

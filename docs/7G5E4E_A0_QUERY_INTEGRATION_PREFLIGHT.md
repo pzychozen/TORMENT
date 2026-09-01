@@ -284,3 +284,18 @@ CHARACTER_QUERY_SCOPE_AMBIGUITY = NO
 BARE_EID_QUERY_DEDUP_RISK = YES
 KERNEL_CHANGE_REQUIRED = NO
 ```
+
+## A1 supersession status
+
+The A0 observations above are retained as the historical baseline. A1 repairs
+the two identified legacy query identity leaks prospectively: continuity
+anchor comparison now uses qualified memory identities and motif geometry now
+uses qualified domain/motif identities. See
+`docs/7G5E4E_A1_QUERY_COMPOSITE_IDENTITY_REPAIR.md` for the repair evidence
+and reassessment.
+
+```text
+BARE_EID_QUERY_IDENTITY_LEAK = CLOSED
+BARE_MOTIF_ID_QUERY_IDENTITY_LEAK = CLOSED
+E4E_QUERY_PREFLIGHT = READY
+```

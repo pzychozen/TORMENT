@@ -1,9 +1,8 @@
-"""7G5E4E-A0 characterization locks for the current Fabric query boundary.
+"""7G5E4E legacy-query characterization locks.
 
-These tests do not select native retrieval.  They record the observable
-legacy call and identity laws that a later backend-neutral retrieval seam must
-preserve (or explicitly repair in a separately authorized compatibility
-change).
+These tests do not select native retrieval.  They retain the A0 query-call
+baseline and lock A1's prospective composite-identity repair in the legacy
+query path.
 """
 from __future__ import annotations
 
@@ -34,6 +33,19 @@ class _CountingEmbedder:
         return self._delegate.embed(text)
 
 
+class _FixedEmbedder:
+    """Deterministic test embedder with the current workspace dimension."""
+
+    def __init__(self, delegate, vector: np.ndarray) -> None:
+        self.provider = delegate.provider
+        self.model = delegate.model
+        self.dim = delegate.dim
+        self.vector = np.asarray(vector, dtype=np.float32).reshape(-1)
+
+    def embed(self, text: str):
+        return self.vector.copy()
+
+
 def _install_counting_embedder(fabric: TormentFabric, workspace_id: str, agent_id: str):
     counter = _CountingEmbedder(fabric.kernel.embedder)
     fabric.embedder = counter
@@ -43,6 +55,22 @@ def _install_counting_embedder(fabric: TormentFabric, workspace_id: str, agent_i
     for graph in (fabric.private_graphs[agent_key], *workspace.shared_graphs.values()):
         graph.embedder = counter
     return counter, workspace
+
+
+def _install_fixed_embedder(
+    fabric: TormentFabric,
+    workspace_id: str,
+    agent_id: str,
+    vector: np.ndarray,
+):
+    fixed = _FixedEmbedder(fabric.kernel.embedder, vector)
+    fabric.embedder = fixed
+    fabric.kernel.embedder = fixed
+    workspace = fabric.get_workspace(workspace_id)
+    agent_key = fabric._agent_key(workspace_id, agent_id)
+    for graph in (fabric.private_graphs[agent_key], *workspace.shared_graphs.values()):
+        graph.embedder = fixed
+    return fixed, workspace
 
 
 def _add_lane_memory(
@@ -159,14 +187,8 @@ def test_query_does_not_collapse_same_numeric_eid_across_private_and_shared_lane
         fabric.close()
 
 
-def test_characterization_bare_eid_anchor_boost_crosses_private_shared_scope(tmp_path):
-    """Record the outstanding query-scoring collision for the A0 blocker.
-
-    ``anchor_full_boost_eids`` is a bare integer set.  A private seed-canon
-    and a shared non-canon identity anchor with the same graph-local EID make
-    the shared hit receive the full 0.12 anchor boost.  This is not final-merge
-    deduplication, but it is an unsafe cross-scope query identity use.
-    """
+def test_private_anchor_eid_does_not_full_boost_shared_eid_collision(tmp_path):
+    """A private qualifying anchor cannot identify a same-number shared hit."""
     fabric = TormentFabric(data_dir=str(tmp_path))
     try:
         workspace_id, agent_id, domain_id = "ws", "aria", "alpha"
@@ -195,26 +217,92 @@ def test_characterization_bare_eid_anchor_boost_crosses_private_shared_scope(tmp
         )
         shared_hit = next(hit for hit in result["results"] if hit["scope"] == "shared")
 
-        assert shared_hit["explain"]["self_anchor_bonus"] == 0.12
+        assert shared_hit["explain"]["self_anchor_bonus"] == 0.12 * 0.35
     finally:
         fabric.close()
 
 
-def test_characterization_flat_motif_id_lookup_crosses_selected_domain_scope(tmp_path):
-    """Record the second A0 namespace blocker in motif-alignment scoring.
+def test_private_anchor_keeps_full_boost_for_same_qualified_identity(tmp_path):
+    """Qualified private identity remains eligible for its own full boost."""
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    try:
+        workspace_id, agent_id, domain_id = "ws", "aria", "alpha"
+        workspace = fabric.get_workspace(workspace_id, domains=[domain_id])
+        fabric.create_agent(workspace_id, agent_id)
+        vector = np.zeros(fabric.kernel.embedder.dim, dtype=np.float32)
+        vector[0] = 1.0
+        agent_key = fabric._agent_key(workspace_id, agent_id)
+        eid = _add_lane_memory(
+            fabric.private_graphs[agent_key], workspace_id=workspace_id,
+            agent_id=agent_id, scope="private", domain_id=domain_id,
+            text="private canon identity anchor", vector=vector,
+            memory_type="identity_anchor", canon=True,
+        )
 
-    Query builds one centroid map keyed only by ``motif_id``.  With the same
-    runtime motif ID in alpha and beta, the later selected beta centroid
-    overwrites alpha's centroid, even for an alpha-scoped hit.
-    """
+        result = fabric.query(
+            workspace_id, agent_id, "identity query", domain_id=domain_id,
+            top_k=8, explain=True,
+            memory_plan={"top_k_by_lane": {"core": 1, "relational": 1, "deep": 0}},
+        )
+        hit = next(item for item in result["results"] if int(item["eid"]) == eid)
+
+        assert hit["explain"]["self_anchor_bonus"] == 0.12 + 0.04
+    finally:
+        fabric.close()
+
+
+def test_private_anchor_eid_does_not_full_boost_bridge_shared_collision(tmp_path):
+    """Bridge routing cannot replace a shared hit's destination-domain identity."""
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    try:
+        workspace_id, agent_id = "ws", "aria"
+        workspace = fabric.get_workspace(workspace_id, domains=["alpha", "beta", "gamma"])
+        fabric.create_agent(workspace_id, agent_id)
+        vector = np.zeros(fabric.kernel.embedder.dim, dtype=np.float32)
+        vector[0] = 1.0
+        agent_key = fabric._agent_key(workspace_id, agent_id)
+        private_eid = _add_lane_memory(
+            fabric.private_graphs[agent_key], workspace_id=workspace_id,
+            agent_id=agent_id, scope="private", domain_id="alpha",
+            text="private seed canon", vector=vector, memory_type="seed_canon", canon=True,
+        )
+        bridge_eid = _add_lane_memory(
+            workspace.shared_graphs["gamma"], workspace_id=workspace_id,
+            agent_id=agent_id, scope="shared", domain_id="gamma",
+            text="bridge shared identity anchor", vector=vector,
+            memory_type="identity_anchor", canon=False,
+        )
+        assert private_eid == bridge_eid
+        workspace.bridges.bridges.append(Bridge(
+            from_domain="alpha", from_motif="motif-a",
+            to_domain="gamma", to_motif="motif-g", confidence=1.0,
+            created_ts=1, status="approved", updated_ts=1,
+        ))
+
+        result = fabric.query(
+            workspace_id, agent_id, "identity bridge query", domain_id="alpha",
+            top_k=8, explain=True, peek_bridges=True,
+            memory_plan={"top_k_by_lane": {"core": 1, "relational": 1, "deep": 0}},
+        )
+        bridge_hit = next(item for item in result["results"] if item.get("via_bridge"))
+
+        assert bridge_hit["domain_id"] == "gamma"
+        assert bridge_hit["bridge_domain"] == "gamma"
+        assert bridge_hit["explain"]["self_anchor_bonus"] == 0.12 * 0.35
+    finally:
+        fabric.close()
+
+
+def test_same_string_motifs_resolve_in_each_hit_domain(tmp_path):
+    """Alpha and beta same-string motifs retain their separate geometry."""
     fabric = TormentFabric(data_dir=str(tmp_path))
     try:
         workspace_id, agent_id = "ws", "aria"
         workspace = fabric.get_workspace(workspace_id, domains=["alpha", "beta"])
         fabric.create_agent(workspace_id, agent_id)
-        counter, workspace = _install_counting_embedder(fabric, workspace_id, agent_id)
-        vector = np.zeros(counter.dim, dtype=np.float32)
+        vector = np.zeros(fabric.kernel.embedder.dim, dtype=np.float32)
         vector[0] = 1.0
+        fixed, workspace = _install_fixed_embedder(fabric, workspace_id, agent_id, vector)
         now = 1
         workspace.motif_regs["alpha"].motifs["same-id"] = Motif(
             "same-id", "alpha", "alpha motif", vector.tolist(),
@@ -225,22 +313,130 @@ def test_characterization_flat_motif_id_lookup_crosses_selected_domain_scope(tmp
             1.0, [], [], 0.5, now, now,
         )
         agent_key = fabric._agent_key(workspace_id, agent_id)
-        eid = _add_lane_memory(
+        alpha_eid = _add_lane_memory(
             fabric.private_graphs[agent_key], workspace_id=workspace_id,
             agent_id=agent_id, scope="private", domain_id="alpha",
             text="alpha-scoped motif memory", vector=vector,
         )
-        fabric.private_graphs[agent_key].entities[eid].payload["motifs"] = ["same-id"]
+        beta_eid = _add_lane_memory(
+            workspace.shared_graphs["beta"], workspace_id=workspace_id,
+            agent_id=agent_id, scope="shared", domain_id="beta",
+            text="beta-scoped motif memory", vector=vector,
+        )
+        fabric.private_graphs[agent_key].entities[alpha_eid].payload["motifs"] = ["same-id"]
+        workspace.shared_graphs["beta"].entities[beta_eid].payload["motifs"] = ["same-id"]
 
         result = fabric.query(
             workspace_id, agent_id, "motif collision query", domain_id="alpha",
             top_k=8,
+            memory_plan={"top_k_by_lane": {"core": 1, "relational": 1, "deep": 0}},
+        )
+        alpha_hit = next(item for item in result["results"] if item["scope"] == "private")
+        beta_hit = next(item for item in result["results"] if item["scope"] == "shared")
+
+        assert alpha_hit["motif_alignment"] == 1.0
+        assert beta_hit["motif_alignment"] == 0.0
+
+        fixed.vector = -vector
+        reversed_result = fabric.query(
+            workspace_id, agent_id, "motif collision reverse query", domain_id="alpha",
+            top_k=8,
+            memory_plan={"top_k_by_lane": {"core": 1, "relational": 1, "deep": 0}},
+        )
+        reversed_alpha = next(item for item in reversed_result["results"] if item["scope"] == "private")
+        reversed_beta = next(item for item in reversed_result["results"] if item["scope"] == "shared")
+
+        assert reversed_alpha["motif_alignment"] == 0.0
+        assert reversed_beta["motif_alignment"] == 1.0
+    finally:
+        fabric.close()
+
+
+def test_bridge_hit_cannot_borrow_same_string_primary_motif_centroid(tmp_path):
+    """A bridge-peek hit keeps absence when its source geometry was not selected."""
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    try:
+        workspace_id, agent_id = "ws", "aria"
+        workspace = fabric.get_workspace(workspace_id, domains=["alpha", "beta", "gamma"])
+        fabric.create_agent(workspace_id, agent_id)
+        vector = np.zeros(fabric.kernel.embedder.dim, dtype=np.float32)
+        vector[0] = 1.0
+        _install_fixed_embedder(fabric, workspace_id, agent_id, vector)
+        now = 1
+        workspace.motif_regs["alpha"].motifs["same-id"] = Motif(
+            "same-id", "alpha", "alpha motif", vector.tolist(),
+            1.0, [], [], 0.5, now, now,
+        )
+        workspace.motif_regs["gamma"].motifs["same-id"] = Motif(
+            "same-id", "gamma", "gamma motif", (-vector).tolist(),
+            1.0, [], [], 0.5, now, now,
+        )
+        bridge_eid = _add_lane_memory(
+            workspace.shared_graphs["gamma"], workspace_id=workspace_id,
+            agent_id=agent_id, scope="shared", domain_id="gamma",
+            text="bridge motif memory", vector=vector,
+        )
+        workspace.shared_graphs["gamma"].entities[bridge_eid].payload["motifs"] = ["same-id"]
+        workspace.bridges.bridges.append(Bridge(
+            from_domain="alpha", from_motif="same-id",
+            to_domain="gamma", to_motif="same-id", confidence=1.0,
+            created_ts=1, status="approved", updated_ts=1,
+        ))
+
+        result = fabric.query(
+            workspace_id, agent_id, "bridge motif query", domain_id="alpha",
+            top_k=8, peek_bridges=True,
+            memory_plan={"top_k_by_lane": {"core": 0, "relational": 1, "deep": 0}},
+        )
+        bridge_hit = next(item for item in result["results"] if item.get("via_bridge"))
+
+        assert bridge_hit["domain_id"] == "gamma"
+        assert bridge_hit["motif_alignment"] == 0.0
+    finally:
+        fabric.close()
+
+
+def test_hit_without_motif_keeps_qualified_fallback_threshold_behavior(tmp_path):
+    """Fallback still returns the best selected motif only at the 0.55 threshold."""
+    fabric = TormentFabric(data_dir=str(tmp_path))
+    try:
+        workspace_id, agent_id, domain_id = "ws", "aria", "alpha"
+        workspace = fabric.get_workspace(workspace_id, domains=[domain_id])
+        fabric.create_agent(workspace_id, agent_id)
+        vector = np.zeros(fabric.kernel.embedder.dim, dtype=np.float32)
+        vector[0] = 1.0
+        fixed, workspace = _install_fixed_embedder(fabric, workspace_id, agent_id, vector)
+        now = 1
+        workspace.motif_regs[domain_id].motifs["fallback-id"] = Motif(
+            "fallback-id", domain_id, "fallback motif", vector.tolist(),
+            1.0, [], [], 0.5, now, now,
+        )
+        agent_key = fabric._agent_key(workspace_id, agent_id)
+        eid = _add_lane_memory(
+            fabric.private_graphs[agent_key], workspace_id=workspace_id,
+            agent_id=agent_id, scope="private", domain_id=domain_id,
+            text="motif-free memory", vector=vector,
+        )
+
+        aligned = fabric.query(
+            workspace_id, agent_id, "fallback aligned query", domain_id=domain_id,
+            top_k=8,
             memory_plan={"top_k_by_lane": {"core": 1, "relational": 0, "deep": 0}},
         )
-        hit = next(item for item in result["results"] if int(item["eid"]) == eid)
+        aligned_hit = next(item for item in aligned["results"] if int(item["eid"]) == eid)
+        assert aligned_hit["motifs"] == ["fallback-id"]
+        assert aligned_hit["motif_alignment"] == 1.0
 
-        # The alpha centroid is exactly aligned with the query.  The observed
-        # zero proves beta's same-string motif ID overwrote it in the flat map.
-        assert hit["motif_alignment"] == 0.0
+        orthogonal = np.zeros_like(vector)
+        orthogonal[1] = 1.0
+        fixed.vector = orthogonal
+        unaligned = fabric.query(
+            workspace_id, agent_id, "fallback unaligned query", domain_id=domain_id,
+            top_k=8,
+            memory_plan={"top_k_by_lane": {"core": 1, "relational": 0, "deep": 0}},
+        )
+        unaligned_hit = next(item for item in unaligned["results"] if int(item["eid"]) == eid)
+        assert unaligned_hit["motifs"] == []
+        assert unaligned_hit["motif_alignment"] == 0.0
     finally:
         fabric.close()

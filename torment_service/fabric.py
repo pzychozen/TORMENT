@@ -42,7 +42,13 @@ from .substrate.shared_proposal_materialization import (
     AuthorizedSharedProposalOperator,
     AuthorizedSharedProposalQuorum,
 )
-from .scoring import score_hit, ContinuityContext, compute_continuity_bonuses
+from .scoring import (
+    score_hit,
+    ContinuityContext,
+    QueryMemoryIdentity,
+    compute_continuity_bonuses,
+    qualified_query_memory_identity,
+)
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
 from .coherence_field import compute_coherence_field
@@ -115,6 +121,42 @@ class _PersistedJobRootIdentity:
     jobs_root: _FilesystemDirectoryIdentity
     clone_root: _FilesystemDirectoryIdentity
     repair_root: _FilesystemDirectoryIdentity
+
+
+@dataclass(frozen=True)
+class _QueryMotifIdentity:
+    """Internal domain-qualified identity for legacy motif geometry lookup."""
+
+    workspace_id: str
+    domain_id: str
+    motif_id: str
+
+
+def _qualified_query_motif_identity(
+    hit: Dict[str, Any],
+    *,
+    workspace_id: str,
+    motif_id: Any,
+) -> Optional[_QueryMotifIdentity]:
+    """Resolve a stored hit motif only in its authoritative source domain.
+
+    ``bridge_domain`` is routing metadata, not the memory's namespace.  A hit
+    without a validated private/shared origin is intentionally unresolved.
+    """
+    if not isinstance(motif_id, str) or not motif_id:
+        return None
+    if str(hit.get("workspace_id") or "") != str(workspace_id):
+        return None
+    if str(hit.get("scope") or "") not in {"private", "shared"}:
+        return None
+    domain_id = str(hit.get("domain_id") or "")
+    if not domain_id:
+        return None
+    return _QueryMotifIdentity(
+        workspace_id=str(workspace_id),
+        domain_id=domain_id,
+        motif_id=motif_id,
+    )
 
 class _JobCancelled(Exception):
     pass
@@ -4318,11 +4360,16 @@ class TormentFabric:
         for d in domains:
             active_motifs[d] = ws.motif_regs[d].active(top_k=6)
 
-        # build quick motif centroid lookup
-        motif_centroids: Dict[str, np.ndarray] = {}
+        # Preserve domain ownership of motif geometry.  Runtime motif IDs are
+        # compatibility identifiers within a domain, not global identifiers.
+        motif_centroids: Dict[_QueryMotifIdentity, np.ndarray] = {}
         for d in domains:
             for m in ws.motif_regs[d].motifs.values():
-                motif_centroids[m.motif_id] = m.centroid_np()
+                motif_centroids[_QueryMotifIdentity(
+                    workspace_id=str(workspace_id),
+                    domain_id=str(d),
+                    motif_id=str(m.motif_id),
+                )] = m.centroid_np()
 
         
         wants_contested = any(k in query_text.lower() for k in ["contested", "disputed", "conflict", "contradict", "both sides", "arguments"])
@@ -4361,10 +4408,10 @@ class TormentFabric:
             _anchor_topk = int(os.getenv("TORMENT_ANCHOR_BOOST_TOPK", "3"))
         except Exception:
             _anchor_topk = 3
-        _anchor_full_boost: set = set()
+        _anchor_full_boost: set[QueryMemoryIdentity] = set()
         if _anchor_topk > 0:
             try:
-                _acand: List[Tuple[int, float]] = []
+                _acand: List[Tuple[QueryMemoryIdentity, float]] = []
                 for _hh in all_hits:
                     try:
                         _htype = str(_hh.get("type") or "")
@@ -4379,11 +4426,17 @@ class TormentFabric:
                             continue
                         if bool(_hh.get("anchor_retired")):
                             continue
-                        _acand.append((int(_hh.get("eid", -1)), float(_hh.get("score", 0.0))))
+                        _memory_identity = qualified_query_memory_identity(
+                            _hh,
+                            expected_workspace_id=str(workspace_id),
+                        )
+                        if _memory_identity is None:
+                            continue
+                        _acand.append((_memory_identity, float(_hh.get("score", 0.0))))
                     except Exception:
                         continue
                 _acand.sort(key=lambda x: x[1], reverse=True)
-                _anchor_full_boost = set([e for (e, _s) in _acand[:_anchor_topk] if e >= 0])
+                _anchor_full_boost = {identity for (identity, _score) in _acand[:_anchor_topk]}
             except Exception:
                 _anchor_full_boost = set()
 
@@ -4426,7 +4479,8 @@ class TormentFabric:
             q_affect_tag=_q_affect_tag,
             q_affect_conf=_q_affect_conf,
             spiral_neg_recent=_spiral_neg_recent,
-            anchor_full_boost_eids=frozenset(_anchor_full_boost),
+            workspace_id=str(workspace_id),
+            anchor_full_boost_memory_ids=frozenset(_anchor_full_boost),
         )
 
         now_ts = _now_ts()
@@ -4443,21 +4497,32 @@ class TormentFabric:
             ts = int(h.get("created_ts", now_ts))
             recency_days = max(0.0, (now_ts - ts) / 86400.0)
             motifs = h.get("motifs") or []
+            motif_identities: List[_QueryMotifIdentity] = []
             if not motifs and motif_centroids:
                 # infer best motif by similarity
-                best_mid = None
+                best_identity = None
                 best_ms = -1.0
-                for mid, c in motif_centroids.items():
+                for motif_identity, c in motif_centroids.items():
                     s2 = float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12)))
                     if s2 > best_ms:
                         best_ms = s2
-                        best_mid = mid
-                if best_mid is not None and best_ms >= 0.55:
-                    motifs = [best_mid]
+                        best_identity = motif_identity
+                if best_identity is not None and best_ms >= 0.55:
+                    motifs = [best_identity.motif_id]
+                    motif_identities = [best_identity]
+            elif motifs:
+                for mid in motifs:
+                    identity = _qualified_query_motif_identity(
+                        h,
+                        workspace_id=str(workspace_id),
+                        motif_id=mid,
+                    )
+                    if identity is not None:
+                        motif_identities.append(identity)
 
             motif_alignment = 0.0
-            for mid in motifs:
-                c = motif_centroids.get(mid)
+            for motif_identity in motif_identities:
+                c = motif_centroids.get(motif_identity)
                 if c is None:
                     continue
                 motif_alignment = max(motif_alignment, float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12))))
@@ -7731,10 +7796,14 @@ class TormentFabric:
             domains = [domain_id] + [d for d in domains if d != domain_id]
             domains = domains[:2]
 
-        motif_centroids: Dict[str, np.ndarray] = {}
+        motif_centroids: Dict[_QueryMotifIdentity, np.ndarray] = {}
         for d in domains:
             for m in ws.motif_regs.get(d, MotifRegistry(self.data_dir, workspace_id, d)).motifs.values():
-                motif_centroids[m.motif_id] = m.centroid_np()
+                motif_centroids[_QueryMotifIdentity(
+                    workspace_id=str(workspace_id),
+                    domain_id=str(d),
+                    motif_id=str(m.motif_id),
+                )] = m.centroid_np()
 
         # Build qualified conflict map for traced domains (parity with query()).
         _trace_conflict_map = _build_conflict_map(ws, workspace_id, domains)
@@ -7803,8 +7872,8 @@ class TormentFabric:
             except Exception:
                 _trace_spiral_neg_recent = 0
 
-        # 4. Build shared ContinuityContext (anchor_full_boost_eids set after raw-hit gather below)
-        _trace_anchor_full_boost: frozenset = frozenset()
+        # 4. Build shared ContinuityContext (qualified anchors are gathered below)
+        _trace_anchor_full_boost: frozenset[QueryMemoryIdentity] = frozenset()
 
         def explain_for_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
             now_ts = _now_ts()
@@ -7815,7 +7884,14 @@ class TormentFabric:
             motifs = hit.get('motifs') or []
             motif_alignment = 0.0
             for mid in motifs:
-                c = motif_centroids.get(mid)
+                motif_identity = _qualified_query_motif_identity(
+                    hit,
+                    workspace_id=str(workspace_id),
+                    motif_id=mid,
+                )
+                if motif_identity is None:
+                    continue
+                c = motif_centroids.get(motif_identity)
                 if c is None or c.size == 0:
                     continue
                 motif_alignment = max(motif_alignment, float(np.dot(qemb, c) / ((np.linalg.norm(qemb)+1e-12)*(np.linalg.norm(c)+1e-12))))
@@ -8013,6 +8089,7 @@ class TormentFabric:
                 "score": _real_sim(graph, int(eid), payload),
                 "strength": float(payload.get('strength', 0.0)),
                 "created_ts": int(payload.get('created_ts', 0) or 0),
+                "workspace_id": payload.get('workspace_id'),
                 "domain_id": payload.get('domain_id'),
                 "scope": payload.get('scope', default_scope),
                 "motifs": payload.get('motifs', []),
@@ -8065,13 +8142,21 @@ class TormentFabric:
                         continue
                     if bool(_rh.get("anchor_retired")):
                         continue
-                    _t_acand.append((int(_rh.get("eid", -1)), float(_rh.get("score", 0.0))))
+                    _memory_identity = qualified_query_memory_identity(
+                        _rh,
+                        expected_workspace_id=str(workspace_id),
+                    )
+                    if _memory_identity is None:
+                        continue
+                    _t_acand.append((_memory_identity, float(_rh.get("score", 0.0))))
                 _t_acand.sort(key=lambda x: x[1], reverse=True)
-                _trace_anchor_full_boost = frozenset(e for (e, _s) in _t_acand[:_t_anchor_topk] if e >= 0)
+                _trace_anchor_full_boost = frozenset(
+                    identity for (identity, _score) in _t_acand[:_t_anchor_topk]
+                )
             except Exception:
                 _trace_anchor_full_boost = frozenset()
 
-        # Build ContinuityContext now that anchor_full_boost_eids is known
+        # Build ContinuityContext now that qualified anchor identities are known
         _trace_cont_ctx = ContinuityContext.from_env(
             agent_id=str(agent_id),
             canonical_step=_trace_canonical_step,
@@ -8079,7 +8164,8 @@ class TormentFabric:
             q_affect_tag=_trace_q_affect_tag,
             q_affect_conf=_trace_q_affect_conf,
             spiral_neg_recent=_trace_spiral_neg_recent,
-            anchor_full_boost_eids=_trace_anchor_full_boost,
+            workspace_id=str(workspace_id),
+            anchor_full_boost_memory_ids=_trace_anchor_full_boost,
         )
 
         # Explain each raw hit
