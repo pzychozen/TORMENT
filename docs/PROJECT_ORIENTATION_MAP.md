@@ -68,15 +68,28 @@ ACTIVATED`; `ACTIVATED != AUTHORIZED`.
 
 ```text
 QUALIFIED_NATIVE_ENVIRONMENT = torment-substrate / SQLite 3.53.4
-ORDINARY_torment_ENVIRONMENT = SQLite 3.51.2 / native-ineligible
-PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = YES
+ORDINARY_torment_ENVIRONMENT = SQLite 3.53.4 / native-runtime-qualified
+BLOCKER_5_B5_A1 = CLOSED
+PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = NO
+
+SOLVER_MOVEMENT_RULE_REVISED = NO
+AUTHORIZED_ENVIRONMENT_CHANGE = sqlite 3.51.2 -> 3.53.4; add libsqlite 3.53.4
+AUTHORIZED_OPENSSL_CHANGE = NO
+AUTHORIZED_CA_CERTIFICATES_CHANGE = NO
 ```
+
+The completed [B5-A1 production environment convergence record](BLOCKER_5_A1_PRODUCTION_ENVIRONMENT_CONVERGENCE.md)
+proves exact package movement, unmocked runtime qualification, native
+write/read requalification, public legacy regression, MCP regression, and
+real legacy REST lifecycle/restart smoke. The qualified profile remains
+compression/deep disabled.
 
 ### Current authorized frontier
 
 ```text
-BLOCKER_5_PREFLIGHT = READY
-BLOCKER_5 = OPENED_AT_PREFLIGHT_DESIGN_LEVEL
+BLOCKER_5_PREFLIGHT = CLOSED
+BLOCKER_5_B5_A1 = CLOSED
+BLOCKER_5 = OPENED_FOR_B5_A2_DESIGN_AND_IMPLEMENTATION
 
 PRODUCTION_SELECTOR_ADDED = NO
 NATIVE_ACTIVE = NO
@@ -93,14 +106,15 @@ mutation law, cutover/restart/rollback qualification, and production-shaped
 service administration.
 
 This orientation update does not open or authorize a selector, native
-activation, dual write, dual read, an environment upgrade, cutover, rollback,
+activation, dual write, dual read, cutover, rollback, public Fabric routing,
 or a production native service.
 
 The completed [Blocker-5 A0 production selection preflight](BLOCKER_5_A0_PRODUCTION_SELECTION_PREFLIGHT.md)
-freezes the entrypoint, environment, profile, selector/fence, lifecycle,
-fallback, rollback, crash, and rehearsal design. The next implementation slice
-is B5-A1: deliberate ordinary-environment convergence and requalification only.
-It does not begin selector, activation, or cutover implementation.
+freezes the entrypoint, profile, selector/fence, lifecycle, fallback, rollback,
+crash, and rehearsal design. B5-A1 has converged and requalified the ordinary
+environment only. The next authorized slice is B5-A2: external selector/era
+and agreement resolver plus active-core/pending maintenance-transition
+mechanics. It does not begin public Fabric routing, activation, or cutover.
 
 ## 1. Current main project thread
 
