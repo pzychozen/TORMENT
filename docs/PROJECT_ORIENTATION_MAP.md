@@ -5,47 +5,89 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
-- **TORMENT Memory Substrate Phases 0–6 are frozen at requirement/engineering-blueprint level.** The binding records are [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md). No production implementation, test change, runtime upgrade, database creation, migration, benchmark, or qualification has opened.
+- **TORMENT Memory Substrate Phases 0–6 are frozen design/requirements lineage.** Their binding records remain the [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md).
+- **Phase 7 bounded implementation is materially complete through the current native qualification chain.** `Blocker-1`, `Blocker-2`, `Blocker-3`, and `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md) and [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md) are the current implementation and qualification records.
 
-### Memory substrate closure
+### Closed memory-substrate result
 
-- **Phase 0 baseline:** `CURRENT_STORAGE_IS_AN_EMBRYONIC_CUSTOM_SUBSTRATE`; `CANONICAL_OPERATIONAL_TRUTH_SHOULD_LEAVE_LOOSE_JSONL`; `TORMENT_OWNED_LOGICAL_SUBSTRATE_REQUIRED`; `MULTIPLE_ACCESS_MODELS_REQUIRED`; `MULTIPLE_PHYSICAL_ENGINES_LIKELY_BUT_NOT_REQUIRED`; `NEW_LOW_LEVEL_DATABASE_ENGINE_NOT_REQUIRED`. JSONL is not inherently the problem; unmanaged canonical persistence lacks adequate durability discipline, cross-process exclusion, localized integrity, logical commit boundaries, and recovery semantics.
-- **Phase 1 logical model:** durable semantics are carried by logical objects and first-class logical relationships, not files, rows, or engines. `PRIMARY_DURABLE_STATE`, `MATERIALIZED_DERIVATION`, `HISTORICAL_EVIDENCE`, and `ACCELERATION` remain distinct; representation generations and dependencies are explicit.
-- **Phase 2 reliability contract:** commitment requires explicit, durable, non-residue evidence sufficient for non-guessing recovery. Historical outcome is separate from present determination; retries require stable idempotency identity and revision compatibility; integrity is localized; incomplete joint semantic invariants are withheld; and legacy ambiguity attaches to the smallest affected unit.
-- **Phase 3 physical architecture:** `INITIAL_PHYSICAL_SHAPE = SINGLE_TRANSACTIONAL_CORE`. The initial transactional core carries authoritative durable semantics and may initially retain materialized-representation payloads and required semantic history without collapsing their logical roles. `ACCELERATION` remains rebuildable and non-authoritative. A future separate representation-payload lane is compatible but not required.
-- **Phase 4 SQLite transactional-core contract:** `TRANSACTIONAL_CORE_ENGINE = SQLITE`. One semantic commit set is one SQLite core-database transaction; WAL and `synchronous=FULL` are required for semantic commitment; every semantic connection has a controlled initialization/verification path; semantic writes begin with `BEGIN IMMEDIATE`; and immutable transition evidence commits with successor state. SQLite physical writer serialization never replaces predecessor/revision validation. The current SQLite 3.51.2 environment is **not eligible** for the new WAL core: the WAL-reset fix, runtime admissibility policy, and fail-closed startup qualification are required.
-- **Phase 5 native schema/transaction/migration design:** logical objects and relationships use immutable revisions with primary current-revision selection pointers; committed revisions are semantically closed; operations provide recoverable idempotency intent and allocated outputs; each semantic commit has immutable transition evidence and typed effects; representations, integrity, reconciliation, aliases, and admission remain distinct structural families. Migration is an offline one-shot admission cutover; after new-core writes resume, the legacy store is evidence only. Exact DDL remains deferred.
-- **Phase 6 detailed SQLite engineering blueprint:** the native core uses UUIDv4 16-byte BLOB identities; separate identity, semantic-scope, and legacy-source namespaces; composite same-carrier revision ownership/linearity constraints; typed operation, transition-effect, integrity, reconciliation, and legacy-admission structures; controlled connection qualification; and a deployment cutover fence. The blueprint freezes no production implementation or runtime qualification result.
-- **Preserved boundaries:** semantic scope, fate domain, authority, current state, history, commit truth, representation readiness, integrity measurement, and operational disposition remain distinct. `COMMITTED / REPRESENTATION_PENDING` remains valid. Motif reconstruction remains unproven; motifs are non-disposable derived logical objects with derived logical membership relationships.
+```text
+7G5E4D_SHARED_WRITE_LIFECYCLE_SEMANTICS = PASS
+7G5E4E_QUERY_READ_COGNITION_SEMANTICS = PASS
 
-### Next memory substrate phase
+BLOCKER_4_SHARED_WRITE_SIDE = CLOSED
+BLOCKER_4_QUERY_READ_SIDE = CLOSED
+BLOCKER_4 = CLOSED
 
-**Phase 7 — Bounded Implementation in Slices** is the next separately authorized phase. It begins construction only through the frozen dependency order: eligible runtime, isolated substrate package, runtime qualification, connection discipline, schema/bootstrap, and tests before any authority cutover or legacy-runtime replacement. It must not dual-write or wire a half-built core into current TORMENT runtime.
+QUALIFIED_NATIVE_PROFILE = compression/deep disabled
+COMPRESSION_OR_DEEP_ENABLED = NOT_QUALIFIED_FOR_NATIVE_CUTOVER
+COMPRESSION_OR_DEEP_ENABLED = REFUSE_PROFILE_ELIGIBILITY
+```
 
-### Pre-database invariant closure
+SQLite owns native durable memory truth for memory objects/revisions,
+representations, motif truth/membership, provenance/governance facts, runtime
+order, and recovery/idempotency evidence.  `CharacterStore`, `BridgeRegistry`,
+`ConflictRegistry`, proposal/workflow stores, trajectory/checkpoint artifacts,
+Hivemind, world/SRG process-local state, and the deep-memory store remain
+external or process-local owners.
 
-- **PRE-DATABASE INVARIANT 1 — MEMORY-OPTIONAL IDENTITY: CLOSED / REQUIREMENT-LEVEL.** Identity definition is separable from experiential history; full character runtime remains memory-backed; the future reduced-mode term is **historyless character**. No implementation opened.
-- **PRE-DATABASE INVARIANT 2 — MODALITY-INDEPENDENT INGEST: CLOSED / REQUIREMENT-LEVEL.** Current generic text ingress is modality-blind and provenance-lossy; future memory semantics must separate origin, channel, representation, and derivation; unknown provenance is legitimate and raw media need not be retained. No richer-audio implementation opened.
-- **PRE-DATABASE INVARIANT 3 — AGENCY / AUTHORITY SEPARATION: CLOSED / REQUIREMENT-LEVEL.** Content/evidence does not create present authority; intent/proposal is distinct from permission; future durable, delegated, and AI-held authority remains permitted only under legitimate non-circular conferral; execution and autonomous initiation are distinct. No authority or autonomy runtime was opened.
+```text
+EVERYTHING_TO_SQLITE = NO
+```
 
-> **All three pre-database invariants are CLOSED.**
->
-> 1. Memory-Optional Identity
-> 2. Modality-Independent Ingest
-> 3. Agency / Authority Separation
+Native shared write/lifecycle semantics and native query/read cognition parity
+are qualified for that profile.  The same Fabric query cognition consumes
+native SQLite-backed memory truth through the qualified read model; there is no
+native query-algorithm fork.  SQLite does not make TORMENT more intelligent;
+that claim is neither implemented nor experimentally established.
 
-### Current authority and autonomy boundary
+### Preserved runtime and kernel boundaries
 
-- `CONTENT_AND_AUTHORITY_ARE_MOSTLY_SEPARATED_WITH_EXPLICIT_EXCEPTIONS` is the factual archaeology verdict. Trust/request authorization is external/config/request-derived, not memory-derived. Ordinary memory, canon, retrieval rank, tool result, model output, ThinkingResult, cognition result, Hivemind echo/proposal, character state, kernel signal, and stored intent do not create execution permission merely by existing or becoming influential.
-- The frozen substrate model preserves this boundary: stored carriers and representations—including future executable-artifact representations—never become execution authority merely through persistence. `STORED != EXECUTABLE`; `EXECUTABLE != ACTIVATED`; `ACTIVATED != AUTHORIZED`.
-- Current Mode 0 contains no memory-triggered wake loop or autonomous initiation path. AgentRunner/tool execution remains dormant and unowned. Managed autonomy is a future concept only; no scheduler, wake condition, active authorization runtime, capability system, or generic action authority exists today.
-- Canon is epistemic/identity standing, not execution permission. Retrieval may reveal authority-related information but is non-authorizing. Collective content cannot manufacture independent authority. `CONTENT CONTRIBUTION != AUTHORITY CONTRIBUTION` remains current Hivemind posture.
-- Current TORMENT has parallel REST and Spine trust enforcement; Fabric generally assumes caller-side authorization. This is enforcement-placement debt, not content/authority entanglement. `/promote force=True` remains `SEPARATELY_GATED_AUTHORITY_QUESTION`; Gate B is unresolved.
-- Existing persisted authority-shaped state that has never been load-bearing must not automatically become active authority in any future migration merely because it is preserved or normalized.
+```text
+PUBLIC_INGEST_BACKEND = LEGACY
+PUBLIC_QUERY_BACKEND = LEGACY
+NATIVE_ACTIVE = NO
+DUAL_WRITE = NO
+DUAL_READ = NO
+PRODUCTION_SELECTOR_ADDED = NO
+CUTOVER_OPENED = NO
 
-### Current authorized activity
+KERNEL_FILES_CHANGED = 0
+KERNEL_MATHEMATICS_CHANGED = NO
+KERNEL_GEOMETRY_CHANGED = NO
+KERNEL_VECTORISATION_CHANGED = NO
+KERNEL_RUNTIME_BEHAVIOR_CHANGED = NO
+```
 
-**NONE / HOLD pending explicit Phase 7 opening: Bounded Implementation in Slices.**
+The substrate remains a durable-memory system, not a kernel/database
+reinterpretation.  Memory may shape context but may not seize authority:
+stored content, retrieval, canon, Character state, and cognition results do
+not create execution permission.  `STORED != EXECUTABLE`; `EXECUTABLE !=
+ACTIVATED`; `ACTIVATED != AUTHORIZED`.
+
+### Environment state
+
+```text
+QUALIFIED_NATIVE_ENVIRONMENT = torment-substrate / SQLite 3.53.4
+ORDINARY_torment_ENVIRONMENT = SQLite 3.51.2 / native-ineligible
+PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = YES
+```
+
+### Current authorized frontier
+
+```text
+BLOCKER-5 = NOT YET IMPLEMENTED
+```
+
+Blocker-5 is deployment and selection work, not new cognition or memory
+semantics.  Its separately authorized boundary is production-environment
+convergence, deployment/profile eligibility, an explicit legacy/native
+selector, native resource lifecycle/ownership, the no-fallback-after-native-
+mutation law, cutover/restart/rollback qualification, and production-shaped
+service administration.
+
+This orientation update does not open or authorize a selector, native
+activation, dual write, dual read, an environment upgrade, cutover, rollback,
+or a production native service.
 
 ## 1. Current main project thread
 
