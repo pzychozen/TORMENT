@@ -11,8 +11,10 @@ from enum import Enum
 import logging
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from typing import Any, Callable
 
+from torment_service.checkpoint import build_motif_summary, save_checkpoint
 from torment_service.post_write_runtime import (
     FabricPostWriteContext,
     FabricPostWriteOutcome,
@@ -87,6 +89,7 @@ class NativePostWriteQualificationProfile:
     shared_trigger_mood_drift: NativePostWriteBehavior
     shared_hivemind_packet_emission: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
     shared_trajectory_evidence: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
+    shared_checkpoint_snapshot: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -159,6 +162,14 @@ class NativePostWriteQualificationProfile:
             shared_trajectory_evidence=NativePostWriteBehavior.QUALIFIED,
         )
 
+    @classmethod
+    def core_staging_with_shared_checkpoint_snapshot(cls) -> "NativePostWriteQualificationProfile":
+        """D4 profile for one external shared-trigger checkpoint snapshot."""
+        return replace(
+            cls.core_staging(),
+            shared_checkpoint_snapshot=NativePostWriteBehavior.QUALIFIED,
+        )
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -206,6 +217,24 @@ class NativeSharedTrajectoryEvidenceBinding:
 
 
 @dataclass(frozen=True)
+class NativeSharedCheckpointSnapshotBinding:
+    """Live process objects copied by the external checkpoint writer only."""
+
+    model_state: Any | None
+    kernel_runtime_context: Any | None
+
+
+@dataclass(frozen=True)
+class _NativeCheckpointMotifProjection:
+    """Read-only shape consumed by the existing checkpoint summary builder."""
+
+    motif_id: str
+    label: str
+    strength: float
+    members: range
+
+
+@dataclass(frozen=True)
 class NativePostWriteQualificationConfiguration:
     """Explicit external posture; every excluded behavior must be declared."""
 
@@ -224,6 +253,8 @@ class NativePostWriteQualificationConfiguration:
     shared_hivemind_packet_emission_required: bool = False
     shared_trajectory_evidence_binding: NativeSharedTrajectoryEvidenceBinding | None = None
     shared_trajectory_evidence_required: bool = False
+    shared_checkpoint_snapshot_binding: NativeSharedCheckpointSnapshotBinding | None = None
+    shared_checkpoint_snapshot_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -246,11 +277,18 @@ class NativePostWriteQualificationConfiguration:
             raise ValueError(
                 "shared_trajectory_evidence_binding must be NativeSharedTrajectoryEvidenceBinding or None"
             )
+        if self.shared_checkpoint_snapshot_binding is not None and not isinstance(
+            self.shared_checkpoint_snapshot_binding, NativeSharedCheckpointSnapshotBinding,
+        ):
+            raise ValueError(
+                "shared_checkpoint_snapshot_binding must be NativeSharedCheckpointSnapshotBinding or None"
+            )
         for name in (
             "motif_suggestion_maintenance_required", "persistent_trajectory_evidence_required",
             "checkpoint_snapshots_required", "bridge_suggestions_required", "deep_memory_required",
             "shared_bridge_suggestions_required", "shared_motif_suggestion_maintenance_required",
             "shared_hivemind_packet_emission_required", "shared_trajectory_evidence_required",
+            "shared_checkpoint_snapshot_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -307,6 +345,14 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
         if context.scope == "shared":
+            if self._configuration.shared_checkpoint_snapshot_required:
+                self._validate_shared_checkpoint_pre_effect(context)
+                with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+                    connection = opened.connection
+                    _revalidate_capability_for_route(self._capability, connection)
+                    self._validate_context_and_route(connection, context, witness)
+                    self._run_shared_checkpoint_snapshot(connection, context)
+                return FabricPostWriteOutcome()
             if self._configuration.shared_trajectory_evidence_required:
                 self._validate_shared_trajectory_pre_effect(context)
                 with open_existing_native_core_connection(self._capability.core_database_path) as opened:
@@ -421,6 +467,89 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         )
         self._shared_trajectory_evidence = runtime
         return runtime
+
+    def _run_shared_checkpoint_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        context: FabricPostWriteContext,
+    ) -> None:
+        """Run the existing non-authoritative checkpoint write with native reads.
+
+        This deliberately mirrors ``LegacyFabricPostWriteAdapter._run_checkpoint``:
+        component reads degrade independently, while the whole checkpoint slot
+        remains fail-soft at the post-write boundary.  It never loads a
+        checkpoint and therefore grants it no native recovery authority.
+        """
+        owner = self._configuration.external.owner
+        if not (
+            owner._checkpoint_enable
+            and int(context.step) > 0
+            and int(context.step) % owner._checkpoint_interval == 0
+        ):
+            return
+        binding = self._configuration.shared_checkpoint_snapshot_binding
+        assert binding is not None  # preparation proves the explicit binding.
+        try:
+            motif_summary = None
+            try:
+                motif_summary = self._build_native_checkpoint_motif_summary(connection, context)
+            except Exception as exc:
+                owner._log.debug("checkpoint motif summary build failed: %s", exc)
+
+            # Native representations have no legacy embedding-shard manifest.
+            # The existing checkpoint schema permits this truthful absence.
+            shard_snapshot = None
+
+            character_state = None
+            try:
+                from dataclasses import asdict
+
+                character_store = self._configuration.external.character_store
+                if character_store is not None:
+                    state = character_store.load_state(context.workspace_id, context.agent_id)
+                    if state:
+                        character_state = asdict(state)
+            except Exception as exc:
+                owner._log.debug("checkpoint character state load failed: %s", exc)
+
+            if binding.kernel_runtime_context is None:
+                owner._log.debug("checkpoint skipped: KernelRuntimeContext missing for %s", self._configuration.external.agent_key)
+            else:
+                save_checkpoint(
+                    data_dir=owner.data_dir, workspace_id=context.workspace_id,
+                    agent_id=context.agent_id, step=int(context.step),
+                    model_state=binding.model_state,
+                    corridor_monitor=binding.kernel_runtime_context.mon,
+                    kernel_runtime_context=binding.kernel_runtime_context,
+                    character_state_dict=character_state, motif_summary=motif_summary,
+                    shard_snapshot=shard_snapshot, max_checkpoints=owner._checkpoint_max_keep,
+                )
+        except Exception as exc:
+            owner._log.debug("checkpoint save failed for step=%s: %s", context.step, exc)
+
+    def _build_native_checkpoint_motif_summary(
+        self,
+        connection: sqlite3.Connection,
+        context: FabricPostWriteContext,
+    ) -> dict[str, Any]:
+        """Project only current native motif geometry into the legacy schema."""
+        scope = self._configuration.routing_scope
+        reader = NativeMotifRuntimeReader(connection)
+        motifs = reader.list_runtime_motifs(
+            motif_alias_namespace_id=scope.motif_alias_namespace_id,
+            domain_id=context.chosen_domain,
+            semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+        )
+        projection = SimpleNamespace(motifs={
+            item.read_model.runtime_motif_id: _NativeCheckpointMotifProjection(
+                motif_id=item.read_model.runtime_motif_id,
+                label=str(item.read_model.label),
+                strength=float(item.read_model.strength),
+                members=range(int(item.read_model.member_count)),
+            )
+            for item in motifs
+        })
+        return build_motif_summary(projection)
 
     def _bind_dependencies(
         self,
@@ -813,6 +942,27 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if configuration.persistent_trajectory_evidence_required:
             raise SubstrateConfigurationError("shared D3 trajectory profile must not claim the private trajectory capability")
 
+    def _validate_shared_checkpoint_pre_effect(self, context: FabricPostWriteContext) -> None:
+        configuration = self._configuration
+        if configuration.routing_scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+            raise SubstrateInvariantViolation("shared post-write requires a claimed shared native scope")
+        if not configuration.shared_checkpoint_snapshot_required:
+            raise SubstrateConfigurationError("shared checkpoint capability is not required by this profile")
+        _require_qualified(configuration.profile.shared_checkpoint_snapshot, "shared checkpoint snapshot")
+        _validate_shared_checkpoint_snapshot_binding(configuration)
+        if configuration.shared_bridge_suggestions_required:
+            raise SubstrateConfigurationError("shared checkpoint and B1 bridge consumers must be prepared separately")
+        if configuration.shared_motif_suggestion_maintenance_required or configuration.shared_mood_drift_binding is not None:
+            raise SubstrateConfigurationError("shared checkpoint and D1 M1/mood consumers must be prepared separately")
+        if configuration.shared_hivemind_packet_emission_required:
+            raise SubstrateConfigurationError("shared checkpoint and D2 Hivemind consumers must be prepared separately")
+        if configuration.shared_trajectory_evidence_required:
+            raise SubstrateConfigurationError("shared checkpoint and D3 trajectory consumers must be prepared separately")
+        if configuration.derived_runtime_template is not None:
+            raise SubstrateConfigurationError("shared checkpoint profile must not bind a source-scope derived runtime")
+        if configuration.checkpoint_snapshots_required:
+            raise SubstrateConfigurationError("shared D4 checkpoint profile must not claim the private checkpoint capability")
+
 
 def prepare_native_fabric_post_write_adapter(
     *,
@@ -845,11 +995,13 @@ def prepare_native_fabric_post_write_adapter(
         shared_d1 = configuration.shared_motif_suggestion_maintenance_required
         shared_hivemind = configuration.shared_hivemind_packet_emission_required
         shared_trajectory = configuration.shared_trajectory_evidence_required
+        shared_checkpoint = configuration.shared_checkpoint_snapshot_required
         shared_consumers = sum((
             bool(configuration.shared_bridge_suggestions_required),
             bool(shared_d1),
             bool(shared_hivemind),
             bool(shared_trajectory),
+            bool(shared_checkpoint),
         ))
         if shared_consumers > 1:
             raise SubstrateConfigurationError("shared post-write consumers must be prepared separately")
@@ -874,6 +1026,13 @@ def prepare_native_fabric_post_write_adapter(
                 raise SubstrateConfigurationError("shared trajectory configuration must not bind a private mood-drift target")
             if configuration.persistent_trajectory_evidence_required:
                 raise SubstrateConfigurationError("shared D3 trajectory profile must not claim the private trajectory capability")
+        elif shared_checkpoint:
+            _require_qualified(configuration.profile.shared_checkpoint_snapshot, "shared checkpoint snapshot")
+            _validate_shared_checkpoint_snapshot_binding(configuration)
+            if configuration.shared_mood_drift_binding is not None:
+                raise SubstrateConfigurationError("shared checkpoint configuration must not bind a private mood-drift target")
+            if configuration.checkpoint_snapshots_required:
+                raise SubstrateConfigurationError("shared D4 checkpoint profile must not claim the private checkpoint capability")
         else:
             _require_qualified(configuration.profile.shared_hivemind_packet_emission, "shared Hivemind packet emission")
             if configuration.shared_mood_drift_binding is not None:
@@ -957,6 +1116,27 @@ def _validate_shared_trajectory_evidence_binding(
         raise SubstrateConfigurationError("shared trajectory evidence format does not match current legacy selection")
 
 
+def _validate_shared_checkpoint_snapshot_binding(
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    binding = configuration.shared_checkpoint_snapshot_binding
+    if binding is None:
+        raise SubstrateConfigurationError("shared checkpoint profile requires an explicit live-state binding")
+    owner = configuration.external.owner
+    for name in ("_checkpoint_enable", "_checkpoint_interval", "_checkpoint_max_keep", "data_dir", "_log"):
+        if not hasattr(owner, name):
+            raise SubstrateConfigurationError(f"shared checkpoint profile requires owner.{name}")
+    if not isinstance(owner.data_dir, str) or not owner.data_dir:
+        raise SubstrateConfigurationError("shared checkpoint profile requires a non-empty owner.data_dir")
+    if not isinstance(owner._checkpoint_interval, int) or isinstance(owner._checkpoint_interval, bool) or owner._checkpoint_interval < 1:
+        raise SubstrateConfigurationError("shared checkpoint profile requires a positive owner._checkpoint_interval")
+    if not isinstance(owner._checkpoint_max_keep, int) or isinstance(owner._checkpoint_max_keep, bool) or owner._checkpoint_max_keep < 0:
+        raise SubstrateConfigurationError("shared checkpoint profile requires a non-negative owner._checkpoint_max_keep")
+    character_store = configuration.external.character_store
+    if character_store is None or not callable(getattr(character_store, "load_state", None)):
+        raise SubstrateConfigurationError("shared checkpoint profile requires the existing CharacterStore load_state interface")
+
+
 def _require_shared_bridge_geometry(
     geometry: NativeMotifGeometryAdapter | None,
     capability: NativeFabricRoutingCapability,
@@ -979,6 +1159,7 @@ __all__ = [
     "NativePostWriteQualificationConfiguration",
     "NativePostWriteQualificationProfile",
     "NativePostWriteRouteWitness",
+    "NativeSharedCheckpointSnapshotBinding",
     "NativeSharedTrajectoryEvidenceBinding",
     "NativeSharedTriggerMoodDriftBinding",
     "prepare_native_fabric_post_write_adapter",
