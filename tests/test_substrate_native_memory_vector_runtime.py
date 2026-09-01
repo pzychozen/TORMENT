@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
 
@@ -407,6 +408,99 @@ def test_invariant_failed_rebuild_refuses_partial_or_stale_snapshot(tmp_path: Pa
         qualified.close()
 
 
+@pytest.mark.parametrize("top_k", (1, 8, 32))
+def test_warm_selected_results_use_one_batched_read_transaction(tmp_path: Path, monkeypatch, top_k: int):
+    qualified, connection, core_id, idempotency = _database(tmp_path)
+    runtime = None
+    try:
+        scope = _scope(connection, workspace=f"batch-{top_k}", kind="PRIVATE_AGENT", qualifier="aria")
+        vector = _seed_scale_lane(connection, scope, idempotency, 64)
+        runtime = _runtime(qualified, core_id, scope, vector=vector)
+        assert len(runtime.search_by_embedding(vector, top_k=top_k)) == top_k
+
+        def forbidden_single_row_lookup(*_args, **_kwargs):
+            raise AssertionError("warm selected projection must not perform an N+1 lookup")
+
+        monkeypatch.setattr(runtime._compatibility, "get_memory_by_eid", forbidden_single_row_lookup)
+        monkeypatch.setattr(runtime._embeddings, "read_current", forbidden_single_row_lookup)
+        statements: list[str] = []
+        runtime._connection.set_trace_callback(statements.append)
+        try:
+            hits = runtime.search_by_embedding(vector, top_k=top_k)
+        finally:
+            runtime._connection.set_trace_callback(None)
+        assert len(hits) == top_k
+        begin = next(index for index, statement in enumerate(statements) if statement.strip().upper() == "BEGIN")
+        commit = next(index for index, statement in enumerate(statements) if statement.strip().upper() == "COMMIT")
+        post_selection = statements[begin:commit + 1]
+        assert len(post_selection) == 5
+        assert post_selection[0].strip().upper() == "BEGIN"
+        assert post_selection[-1].strip().upper() == "COMMIT"
+        assert sum(statement.lstrip().upper().startswith(("SELECT", "WITH")) for statement in post_selection) == 3
+    finally:
+        if runtime is not None:
+            runtime.close()
+        qualified.close()
+
+
+def test_concurrent_writer_returns_one_read_snapshot_then_next_query_refuses_stale_rows(tmp_path: Path):
+    qualified, connection, core_id, idempotency = _database(tmp_path)
+    try:
+        scope = _scope(connection, workspace="race", kind="PRIVATE_AGENT", qualifier="aria")
+        r1 = _memory(connection, scope, idempotency, "r1")
+        _ready(connection, r1, idempotency, "r1", (1.0, 0.0, 0.0))
+        entered_read_snapshot = threading.Event()
+        allow_projection = threading.Event()
+        completed = threading.Event()
+        observed: dict[str, Any] = {}
+
+        def query_in_reader_thread() -> None:
+            runtime = None
+            try:
+                runtime = _runtime(qualified, core_id, scope)
+                assert runtime.search_by_embedding((1.0, 0.0, 0.0), top_k=4)
+                original_validate = runtime._embeddings.validate_current_witnesses
+
+                def pause_after_read_snapshot(*args, **kwargs):
+                    result = original_validate(*args, **kwargs)
+                    entered_read_snapshot.set()
+                    if not allow_projection.wait(timeout=5):
+                        raise TimeoutError("writer did not complete during the reader snapshot")
+                    return result
+
+                runtime._embeddings.validate_current_witnesses = pause_after_read_snapshot
+                observed["during"] = runtime.search_by_embedding((1.0, 0.0, 0.0), top_k=4)
+                observed["after"] = runtime.search_by_embedding((1.0, 0.0, 0.0), top_k=4)
+            except BaseException as exc:  # capture thread failures as test evidence
+                observed["error"] = exc
+            finally:
+                if runtime is not None:
+                    runtime.close()
+                completed.set()
+
+        reader = threading.Thread(target=query_in_reader_thread, daemon=True)
+        reader.start()
+        assert entered_read_snapshot.wait(timeout=5)
+        r2 = NativeMemoryCompatibilityFacade(connection).patch_memory_state(
+            legacy_source_namespace_id=scope.legacy_source_namespace_id,
+            eid=r1.eid,
+            patch={"strength": .9},
+            idempotency_namespace_id=idempotency,
+            idempotency_key="race:r2",
+            expected_revision_id=r1.revision_id,
+        )
+        assert r2.revision_id != r1.revision_id
+        allow_projection.set()
+        assert completed.wait(timeout=5)
+        reader.join(timeout=1)
+        assert "error" not in observed
+        assert [item["eid"] for item in observed["during"]] == [r1.eid]
+        assert observed["during"][0]["strength"] == .7
+        assert observed["after"] == []
+    finally:
+        qualified.close()
+
+
 def test_cold_runtime_rebuild_uses_only_core_path_scope_and_lane(tmp_path: Path):
     qualified, connection, core_id, idempotency = _database(tmp_path)
     try:
@@ -726,4 +820,83 @@ def test_scale_characterization_native_matrix_and_warm_search(tmp_path: Path, co
             runtime.close()
         if graph is not None:
             graph.close()
+        qualified.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("TORMENT_7G5E4B_RUN_HOT_PATH") != "1",
+    reason="set TORMENT_7G5E4B_RUN_HOT_PATH=1 for hot-path component characterization",
+)
+@pytest.mark.parametrize("count", (1_000, 10_000, 50_000))
+@pytest.mark.parametrize("top_k", (1, 8, 32))
+def test_hot_path_component_characterization(tmp_path: Path, monkeypatch, count: int, top_k: int):
+    """Emit per-phase warm-query timing without changing runtime behavior."""
+    qualified, connection, core_id, idempotency = _database(tmp_path)
+    runtime = None
+    try:
+        scope = _scope(connection, workspace=f"hot-path-{count}-{top_k}", kind="PRIVATE_AGENT", qualifier="aria")
+        vector = _seed_scale_lane(connection, scope, idempotency, count)
+        runtime = _runtime(qualified, core_id, scope, vector=vector)
+        assert runtime.search_by_embedding(vector, top_k=top_k)
+        assert runtime.snapshot is not None and runtime.snapshot.matrix is not None
+        elapsed = {"batch": 0.0, "compatibility": 0.0, "embedding": 0.0}
+
+        original_batch = runtime._batch_project_current_rows
+        original_compatibility = runtime._compatibility.get_memories_by_eids
+        original_embedding = runtime._embeddings.validate_current_witnesses
+
+        def timed_batch(*args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return original_batch(*args, **kwargs)
+            finally:
+                elapsed["batch"] += time.perf_counter() - started
+
+        def timed_compatibility(*args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return original_compatibility(*args, **kwargs)
+            finally:
+                elapsed["compatibility"] += time.perf_counter() - started
+
+        def timed_embedding(*args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return original_embedding(*args, **kwargs)
+            finally:
+                elapsed["embedding"] += time.perf_counter() - started
+
+        monkeypatch.setattr(runtime, "_batch_project_current_rows", timed_batch)
+        monkeypatch.setattr(runtime._compatibility, "get_memories_by_eids", timed_compatibility)
+        monkeypatch.setattr(runtime._embeddings, "validate_current_witnesses", timed_embedding)
+
+        repeats = 10
+        matrix_started = time.perf_counter()
+        for _ in range(repeats):
+            query = runtime._normalize(vector)
+            scores = (runtime.snapshot.matrix @ query).astype(np.float32)
+            if int(scores.shape[0]) <= top_k:
+                np.argsort(-scores)
+            else:
+                candidates = np.argpartition(-scores, top_k - 1)[:top_k]
+                candidates[np.argsort(-scores[candidates])]
+        matrix_top_k_ms = (time.perf_counter() - matrix_started) * 1_000 / repeats
+
+        total_started = time.perf_counter()
+        for _ in range(repeats):
+            assert runtime.search_by_embedding(vector, top_k=top_k)
+        total_warm_ms = (time.perf_counter() - total_started) * 1_000 / repeats
+        print(json.dumps({
+            "phase": os.environ.get("TORMENT_7G5E4B_HOT_PATH_PHASE", "unspecified"),
+            "count": count,
+            "top_k": top_k,
+            "matrix_top_k_ms": round(matrix_top_k_ms, 6),
+            "batch_transaction_total_ms": round(elapsed["batch"] * 1_000 / repeats, 6),
+            "compatibility_projection_ms": round(elapsed["compatibility"] * 1_000 / repeats, 6),
+            "batch_currentness_ms": round(elapsed["embedding"] * 1_000 / repeats, 6),
+            "native_total_warm_ms": round(total_warm_ms, 6),
+        }, sort_keys=True))
+    finally:
+        if runtime is not None:
+            runtime.close()
         qualified.close()

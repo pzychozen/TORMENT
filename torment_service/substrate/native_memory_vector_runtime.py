@@ -20,13 +20,12 @@ from uuid import UUID
 import numpy as np
 
 from .compat import LegacyMemoryView, NativeMemoryCompatibilityFacade
-from .compat_embedding_reader import NativeCompatEmbeddingReader
+from .compat_embedding_reader import CurrentCompatEmbeddingWitness, NativeCompatEmbeddingReader
 from .connection import QualifiedExistingCoreConnection, open_existing_native_core_connection
 from .errors import (
     SubstrateConfigurationError,
     SubstrateError,
     SubstrateInvariantViolation,
-    SubstrateObjectNotFound,
 )
 from .ids import native_id_to_bytes
 from .runtime_binding import (
@@ -114,6 +113,7 @@ class NativeVectorRuntimeSourceWitness:
     object_revision_ordinal: int
     runtime_ordinal: int
     representation_id: UUID | None
+    integrity_expectation_id: UUID | None
     selected_integrity_measurement_id: UUID | None
     raw_representation_digest: str | None
 
@@ -127,6 +127,7 @@ class NativeVectorRuntimeRow:
     object_revision_id: UUID
     object_revision_ordinal: int
     representation_id: UUID
+    integrity_expectation_id: UUID
     selected_integrity_measurement_id: UUID
     raw_representation_digest: str
 
@@ -165,6 +166,7 @@ class _QualifiedVectorCandidate:
     object_revision_id: UUID
     object_revision_ordinal: int
     representation_id: UUID
+    integrity_expectation_id: UUID
     selected_integrity_measurement_id: UUID
     payload_sha256: str
     raw_vector: np.ndarray
@@ -327,20 +329,23 @@ class NativeMemoryVectorRuntime:
             candidate = np.argpartition(-scores, limit - 1)[:limit]
             order = candidate[np.argsort(-scores[candidate])]
 
+        selected = tuple(
+            (snapshot.rows[int(index)], float(scores[int(index)]))
+            for index in order[:limit]
+        )
+        sources = self._batch_project_current_rows(tuple(row for row, _ in selected))
+        if sources is None:
+            # A durable change raced after pre-query currentness validation.
+            # Do not mix a stale vector with a new semantic payload.
+            self._snapshot = None
+            self._dirty = True
+            self._last_invalidation_reason = "concurrent-currentness-change"
+            return []
+
         now_ts = int(time.time())
         type_set = set(type_filter or [])
         results: list[dict[str, Any]] = []
-        for index in order[:limit]:
-            row = snapshot.rows[int(index)]
-            raw_score = float(scores[int(index)])
-            source = self._current_source_for_row(row)
-            if source is None:
-                # A durable change raced after pre-query currentness validation.
-                # Do not mix a stale vector with a new semantic payload.
-                self._snapshot = None
-                self._dirty = True
-                self._last_invalidation_reason = "concurrent-currentness-change"
-                return []
+        for (row, raw_score), source in zip(selected, sources, strict=True):
             payload = dict(source.payload)
             if min_score is not None and raw_score < float(min_score):
                 continue
@@ -369,6 +374,62 @@ class NativeMemoryVectorRuntime:
             results.append(result)
         results.sort(key=lambda item: item["score"], reverse=True)
         return results
+
+    def _batch_project_current_rows(
+        self,
+        rows: tuple[NativeVectorRuntimeRow, ...],
+    ) -> tuple[LegacyMemoryView, ...] | None:
+        """Return one coherent selected-result snapshot or refuse it whole.
+
+        The runtime begins a SQLite read transaction before the first witness
+        read.  The batched representation proof and facade projection therefore
+        observe one durable point in time.  A later writer commit is visible to
+        the next query through ``data_version``; it cannot mix revisions inside
+        this result.
+        """
+        if not rows:
+            return ()
+        if self._connection.in_transaction:
+            raise SubstrateInvariantViolation("native vector projection requires a fresh read transaction")
+        try:
+            self._connection.execute("BEGIN")
+            witnesses = tuple(CurrentCompatEmbeddingWitness(
+                row.eid,
+                row.object_id,
+                row.object_revision_id,
+                row.object_revision_ordinal,
+                row.representation_id,
+                row.integrity_expectation_id,
+                row.selected_integrity_measurement_id,
+            ) for row in rows)
+            if not self._embeddings.validate_current_witnesses(
+                legacy_source_namespace_id=self._configuration.scope.legacy_source_namespace_id,
+                identity_namespace_id=self._configuration.scope.identity_namespace_id,
+                semantic_scope_id=self._configuration.scope.semantic_scope_id,
+                witnesses=witnesses,
+            ):
+                raise SubstrateInvariantViolation("selected native vector rows are no longer current")
+            sources = self._compatibility.get_memories_by_eids(
+                legacy_source_namespace_id=self._configuration.scope.legacy_source_namespace_id,
+                eids=tuple(row.eid for row in rows),
+            )
+            if len(sources) != len(rows):
+                raise SubstrateInvariantViolation("selected native vector projection is incomplete")
+            for row, source in zip(rows, sources, strict=True):
+                if (
+                    source.eid != row.eid
+                    or source.object_id != row.object_id
+                    or source.revision_id != row.object_revision_id
+                    or source.revision_ordinal != row.object_revision_ordinal
+                    or source.semantic_scope_id != self._configuration.scope.semantic_scope_id
+                ):
+                    raise SubstrateInvariantViolation("selected native vector projection contradicts its witness")
+            self._connection.execute("COMMIT")
+            return sources
+        except (SubstrateError, TypeError, ValueError, sqlite3.Error):
+            if self._connection.in_transaction:
+                self._connection.execute("ROLLBACK")
+            return None
 
     def _ensure_snapshot(self) -> NativeVectorRuntimeSnapshot | None:
         self._require_open()
@@ -445,6 +506,7 @@ class NativeMemoryVectorRuntime:
                     None,
                     None,
                     None,
+                    None,
                 ))
                 continue
             if (
@@ -456,7 +518,8 @@ class NativeMemoryVectorRuntime:
             source_witness = NativeVectorRuntimeSourceWitness(
                 source.eid, source.object_id, source.object_revision_id,
                 source.object_revision_ordinal, source.runtime_ordinal,
-                qualified.representation_id, qualified.selected_integrity_measurement_id,
+                qualified.representation_id, qualified.integrity_expectation_id,
+                qualified.selected_integrity_measurement_id,
                 digest,
             )
             sources.append(source_witness)
@@ -466,6 +529,7 @@ class NativeMemoryVectorRuntime:
                 source_witness.object_revision_id,
                 source_witness.object_revision_ordinal,
                 qualified.representation_id,
+                qualified.integrity_expectation_id,
                 qualified.selected_integrity_measurement_id,
                 digest,
             )
@@ -564,7 +628,7 @@ class NativeMemoryVectorRuntime:
             seen_eids.add(eid)
             sources.append(NativeVectorRuntimeSourceWitness(
                 eid, identifier, UUID(bytes=revision_id), revision_ordinal,
-                ordinals[identifier], None, None, None,
+                ordinals[identifier], None, None, None, None,
             ))
         if seen_objects != set(ordinals):
             raise SubstrateInvariantViolation("runtime memory aliases and runtime order disagree")
@@ -586,7 +650,7 @@ class NativeMemoryVectorRuntime:
             )
             SELECT r.representation_id,r.source_object_id,r.source_object_revision_id,
                    r.source_object_revision_ordinal,r.expected_payload_byte_length,
-                   state.selected_integrity_measurement_id,payload.payload_bytes
+                   expectation.expectation_id,state.selected_integrity_measurement_id,payload.payload_bytes
               FROM legacy_object_aliases alias
               JOIN objects object ON object.object_id=alias.object_id
               JOIN representations r
@@ -627,11 +691,12 @@ class NativeMemoryVectorRuntime:
         ).fetchall()
         candidates: dict[UUID, _QualifiedVectorCandidate] = {}
         required_length = lane.dimension * np.dtype(np.float32).itemsize
-        for representation_id, object_id, revision_id, ordinal, expected_length, measurement_id, payload in rows:
+        for representation_id, object_id, revision_id, ordinal, expected_length, expectation_id, measurement_id, payload in rows:
             if (
                 not isinstance(representation_id, bytes) or len(representation_id) != 16
                 or not isinstance(object_id, bytes) or len(object_id) != 16
                 or not isinstance(revision_id, bytes) or len(revision_id) != 16
+                or not isinstance(expectation_id, bytes) or len(expectation_id) != 16
                 or not isinstance(measurement_id, bytes) or len(measurement_id) != 16
             ):
                 raise SubstrateInvariantViolation("qualified vector has an invalid durable identity")
@@ -650,52 +715,12 @@ class NativeMemoryVectorRuntime:
                 UUID(bytes=revision_id),
                 ordinal,
                 UUID(bytes=representation_id),
+                UUID(bytes=expectation_id),
                 UUID(bytes=measurement_id),
                 sha256(payload).hexdigest(),
                 vector.copy(),
             )
         return candidates
-
-    def _current_source_for_row(self, row: NativeVectorRuntimeRow) -> LegacyMemoryView | None:
-        try:
-            source = self._compatibility.get_memory_by_eid(
-                legacy_source_namespace_id=self._configuration.scope.legacy_source_namespace_id,
-                eid=row.eid,
-            )
-            self._validate_source_scope(source)
-            if (
-                source.object_id != row.object_id
-                or source.revision_id != row.object_revision_id
-                or source.revision_ordinal != row.object_revision_ordinal
-            ):
-                return None
-            qualified = self._embeddings.read_current(
-                source.object_id,
-                expected_dimension=self._configuration.representation_lane.dimension,
-            )
-            if qualified is None:
-                return None
-            if (
-                qualified.representation_id != row.representation_id
-                or qualified.selected_measurement_id != row.selected_integrity_measurement_id
-                or qualified.payload_sha256 != row.raw_representation_digest
-            ):
-                return None
-            return source
-        except (SubstrateError, TypeError, ValueError, sqlite3.Error):
-            return None
-
-    def _validate_source_scope(self, source: LegacyMemoryView) -> None:
-        if source.semantic_scope_id != self._configuration.scope.semantic_scope_id:
-            raise SubstrateInvariantViolation("native vector source has a different semantic scope")
-        row = self._connection.execute(
-            "SELECT identity_namespace_id,object_kind FROM objects WHERE object_id=?",
-            (native_id_to_bytes(source.object_id),),
-        ).fetchone()
-        if row is None or row[0] != native_id_to_bytes(self._configuration.scope.identity_namespace_id):
-            raise SubstrateInvariantViolation("native vector source has a different identity namespace")
-        if row[1] != _MEMORY_OBJECT_KIND:
-            raise SubstrateInvariantViolation("native vector source is not a core memory")
 
     def _currentness_signature(self) -> tuple[object, ...]:
         """Observe only durable facts that can alter this matrix's rows.
@@ -802,6 +827,7 @@ def _snapshot_currentness_signature(
             item.object_revision_id.bytes,
             item.object_revision_ordinal,
             item.representation_id.bytes,
+            item.integrity_expectation_id.bytes,
             item.selected_integrity_measurement_id.bytes,
             item.payload_sha256,
         )

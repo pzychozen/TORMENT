@@ -208,6 +208,114 @@ class NativeMemoryCompatibilityFacade:
     def get_memory_by_eid(self, *, legacy_source_namespace_id: UUID, eid: int) -> LegacyMemoryView:
         return self._view(eid, self._current_row(legacy_source_namespace_id, eid))
 
+    def get_memories_by_eids(
+        self,
+        *,
+        legacy_source_namespace_id: UUID,
+        eids: tuple[int, ...] | list[int],
+    ) -> tuple[LegacyMemoryView, ...]:
+        """Project one ordered, namespace-qualified current-memory batch.
+
+        Every requested EID must resolve to exactly one current core-memory
+        revision in the supplied namespace.  The projection and its complete
+        representation-reference surface are fetched in two bounded set reads;
+        callers never need to construct a legacy payload from arbitrary SQL.
+        """
+        if not isinstance(legacy_source_namespace_id, UUID):
+            raise ValueError("legacy_source_namespace_id must be a UUID")
+        requested = tuple(eids)
+        for eid in requested:
+            _validate_eid(eid)
+        if len(set(requested)) != len(requested):
+            raise ValueError("batch compatibility EIDs must be unique")
+        if not requested:
+            return ()
+
+        placeholders = ",".join("?" for _ in requested)
+        rows = self._connection.execute(
+            f"""
+            SELECT a.alias_value,o.object_id,o.object_kind,r.object_revision_id,
+                   r.revision_ordinal,r.effective_semantic_scope_id,
+                   r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,
+                   r.governance_state,r.authority_category,r.provenance_id,
+                   r.payload_format,r.payload_text
+              FROM legacy_object_aliases a
+              JOIN objects o ON o.object_id=a.object_id
+              JOIN object_revisions r
+                ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id
+               AND r.revision_ordinal=o.current_revision_ordinal
+             WHERE a.legacy_source_namespace_id=?
+               AND a.alias_kind='EID'
+               AND a.alias_value IN ({placeholders})
+            """,
+            (native_id_to_bytes(legacy_source_namespace_id), *(str(eid) for eid in requested)),
+        ).fetchall()
+        by_eid: dict[int, tuple[Any, ...]] = {}
+        for row in rows:
+            try:
+                eid = int(row[0])
+            except (TypeError, ValueError) as exc:
+                raise SubstrateInvariantViolation("batch compatibility EID alias is invalid") from exc
+            if str(eid) != row[0] or eid not in requested or eid in by_eid:
+                raise SubstrateInvariantViolation("batch compatibility EID aliases are ambiguous")
+            if row[2] != _MEMORY_OBJECT_KIND:
+                raise SubstrateInvariantViolation("EID alias does not target an admissible core memory")
+            by_eid[eid] = row
+        if len(by_eid) != len(requested):
+            raise SubstrateObjectNotFound("one or more namespaced EID compatibility aliases were not found")
+
+        values_sql = ",".join("(?,?,?,?)" for _ in requested)
+        reference_parameters: list[Any] = []
+        for eid in requested:
+            row = by_eid[eid]
+            reference_parameters.extend((eid, row[1], row[3], row[4]))
+        reference_rows = self._connection.execute(
+            f"""
+            WITH requested(eid,object_id,object_revision_id,revision_ordinal) AS MATERIALIZED (
+                VALUES {values_sql}
+            )
+            SELECT requested.eid,r.representation_id,r.representation_class,
+                   r.generation,state.readiness,state.operational_disposition
+              FROM requested
+              JOIN representations r
+                ON r.source_kind='OBJECT_REVISION'
+               AND r.source_object_id=requested.object_id
+               AND r.source_object_revision_id=requested.object_revision_id
+               AND r.source_object_revision_ordinal=requested.revision_ordinal
+              JOIN representation_current_state state USING(representation_id)
+             ORDER BY requested.eid,r.representation_class,r.generation,r.representation_id
+            """,
+            tuple(reference_parameters),
+        ).fetchall()
+        references: dict[int, list[LegacyRepresentationReference]] = {eid: [] for eid in requested}
+        for eid, representation_id, representation_class, generation, readiness, disposition in reference_rows:
+            if eid not in references:
+                raise SubstrateInvariantViolation("batch compatibility reference has an unknown EID")
+            references[eid].append(LegacyRepresentationReference(
+                native_id_from_bytes(representation_id), representation_class, generation,
+                readiness, disposition, readiness == "READY" and disposition == "USABLE",
+            ))
+        result: list[LegacyMemoryView] = []
+        for eid in requested:
+            row = by_eid[eid]
+            result.append(LegacyMemoryView(
+                eid,
+                native_id_from_bytes(row[1]),
+                native_id_from_bytes(row[3]),
+                row[4],
+                native_id_from_bytes(row[5]),
+                row[6],
+                row[7],
+                bool(row[8]),
+                row[9],
+                row[10],
+                native_id_from_bytes(row[11]) if row[11] is not None else None,
+                MappingProxyType(_payload_mapping(row[12], row[13])),
+                tuple(references[eid]),
+            ))
+        return tuple(result)
+
     def get_memory_revision(self, *, legacy_source_namespace_id: UUID, eid: int, revision_id: UUID) -> LegacyMemoryView:
         object_id = self.resolve_memory_eid(legacy_source_namespace_id=legacy_source_namespace_id, eid=eid)
         row = self._connection.execute("""SELECT o.object_id,r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,r.authority_category,r.provenance_id,r.payload_format,r.payload_text FROM objects o JOIN object_revisions r ON r.object_id=o.object_id WHERE o.object_id=? AND r.object_revision_id=? AND o.object_kind=?""", (native_id_to_bytes(object_id), native_id_to_bytes(revision_id), _MEMORY_OBJECT_KIND)).fetchone()

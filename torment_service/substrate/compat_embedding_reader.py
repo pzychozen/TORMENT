@@ -132,6 +132,43 @@ class QualifiedCompatEmbedding:
         return _validate_payload(self, self.payload_bytes)
 
 
+@dataclass(frozen=True)
+class CurrentCompatEmbeddingWitness:
+    """Immutable selected-row facts for a batched currentness recheck.
+
+    The expectation, measurement, representation metadata, and payload bytes
+    are immutable after qualified READY publication.  A hot read therefore
+    proves their stable IDs and current operational state without reloading or
+    rehashing the immutable payload bytes for every selected result.
+    """
+
+    eid: int
+    source_object_id: UUID
+    source_revision_id: UUID
+    source_revision_ordinal: int
+    representation_id: UUID
+    expectation_id: UUID
+    selected_measurement_id: UUID
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.eid, int) or isinstance(self.eid, bool) or self.eid < 0:
+            raise ValueError("embedding witness EID must be a non-negative integer")
+        for value in (
+            self.source_object_id,
+            self.source_revision_id,
+            self.representation_id,
+            self.expectation_id,
+            self.selected_measurement_id,
+        ):
+            _require_uuid("embedding witness identity", value)
+        if (
+            not isinstance(self.source_revision_ordinal, int)
+            or isinstance(self.source_revision_ordinal, bool)
+            or self.source_revision_ordinal < 1
+        ):
+            raise ValueError("embedding witness revision ordinal must be positive")
+
+
 class NativeCompatEmbeddingReader:
     """Read exact qualified embeddings without allocation or mutation."""
 
@@ -178,6 +215,101 @@ class NativeCompatEmbeddingReader:
         if result is None or result.intent() != witness.intent():
             raise SubstrateInvariantViolation("known historical embedding no longer matches its durable witness")
         return result
+
+    def validate_current_witnesses(
+        self,
+        *,
+        legacy_source_namespace_id: UUID,
+        identity_namespace_id: UUID,
+        semantic_scope_id: UUID,
+        witnesses: tuple[CurrentCompatEmbeddingWitness, ...],
+    ) -> bool:
+        """Batch-prove selected current rows without loading payload bytes.
+
+        The query binds every requested EID, source revision, representation,
+        expectation, and selected measurement.  It also requires the current
+        ``representation_current_state`` to remain ``READY``/``USABLE`` with
+        a ``MATCH`` measurement.  Reconciliation failures publish the same
+        non-usable current disposition, so that direct current-state witness
+        is the bounded proof that no non-usable reconciliation state remains.
+        """
+        _require_uuid("legacy_source_namespace_id", legacy_source_namespace_id)
+        _require_uuid("identity_namespace_id", identity_namespace_id)
+        _require_uuid("semantic_scope_id", semantic_scope_id)
+        if not isinstance(witnesses, tuple):
+            raise ValueError("embedding witnesses must be a tuple")
+        if not witnesses:
+            return True
+        if len({item.eid for item in witnesses}) != len(witnesses):
+            raise ValueError("embedding witnesses must have unique EIDs")
+        if not all(isinstance(item, CurrentCompatEmbeddingWitness) for item in witnesses):
+            raise ValueError("embedding witnesses must be CurrentCompatEmbeddingWitness values")
+
+        values_sql = ",".join("(?,?,?,?,?,?,?,?)" for _ in witnesses)
+        parameters: list[object] = []
+        for ordinal, witness in enumerate(witnesses):
+            parameters.extend((
+                ordinal,
+                witness.eid,
+                native_id_to_bytes(witness.source_object_id),
+                native_id_to_bytes(witness.source_revision_id),
+                witness.source_revision_ordinal,
+                native_id_to_bytes(witness.representation_id),
+                native_id_to_bytes(witness.expectation_id),
+                native_id_to_bytes(witness.selected_measurement_id),
+            ))
+        rows = self._connection.execute(
+            f"""
+            WITH requested(
+                row_ordinal,eid,object_id,object_revision_id,
+                revision_ordinal,representation_id,expectation_id,measurement_id
+            ) AS MATERIALIZED (VALUES {values_sql})
+            SELECT requested.row_ordinal
+              FROM requested
+              CROSS JOIN legacy_object_aliases alias
+              JOIN objects object ON object.object_id=requested.object_id
+              JOIN object_revisions source
+                ON source.object_id=object.object_id
+               AND source.object_revision_id=requested.object_revision_id
+               AND source.revision_ordinal=requested.revision_ordinal
+               AND object.current_revision_id=source.object_revision_id
+               AND object.current_revision_ordinal=source.revision_ordinal
+              JOIN representations representation
+                ON representation.representation_id=requested.representation_id
+               AND representation.source_kind='OBJECT_REVISION'
+               AND representation.source_object_id=object.object_id
+               AND representation.source_object_revision_id=source.object_revision_id
+               AND representation.source_object_revision_ordinal=source.revision_ordinal
+              JOIN integrity_expectations expectation
+                ON expectation.expectation_id=requested.expectation_id
+               AND expectation.subject_kind='REPRESENTATION'
+               AND expectation.representation_id=representation.representation_id
+              JOIN representation_current_state state
+                ON state.representation_id=representation.representation_id
+               AND state.selected_integrity_measurement_id=requested.measurement_id
+              JOIN integrity_measurements measurement
+                ON measurement.measurement_id=state.selected_integrity_measurement_id
+               AND measurement.expectation_id=expectation.expectation_id
+             WHERE alias.legacy_source_namespace_id=?
+               AND alias.alias_kind='EID'
+               AND alias.alias_value=CAST(requested.eid AS TEXT)
+               AND alias.object_id=requested.object_id
+               AND object.object_kind=?
+               AND object.identity_namespace_id=?
+               AND source.effective_semantic_scope_id=?
+               AND state.readiness='READY'
+               AND state.operational_disposition='USABLE'
+               AND measurement.result='MATCH'
+             ORDER BY requested.row_ordinal
+            """,
+            tuple(parameters) + (
+                native_id_to_bytes(legacy_source_namespace_id),
+                MEMORY_OBJECT_KIND,
+                native_id_to_bytes(identity_namespace_id),
+                native_id_to_bytes(semantic_scope_id),
+            ),
+        ).fetchall()
+        return len(rows) == len(witnesses) and tuple(row[0] for row in rows) == tuple(range(len(witnesses)))
 
     def _read_exact(
         self,
@@ -318,6 +450,7 @@ __all__ = [
     "COMPAT_EMBEDDING_GENERATION",
     "COMPAT_EMBEDDING_REPRESENTATION_CLASS",
     "MEMORY_OBJECT_KIND",
+    "CurrentCompatEmbeddingWitness",
     "NativeCompatEmbeddingReader",
     "QualifiedCompatEmbedding",
 ]
