@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from torment_service.checkpoint import build_motif_summary, save_checkpoint
 from torment_service.post_write_runtime import (
+    DerivedMemoryRuntimeContext,
     FabricPostWriteContext,
     FabricPostWriteOutcome,
     FabricPostWriteRuntimePort,
@@ -91,6 +92,8 @@ class NativePostWriteQualificationProfile:
     shared_trajectory_evidence: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
     shared_checkpoint_snapshot: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
     shared_compression_disabled_noop: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
+    shared_trigger_character_noop: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
+    shared_integrated_default: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -179,6 +182,28 @@ class NativePostWriteQualificationProfile:
             shared_compression_disabled_noop=NativePostWriteBehavior.QUALIFIED,
         )
 
+    @classmethod
+    def core_staging_with_shared_integrated_default(cls) -> "NativePostWriteQualificationProfile":
+        """E1's complete, default-disabled shared post-write composition.
+
+        This intentionally does not widen any predecessor profile.  Callers
+        must opt into the one named E1 capability and supply every retained
+        external owner/binding it requires.
+        """
+        return replace(
+            cls.core_staging_with_motif_merge_maintenance(),
+            shared_bridge_suggestion=NativePostWriteBehavior.QUALIFIED,
+            shared_motif_suggestion_maintenance=NativePostWriteBehavior.QUALIFIED,
+            shared_trigger_identity_anchor=NativePostWriteBehavior.REQUIRED_NOOP,
+            shared_trigger_mood_drift=NativePostWriteBehavior.QUALIFIED,
+            shared_hivemind_packet_emission=NativePostWriteBehavior.QUALIFIED,
+            shared_trajectory_evidence=NativePostWriteBehavior.QUALIFIED,
+            shared_checkpoint_snapshot=NativePostWriteBehavior.QUALIFIED,
+            shared_compression_disabled_noop=NativePostWriteBehavior.QUALIFIED,
+            shared_trigger_character_noop=NativePostWriteBehavior.QUALIFIED,
+            shared_integrated_default=NativePostWriteBehavior.QUALIFIED,
+        )
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -265,6 +290,7 @@ class NativePostWriteQualificationConfiguration:
     shared_checkpoint_snapshot_binding: NativeSharedCheckpointSnapshotBinding | None = None
     shared_checkpoint_snapshot_required: bool = False
     shared_compression_disabled_noop_required: bool = False
+    shared_integrated_default_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -299,6 +325,7 @@ class NativePostWriteQualificationConfiguration:
             "shared_bridge_suggestions_required", "shared_motif_suggestion_maintenance_required",
             "shared_hivemind_packet_emission_required", "shared_trajectory_evidence_required",
             "shared_checkpoint_snapshot_required", "shared_compression_disabled_noop_required",
+            "shared_integrated_default_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -318,6 +345,15 @@ class NativePostWriteRouteWitness:
             not isinstance(self.native_operation_key, str) or not self.native_operation_key
         ):
             raise ValueError("native_operation_key must be non-empty when supplied")
+
+
+@dataclass(frozen=True)
+class NativeSharedIntegratedPostWriteOutcome:
+    """E1's post-write result plus the exact READY lanes it reached."""
+
+    outcome: FabricPostWriteOutcome
+    ready_routing_scopes: tuple[NativeFabricRoutingScope, ...]
+    ready_memory_eids: tuple[tuple[NativeFabricRoutingScope, int], ...]
 
 
 _PREPARED = object()
@@ -345,6 +381,24 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if runtime is not None:
             runtime.close()
 
+    def preflight_shared_integrated_default(self) -> None:
+        """Refuse E1 before a direct router can mutate native memory."""
+        _validate_shared_integrated_configuration(self._capability, self._configuration)
+
+    def shared_integrated_ready_scopes(
+        self,
+    ) -> tuple[NativeFabricRoutingScope, NativeFabricRoutingScope]:
+        """Return E1's explicit source and derived READY-lane authorities.
+
+        The direct qualification seam uses this narrow declaration to bind its
+        process-local vector caches.  It deliberately exposes neither the
+        general post-write configuration nor any additional storage authority.
+        """
+        self.preflight_shared_integrated_default()
+        binding = self._configuration.shared_mood_drift_binding
+        assert binding is not None  # validated by the E1 preflight above.
+        return self._configuration.routing_scope, binding.target_scope
+
     def run(
         self,
         context: FabricPostWriteContext,
@@ -355,6 +409,8 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
         if context.scope == "shared":
+            if self._configuration.shared_integrated_default_required:
+                return self.run_shared_integrated_default(context, route_witness=witness).outcome
             if self._configuration.shared_compression_disabled_noop_required:
                 self._validate_shared_compression_disabled_pre_effect()
                 return FabricPostWriteOutcome()
@@ -434,6 +490,84 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             consumers._run_character_drift(context)
             proposal_id = consumers._run_proposal(context)
             return FabricPostWriteOutcome(proposal_id=proposal_id)
+
+    def run_shared_integrated_default(
+        self,
+        context: FabricPostWriteContext,
+        *,
+        route_witness: NativePostWriteRouteWitness | None = None,
+        on_ready_memory: Callable[[NativeFabricRoutingScope, int], None] | None = None,
+    ) -> NativeSharedIntegratedPostWriteOutcome:
+        """Execute E1's frozen shared sequence over one explicit route witness."""
+        if not isinstance(context, FabricPostWriteContext):
+            raise ValueError("context must be FabricPostWriteContext")
+        if context.scope != "shared":
+            raise SubstrateInvariantViolation("E1 integrated post-write requires a shared context")
+        self.preflight_shared_integrated_default()
+        witness = route_witness or NativePostWriteRouteWitness(None, None)
+        with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+            connection = opened.connection
+            _revalidate_capability_for_route(self._capability, connection)
+            self._validate_context_and_route(connection, context, witness)
+            consumers = self._bind_shared_integrated_dependencies(connection, context, witness)
+            mood_scope: NativeFabricRoutingScope | None = None
+            ready_memory_eids: list[tuple[NativeFabricRoutingScope, int]] = []
+            if context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
+                assert context.eid is not None
+                ready_memory_eids.append((self._configuration.routing_scope, int(context.eid)))
+                if on_ready_memory is not None:
+                    try:
+                        on_ready_memory(self._configuration.routing_scope, int(context.eid))
+                    except Exception as exc:
+                        self._configuration.external.owner._log.debug(
+                            "E1 READY-lane observer failed for eid=%s: %s", context.eid, exc,
+                        )
+            if context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
+                # This is the corrected legacy created-memory order.  The
+                # first slot has an explicit shared predicate and is a no-op.
+                consumers._run_contradiction_surface(context)
+                consumers._run_srg_collision(context)
+                consumers._run_hivemind(context)
+                mood_eid = self._run_shared_integrated_m1_and_derived(consumers, context)
+                if mood_eid is not None:
+                    binding = self._configuration.shared_mood_drift_binding
+                    assert binding is not None
+                    mood_scope = binding.target_scope
+                    ready_memory_eids.append((mood_scope, mood_eid))
+                    if on_ready_memory is not None:
+                        try:
+                            on_ready_memory(mood_scope, mood_eid)
+                        except Exception as exc:
+                            self._configuration.external.owner._log.debug(
+                                "E1 READY-lane observer failed for eid=%s: %s", mood_eid, exc,
+                            )
+
+            if context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
+                self._run_shared_trajectory_evidence(connection, context)
+            else:
+                consumers._run_world_step(context)
+            consumers._run_character_drift(context)
+            self._run_shared_checkpoint_snapshot(connection, context)
+            # D6 was preflighted above.  Compression is intentionally a real
+            # no-op here, before the ordinary shared proposal gate and B1.
+            self._run_shared_compression_disabled_noop()
+            proposal_id = consumers._run_proposal(context)
+            run_bridge_suggestions(
+                context,
+                workspace=self._configuration.external.workspace,
+                random_chance=self._configuration.external.random_chance,
+                geometry=self._configuration.external.shared_bridge_geometry,
+            )
+        scopes = [self._configuration.routing_scope]
+        if mood_scope is not None:
+            scopes.append(mood_scope)
+        return NativeSharedIntegratedPostWriteOutcome(
+            FabricPostWriteOutcome(proposal_id=proposal_id), tuple(scopes), tuple(ready_memory_eids),
+        )
+
+    def _run_shared_compression_disabled_noop(self) -> None:
+        """D6's qualified semantic no-op in E1's exact legacy slot."""
+        return None
 
     def _run_shared_trajectory_evidence(
         self,
@@ -563,6 +697,120 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             for item in motifs
         })
         return build_motif_summary(projection)
+
+    def _bind_shared_integrated_dependencies(
+        self,
+        connection: sqlite3.Connection,
+        context: FabricPostWriteContext,
+        witness: NativePostWriteRouteWitness,
+    ) -> LegacyFabricPostWriteAdapter:
+        """Bind E1's already-qualified owners without granting new authority."""
+        m1 = self._bind_shared_m1_mood_dependencies(connection, context, witness)
+        scope = self._configuration.routing_scope
+        external = self._configuration.external
+        memory = NativePostWriteMemoryAccess(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            expected_dimension=self._capability.binding.representation_lane.dimension,
+        )
+        world = NativeWorldRuntime(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            expected_dimension=self._capability.binding.representation_lane.dimension,
+            process_state=self._capability.world_process_state,
+        )
+        srg = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            process_state=self._capability.srg_process_state,
+        )
+        character = NativeCharacterDriftRuntime(
+            configuration=NativeCharacterDriftRuntimeConfiguration(
+                workspace_id=scope.runtime_scope.workspace_id,
+                agent_id=context.agent_id,
+                seed_id=str(external.identity.seed.get("seed_id", "") or ""),
+                domain_id=context.chosen_domain,
+                motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+                expected_dimension=self._capability.binding.representation_lane.dimension,
+                character_enabled=bool(getattr(external.owner, "_character_enable", False)),
+                drift_every=int(getattr(external.owner, "_character_drift_every", 1)),
+            ),
+            store=external.character_store,
+            memory_read=memory,
+            memory_enumeration=memory,
+            motif_reader=NativeMotifRuntimeReader(connection),
+        )
+        dependencies = LegacyFabricPostWriteDependencies(
+            owner=external.owner,
+            workspace=external.workspace,
+            graph=_ForbiddenNativeGraph(),
+            world_runtime=world,
+            derived_memory_runtime=m1.derived_memory_runtime,
+            memory_access=memory,
+            memory_enumeration=memory,
+            srg_runtime=srg,
+            embedding_dimension=self._capability.binding.representation_lane.dimension,
+            identity=external.identity,
+            motif_registry=None,
+            motif_runtime=m1.motif_runtime,
+            model_state=None,
+            kernel_context=None,
+            agent_key=external.agent_key,
+            detect_canon_conflict=external.detect_canon_conflict,
+            proposal_allowed=external.proposal_allowed,
+            random_chance=_forbidden_random_chance,
+            save_checkpoint=_forbidden_checkpoint,
+            build_motif_summary=_forbidden_checkpoint,
+            build_shard_snapshot=_forbidden_checkpoint,
+            hivemind_log=external.hivemind_log,
+            character_drift_runtime=character,
+        )
+        return LegacyFabricPostWriteAdapter(dependencies)
+
+    def _run_shared_integrated_m1_and_derived(
+        self,
+        consumers: LegacyFabricPostWriteAdapter,
+        context: FabricPostWriteContext,
+    ) -> int | None:
+        """Keep M1/D0/D1's independent fail-soft boundaries in legacy order."""
+        deps = consumers._deps
+        policy = deps.workspace.domain_policies.get(context.chosen_domain, {})
+        try:
+            assert deps.motif_runtime is not None
+            deps.motif_runtime.update_entropy_and_suggest(
+                target_n=int(policy.get("motif_entropy_target_n", 24)),
+                entropy_high=float(policy.get("motif_entropy_high", 0.72)),
+                sim_threshold=float(policy.get("motif_merge_similarity", 0.93)),
+                max_suggestions=int(policy.get("motif_merge_max_suggestions", 20)),
+                auto_merge=bool(policy.get("auto_merge_motifs", False)),
+                auto_merge_trigger=float(policy.get("auto_merge_entropy_trigger", 0.80)),
+            )
+        except Exception as exc:
+            deps.owner._log.debug("motif entropy update failed for domain=%s: %s", context.chosen_domain, exc)
+        derived_context = DerivedMemoryRuntimeContext(
+            workspace_id=context.workspace_id,
+            agent_id=context.agent_id,
+            domain_id=context.chosen_domain,
+            trigger_scope=context.scope,
+            step=int(context.step),
+            motif_ids=tuple(context.motif_ids),
+            affect_tag=context.affect_tag,
+            affect_conf=context.affect_conf,
+        )
+        try:
+            deps.derived_memory_runtime.maybe_emit_identity_anchor(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("identity anchor emission failed: %s", exc)
+        try:
+            deps.derived_memory_runtime.refine_identity_anchors(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("identity anchor refinement failed: %s", exc)
+        try:
+            return deps.derived_memory_runtime.maybe_emit_mood_drift(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("mood drift emission failed: %s", exc)
+            return None
 
     def _bind_dependencies(
         self,
@@ -1014,6 +1262,7 @@ def prepare_native_fabric_post_write_adapter(
         shared_trajectory = configuration.shared_trajectory_evidence_required
         shared_checkpoint = configuration.shared_checkpoint_snapshot_required
         shared_compression_disabled = configuration.shared_compression_disabled_noop_required
+        shared_integrated = configuration.shared_integrated_default_required
         shared_consumers = sum((
             bool(configuration.shared_bridge_suggestions_required),
             bool(shared_d1),
@@ -1021,6 +1270,7 @@ def prepare_native_fabric_post_write_adapter(
             bool(shared_trajectory),
             bool(shared_checkpoint),
             bool(shared_compression_disabled),
+            bool(shared_integrated),
         ))
         if shared_consumers > 1:
             raise SubstrateConfigurationError("shared post-write consumers must be prepared separately")
@@ -1028,7 +1278,9 @@ def prepare_native_fabric_post_write_adapter(
             raise SubstrateConfigurationError("shared post-write configuration has no qualified consumer")
         if template is not None:
             raise SubstrateConfigurationError("shared post-write configuration must not bind a source-scope derived runtime")
-        if configuration.shared_bridge_suggestions_required:
+        if shared_integrated:
+            _validate_shared_integrated_configuration(capability, configuration)
+        elif configuration.shared_bridge_suggestions_required:
             _require_qualified(configuration.profile.shared_bridge_suggestion, "shared bridge suggestion")
             _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
             if not callable(configuration.external.random_chance):
@@ -1127,6 +1379,70 @@ def _validate_shared_compression_disabled_configuration(
         )
 
 
+def _validate_shared_integrated_configuration(
+    capability: NativeFabricRoutingCapability,
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    """Validate the complete E1 composition before its source operation."""
+    scope = configuration.routing_scope
+    if scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+        raise SubstrateInvariantViolation("E1 integrated post-write requires a claimed shared native scope")
+    if not configuration.shared_integrated_default_required:
+        raise SubstrateConfigurationError("E1 integrated shared capability is not required by this profile")
+    profile = configuration.profile
+    _require_qualified(profile.shared_integrated_default, "shared integrated default")
+    _require_qualified(profile.shared_bridge_suggestion, "shared bridge suggestion")
+    _require_qualified(profile.shared_motif_suggestion_maintenance, "shared motif suggestion maintenance")
+    _require_required_noop(profile.shared_trigger_identity_anchor, "shared trigger identity anchor")
+    _require_qualified(profile.shared_trigger_mood_drift, "shared trigger mood drift")
+    _require_qualified(profile.shared_hivemind_packet_emission, "shared Hivemind packet emission")
+    _require_qualified(profile.shared_trajectory_evidence, "shared trajectory evidence")
+    _require_qualified(profile.shared_checkpoint_snapshot, "shared checkpoint snapshot")
+    _require_qualified(profile.shared_compression_disabled_noop, "shared compression disabled no-op")
+    _require_qualified(profile.shared_trigger_character_noop, "shared Character no-op")
+    _require_qualified(profile.motif_auto_merge, "motif auto-merge")
+    if profile.compression is not NativePostWriteBehavior.UNSUPPORTED:
+        raise SubstrateConfigurationError("E1 integrated profile must not claim enabled compression")
+    if profile.deep_memory is not NativePostWriteBehavior.UNSUPPORTED:
+        raise SubstrateConfigurationError("E1 integrated profile must not claim deep-memory export")
+    if configuration.derived_runtime_template is not None:
+        raise SubstrateConfigurationError("E1 integrated shared profile must not bind a source-scope derived runtime")
+    if any((
+        configuration.motif_suggestion_maintenance_required,
+        configuration.persistent_trajectory_evidence_required,
+        configuration.checkpoint_snapshots_required,
+        configuration.bridge_suggestions_required,
+    )):
+        raise SubstrateConfigurationError(
+            "E1 integrated shared profile cannot claim private-only post-write capabilities"
+        )
+    if configuration.deep_memory_required:
+        raise SubstrateConfigurationError("E1 integrated shared profile must not claim private deep memory")
+    if any((
+        configuration.shared_bridge_suggestions_required,
+        configuration.shared_motif_suggestion_maintenance_required,
+        configuration.shared_hivemind_packet_emission_required,
+        configuration.shared_trajectory_evidence_required,
+        configuration.shared_checkpoint_snapshot_required,
+        configuration.shared_compression_disabled_noop_required,
+    )):
+        raise SubstrateConfigurationError("E1 integrated profile cannot compose standalone shared consumer flags")
+    _validate_shared_mood_drift_binding(capability, configuration)
+    _validate_shared_trajectory_evidence_binding(configuration)
+    _validate_shared_checkpoint_snapshot_binding(configuration)
+    _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
+    if not callable(configuration.external.random_chance):
+        raise SubstrateConfigurationError("E1 integrated profile requires an injected random_chance dependency")
+    owner = configuration.external.owner
+    enabled = getattr(owner, "_compress_enable", None)
+    if type(enabled) is not bool:
+        raise SubstrateConfigurationError("E1 integrated profile requires a boolean owner._compress_enable")
+    if enabled:
+        raise SubstrateConfigurationError(
+            "E1 integrated profile requires TORMENT_COMPRESS_ENABLE=false before effects"
+        )
+
+
 def _validate_shared_mood_drift_binding(
     capability: NativeFabricRoutingCapability,
     configuration: NativePostWriteQualificationConfiguration,
@@ -1215,6 +1531,7 @@ __all__ = [
     "NativePostWriteQualificationConfiguration",
     "NativePostWriteQualificationProfile",
     "NativePostWriteRouteWitness",
+    "NativeSharedIntegratedPostWriteOutcome",
     "NativeSharedCheckpointSnapshotBinding",
     "NativeSharedTrajectoryEvidenceBinding",
     "NativeSharedTriggerMoodDriftBinding",
