@@ -28,6 +28,10 @@ from .motif_geometry_port import (
 from .motifs import MotifRegistry
 from .scoring import QueryMemoryIdentity, qualified_query_memory_identity
 from .substrate.native_memory_vector_runtime import NativeMemoryVectorRuntime
+from .substrate.native_srg_runtime import (
+    NativeSRGProcessState,
+    NativeSRGTransientRuntime,
+)
 
 
 _PRIVATE = "private"
@@ -293,6 +297,9 @@ class LegacyQualifiedQueryReadModel:
         self._geometry = LegacyMotifGeometryAdapter(
             {domain_id: motif_registries[domain_id] for domain_id in shared_domain_order}
         )
+        self._geometry_dimension = _legacy_geometry_dimension(
+            tuple(shared_graphs.values())
+        )
         self._shared_domain_order = shared_domain_order
 
     def private_lane(self, workspace_id: str, agent_id: str) -> QualifiedQueryLane:
@@ -316,7 +323,7 @@ class LegacyQualifiedQueryReadModel:
             self._workspace_id,
             domain_id,
             None,
-            tuple(float(value) for value in geometry.domain_centroid(domain_id, _geometry_dimension(motifs))),
+            tuple(float(value) for value in geometry.domain_centroid(domain_id, self._geometry_dimension)),
             tuple(
                 QualifiedMotifGeometry(
                     QualifiedQueryMotifIdentity(self._workspace_id, item.domain_id, item.runtime_motif_id),
@@ -466,6 +473,9 @@ class NativeQualifiedQueryReadModel:
             expected_dimension=self._lane_dimension,
         )
         self._embedder = embedder
+        # A3 query breathing uses the existing process-local native SRG owner;
+        # this model never publishes a SQLite successor merely because it read.
+        self._srg_process_state = NativeSRGProcessState()
         self._private_lanes: dict[str, _NativeQualifiedQueryLane] = {}
         self._shared_lanes: dict[str, _NativeQualifiedQueryLane] = {}
 
@@ -475,6 +485,59 @@ class NativeQualifiedQueryReadModel:
             lane.close()
         self._private_lanes.clear()
         self._shared_lanes.clear()
+
+    def effective_srg_state(self, hit: QualifiedQueryHit) -> dict[str, Any] | None:
+        """Return current durable-or-process-local SRG state for one native hit."""
+        scope = self._native_srg_scope(hit)
+        with scope.open_readers() as readers:
+            _source, view = self._current_native_srg_view(hit, scope, readers)
+            runtime = NativeSRGTransientRuntime(
+                readers._qualified_connection.connection,
+                legacy_source_namespace_id=scope.memory_runtime_scope.legacy_source_namespace_id,
+                process_state=self._srg_process_state,
+            )
+            state = runtime.effective_srg_state(view)
+            return None if state is None else dict(state)
+
+    def replace_srg_state(self, hit: QualifiedQueryHit, state: Mapping[str, Any]) -> None:
+        """Store an evolved SRG overlay under the exact current native witness."""
+        scope = self._native_srg_scope(hit)
+        with scope.open_readers() as readers:
+            source, _view = self._current_native_srg_view(hit, scope, readers)
+        identity = hit.memory_identity
+        self._srg_process_state.set_overlay(
+            core_id=self._runtime.native_core_id,
+            namespace=scope.memory_runtime_scope.legacy_source_namespace_id,
+            eid=identity.eid,
+            revision_id=source.revision_id,
+            srg_state=state,
+            collision_report=source.payload.get("srg_collision"),
+        )
+
+    def _native_srg_scope(self, hit: QualifiedQueryHit) -> Any:
+        if not isinstance(hit, QualifiedQueryHit) or hit.native_object_id is None or hit.native_revision_id is None:
+            raise QualifiedQueryReadModelError("native SRG requires a qualified native query hit")
+        identity = hit.memory_identity
+        if identity.workspace_id != self._workspace_id:
+            raise QualifiedQueryReadModelError("native SRG hit workspace mismatch")
+        if identity.scope == _PRIVATE:
+            scope = self._runtime.lookup_private(identity.qualifier)
+        elif identity.scope == _SHARED:
+            scope = self._runtime.lookup_shared(identity.qualifier)
+        else:
+            raise QualifiedQueryReadModelError("native SRG hit scope is not query-qualified")
+        return scope
+
+    @staticmethod
+    def _current_native_srg_view(hit: QualifiedQueryHit, scope: Any, readers: Any) -> tuple[Any, Any]:
+        source = readers.memory.get_memory_by_eid(
+            legacy_source_namespace_id=scope.memory_runtime_scope.legacy_source_namespace_id,
+            eid=hit.memory_identity.eid,
+        )
+        view = readers.memory_enumeration.get_current(hit.memory_identity.eid)
+        if view is None or source.object_id != hit.native_object_id or source.revision_id != hit.native_revision_id:
+            raise QualifiedQueryReadModelError("native SRG hit is no longer current")
+        return source, view
 
     def private_lane(self, workspace_id: str, agent_id: str) -> QualifiedQueryLane:
         self._require_workspace(workspace_id)
@@ -606,14 +669,17 @@ def _explicit_shared_domain_order(recovered_runtime: Any) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _geometry_dimension(motifs: tuple[RuntimeMotifGeometry, ...]) -> int:
-    """Infer the pre-existing legacy geometry dimension only from live motifs."""
-    if not motifs:
-        raise QualifiedQueryReadModelError("legacy domain geometry requires at least one motif")
-    dimension = len(motifs[0].centroid)
-    if dimension < 1 or any(len(item.centroid) != dimension for item in motifs):
-        raise QualifiedQueryReadModelError("legacy motif geometry dimensions disagree")
-    return dimension
+def _legacy_geometry_dimension(graphs: tuple[MemoryGraph, ...]) -> int:
+    """Use the existing graph lock even when a domain has no live motifs."""
+    dimensions = [getattr(graph, "_emb_dim", None) for graph in graphs]
+    if not dimensions or any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 1
+        for value in dimensions
+    ):
+        raise QualifiedQueryReadModelError("legacy query graphs lack one embedding dimension")
+    if len(set(dimensions)) != 1:
+        raise QualifiedQueryReadModelError("legacy query graph dimensions disagree")
+    return dimensions[0]
 
 
 def _nonempty(name: str, value: Any) -> None:

@@ -226,6 +226,7 @@ def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedd
     graph.world._next_id = 0
     reader = NativeMemoryCompatibilityFacade(connection)
     runtime_scope = scope.memory_runtime_scope
+    embedding_refs = {}
     for source, vector in sources_and_vectors:
         eid = graph.add_memory(
             summary=f"placeholder {source.eid}", embedding=np.asarray(vector, dtype=np.float32),
@@ -233,6 +234,7 @@ def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedd
             user_id="aria", step=12,
         )
         assert eid == source.eid
+        embedding_refs[eid] = graph.entities[eid].payload["embedding_ref"]
         view = reader.get_memory_by_eid(
             legacy_source_namespace_id=runtime_scope.legacy_source_namespace_id, eid=eid,
         )
@@ -245,14 +247,23 @@ def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedd
         })
         graph.entities[eid].payload = payload
         graph._emb_by_eid[eid] = graph._normalize(np.asarray(vector, dtype=np.float32))
+    graph._a3_fixture_embedding_refs = embedding_refs
     graph._rebuild_matrix()
     return graph
 
 
 def _legacy_registry(graph: MemoryGraph, domain_id: str, motifs: list[tuple[str, int, tuple[float, ...], float, int]]) -> MotifRegistry:
+    def entity_payload(eid: int):
+        entity = graph.entities.get(eid)
+        if entity is None:
+            return None
+        payload = dict(entity.payload)
+        payload["embedding_ref"] = graph._a3_fixture_embedding_refs[eid]
+        return payload
+
     registry = MotifRegistry(
         graph.data_dir, "orchard", domain_id, shard_reader=graph._shard_reader,
-        entity_payload_fn=lambda eid: graph.entities.get(eid).payload if eid in graph.entities else None,
+        entity_payload_fn=entity_payload,
     )
     registry.motifs = {
         motif_id: Motif(
@@ -275,6 +286,7 @@ def qualified_models(tmp_path: Path, monkeypatch):
     private = _scope(connection, qualified.database_path, core_id, kind="PRIVATE_AGENT", qualifier="aria", idempotency=idempotency)
     research = _scope(connection, qualified.database_path, core_id, kind="SHARED_DOMAIN", qualifier="research", idempotency=idempotency)
     engineering = _scope(connection, qualified.database_path, core_id, kind="SHARED_DOMAIN", qualifier="engineering", idempotency=idempotency)
+    archive = _scope(connection, qualified.database_path, core_id, kind="SHARED_DOMAIN", qualifier="archive", idempotency=idempotency)
     native_embedder = _Embedder()
     graphs: list[MemoryGraph] = []
     model = None
@@ -309,35 +321,43 @@ def qualified_models(tmp_path: Path, monkeypatch):
             _memory(connection, engineering, idempotency, "motifless", (.0, .7, .7), user_id="nox"),
             _memory(connection, engineering, idempotency, "same", (1., .0, .0)),
         )
+        archive_rows = (
+            _memory(connection, archive, idempotency, "bridge", (.0, .0, 1.)),
+        )
         assert private_rows[1][0].eid == research_rows[1][0].eid == engineering_rows[1][0].eid == 1
         _create_motif(connection, private, idempotency, motif_id="private-anchor", domain_id="personal", source=private_rows[1][0], centroid=(1., 0., 0.), strength=.65, last_active_ts=110)
         _create_motif(connection, research, idempotency, motif_id="same-id", domain_id="research", source=research_rows[1][0], centroid=(1., 0., 0.), strength=.60, last_active_ts=100)
         _create_motif(connection, research, idempotency, motif_id="research-hot", domain_id="research", source=research_rows[2][0], centroid=(.8, .2, .0), strength=.60, last_active_ts=200)
         _create_motif(connection, engineering, idempotency, motif_id="same-id", domain_id="engineering", source=engineering_rows[1][0], centroid=(0., 1., 0.), strength=.60, last_active_ts=100)
+        _create_motif(connection, archive, idempotency, motif_id="archive-id", domain_id="archive", source=archive_rows[0][0], centroid=(0., 0., 1.), strength=.55, last_active_ts=100)
 
-        legacy_embedders = (_Embedder(), _Embedder(), _Embedder())
+        legacy_embedders = (_Embedder(), _Embedder(), _Embedder(), _Embedder())
         private_graph = _legacy_graph(tmp_path, connection, private, tuple((row[0], vector) for row, vector in zip(private_rows[:2], ((.2, .9, .0), (1., .0, .0)), strict=True)), legacy_embedders[0])
         research_graph = _legacy_graph(tmp_path, connection, research, tuple((row[0], vector) for row, vector in zip(research_rows, ((.5, .5, .0), (1., .0, .0), (.8, .2, .0)), strict=True)), legacy_embedders[1])
         engineering_graph = _legacy_graph(tmp_path, connection, engineering, tuple((row[0], vector) for row, vector in zip(engineering_rows, ((.0, .7, .7), (1., .0, .0)), strict=True)), legacy_embedders[2])
-        graphs.extend((private_graph, research_graph, engineering_graph))
+        archive_graph = _legacy_graph(tmp_path, connection, archive, tuple((row[0], vector) for row, vector in zip(archive_rows, ((.0, .0, 1.),), strict=True)), legacy_embedders[3])
+        graphs.extend((private_graph, research_graph, engineering_graph, archive_graph))
         registries = {
             "personal": _legacy_registry(private_graph, "personal", [("private-anchor", 1, (1., 0., 0.), .65, 110)]),
             "research": _legacy_registry(research_graph, "research", [("same-id", 1, (1., 0., 0.), .60, 100), ("research-hot", 2, (.8, .2, .0), .60, 200)]),
             "engineering": _legacy_registry(engineering_graph, "engineering", [("same-id", 1, (0., 1., 0.), .60, 100)]),
+            "archive": _legacy_registry(archive_graph, "archive", [("archive-id", 0, (0., 0., 1.), .55, 100)]),
         }
         legacy = LegacyQualifiedQueryReadModel(
             "orchard", private_graphs={"aria": private_graph},
-            shared_graphs={"research": research_graph, "engineering": engineering_graph},
+            shared_graphs={"research": research_graph, "engineering": engineering_graph, "archive": archive_graph},
             motif_registries=registries, private_motif_domains={"aria": "personal"},
-            shared_domain_order=("research", "engineering"),
+            shared_domain_order=("research", "engineering", "archive"),
         )
         descriptor = SimpleNamespace(payload={"lanes": [
             {"plan": {"scope_kind": "PRIVATE_AGENT", "agent_id": "aria", "motif_domain_id": "personal"}},
             {"plan": {"scope_kind": "SHARED_DOMAIN", "domain_id": "research", "motif_domain_id": "research"}},
             {"plan": {"scope_kind": "SHARED_DOMAIN", "domain_id": "engineering", "motif_domain_id": "engineering"}},
+            {"plan": {"scope_kind": "SHARED_DOMAIN", "domain_id": "archive", "motif_domain_id": "archive"}},
         ]})
-        recovered = _RecoveredRuntime("orchard", core_id, _lane(), (private, research, engineering), descriptor)
+        recovered = _RecoveredRuntime("orchard", core_id, _lane(), (private, research, engineering, archive), descriptor)
         model = NativeQualifiedQueryReadModel(recovered, embedder=native_embedder)
+        model._a3_fixture_runtime = recovered
         monkeypatch.setattr(memory_graph_module, "_now_ts", lambda: 100 + 86400)
         monkeypatch.setattr(vector_runtime_module.time, "time", lambda: float(100 + 86400))
         yield legacy, model, native_embedder, legacy_embedders
@@ -349,7 +369,7 @@ def qualified_models(tmp_path: Path, monkeypatch):
         qualified.close()
 
 
-@pytest.mark.parametrize("kind,qualifier", (("private", "aria"), ("shared", "research"), ("shared", "engineering")))
+@pytest.mark.parametrize("kind,qualifier", (("private", "aria"), ("shared", "research"), ("shared", "engineering"), ("shared", "archive")))
 def test_native_lane_search_is_legacy_shaped_and_qualified(qualified_models, kind: str, qualifier: str):
     legacy, native, native_embedder, legacy_embedders = qualified_models
     legacy_lane = legacy.private_lane("orchard", qualifier) if kind == "private" else legacy.shared_lane("orchard", qualifier)
@@ -358,7 +378,7 @@ def test_native_lane_search_is_legacy_shaped_and_qualified(qualified_models, kin
     actual = native_lane.search("  query  ", top_k=8)
     assert [item.as_legacy_hit() for item in actual] == [item.as_legacy_hit() for item in expected]
     assert native_embedder.calls == ["query"]
-    assert legacy_embedders[("aria", "research", "engineering").index(qualifier)].calls == ["query"]
+    assert legacy_embedders[("aria", "research", "engineering", "archive").index(qualifier)].calls == ["query"]
     assert all(item.memory_identity.scope == kind and item.memory_identity.qualifier == qualifier for item in actual)
     assert native_lane.search("   ") == ()
     assert native_embedder.calls == ["query"]
@@ -387,7 +407,7 @@ def test_filters_decay_namespaces_geometry_and_cold_rebuild(qualified_models):
     assert research_hit.motif_memberships[0].semantic_scope_id != engineering_hit.motif_memberships[0].semantic_scope_id
 
     assert native.active_motifs("research", top_k=6) == legacy.active_motifs("research", top_k=6)
-    assert native.domain_ids() == legacy.domain_ids() == ("research", "engineering")
+    assert native.domain_ids() == legacy.domain_ids() == ("research", "engineering", "archive")
     for domain in native.domain_ids():
         legacy_geometry = legacy.domain_geometry(domain)
         native_geometry = native.domain_geometry(domain)

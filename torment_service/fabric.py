@@ -20,8 +20,14 @@ from .identity import (
 )
 from .motifs import MotifRegistry, cosine as cos_sim
 from .motif_geometry_port import LegacyMotifGeometryAdapter, MotifGeometryPort
+from .query_read_model import (
+    LegacyQualifiedQueryReadModel,
+    NativeQualifiedQueryReadModel,
+    QualifiedQueryHit,
+    QualifiedQueryReadModel,
+)
 from .motif_runtime import LegacyMotifRuntimeAdapter
-from .router import DomainRouter, SINGLE_AGENT_DOMAIN
+from .router import DomainRouter, DomainScore, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry, ShareProposal
@@ -3884,12 +3890,145 @@ class TormentFabric:
             return None
         return entity
 
+    @staticmethod
+    def _query_read_hit_key() -> str:
+        """Private carrier for one A2 hit during qualification orchestration."""
+        return "_a3_qualified_query_hit"
+
+    def _legacy_query_read_model(
+        self,
+        ws: Workspace,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        preferred_private_domain: str | None,
+    ) -> LegacyQualifiedQueryReadModel:
+        """Adapt the live legacy readers without changing their public owner.
+
+        A3 always routes public ``query()`` through this adapter too, so the
+        orchestration has one storage seam.  The legacy compatibility hit is
+        preserved verbatim; only native qualification uses A2's current motif
+        membership projection to reconstruct an otherwise absent native field.
+        """
+        ak = self._agent_key(workspace_id, agent_id)
+        graph = self.private_graphs.get(ak)
+        if graph is None:
+            raise KeyError(f"private query lane is unavailable for agent {agent_id!r}")
+        private_domain = self._legacy_private_motif_domain(
+            graph,
+            registries=ws.motif_regs,
+            preferred_domain=preferred_private_domain,
+        )
+        return LegacyQualifiedQueryReadModel(
+            workspace_id,
+            private_graphs={agent_id: graph},
+            shared_graphs=ws.shared_graphs,
+            motif_registries=ws.motif_regs,
+            private_motif_domains={agent_id: private_domain},
+            shared_domain_order=tuple(ws.shared_graphs),
+        )
+
+    @staticmethod
+    def _legacy_private_motif_domain(
+        graph: MemoryGraph,
+        *,
+        registries: Dict[str, MotifRegistry],
+        preferred_domain: str | None,
+    ) -> str:
+        """Recover the already-stored private motif-domain fact, never infer one.
+
+        The A2 legacy adapter needs one registry to expose its internal
+        membership projection.  Public legacy result payloads remain untouched
+        below, so an old multi-domain private graph cannot change public query
+        behavior at this qualification seam.
+        """
+        for entity in graph.entities.values():
+            payload = getattr(entity, "payload", {}) or {}
+            domain_id = payload.get("domain_id")
+            if isinstance(domain_id, str) and domain_id in registries:
+                return domain_id
+        if preferred_domain in registries:
+            return str(preferred_domain)
+        try:
+            return next(iter(registries))
+        except StopIteration as exc:
+            raise KeyError("workspace has no motif registry for private query") from exc
+
+    def _query_read_hits_to_compatibility(
+        self,
+        hits: tuple[QualifiedQueryHit, ...],
+        *,
+        read_model: QualifiedQueryReadModel,
+    ) -> List[Dict[str, Any]]:
+        """Expose the existing hit shape while retaining A2 identity privately."""
+        native = isinstance(read_model, NativeQualifiedQueryReadModel)
+        values: List[Dict[str, Any]] = []
+        for hit in hits:
+            value = hit.as_legacy_hit()
+            if native:
+                # A2 membership is current native relationship truth.  Legacy
+                # graph payloads already carry the compatibility list, so do
+                # not rewrite them and thereby perturb public legacy behavior.
+                value["motifs"] = list(hit.motif_ids)
+            value[self._query_read_hit_key()] = hit
+            values.append(value)
+        return values
+
+    @staticmethod
+    def _rank_domains_from_read_model(
+        query_embedding: Any,
+        *,
+        read_model: QualifiedQueryReadModel,
+        domain_order: tuple[str, ...],
+        expected_dimension: int,
+        top_k: int,
+    ) -> List[DomainScore]:
+        """Run the existing DomainRouter cosine/stable-sort law over A2 geometry."""
+        scores: List[DomainScore] = []
+        for domain_id in domain_order:
+            geometry = read_model.domain_geometry(domain_id)
+            centroid = np.asarray(geometry.centroid, dtype=np.float32).reshape(-1)
+            if centroid.size != expected_dimension:
+                raise ValueError("qualified query geometry dimension mismatch")
+            if np.allclose(centroid, 0):
+                score = 0.0
+            else:
+                score = float(cos_sim(query_embedding, centroid))
+            scores.append(DomainScore(domain_id=domain_id, score=score))
+        scores.sort(key=lambda item: item.score, reverse=True)
+        return scores[:top_k]
+
+    def _query_with_read_model(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        query_text: str,
+        *,
+        read_model: QualifiedQueryReadModel,
+        top_k: int = 8,
+        domain_id: Optional[str] = None,
+        peek_bridges: bool = False,
+        explain: bool = False,
+        continuity_debug: bool = False,
+        memory_plan: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Private A3 qualification entrypoint; it is not an API selector."""
+        return self.query(
+            workspace_id, agent_id, query_text,
+            top_k=top_k, domain_id=domain_id, peek_bridges=peek_bridges,
+            explain=explain, continuity_debug=continuity_debug,
+            memory_plan=memory_plan,
+            _qualification_read_model=read_model,
+        )
+
     def _query_private_lane(
         self,
         ak: str,
+        workspace_id: str,
         query_text: str,
         agent_id: str,
         top_k: int,
+        read_model: QualifiedQueryReadModel,
     ) -> List[Dict[str, Any]]:
         """Return hits from the agent's private graph only.
 
@@ -3911,16 +4050,21 @@ class TormentFabric:
         """
         if top_k <= 0:
             return []
-        return self.private_graphs[ak].search(
+        hits = read_model.private_lane(workspace_id, agent_id).search(
             query_text, top_k=top_k, user_id=agent_id,
+        )
+        return self._query_read_hits_to_compatibility(
+            hits, read_model=read_model,
         )
 
     def _query_shared_lane(
         self,
         ws: Any,
+        workspace_id: str,
         query_text: str,
         top_k: int,
         domains: List[str],
+        read_model: QualifiedQueryReadModel,
         *,
         peek_bridges: bool = False,
         peek_top_k: int = 4,
@@ -3953,7 +4097,12 @@ class TormentFabric:
         if top_k > 0:
             for d in domains:
                 shared_hits.extend(
-                    ws.shared_graphs[d].search(query_text, top_k=top_k, user_id=None)
+                    self._query_read_hits_to_compatibility(
+                        read_model.shared_lane(workspace_id, d).search(
+                            query_text, top_k=top_k, user_id=None,
+                        ),
+                        read_model=read_model,
+                    )
                 )
 
         bridge_peek_domains: List[str] = []
@@ -3979,7 +4128,12 @@ class TormentFabric:
                     break
             for pd in bridge_peek_domains:
                 if pd in ws.shared_graphs:
-                    hits_pd = ws.shared_graphs[pd].search(query_text, top_k=peek_top_k, user_id=None)
+                    hits_pd = self._query_read_hits_to_compatibility(
+                        read_model.shared_lane(workspace_id, pd).search(
+                            query_text, top_k=peek_top_k, user_id=None,
+                        ),
+                        read_model=read_model,
+                    )
                     for h in hits_pd:
                         hh = dict(h)
                         hh["via_bridge"] = True
@@ -4264,10 +4418,24 @@ class TormentFabric:
         explain: bool = False,
         continuity_debug: bool = False,
         memory_plan: Optional[Dict[str, Any]] = None,
+        _qualification_read_model: QualifiedQueryReadModel | None = None,
     ) -> Dict[str, Any]:
         ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
         ident = self.create_agent(workspace_id, agent_id)
+
+        read_model = _qualification_read_model or self._legacy_query_read_model(
+            ws,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            preferred_private_domain=domain_id,
+        )
+        native_qualification = isinstance(read_model, NativeQualifiedQueryReadModel)
+        if native_qualification and self._compress_enable:
+            # A3 deliberately has no native deep lane.  Refuse the profile
+            # rather than silently mixing native core candidates with legacy
+            # deep-memory retrieval.
+            raise ValueError("qualified native query does not support enabled deep retrieval")
 
         qemb = self.kernel.embedder.embed(query_text)
         if int(np.asarray(qemb).reshape(-1).shape[0]) != int(ws.embed_dim):
@@ -4275,7 +4443,13 @@ class TormentFabric:
                 status_code=409,
                 detail=f"Embedding dimension mismatch; workspace '{workspace_id}' locked to {ws.embed_dim} but query embedder returned {int(np.asarray(qemb).reshape(-1).shape[0])}.",
             )
-        dom_scores = ws.router.rank_domains(qemb, top_k=2)
+        dom_scores = self._rank_domains_from_read_model(
+            qemb,
+            read_model=read_model,
+            domain_order=tuple(ws.shared_graphs),
+            expected_dimension=int(ws.embed_dim),
+            top_k=2,
+        )
         domains = [d.domain_id for d in dom_scores]
         if domain_id:
             domains = [domain_id] + [d for d in domains if d != domain_id]
@@ -4297,10 +4471,14 @@ class TormentFabric:
 
         # --- Lane retrieval (v2.4.4) ---
         # Each lane is a separate helper; query() merges and rescores.
-        private_hits = self._query_private_lane(ak, query_text, agent_id, top_k=_core_k)
+        private_hits = self._query_private_lane(
+            ak, workspace_id, query_text, agent_id, top_k=_core_k,
+            read_model=read_model,
+        )
 
         shared_hits, bridge_peek_domains = self._query_shared_lane(
-            ws, query_text, top_k=_relational_k, domains=domains,
+            ws, workspace_id, query_text, top_k=_relational_k, domains=domains,
+            read_model=read_model,
             peek_bridges=peek_bridges, peek_top_k=max(2, top_k // 2),
         )
 
@@ -4358,17 +4536,18 @@ class TormentFabric:
         _filter_excluded: List[Dict[str, Any]] = []
         active_motifs = {}
         for d in domains:
-            active_motifs[d] = ws.motif_regs[d].active(top_k=6)
+            active_motifs[d] = read_model.active_motifs(d, top_k=6)
 
         # Preserve domain ownership of motif geometry.  Runtime motif IDs are
         # compatibility identifiers within a domain, not global identifiers.
         motif_centroids: Dict[_QueryMotifIdentity, np.ndarray] = {}
         for d in domains:
-            for m in ws.motif_regs[d].motifs.values():
+            for qualified_motif in read_model.domain_geometry(d).motifs:
+                m = qualified_motif.geometry
                 motif_centroids[_QueryMotifIdentity(
                     workspace_id=str(workspace_id),
                     domain_id=str(d),
-                    motif_id=str(m.motif_id),
+                    motif_id=str(m.runtime_motif_id),
                 )] = m.centroid_np()
 
         
@@ -4485,6 +4664,7 @@ class TormentFabric:
 
         now_ts = _now_ts()
         for h in all_hits:
+            _qualified_hit = h.get(self._query_read_hit_key())
             # Extract provenance early so all scoring phases can use it.
             _h_prov_raw = (h.get("payload") or h).get("provenance") or h.get("provenance")
             _h_is_tool_result = (
@@ -4588,12 +4768,28 @@ class TormentFabric:
             _srg_same_band = 1.0
             _srg_crystal = 1.0
             _srg_heartbeat = 1.0
+            _native_effective_srg: Dict[str, Any] | None = None
             if self._srg_enable:
                 # Normalized SRG SCORING/explain source: prefer flattened top-level
                 # hit["srg"] (MemoryGraph.search flattens payload), fall back to
                 # nested hit["payload"]["srg"] for legacy/manual-shaped hits — the
                 # same effective source trace() uses. Read-only; not a writeback gate.
                 _srg_score_src = _effective_srg_source(h)
+                if native_qualification and isinstance(_qualified_hit, QualifiedQueryHit):
+                    try:
+                        _native_effective_srg = read_model.effective_srg_state(_qualified_hit)  # type: ignore[attr-defined]
+                        if _native_effective_srg is not None:
+                            _srg_score_src = _native_effective_srg
+                            # Preserve the existing compatibility payload
+                            # surface when a qualified process-local overlay
+                            # supersedes the durable native baseline.  This is
+                            # query-time state only: no SQLite successor is
+                            # published and legacy rows are untouched.
+                            if isinstance(h.get("payload"), dict):
+                                h["payload"] = dict(h["payload"])
+                                h["payload"]["srg"] = dict(_native_effective_srg)
+                    except Exception as e:
+                        self._log.debug("failed to read native transient SRG state: %s", e)
                 if _srg_score_src:
                     # Same-band resonance: 8% boost — compare against THIS agent's
                     # last-ingested band only (keyed by (workspace_id, agent_id)).
@@ -4619,16 +4815,22 @@ class TormentFabric:
                     # Breathing evolution: retrieved memories are "active" → evolve
                     try:
                         from .srg_engine import SRGMemoryState as _SMS, evolve_breathing as _evolve
-                        _srg_live = _SMS.from_dict(_srg_writeback_src)
+                        _srg_evolution_src = _srg_writeback_src
+                        if native_qualification and _native_effective_srg is not None:
+                            _srg_evolution_src = _native_effective_srg
+                        _srg_live = _SMS.from_dict(_srg_evolution_src)
                         _evolve(_srg_live)
                         # Write back evolved state only to the graph that
                         # produced this hit.  Raw EIDs are graph-local.
                         _hit_eid = h.get("eid")
-                        _hit_ent = self._resolve_srg_writeback_target(
-                            ws, workspace_id, agent_id, h
-                        )
-                        if _hit_ent is not None:
-                            _hit_ent.payload["srg"] = _srg_live.to_dict()
+                        if native_qualification and isinstance(_qualified_hit, QualifiedQueryHit):
+                            read_model.replace_srg_state(_qualified_hit, _srg_live.to_dict())  # type: ignore[attr-defined]
+                        else:
+                            _hit_ent = self._resolve_srg_writeback_target(
+                                ws, workspace_id, agent_id, h
+                            )
+                            if _hit_ent is not None:
+                                _hit_ent.payload["srg"] = _srg_live.to_dict()
                     except Exception as e:
                         self._log.debug("failed to write srg payload to entity eid=%s: %s", _hit_eid, e)
 
@@ -4690,6 +4892,9 @@ class TormentFabric:
                 _lane_applied = True
 
             hh = dict(h)
+            # A2 structural identity is strictly an orchestration carrier.
+            # Never let it cross the existing public query-result boundary.
+            hh.pop(self._query_read_hit_key(), None)
             hh["motifs"] = motifs
             hh["final_score"] = final
             # Provenance badge: surface source_type for downstream consumers.
