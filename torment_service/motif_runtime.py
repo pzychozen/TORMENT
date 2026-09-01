@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Protocol
 import numpy as np
 
 from .motifs import MotifRegistry
+from .motif_maintenance import MotifMaintenancePort
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class MotifMutationOutcome:
     created_runtime_id: Optional[str]
 
 
-class MotifRuntimePort(Protocol):
+class MotifRuntimePort(MotifMaintenancePort, Protocol):
     """Minimal motif operations consumed by ordinary ``TormentFabric.ingest``."""
 
     def attach_or_create(
@@ -35,18 +36,6 @@ class MotifRuntimePort(Protocol):
     ) -> MotifMutationOutcome: ...
 
     def project_coherence_field_rows(self) -> List[Dict[str, Any]]: ...
-
-    def update_entropy_and_suggest(
-        self,
-        *,
-        target_n: int,
-        entropy_high: float,
-        sim_threshold: float,
-        max_suggestions: int,
-        auto_merge: bool,
-        auto_merge_trigger: float,
-    ) -> Dict[str, Any]: ...
-
 
 class LegacyMotifRuntimeAdapter:
     """Delegate the Fabric motif boundary to the existing ``MotifRegistry``."""

@@ -19,6 +19,7 @@ from .identity import (
     DEFAULT_AGENT_OVERLAY,
 )
 from .motifs import MotifRegistry, cosine as cos_sim
+from .motif_geometry_port import LegacyMotifGeometryAdapter, MotifGeometryPort
 from .motif_runtime import LegacyMotifRuntimeAdapter
 from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
@@ -6976,13 +6977,27 @@ class TormentFabric:
         return {"ok": True, "decision": "approved", "proposal_id": proposal_id, "created_shared_eid": int(eid)}
 
 
-    def _maybe_suggest_domain(self, ws: Workspace, domain_id: str) -> None:
+    def _maybe_suggest_domain(
+        self,
+        ws: Workspace,
+        domain_id: str,
+        *,
+        geometry: MotifGeometryPort | None = None,
+    ) -> None:
         """Suggest new domains based on strong motifs that are poorly aligned with their current domain centroid."""
         _validate_path_component(domain_id, "domain_id")
+        # The suggestion workflow remains Fabric-owned external JSON state.
+        # Geometry is deliberately injected so a qualified native caller never
+        # reads stale legacy motif JSON after a native motif mutation.
+        geometry = geometry or LegacyMotifGeometryAdapter(ws.motif_regs)
         # Build domain centroid from motif centroids
         dom_centroids: Dict[str, np.ndarray] = {}
-        for d, r in ws.motif_regs.items():
-            cs = [m.centroid_np() for m in r.motifs.values() if m.centroid_np().size > 0]
+        for d in geometry.domain_ids():
+            cs = [
+                motif.centroid_np()
+                for motif in geometry.list_motifs(d)
+                if motif.centroid_np().size > 0
+            ]
             if not cs:
                 continue
             dom_centroids[d] = np.mean(np.stack(cs, axis=0), axis=0)
@@ -6992,15 +7007,15 @@ class TormentFabric:
             return
 
         suggestions = []
-        for m in ws.motif_regs[domain_id].motifs.values():
-            if float(getattr(m, 'strength', 0.0)) < 0.75:
+        for motif in geometry.list_motifs(domain_id):
+            if float(motif.strength) < 0.75:
                 continue
-            c = m.centroid_np()
+            c = motif.centroid_np()
             if c.size == 0:
                 continue
             s = float(np.dot(c, dc) / ((np.linalg.norm(c)+1e-12)*(np.linalg.norm(dc)+1e-12)))
             if s < 0.35:
-                label = getattr(m, 'label', '') or 'emergent'
+                label = motif.label or 'emergent'
                 name = re.sub(r"[^a-z0-9_]+", "_", label.lower()).strip("_")
                 if not name:
                     name = 'emergent'
@@ -7008,9 +7023,9 @@ class TormentFabric:
                 suggestions.append({
                     "domain_id": name,
                     "from_domain": domain_id,
-                    "motif_id": m.motif_id,
+                    "motif_id": motif.runtime_motif_id,
                     "motif_label": label,
-                    "strength": float(getattr(m, 'strength', 0.0)),
+                    "strength": float(motif.strength),
                     "score": s,
                     "ts": _now_ts(),
                     "approved": False,

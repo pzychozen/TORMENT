@@ -19,6 +19,7 @@ from .motifs import MotifRegistry
 class RuntimeMotifGeometry:
     domain_id: str
     runtime_motif_id: str
+    label: str
     centroid: tuple[float, ...]
     strength: float
     stability_score: float
@@ -61,6 +62,7 @@ class LegacyMotifGeometryAdapter:
             RuntimeMotifGeometry(
                 domain_id=motif.domain_id,
                 runtime_motif_id=motif.motif_id,
+                label=str(motif.label),
                 centroid=tuple(float(value) for value in motif.centroid),
                 strength=float(motif.strength),
                 stability_score=float(motif.stability_score),
@@ -121,6 +123,7 @@ class NativeMotifGeometryAdapter:
             RuntimeMotifGeometry(
                 domain_id=item.read_model.domain_id,
                 runtime_motif_id=item.read_model.runtime_motif_id,
+                label=str(item.read_model.label),
                 centroid=tuple(float(value) for value in item.read_model.centroid),
                 strength=float(item.read_model.strength),
                 stability_score=float(item.read_model.stability_score),
@@ -149,9 +152,82 @@ class NativeMotifGeometryAdapter:
         return self._runtime.lookup_shared(domain_id)
 
 
+class NativeScopedMotifGeometryAdapter:
+    """Read one explicitly-bound native motif lane through its existing reader.
+
+    This is deliberately a geometry adapter, not a second motif reader or a
+    shadow ``MotifRegistry``.  It is used by connection-scoped staging
+    consumers (notably the native post-write tail) that have already opened
+    one qualified native core connection.  Multi-domain shared consumers use
+    :class:`NativeMotifGeometryAdapter` above instead.
+    """
+
+    def __init__(
+        self,
+        reader: Any,
+        *,
+        domain_id: str,
+        motif_alias_namespace_id: Any,
+        semantic_scope_id: Any,
+        expected_dimension: int,
+    ) -> None:
+        if not hasattr(reader, "list_runtime_motifs") or not hasattr(reader, "domain_centroid"):
+            raise ValueError("native scoped geometry requires NativeMotifRuntimeReader semantics")
+        if not isinstance(domain_id, str) or not domain_id:
+            raise ValueError("native scoped geometry requires a non-empty domain ID")
+        if not isinstance(expected_dimension, int) or isinstance(expected_dimension, bool) or expected_dimension < 1:
+            raise ValueError("native scoped geometry expected_dimension must be positive")
+        self._reader = reader
+        self._domain_id = domain_id
+        self._motif_alias_namespace_id = motif_alias_namespace_id
+        self._semantic_scope_id = semantic_scope_id
+        self._expected_dimension = expected_dimension
+
+    def domain_ids(self) -> tuple[str, ...]:
+        return (self._domain_id,)
+
+    def list_motifs(self, domain_id: str) -> tuple[RuntimeMotifGeometry, ...]:
+        self._require_domain(domain_id)
+        motifs = self._reader.list_runtime_motifs(
+            motif_alias_namespace_id=self._motif_alias_namespace_id,
+            domain_id=self._domain_id,
+            semantic_scope_id=self._semantic_scope_id,
+        )
+        return tuple(
+            RuntimeMotifGeometry(
+                domain_id=item.read_model.domain_id,
+                runtime_motif_id=item.read_model.runtime_motif_id,
+                label=str(item.read_model.label),
+                centroid=tuple(float(value) for value in item.read_model.centroid),
+                strength=float(item.read_model.strength),
+                stability_score=float(item.read_model.stability_score),
+                member_count=int(item.read_model.member_count),
+                created_ts=int(item.read_model.created_ts),
+                last_active_ts=int(item.read_model.last_active_ts),
+            )
+            for item in motifs
+        )
+
+    def domain_centroid(self, domain_id: str, expected_dimension: int) -> np.ndarray:
+        self._require_domain(domain_id)
+        if expected_dimension != self._expected_dimension:
+            raise ValueError("native scoped geometry dimension differs from its qualified lane")
+        return self._reader.domain_centroid(
+            motif_alias_namespace_id=self._motif_alias_namespace_id,
+            domain_id=self._domain_id,
+            dimension=expected_dimension,
+            semantic_scope_id=self._semantic_scope_id,
+        )
+
+    def _require_domain(self, domain_id: str) -> None:
+        if domain_id != self._domain_id:
+            raise KeyError(f"geometry is not available for native scoped domain {domain_id!r}")
+
+
 __all__ = [
     "LegacyMotifGeometryAdapter",
     "MotifGeometryPort",
     "NativeMotifGeometryAdapter",
+    "NativeScopedMotifGeometryAdapter",
     "RuntimeMotifGeometry",
 ]

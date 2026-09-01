@@ -21,6 +21,7 @@ from torment_service.bridges import Bridge, BridgeRegistry
 from torment_service.fabric import TormentFabric
 from torment_service.memory_graph import MemoryGraph
 from torment_service.motif_geometry_port import LegacyMotifGeometryAdapter, NativeMotifGeometryAdapter
+from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
 from torment_service.motifs import MotifRegistry
 from torment_service.substrate.connection import open_existing_native_core_connection, open_new_native_core_connection
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
@@ -425,6 +426,65 @@ def test_real_multi_scope_admission_cold_recovery_vectors_and_resume(tmp_path: P
     assert [item.confidence for item in native_suggestions] == pytest.approx(
         [item.confidence for item in legacy_suggestions]
     )
+
+    # M1 consumes the admitted native geometry directly.  Its only durable
+    # output is the existing external motif workflow state; current native
+    # motif truth and the retained legacy motifs.json are both unchanged.
+    native_motif_path = root / "domains" / "research" / "motifs.json"
+    native_motif_truth_before = native_motif_path.read_bytes()
+    native_maintenance = NativeMotifMaintenanceAdapter(
+        native_geometry,
+        data_dir=str(root.parents[1]), workspace_id="orchard", domain_id="research",
+    )
+    legacy_research = MotifRegistry(str(root.parents[1]), "orchard", "research")
+    native_entropy = native_maintenance.update_entropy_and_suggest(
+        target_n=24, entropy_high=.0, sim_threshold=.93,
+        max_suggestions=20, auto_merge=False, auto_merge_trigger=.80,
+    )
+    assert native_entropy == legacy_research.entropy_report(target_n=24)
+    assert native_motif_path.read_bytes() == native_motif_truth_before
+    assert not hasattr(native_maintenance, "_registry")
+
+    # A normal Fabric instance still owns the domain-suggestion side-store,
+    # but this call receives only native geometry.  A forbidden legacy mapping
+    # proves the method no longer consults motif registries on the injected
+    # native path.
+    class _ForbiddenLegacyMotifs(dict):
+        def items(self):
+            raise AssertionError("native domain suggestion consulted legacy motif state")
+
+        def __getitem__(self, _key):
+            raise AssertionError("native domain suggestion consulted legacy motif state")
+
+    native_domain_workspace = SimpleNamespace(
+        motif_regs=_ForbiddenLegacyMotifs(),
+        domain_suggestions_path=root / "domain_suggestions.json",
+    )
+    TormentFabric._maybe_suggest_domain(
+        None, native_domain_workspace, "research", geometry=native_geometry,
+    )
+
+    # Recreate the recovered runtime and workflow adapter after the original
+    # reader objects have gone out of scope.  Geometry is recovered from SQLite
+    # and outstanding workflow suggestions/events remain in their side-store.
+    del native_maintenance
+    gc.collect()
+    cold_recovered = recover_existing_workspace_native_multi_scope_runtime(
+        native_core_database_path=request.native_core_database_path,
+        admission_descriptor_path=request.admission_descriptor_path,
+    )
+    cold_geometry = NativeMotifGeometryAdapter(
+        cold_recovered, domain_ids=geometry_domains, expected_dimension=3,
+    )
+    cold_maintenance = NativeMotifMaintenanceAdapter(
+        cold_geometry,
+        data_dir=str(root.parents[1]), workspace_id="orchard", domain_id="research",
+    )
+    assert cold_maintenance.update_entropy_and_suggest(
+        target_n=24, entropy_high=.0, sim_threshold=.93,
+        max_suggestions=20, auto_merge=False, auto_merge_trigger=.80,
+    ) == native_entropy
+    assert native_motif_path.read_bytes() == native_motif_truth_before
 
     with recovered.lookup_shared("research").open_readers() as readers:
         research = recovered.lookup_shared("research")

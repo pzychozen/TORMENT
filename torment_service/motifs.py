@@ -25,6 +25,7 @@ from .motif_decision import (
     realize_create_next_state,
 )
 from .motif_geometry import motif_radius_from_member_vectors
+from .motif_maintenance import entropy_report_for_geometry, merge_candidates_for_geometry
 from .motif_split_policy import MotifSplitPlan, decide_motif_auto_split
 
 def _now_ts() -> int:
@@ -387,34 +388,14 @@ class MotifRegistry:
         return motif_label_from_summary(self.domain_id, summary)
 
     def entropy_report(self, target_n: int = 24) -> Dict[str, Any]:
-        n = len(self.motifs)
-        if n <= 1:
-            return {"motif_count": n, "shannon": 0.0, "fragmentation": 0.0, "entropy_score": 0.0}
-        strengths = np.asarray([max(1e-6, float(m.strength)) for m in self.motifs.values()], dtype=np.float64)
-        p = strengths / (strengths.sum() + 1e-12)
-        shannon = float(-(p * np.log(p + 1e-12)).sum() / (np.log(n + 1e-12)))
-        fragmentation = float(min(1.0, n / float(max(1, target_n))))
-        entropy_score = float(min(1.0, 0.55 * shannon + 0.45 * fragmentation))
-        return {"motif_count": n, "shannon": shannon, "fragmentation": fragmentation, "entropy_score": entropy_score}
+        return entropy_report_for_geometry(
+            tuple(self.motifs.values()), target_n=target_n,
+        )
 
     def suggest_merges(self, sim_threshold: float = 0.93, max_suggestions: int = 20) -> List[Dict[str, Any]]:
-        mids = list(self.motifs.keys())
-        if len(mids) < 2:
-            return []
-        candidates: List[Tuple[float, str, str]] = []
-        for i in range(len(mids)):
-            mi = self.motifs[mids[i]]
-            ci = mi.centroid_np()
-            for j in range(i + 1, len(mids)):
-                mj = self.motifs[mids[j]]
-                cj = mj.centroid_np()
-                if ci.size == 0 or cj.size == 0 or ci.size != cj.size:
-                    continue
-                s = cosine(ci, cj)
-                if s >= sim_threshold:
-                    a, b = mi.motif_id, mj.motif_id
-                    candidates.append((s, a, b))
-        candidates.sort(reverse=True, key=lambda t: t[0])
+        candidates = merge_candidates_for_geometry(
+            tuple(self.motifs.values()), sim_threshold=sim_threshold,
+        )
         out: List[Dict[str, Any]] = []
         for s, a, b in candidates[:max_suggestions]:
             sid = f"merge_{a}__{b}"

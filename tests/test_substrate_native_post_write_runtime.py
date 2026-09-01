@@ -665,3 +665,57 @@ def test_derived_representation_recovery_inside_post_write_creates_no_duplicate_
         assert _world(connection, capability, scope).eids == (0, 1, 2, 3)
     finally:
         qualified.close()
+
+
+def test_explicit_m1_profile_runs_native_suggestion_maintenance_without_legacy_motif_truth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._hivemind_enable = False
+        identity.seed["coupling_mode"] = "read_only"
+        workflow_root = tmp_path / "external-workflow"
+        workspace = SimpleNamespace(
+            data_dir=str(workflow_root),
+            domain_policies={"personal": {
+                "auto_merge_motifs": False,
+                "motif_entropy_target_n": 2,
+                "motif_entropy_high": 0.0,
+                "motif_merge_similarity": .9,
+                "motif_merge_max_suggestions": 20,
+                "auto_merge_entropy_trigger": .8,
+            }},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_suggestion_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        router = NativeFabricMemoryRouter(capability)
+        assert router.route(_request("m1-first", 1, vector=(1.0, 0.0, 0.0))).result is not None
+        request = _request("m1-second", 2, vector=(0.0, 1.0, 0.0))
+        result = router.route(request).result
+        assert result is not None and result.reinforced is False
+
+        _adapter(capability, configuration).run(
+            _context(result, request),
+            route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
+        )
+        motif_base = workflow_root / "workspaces" / "ws" / "domains" / "personal"
+        assert not (motif_base / "motifs.json").exists()
+        events = [json.loads(line) for line in (motif_base / "motif_events.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [event["type"] for event in events] == ["MOTIF_ENTROPY"]
+        assert NativePostWriteQualificationProfile.core_staging().motif_suggestion_maintenance.name == "REQUIRED_NOOP"
+        assert configuration.profile.motif_suggestion_maintenance.name == "QUALIFIED"
+        assert configuration.profile.motif_auto_merge.name == "UNSUPPORTED"
+        # The workflow event is external; it did not create or mutate native
+        # objects beyond the already-routed source/motif composition.
+        assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == 4
+    finally:
+        qualified.close()

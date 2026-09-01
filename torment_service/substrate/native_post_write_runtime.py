@@ -20,6 +20,8 @@ from torment_service.post_write_runtime import (
     LegacyFabricPostWriteDependencies,
     PostWriteStorageOutcome,
 )
+from torment_service.motif_geometry_port import NativeScopedMotifGeometryAdapter
+from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
 
 from .connection import open_existing_native_core_connection
 from .errors import SubstrateConfigurationError, SubstrateInvariantViolation
@@ -89,6 +91,14 @@ class NativePostWriteQualificationProfile:
     def core_staging_with_character(cls) -> "NativePostWriteQualificationProfile":
         """Explicit C1A/C1B staging profile; ``core_staging`` remains frozen."""
         return replace(cls.core_staging(), character=NativePostWriteBehavior.QUALIFIED)
+
+    @classmethod
+    def core_staging_with_motif_suggestion_maintenance(cls) -> "NativePostWriteQualificationProfile":
+        """Explicit M1 profile; auto-merge remains an unsupported mutation."""
+        return replace(
+            cls.core_staging(),
+            motif_suggestion_maintenance=NativePostWriteBehavior.QUALIFIED,
+        )
 
 
 @dataclass(frozen=True)
@@ -191,9 +201,10 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
                 consumers._run_contradiction_surface(context)
                 consumers._run_srg_collision(context)
                 consumers._run_hivemind(context)
-                # The profile reserves this slot as an explicit no-op.  It
-                # then invokes the extracted derived-memory sequence directly.
-                consumers._run_derived_memory(context)
+                if self._configuration.motif_suggestion_maintenance_required:
+                    consumers._run_motif_maintenance_and_anchors(context)
+                else:
+                    consumers._run_derived_memory(context)
             consumers._run_world_step(context)
             consumers._run_character_drift(context)
             proposal_id = consumers._run_proposal(context)
@@ -229,6 +240,25 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         external = self._configuration.external
         character_drift = None
         character_correction = None
+        motif_runtime = None
+        if self._configuration.motif_suggestion_maintenance_required:
+            data_dir = getattr(external.workspace, "data_dir", None)
+            if not isinstance(data_dir, str) or not data_dir:
+                raise SubstrateConfigurationError(
+                    "native motif suggestion maintenance requires workspace.data_dir"
+                )
+            motif_runtime = NativeMotifMaintenanceAdapter(
+                NativeScopedMotifGeometryAdapter(
+                    NativeMotifRuntimeReader(connection),
+                    domain_id=context.chosen_domain,
+                    motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                    semantic_scope_id=runtime_scope.semantic_scope_id,
+                    expected_dimension=self._capability.binding.representation_lane.dimension,
+                ),
+                data_dir=data_dir,
+                workspace_id=runtime_scope.workspace_id,
+                domain_id=context.chosen_domain,
+            )
         if self._configuration.profile.character is NativePostWriteBehavior.QUALIFIED:
             embedder = external.character_embedder
             if embedder is None:
@@ -275,7 +305,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             world_runtime=world, derived_memory_runtime=derived, memory_access=memory,
             memory_enumeration=memory, srg_runtime=srg,
             embedding_dimension=self._capability.binding.representation_lane.dimension,
-            identity=external.identity, motif_registry=None, motif_runtime=None,
+            identity=external.identity, motif_registry=None, motif_runtime=motif_runtime,
             model_state=None, kernel_context=None, agent_key=external.agent_key,
             detect_canon_conflict=external.detect_canon_conflict,
             proposal_allowed=external.proposal_allowed,
@@ -366,7 +396,8 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         _require_qualified(profile.world, "world")
         _require_qualified(profile.proposal, "proposal")
         if self._configuration.motif_suggestion_maintenance_required:
-            _refuse(profile.motif_suggestion_maintenance, "motif suggestion maintenance")
+            if profile.motif_suggestion_maintenance is not NativePostWriteBehavior.QUALIFIED:
+                _refuse(profile.motif_suggestion_maintenance, "motif suggestion maintenance")
         if bool(policy.get("auto_merge_motifs", False)):
             _refuse(profile.motif_auto_merge, "motif auto-merge")
         character_due = bool(getattr(owner, "_character_enable", False)) and context.stored and (
