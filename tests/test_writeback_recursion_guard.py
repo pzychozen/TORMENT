@@ -25,11 +25,13 @@ from cognition.recursion_guard import (
     REASON_DEPTH_EXCEEDED,
     REASON_MALFORMED_ROLE_OUT,
     REASON_MIGRATION_REFUSED,
+    REASON_UNSAFE_SOURCE_TYPE,
 )
 from torment_service.provenance_v1 import (
     ProvenanceV1,
     SOURCE_GATE1_UNRECOVERABLE,
     SOURCE_MEMORY,
+    SOURCE_SHARE_PROPOSAL,
 )
 
 
@@ -236,6 +238,18 @@ class TestRecursionGuardRejections(unittest.TestCase):
         ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
         self.assertFalse(ok)
         self.assertEqual(reason, REASON_DERIVED)
+
+    def test_share_proposal_storage_origin_is_not_a_safe_parent(self):
+        # 7G5E4D makes this a valid typed storage origin, not an ancestry
+        # authority class.  The guard must remain fail-closed for it.
+        provenance = ProvenanceV1.for_share_proposal_operator(
+            proposal_created_ts=1_700_000_000,
+        ).to_dict()
+        assert provenance["source_type"] == SOURCE_SHARE_PROPOSAL
+        corpus = {1: {"eid": 1, "provenance": provenance}}
+        ok, reason = recursion_guard_check([1], make_lookup(corpus), "ws", "ag")
+        self.assertFalse(ok)
+        self.assertEqual(reason, REASON_UNSAFE_SOURCE_TYPE)
 
     def test_malformed_dict_missing_source_type_rejects_cleanly(self):
         # Must not raise AttributeError or similar.

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 
 # ── Enum constants ──────────────────────────────────────────────────
@@ -32,6 +32,12 @@ SOURCE_DERIVED      = "derived"
 SOURCE_MEMORY       = "memory"
 SOURCE_TOOL_RESULT      = "tool_result"
 SOURCE_COLLECTIVE_ECHO  = "collective_echo"
+
+# 7G5E4D — a TORMENT ShareProposal that has crossed an already-authorized
+# shared-memory materialization boundary.  The authorization decision stays
+# outside this storage provenance vocabulary; the distinct write paths below
+# retain whether that decision came from quorum or an operator.
+SOURCE_SHARE_PROPOSAL = "share_proposal"
 
 # Block A — baton as a cross-session attention-bounded intent. Origin class
 # only; baton lifecycle state (owner, expires_when, resolution_condition,
@@ -82,6 +88,7 @@ VALID_SOURCE_TYPES = frozenset({
     SOURCE_MEMORY,
     SOURCE_TOOL_RESULT,
     SOURCE_COLLECTIVE_ECHO,
+    SOURCE_SHARE_PROPOSAL,
     SOURCE_GATE1_UNRECOVERABLE,
     SOURCE_BATON_INTENT,                # Block A
     SOURCE_REFERENCE_INGEST,            # Block B — reference memory
@@ -103,6 +110,11 @@ WRITE_MIGRATION           = "migration"
 WRITE_SYSTEM_IMPORT       = "system_import"
 WRITE_COLLECTIVE_REINGEST = "collective_reingest"
 
+# 7G5E4D — distinct authority crossings that materialize an already-approved
+# ShareProposal as shared memory.  These paths do not decide authority.
+WRITE_SHARE_PROPOSAL_QUORUM = "share_proposal_quorum"
+WRITE_SHARE_PROPOSAL_OPERATOR = "share_proposal_operator"
+
 # Block C — closure commit/revision write path. STRUCTURALLY DISTINCT from
 # WRITE_COGNITION_WRITEBACK and WRITE_REFLECTION_WRITEBACK per the
 # writeback-vs-closure guardrail (docs/BLOCK_C_DESIGN.md §7.1). Closure
@@ -118,6 +130,8 @@ VALID_WRITE_PATHS = frozenset({
     WRITE_MIGRATION,
     WRITE_SYSTEM_IMPORT,
     WRITE_COLLECTIVE_REINGEST,
+    WRITE_SHARE_PROPOSAL_QUORUM,
+    WRITE_SHARE_PROPOSAL_OPERATOR,
     WRITE_CLOSURE_COMMIT,               # Block C — closure commit / revision
 })
 
@@ -548,6 +562,62 @@ class ProvenanceV1:
             notes=notes,
         )
 
+    # ── 7G5E4D ShareProposal factories ────────────────────────────
+
+    @classmethod
+    def for_share_proposal_quorum(
+        cls,
+        *,
+        contributing_created_ts: Iterable[int],
+    ) -> "ProvenanceV1":
+        """Record a quorum-authorized ShareProposal materialization.
+
+        The source timestamp is the maximum durable ``created_ts`` across
+        the contributing authorized proposal set: the earliest deterministic
+        time by which that complete set could have existed.  It is lineage
+        evidence, not a quorum-processing or database-commit timestamp.
+        """
+        timestamps = _validated_share_proposal_timestamps(
+            contributing_created_ts,
+            field="contributing_created_ts",
+            require_nonempty=True,
+        )
+        return cls(
+            source_type=SOURCE_SHARE_PROPOSAL,
+            source_role=None,
+            write_path=WRITE_SHARE_PROPOSAL_QUORUM,
+            parent_eids=[],
+            created_at_step=None,
+            created_at_ts=_share_proposal_created_at_ts(max(timestamps)),
+        )
+
+    @classmethod
+    def for_share_proposal_operator(
+        cls,
+        *,
+        proposal_created_ts: int,
+    ) -> "ProvenanceV1":
+        """Record an operator-authorized ShareProposal materialization.
+
+        ``created_at_ts`` is the proposal's durable creation timestamp, not
+        the operator-click, processing, or database-commit time.  The
+        deterministic conversion keeps a retried native operation's routing
+        input identical.
+        """
+        (timestamp,) = _validated_share_proposal_timestamps(
+            (proposal_created_ts,),
+            field="proposal_created_ts",
+            require_nonempty=True,
+        )
+        return cls(
+            source_type=SOURCE_SHARE_PROPOSAL,
+            source_role=None,
+            write_path=WRITE_SHARE_PROPOSAL_OPERATOR,
+            parent_eids=[],
+            created_at_step=None,
+            created_at_ts=_share_proposal_created_at_ts(timestamp),
+        )
+
     # ── Block C factories ──────────────────────────────────────────
     #
     # Three factories, one per closure lifecycle event kind (commit /
@@ -733,3 +803,30 @@ class ProvenanceV1:
     # See ``docs/PROVENANCE_STATUS_REGISTRY_v2.4.x.md §7.3`` for the
     # removal rationale and the safety asymmetry note preserved there
     # for historical context.
+
+
+def _validated_share_proposal_timestamps(
+    values: Iterable[int],
+    *,
+    field: str,
+    require_nonempty: bool,
+) -> tuple[int, ...]:
+    """Validate durable ShareProposal epoch-second timestamps fail-closed."""
+    try:
+        timestamps = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{field} must be an iterable of non-negative integer timestamps") from exc
+    if require_nonempty and not timestamps:
+        raise ValueError(f"{field} must not be empty")
+    for timestamp in timestamps:
+        if not isinstance(timestamp, int) or isinstance(timestamp, bool) or timestamp < 0:
+            raise ValueError(f"{field} values must be non-negative integers")
+    return timestamps
+
+
+def _share_proposal_created_at_ts(timestamp: int) -> str:
+    """Convert a validated durable epoch-second fact to canonical V1 UTC."""
+    try:
+        return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ValueError("share proposal timestamp is outside the supported UTC range") from exc
