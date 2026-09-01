@@ -26,6 +26,11 @@ from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
 from .proposals import ProposalRegistry
 from .conflicts import ConflictRegistry
+from .proposal_shared_storage import (
+    AuthorizedSharedProposalStorage,
+    LegacyAuthorizedSharedProposalStorage,
+    NativeAuthorizedSharedProposalStorage,
+)
 from .scoring import score_hit, ContinuityContext, compute_continuity_bonuses
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
 from .resonance import append_symbol, summarize_resonance
@@ -6654,6 +6659,76 @@ class TormentFabric:
                 f"Registered domains: {ws.domains}. "
                 f"Domains are structural — register them at workspace creation or via add_domain()."
             )
+        # Production proposal orchestration remains unconditionally legacy.
+        # The native implementation is available only through the explicit
+        # private qualification seam below.
+        return self._process_proposals_impl(
+            workspace_id=workspace_id,
+            domain_id=domain_id,
+            max_to_process=max_to_process,
+            sim_threshold=sim_threshold,
+            min_distinct_agents=min_distinct_agents,
+            step=step,
+            storage=LegacyAuthorizedSharedProposalStorage(
+                shared_graph=ws.shared_graphs[domain_id],
+                motif_registry=ws.motif_regs[domain_id],
+                geometry=LegacyMotifGeometryAdapter(ws.motif_regs),
+            ),
+        )
+
+    def _process_proposals_with_qualified_native_storage(
+        self,
+        workspace_id: str,
+        domain_id: str,
+        *,
+        storage: NativeAuthorizedSharedProposalStorage,
+        max_to_process: int = 200,
+        sim_threshold: float = 0.90,
+        min_distinct_agents: int = 0,
+        step: Optional[int] = None,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Qualification-only native counterpart of :meth:`process_proposals`.
+
+        Callers must construct and pass a fully-qualified native storage port;
+        this method neither discovers a native core nor selects a backend.
+        """
+        if not isinstance(storage, NativeAuthorizedSharedProposalStorage):
+            raise ValueError("native proposal qualification requires explicit native storage")
+        return self._process_proposals_impl(
+            workspace_id=workspace_id,
+            domain_id=domain_id,
+            max_to_process=max_to_process,
+            sim_threshold=sim_threshold,
+            min_distinct_agents=min_distinct_agents,
+            step=step,
+            storage=storage,
+            _side_effect_trace=_side_effect_trace,
+            _test_fail_after=_test_fail_after,
+        )
+
+    def _process_proposals_impl(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: str,
+        max_to_process: int,
+        sim_threshold: float,
+        min_distinct_agents: int,
+        step: Optional[int],
+        storage: AuthorizedSharedProposalStorage,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run unchanged TORMENT authority over one authorized storage port."""
+        ws = self.get_workspace(workspace_id)
+        if domain_id not in ws.domains:
+            raise ValueError(
+                f"Unknown domain_id '{domain_id}' in workspace '{workspace_id}'. "
+                f"Registered domains: {ws.domains}. "
+                f"Domains are structural — register them at workspace creation or via add_domain()."
+            )
 
         reg = ws.proposals[domain_id]
         if min_distinct_agents <= 0:
@@ -6712,40 +6787,30 @@ class TormentFabric:
 
                 emb_provider = str(getattr(self.kernel.embedder, "provider", ""))
                 emb_model = str(getattr(self.kernel.embedder, "model", ""))
-                emb_dim = int(np.asarray(emb).reshape(-1).shape[0])
-                emb_ck = embedding_checksum(rep.summary, emb_provider, emb_model)
+                support_agents = tuple(sorted(agents))
+                participating = tuple(P[k] for k in group)
+                self._proposal_trace(_side_effect_trace, "AUTHORITY_DECIDED")
 
-                # pre-scan for potential canon conflicts against existing shared canon
-                sg = ws.shared_graphs[domain_id]
-                existing = sg.search_by_embedding(emb, top_k=6, user_id=None, canon_only=True)
+                # Pre-scan uses the storage lane's exact vector read law.  On
+                # legacy this is MemoryGraph; native qualification supplies
+                # NativeMemoryVectorRuntime with the same top_k/canon filter.
+                existing = storage.pre_conflict_read(emb)
+                self._proposal_trace(_side_effect_trace, "PRE_CONFLICT_READ")
 
-                # store into shared graph
-                eid = sg.add_memory(
-                    summary=rep.summary,
-                    embedding=emb,
-                    mtype=rep.mtype,
-                    strength=max(0.7, float(rep.strength)),
-                    confidence=max(0.7, float(rep.confidence)),
-                    half_life_days=30.0,  # shared defaults to slow decay
-                    links=[],
-                    canon=True,
-                    user_id="collective",
-                    step=step if step is not None else int(time.time()),
-                    extra_payload={
-                        "workspace_id": workspace_id,
-                        "domain_id": domain_id,
-                        "scope": "shared",
-                        "agent_id": "collective",
-                        "source": "proposal_group",
-                        "embedding_provider": emb_provider,
-                        "embedding_model": emb_model,
-                        "embedding_dim": emb_dim,
-                        "embedding_checksum": emb_ck,
-                        "support_agents": sorted(list(agents)),
-                        "source_proposal_ids": [P[k].proposal_id for k in group],
-                    },
+                materialized = storage.materialize_quorum(
+                    workspace_id=workspace_id,
+                    domain_id=domain_id,
+                    representative=rep,
+                    participating_proposals=participating,
+                    support_agents=support_agents,
+                    embedding_provider=emb_provider,
+                    embedding_model=emb_model,
+                    step=step,
                 )
-                created_shared_eids.append(int(eid))
+                eid = int(materialized.eid)
+                created_shared_eids.append(eid)
+                self._proposal_trace(_side_effect_trace, "STORAGE_COMMITTED")
+                self._proposal_fault(_test_fail_after, "storage_commit")
 
                 # conflict detection (heuristic) against nearest existing canon
                 for h in existing:
@@ -6768,50 +6833,62 @@ class TormentFabric:
                         )
                         # one conflict per new node is enough for now
                         break
+                self._proposal_trace(_side_effect_trace, "CONFLICT_SIDE_EFFECT")
+                self._proposal_fault(_test_fail_after, "conflict")
 
-                # attach to motifs
-                ws.motif_regs[domain_id].attach_or_create(emb, memory_eid=int(eid), agent_id="collective", summary=rep.summary, attach_threshold=0.62)
+                # Legacy attachment remains in this exact place.  Qualified
+                # native storage has already made current motif truth and is
+                # deliberately a no-op to avoid a second native attachment.
+                storage.ensure_motif_current(embedding=emb, eid=eid, summary=rep.summary)
 
                 # motif entropy + merge suggestions (domain)
                 pol = ws.domain_policies.get(domain_id, {})
                 try:
-                    ws.motif_regs[domain_id].update_entropy_and_suggest(
-                        target_n=int(pol.get("motif_entropy_target_n", 24)),
-                        entropy_high=float(pol.get("motif_entropy_high", 0.72)),
-                        sim_threshold=float(pol.get("motif_merge_similarity", 0.93)),
-                        max_suggestions=int(pol.get("motif_merge_max_suggestions", 20)),
-                        auto_merge=bool(pol.get("auto_merge_motifs", False)),
-                        auto_merge_trigger=float(pol.get("auto_merge_entropy_trigger", 0.80)),
-                    )
+                    if materialized.created_new:
+                        storage.update_motif_maintenance(pol)
                 except Exception as e:
                     self._log.debug(
                         "group proposal motif entropy update failed for domain=%s: %s",
                         _safe_log_value(domain_id),
                         _safe_log_value(e),
                     )
+                self._proposal_trace(_side_effect_trace, "MOTIF_MAINTENANCE")
+                if bool(pol.get("auto_merge_motifs", False)):
+                    self._proposal_trace(_side_effect_trace, "AUTO_MERGE_IF_ANY")
+                self._proposal_fault(_test_fail_after, "motif_maintenance")
 
                 # mark all proposals in group approved
                 for k in group:
                     reg.mark(P[k].proposal_id, status="approved", note=f"approved via group (agents={len(agents)})")
                     approved += 1
+                    if approved == 1:
+                        self._proposal_fault(_test_fail_after, "proposal_mark_after_first")
+                self._proposal_trace(_side_effect_trace, "PROPOSAL_MARK")
+                self._proposal_fault(_test_fail_after, "proposal_mark")
             else:
                 # Not enough agreement; leave pending (no event)
                 pass
 
         # Refresh bridge suggestions after new shared nodes
         if created_shared_eids:
-            ws.bridges.suggest(ws.motif_regs, sim_threshold=0.86, max_new=10)
+            ws.bridges.suggest(storage.geometry, sim_threshold=0.86, max_new=10)
+            self._proposal_trace(_side_effect_trace, "BRIDGE_SUGGEST")
+            self._proposal_fault(_test_fail_after, "bridge")
 
         # Domain suggestion heuristic: if we keep seeing strong motifs poorly aligned with any domain centroid.
-        self._maybe_suggest_domain(ws, domain_id=domain_id)
+        self._maybe_suggest_domain(ws, domain_id=domain_id, geometry=storage.geometry)
+        self._proposal_trace(_side_effect_trace, "DOMAIN_SUGGEST")
+        self._proposal_fault(_test_fail_after, "domain_suggestion")
 
-        return {
+        result = {
             "ok": True,
             "processed": len(P),
             "approved_groups": approved_groups,
             "approved": approved,
             "created_shared_eids": created_shared_eids,
         }
+        self._proposal_trace(_side_effect_trace, "RETURN")
+        return result
 
     
 
@@ -6922,6 +6999,62 @@ class TormentFabric:
         ws = self.get_workspace(workspace_id)
         if domain_id not in ws.domains:
             raise ValueError("Unknown domain_id")
+        # Production operator decisions remain unconditionally legacy.
+        return self._decide_proposal_impl(
+            workspace_id=workspace_id,
+            domain_id=domain_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            note=note,
+            storage=LegacyAuthorizedSharedProposalStorage(
+                shared_graph=ws.shared_graphs[domain_id],
+                motif_registry=ws.motif_regs[domain_id],
+                geometry=LegacyMotifGeometryAdapter(ws.motif_regs),
+            ),
+        )
+
+    def _decide_proposal_with_qualified_native_storage(
+        self,
+        workspace_id: str,
+        domain_id: str,
+        proposal_id: str,
+        decision: str,
+        note: Optional[str] = None,
+        *,
+        storage: NativeAuthorizedSharedProposalStorage,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Qualification-only native counterpart of :meth:`decide_proposal`."""
+        if not isinstance(storage, NativeAuthorizedSharedProposalStorage):
+            raise ValueError("native proposal qualification requires explicit native storage")
+        return self._decide_proposal_impl(
+            workspace_id=workspace_id,
+            domain_id=domain_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            note=note,
+            storage=storage,
+            _side_effect_trace=_side_effect_trace,
+            _test_fail_after=_test_fail_after,
+        )
+
+    def _decide_proposal_impl(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: str,
+        proposal_id: str,
+        decision: str,
+        note: Optional[str],
+        storage: AuthorizedSharedProposalStorage,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run unchanged operator authority over one authorized storage port."""
+        ws = self.get_workspace(workspace_id)
+        if domain_id not in ws.domains:
+            raise ValueError("Unknown domain_id")
         reg = ws.proposals[domain_id]
         latest = reg.apply_events()
         p = latest.get(proposal_id)
@@ -6943,38 +7076,43 @@ class TormentFabric:
         emb = np.asarray(p.embedding, dtype=np.float32)
         emb_provider = str(getattr(self.kernel.embedder, "provider", ""))
         emb_model = str(getattr(self.kernel.embedder, "model", ""))
-        emb_dim = int(np.asarray(emb).reshape(-1).shape[0])
-        emb_ck = embedding_checksum(p.summary, emb_provider, emb_model)
-        sg = ws.shared_graphs[domain_id]
-        eid = sg.add_memory(
-            summary=p.summary,
-            embedding=emb,
-            mtype=p.mtype,
-            strength=max(0.7, float(p.strength)),
-            confidence=max(0.7, float(p.confidence)),
-            half_life_days=30.0,
-            links=[],
-            canon=True,
-            user_id="collective",
-            step=int(time.time()),
-            extra_payload={
-                "workspace_id": workspace_id,
-                "domain_id": domain_id,
-                "scope": "shared",
-                "agent_id": "collective",
-                "source": "proposal_manual",
-                "embedding_provider": emb_provider,
-                "embedding_model": emb_model,
-                "embedding_dim": emb_dim,
-                "embedding_checksum": emb_ck,
-                "support_agents": [p.agent_id],
-            },
+        self._proposal_trace(_side_effect_trace, "AUTHORITY_DECIDED")
+        materialized = storage.materialize_operator(
+            workspace_id=workspace_id,
+            domain_id=domain_id,
+            proposal=p,
+            embedding_provider=emb_provider,
+            embedding_model=emb_model,
         )
-        ws.motif_regs[domain_id].attach_or_create(emb, memory_eid=int(eid), agent_id="collective", summary=p.summary, attach_threshold=0.62)
+        eid = int(materialized.eid)
+        self._proposal_trace(_side_effect_trace, "STORAGE_COMMITTED")
+        self._proposal_fault(_test_fail_after, "operator_storage_commit")
+        storage.ensure_motif_current(embedding=emb, eid=eid, summary=p.summary)
         reg.mark(proposal_id, status="approved", note=note or "approved manually")
-        ws.bridges.suggest(ws.motif_regs, sim_threshold=0.86, max_new=5)
-        self._maybe_suggest_domain(ws, domain_id=domain_id)
-        return {"ok": True, "decision": "approved", "proposal_id": proposal_id, "created_shared_eid": int(eid)}
+        self._proposal_trace(_side_effect_trace, "PROPOSAL_MARK")
+        self._proposal_fault(_test_fail_after, "operator_proposal_mark")
+        ws.bridges.suggest(storage.geometry, sim_threshold=0.86, max_new=5)
+        self._proposal_trace(_side_effect_trace, "BRIDGE_SUGGEST")
+        self._proposal_fault(_test_fail_after, "operator_bridge")
+        self._maybe_suggest_domain(ws, domain_id=domain_id, geometry=storage.geometry)
+        self._proposal_trace(_side_effect_trace, "DOMAIN_SUGGEST")
+        self._proposal_fault(_test_fail_after, "operator_domain_suggestion")
+        result = {"ok": True, "decision": "approved", "proposal_id": proposal_id, "created_shared_eid": eid}
+        self._proposal_trace(_side_effect_trace, "RETURN")
+        return result
+
+
+    @staticmethod
+    def _proposal_trace(trace: Optional[List[str]], event: str) -> None:
+        """Append a qualification-only observable side-effect boundary."""
+        if trace is not None:
+            trace.append(event)
+
+    @staticmethod
+    def _proposal_fault(requested_boundary: Optional[str], boundary: str) -> None:
+        """Private fault seam used only to characterize cross-store retries."""
+        if requested_boundary == boundary:
+            raise RuntimeError(f"forced proposal orchestration failure after {boundary}")
 
 
     def _maybe_suggest_domain(
