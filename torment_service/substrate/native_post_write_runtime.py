@@ -90,6 +90,7 @@ class NativePostWriteQualificationProfile:
     shared_hivemind_packet_emission: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
     shared_trajectory_evidence: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
     shared_checkpoint_snapshot: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
+    shared_compression_disabled_noop: NativePostWriteBehavior = NativePostWriteBehavior.UNSUPPORTED
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -168,6 +169,14 @@ class NativePostWriteQualificationProfile:
         return replace(
             cls.core_staging(),
             shared_checkpoint_snapshot=NativePostWriteBehavior.QUALIFIED,
+        )
+
+    @classmethod
+    def core_staging_with_shared_compression_disabled_noop(cls) -> "NativePostWriteQualificationProfile":
+        """D6 profile for a shared trigger while compression is explicitly off."""
+        return replace(
+            cls.core_staging(),
+            shared_compression_disabled_noop=NativePostWriteBehavior.QUALIFIED,
         )
 
 
@@ -255,6 +264,7 @@ class NativePostWriteQualificationConfiguration:
     shared_trajectory_evidence_required: bool = False
     shared_checkpoint_snapshot_binding: NativeSharedCheckpointSnapshotBinding | None = None
     shared_checkpoint_snapshot_required: bool = False
+    shared_compression_disabled_noop_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -288,7 +298,7 @@ class NativePostWriteQualificationConfiguration:
             "checkpoint_snapshots_required", "bridge_suggestions_required", "deep_memory_required",
             "shared_bridge_suggestions_required", "shared_motif_suggestion_maintenance_required",
             "shared_hivemind_packet_emission_required", "shared_trajectory_evidence_required",
-            "shared_checkpoint_snapshot_required",
+            "shared_checkpoint_snapshot_required", "shared_compression_disabled_noop_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -345,6 +355,9 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
         if context.scope == "shared":
+            if self._configuration.shared_compression_disabled_noop_required:
+                self._validate_shared_compression_disabled_pre_effect()
+                return FabricPostWriteOutcome()
             if self._configuration.shared_checkpoint_snapshot_required:
                 self._validate_shared_checkpoint_pre_effect(context)
                 with open_existing_native_core_connection(self._capability.core_database_path) as opened:
@@ -963,6 +976,10 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if configuration.checkpoint_snapshots_required:
             raise SubstrateConfigurationError("shared D4 checkpoint profile must not claim the private checkpoint capability")
 
+    def _validate_shared_compression_disabled_pre_effect(self) -> None:
+        """Prove D6's disabled shared route cannot reach a compression owner."""
+        _validate_shared_compression_disabled_configuration(self._configuration)
+
 
 def prepare_native_fabric_post_write_adapter(
     *,
@@ -996,12 +1013,14 @@ def prepare_native_fabric_post_write_adapter(
         shared_hivemind = configuration.shared_hivemind_packet_emission_required
         shared_trajectory = configuration.shared_trajectory_evidence_required
         shared_checkpoint = configuration.shared_checkpoint_snapshot_required
+        shared_compression_disabled = configuration.shared_compression_disabled_noop_required
         shared_consumers = sum((
             bool(configuration.shared_bridge_suggestions_required),
             bool(shared_d1),
             bool(shared_hivemind),
             bool(shared_trajectory),
             bool(shared_checkpoint),
+            bool(shared_compression_disabled),
         ))
         if shared_consumers > 1:
             raise SubstrateConfigurationError("shared post-write consumers must be prepared separately")
@@ -1033,6 +1052,8 @@ def prepare_native_fabric_post_write_adapter(
                 raise SubstrateConfigurationError("shared checkpoint configuration must not bind a private mood-drift target")
             if configuration.checkpoint_snapshots_required:
                 raise SubstrateConfigurationError("shared D4 checkpoint profile must not claim the private checkpoint capability")
+        elif shared_compression_disabled:
+            _validate_shared_compression_disabled_configuration(configuration)
         else:
             _require_qualified(configuration.profile.shared_hivemind_packet_emission, "shared Hivemind packet emission")
             if configuration.shared_mood_drift_binding is not None:
@@ -1069,6 +1090,41 @@ def _refuse(value: NativePostWriteBehavior, name: str) -> None:
 def _require_required_noop(value: NativePostWriteBehavior, name: str) -> None:
     if value is not NativePostWriteBehavior.REQUIRED_NOOP:
         raise SubstrateConfigurationError(f"native post-write profile does not qualify required no-op {name}")
+
+
+def _validate_shared_compression_disabled_configuration(
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    """Validate D6's narrow, explicitly disabled shared compression posture.
+
+    This intentionally validates no source or candidate.  Returning from the
+    D6 adapter must not enumerate native memory, open a deep store, touch a
+    vector lane, or mutate a core successor.
+    """
+    if configuration.routing_scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+        raise SubstrateInvariantViolation("shared post-write requires a claimed shared native scope")
+    if not configuration.shared_compression_disabled_noop_required:
+        raise SubstrateConfigurationError("shared compression disabled capability is not required by this profile")
+    _require_qualified(
+        configuration.profile.shared_compression_disabled_noop,
+        "shared compression disabled no-op",
+    )
+    if configuration.profile.compression is not NativePostWriteBehavior.UNSUPPORTED:
+        raise SubstrateConfigurationError("D6 disabled profile must not claim enabled compression")
+    if configuration.profile.deep_memory is not NativePostWriteBehavior.UNSUPPORTED:
+        raise SubstrateConfigurationError("D6 disabled profile must not claim deep-memory export")
+    if configuration.derived_runtime_template is not None:
+        raise SubstrateConfigurationError("shared D6 profile must not bind a source-scope derived runtime")
+    if configuration.deep_memory_required:
+        raise SubstrateConfigurationError("shared D6 profile must not claim the private deep-memory capability")
+    owner = configuration.external.owner
+    enabled = getattr(owner, "_compress_enable", None)
+    if type(enabled) is not bool:
+        raise SubstrateConfigurationError("shared D6 profile requires a boolean owner._compress_enable")
+    if enabled:
+        raise SubstrateConfigurationError(
+            "shared D6 profile requires TORMENT_COMPRESS_ENABLE=false before effects"
+        )
 
 
 def _validate_shared_mood_drift_binding(
