@@ -19,6 +19,7 @@ import pytest
 
 from torment_service.bridges import Bridge, BridgeRegistry
 from torment_service.memory_graph import MemoryGraph
+from torment_service.motif_geometry_port import LegacyMotifGeometryAdapter, NativeMotifGeometryAdapter
 from torment_service.motifs import MotifRegistry
 from torment_service.substrate.connection import open_new_native_core_connection
 from torment_service.substrate.errors import SubstrateInvariantViolation
@@ -378,6 +379,38 @@ def test_real_multi_scope_admission_cold_recovery_vectors_and_resume(tmp_path: P
                 semantic_scope_id=scope.memory_runtime_scope.semantic_scope_id,
             )
             assert centroid == pytest.approx(tuple(legacy_centroids[scope.memory_runtime_scope.domain_id]))
+
+    geometry_domains = ("research", "engineering", "creative")
+    legacy_geometry = LegacyMotifGeometryAdapter({
+        domain: MotifRegistry(str(root.parents[1]), "orchard", domain)
+        for domain in geometry_domains
+    })
+    native_geometry = NativeMotifGeometryAdapter(
+        recovered, domain_ids=geometry_domains, expected_dimension=3,
+    )
+    for domain in geometry_domains:
+        assert native_geometry.domain_centroid(domain, 3) == pytest.approx(
+            legacy_geometry.domain_centroid(domain, 3)
+        )
+        assert [item.runtime_motif_id for item in native_geometry.list_motifs(domain)] == [
+            item.runtime_motif_id for item in legacy_geometry.list_motifs(domain)
+        ]
+    with pytest.raises(KeyError, match="unadmitted native domain"):
+        native_geometry.list_motifs("archive")
+    legacy_bridge_policy = BridgeRegistry(str(tmp_path / "legacy-geometry-bridges"), "orchard")
+    native_bridge_policy = BridgeRegistry(str(tmp_path / "native-geometry-bridges"), "orchard")
+    legacy_suggestions = legacy_bridge_policy.suggest(legacy_geometry, sim_threshold=0.0, max_new=10)
+    native_suggestions = native_bridge_policy.suggest(native_geometry, sim_threshold=0.0, max_new=10)
+    assert [
+        (item.from_domain, item.from_motif, item.to_domain, item.to_motif)
+        for item in native_suggestions
+    ] == [
+        (item.from_domain, item.from_motif, item.to_domain, item.to_motif)
+        for item in legacy_suggestions
+    ]
+    assert [item.confidence for item in native_suggestions] == pytest.approx(
+        [item.confidence for item in legacy_suggestions]
+    )
 
     with recovered.lookup_shared("research").open_readers() as readers:
         research = recovered.lookup_shared("research")

@@ -1,9 +1,10 @@
 # bridges.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 import os, json, time
 from .motifs import cosine, MotifRegistry
+from .motif_geometry_port import LegacyMotifGeometryAdapter, MotifGeometryPort
 
 
 def _now_ts() -> int:
@@ -75,23 +76,28 @@ class BridgeRegistry:
         evt.setdefault("workspace_id", self.workspace_id)
         with open(self._guard(self.events_path), "a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
-    def suggest(self, regs: Dict[str, MotifRegistry], sim_threshold: float = 0.82, max_new: int = 10) -> List[Bridge]:
+    def suggest(self, geometry: MotifGeometryPort | Mapping[str, MotifRegistry], sim_threshold: float = 0.82, max_new: int = 10) -> List[Bridge]:
         # Simple pass: compare motif centroids across domains.
+        # Mapping input remains a compatibility convenience for legacy Fabric;
+        # all policy traversal below consumes the neutral read-only port.
+        if isinstance(geometry, Mapping):
+            geometry = LegacyMotifGeometryAdapter(geometry)
+        if not isinstance(geometry, MotifGeometryPort):
+            raise TypeError("bridge suggestion requires a MotifGeometryPort")
         new: List[Bridge] = []
-        domains = list(regs.keys())
+        domains = list(geometry.domain_ids())
         for i in range(len(domains)):
             for j in range(i+1, len(domains)):
                 da, db = domains[i], domains[j]
-                ra, rb = regs[da], regs[db]
-                for ma in ra.motifs.values():
+                for ma in geometry.list_motifs(da):
                     ca = ma.centroid_np()
-                    for mb in rb.motifs.values():
+                    for mb in geometry.list_motifs(db):
                         cb = mb.centroid_np()
                         if ca.size == 0 or cb.size == 0 or ca.size != cb.size:
                             continue
                         s = cosine(ca, cb)
                         if s >= sim_threshold:
-                            b = Bridge(from_domain=da, from_motif=ma.motif_id, to_domain=db, to_motif=mb.motif_id, confidence=float(s), created_ts=_now_ts(), status="suggested", updated_ts=_now_ts())
+                            b = Bridge(from_domain=da, from_motif=ma.runtime_motif_id, to_domain=db, to_motif=mb.runtime_motif_id, confidence=float(s), created_ts=_now_ts(), status="suggested", updated_ts=_now_ts())
                             if not self._exists(b):
                                 new.append(b)
                                 if len(new) >= max_new:
