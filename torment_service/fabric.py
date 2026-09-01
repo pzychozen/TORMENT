@@ -24,12 +24,23 @@ from .motif_runtime import LegacyMotifRuntimeAdapter
 from .router import DomainRouter, SINGLE_AGENT_DOMAIN
 from .domain_policies import DEFAULT_DOMAIN_POLICIES
 from .bridges import BridgeRegistry
-from .proposals import ProposalRegistry
+from .proposals import ProposalRegistry, ShareProposal
 from .conflicts import ConflictRegistry
 from .proposal_shared_storage import (
     AuthorizedSharedProposalStorage,
     LegacyAuthorizedSharedProposalStorage,
     NativeAuthorizedSharedProposalStorage,
+    native_operator_operation_key,
+    native_quorum_operation_key,
+)
+from .substrate.authorized_proposal_receipts import (
+    AuthorizedProposalReceipt,
+    AuthorizedProposalReceiptError,
+    verify_receipt_sources,
+)
+from .substrate.shared_proposal_materialization import (
+    AuthorizedSharedProposalOperator,
+    AuthorizedSharedProposalQuorum,
 )
 from .scoring import score_hit, ContinuityContext, compute_continuity_bonuses
 from .embeddings import build_embedder_from_env, Embedder, embedding_checksum
@@ -6696,7 +6707,7 @@ class TormentFabric:
         """
         if not isinstance(storage, NativeAuthorizedSharedProposalStorage):
             raise ValueError("native proposal qualification requires explicit native storage")
-        return self._process_proposals_impl(
+        return self._process_proposals_with_receipt_recovery(
             workspace_id=workspace_id,
             domain_id=domain_id,
             max_to_process=max_to_process,
@@ -6707,6 +6718,362 @@ class TormentFabric:
             _side_effect_trace=_side_effect_trace,
             _test_fail_after=_test_fail_after,
         )
+
+    def _process_proposals_with_receipt_recovery(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: str,
+        max_to_process: int,
+        sim_threshold: float,
+        min_distinct_agents: int,
+        step: Optional[int],
+        storage: NativeAuthorizedSharedProposalStorage,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resume frozen qualified proposals before considering fresh pending work.
+
+        This private method is intentionally separate from the legacy public
+        workflow.  It never re-runs TORMENT authority for a receipt: it merely
+        verifies immutable source facts and reconciles the already-authorized
+        effects in their recorded order.
+        """
+        ws = self.get_workspace(workspace_id)
+        if domain_id not in ws.domains:
+            raise ValueError(
+                f"Unknown domain_id '{domain_id}' in workspace '{workspace_id}'. "
+                f"Registered domains: {ws.domains}. "
+                f"Domains are structural — register them at workspace creation or via add_domain()."
+            )
+        reg = ws.proposals[domain_id]
+        if min_distinct_agents <= 0:
+            min_distinct_agents = int(
+                ws.domain_policies.get(domain_id, {}).get("shared_min_distinct_agents", 2)
+            )
+        process_call = {
+            "max_to_process": int(max_to_process),
+            "sim_threshold": float(sim_threshold),
+            "min_distinct_agents": int(min_distinct_agents),
+            "step": None if step is None else int(step),
+        }
+
+        recovered: list[dict[str, Any]] = []
+        for receipt in storage.receipts.list_incomplete_quorum(
+            workspace_id=workspace_id, domain_id=domain_id,
+        ):
+            recovered.append(
+                self._recover_native_quorum_receipt(
+                    ws=ws,
+                    registry=reg,
+                    storage=storage,
+                    receipt=receipt,
+                    _side_effect_trace=_side_effect_trace,
+                    _test_fail_after=_test_fail_after,
+                )
+            )
+
+        pending = reg.list_pending(limit=max_to_process)
+        if not pending:
+            if recovered:
+                result = self._combine_native_quorum_results(recovered)
+                self._proposal_trace(_side_effect_trace, "RETURN")
+                return result
+            # A fully completed qualified call is safely replayable by its
+            # frozen process knobs.  No ordinary/public path uses this lookup.
+            completed = storage.receipts.completed_quorum_for_call(
+                workspace_id=workspace_id, domain_id=domain_id, process_call=process_call,
+            )
+            if completed:
+                for receipt, _result in completed:
+                    verify_receipt_sources(receipt, reg)
+                result = self._combine_native_quorum_results([item[1] for item in completed])
+                self._proposal_trace(_side_effect_trace, "RETURN")
+                return result
+            return {"ok": True, "processed": 0, "approved_groups": 0, "approved": 0}
+
+        P = pending
+        E = [np.asarray(p.embedding, dtype=np.float32) for p in P]
+        used: set[str] = set()
+        fresh: list[dict[str, Any]] = []
+        for i, pi in enumerate(P):
+            if pi.proposal_id in used:
+                continue
+            group = [i]
+            used.add(pi.proposal_id)
+            agents = {pi.agent_id} if pi.mtype != "collective_echo" else set()
+            for j in range(i + 1, len(P)):
+                pj = P[j]
+                if pj.proposal_id in used:
+                    continue
+                if cos_sim(E[i], E[j]) >= sim_threshold:
+                    group.append(j)
+                    used.add(pj.proposal_id)
+                    if pj.mtype != "collective_echo":
+                        agents.add(pj.agent_id)
+            if len(agents) < min_distinct_agents:
+                continue
+
+            authority_candidates = [k for k in group if P[k].mtype != "collective_echo"]
+            if not authority_candidates:
+                raise RuntimeError("quorum-qualified proposal group has no authority contributor")
+            rep_idx = max(authority_candidates, key=lambda k: (P[k].strength, P[k].confidence))
+            representative = P[rep_idx]
+            participating = tuple(P[k] for k in group)
+            support_agents = tuple(sorted(agents))
+            embedding_provider = str(getattr(self.kernel.embedder, "provider", ""))
+            embedding_model = str(getattr(self.kernel.embedder, "model", ""))
+            self._proposal_trace(_side_effect_trace, "AUTHORITY_DECIDED")
+            witness = storage.pre_conflict_read(E[rep_idx])
+            self._proposal_trace(_side_effect_trace, "PRE_CONFLICT_READ")
+            policy = self._receipt_motif_policy(ws.domain_policies.get(domain_id, {}))
+            receipt = storage.receipts.prepare_quorum(
+                authorization=AuthorizedSharedProposalQuorum(
+                    workspace_id=workspace_id,
+                    domain_id=domain_id,
+                    representative=representative,
+                    participating_proposals=participating,
+                    support_agents=support_agents,
+                    embedding_provider=embedding_provider,
+                    embedding_model=embedding_model,
+                ),
+                authority_proposal_ids=tuple(P[k].proposal_id for k in authority_candidates),
+                sim_threshold=sim_threshold,
+                min_distinct_agents=min_distinct_agents,
+                step=step,
+                native_storage_key=native_quorum_operation_key(workspace_id, domain_id, participating),
+                pre_conflict_witness=witness,
+                policy=policy,
+                process_call=process_call,
+            )
+            fresh.append(
+                self._run_native_quorum_receipt(
+                    ws=ws,
+                    registry=reg,
+                    storage=storage,
+                    receipt=receipt,
+                    proposals=participating,
+                    representative=representative,
+                    _side_effect_trace=_side_effect_trace,
+                    _test_fail_after=_test_fail_after,
+                )
+            )
+
+        result = self._combine_native_quorum_results(recovered + fresh)
+        # Preserve the public result-envelope meaning for a fresh scan: it
+        # counts every considered pending proposal, even those left pending.
+        if fresh:
+            result["processed"] = len(P)
+        self._proposal_trace(_side_effect_trace, "RETURN")
+        return result
+
+    def _recover_native_quorum_receipt(
+        self,
+        *,
+        ws: Workspace,
+        registry: ProposalRegistry,
+        storage: NativeAuthorizedSharedProposalStorage,
+        receipt: AuthorizedProposalReceipt,
+        _side_effect_trace: Optional[List[str]],
+        _test_fail_after: Optional[str],
+    ) -> dict[str, Any]:
+        if receipt.kind != "QUORUM":
+            raise AuthorizedProposalReceiptError("non-quorum receipt reached quorum recovery")
+        proposals = verify_receipt_sources(receipt, registry)
+        by_id = {proposal.proposal_id: proposal for proposal in proposals}
+        representative = by_id.get(receipt.representative_id)
+        if representative is None:
+            raise AuthorizedProposalReceiptError("receipt representative is missing")
+        if not set(receipt.payload["authority_proposal_ids"]).issubset(by_id):
+            raise AuthorizedProposalReceiptError("receipt authority source facts differ")
+        return self._run_native_quorum_receipt(
+            ws=ws,
+            registry=registry,
+            storage=storage,
+            receipt=receipt,
+            proposals=proposals,
+            representative=representative,
+            _side_effect_trace=_side_effect_trace,
+            _test_fail_after=_test_fail_after,
+        )
+
+    def _run_native_quorum_receipt(
+        self,
+        *,
+        ws: Workspace,
+        registry: ProposalRegistry,
+        storage: NativeAuthorizedSharedProposalStorage,
+        receipt: AuthorizedProposalReceipt,
+        proposals: tuple[ShareProposal, ...],
+        representative: ShareProposal,
+        _side_effect_trace: Optional[List[str]],
+        _test_fail_after: Optional[str],
+    ) -> dict[str, Any]:
+        completed = storage.receipts.completion(receipt)
+        if completed is not None:
+            return completed
+        materialized = storage.materialize_quorum(
+            workspace_id=receipt.workspace_id,
+            domain_id=receipt.domain_id,
+            representative=representative,
+            participating_proposals=proposals,
+            support_agents=receipt.authority_agents,
+            embedding_provider=receipt.embedding_provider,
+            embedding_model=receipt.embedding_model,
+            step=receipt.payload.get("step"),
+            receipt=receipt,
+        )
+        eid = int(materialized.eid)
+        self._proposal_trace(_side_effect_trace, "STORAGE_COMMITTED")
+        self._proposal_fault(_test_fail_after, "storage_commit")
+
+        self._reconcile_native_receipt_conflict(
+            ws=ws, receipt=receipt, representative=representative, eid=eid,
+        )
+        storage.receipts.mark_stage(receipt, "CONFLICT")
+        self._proposal_trace(_side_effect_trace, "CONFLICT_SIDE_EFFECT")
+        self._proposal_fault(_test_fail_after, "conflict")
+
+        storage.ensure_motif_current(
+            embedding=np.asarray(representative.embedding, dtype=np.float32), eid=eid, summary=representative.summary,
+        )
+        if not storage.receipts.has_stage(receipt, "MOTIF_MAINTENANCE"):
+            try:
+                if materialized.created_new:
+                    storage.update_motif_maintenance(receipt.policy)
+            except Exception as exc:
+                self._log.debug(
+                    "group proposal motif entropy update failed for domain=%s: %s",
+                    _safe_log_value(receipt.domain_id), _safe_log_value(exc),
+                )
+            storage.receipts.mark_stage(receipt, "MOTIF_MAINTENANCE")
+        self._proposal_trace(_side_effect_trace, "MOTIF_MAINTENANCE")
+        if bool(receipt.policy.get("auto_merge_motifs", False)):
+            self._proposal_trace(_side_effect_trace, "AUTO_MERGE_IF_ANY")
+        self._proposal_fault(_test_fail_after, "motif_maintenance")
+
+        self._reconcile_native_receipt_marks(
+            registry=registry,
+            receipt=receipt,
+            note=f"approved via group (agents={len(receipt.authority_agents)})",
+            first_mark_fault="proposal_mark_after_first",
+            _test_fail_after=_test_fail_after,
+        )
+        storage.receipts.mark_stage(receipt, "PROPOSAL_MARK")
+        self._proposal_trace(_side_effect_trace, "PROPOSAL_MARK")
+        self._proposal_fault(_test_fail_after, "proposal_mark")
+
+        if not storage.receipts.has_stage(receipt, "BRIDGE_SUGGEST"):
+            ws.bridges.suggest(storage.geometry, sim_threshold=0.86, max_new=10)
+            storage.receipts.mark_stage(receipt, "BRIDGE_SUGGEST")
+        self._proposal_trace(_side_effect_trace, "BRIDGE_SUGGEST")
+        self._proposal_fault(_test_fail_after, "bridge")
+        if not storage.receipts.has_stage(receipt, "DOMAIN_SUGGEST"):
+            self._maybe_suggest_domain(ws, domain_id=receipt.domain_id, geometry=storage.geometry)
+            storage.receipts.mark_stage(receipt, "DOMAIN_SUGGEST")
+        self._proposal_trace(_side_effect_trace, "DOMAIN_SUGGEST")
+        result = {
+            "ok": True,
+            "processed": len(proposals),
+            "approved_groups": 1,
+            "approved": len(proposals),
+            "created_shared_eids": [eid],
+        }
+        result = storage.receipts.complete(receipt, result)
+        # The fault boundary is deliberately after completion.  A lost reply
+        # therefore has immutable evidence for the exact outward result.
+        self._proposal_fault(_test_fail_after, "domain_suggestion")
+        return result
+
+    @staticmethod
+    def _receipt_motif_policy(policy: Dict[str, Any]) -> dict[str, Any]:
+        return {
+            "motif_entropy_target_n": int(policy.get("motif_entropy_target_n", 24)),
+            "motif_entropy_high": float(policy.get("motif_entropy_high", 0.72)),
+            "motif_merge_similarity": float(policy.get("motif_merge_similarity", 0.93)),
+            "motif_merge_max_suggestions": int(policy.get("motif_merge_max_suggestions", 20)),
+            "auto_merge_motifs": bool(policy.get("auto_merge_motifs", False)),
+            "auto_merge_entropy_trigger": float(policy.get("auto_merge_entropy_trigger", 0.80)),
+        }
+
+    @staticmethod
+    def _combine_native_quorum_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+        if not results:
+            return {"ok": True, "processed": 0, "approved_groups": 0, "approved": 0, "created_shared_eids": []}
+        if len(results) == 1:
+            return dict(results[0])
+        return {
+            "ok": True,
+            "processed": sum(int(item["processed"]) for item in results),
+            "approved_groups": sum(int(item["approved_groups"]) for item in results),
+            "approved": sum(int(item["approved"]) for item in results),
+            "created_shared_eids": [eid for item in results for eid in item["created_shared_eids"]],
+        }
+
+    def _reconcile_native_receipt_conflict(
+        self,
+        *,
+        ws: Workspace,
+        receipt: AuthorizedProposalReceipt,
+        representative: ShareProposal,
+        eid: int,
+    ) -> None:
+        expected: tuple[int, float, float, str] | None = None
+        for witness in receipt.witness:
+            old_eid = int(witness.get("eid", 0))
+            if old_eid <= 0:
+                continue
+            sim = float(witness.get("score", 0.0))
+            is_conflict, score, reason = _detect_canon_conflict(
+                representative.summary, str(witness.get("summary", "")), sim,
+            )
+            if is_conflict:
+                expected = (old_eid, sim, float(score), str(reason or "heuristic"))
+                break
+        if expected is None:
+            return
+        old_eid, sim, score, reason = expected
+        matches = [
+            conflict for conflict in ws.conflicts[receipt.domain_id].apply_events().values()
+            if conflict.eid_a == old_eid and conflict.eid_b == eid
+            and conflict.sim == sim and conflict.conflict_score == score
+            and conflict.reason == reason and conflict.origin_scope == "shared"
+            and conflict.origin_domain_id == receipt.domain_id and conflict.origin_agent_id is None
+        ]
+        if len(matches) > 1:
+            raise AuthorizedProposalReceiptError("receipt conflict reconciliation is ambiguous")
+        if not matches:
+            ws.conflicts[receipt.domain_id].add(
+                eid_a=old_eid, eid_b=eid, sim=sim, conflict_score=score, reason=reason,
+                origin_scope="shared", origin_agent_id=None, origin_domain_id=receipt.domain_id,
+            )
+
+    def _reconcile_native_receipt_marks(
+        self,
+        *,
+        registry: ProposalRegistry,
+        receipt: AuthorizedProposalReceipt,
+        note: str,
+        first_mark_fault: str | None,
+        _test_fail_after: Optional[str],
+    ) -> None:
+        latest = registry.apply_events()
+        marked = 0
+        for proposal_id in receipt.source_proposal_ids:
+            proposal = latest.get(proposal_id)
+            if proposal is None:
+                raise AuthorizedProposalReceiptError("receipt proposal is missing during mark reconciliation")
+            if proposal.status == "pending":
+                registry.mark(proposal_id, status="approved", note=note)
+                marked += 1
+                if marked == 1 and first_mark_fault is not None:
+                    self._proposal_fault(_test_fail_after, first_mark_fault)
+            elif proposal.status == "approved":
+                continue
+            elif proposal.status == "rejected":
+                raise AuthorizedProposalReceiptError("receipt proposal was rejected before recovery")
+            else:
+                raise AuthorizedProposalReceiptError("receipt proposal has an unknown effective status")
 
     def _process_proposals_impl(
         self,
@@ -7028,7 +7395,7 @@ class TormentFabric:
         """Qualification-only native counterpart of :meth:`decide_proposal`."""
         if not isinstance(storage, NativeAuthorizedSharedProposalStorage):
             raise ValueError("native proposal qualification requires explicit native storage")
-        return self._decide_proposal_impl(
+        return self._decide_proposal_with_receipt_recovery(
             workspace_id=workspace_id,
             domain_id=domain_id,
             proposal_id=proposal_id,
@@ -7038,6 +7405,152 @@ class TormentFabric:
             _side_effect_trace=_side_effect_trace,
             _test_fail_after=_test_fail_after,
         )
+
+    def _decide_proposal_with_receipt_recovery(
+        self,
+        *,
+        workspace_id: str,
+        domain_id: str,
+        proposal_id: str,
+        decision: str,
+        note: Optional[str],
+        storage: NativeAuthorizedSharedProposalStorage,
+        _side_effect_trace: Optional[List[str]] = None,
+        _test_fail_after: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Private operator path with receipt recovery for approved decisions only."""
+        ws = self.get_workspace(workspace_id)
+        if domain_id not in ws.domains:
+            raise ValueError("Unknown domain_id")
+        registry = ws.proposals[domain_id]
+        latest = registry.apply_events()
+        proposal = latest.get(proposal_id)
+        if proposal is None:
+            raise ValueError("Unknown proposal_id")
+        if decision not in ("approve", "reject"):
+            raise ValueError("decision must be approve|reject")
+        # Rejections deliberately retain the ordinary Fabric-only behavior;
+        # an authorization recovery receipt never represents a rejection.
+        if decision == "reject":
+            registry.mark(proposal_id, status="rejected", note=note or "rejected manually")
+            return {"ok": True, "decision": "rejected", "proposal_id": proposal_id}
+        if proposal.mtype == "collective_echo":
+            raise ValueError(
+                "collective-derived proposals require the grouped "
+                "independent-authority path"
+            )
+
+        native_key = native_operator_operation_key(workspace_id, domain_id, proposal)
+        receipt = storage.receipts.get(
+            workspace_id=workspace_id, domain_id=domain_id, native_storage_key=native_key,
+        )
+        if receipt is not None:
+            if receipt.kind != "OPERATOR_APPROVE":
+                raise AuthorizedProposalReceiptError("operator receipt kind differs")
+            return self._recover_native_operator_receipt(
+                ws=ws,
+                registry=registry,
+                storage=storage,
+                receipt=receipt,
+                note=note,
+                _side_effect_trace=_side_effect_trace,
+                _test_fail_after=_test_fail_after,
+            )
+        if proposal.status != "pending":
+            raise AuthorizedProposalReceiptError(
+                "approved operator proposal has no qualified recovery receipt"
+            )
+
+        embedding_provider = str(getattr(self.kernel.embedder, "provider", ""))
+        embedding_model = str(getattr(self.kernel.embedder, "model", ""))
+        self._proposal_trace(_side_effect_trace, "AUTHORITY_DECIDED")
+        receipt = storage.receipts.prepare_operator(
+            authorization=AuthorizedSharedProposalOperator(
+                workspace_id=workspace_id,
+                domain_id=domain_id,
+                proposal=proposal,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+            ),
+            native_storage_key=native_key,
+            policy=self._receipt_motif_policy(ws.domain_policies.get(domain_id, {})),
+        )
+        return self._recover_native_operator_receipt(
+            ws=ws,
+            registry=registry,
+            storage=storage,
+            receipt=receipt,
+            note=note,
+            _side_effect_trace=_side_effect_trace,
+            _test_fail_after=_test_fail_after,
+        )
+
+    def _recover_native_operator_receipt(
+        self,
+        *,
+        ws: Workspace,
+        registry: ProposalRegistry,
+        storage: NativeAuthorizedSharedProposalStorage,
+        receipt: AuthorizedProposalReceipt,
+        note: Optional[str],
+        _side_effect_trace: Optional[List[str]],
+        _test_fail_after: Optional[str],
+    ) -> Dict[str, Any]:
+        if receipt.kind != "OPERATOR_APPROVE":
+            raise AuthorizedProposalReceiptError("non-operator receipt reached operator recovery")
+        proposals = verify_receipt_sources(receipt, registry)
+        if len(proposals) != 1 or proposals[0].proposal_id != receipt.representative_id:
+            raise AuthorizedProposalReceiptError("operator receipt source facts differ")
+        completed = storage.receipts.completion(receipt)
+        if completed is not None:
+            self._proposal_trace(_side_effect_trace, "RETURN")
+            return completed
+        proposal = proposals[0]
+        materialized = storage.materialize_operator(
+            workspace_id=receipt.workspace_id,
+            domain_id=receipt.domain_id,
+            proposal=proposal,
+            embedding_provider=receipt.embedding_provider,
+            embedding_model=receipt.embedding_model,
+            receipt=receipt,
+        )
+        eid = int(materialized.eid)
+        self._proposal_trace(_side_effect_trace, "STORAGE_COMMITTED")
+        self._proposal_fault(_test_fail_after, "operator_storage_commit")
+        storage.ensure_motif_current(
+            embedding=np.asarray(proposal.embedding, dtype=np.float32), eid=eid, summary=proposal.summary,
+        )
+        self._reconcile_native_receipt_marks(
+            registry=registry,
+            receipt=receipt,
+            note=note or "approved manually",
+            first_mark_fault=None,
+            _test_fail_after=_test_fail_after,
+        )
+        storage.receipts.mark_stage(receipt, "PROPOSAL_MARK")
+        self._proposal_trace(_side_effect_trace, "PROPOSAL_MARK")
+        self._proposal_fault(_test_fail_after, "operator_proposal_mark")
+        if not storage.receipts.has_stage(receipt, "BRIDGE_SUGGEST"):
+            ws.bridges.suggest(storage.geometry, sim_threshold=0.86, max_new=5)
+            storage.receipts.mark_stage(receipt, "BRIDGE_SUGGEST")
+        self._proposal_trace(_side_effect_trace, "BRIDGE_SUGGEST")
+        self._proposal_fault(_test_fail_after, "operator_bridge")
+        if not storage.receipts.has_stage(receipt, "DOMAIN_SUGGEST"):
+            self._maybe_suggest_domain(ws, domain_id=receipt.domain_id, geometry=storage.geometry)
+            storage.receipts.mark_stage(receipt, "DOMAIN_SUGGEST")
+        self._proposal_trace(_side_effect_trace, "DOMAIN_SUGGEST")
+        result = storage.receipts.complete(
+            receipt,
+            {
+                "ok": True,
+                "decision": "approved",
+                "proposal_id": proposal.proposal_id,
+                "created_shared_eid": eid,
+            },
+        )
+        self._proposal_fault(_test_fail_after, "operator_domain_suggestion")
+        self._proposal_trace(_side_effect_trace, "RETURN")
+        return result
 
     def _decide_proposal_impl(
         self,

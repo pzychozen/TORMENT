@@ -20,6 +20,10 @@ from .motif_geometry_port import MotifGeometryPort
 from .motif_maintenance import NativeMotifMaintenanceAdapter
 from .proposals import ShareProposal
 from .substrate.native_memory_vector_runtime import NativeMemoryVectorRuntime
+from .substrate.authorized_proposal_receipts import (
+    AuthorizedProposalReceipt,
+    NativeAuthorizedProposalReceiptStore,
+)
 from .substrate.shared_proposal_materialization import (
     AuthorizedSharedProposalOperator,
     AuthorizedSharedProposalQuorum,
@@ -54,6 +58,7 @@ class AuthorizedSharedProposalStorage(Protocol):
         embedding_provider: str,
         embedding_model: str,
         step: int | None,
+        receipt: Any | None = None,
     ) -> SharedProposalMaterialization: ...
 
     def materialize_operator(
@@ -64,6 +69,7 @@ class AuthorizedSharedProposalStorage(Protocol):
         proposal: ShareProposal,
         embedding_provider: str,
         embedding_model: str,
+        receipt: Any | None = None,
     ) -> SharedProposalMaterialization: ...
 
     def ensure_motif_current(
@@ -101,6 +107,7 @@ class LegacyAuthorizedSharedProposalStorage:
         embedding_provider: str,
         embedding_model: str,
         step: int | None,
+        receipt: Any | None = None,
     ) -> SharedProposalMaterialization:
         return self._materialize(
             workspace_id=workspace_id,
@@ -122,6 +129,7 @@ class LegacyAuthorizedSharedProposalStorage:
         proposal: ShareProposal,
         embedding_provider: str,
         embedding_model: str,
+        receipt: Any | None = None,
     ) -> SharedProposalMaterialization:
         return self._materialize(
             workspace_id=workspace_id,
@@ -224,6 +232,7 @@ class NativeAuthorizedSharedProposalStorage:
         vector_runtime: NativeMemoryVectorRuntime,
         geometry: MotifGeometryPort,
         motif_maintenance: NativeMotifMaintenanceAdapter,
+        receipts: NativeAuthorizedProposalReceiptStore,
     ) -> None:
         if not isinstance(materializer, NativeAuthorizedSharedProposalMaterializer):
             raise ValueError("native proposal storage requires the qualified materializer")
@@ -233,10 +242,13 @@ class NativeAuthorizedSharedProposalStorage:
             raise ValueError("native proposal storage requires qualified native motif geometry")
         if not isinstance(motif_maintenance, NativeMotifMaintenanceAdapter):
             raise ValueError("native proposal storage requires qualified native motif maintenance")
+        if not isinstance(receipts, NativeAuthorizedProposalReceiptStore):
+            raise ValueError("native proposal storage requires qualified recovery receipts")
         self._materializer = materializer
         self._vector_runtime = vector_runtime
         self.geometry = geometry
         self._motif_maintenance = motif_maintenance
+        self.receipts = receipts
 
     def pre_conflict_read(self, embedding: Any) -> list[dict[str, Any]]:
         # This is the established exact MemoryGraph-shaped native vector
@@ -256,8 +268,29 @@ class NativeAuthorizedSharedProposalStorage:
         embedding_provider: str,
         embedding_model: str,
         step: int | None,
+        receipt: AuthorizedProposalReceipt | None = None,
     ) -> SharedProposalMaterialization:
-        now = int(time.time())
+        if receipt is not None:
+            self.receipts.require_current_core(receipt)
+            if receipt.kind != "QUORUM":
+                raise ValueError("quorum storage requires a quorum receipt")
+            if receipt.native_storage_key != native_quorum_operation_key(
+                workspace_id, domain_id, participating_proposals,
+            ):
+                raise ValueError("quorum receipt native storage key differs")
+            clock = receipt.clock
+            native_operation_key = receipt.native_storage_key
+        else:
+            now = int(time.time())
+            clock = NativeSharedProposalStorageClock(
+                logical_step=int(step) if step is not None else now,
+                created_ts=now,
+                last_active_ts=now,
+                last_reinforced_ts=now,
+            )
+            native_operation_key = native_quorum_operation_key(
+                workspace_id, domain_id, participating_proposals,
+            )
         authorization = AuthorizedSharedProposalQuorum(
             workspace_id=workspace_id,
             domain_id=domain_id,
@@ -269,15 +302,8 @@ class NativeAuthorizedSharedProposalStorage:
         )
         attempt = self._materializer.materialize_quorum(
             authorization=authorization,
-            native_operation_key=_quorum_operation_key(
-                workspace_id, domain_id, participating_proposals,
-            ),
-            clock=NativeSharedProposalStorageClock(
-                logical_step=int(step) if step is not None else now,
-                created_ts=now,
-                last_active_ts=now,
-                last_reinforced_ts=now,
-            ),
+            native_operation_key=native_operation_key,
+            clock=clock,
         )
         return self._native_result(attempt)
 
@@ -289,8 +315,22 @@ class NativeAuthorizedSharedProposalStorage:
         proposal: ShareProposal,
         embedding_provider: str,
         embedding_model: str,
+        receipt: AuthorizedProposalReceipt | None = None,
     ) -> SharedProposalMaterialization:
-        now = int(time.time())
+        if receipt is not None:
+            self.receipts.require_current_core(receipt)
+            if receipt.kind != "OPERATOR_APPROVE":
+                raise ValueError("operator storage requires an operator receipt")
+            if receipt.native_storage_key != native_operator_operation_key(
+                workspace_id, domain_id, proposal,
+            ):
+                raise ValueError("operator receipt native storage key differs")
+            clock = receipt.clock
+            native_operation_key = receipt.native_storage_key
+        else:
+            now = int(time.time())
+            clock = NativeSharedProposalStorageClock(now, now, now, now)
+            native_operation_key = native_operator_operation_key(workspace_id, domain_id, proposal)
         authorization = AuthorizedSharedProposalOperator(
             workspace_id=workspace_id,
             domain_id=domain_id,
@@ -300,8 +340,8 @@ class NativeAuthorizedSharedProposalStorage:
         )
         attempt = self._materializer.materialize_operator(
             authorization=authorization,
-            native_operation_key=_operator_operation_key(workspace_id, domain_id, proposal),
-            clock=NativeSharedProposalStorageClock(now, now, now, now),
+            native_operation_key=native_operation_key,
+            clock=clock,
         )
         return self._native_result(attempt)
 
@@ -340,7 +380,7 @@ class NativeAuthorizedSharedProposalStorage:
         return SharedProposalMaterialization(eid=int(attempt.result.eid), created_new=True)
 
 
-def _quorum_operation_key(
+def native_quorum_operation_key(
     workspace_id: str,
     domain_id: str,
     proposals: tuple[ShareProposal, ...],
@@ -351,7 +391,7 @@ def _quorum_operation_key(
     ))
 
 
-def _operator_operation_key(
+def native_operator_operation_key(
     workspace_id: str,
     domain_id: str,
     proposal: ShareProposal,
@@ -367,4 +407,6 @@ __all__ = [
     "LegacyAuthorizedSharedProposalStorage",
     "NativeAuthorizedSharedProposalStorage",
     "SharedProposalMaterialization",
+    "native_operator_operation_key",
+    "native_quorum_operation_key",
 ]

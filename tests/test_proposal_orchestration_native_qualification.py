@@ -1,7 +1,7 @@
 """Qualification-only 7G5E4D proposal orchestration over native shared truth."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,10 @@ from torment_service.proposal_shared_storage import (
 from torment_service.proposals import ShareProposal
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope
 from torment_service.substrate.connection import open_existing_native_core_connection
+from torment_service.substrate.authorized_proposal_receipts import (
+    AuthorizedProposalReceiptError,
+    NativeAuthorizedProposalReceiptStore,
+)
 from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
 from torment_service.substrate.motifs import MotifState, NativeMotifService
 from torment_service.substrate.native_memory_vector_runtime import (
@@ -30,6 +34,7 @@ from torment_service.substrate.native_memory_vector_runtime import (
 )
 from torment_service.substrate.native_motif_merge_runtime import NativeMotifMergeRuntime
 from torment_service.substrate.shared_proposal_materialization import (
+    AuthorizedSharedProposalQuorum,
     NativeAuthorizedSharedProposalMaterializer,
 )
 
@@ -151,6 +156,7 @@ def _native_harness(fabric: TormentFabric, tmp_path: Path) -> _NativeHarness:
         vector_runtime=vector,
         geometry=geometry,
         motif_maintenance=maintenance,
+        receipts=NativeAuthorizedProposalReceiptStore(capability),
     )
     return _NativeHarness(qualified, capability, connection, scope, vector, storage)
 
@@ -193,6 +199,7 @@ def _reopen_native_harness(fabric: TormentFabric, previous: _NativeHarness) -> _
         vector_runtime=vector,
         geometry=geometry,
         motif_maintenance=maintenance,
+        receipts=NativeAuthorizedProposalReceiptStore(capability),
     )
     return _NativeHarness(qualified, capability, connection, scope, vector, storage)
 
@@ -495,15 +502,15 @@ def test_legacy_and_native_process_auto_merge_executes_meaningful_native_m2_muta
 
 
 @pytest.mark.parametrize(
-    ("boundary", "pending_after_failure", "conflicts_after_natural_retry", "entropy_events"),
+    ("boundary", "pending_after_failure"),
     [
-        ("storage_commit", 3, 1, 1),
-        ("conflict", 3, 2, 1),
-        ("motif_maintenance", 3, 2, 2),
-        ("proposal_mark_after_first", 2, 1, 1),
-        ("proposal_mark", 0, 1, 1),
-        ("bridge", 0, 1, 1),
-        ("domain_suggestion", 0, 1, 1),
+        ("storage_commit", 3),
+        ("conflict", 3),
+        ("motif_maintenance", 3),
+        ("proposal_mark_after_first", 2),
+        ("proposal_mark", 0),
+        ("bridge", 0),
+        ("domain_suggestion", 0),
     ],
 )
 def test_native_process_fault_boundaries_characterize_natural_retry(
@@ -512,13 +519,27 @@ def test_native_process_fault_boundaries_characterize_natural_retry(
     monkeypatch: pytest.MonkeyPatch,
     boundary: str,
     pending_after_failure: int,
-    conflicts_after_natural_retry: int,
-    entropy_events: int,
 ) -> None:
     monkeypatch.setattr("time.time", lambda: 4_000)
     _proposal_group(fabric)
     harness = _native_harness(fabric, tmp_path)
     try:
+        workspace = fabric.get_workspace(WORKSPACE)
+        bridge_calls: list[tuple[float, int]] = []
+        domain_calls: list[str] = []
+        original_bridge = workspace.bridges.suggest
+        original_domain = fabric._maybe_suggest_domain
+
+        def bridge_observer(geometry, sim_threshold=.82, max_new=10):
+            bridge_calls.append((sim_threshold, max_new))
+            return original_bridge(geometry, sim_threshold=sim_threshold, max_new=max_new)
+
+        def domain_observer(ws, domain_id, *, geometry=None):
+            domain_calls.append(domain_id)
+            return original_domain(ws, domain_id, geometry=geometry)
+
+        monkeypatch.setattr(workspace.bridges, "suggest", bridge_observer)
+        monkeypatch.setattr(fabric, "_maybe_suggest_domain", domain_observer)
         # The first native EID is intentionally ignored by the existing
         # conflict guard, so a second canon makes conflict replay observable.
         _seed_ignored_canon(harness.storage)
@@ -539,22 +560,16 @@ def test_native_process_fault_boundaries_characterize_natural_retry(
         # The storage operation key is stable: every natural retry sees the
         # one committed proposal memory rather than duplicating it.
         assert len(hits) == 3
-        assert len(fabric.get_workspace(WORKSPACE).conflicts[DOMAIN].list()) == conflicts_after_natural_retry
-        assert _event_types(fabric).count("MOTIF_ENTROPY") == entropy_events
-        if boundary in {"storage_commit", "conflict", "motif_maintenance"}:
-            assert retry["approved"] == 3
-            assert set(_statuses(fabric).values()) == {"approved"}
-            assert _proposal_event_count(fabric) == 3
-        elif boundary == "proposal_mark_after_first":
-            assert retry == {"ok": True, "processed": 2, "approved_groups": 0, "approved": 0, "created_shared_eids": []}
-            assert sorted(_statuses(fabric).values()) == ["approved", "pending", "pending"]
-            assert _proposal_event_count(fabric) == 1
-        else:
-            # Once every proposal has been marked, ordinary list_pending()
-            # cannot reconstruct the group or resume post-mark callbacks.
-            assert retry == {"ok": True, "processed": 0, "approved_groups": 0, "approved": 0}
-            assert set(_statuses(fabric).values()) == {"approved"}
-            assert _proposal_event_count(fabric) == 3
+        assert len(fabric.get_workspace(WORKSPACE).conflicts[DOMAIN].list()) == 1
+        assert _event_types(fabric).count("MOTIF_ENTROPY") == 1
+        assert retry == {
+            "ok": True, "processed": 3, "approved_groups": 1, "approved": 3,
+            "created_shared_eids": [2],
+        }
+        assert set(_statuses(fabric).values()) == {"approved"}
+        assert _proposal_event_count(fabric) == 3
+        assert bridge_calls == [(.86, 10)]
+        assert domain_calls == [DOMAIN]
     finally:
         harness.close()
 
@@ -601,12 +616,12 @@ def test_native_same_authorized_group_replay_recovers_one_committed_memory(
 
 
 @pytest.mark.parametrize(
-    ("boundary", "expected_marks", "expected_bridge_calls", "expected_domain_calls"),
+    ("boundary",),
     [
-        ("operator_storage_commit", 1, 1, 1),
-        ("operator_proposal_mark", 2, 1, 1),
-        ("operator_bridge", 2, 2, 1),
-        ("operator_domain_suggestion", 2, 2, 2),
+        ("operator_storage_commit",),
+        ("operator_proposal_mark",),
+        ("operator_bridge",),
+        ("operator_domain_suggestion",),
     ],
 )
 def test_native_operator_fault_boundaries_characterize_natural_retry(
@@ -614,9 +629,6 @@ def test_native_operator_fault_boundaries_characterize_natural_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     boundary: str,
-    expected_marks: int,
-    expected_bridge_calls: int,
-    expected_domain_calls: int,
 ) -> None:
     monkeypatch.setattr("time.time", lambda: 4_600)
     proposal_id = _submit(fabric, agent_id="operator", summary="Operator retry claim.")
@@ -648,14 +660,14 @@ def test_native_operator_fault_boundaries_characterize_natural_retry(
         )
         assert retry["created_shared_eid"] == 0
         assert len(harness.storage.pre_conflict_read(_embed())) == 1
-        assert _proposal_event_count(fabric) == expected_marks
-        assert bridge_calls == [(.86, 5)] * expected_bridge_calls
-        assert domain_calls == [DOMAIN] * expected_domain_calls
+        assert _proposal_event_count(fabric) == 1
+        assert bridge_calls == [(.86, 5)]
+        assert domain_calls == [DOMAIN]
     finally:
         harness.close()
 
 
-def test_partial_group_mark_hazard_survives_cold_restart_without_a_repair(
+def test_partial_group_mark_recovers_across_cold_restart(
     fabric: TormentFabric, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("time.time", lambda: 4_700)
@@ -681,10 +693,13 @@ def test_partial_group_mark_hazard_survives_cold_restart_without_a_repair(
             WORKSPACE, DOMAIN, storage=reopened.storage, sim_threshold=.99,
             min_distinct_agents=2, step=93,
         )
-        assert retry == {"ok": True, "processed": 2, "approved_groups": 0, "approved": 0, "created_shared_eids": []}
-        assert sorted(_statuses(replacement).values()) == ["approved", "pending", "pending"]
+        assert retry == {
+            "ok": True, "processed": 3, "approved_groups": 1, "approved": 3,
+            "created_shared_eids": [0],
+        }
+        assert set(_statuses(replacement).values()) == {"approved"}
         assert len(reopened.storage.pre_conflict_read(_embed())) == 1
-        assert _proposal_event_count(replacement) == 1
+        assert _proposal_event_count(replacement) == 3
     finally:
         if reopened is not None:
             reopened.close()
@@ -772,5 +787,187 @@ def test_qualified_native_operator_approve_reject_and_collective_refusal(
         assert _statuses(fabric)[approve] == "approved"
         assert _statuses(fabric)[reject] == "rejected"
         assert _statuses(fabric)[echo] == "pending"
+    finally:
+        harness.close()
+
+
+def test_native_receipt_operations_are_evidence_only_and_completed_replay_is_inert(
+    fabric: TormentFabric, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 5_100)
+    _proposal_group(fabric)
+    harness = _native_harness(fabric, tmp_path)
+    try:
+        result = fabric._process_proposals_with_qualified_native_storage(
+            WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+            min_distinct_agents=2, step=111,
+        )
+        receipt_rows = harness.connection.execute(
+            "SELECT operation_id FROM operations "
+            "WHERE operation_kind LIKE 'NATIVE_AUTHORIZED_PROPOSAL_RECEIPT%'"
+        ).fetchall()
+        assert receipt_rows
+        for (operation_id,) in receipt_rows:
+            assert harness.connection.execute(
+                "SELECT COUNT(*) FROM semantic_transitions WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0] == 0
+            assert harness.connection.execute(
+                "SELECT COUNT(*) FROM operation_outputs WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0] == 0
+            assert harness.connection.execute(
+                "SELECT COUNT(*) FROM operation_targets WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0] == 0
+
+        event_count = _proposal_event_count(fabric)
+        conflict_count = len(fabric.get_workspace(WORKSPACE).conflicts[DOMAIN].list())
+        receipt_count = len(receipt_rows)
+        assert fabric._process_proposals_with_qualified_native_storage(
+            WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+            min_distinct_agents=2, step=111,
+        ) == result
+        assert _proposal_event_count(fabric) == event_count
+        assert len(fabric.get_workspace(WORKSPACE).conflicts[DOMAIN].list()) == conflict_count
+        assert harness.connection.execute(
+            "SELECT COUNT(*) FROM operations "
+            "WHERE operation_kind LIKE 'NATIVE_AUTHORIZED_PROPOSAL_RECEIPT%'"
+        ).fetchone()[0] == receipt_count
+    finally:
+        harness.close()
+
+
+def test_native_operator_receipt_recovers_lost_response_after_cold_restart(
+    fabric: TormentFabric, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 5_200)
+    proposal_id = _submit(fabric, agent_id="operator", summary="Cold operator receipt claim.")
+    harness = _native_harness(fabric, tmp_path)
+    data_dir = fabric.data_dir
+    replacement: TormentFabric | None = None
+    reopened: _NativeHarness | None = None
+    try:
+        with pytest.raises(RuntimeError, match="after operator_domain_suggestion"):
+            fabric._decide_proposal_with_qualified_native_storage(
+                WORKSPACE, DOMAIN, proposal_id, "approve", storage=harness.storage,
+                _test_fail_after="operator_domain_suggestion",
+            )
+        assert _proposal_event_count(fabric) == 1
+        harness.close()
+        fabric.close()
+        replacement = TormentFabric(data_dir=data_dir)
+        replacement.get_workspace(WORKSPACE, domains=[DOMAIN])
+        reopened = _reopen_native_harness(replacement, harness)
+        result = replacement._decide_proposal_with_qualified_native_storage(
+            WORKSPACE, DOMAIN, proposal_id, "approve", storage=reopened.storage,
+        )
+        assert result == {
+            "ok": True, "decision": "approved", "proposal_id": proposal_id,
+            "created_shared_eid": 0,
+        }
+        assert _proposal_event_count(replacement) == 1
+        assert len(reopened.storage.pre_conflict_read(_embed())) == 1
+        assert replacement._decide_proposal_with_qualified_native_storage(
+            WORKSPACE, DOMAIN, proposal_id, "approve", storage=reopened.storage,
+        ) == result
+        assert _proposal_event_count(replacement) == 1
+    finally:
+        if reopened is not None:
+            reopened.close()
+        if replacement is not None:
+            replacement.close()
+        harness.close()
+
+
+def test_native_receipt_source_drift_and_changed_intent_fail_closed(
+    fabric: TormentFabric, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 5_300)
+    _proposal_group(fabric)
+    harness = _native_harness(fabric, tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="after storage_commit"):
+            fabric._process_proposals_with_qualified_native_storage(
+                WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+                min_distinct_agents=2, step=113, _test_fail_after="storage_commit",
+            )
+        registry = fabric.get_workspace(WORKSPACE).proposals[DOMAIN]
+        receipt = harness.storage.receipts.list_incomplete_quorum(
+            workspace_id=WORKSPACE, domain_id=DOMAIN,
+        )[0]
+        sources = tuple(registry.apply_events()[proposal_id] for proposal_id in receipt.source_proposal_ids)
+        representative = next(item for item in sources if item.proposal_id == receipt.representative_id)
+        with pytest.raises(AuthorizedProposalReceiptError, match="intent differs"):
+            harness.storage.receipts.prepare_quorum(
+                authorization=AuthorizedSharedProposalQuorum(
+                    workspace_id=WORKSPACE, domain_id=DOMAIN, representative=representative,
+                    participating_proposals=sources, support_agents=receipt.authority_agents,
+                    embedding_provider=receipt.embedding_provider, embedding_model=receipt.embedding_model,
+                ),
+                authority_proposal_ids=tuple(receipt.payload["authority_proposal_ids"]),
+                sim_threshold=.98,
+                min_distinct_agents=int(receipt.payload["min_distinct_agents"]),
+                step=113,
+                native_storage_key=receipt.native_storage_key,
+                pre_conflict_witness=list(receipt.witness), policy=receipt.policy,
+                process_call=receipt.process_call,
+            )
+        with pytest.raises(ValueError, match="native storage key differs"):
+            harness.storage.materialize_quorum(
+                workspace_id=WORKSPACE, domain_id=DOMAIN, representative=representative,
+                participating_proposals=sources[:-1], support_agents=receipt.authority_agents,
+                embedding_provider=receipt.embedding_provider, embedding_model=receipt.embedding_model,
+                step=113, receipt=receipt,
+            )
+        foreign_core_receipt = replace(
+            receipt,
+            payload={**receipt.payload, "native_core_id": "foreign-qualified-core"},
+        )
+        with pytest.raises(AuthorizedProposalReceiptError, match="different native core"):
+            harness.storage.materialize_quorum(
+                workspace_id=WORKSPACE, domain_id=DOMAIN, representative=representative,
+                participating_proposals=sources, support_agents=receipt.authority_agents,
+                embedding_provider=receipt.embedding_provider, embedding_model=receipt.embedding_model,
+                step=113, receipt=foreign_core_receipt,
+            )
+
+        current = registry.apply_events()
+        changed = dict(current)
+        changed[representative.proposal_id] = replace(
+            representative, summary="tampered immutable proposal content",
+        )
+        monkeypatch.setattr(registry, "apply_events", lambda: changed)
+        with pytest.raises(AuthorizedProposalReceiptError, match="immutable facts differ"):
+            fabric._process_proposals_with_qualified_native_storage(
+                WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+                min_distinct_agents=2, step=113,
+            )
+        assert len(harness.storage.pre_conflict_read(_embed())) == 1
+        assert _proposal_event_count(fabric) == 0
+    finally:
+        harness.close()
+
+
+def test_native_receipt_malformed_core_evidence_fails_closed(
+    fabric: TormentFabric, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 5_400)
+    _proposal_group(fabric)
+    harness = _native_harness(fabric, tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="after storage_commit"):
+            fabric._process_proposals_with_qualified_native_storage(
+                WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+                min_distinct_agents=2, step=114, _test_fail_after="storage_commit",
+            )
+        harness.connection.execute(
+            "UPDATE operations SET canonical_intent_json='{}' "
+            "WHERE operation_kind='NATIVE_AUTHORIZED_PROPOSAL_RECEIPT_PREPARED'"
+        )
+        with pytest.raises(AuthorizedProposalReceiptError, match="schema fields are incomplete"):
+            fabric._process_proposals_with_qualified_native_storage(
+                WORKSPACE, DOMAIN, storage=harness.storage, sim_threshold=.99,
+                min_distinct_agents=2, step=114,
+            )
+        assert _proposal_event_count(fabric) == 0
+        assert len(harness.storage.pre_conflict_read(_embed())) == 1
     finally:
         harness.close()
