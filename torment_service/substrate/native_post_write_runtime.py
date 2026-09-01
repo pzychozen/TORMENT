@@ -77,6 +77,9 @@ class NativePostWriteQualificationProfile:
     trajectory_evidence: NativePostWriteBehavior
     bridge_suggestions: NativePostWriteBehavior
     shared_bridge_suggestion: NativePostWriteBehavior
+    shared_motif_suggestion_maintenance: NativePostWriteBehavior
+    shared_trigger_identity_anchor: NativePostWriteBehavior
+    shared_trigger_mood_drift: NativePostWriteBehavior
 
     @classmethod
     def core_staging(cls) -> "NativePostWriteQualificationProfile":
@@ -89,6 +92,8 @@ class NativePostWriteQualificationProfile:
             NativePostWriteBehavior.UNSUPPORTED, NativePostWriteBehavior.DISABLED_FOR_PROFILE,
             NativePostWriteBehavior.DISABLED_FOR_PROFILE, NativePostWriteBehavior.DISABLED_FOR_PROFILE,
             NativePostWriteBehavior.DISABLED_FOR_PROFILE,
+            NativePostWriteBehavior.UNSUPPORTED, NativePostWriteBehavior.UNSUPPORTED,
+            NativePostWriteBehavior.UNSUPPORTED,
         )
 
     @classmethod
@@ -121,6 +126,16 @@ class NativePostWriteQualificationProfile:
             shared_bridge_suggestion=NativePostWriteBehavior.QUALIFIED,
         )
 
+    @classmethod
+    def core_staging_with_shared_m1_mood_drift(cls) -> "NativePostWriteQualificationProfile":
+        """D1 profile for shared M1 and private-target mood drift only."""
+        return replace(
+            cls.core_staging_with_motif_merge_maintenance(),
+            shared_motif_suggestion_maintenance=NativePostWriteBehavior.QUALIFIED,
+            shared_trigger_identity_anchor=NativePostWriteBehavior.REQUIRED_NOOP,
+            shared_trigger_mood_drift=NativePostWriteBehavior.QUALIFIED,
+        )
+
 
 @dataclass(frozen=True)
 class NativePostWriteExternalDependencies:
@@ -140,6 +155,20 @@ class NativePostWriteExternalDependencies:
 
 
 @dataclass(frozen=True)
+class NativeSharedTriggerMoodDriftBinding:
+    """Explicit private target for a shared-trigger mood-drift operation."""
+
+    target_scope: NativeFabricRoutingScope
+    runtime_template: NativeDerivedMemoryRuntimeConfiguration
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target_scope, NativeFabricRoutingScope):
+            raise ValueError("target_scope must be NativeFabricRoutingScope")
+        if not isinstance(self.runtime_template, NativeDerivedMemoryRuntimeConfiguration):
+            raise ValueError("runtime_template must be NativeDerivedMemoryRuntimeConfiguration")
+
+
+@dataclass(frozen=True)
 class NativePostWriteQualificationConfiguration:
     """Explicit external posture; every excluded behavior must be declared."""
 
@@ -153,6 +182,8 @@ class NativePostWriteQualificationConfiguration:
     bridge_suggestions_required: bool
     deep_memory_required: bool
     shared_bridge_suggestions_required: bool = False
+    shared_motif_suggestion_maintenance_required: bool = False
+    shared_mood_drift_binding: NativeSharedTriggerMoodDriftBinding | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -165,10 +196,14 @@ class NativePostWriteQualificationConfiguration:
             self.derived_runtime_template, NativeDerivedMemoryRuntimeConfiguration,
         ):
             raise ValueError("derived_runtime_template must be NativeDerivedMemoryRuntimeConfiguration or None")
+        if self.shared_mood_drift_binding is not None and not isinstance(
+            self.shared_mood_drift_binding, NativeSharedTriggerMoodDriftBinding,
+        ):
+            raise ValueError("shared_mood_drift_binding must be NativeSharedTriggerMoodDriftBinding or None")
         for name in (
             "motif_suggestion_maintenance_required", "persistent_trajectory_evidence_required",
             "checkpoint_snapshots_required", "bridge_suggestions_required", "deep_memory_required",
-            "shared_bridge_suggestions_required",
+            "shared_bridge_suggestions_required", "shared_motif_suggestion_maintenance_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -218,6 +253,18 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
         if context.scope == "shared":
+            if self._configuration.shared_motif_suggestion_maintenance_required:
+                self._validate_shared_m1_mood_pre_effect(context)
+                with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+                    connection = opened.connection
+                    _revalidate_capability_for_route(self._capability, connection)
+                    self._validate_context_and_route(connection, context, witness)
+                    if context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW:
+                        consumers = LegacyFabricPostWriteAdapter(
+                            self._bind_shared_m1_mood_dependencies(connection, context, witness)
+                        )
+                        consumers._run_motif_maintenance_and_anchors(context)
+                return FabricPostWriteOutcome()
             self._validate_shared_bridge_pre_effect(context)
             with open_existing_native_core_connection(self._capability.core_database_path) as opened:
                 connection = opened.connection
@@ -374,6 +421,69 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             character_gravity_runtime=character_correction,
         )
 
+    def _bind_shared_m1_mood_dependencies(
+        self,
+        connection: sqlite3.Connection,
+        context: FabricPostWriteContext,
+        witness: NativePostWriteRouteWitness,
+    ) -> LegacyFabricPostWriteDependencies:
+        """Bind D1's shared M1 source and explicit private mood target only."""
+        configuration = self._configuration
+        scope = configuration.routing_scope
+        binding = configuration.shared_mood_drift_binding
+        if binding is None:
+            raise SubstrateInvariantViolation("shared D1 post-write requires a private mood-drift binding")
+        external = configuration.external
+        data_dir = getattr(external.workspace, "data_dir", None)
+        if not isinstance(data_dir, str) or not data_dir:
+            raise SubstrateConfigurationError("shared motif suggestion maintenance requires workspace.data_dir")
+        parent_key = witness.native_operation_key or "NATIVE_POST_WRITE_NO_WRITE"
+        derived = NativeFabricMemoryRouter(self._capability).bind_derived_memory_runtime(
+            connection,
+            configuration=replace(
+                binding.runtime_template,
+                parent_native_operation_key=parent_key,
+            ),
+        )
+        motif_runtime = NativeMotifMaintenanceAdapter(
+            NativeScopedMotifGeometryAdapter(
+                NativeMotifRuntimeReader(connection),
+                domain_id=context.chosen_domain,
+                motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+                expected_dimension=self._capability.binding.representation_lane.dimension,
+            ),
+            data_dir=data_dir,
+            workspace_id=scope.runtime_scope.workspace_id,
+            domain_id=context.chosen_domain,
+            merge_mutator=(
+                NativeMotifMergeRuntime(
+                    connection,
+                    routing_scope=scope,
+                    domain_id=context.chosen_domain,
+                    process_order=self._capability.process_order,
+                )
+                if configuration.profile.motif_auto_merge is NativePostWriteBehavior.QUALIFIED
+                else None
+            ),
+        )
+        forbidden = _ForbiddenNativeGraph()
+        return LegacyFabricPostWriteDependencies(
+            owner=external.owner, workspace=external.workspace, graph=forbidden,
+            world_runtime=forbidden, derived_memory_runtime=derived,
+            memory_access=forbidden, memory_enumeration=forbidden, srg_runtime=forbidden,
+            embedding_dimension=self._capability.binding.representation_lane.dimension,
+            identity=external.identity, motif_registry=None, motif_runtime=motif_runtime,
+            model_state=None, kernel_context=None, agent_key=external.agent_key,
+            detect_canon_conflict=external.detect_canon_conflict,
+            proposal_allowed=external.proposal_allowed,
+            random_chance=_forbidden_random_chance,
+            save_checkpoint=_forbidden_checkpoint,
+            build_motif_summary=_forbidden_checkpoint,
+            build_shard_snapshot=_forbidden_checkpoint,
+            hivemind_log=external.hivemind_log,
+        )
+
     def _validate_context_and_route(
         self,
         connection: sqlite3.Connection,
@@ -503,6 +613,23 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if not callable(external.random_chance):
             raise SubstrateConfigurationError("shared bridge profile requires an injected random_chance dependency")
 
+    def _validate_shared_m1_mood_pre_effect(self, context: FabricPostWriteContext) -> None:
+        configuration = self._configuration
+        scope = configuration.routing_scope
+        if scope.runtime_scope.scope_kind != "SHARED_DOMAIN":
+            raise SubstrateInvariantViolation("shared post-write requires a claimed shared native scope")
+        if configuration.shared_bridge_suggestions_required:
+            raise SubstrateConfigurationError("shared D1 M1/mood profile cannot compose B1 bridge suggestions")
+        if configuration.derived_runtime_template is not None:
+            raise SubstrateConfigurationError("shared D1 M1/mood profile must not bind a source-scope derived runtime")
+        _require_qualified(configuration.profile.shared_motif_suggestion_maintenance, "shared motif suggestion maintenance")
+        _require_required_noop(configuration.profile.shared_trigger_identity_anchor, "shared trigger identity anchor")
+        _require_qualified(configuration.profile.shared_trigger_mood_drift, "shared trigger mood drift")
+        policy = configuration.external.workspace.domain_policies.get(context.chosen_domain, {})
+        if bool(policy.get("auto_merge_motifs", False)):
+            _require_qualified(configuration.profile.motif_auto_merge, "motif auto-merge")
+        _validate_shared_mood_drift_binding(self._capability, configuration)
+
 
 def prepare_native_fabric_post_write_adapter(
     *,
@@ -532,14 +659,23 @@ def prepare_native_fabric_post_write_adapter(
         ):
             raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
     elif scope.runtime_scope.scope_kind == "SHARED_DOMAIN":
-        if not configuration.shared_bridge_suggestions_required:
+        shared_d1 = configuration.shared_motif_suggestion_maintenance_required
+        if configuration.shared_bridge_suggestions_required and shared_d1:
+            raise SubstrateConfigurationError("shared bridge and D1 M1/mood consumers must be prepared separately")
+        if not configuration.shared_bridge_suggestions_required and not shared_d1:
             raise SubstrateConfigurationError("shared post-write configuration has no qualified consumer")
         if template is not None:
-            raise SubstrateConfigurationError("shared bridge configuration must not bind a derived runtime")
-        _require_qualified(configuration.profile.shared_bridge_suggestion, "shared bridge suggestion")
-        _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
-        if not callable(configuration.external.random_chance):
-            raise SubstrateConfigurationError("shared bridge configuration requires an injected random_chance dependency")
+            raise SubstrateConfigurationError("shared post-write configuration must not bind a source-scope derived runtime")
+        if configuration.shared_bridge_suggestions_required:
+            _require_qualified(configuration.profile.shared_bridge_suggestion, "shared bridge suggestion")
+            _require_shared_bridge_geometry(configuration.external.shared_bridge_geometry, capability)
+            if not callable(configuration.external.random_chance):
+                raise SubstrateConfigurationError("shared bridge configuration requires an injected random_chance dependency")
+        else:
+            _require_qualified(configuration.profile.shared_motif_suggestion_maintenance, "shared motif suggestion maintenance")
+            _require_required_noop(configuration.profile.shared_trigger_identity_anchor, "shared trigger identity anchor")
+            _require_qualified(configuration.profile.shared_trigger_mood_drift, "shared trigger mood drift")
+            _validate_shared_mood_drift_binding(capability, configuration)
     else:
         raise SubstrateConfigurationError("post-write configuration has an unsupported runtime scope")
     return NativeFabricPostWriteAdapter(capability, configuration, _prepared_marker=_PREPARED)
@@ -569,6 +705,36 @@ def _refuse(value: NativePostWriteBehavior, name: str) -> None:
     )
 
 
+def _require_required_noop(value: NativePostWriteBehavior, name: str) -> None:
+    if value is not NativePostWriteBehavior.REQUIRED_NOOP:
+        raise SubstrateConfigurationError(f"native post-write profile does not qualify required no-op {name}")
+
+
+def _validate_shared_mood_drift_binding(
+    capability: NativeFabricRoutingCapability,
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    source_scope = configuration.routing_scope
+    binding = configuration.shared_mood_drift_binding
+    if binding is None:
+        raise SubstrateConfigurationError("shared D1 M1/mood configuration requires a private mood-drift binding")
+    target = binding.target_scope
+    template = binding.runtime_template
+    if target not in capability.routing_scopes or target.runtime_scope.scope_kind != "PRIVATE_AGENT":
+        raise SubstrateConfigurationError("shared mood-drift target must be an admitted private native scope")
+    if (
+        template.workspace_id != target.runtime_scope.workspace_id
+        or template.agent_id != target.runtime_scope.agent_id
+        or template.domain_id != source_scope.runtime_scope.domain_id
+        or template.legacy_source_namespace_id != target.runtime_scope.legacy_source_namespace_id
+        or template.motif_alias_namespace_id != target.motif_alias_namespace_id
+        or template.memory_identity_namespace_id != target.runtime_scope.identity_namespace_id
+        or template.semantic_scope_id != target.runtime_scope.semantic_scope_id
+        or template.idempotency_namespace_id != target.idempotency_namespace_id
+    ):
+        raise SubstrateConfigurationError("shared mood-drift binding does not match its private target and shared trigger domain")
+
+
 def _require_shared_bridge_geometry(
     geometry: NativeMotifGeometryAdapter | None,
     capability: NativeFabricRoutingCapability,
@@ -591,5 +757,6 @@ __all__ = [
     "NativePostWriteQualificationConfiguration",
     "NativePostWriteQualificationProfile",
     "NativePostWriteRouteWitness",
+    "NativeSharedTriggerMoodDriftBinding",
     "prepare_native_fabric_post_write_adapter",
 ]

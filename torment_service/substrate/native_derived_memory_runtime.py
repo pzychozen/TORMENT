@@ -316,6 +316,11 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
         ))
         last_tag = state.get("last_tag")
         last_step = _as_int(state.get("last_step", -10**9), -10**9)
+        recovered = self._recover_lost_mood_drift_response(
+            context=context, confidence=confidence, state=state,
+        )
+        if recovered is not None:
+            return recovered
         # Exact legacy topology: persist the latest affect before deciding
         # whether there is a drift row.  Its failure is best-effort and does
         # not prevent the subsequent memory decision.
@@ -334,22 +339,101 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
             return None
         if context.step - last_step < min_gap:
             return None
-        summary = f"Mood drift: from {last_tag} to {context.affect_tag}."
+        request = self._mood_drift_request(
+            context=context, prior_tag=str(last_tag), confidence=confidence,
+            created_ts=int(self._config.now_ts()),
+        )
+        self._world.ensure_initialized()
+        result = NativeDerivedMemoryCreationService(self._connection).create(
+            request, on_source_committed=self._register_fresh,
+        )
+        self._append_mood_drift_history(
+            prior_tag=str(last_tag), context=context, confidence=confidence,
+        )
+        return result.source.eid
+
+    def _recover_lost_mood_drift_response(
+        self,
+        *,
+        context: DerivedMemoryRuntimeContext,
+        confidence: float,
+        state: Mapping[str, Any],
+    ) -> int | None:
+        """Resume only an exact, target-private mood creation after response loss.
+
+        The legacy affect save happens before derived creation.  Consequently
+        a replay after a source/PENDING/READY response loss sees the current
+        affect as ``last_tag`` and would normally look like a no-op.  Recovery
+        is deliberately restricted to a matching private mood row whose
+        derived child source key already exists for this same parent operation.
+        It therefore never maps a shared source identity into this private
+        lane and cannot turn a later ordinary same-tag event into a duplicate.
+        """
+        if str(state.get("last_tag") or "") != str(context.affect_tag):
+            return None
+        for view in reversed(self._list_current_views()):
+            payload = view.payload
+            if not self._is_current_mood_drift_candidate(context=context, view=view, payload=payload):
+                continue
+            prior_tag = str(payload.get("mood_from") or "")
+            created_ts = _as_int(payload.get("created_ts"), -1)
+            if not prior_tag or prior_tag == "neutral" or created_ts < 0:
+                continue
+            request = self._mood_drift_request(
+                context=context, prior_tag=prior_tag, confidence=confidence,
+                created_ts=created_ts,
+            )
+            service = NativeDerivedMemoryCreationService(self._connection)
+            if not service.has_committed_source(request):
+                continue
+            if self._has_recorded_mood_drift(
+                state=state, prior_tag=prior_tag, context=context, confidence=confidence,
+            ):
+                return None
+            self._world.ensure_initialized()
+            result = service.create(request, on_source_committed=self._register_fresh)
+            self._append_mood_drift_history(
+                prior_tag=prior_tag, context=context, confidence=confidence,
+            )
+            return result.source.eid
+        return None
+
+    def _is_current_mood_drift_candidate(self, *, context, view, payload: Mapping[str, Any]) -> bool:
+        return (
+            view.semantic_scope_id == self._config.semantic_scope_id
+            and payload.get("type") == "mood_drift"
+            and payload.get("workspace_id") == context.workspace_id
+            and payload.get("domain_id") == context.domain_id
+            and payload.get("scope") == "private"
+            and payload.get("agent_id") == context.agent_id
+            and payload.get("mood_to") == str(context.affect_tag)
+            and _as_int(payload.get("created_at"), -1) == int(context.step)
+        )
+
+    def _mood_drift_request(
+        self,
+        *,
+        context: DerivedMemoryRuntimeContext,
+        prior_tag: str,
+        confidence: float,
+        created_ts: int,
+    ) -> NativeDerivedMemoryCreationRequest:
+        summary = f"Mood drift: from {prior_tag} to {context.affect_tag}."
         vector = self._embed(summary)
         payload = {
             "workspace_id": context.workspace_id, "domain_id": context.domain_id,
             "scope": "private", "agent_id": context.agent_id,
             "affect_tag": str(context.affect_tag), "affect_conf": confidence,
             "affect_attribution": build_mood_drift_attribution(affect_tag=str(context.affect_tag)),
-            "mood_from": str(last_tag), "mood_to": str(context.affect_tag),
+            "mood_from": prior_tag, "mood_to": str(context.affect_tag),
             **self._embedding_metadata(summary, vector),
         }
         child_key = derived_child_operation_key(
             parent_native_operation_key=self._config.parent_native_operation_key,
             operation_kind=DerivedMemoryCreateKind.MOOD_DRIFT_CREATE.value,
-            semantic_discriminator=f"{context.domain_id}:{last_tag}:{context.affect_tag}:{context.step}",
+            semantic_discriminator=f"{context.domain_id}:{prior_tag}:{context.affect_tag}:{context.step}",
         )
-        request = NativeDerivedMemoryCreationRequest(
+        return NativeDerivedMemoryCreationRequest(
             operation_kind=DerivedMemoryCreateKind.MOOD_DRIFT_CREATE,
             legacy_source_namespace_id=self._config.legacy_source_namespace_id,
             memory_identity_namespace_id=self._config.memory_identity_namespace_id,
@@ -360,14 +444,38 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
             confidence=float(min(0.95, 0.6 + 0.35 * confidence)),
             half_life_days=_env_float("TORMENT_MOOD_DRIFT_HALF_LIFE_DAYS", 60.0),
             user_id=context.agent_id, logical_step=context.step,
-            created_ts=int(self._config.now_ts()), payload_fields=payload,
+            created_ts=created_ts, payload_fields=payload,
             provenance=self._provenance("mood_drift"), governance=self._config.governance,
             embedding=vector, expected_dimension=self._config.expected_dimension,
         )
-        self._world.ensure_initialized()
-        result = NativeDerivedMemoryCreationService(self._connection).create(
-            request, on_source_committed=self._register_fresh,
+
+    def _has_recorded_mood_drift(
+        self,
+        *,
+        state: Mapping[str, Any],
+        prior_tag: str,
+        context: DerivedMemoryRuntimeContext,
+        confidence: float,
+    ) -> bool:
+        history = state.get("drift_hist")
+        if not isinstance(history, list):
+            return False
+        return any(
+            isinstance(item, Mapping)
+            and item.get("from") == prior_tag
+            and item.get("to") == str(context.affect_tag)
+            and _as_int(item.get("step"), -1) == int(context.step)
+            and item.get("conf") == confidence
+            for item in history
         )
+
+    def _append_mood_drift_history(
+        self,
+        *,
+        prior_tag: str,
+        context: DerivedMemoryRuntimeContext,
+        confidence: float,
+    ) -> None:
         # Exact legacy post-memory side-store shape: reload, append, save; a
         # failure here leaves the memory durable and returns its EID.
         try:
@@ -378,7 +486,7 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
             if not isinstance(history, list):
                 history = []
             history.append({
-                "from": str(last_tag), "to": str(context.affect_tag),
+                "from": prior_tag, "to": str(context.affect_tag),
                 "step": int(context.step), "conf": confidence,
             })
             state2["drift_hist"] = history[-50:]
@@ -387,7 +495,6 @@ class NativeDerivedMemoryRuntime(DerivedMemoryRuntimePort):
             )
         except Exception as exc:
             _LOG.debug("native affect state save failed: %s", exc)
-        return result.source.eid
 
     def _publish_lifecycle(
         self, *, eid: int, patch: IdentityAnchorLifecyclePatch, discriminator: str,

@@ -188,6 +188,23 @@ class NativeDerivedMemoryCreationService:
         self._objects = NativeObjectService(connection)
         self._representations = NativeRepresentationService(connection)
 
+    def has_committed_source(self, request: NativeDerivedMemoryCreationRequest) -> bool:
+        """Return whether this exact creation key already has a source operation.
+
+        Recovery callers use this narrow preflight before calling ``create``:
+        a retry may resume an existing source, but a later ordinary event must
+        never be mistaken for that retry and create a second derived row.
+        ``create`` remains the sole publisher and performs the full intent
+        comparison when the source is present.
+        """
+        if not isinstance(request, NativeDerivedMemoryCreationRequest):
+            raise ValueError("a NativeDerivedMemoryCreationRequest is required")
+        row = self._connection.execute(
+            "SELECT 1 FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (native_id_to_bytes(request.idempotency_namespace_id), _creation_subkey(request.idempotency_key, "SOURCE")),
+        ).fetchone()
+        return row is not None
+
     def create(
         self,
         request: NativeDerivedMemoryCreationRequest,
