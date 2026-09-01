@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
+import logging
 import sqlite3
 import threading
 from typing import Any, Iterator, Mapping
@@ -26,6 +27,9 @@ from .compat import LegacyMemoryView, NativeMemoryCompatibilityFacade
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .native_memory_runtime_access import NativePostWriteMemoryAccess
 from .schema import require_current_schema
+
+
+log = logging.getLogger("torment.substrate.native_world")
 
 
 @dataclass
@@ -361,8 +365,40 @@ class NativeWorldRuntime(WorldRuntimePort):
             entry.revision_id = successor_revision_id
             entry.revision_ordinal = successor_revision_ordinal
 
+    def write_trajectory_genesis_for_post_write(self, *, eid: int, evidence: Any) -> None:
+        """Expose one freshly source-bound birth to an external V2 evidence sink.
+
+        The entity is never reconstructed here and the sink receives no native
+        storage authority.  The caller uses this only for a current
+        ``CREATED_NEW`` route, matching the legacy V2 creation boundary.
+        """
+        snapshots = self._snapshots()
+        with self._process_state.locked_scope(
+            core_id=self._core_id, namespace=self._namespace
+        ) as scope:
+            if scope is None:
+                raise SubstrateInvariantViolation("native world runtime is not initialized")
+            self._assert_current(scope, snapshots)
+            entry = scope.entries.get(int(eid))
+            if entry is None:
+                raise SubstrateInvariantViolation("native trajectory genesis source is absent")
+            try:
+                evidence.write_genesis(entry.entity)
+            except Exception as exc:
+                log.debug("Trajectory genesis skipped for eid=%s: %s", eid, exc)
+
     def advance_for_post_write(self, *, step: int) -> None:
         """Advance physics and typed diagnostic overlay without any native write."""
+        self._advance_for_post_write(step=step, trajectory_evidence=None)
+
+    def advance_for_post_write_with_trajectory_evidence(self, *, step: int, evidence: Any) -> None:
+        """Advance then serialize only the current process-local world state."""
+        if evidence is None:
+            raise ValueError("trajectory evidence runtime is required")
+        self._advance_for_post_write(step=step, trajectory_evidence=evidence)
+
+    def _advance_for_post_write(self, *, step: int, trajectory_evidence: Any | None) -> None:
+        """Keep native physics/classification ordering equal to ``MemoryGraph``."""
         snapshots = self._snapshots()
         with self._process_state.locked_scope(
             core_id=self._core_id, namespace=self._namespace
@@ -382,6 +418,11 @@ class NativeWorldRuntime(WorldRuntimePort):
                     "native world has an unacknowledged materialized diagnostic successor"
                 )
             scope.world.step()
+            if trajectory_evidence is not None:
+                try:
+                    trajectory_evidence.write_step(tuple(scope.world.entities), step=int(step))
+                except Exception as exc:
+                    log.debug("Trajectory log skipped at step=%s: %s", step, exc)
             if int(step) % 50 != 0:
                 return
             for eid, entry in scope.entries.items():
@@ -394,6 +435,13 @@ class NativeWorldRuntime(WorldRuntimePort):
                 entry.diagnostic = _WorldDiagnosticOverlay(
                     entry.revision_id, entry.revision_ordinal, label, int(step),
                 )
+                if trajectory_evidence is not None:
+                    try:
+                        trajectory_evidence.write_classification_event(
+                            entity, step=int(step), label=label,
+                        )
+                    except Exception as exc:
+                        log.debug("Traj classify event write skipped for eid=%s: %s", eid, exc)
 
     def prepare_successor_materialization(
         self, *, eid: int, expected_revision_id: UUID
