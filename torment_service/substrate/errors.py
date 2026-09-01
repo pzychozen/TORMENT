@@ -55,3 +55,11 @@ class SubstrateObjectNotFound(SubstrateError):
 
 class SubstrateInvariantViolation(SubstrateError):
     """Raised when a current-slice helper-owned invariant is not satisfied."""
+
+
+class DeploymentAuthorityError(SubstrateError):
+    """Raised when durable deployment-administration facts are invalid or disagree."""
+
+
+class DeploymentIdempotencyConflict(DeploymentAuthorityError):
+    """Raised when a deployment operation key is reused with different intent."""

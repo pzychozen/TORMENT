@@ -6,7 +6,7 @@
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **TORMENT Memory Substrate Phases 0–6 are frozen design/requirements lineage.** Their binding records remain the [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md).
-- **Phase 7 bounded implementation is materially complete through the current native qualification chain.** `Blocker-1`, `Blocker-2`, `Blocker-3`, and `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md) and [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md) are the current implementation and qualification records.
+- **Phase 7 bounded implementation is materially complete through the current native qualification chain.** `Blocker-1`, `Blocker-2`, `Blocker-3`, and `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), and [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md) are the current implementation and qualification records.
 
 ### Closed memory-substrate result
 
@@ -17,6 +17,7 @@
 BLOCKER_4_SHARED_WRITE_SIDE = CLOSED
 BLOCKER_4_QUERY_READ_SIDE = CLOSED
 BLOCKER_4 = CLOSED
+BLOCKER_5_B5_A2_DEPLOYMENT_FENCE = QUALIFICATION_ONLY_COMPLETE
 
 QUALIFIED_NATIVE_PROFILE = compression/deep disabled
 COMPRESSION_OR_DEEP_ENABLED = NOT_QUALIFIED_FOR_NATIVE_CUTOVER
@@ -70,6 +71,7 @@ ACTIVATED`; `ACTIVATED != AUTHORIZED`.
 QUALIFIED_NATIVE_ENVIRONMENT = torment-substrate / SQLite 3.53.4
 ORDINARY_torment_ENVIRONMENT = SQLite 3.53.4 / native-runtime-qualified
 BLOCKER_5_B5_A1 = CLOSED
+BLOCKER_5_B5_A2 = QUALIFICATION_ONLY_COMPLETE
 PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = NO
 
 SOLVER_MOVEMENT_RULE_REVISED = NO
@@ -89,9 +91,12 @@ compression/deep disabled.
 ```text
 BLOCKER_5_PREFLIGHT = CLOSED
 BLOCKER_5_B5_A1 = CLOSED
-BLOCKER_5 = OPENED_FOR_B5_A2_DESIGN_AND_IMPLEMENTATION
+BLOCKER_5_B5_A2 = QUALIFICATION_ONLY_COMPLETE
+BLOCKER_5 = AWAITING_SEPARATE_NEXT_AUTHORIZATION
 
 PRODUCTION_SELECTOR_ADDED = NO
+DURABLE_SELECTOR_ERA_AND_FENCE = QUALIFICATION_ONLY
+PUBLIC_SELECTOR_WIRING = NO
 NATIVE_ACTIVE = NO
 DUAL_WRITE = NO
 DUAL_READ = NO
@@ -105,16 +110,18 @@ selector, native resource lifecycle/ownership, the no-fallback-after-native-
 mutation law, cutover/restart/rollback qualification, and production-shaped
 service administration.
 
-This orientation update does not open or authorize a selector, native
+This orientation update does not open or authorize a public selector, native
 activation, dual write, dual read, cutover, rollback, public Fabric routing,
 or a production native service.
 
 The completed [Blocker-5 A0 production selection preflight](BLOCKER_5_A0_PRODUCTION_SELECTION_PREFLIGHT.md)
 freezes the entrypoint, profile, selector/fence, lifecycle, fallback, rollback,
-crash, and rehearsal design. B5-A1 has converged and requalified the ordinary
-environment only. The next authorized slice is B5-A2: external selector/era
-and agreement resolver plus active-core/pending maintenance-transition
-mechanics. It does not begin public Fabric routing, activation, or cutover.
+crash, and rehearsal design. B5-A1 converged and requalified the ordinary
+environment. B5-A2 has implemented only the durable external selector-era,
+selector ledger, pure agreement resolver, and contained-core pending/active
+maintenance mechanics recorded in the [B5-A2 closure](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md).
+It did not begin public Fabric routing, public activation, cutover, dual write,
+dual read, or rollback. Any next B5 slice requires separate authorization.
 
 ## 1. Current main project thread
 
