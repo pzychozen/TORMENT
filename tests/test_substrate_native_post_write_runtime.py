@@ -719,3 +719,15 @@ def test_explicit_m1_profile_runs_native_suggestion_maintenance_without_legacy_m
         assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == 4
     finally:
         qualified.close()
+
+
+def test_explicit_m2_profile_is_the_only_profile_that_qualifies_native_auto_merge():
+    baseline = NativePostWriteQualificationProfile.core_staging()
+    m1 = NativePostWriteQualificationProfile.core_staging_with_motif_suggestion_maintenance()
+    m2 = NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance()
+    assert baseline.motif_suggestion_maintenance.name == "REQUIRED_NOOP"
+    assert baseline.motif_auto_merge.name == "UNSUPPORTED"
+    assert m1.motif_suggestion_maintenance.name == "QUALIFIED"
+    assert m1.motif_auto_merge.name == "UNSUPPORTED"
+    assert m2.motif_suggestion_maintenance.name == "QUALIFIED"
+    assert m2.motif_auto_merge.name == "QUALIFIED"

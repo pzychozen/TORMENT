@@ -146,6 +146,7 @@ class NativeMotifRuntimeReader:
                AND r.object_revision_id=o.current_revision_id
                AND r.revision_ordinal=o.current_revision_ordinal
              WHERE o.object_kind=? AND r.effective_semantic_scope_id=?
+               AND r.existence_state='EXISTS'
             """,
             (DERIVED_MOTIF_OBJECT_KIND, native_id_to_bytes(semantic_scope_id)),
         ).fetchall()
@@ -235,6 +236,10 @@ class NativeMotifRuntimeReader:
                     self._connection, relationship_id, revision_id, ordinal,
                 )
         memberships = [row[:6] for row in all_memberships if row[6] == "EXISTS"]
+        if self._has_native_merge_projection(motif_object_id):
+            return self._merge_ordered_members(
+                motif_object_id, memberships, all_memberships,
+            )
         projected_baseline = self._migration_projection_baseline(motif_object_id)
         if projected_baseline is not None:
             return self._ordered_projected_members(
@@ -319,6 +324,71 @@ class NativeMotifRuntimeReader:
                 )
             )
         return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
+
+    def _has_native_merge_projection(self, motif_object_id: UUID) -> bool:
+        """A merge's durable transition makes sorted-union ordering explicit."""
+        return self._connection.execute(
+            """
+            SELECT 1
+              FROM object_revision_effects effect
+              JOIN semantic_transitions transition ON transition.transition_id=effect.transition_id
+             WHERE effect.object_id=? AND transition.transition_kind='NATIVE_MOTIF_MERGE'
+            """,
+            (native_id_to_bytes(motif_object_id),),
+        ).fetchone() is not None
+
+    def _merge_ordered_members(
+        self,
+        motif_object_id: UUID,
+        memberships: list[tuple[Any, ...]],
+        all_memberships: list[tuple[Any, ...]],
+    ) -> tuple[NativeOrderedMotifMember, ...]:
+        """Project a retained merge survivor in frozen legacy EID-set order."""
+        baseline = self._migration_projection_baseline(motif_object_id)
+        if baseline is not None:
+            baseline_by_relationship = {key[0]: key for key in baseline}
+            seen_baseline: set[tuple[bytes, bytes, int]] = set()
+            for relationship_id, revision_id, ordinal, _member, _scope, _kind, existence_state in all_memberships:
+                key = baseline_by_relationship.get(relationship_id)
+                if key is None:
+                    continue
+                self._validate_projected_baseline_successor(
+                    relationship_id, revision_id, ordinal, existence_state, key,
+                )
+                seen_baseline.add(key)
+            if seen_baseline != set(baseline):
+                raise SubstrateInvariantViolation("migration motif projection baseline is not current and complete")
+        values: list[tuple[tuple[int, str, bytes], NativeOrderedMotifMember]] = []
+        seen_members: set[bytes] = set()
+        for relationship_id, revision_id, ordinal, member_object_id, member_scope_id, member_kind in memberships:
+            if member_kind != _MEMORY_OBJECT_KIND:
+                raise SubstrateInvariantViolation("native motif membership does not target a LEGACY_CORE_NODE")
+            if member_object_id in seen_members:
+                raise SubstrateInvariantViolation("current motif memberships duplicate one member identity")
+            seen_members.add(member_object_id)
+            aliases = self._connection.execute(
+                "SELECT alias_value FROM legacy_object_aliases WHERE object_id=? AND alias_kind='EID' ORDER BY alias_value",
+                (member_object_id,),
+            ).fetchall()
+            if not aliases:
+                raise SubstrateInvariantViolation("native motif member has no legacy EID alias")
+            alias = aliases[0][0]
+            try:
+                sort_key = (int(alias), alias, member_object_id)
+            except (TypeError, ValueError) as error:
+                raise SubstrateInvariantViolation("native motif member EID alias is not numeric") from error
+            values.append((sort_key, NativeOrderedMotifMember(
+                UUID(bytes=relationship_id), UUID(bytes=revision_id), ordinal,
+                UUID(bytes=member_object_id), UUID(bytes=member_scope_id), 0,
+            )))
+        ordered: list[NativeOrderedMotifMember] = []
+        for index, (_key, member) in enumerate(sorted(values, key=lambda item: item[0]), start=1):
+            ordered.append(NativeOrderedMotifMember(
+                member.relationship_id, member.relationship_revision_id,
+                member.relationship_revision_ordinal, member.member_object_id,
+                member.member_semantic_scope_id, index,
+            ))
+        return tuple(ordered)
 
     def _migration_projection_baseline(
         self, motif_object_id: UUID

@@ -46,6 +46,7 @@ from .native_character_gravity_runtime import (
     NativeCharacterGravityCorrectionRuntimeConfiguration,
 )
 from .motif_runtime_reader import NativeMotifRuntimeReader
+from .native_motif_merge_runtime import NativeMotifMergeRuntime
 from .runtime_binding import validate_fabric_embedder
 
 
@@ -98,6 +99,15 @@ class NativePostWriteQualificationProfile:
         return replace(
             cls.core_staging(),
             motif_suggestion_maintenance=NativePostWriteBehavior.QUALIFIED,
+        )
+
+    @classmethod
+    def core_staging_with_motif_merge_maintenance(cls) -> "NativePostWriteQualificationProfile":
+        """Explicit M2 staging profile; both qualified motif behaviors are opt-in."""
+        return replace(
+            cls.core_staging(),
+            motif_suggestion_maintenance=NativePostWriteBehavior.QUALIFIED,
+            motif_auto_merge=NativePostWriteBehavior.QUALIFIED,
         )
 
 
@@ -258,6 +268,16 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
                 data_dir=data_dir,
                 workspace_id=runtime_scope.workspace_id,
                 domain_id=context.chosen_domain,
+                merge_mutator=(
+                    NativeMotifMergeRuntime(
+                        connection,
+                        routing_scope=scope,
+                        domain_id=context.chosen_domain,
+                        process_order=self._capability.process_order,
+                    )
+                    if self._configuration.profile.motif_auto_merge
+                    is NativePostWriteBehavior.QUALIFIED else None
+                ),
             )
         if self._configuration.profile.character is NativePostWriteBehavior.QUALIFIED:
             embedder = external.character_embedder

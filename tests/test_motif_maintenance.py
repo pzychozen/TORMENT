@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Mapping
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -244,6 +245,94 @@ def test_native_auto_merge_refuses_before_any_workflow_or_motif_effect(tmp_path:
             max_suggestions=20, auto_merge=True, auto_merge_trigger=.0,
         )
     assert not motifs_path.exists() and not events_path.exists() and not merges_path.exists()
+
+
+class _RecordedNativeMerge:
+    """A persistence-port probe; it deliberately has no legacy motif truth."""
+
+    def __init__(self, *, missing_suggestion_ids: tuple[str, ...] = ()) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        self._missing = set(missing_suggestion_ids)
+
+    def merge_suggestion(self, suggestion, *, note: str, _test_fail_after=None):
+        self.calls.append((suggestion["suggestion_id"], suggestion["a"], suggestion["b"]))
+        if suggestion["suggestion_id"] in self._missing:
+            return None
+        return SimpleNamespace(
+            keep_runtime_motif_id=suggestion["a"],
+            drop_runtime_motif_id=suggestion["b"],
+        )
+
+
+@pytest.mark.parametrize(
+    ("seam", "expected_status", "expected_merged_events_before_retry"),
+    [
+        ("after_sqlite_commit", "suggested", 0),
+        ("after_workflow_status", "approved", 0),
+        ("after_workflow_event", "approved", 1),
+    ],
+)
+def test_native_merge_workflow_recovers_each_cross_store_lost_response_seam_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seam: str,
+    expected_status: str,
+    expected_merged_events_before_retry: int,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 3_333)
+    rows = (
+        _row("motif_research_0001", centroid=(1.0, 0.0), strength=.8),
+        _row("motif_research_0002", centroid=(.999, .001), strength=.4),
+    )
+    mutator = _RecordedNativeMerge()
+    native = NativeMotifMaintenanceAdapter(
+        _StaticGeometry({"research": rows}), data_dir=str(tmp_path),
+        workspace_id="ws", domain_id="research", merge_mutator=mutator,
+    )
+    native.update_entropy_and_suggest(
+        target_n=2, entropy_high=.0, sim_threshold=.9,
+        max_suggestions=1, auto_merge=False, auto_merge_trigger=.8,
+    )
+    suggestion_id = "merge_motif_research_0001__motif_research_0002"
+    with pytest.raises(RuntimeError, match="forced native motif merge failure"):
+        native.decide_merge(suggestion_id, "approve", note="manual", _test_fail_after=seam)
+    assert native.workflow_store.suggestions[suggestion_id]["status"] == expected_status
+    assert sum(event["type"] == "MOTIF_MERGED" for event in _event_rows(tmp_path)) == expected_merged_events_before_retry
+    retry = native.decide_merge(suggestion_id, "approve", note="manual")
+    assert retry["status"] == "approved"
+    assert sum(event["type"] == "MOTIF_MERGED" for event in _event_rows(tmp_path)) == 1
+    # The outer retry invokes the idempotent persistence port once more; it
+    # must not fabricate a second workflow event.
+    assert len(mutator.calls) == 2
+
+
+def test_native_auto_merge_uses_current_suggestion_order_and_counts_sequential_missing_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 3_444)
+    rows = (
+        _row("motif_research_0001", centroid=(1.0, 0.0), strength=.8),
+        _row("motif_research_0002", centroid=(.99875, .04998), strength=.4),
+        _row("motif_research_0003", centroid=(.98877, .14944), strength=.2),
+    )
+    mutator = _RecordedNativeMerge(
+        missing_suggestion_ids=("merge_motif_research_0002__motif_research_0003",),
+    )
+    native = NativeMotifMaintenanceAdapter(
+        _StaticGeometry({"research": rows}), data_dir=str(tmp_path),
+        workspace_id="ws", domain_id="research", merge_mutator=mutator,
+    )
+    report = native.update_entropy_and_suggest(
+        target_n=3, entropy_high=.0, sim_threshold=.984,
+        max_suggestions=20, auto_merge=True, auto_merge_trigger=.0,
+    )
+    assert report["auto_merged"] == 2
+    assert [call[0] for call in mutator.calls] == [
+        "merge_motif_research_0001__motif_research_0002",
+        "merge_motif_research_0002__motif_research_0003",
+    ]
+    assert native.workflow_store.suggestions["merge_motif_research_0002__motif_research_0003"]["status"] == "rejected"
 
 
 def _suggestion_geometry() -> _StaticGeometry:

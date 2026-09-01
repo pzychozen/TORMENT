@@ -174,6 +174,28 @@ class NativeMotifProcessOrder:
                 return
             self._runtime_ids[key] = (*known, runtime_motif_id)
 
+    def retire_runtime_id(
+        self,
+        *,
+        routing_scope: NativeFabricRoutingScope,
+        domain_id: str,
+        runtime_motif_id: str,
+    ) -> None:
+        """Reconcile one locally retired motif after its committed merge.
+
+        A catalog that has not yet been initialized has no process-local
+        ordering to repair.  Once initialized, only the owner that executed
+        the native merge may remove the retired ID; the next attach therefore
+        observes the same live set instead of treating the committed merge as
+        an out-of-band catalog mutation.
+        """
+        key = (*routing_scope.key, domain_id, routing_scope.motif_alias_namespace_id)
+        with self._lock:
+            known = self._runtime_ids.get(key)
+            if known is None or runtime_motif_id not in known:
+                return
+            self._runtime_ids[key] = tuple(item for item in known if item != runtime_motif_id)
+
     def runtime_ids_for_testing(
         self, *, routing_scope: NativeFabricRoutingScope, domain_id: str,
     ) -> tuple[str, ...] | None:

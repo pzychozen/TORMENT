@@ -16,8 +16,13 @@ from torment_service.substrate.motifs import (
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
     MotifState,
     NativeMotifService,
+    NativeMotifMergeResult,
     NativeMotifSplitPlan,
 )
+from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
+from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope, NativeMotifProcessOrder
+from torment_service.substrate.native_motif_merge_runtime import NativeMotifMergeRuntime
+from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope
 from torment_service.substrate.objects import NativeObjectService
 from torment_service.substrate.relationships import NativeRelationshipService
 from torment_service.substrate.schema import create_schema
@@ -109,6 +114,185 @@ def _create(values, memory, *, key="motif-create", state=None, alias=None):
         state=state or _state(values),
         member_object_id=memory.object_id,
     )
+
+
+def _merge(values, *, key="motif-merge", timestamp=200, a="motif_reflection_0001", b="motif_reflection_0002", source=None, fail=None):
+    return NativeMotifService(values["connection"]).merge_motifs(
+        idempotency_namespace_id=values["idempotency"],
+        idempotency_key=key,
+        legacy_source_namespace_id=source or values["memory_alias"],
+        motif_identity_namespace_id=values["motif_identity"],
+        motif_alias_namespace_id=values["motif_alias"],
+        membership_identity_namespace_id=values["membership_identity"],
+        semantic_scope_id=values["motif_scope"],
+        domain_id="reflection",
+        a_runtime_motif_id=a,
+        b_runtime_motif_id=b,
+        merge_timestamp=timestamp,
+        _test_fail_after=fail,
+    )
+
+
+def _two_mergeable_motifs(values):
+    one, two, three, four = (_memory(values, eid) for eid in range(1, 5))
+    first = _create(values, one, state=_state(values, strength=0.8, centroid=(1.0, 0.0, 0.0)))
+    service = NativeMotifService(values["connection"])
+    added = service.add_motif_member(
+        idempotency_namespace_id=values["idempotency"], idempotency_key="merge-add-three",
+        motif_alias_namespace_id=values["motif_alias"], membership_identity_namespace_id=values["membership_identity"],
+        motif_object_id=first.motif_object_id, expected_motif_revision_id=first.motif_revision_id,
+        state=_state(values, strength=0.8, centroid=(1.0, 0.0, 0.0), step=103), member_object_id=three.object_id,
+    )
+    second = _create(
+        values, two, key="merge-create-second",
+        state=_state(values, motif_id="motif_reflection_0002", strength=0.4, centroid=(0.0, 1.0, 0.0)),
+    )
+    service.add_motif_member(
+        idempotency_namespace_id=values["idempotency"], idempotency_key="merge-add-four",
+        motif_alias_namespace_id=values["motif_alias"], membership_identity_namespace_id=values["membership_identity"],
+        motif_object_id=second.motif_object_id, expected_motif_revision_id=second.motif_revision_id,
+        state=_state(values, motif_id="motif_reflection_0002", strength=0.4, centroid=(0.0, 1.0, 0.0), step=104), member_object_id=four.object_id,
+    )
+    return first, added, second, (one, two, three, four)
+
+
+def test_native_motif_merge_is_atomic_idempotent_and_retires_the_drop_without_losing_history(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        first, added, second, memories = _two_mergeable_motifs(values)
+        connection = values["connection"]
+        service = NativeMotifService(connection)
+        before = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions"))
+        with pytest.raises(RuntimeError, match="before current-pointer"):
+            _merge(values, key="merge-rollback", fail="before_current_pointer_publication")
+        assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions")) == before
+        result = _merge(values)
+        assert isinstance(result, NativeMotifMergeResult)
+        assert _merge(values) == result
+        with pytest.raises(SubstrateIdempotencyConflict):
+            _merge(values, timestamp=201)
+        keep = service.get_current_motif(result.keep_motif_object_id)
+        drop = service.get_current_motif(result.drop_motif_object_id)
+        assert (keep.motif_object_id, keep.revision_ordinal) == (first.motif_object_id, added.motif_revision_ordinal + 1)
+        assert keep.state.strength == 1.0
+        assert keep.state.contributing_agents == ("aria", "nox")
+        assert keep.state.last_active_ts == 200
+        assert keep.state.centroid == pytest.approx((0.8944271909999159, 0.4472135954999579, 0.0))
+        assert drop.motif_object_id == second.motif_object_id
+        assert connection.execute("SELECT existence_state FROM object_revisions WHERE object_revision_id=?", (native_id_to_bytes(drop.motif_revision_id),)).fetchone() == ("RETIRED",)
+        assert service.resolve_motif_alias(motif_alias_namespace_id=values["motif_alias"], runtime_motif_id="motif_reflection_0002") == second.motif_object_id
+        assert service.list_current_motif_members(second.motif_object_id) == ()
+        assert {item.member_object_id for item in service.list_current_motif_members(first.motif_object_id)} == {item.object_id for item in memories}
+        assert len(result.retired_drop_membership_relationship_ids) == 2
+        assert len(result.created_keep_membership_relationship_ids) == 2
+        assert connection.execute("SELECT count(*) FROM object_revision_effects WHERE transition_id=?", (native_id_to_bytes(result.transition_id),)).fetchone() == (2,)
+        assert connection.execute("SELECT count(*) FROM relationship_revision_effects WHERE transition_id=?", (native_id_to_bytes(result.transition_id),)).fetchone() == (4,)
+        assert connection.execute("SELECT output_role,output_kind FROM operation_outputs WHERE operation_id=? ORDER BY output_ordinal", (native_id_to_bytes(result.operation_id),)).fetchall() == [
+            ("MERGE_KEEP_MOTIF", "OBJECT"), ("RETIRED_DROP_MOTIF", "OBJECT"),
+            ("RETIRED_DROP_MEMBERSHIP", "RELATIONSHIP"), ("RETIRED_DROP_MEMBERSHIP", "RELATIONSHIP"),
+            ("MERGE_KEEP_MEMBERSHIP", "RELATIONSHIP"), ("MERGE_KEEP_MEMBERSHIP", "RELATIONSHIP"),
+        ]
+        reader = NativeMotifRuntimeReader(connection)
+        assert [item.read_model.runtime_motif_id for item in reader.list_runtime_motifs(
+            motif_alias_namespace_id=values["motif_alias"], domain_id="reflection", semantic_scope_id=values["motif_scope"],
+        )] == ["motif_reflection_0001"]
+        assert [item.member_object_id for item in reader.list_ordered_current_motif_members(first.motif_object_id)] == [item.object_id for item in memories]
+    finally:
+        values["qualified"].close()
+
+
+def test_native_motif_merge_lost_response_reconstructs_once_and_rejects_cross_scope_pre_mutation(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        _two_mergeable_motifs(values)
+        connection = values["connection"]
+        before = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions"))
+        foreign_memory = _memory(values, 9, scope=values["memory_scope"])
+        _create(
+            values, foreign_memory, key="foreign-motif",
+            state=_state(values, motif_id="motif_reflection_foreign", scope=values["alternate_motif_scope"]),
+        )
+        before_cross = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions"))
+        with pytest.raises(SubstrateInvariantViolation, match="semantic scopes"):
+            _merge(values, key="merge-cross-scope", b="motif_reflection_foreign")
+        assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions")) == before_cross
+        foreign_domain_memory = _memory(values, 10)
+        _create(
+            values, foreign_domain_memory, key="foreign-domain-motif",
+            state=replace(_state(values, motif_id="motif_other_0001"), domain_id="other"),
+        )
+        before_domain = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions"))
+        with pytest.raises(SubstrateInvariantViolation, match="claimed domain"):
+            _merge(values, key="merge-cross-domain", b="motif_other_0001")
+        assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions")) == before_domain
+        with pytest.raises(SubstrateInvariantViolation, match="no legacy EID alias"):
+            _merge(values, key="merge-wrong-source", source=values["motif_alias"])
+        assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions")) == before_domain
+        with pytest.raises(RuntimeError, match="lost response"):
+            _merge(values, key="merge-lost", fail="after_complete_before_response")
+        result = _merge(values, key="merge-lost")
+        assert result.operation_id is not None
+        after = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("operations", "semantic_transitions", "object_revisions", "relationship_revisions"))
+        assert after == tuple(value + delta for value, delta in zip(before_domain, (1, 1, 2, 4)))
+    finally:
+        values["qualified"].close()
+
+
+def test_native_motif_merge_reuses_the_existing_keep_membership_for_an_overlapping_member(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        member = _memory(values, 1)
+        first = _create(values, member, state=_state(values, strength=.8, centroid=(1.0, 0.0)))
+        second = _create(
+            values, member, key="merge-overlap-second",
+            state=_state(values, motif_id="motif_reflection_0002", strength=.4, centroid=(0.0, 1.0)),
+        )
+        result = _merge(values, key="merge-overlap")
+        assert result.keep_motif_object_id == first.motif_object_id
+        assert result.drop_motif_object_id == second.motif_object_id
+        assert result.created_keep_membership_relationship_ids == ()
+        assert _merge(values, key="merge-overlap") == result
+        assert {item.member_object_id for item in NativeMotifService(values["connection"]).list_current_motif_members(first.motif_object_id)} == {member.object_id}
+    finally:
+        values["qualified"].close()
+
+
+def test_native_motif_merge_runtime_reconciles_initialized_process_order_for_the_next_attach(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        _two_mergeable_motifs(values)
+        routing_scope = NativeFabricRoutingScope(
+            NativeMemoryRuntimeScope(
+                "ws", "PRIVATE_AGENT", values["memory_alias"], values["memory_identity"],
+                values["motif_scope"], agent_id="aria",
+            ),
+            values["motif_alias"], values["motif_identity"], values["membership_identity"], values["idempotency"],
+        )
+        process_order = NativeMotifProcessOrder()
+        reader = NativeMotifRuntimeReader(values["connection"])
+        with process_order.locked_catalog(reader=reader, routing_scope=routing_scope, domain_id="reflection") as catalog:
+            assert [item.read_model.runtime_motif_id for item in catalog] == [
+                "motif_reflection_0001", "motif_reflection_0002",
+            ]
+        result = NativeMotifMergeRuntime(
+            values["connection"], routing_scope=routing_scope, domain_id="reflection",
+            process_order=process_order,
+        ).merge_suggestion({
+            "suggestion_id": "merge_motif_reflection_0001__motif_reflection_0002",
+            "a": "motif_reflection_0001", "b": "motif_reflection_0002", "created_ts": 300,
+        }, note="manual")
+        assert result is not None
+        assert process_order.runtime_ids_for_testing(
+            routing_scope=routing_scope, domain_id="reflection",
+        ) == ("motif_reflection_0001",)
+        with process_order.locked_catalog(reader=reader, routing_scope=routing_scope, domain_id="reflection") as catalog:
+            assert [item.read_model.runtime_motif_id for item in catalog] == ["motif_reflection_0001"]
+        # A fresh reader has no process cache and sees exactly the same live truth.
+        assert [item.read_model.runtime_motif_id for item in NativeMotifRuntimeReader(values["connection"]).list_runtime_motifs(
+            motif_alias_namespace_id=values["motif_alias"], domain_id="reflection", semantic_scope_id=values["motif_scope"],
+        )] == ["motif_reflection_0001"]
+    finally:
+        values["qualified"].close()
 
 
 def test_native_motif_create_is_atomic_idempotent_and_centroid_is_not_a_representation(tmp_path: Path):

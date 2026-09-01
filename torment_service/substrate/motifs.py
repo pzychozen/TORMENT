@@ -204,6 +204,30 @@ class NativeMotifSplitResult:
     operation_id: UUID
 
 
+@dataclass(frozen=True)
+class NativeMotifMergeResult:
+    """Durable outcome of one already-authorized native motif merge.
+
+    The surviving motif receives an ordinary successor.  The dropped motif is
+    retained as a current ``RETIRED`` successor so its alias and complete
+    historical lineage remain resolvable without making it part of current
+    runtime geometry.
+    """
+
+    keep_motif_object_id: UUID
+    keep_motif_revision_id: UUID
+    keep_motif_revision_ordinal: int
+    keep_runtime_motif_id: str
+    drop_motif_object_id: UUID
+    drop_motif_revision_id: UUID
+    drop_motif_revision_ordinal: int
+    drop_runtime_motif_id: str
+    retired_drop_membership_relationship_ids: tuple[UUID, ...]
+    created_keep_membership_relationship_ids: tuple[UUID, ...]
+    transition_id: UUID
+    operation_id: UUID
+
+
 class NativeMotifService:
     """Native, persistence-only motif and membership operations.
 
@@ -424,6 +448,74 @@ class NativeMotifService:
                 motif_alias_namespace_id, plan, _test_fail_after=_test_fail_after,
             ),
         )
+
+    def merge_motifs(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        legacy_source_namespace_id: UUID,
+        motif_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        semantic_scope_id: UUID,
+        domain_id: str,
+        a_runtime_motif_id: str,
+        b_runtime_motif_id: str,
+        merge_timestamp: int,
+        _test_fail_after: str | None = None,
+    ) -> NativeMotifMergeResult:
+        """Atomically apply the frozen legacy keep/drop merge law.
+
+        This operation owns only native motif truth.  Suggestion decision
+        status and diagnostic events deliberately remain in the external M1
+        workflow store and are applied by the outer maintenance adapter only
+        after this transaction commits.
+        """
+        _validate_mutation_ids(
+            idempotency_namespace_id, idempotency_key, legacy_source_namespace_id, motif_identity_namespace_id, motif_alias_namespace_id,
+            membership_identity_namespace_id, semantic_scope_id,
+        )
+        _nonempty_text("domain_id", domain_id)
+        _nonempty_text("a_runtime_motif_id", a_runtime_motif_id)
+        _nonempty_text("b_runtime_motif_id", b_runtime_motif_id)
+        if not isinstance(merge_timestamp, int):
+            raise ValueError("merge_timestamp must be an integer")
+        if a_runtime_motif_id == b_runtime_motif_id:
+            raise SubstrateInvariantViolation("native motif merge requires two distinct runtime motif IDs")
+        for table, column, value in (
+            ("idempotency_namespaces", "idempotency_namespace_id", idempotency_namespace_id),
+            ("legacy_source_namespaces", "legacy_source_namespace_id", legacy_source_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", motif_identity_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", membership_identity_namespace_id),
+            ("legacy_source_namespaces", "legacy_source_namespace_id", motif_alias_namespace_id),
+            ("semantic_scopes", "semantic_scope_id", semantic_scope_id),
+        ):
+            self._require_row(table, column, value)
+        intent = canonical_intent_text({
+            "kind": "NATIVE_MOTIF_MERGE",
+            "legacy_source_namespace_id": str(legacy_source_namespace_id),
+            "motif_identity_namespace_id": str(motif_identity_namespace_id),
+            "motif_alias_namespace_id": str(motif_alias_namespace_id),
+            "membership_identity_namespace_id": str(membership_identity_namespace_id),
+            "semantic_scope_id": str(semantic_scope_id),
+            "domain_id": domain_id,
+            "a_runtime_motif_id": a_runtime_motif_id,
+            "b_runtime_motif_id": b_runtime_motif_id,
+            "merge_timestamp": merge_timestamp,
+        })
+        result = execute_semantic(
+            self._connection, idempotency_namespace_id, idempotency_key,
+            "NATIVE_MOTIF_MERGE", intent, self._merge_result_for_operation,
+            lambda tx: self._merge_motifs(
+                tx, legacy_source_namespace_id, motif_identity_namespace_id, motif_alias_namespace_id, membership_identity_namespace_id,
+                semantic_scope_id, domain_id, a_runtime_motif_id,
+                b_runtime_motif_id, merge_timestamp, _test_fail_after=_test_fail_after,
+            ),
+        )
+        if _test_fail_after == "after_complete_before_response":
+            raise RuntimeError("forced native motif merge lost response after semantic completion")
+        return result
 
     def get_current_motif(self, motif_object_id: UUID) -> NativeMotifView:
         _require_uuid("motif_object_id", motif_object_id)
@@ -749,6 +841,243 @@ class NativeMotifService:
             UUID(bytes=candidate_parent_membership[0]) if candidate_parent_membership else None,
             UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
         )
+
+    def _merge_motifs(
+        self,
+        tx: SubstrateTx,
+        legacy_source_namespace_id: UUID,
+        motif_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        semantic_scope_id: UUID,
+        domain_id: str,
+        a_runtime_motif_id: str,
+        b_runtime_motif_id: str,
+        merge_timestamp: int,
+        *,
+        _test_fail_after: str | None,
+    ) -> NativeMotifMergeResult:
+        a_id = self._alias_row(tx, motif_alias_namespace_id, a_runtime_motif_id)
+        b_id = self._alias_row(tx, motif_alias_namespace_id, b_runtime_motif_id)
+        if a_id is None or b_id is None:
+            raise SubstrateObjectNotFound("native motif merge alias was not found")
+        if a_id == b_id:
+            raise SubstrateInvariantViolation("native motif merge aliases resolve to one object")
+        a = self._current_live_motif_for_merge(tx, UUID(bytes=a_id), semantic_scope_id, domain_id)
+        b = self._current_live_motif_for_merge(tx, UUID(bytes=b_id), semantic_scope_id, domain_id)
+        if a[3] != _blob(motif_identity_namespace_id) or b[3] != _blob(motif_identity_namespace_id):
+            raise SubstrateInvariantViolation("native motif merge does not match the claimed motif identity namespace")
+        keep, drop = (a, b) if a[4].strength >= b[4].strength else (b, a)
+        keep_id, keep_revision, keep_ordinal, keep_identity, keep_state = keep
+        drop_id, drop_revision, drop_ordinal, drop_identity, drop_state = drop
+        keep_uuid = UUID(bytes=keep_id)
+        drop_uuid = UUID(bytes=drop_id)
+
+        keep_members = self._current_active_memberships(tx, keep_uuid)
+        drop_members = self._current_active_memberships(tx, drop_uuid)
+        keep_by_member = {item[3]: item for item in keep_members}
+        drop_by_member = {item[3]: item for item in drop_members}
+        if len(keep_by_member) != len(keep_members) or len(drop_by_member) != len(drop_members):
+            raise SubstrateInvariantViolation("native motif merge has duplicate current member identities")
+        final_member_ids = set(keep_by_member) | set(drop_by_member)
+        if not final_member_ids:
+            raise SubstrateInvariantViolation("native motif merge cannot produce an empty survivor")
+        # The claimed source namespace is not merely an operation-key label:
+        # every projected member must have its durable legacy EID there before
+        # any successor revision is created.
+        for member_id in final_member_ids:
+            self._legacy_eid_sort_key(tx, legacy_source_namespace_id, member_id)
+
+        keep_successor_state = _merged_keep_state(keep_state, drop_state, merge_timestamp)
+        transition_id, keep_successor_id, drop_successor_id = _new(), _new(), _new()
+        keep_successor_ordinal = keep_ordinal + 1
+        drop_successor_ordinal = drop_ordinal + 1
+        self._insert_motif_successor(
+            tx, keep_uuid, keep_successor_id, keep_successor_ordinal,
+            UUID(bytes=keep_revision), keep_ordinal,
+            _motif_object_state(UUID(bytes=keep_identity), keep_successor_state),
+        )
+        if _test_fail_after == "keep_successor":
+            raise RuntimeError("forced native motif merge failure after keep successor")
+        self._insert_motif_successor(
+            tx, drop_uuid, drop_successor_id, drop_successor_ordinal,
+            UUID(bytes=drop_revision), drop_ordinal,
+            _retired_motif_object_state(UUID(bytes=drop_identity), drop_state),
+        )
+        if _test_fail_after == "drop_successor":
+            raise RuntimeError("forced native motif merge failure after drop successor")
+
+        retired: list[tuple[bytes, bytes, int]] = []
+        for membership in drop_members:
+            relationship_id, revision_id, ordinal, _member_id, _member_scope = membership
+            successor_id = _new()
+            self._relationships._revision(
+                tx, relationship_id, successor_id, ordinal + 1, "NATIVE_ORDINARY",
+                revision_id, ordinal,
+                self._retired_membership_state(tx, relationship_id, revision_id, ordinal),
+            )
+            retired.append((relationship_id, successor_id, ordinal + 1))
+        if _test_fail_after == "retire_memberships":
+            raise RuntimeError("forced native motif merge failure after membership retirement")
+
+        created: list[tuple[bytes, bytes, int]] = []
+        for member_id in sorted(set(drop_by_member) - set(keep_by_member), key=lambda value: self._legacy_eid_sort_key(tx, legacy_source_namespace_id, value)):
+            _old_relationship, _old_revision, _old_ordinal, _old_member, member_scope = drop_by_member[member_id]
+            relationship_id, revision_id = _new(), _new()
+            self._insert_membership(
+                tx, relationship_id, revision_id, transition_id,
+                _membership_state(
+                    membership_identity_namespace_id, semantic_scope_id, keep_uuid,
+                    UUID(bytes=member_scope), UUID(bytes=member_id),
+                ),
+            )
+            created.append((relationship_id, revision_id, 1))
+        if _test_fail_after == "before_current_pointer_publication":
+            raise RuntimeError("forced native motif merge failure before current-pointer publication")
+
+        self._publish_merge(
+            tx, transition_id,
+            keep_id, keep_successor_id, keep_successor_ordinal,
+            drop_id, drop_successor_id, drop_successor_ordinal,
+            retired, created,
+        )
+        return NativeMotifMergeResult(
+            keep_uuid, UUID(bytes=keep_successor_id), keep_successor_ordinal,
+            keep_state.runtime_motif_id,
+            drop_uuid, UUID(bytes=drop_successor_id), drop_successor_ordinal,
+            drop_state.runtime_motif_id,
+            tuple(UUID(bytes=item[0]) for item in retired),
+            tuple(UUID(bytes=item[0]) for item in created),
+            UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
+        )
+
+    def _publish_merge(
+        self,
+        tx: SubstrateTx,
+        transition_id: bytes,
+        keep_id: bytes,
+        keep_revision_id: bytes,
+        keep_ordinal: int,
+        drop_id: bytes,
+        drop_revision_id: bytes,
+        drop_ordinal: int,
+        retired: list[tuple[bytes, bytes, int]],
+        created: list[tuple[bytes, bytes, int]],
+    ) -> None:
+        tx.execute(
+            "INSERT INTO semantic_transitions VALUES (?,?,?,?,0)",
+            (transition_id, tx.operation_id, "NATIVE_MOTIF_MERGE", "NATIVE"),
+        )
+        for object_id, revision_id, ordinal in (
+            (keep_id, keep_revision_id, keep_ordinal),
+            (drop_id, drop_revision_id, drop_ordinal),
+        ):
+            tx.execute(
+                "INSERT INTO object_revision_effects VALUES (?,?,?,?)",
+                (transition_id, object_id, revision_id, ordinal),
+            )
+            tx.execute(
+                "UPDATE objects SET current_revision_id=?,current_revision_ordinal=? WHERE object_id=?",
+                (revision_id, ordinal, object_id),
+            )
+        output_ordinal = 0
+        for role, object_id, revision_id, ordinal in (
+            ("MERGE_KEEP_MOTIF", keep_id, keep_revision_id, keep_ordinal),
+            ("RETIRED_DROP_MOTIF", drop_id, drop_revision_id, drop_ordinal),
+        ):
+            tx.execute(
+                "INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,object_id,object_revision_id,object_revision_ordinal) VALUES (?,?,?,?,?,?,?)",
+                (tx.operation_id, output_ordinal, role, "OBJECT", object_id, revision_id, ordinal),
+            )
+            output_ordinal += 1
+        for role, rows in (("RETIRED_DROP_MEMBERSHIP", retired), ("MERGE_KEEP_MEMBERSHIP", created)):
+            for relationship_id, revision_id, ordinal in rows:
+                tx.execute(
+                    "INSERT INTO relationship_revision_effects VALUES (?,?,?,?)",
+                    (transition_id, relationship_id, revision_id, ordinal),
+                )
+                tx.execute(
+                    "INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,relationship_id,relationship_revision_id,relationship_revision_ordinal) VALUES (?,?,?,?,?,?,?)",
+                    (tx.operation_id, output_ordinal, role, "RELATIONSHIP", relationship_id, revision_id, ordinal),
+                )
+                tx.execute(
+                    "UPDATE relationships SET current_revision_id=?,current_revision_ordinal=? WHERE relationship_id=?",
+                    (revision_id, ordinal, relationship_id),
+                )
+                output_ordinal += 1
+        tx.transitions.append(transition_id)
+        tx.published.extend(((keep_id, keep_revision_id, keep_ordinal), (drop_id, drop_revision_id, drop_ordinal)))
+        tx.relationship_published.extend(retired)
+        tx.relationship_published.extend(created)
+
+    def _current_live_motif_for_merge(
+        self, tx: SubstrateTx, motif_id: UUID, semantic_scope_id: UUID, domain_id: str,
+    ) -> tuple[bytes, bytes, int, bytes, MotifState]:
+        row = tx.execute(
+            """
+            SELECT o.object_id,o.current_revision_id,o.current_revision_ordinal,
+                   o.identity_namespace_id,r.effective_semantic_scope_id,r.existence_state,
+                   r.payload_format,r.payload_text,o.object_kind
+              FROM objects o JOIN object_revisions r
+                ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id
+               AND r.revision_ordinal=o.current_revision_ordinal
+             WHERE o.object_id=?
+            """,
+            (_blob(motif_id),),
+        ).fetchone()
+        if row is None:
+            raise SubstrateObjectNotFound("native motif was not found")
+        if row[8] != DERIVED_MOTIF_OBJECT_KIND or row[5] != "EXISTS":
+            raise SubstrateObjectNotFound("native motif is not current live truth")
+        if row[4] != _blob(semantic_scope_id):
+            raise SubstrateInvariantViolation("native motif merge crosses semantic scopes")
+        if row[6] != "JSON" or row[7] is None:
+            raise SubstrateInvariantViolation("native motif current state is not JSON")
+        state = _state_from_payload(semantic_scope_id, row[7])
+        if state.semantic_scope_id != semantic_scope_id or state.domain_id != domain_id:
+            raise SubstrateInvariantViolation("native motif merge crosses the claimed domain")
+        return row[0], row[1], row[2], row[3], state
+
+    def _current_active_memberships(
+        self, tx: SubstrateTx, motif_id: UUID,
+    ) -> tuple[tuple[bytes, bytes, int, bytes, bytes], ...]:
+        rows = tx.execute(
+            """
+            SELECT h.relationship_id,r.relationship_revision_id,r.revision_ordinal,
+                   member.object_id,member.endpoint_semantic_scope_id
+              FROM relationships h JOIN relationship_revisions r
+                ON r.relationship_id=h.relationship_id
+               AND r.relationship_revision_id=h.current_revision_id
+               AND r.revision_ordinal=h.current_revision_ordinal
+              JOIN relationship_revision_endpoints motif ON motif.relationship_revision_id=r.relationship_revision_id
+               AND motif.endpoint_ordinal=0 AND motif.endpoint_role='MOTIF' AND motif.binding_mode='IDENTITY'
+              JOIN relationship_revision_endpoints member ON member.relationship_revision_id=r.relationship_revision_id
+               AND member.endpoint_ordinal=1 AND member.endpoint_role='MEMBER' AND member.binding_mode='IDENTITY'
+             WHERE h.relationship_kind=? AND r.existence_state='EXISTS' AND motif.object_id=?
+            """,
+            (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND, _blob(motif_id)),
+        ).fetchall()
+        if not rows:
+            raise SubstrateInvariantViolation("native motif merge requires current memberships")
+        for _relationship_id, _revision_id, _ordinal, member_id, _member_scope in rows:
+            self._require_compatible_member(tx, UUID(bytes=member_id))
+        return tuple(rows)
+
+    def _legacy_eid_sort_key(
+        self, tx: SubstrateTx, legacy_source_namespace_id: UUID, member_id: bytes,
+    ) -> tuple[int, str, bytes]:
+        rows = tx.execute(
+            "SELECT alias_value FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND object_id=? AND alias_kind='EID' ORDER BY alias_value",
+            (_blob(legacy_source_namespace_id), member_id),
+        ).fetchall()
+        if not rows:
+            raise SubstrateInvariantViolation("native motif member has no legacy EID alias")
+        value = rows[0][0]
+        try:
+            return int(value), value, member_id
+        except (TypeError, ValueError) as error:
+            raise SubstrateInvariantViolation("native motif member EID alias is not numeric") from error
 
     def _publish_split(
         self, tx: SubstrateTx, transition_id: bytes, parent_id: bytes,
@@ -1170,6 +1499,58 @@ class NativeMotifService:
             UUID(bytes=parent[0]), UUID(bytes=parent[1]),
         )
 
+    def _merge_result_for_operation(self, operation_id: bytes) -> NativeMotifMergeResult | None:
+        rows = self._connection.execute(
+            """
+            SELECT t.transition_id,t.operation_id,o.output_ordinal,o.output_role,o.output_kind,
+                   o.object_id,o.object_revision_id,o.object_revision_ordinal,
+                   o.relationship_id,o.relationship_revision_id,o.relationship_revision_ordinal
+              FROM semantic_transitions t JOIN operation_outputs o ON o.operation_id=t.operation_id
+             WHERE t.operation_id=? AND t.transition_kind='NATIVE_MOTIF_MERGE'
+             ORDER BY o.output_ordinal
+            """,
+            (operation_id,),
+        ).fetchall()
+        if len(rows) < 3 or [row[3:5] for row in rows[:2]] != [
+            ("MERGE_KEEP_MOTIF", "OBJECT"), ("RETIRED_DROP_MOTIF", "OBJECT"),
+        ]:
+            return None
+        keep, drop = rows[:2]
+        retired: list[UUID] = []
+        created: list[UUID] = []
+        for row in rows[2:]:
+            if row[4] != "RELATIONSHIP" or row[8] is None or row[9] is None:
+                return None
+            if row[3] == "RETIRED_DROP_MEMBERSHIP":
+                retired.append(UUID(bytes=row[8]))
+            elif row[3] == "MERGE_KEEP_MEMBERSHIP":
+                created.append(UUID(bytes=row[8]))
+            else:
+                return None
+        if not retired:
+            return None
+        names: list[str] = []
+        for object_id in (keep[5], drop[5]):
+            current = self._connection.execute(
+                """
+                SELECT r.effective_semantic_scope_id,r.payload_format,r.payload_text
+                  FROM objects o JOIN object_revisions r
+                    ON r.object_id=o.object_id
+                   AND r.object_revision_id=o.current_revision_id
+                   AND r.revision_ordinal=o.current_revision_ordinal
+                 WHERE o.object_id=?
+                """,
+                (object_id,),
+            ).fetchone()
+            if current is None or current[1] != "JSON" or current[2] is None:
+                return None
+            names.append(_state_from_payload(UUID(bytes=current[0]), current[2]).runtime_motif_id)
+        return NativeMotifMergeResult(
+            UUID(bytes=keep[5]), UUID(bytes=keep[6]), keep[7], names[0],
+            UUID(bytes=drop[5]), UUID(bytes=drop[6]), drop[7], names[1],
+            tuple(retired), tuple(created), UUID(bytes=keep[0]), UUID(bytes=keep[1]),
+        )
+
     def _require_row(self, table: str, column: str, value: UUID) -> None:
         if self._connection.execute(
             f"SELECT 1 FROM {table} WHERE {column}=?", (_blob(value),)
@@ -1189,6 +1570,50 @@ def _motif_object_state(identity_namespace_id: UUID, state: MotifState) -> Objec
         "NOT_APPLICABLE",
         state.payload(),
         "JSON",
+    )
+
+
+def _retired_motif_object_state(identity_namespace_id: UUID, state: MotifState) -> ObjectState:
+    """Keep a merged-away motif historically addressable, but not live."""
+    return ObjectState(
+        identity_namespace_id,
+        state.semantic_scope_id,
+        DERIVED_MOTIF_OBJECT_KIND,
+        "RETIRED",
+        "DERIVED",
+        False,
+        "DERIVED",
+        "NOT_APPLICABLE",
+        state.payload(),
+        "JSON",
+    )
+
+
+def _merged_keep_state(keep: MotifState, drop: MotifState, merge_timestamp: int) -> MotifState:
+    """The frozen ``MotifRegistry.decide_merge`` aggregate law."""
+    centroid = keep.centroid
+    if len(keep.centroid) == len(drop.centroid) and len(keep.centroid) > 0:
+        keep_weight = max(1e-6, float(keep.strength))
+        drop_weight = max(1e-6, float(drop.strength))
+        weighted = tuple(
+            (float(a) * keep_weight + float(b) * drop_weight) / (keep_weight + drop_weight)
+            for a, b in zip(keep.centroid, drop.centroid)
+        )
+        norm = math.sqrt(sum(value * value for value in weighted))
+        centroid = weighted if norm <= 1e-12 else tuple(value / norm for value in weighted)
+    return MotifState(
+        keep.semantic_scope_id,
+        keep.runtime_motif_id,
+        keep.domain_id,
+        keep.label,
+        centroid,
+        float(min(1.0, float(keep.strength) + 0.5 * float(drop.strength))),
+        keep.stability_score,
+        tuple(sorted(set(keep.contributing_agents) | set(drop.contributing_agents))),
+        keep.created_ts,
+        merge_timestamp,
+        keep.derivation_metadata,
+        keep.extra_payload,
     )
 
 

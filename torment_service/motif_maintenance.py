@@ -178,6 +178,121 @@ class MotifSuggestionWorkflowStore:
             self.save_merges()
         return out
 
+    def list_merge_suggestions(
+        self, status: str = "suggested", limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Retain the registry's status/similarity/update ordering law."""
+        items = list(self._merge_suggestions.values())
+        if status and status != "any":
+            items = [item for item in items if item.get("status") == status]
+        items.sort(
+            key=lambda item: (
+                item.get("status"), float(item.get("sim", 0.0)),
+                int(item.get("updated_ts", 0)),
+            ),
+            reverse=True,
+        )
+        return items[:limit]
+
+    def mark_merge_approved(self, suggestion_id: str, *, note: str) -> Dict[str, Any]:
+        """Persist only the external decision state, after native truth commits.
+
+        Retrying a successfully persisted approval leaves its timestamp and
+        JSON bytes alone.  That fact lets the outer layer recover a lost
+        response without inventing a second cross-store decision.
+        """
+        suggestion = self._require_suggestion(suggestion_id)
+        if suggestion.get("status") == "approved":
+            return suggestion
+        suggestion["status"] = "approved"
+        suggestion["updated_ts"] = _now_ts()
+        suggestion["note"] = note
+        self.save_merges()
+        return suggestion
+
+    def mark_merge_rejected_missing_native(self, suggestion_id: str) -> Dict[str, Any]:
+        """The frozen legacy missing-motif failure decision and event."""
+        suggestion = self._require_suggestion(suggestion_id)
+        suggestion["status"] = "rejected"
+        suggestion["updated_ts"] = _now_ts()
+        self.save_merges()
+        self.log_event({
+            "type": "MOTIF_MERGE_FAILED",
+            "suggestion_id": suggestion_id,
+            "reason": "missing motif",
+        })
+        return suggestion
+
+    def decide_without_motif_mutation(
+        self, suggestion_id: str, decision: str, *, note: str = "",
+    ) -> Dict[str, Any]:
+        """Apply the retained side-store-only reject/reset workflow.
+
+        ``approve`` remains deliberately unavailable here: callers with
+        native truth must first execute their atomic storage mutation.
+        """
+        suggestion = self._require_suggestion(suggestion_id)
+        decision = decision.strip().lower()
+        if decision not in ("reject", "reset"):
+            raise ValueError("side-store-only decision must be reject or reset")
+        if decision == "reject":
+            suggestion["status"] = "rejected"
+            suggestion["updated_ts"] = _now_ts()
+            suggestion["note"] = note
+            self.save_merges()
+            self.log_event({
+                "type": "MOTIF_MERGE_REJECTED", "suggestion_id": suggestion_id, "note": note,
+            })
+            return suggestion
+        suggestion["status"] = "suggested"
+        suggestion["updated_ts"] = _now_ts()
+        self.save_merges()
+        self.log_event({"type": "MOTIF_MERGE_RESET", "suggestion_id": suggestion_id})
+        return suggestion
+
+    def log_merged_once(
+        self, suggestion_id: str, *, keep: str, drop: str) -> bool:
+        """Append the native merge event exactly once across lost responses.
+
+        The M1 JSONL stream has no operation table.  Recovery is therefore
+        grounded in the durable approved status plus this precise, existing
+        event shape; a matching event is evidence that its append completed.
+        """
+        for event in self._events():
+            if (
+                event.get("type") == "MOTIF_MERGED"
+                and event.get("suggestion_id") == suggestion_id
+                and event.get("keep") == keep and event.get("drop") == drop
+            ):
+                return False
+        self.log_event({
+            "type": "MOTIF_MERGED", "suggestion_id": suggestion_id,
+            "keep": keep, "drop": drop,
+        })
+        return True
+
+    def _require_suggestion(self, suggestion_id: str) -> Dict[str, Any]:
+        if suggestion_id not in self._merge_suggestions:
+            raise ValueError("unknown suggestion_id")
+        return self._merge_suggestions[suggestion_id]
+
+    def _events(self) -> Iterable[Dict[str, Any]]:
+        if not os.path.exists(self.events_path):
+            return ()
+        events: list[Dict[str, Any]] = []
+        try:
+            with open(self._guard(self.events_path), "r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(event, dict):
+                        events.append(event)
+        except OSError:
+            return ()
+        return tuple(events)
+
 
 class LegacyMotifMaintenanceAdapter:
     """Retain the legacy registry's existing maintenance and mutation authority."""
@@ -206,6 +321,7 @@ class NativeMotifMaintenanceAdapter:
         data_dir: str,
         workspace_id: str,
         domain_id: str,
+        merge_mutator: Any | None = None,
     ) -> None:
         if not hasattr(geometry, "list_motifs") or not hasattr(geometry, "domain_ids"):
             raise ValueError("native motif maintenance requires motif geometry semantics")
@@ -214,6 +330,9 @@ class NativeMotifMaintenanceAdapter:
         self._geometry = geometry
         self._domain_id = domain_id
         self._workflow = MotifSuggestionWorkflowStore(data_dir, workspace_id, domain_id)
+        if merge_mutator is not None and not hasattr(merge_mutator, "merge_suggestion"):
+            raise ValueError("native motif merge mutator requires merge_suggestion semantics")
+        self._merge_mutator = merge_mutator
 
     @property
     def workflow_store(self) -> MotifSuggestionWorkflowStore:
@@ -230,7 +349,7 @@ class NativeMotifMaintenanceAdapter:
         auto_merge: bool,
         auto_merge_trigger: float,
     ) -> Dict[str, Any]:
-        if auto_merge:
+        if auto_merge and self._merge_mutator is None:
             raise NativeMotifAutoMergeRefused(
                 "native motif auto-merge remains unqualified until 7G5E4D-M2"
             )
@@ -243,7 +362,62 @@ class NativeMotifMaintenanceAdapter:
                 sim_threshold=sim_threshold,
                 max_suggestions=max_suggestions,
             )
+        if auto_merge and report.get("entropy_score", 0.0) >= auto_merge_trigger:
+            suggestions = self._workflow.list_merge_suggestions(status="suggested", limit=5)
+            approved = 0
+            for suggestion in suggestions:
+                if approved >= 2:
+                    break
+                if float(suggestion.get("sim", 0.0)) >= (sim_threshold + 0.01):
+                    self.decide_merge(
+                        str(suggestion["suggestion_id"]), "approve", note="auto-merge",
+                    )
+                    # Exact legacy behavior counts an eligible attempted
+                    # decision even when the second suggestion has become
+                    # missing after the first merge.
+                    approved += 1
+            report["auto_merged"] = approved
         return report
+
+    def decide_merge(
+        self,
+        suggestion_id: str,
+        decision: str,
+        note: str = "",
+        *,
+        _test_fail_after: str | None = None,
+    ) -> Dict[str, Any]:
+        """Apply a native proposal decision without consulting legacy truth."""
+        suggestion = self._workflow._require_suggestion(suggestion_id)
+        decision = decision.strip().lower()
+        if decision not in ("approve", "reject", "reset"):
+            raise ValueError("invalid decision")
+        if decision != "approve":
+            return self._workflow.decide_without_motif_mutation(
+                suggestion_id, decision, note=note,
+            )
+        if self._merge_mutator is None:
+            raise NativeMotifAutoMergeRefused(
+                "native motif merge mutation remains unqualified until 7G5E4D-M2"
+            )
+        result = self._merge_mutator.merge_suggestion(
+            suggestion, note=note, _test_fail_after=_test_fail_after,
+        )
+        if result is None:
+            return self._workflow.mark_merge_rejected_missing_native(suggestion_id)
+        if _test_fail_after == "after_sqlite_commit":
+            raise RuntimeError("forced native motif merge failure after SQLite commit")
+        approved = self._workflow.mark_merge_approved(suggestion_id, note=note)
+        if _test_fail_after == "after_workflow_status":
+            raise RuntimeError("forced native motif merge failure after workflow status")
+        self._workflow.log_merged_once(
+            suggestion_id,
+            keep=result.keep_runtime_motif_id,
+            drop=result.drop_runtime_motif_id,
+        )
+        if _test_fail_after == "after_workflow_event":
+            raise RuntimeError("forced native motif merge failure after workflow event")
+        return approved
 
 
 def _runtime_motif_id(motif: Any) -> str:
