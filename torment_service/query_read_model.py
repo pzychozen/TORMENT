@@ -139,11 +139,13 @@ def _qualified_hit(
     motif_memberships: tuple[QualifiedQueryMotifIdentity, ...],
     native_object_id: UUID | None = None,
     native_revision_id: UUID | None = None,
+    identity_input: Mapping[str, Any] | None = None,
 ) -> QualifiedQueryHit:
     """Fail closed unless a flattened candidate proves its A1 identity."""
     compatibility = dict(hit)
+    identity_candidate = dict(compatibility if identity_input is None else identity_input)
     identity = qualified_query_memory_identity(
-        compatibility, expected_workspace_id=workspace_id,
+        identity_candidate, expected_workspace_id=workspace_id,
     )
     if (
         identity is None
@@ -237,16 +239,28 @@ class _LegacyQualifiedQueryLane:
             query_text, top_k=top_k, user_id=user_id, min_score=min_score,
             type_filter=list(type_filter) if type_filter is not None else None,
         )
-        return tuple(
-            _qualified_hit(
+        qualified: list[QualifiedQueryHit] = []
+        for hit in hits:
+            # Legacy public hits historically need not flatten their known
+            # lane origin.  The adapter itself already owns that binding, so
+            # use it only to construct the private A1 identity witness; do
+            # not add fields to the compatibility hit that Fabric exposes.
+            identity_input = dict(hit)
+            identity_input.setdefault("workspace_id", self._workspace_id)
+            identity_input.setdefault("scope", self._scope)
+            if self._scope == _PRIVATE:
+                identity_input.setdefault("agent_id", self._qualifier)
+            else:
+                identity_input.setdefault("domain_id", self._qualifier)
+            qualified.append(_qualified_hit(
                 hit,
                 workspace_id=self._workspace_id,
                 expected_scope=self._scope,
                 expected_qualifier=self._qualifier,
                 motif_memberships=memberships.get(int(hit["eid"]), ()),
-            )
-            for hit in hits
-        )
+                identity_input=identity_input,
+            ))
+        return tuple(qualified)
 
 
 class LegacyQualifiedQueryReadModel:
