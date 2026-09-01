@@ -75,7 +75,14 @@ PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = YES
 ### Current authorized frontier
 
 ```text
-BLOCKER-5 = NOT YET IMPLEMENTED
+BLOCKER_5_PREFLIGHT = READY
+BLOCKER_5 = OPENED_AT_PREFLIGHT_DESIGN_LEVEL
+
+PRODUCTION_SELECTOR_ADDED = NO
+NATIVE_ACTIVE = NO
+DUAL_WRITE = NO
+DUAL_READ = NO
+CUTOVER_OPENED = NO
 ```
 
 Blocker-5 is deployment and selection work, not new cognition or memory
@@ -88,6 +95,12 @@ service administration.
 This orientation update does not open or authorize a selector, native
 activation, dual write, dual read, an environment upgrade, cutover, rollback,
 or a production native service.
+
+The completed [Blocker-5 A0 production selection preflight](BLOCKER_5_A0_PRODUCTION_SELECTION_PREFLIGHT.md)
+freezes the entrypoint, environment, profile, selector/fence, lifecycle,
+fallback, rollback, crash, and rehearsal design. The next implementation slice
+is B5-A1: deliberate ordinary-environment convergence and requalification only.
+It does not begin selector, activation, or cutover implementation.
 
 ## 1. Current main project thread
 

@@ -12,6 +12,8 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 # Ensure the torment_fabric package root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -244,6 +246,34 @@ class TestMCPServerCreation(unittest.TestCase):
             tool_names = set(mcp._tool_manager._tools.keys())
         self.assertEqual(len(tool_names), 6,
                          f"Expected 6 tools (1 canonical + 5 convenience), got {len(tool_names)}: {tool_names}")
+
+
+class TestMCPNativeSelectionPreflight(unittest.TestCase):
+    """Freeze MCP's current legacy-only construction posture."""
+
+    def test_lazy_mcp_fabric_ignores_native_selector_names(self):
+        """No current MCP startup path can select or create a native core."""
+        with tempfile.TemporaryDirectory() as data_dir:
+            prior_fabric = mcp_mod._fabric
+            created = None
+            try:
+                mcp_mod._fabric = None
+                with patch.dict(os.environ, {
+                    "TORMENT_MCP_DATA_DIR": data_dir,
+                    "TORMENT_MEMORY_BACKEND": "native",
+                    "TORMENT_SUBSTRATE_ENABLE": "1",
+                    "TORMENT_NATIVE_MEMORY": "1",
+                    "TORMENT_SQLITE_INDEX_ENABLE": "0",
+                    "TORMENT_CHARACTER_ENABLE": "0",
+                }, clear=False):
+                    created = mcp_mod._get_fabric()
+                    self.assertIsNone(created.native_memory_binding)
+                    self.assertIsNone(created.native_memory_binding_readiness)
+                    self.assertFalse(list(Path(data_dir).rglob("*.db")))
+            finally:
+                if created is not None:
+                    created.close()
+                mcp_mod._fabric = prior_fabric
 
 
 class TestExposureTierFiltering(unittest.TestCase):

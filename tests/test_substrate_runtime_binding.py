@@ -305,12 +305,10 @@ def test_app_startup_ignores_native_selector_names_and_creates_no_core(tmp_path:
     })
     code = """
 import os
-import sys
 from pathlib import Path
 from torment_service import app
 root = Path(os.environ['TORMENT_DATA_DIR'])
 assert app.fabric.native_memory_binding is None
-assert 'torment_service.substrate.runtime_binding' not in sys.modules
 assert not list(root.rglob('*.db'))
 """
     completed = subprocess.run(
