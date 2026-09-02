@@ -448,26 +448,7 @@ class NativeMigrationRuntimeReadinessPreflight:
         )
 
     def _core_readiness(self, expected_core_id: UUID) -> tuple[CoreRuntimeReadiness, ...]:
-        result: list[CoreRuntimeReadiness] = []
-        actual = UUID(bytes=self._metadata.core_id)
-        if actual != expected_core_id:
-            result.append(CoreRuntimeReadiness.CORE_ID_MISMATCH)
-        if (self._metadata.schema_major, self._metadata.schema_minor) != (SCHEMA_MAJOR, SCHEMA_MINOR):
-            result.append(CoreRuntimeReadiness.SCHEMA_VERSION_NOT_CURRENT)
-        if self._metadata.core_role != "STAGING":
-            result.append(CoreRuntimeReadiness.CORE_ROLE_NOT_STAGING)
-        deployment = self._connection.execute(
-            "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
-        ).fetchall()
-        if len(deployment) != 1:
-            result.append(CoreRuntimeReadiness.DEPLOYMENT_NOT_LEGACY_ACTIVE)
-        else:
-            state, reference = deployment[0]
-            if state != "LEGACY_ACTIVE":
-                result.append(CoreRuntimeReadiness.DEPLOYMENT_NOT_LEGACY_ACTIVE)
-            if reference is not None:
-                result.append(CoreRuntimeReadiness.DEPLOYMENT_REFERENCES_CORE)
-        return (CoreRuntimeReadiness.QUALIFIED_STAGING_LEGACY_ACTIVE,) if not result else tuple(result)
+        return read_core_runtime_readiness(self._connection, expected_core_id)
 
     def _admitted_objects(self, snapshot_id: UUID) -> tuple[sqlite3.Row | tuple[Any, ...], ...]:
         return tuple(self._connection.execute(
@@ -872,7 +853,7 @@ class NativeMigrationRuntimeReadinessPreflight:
             try:
                 members = reader.list_ordered_current_motif_members(object_id)
                 member_count = len(members)
-                if not members:
+                if not members and not reader.is_certified_zero_member_migration_baseline(object_id):
                     reasons.append("MOTIF_HAS_NO_CURRENT_MEMBERS")
                 for member in members:
                     try:
@@ -977,6 +958,30 @@ class NativeMigrationRuntimeReadinessPreflight:
             )
             if common and (b4a or b4b):
                 candidates.append((target_id, intent))
+        if not candidates:
+            # B4C is a distinct, reader-certified zero-member topology.  It
+            # cannot be inferred from an empty list or folded into B4A/B4B's
+            # member-bearing baseline query above.
+            try:
+                reader = NativeMotifRuntimeReader(self._connection)
+                target_id = reader.resolve_certified_zero_member_migration_baseline(
+                    source_motif_object_id=source_object_id,
+                    source_motif_revision_id=source_revision_id,
+                    runtime_motif_id=runtime_id,
+                    source_state_payload=source_payload,
+                    target_lane_identity=(
+                        lane.provider, lane.model, lane.dimension,
+                        lane.representation_class, lane.generation,
+                        lane.derivation_contract_version, lane.encoding_id, lane.dtype,
+                    ),
+                    motif_alias_namespace_id=plan.motif_alias_namespace_id,
+                    motif_identity_namespace_id=plan.motif_identity_namespace_id,
+                    membership_identity_namespace_id=plan.membership_identity_namespace_id,
+                    target_semantic_scope_id=plan.target_semantic_scope_id,
+                )
+            except (SubstrateInvariantViolation, ValueError):
+                return None
+            return 0 if target_id is not None else None
         if len(candidates) != 1:
             return None
         target_id, intent = candidates[0]
@@ -1023,6 +1028,34 @@ class NativeMigrationRuntimeReadinessPreflight:
             """, (motif_object_id,),
         ).fetchone()
         return 0 if row is None else row[0]
+
+
+def read_core_runtime_readiness(
+    connection: sqlite3.Connection, expected_core_id: UUID,
+) -> tuple[CoreRuntimeReadiness, ...]:
+    """Read B1's shared staging-core/deployment gate without scope inference."""
+    if not isinstance(connection, sqlite3.Connection) or not isinstance(expected_core_id, UUID):
+        raise ValueError("B1 core readiness requires an open connection and expected UUID")
+    metadata = open_schema(connection, writable=False)
+    result: list[CoreRuntimeReadiness] = []
+    if UUID(bytes=metadata.core_id) != expected_core_id:
+        result.append(CoreRuntimeReadiness.CORE_ID_MISMATCH)
+    if (metadata.schema_major, metadata.schema_minor) != (SCHEMA_MAJOR, SCHEMA_MINOR):
+        result.append(CoreRuntimeReadiness.SCHEMA_VERSION_NOT_CURRENT)
+    if metadata.core_role != "STAGING":
+        result.append(CoreRuntimeReadiness.CORE_ROLE_NOT_STAGING)
+    deployment = connection.execute(
+        "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
+    ).fetchall()
+    if len(deployment) != 1:
+        result.append(CoreRuntimeReadiness.DEPLOYMENT_NOT_LEGACY_ACTIVE)
+    else:
+        state, reference = deployment[0]
+        if state != "LEGACY_ACTIVE":
+            result.append(CoreRuntimeReadiness.DEPLOYMENT_NOT_LEGACY_ACTIVE)
+        if reference is not None:
+            result.append(CoreRuntimeReadiness.DEPLOYMENT_REFERENCES_CORE)
+    return (CoreRuntimeReadiness.QUALIFIED_STAGING_LEGACY_ACTIVE,) if not result else tuple(result)
 
 
 def _validate_target_lane(lane: NativeRepresentationLane) -> None:

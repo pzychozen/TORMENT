@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from uuid import UUID
 
@@ -29,12 +30,38 @@ from torment_service.substrate.migration import (
     MigrationRuntimeMotifProjectionRequest,
     MigrationRuntimeMotifRegeometryProjectionRefused,
     MigrationRuntimeMotifRegeometryProjectionRequest,
+    MigrationRuntimeReadinessRequest,
     MigrationRuntimeScopePlan,
     MigrationRuntimeZeroMemberMotifProjectionRefused,
     MigrationRuntimeZeroMemberMotifProjectionRequest,
     NativeLegacyMigrationRehearsal,
     NativeMigrationRuntimeMotifProjectionService,
     NativeMigrationRuntimeMotifRegeometryProjectionService,
+    NativeMigrationRuntimeReadinessPreflight,
+    EvidenceAbsenceReason,
+    EvidenceOwnerBoundary,
+    EvidenceOwnerBoundaryKind,
+    EvidencePresenceExpectation,
+    EvidenceSemanticRole,
+    ExplicitSourceEvidence,
+    GeneralizedNativeRuntimeReadinessRequest,
+    GeneralizedScopeReadinessInput,
+    IdentityOnlyAgentObservation,
+    MaterializedRootScopePlan,
+    MaterializedScopePosture,
+    NativeGeneralizedRuntimeReadiness,
+    RootEvidenceManifest,
+    RootFeaturePosture,
+    RootNativeProductionAdmissionDescription,
+    RootRepresentationDisposition,
+    RootScopeKey,
+    RootScopeKind,
+    SourceOwnerClass,
+    WorkspaceRootAdmissionPlan,
+    ExpectedRootCensus,
+    RepresentationDispositionCount,
+    WorkspaceTopologyCounts,
+    WorkspaceNativeEmbedderIdentity,
     NativeMigrationRuntimeZeroMemberMotifProjectionService,
     create_snapshot_manifest,
 )
@@ -43,6 +70,7 @@ from torment_service.substrate.motifs import MotifState, NativeMotifService
 from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.runtime_binding import NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
+from test_substrate_workspace_runtime_readiness import _configuration
 
 
 _TARGET_PROVIDER = "st"
@@ -112,6 +140,8 @@ def _context(
     include_workspace_meta=True,
     malformed_workspace_meta=False,
     include_extra=True,
+    include_source_node=True,
+    scope_kind="PRIVATE_AGENT",
 ):
     qualified = open_temporary_test_connection(tmp_path / "b4c.db")
     connection = qualified.connection
@@ -143,9 +173,10 @@ def _context(
 
     root = tmp_path / "frozen" / "legacy"
     root.mkdir(parents=True)
-    (root / "nodes.jsonl").write_bytes(
-        _line({"eid": 7, "born_step": 1, "channel": 1, "payload": _payload()})
-    )
+    if include_source_node:
+        (root / "nodes.jsonl").write_bytes(
+            _line({"eid": 7, "born_step": 1, "channel": 1, "payload": _payload()})
+        )
     workspace = root / "workspaces" / "orchard"
     workspace.mkdir(parents=True)
     if include_workspace_meta:
@@ -202,8 +233,9 @@ def _context(
     plan = MigrationRuntimeScopePlan(
         legacy_source_namespace_id=source_ns,
         workspace_id="orchard",
-        scope_kind="PRIVATE_AGENT",
-        agent_id="aria",
+        scope_kind=scope_kind,
+        agent_id="aria" if scope_kind == "PRIVATE_AGENT" else None,
+        domain_id="reflection" if scope_kind == "SHARED_DOMAIN" else None,
         target_identity_namespace_id=object_ns,
         target_semantic_scope_id=target_scope,
         motif_alias_namespace_id=target_alias_ns,
@@ -339,6 +371,198 @@ def test_b4c_projects_exact_active_zero_member_state_and_reader_parity(tmp_path:
             dimension=_TARGET_DIMENSION,
             semantic_scope_id=facts["plan"].target_semantic_scope_id,
         ).shape == (_TARGET_DIMENSION,)
+    finally:
+        qualified.close()
+
+
+def test_b1_recognizes_only_reader_certified_b4c_zero_member_lineage(tmp_path: Path):
+    qualified, facts = _context(tmp_path)
+    try:
+        NativeMigrationRuntimeZeroMemberMotifProjectionService(
+            facts["connection"]
+        ).project_target_compatible_zero_member_motif(facts["request"])
+        report = NativeMigrationRuntimeReadinessPreflight(facts["connection"]).run(
+            MigrationRuntimeReadinessRequest(
+                facts["manifest"].legacy_snapshot_id,
+                facts["request"].expected_native_core_id,
+                (facts["plan"],),
+                facts["lane"],
+            )
+        )
+        motif = report.motif_items[0]
+        assert motif.readiness.value == "RUNTIME_READY_AS_IS", motif.reason_codes
+        assert motif.membership_count == 0
+        assert "MOTIF_HAS_NO_CURRENT_MEMBERS" not in motif.reason_codes
+    finally:
+        qualified.close()
+
+
+def test_b1_keeps_the_zero_member_blocker_without_b4c_certification(tmp_path: Path):
+    qualified, facts = _context(tmp_path)
+    try:
+        report = NativeMigrationRuntimeReadinessPreflight(facts["connection"]).run(
+            MigrationRuntimeReadinessRequest(
+                facts["manifest"].legacy_snapshot_id,
+                facts["request"].expected_native_core_id,
+                (facts["plan"],),
+                facts["lane"],
+            )
+        )
+        motif = report.motif_items[0]
+        assert motif.readiness.value != "RUNTIME_READY_AS_IS"
+        assert "MOTIF_HAS_NO_CURRENT_MEMBERS" in motif.reason_codes
+    finally:
+        qualified.close()
+
+
+def test_generalized_readiness_accepts_declared_empty_shared_b4c_scope(tmp_path: Path):
+    qualified, facts = _context(
+        tmp_path,
+        include_source_node=False,
+        scope_kind="SHARED_DOMAIN",
+    )
+    try:
+        NativeMigrationRuntimeZeroMemberMotifProjectionService(
+            facts["connection"]
+        ).project_target_compatible_zero_member_motif(facts["request"])
+        scope_key = RootScopeKey("orchard", RootScopeKind.SHARED, domain_id="reflection")
+        workspace_meta = facts["root"] / "workspaces" / "orchard" / "workspace_meta.json"
+        manifest = RootEvidenceManifest((
+            ExplicitSourceEvidence(
+                SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+                EvidenceOwnerBoundary("orchard", EvidenceOwnerBoundaryKind.WORKSPACE),
+                "workspace_meta.json", EvidenceSemanticRole.WORKSPACE_META,
+                EvidencePresenceExpectation.EXPECTED_PRESENT,
+                byte_length=workspace_meta.stat().st_size,
+                sha256_hex=hashlib.sha256(workspace_meta.read_bytes()).hexdigest(),
+            ),
+            ExplicitSourceEvidence(
+                SourceOwnerClass.SHARED_GRAPH_SOURCE,
+                EvidenceOwnerBoundary("orchard", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="reflection"),
+                "nodes.jsonl", EvidenceSemanticRole.NODES,
+                EvidencePresenceExpectation.EXPECTED_ABSENT,
+                scope_key=scope_key,
+                absence_reason=EvidenceAbsenceReason.EMPTY_GRAPH,
+            ),
+            ExplicitSourceEvidence(
+                SourceOwnerClass.MOTIF_SOURCE,
+                EvidenceOwnerBoundary("orchard", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="reflection"),
+                "motifs.json", EvidenceSemanticRole.MOTIFS,
+                EvidencePresenceExpectation.EXPECTED_PRESENT,
+                scope_key=scope_key,
+                byte_length=facts["motif_path"].stat().st_size,
+                sha256_hex=hashlib.sha256(facts["motif_path"].read_bytes()).hexdigest(),
+            ),
+        ))
+        description = RootNativeProductionAdmissionDescription(
+            data_root_identity="synthetic-generalized-b4c",
+            operator_identity="offline-test",
+            workspace_plans=(WorkspaceRootAdmissionPlan(
+                "orchard",
+                shared_materialized_scopes=(MaterializedRootScopePlan(
+                    scope_key, RootRepresentationDisposition.TARGET_COMPATIBLE,
+                    MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+                ),),
+            ),),
+            target_representation_lane=facts["lane"],
+            expected_census=ExpectedRootCensus(
+                1, 0, 1, 1,
+                tuple(RepresentationDispositionCount(item, 1 if item is RootRepresentationDisposition.TARGET_COMPATIBLE else 0)
+                      for item in RootRepresentationDisposition),
+                WorkspaceTopologyCounts(1, 0, 0, 0, 1, 0),
+            ),
+            explicit_source_manifest=manifest,
+            external_owner_observations=(),
+            feature_posture=RootFeaturePosture("synthetic", False, False),
+        )
+        request = GeneralizedNativeRuntimeReadinessRequest(
+            description=description,
+            data_root=facts["root"],
+            native_core_database_path=qualified.database_path,
+            expected_native_core_id=facts["request"].expected_native_core_id,
+            scope_inputs=(GeneralizedScopeReadinessInput(
+                scope_key,
+                MigrationRuntimeReadinessRequest(
+                    facts["manifest"].legacy_snapshot_id,
+                    facts["request"].expected_native_core_id,
+                    (facts["plan"],),
+                    facts["lane"],
+                ),
+            ),),
+            qualification_embedder_identity=WorkspaceNativeEmbedderIdentity(
+                facts["lane"].provider, facts["lane"].model, facts["lane"].dimension,
+            ),
+            post_write_configurations=(),
+        )
+        report = NativeGeneralizedRuntimeReadiness(facts["connection"]).run(request)
+        assert report.generalized_staging_runtime_ready, report.reason_codes
+        assert report.activation_ready is False
+        assert report.scope_items[0].memory_fact_count == 0
+        assert report.scope_items[0].motif_lineages == ("B4C",)
+        _native_memory(facts, "unexpected-empty-shared")
+        unexpected_memory = NativeGeneralizedRuntimeReadiness(facts["connection"]).run(request)
+        assert not unexpected_memory.generalized_staging_runtime_ready
+        assert "DECLARED_EMPTY_SCOPE_HAS_MEMORY" in unexpected_memory.reason_codes
+    finally:
+        qualified.close()
+
+
+def test_generalized_readiness_completes_no_memory_workspace_without_binding(tmp_path: Path):
+    qualified = open_temporary_test_connection(tmp_path / "no-memory.db")
+    try:
+        metadata = create_schema(qualified.connection)
+        root = tmp_path / "no-memory-root"
+        workspace = root / "workspaces" / "scaffold"
+        workspace.mkdir(parents=True)
+        workspace_meta = workspace / "workspace_meta.json"
+        workspace_meta.write_text(json.dumps({
+            "embed_provider": _TARGET_PROVIDER,
+            "embed_model": _TARGET_MODEL,
+            "embed_dim": _TARGET_DIMENSION,
+        }), encoding="utf-8")
+        manifest = RootEvidenceManifest((ExplicitSourceEvidence(
+            SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+            EvidenceOwnerBoundary("scaffold", EvidenceOwnerBoundaryKind.WORKSPACE),
+            "workspace_meta.json", EvidenceSemanticRole.WORKSPACE_META,
+            EvidencePresenceExpectation.EXPECTED_PRESENT,
+            byte_length=workspace_meta.stat().st_size,
+            sha256_hex=hashlib.sha256(workspace_meta.read_bytes()).hexdigest(),
+        ),))
+        description = RootNativeProductionAdmissionDescription(
+            data_root_identity="synthetic-no-memory",
+            operator_identity="offline-test",
+            workspace_plans=(WorkspaceRootAdmissionPlan(
+                "scaffold",
+                identity_only_agents=(IdentityOnlyAgentObservation("aria", "identity-observed"),),
+                no_memory_scope=True,
+            ),),
+            target_representation_lane=_lane(),
+            expected_census=ExpectedRootCensus(
+                1, 0, 0, 0,
+                tuple(RepresentationDispositionCount(item, 0) for item in RootRepresentationDisposition),
+                WorkspaceTopologyCounts(1, 0, 0, 1, 0, 0),
+            ),
+            explicit_source_manifest=manifest,
+            external_owner_observations=(),
+            feature_posture=RootFeaturePosture("synthetic", False, False),
+        )
+        report = NativeGeneralizedRuntimeReadiness(qualified.connection).run(
+            GeneralizedNativeRuntimeReadinessRequest(
+                description=description,
+                data_root=root,
+                native_core_database_path=qualified.database_path,
+                expected_native_core_id=UUID(bytes=metadata.core_id),
+                scope_inputs=(),
+                qualification_embedder_identity=WorkspaceNativeEmbedderIdentity(
+                    _TARGET_PROVIDER, _TARGET_MODEL, _TARGET_DIMENSION,
+                ),
+            )
+        )
+        assert report.generalized_staging_runtime_ready, report.reason_codes
+        assert report.a3d_binding_constructible and report.a3d_routing_constructible
+        assert report.a3d_post_write_constructible
+        assert report.workspace_items[0].materialized_scope_count == 0
+        assert report.workspace_items[0].no_memory_scope_expected
     finally:
         qualified.close()
 

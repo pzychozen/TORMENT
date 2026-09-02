@@ -91,6 +91,7 @@ class MemoryNormalizationLineage(StrEnum):
 class MotifProjectionLineage(StrEnum):
     B4A = "B4A"
     B4B = "B4B"
+    B4C = "B4C"
     NOT_RUNTIME_READY = "NOT_RUNTIME_READY"
 
 
@@ -435,6 +436,57 @@ class WorkspaceNativeRuntimeReadinessReport:
     embedder_call_count: int
     authority_expansion_count: int
     observed_core_fingerprint: tuple[tuple[str, int, str], ...]
+
+
+@dataclass(frozen=True)
+class ReadOnlyRuntimeCapabilityConstruction:
+    """Shared A3D construction result for bounded readiness consumers.
+
+    The object contains only transient constructor outputs and deterministic
+    refusal text.  It is neither a runtime registry nor durable authority.
+    """
+
+    binding: Any | None
+    capability: Any | None
+    binding_reason: str | None
+    capability_reason: str | None
+
+
+def construct_read_only_runtime_capability(
+    *,
+    connection: sqlite3.Connection,
+    native_core_database_path: str | Path,
+    expected_native_core_id: UUID,
+    plans: tuple[MigrationRuntimeScopePlan, ...],
+    target_lane: NativeRepresentationLane,
+    qualification_embedder_identity: WorkspaceNativeEmbedderIdentity,
+) -> ReadOnlyRuntimeCapabilityConstruction:
+    """Reuse A3D binding/routing construction without B5 topology policy."""
+    if not plans:
+        return ReadOnlyRuntimeCapabilityConstruction(None, None, "NO_SNAPSHOT_SCOPE_PLANS", None)
+    try:
+        runtime_scopes = tuple(_runtime_scope(plan) for plan in plans)
+        binding = prepare_native_memory_runtime_binding(
+            connection=connection,
+            core_database_path=native_core_database_path,
+            expected_core_id=expected_native_core_id,
+            scope_bindings=runtime_scopes,
+            representation_lane=target_lane,
+        )
+        validate_fabric_embedder(binding, qualification_embedder_identity)
+    except (SubstrateConfigurationError, ValueError) as exc:
+        return ReadOnlyRuntimeCapabilityConstruction(None, None, str(exc), None)
+    try:
+        routing_scopes = tuple(_routing_scope(plan) for plan in plans)
+        capability = prepare_native_fabric_routing_capability(
+            binding=binding,
+            connection=connection,
+            routing_scopes=routing_scopes,
+            expected_core_id=expected_native_core_id,
+        )
+    except (SubstrateConfigurationError, ValueError) as exc:
+        return ReadOnlyRuntimeCapabilityConstruction(binding, None, None, str(exc))
+    return ReadOnlyRuntimeCapabilityConstruction(binding, capability, None, None)
 
 
 class NativeWorkspaceRuntimeReadiness:
@@ -884,31 +936,20 @@ class NativeWorkspaceRuntimeReadiness:
         self, request: WorkspaceNativeRuntimeReadinessRequest,
         plans: tuple[MigrationRuntimeScopePlan, ...],
     ) -> tuple[Any | None, Any | None, str | None, str | None]:
-        if not plans:
-            return None, None, "NO_SNAPSHOT_SCOPE_PLANS", None
-        try:
-            runtime_scopes = tuple(_runtime_scope(plan) for plan in plans)
-            binding = prepare_native_memory_runtime_binding(
-                connection=self._connection,
-                core_database_path=request.native_core_database_path,
-                expected_core_id=request.expected_native_core_id,
-                scope_bindings=runtime_scopes,
-                representation_lane=request.target_lane,
-            )
-            validate_fabric_embedder(binding, request.qualification_embedder_identity)
-        except (SubstrateConfigurationError, ValueError) as exc:
-            return None, None, str(exc), None
-        try:
-            routing_scopes = tuple(_routing_scope(plan) for plan in plans)
-            capability = prepare_native_fabric_routing_capability(
-                binding=binding,
-                connection=self._connection,
-                routing_scopes=routing_scopes,
-                expected_core_id=request.expected_native_core_id,
-            )
-        except (SubstrateConfigurationError, ValueError) as exc:
-            return binding, None, None, str(exc)
-        return binding, capability, None, None
+        construction = construct_read_only_runtime_capability(
+            connection=self._connection,
+            native_core_database_path=request.native_core_database_path,
+            expected_native_core_id=request.expected_native_core_id,
+            plans=plans,
+            target_lane=request.target_lane,
+            qualification_embedder_identity=request.qualification_embedder_identity,
+        )
+        return (
+            construction.binding,
+            construction.capability,
+            construction.binding_reason,
+            construction.capability_reason,
+        )
 
     @staticmethod
     def _validate_post_write_configuration(

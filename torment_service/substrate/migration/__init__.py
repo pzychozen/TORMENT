@@ -90,6 +90,7 @@ from .runtime_readiness import (
     ScopePlanReadiness,
     SideStoreDisposition,
     SideStoreReadinessItem,
+    read_core_runtime_readiness,
 )
 from .runtime_normalization import (
     MigrationRuntimeNormalizationRefused,
@@ -150,6 +151,18 @@ from .workspace_runtime_readiness import (
     WorkspaceNativeRuntimeReadinessRequest,
     WorkspaceReadinessBlockerClass,
     WorkspaceSideStoreReadinessItem,
+    ReadOnlyRuntimeCapabilityConstruction,
+    construct_read_only_runtime_capability,
+)
+from .generalized_runtime_readiness import (
+    GeneralizedNativeRuntimeReadinessReport,
+    GeneralizedNativeRuntimeReadinessRequest,
+    GeneralizedReadinessReason,
+    GeneralizedScopeReadinessInput,
+    GeneralizedScopeReadinessItem,
+    GeneralizedTopologyReason,
+    GeneralizedWorkspaceReadinessItem,
+    NativeGeneralizedRuntimeReadiness,
 )
 from .existing_workspace_admission import (
     ExistingWorkspaceAdmissionDescriptor,
@@ -299,6 +312,7 @@ __all__ = [
     "ScopePlanReadiness",
     "SideStoreDisposition",
     "SideStoreReadinessItem",
+    "read_core_runtime_readiness",
     "MigrationRuntimeNormalizationRefused",
     "MigrationRuntimeNormalizationRequest",
     "MigrationRuntimeNormalizationResult",
@@ -345,6 +359,16 @@ __all__ = [
     "WorkspaceNativeRuntimeReadinessRequest",
     "WorkspaceReadinessBlockerClass",
     "WorkspaceSideStoreReadinessItem",
+    "ReadOnlyRuntimeCapabilityConstruction",
+    "construct_read_only_runtime_capability",
+    "GeneralizedNativeRuntimeReadinessReport",
+    "GeneralizedNativeRuntimeReadinessRequest",
+    "GeneralizedReadinessReason",
+    "GeneralizedScopeReadinessInput",
+    "GeneralizedScopeReadinessItem",
+    "GeneralizedTopologyReason",
+    "GeneralizedWorkspaceReadinessItem",
+    "NativeGeneralizedRuntimeReadiness",
     "ExistingWorkspaceAdmissionDescriptor",
     "ExistingWorkspaceAdmissionRefused",
     "ExistingWorkspaceAdmissionState",

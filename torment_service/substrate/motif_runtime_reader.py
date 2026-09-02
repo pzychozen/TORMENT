@@ -344,6 +344,160 @@ class NativeMotifRuntimeReader:
             )
         return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
 
+    def is_certified_zero_member_migration_baseline(self, motif_object_id: UUID) -> bool:
+        """Return whether one motif has B4C's exact durable baseline topology.
+
+        This is intentionally narrower than asking whether the motif currently
+        has no members.  Callers must use the result together with the current
+        membership facts appropriate to their own declared-topology contract.
+        """
+        _require_uuid("motif_object_id", motif_object_id)
+        self._get_current_motif(motif_object_id)
+        return self._is_certified_zero_member_migration_baseline(motif_object_id)
+
+    def has_runtime_motif_in_scope(
+        self, *, motif_alias_namespace_id: UUID, semantic_scope_id: UUID,
+    ) -> bool:
+        """Verify whether one scoped native runtime motif exists in a namespace.
+
+        This supports declared-zero-motif readiness without treating the
+        absence of source motifs as proof that an unexpected native motif is
+        absent.  Every observed motif is still validated through the ordinary
+        alias, state, and membership reader contracts.
+        """
+        _require_uuid("motif_alias_namespace_id", motif_alias_namespace_id)
+        _require_uuid("semantic_scope_id", semantic_scope_id)
+        rows = self._connection.execute(
+            """
+            SELECT o.object_id
+              FROM objects o
+              JOIN object_revisions r
+                ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id
+               AND r.revision_ordinal=o.current_revision_ordinal
+             WHERE o.object_kind=? AND r.effective_semantic_scope_id=?
+               AND r.existence_state='EXISTS'
+            """,
+            (DERIVED_MOTIF_OBJECT_KIND, native_id_to_bytes(semantic_scope_id)),
+        ).fetchall()
+        for (object_blob,) in rows:
+            aliases = self._connection.execute(
+                """SELECT alias_value FROM legacy_object_aliases
+                     WHERE legacy_source_namespace_id=? AND alias_kind=? AND object_id=?""",
+                (native_id_to_bytes(motif_alias_namespace_id), MOTIF_ID_ALIAS_KIND, object_blob),
+            ).fetchall()
+            if len(aliases) != 1:
+                raise SubstrateInvariantViolation(
+                    "native motif has no unique MOTIF_ID alias in the requested runtime namespace"
+                )
+            view = self._get_current_motif(UUID(bytes=object_blob))
+            if view.state.semantic_scope_id != semantic_scope_id or view.state.runtime_motif_id != aliases[0][0]:
+                raise SubstrateInvariantViolation("native motif state disagrees with its runtime alias or scope")
+            self.list_ordered_current_motif_members(view.motif_object_id)
+        return bool(rows)
+
+    def resolve_certified_zero_member_migration_baseline(
+        self,
+        *,
+        source_motif_object_id: UUID,
+        source_motif_revision_id: UUID,
+        runtime_motif_id: str,
+        source_state_payload: dict[str, Any],
+        target_lane_identity: tuple[str, str, int, str, int, str, str, str],
+        motif_alias_namespace_id: UUID,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        target_semantic_scope_id: UUID,
+    ) -> UUID | None:
+        """Resolve one fully certified, still-zero B4C peer for an admitted motif.
+
+        B1 and generalized readiness need source-to-runtime lineage, but must
+        not recreate B4C's transition/evidence inspection.  This reader-owned
+        helper proves the exceptional topology and returns no result for an
+        ordinary or non-zero native motif.
+        """
+        for field, value in (
+            ("source_motif_object_id", source_motif_object_id),
+            ("source_motif_revision_id", source_motif_revision_id),
+            ("motif_alias_namespace_id", motif_alias_namespace_id),
+            ("motif_identity_namespace_id", motif_identity_namespace_id),
+            ("membership_identity_namespace_id", membership_identity_namespace_id),
+            ("target_semantic_scope_id", target_semantic_scope_id),
+        ):
+            _require_uuid(field, value)
+        _nonempty_text("runtime_motif_id", runtime_motif_id)
+        if (
+            not isinstance(source_state_payload, dict)
+            or not isinstance(target_lane_identity, tuple)
+            or len(target_lane_identity) != 8
+        ):
+            raise ValueError("B4C lineage inputs are malformed")
+        source_state_digest = hashlib.sha256(
+            canonical_intent_text(source_state_payload).encode("utf-8")
+        ).hexdigest()
+        rows = self._connection.execute(
+            """
+            SELECT output.object_id
+              FROM operations operation
+              JOIN semantic_transitions transition
+                ON transition.operation_id=operation.operation_id
+              JOIN operation_outputs output ON output.operation_id=operation.operation_id
+             WHERE transition.transition_kind=?
+               AND transition.origin_kind='NATIVE'
+               AND operation.operation_kind=?
+               AND output.output_ordinal=0
+               AND output.output_kind='OBJECT'
+            """,
+            (
+                MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_TRANSITION_KIND,
+                MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OPERATION_KIND,
+            ),
+        ).fetchall()
+        matches: list[UUID] = []
+        for (target_blob,) in rows:
+            target_id = UUID(bytes=target_blob)
+            if not self.is_certified_zero_member_migration_baseline(target_id):
+                continue
+            if self.list_ordered_current_motif_members(target_id):
+                continue
+            intent_text = self._connection.execute(
+                """
+                SELECT operation.canonical_intent_json
+                  FROM objects object_row
+                  JOIN semantic_transitions transition
+                    ON transition.transition_id=object_row.creating_transition_id
+                  JOIN operations operation ON operation.operation_id=transition.operation_id
+                 WHERE object_row.object_id=?
+                """,
+                (target_blob,),
+            ).fetchone()
+            if intent_text is None:
+                raise SubstrateInvariantViolation("zero-member migration baseline intent is missing")
+            try:
+                intent = json.loads(intent_text[0])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise SubstrateInvariantViolation("zero-member migration baseline intent is malformed") from exc
+            evidence = intent.get("evidence") if isinstance(intent, dict) else None
+            if not isinstance(evidence, dict):
+                raise SubstrateInvariantViolation("zero-member migration baseline evidence is incomplete")
+            expected = {
+                "source_motif_object_id": str(source_motif_object_id),
+                "source_motif_revision_id": str(source_motif_revision_id),
+                "runtime_motif_id": runtime_motif_id,
+                "source_state_digest": source_state_digest,
+                "target_lane_identity": list(target_lane_identity),
+                "motif_alias_namespace_id": str(motif_alias_namespace_id),
+                "motif_identity_namespace_id": str(motif_identity_namespace_id),
+                "membership_identity_namespace_id": str(membership_identity_namespace_id),
+                "target_semantic_scope_id": str(target_semantic_scope_id),
+                "source_member_count": 0,
+            }
+            if all(evidence.get(key) == value for key, value in expected.items()):
+                matches.append(target_id)
+        if len(matches) > 1:
+            raise SubstrateInvariantViolation("zero-member migration baseline lineage is ambiguous")
+        return matches[0] if matches else None
+
     def _has_native_merge_projection(self, motif_object_id: UUID) -> bool:
         """A merge's durable transition makes sorted-union ordering explicit."""
         return self._connection.execute(
