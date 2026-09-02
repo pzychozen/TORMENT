@@ -126,6 +126,13 @@ from .runtime_motif_regeometry_projection import (
     NativeMigrationRuntimeMotifRegeometryProjectionService,
     PreparedLegacyMotifRuntimeRegeometryProjection,
 )
+from .runtime_zero_member_motif_projection import (
+    MigrationRuntimeZeroMemberMotifProjectionRefused,
+    MigrationRuntimeZeroMemberMotifProjectionRequest,
+    MigrationRuntimeZeroMemberMotifProjectionResult,
+    NativeMigrationRuntimeZeroMemberMotifProjectionService,
+    PreparedLegacyZeroMemberMotifProjection,
+)
 from .workspace_runtime_readiness import (
     MemoryNormalizationLineage,
     MotifProjectionLineage,
@@ -317,6 +324,11 @@ __all__ = [
     "MigrationRuntimeMotifRegeometryProjectionResult",
     "NativeMigrationRuntimeMotifRegeometryProjectionService",
     "PreparedLegacyMotifRuntimeRegeometryProjection",
+    "MigrationRuntimeZeroMemberMotifProjectionRefused",
+    "MigrationRuntimeZeroMemberMotifProjectionRequest",
+    "MigrationRuntimeZeroMemberMotifProjectionResult",
+    "NativeMigrationRuntimeZeroMemberMotifProjectionService",
+    "PreparedLegacyZeroMemberMotifProjection",
     "MemoryNormalizationLineage",
     "MotifProjectionLineage",
     "NativeWorkspaceRuntimeReadiness",

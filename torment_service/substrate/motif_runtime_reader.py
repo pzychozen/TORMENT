@@ -6,6 +6,8 @@ allocation, routing, binding, or activation behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import sqlite3
 from typing import Any
 from uuid import UUID
@@ -20,10 +22,15 @@ from ..motif_decision import (
 )
 from ..motif_geometry import motif_radius_from_member_vectors
 from .compat_embedding_reader import NativeCompatEmbeddingReader
+from .canonical_intent import canonical_intent_text
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .ids import native_id_to_bytes
 from .motifs import (
     DERIVED_MOTIF_OBJECT_KIND,
+    MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_CONTRACT,
+    MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OPERATION_KIND,
+    MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OUTPUT_ROLE,
+    MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_TRANSITION_KIND,
     MOTIF_ID_ALIAS_KIND,
     MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,
     NativeMotifView,
@@ -49,6 +56,9 @@ _MIGRATION_BASELINE_TOPOLOGIES = {
         "MIGRATION_RUNTIME_MOTIF_REGEOMETRY_PROJECTION_MEMBERSHIP",
     ),
 }
+_ZERO_MEMBER_TARGET_LANE_TAIL = (
+    "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR", "float32",
+)
 
 
 class _ReadOnlyRepresentationPayloadReader:
@@ -240,10 +250,19 @@ class NativeMotifRuntimeReader:
             return self._merge_ordered_members(
                 motif_object_id, memberships, all_memberships,
             )
+        if self._is_certified_zero_member_migration_baseline(motif_object_id):
+            return self._ordered_zero_member_migration_members(
+                motif_object_id, memberships,
+            )
         projected_baseline = self._migration_projection_baseline(motif_object_id)
         if projected_baseline is not None:
             return self._ordered_projected_members(
                 motif_object_id, memberships, projected_baseline, all_memberships,
+            )
+
+        if not memberships and not all_memberships:
+            raise SubstrateInvariantViolation(
+                "native motif has zero current memberships without certified baseline evidence"
             )
 
         # Ordinary native motifs retain the original publication-order rule.
@@ -390,6 +409,168 @@ class NativeMotifRuntimeReader:
             ))
         return tuple(ordered)
 
+    def _is_certified_zero_member_migration_baseline(self, motif_object_id: UUID) -> bool:
+        """Recognize only B4C's exact one-object, zero-member publication.
+
+        An empty membership query is never its own authority.  The motif's
+        creating transition, operation intent, R1 output/effect, and absence
+        of baseline relationship publication must all agree before an active
+        zero-member read model is allowed.
+        """
+        rows = self._connection.execute(
+            """
+            SELECT t.transition_id,t.operation_id,t.transition_kind,t.origin_kind,
+                   operation.operation_kind,operation.canonical_intent_json
+              FROM objects o
+              JOIN semantic_transitions t ON t.transition_id=o.creating_transition_id
+              JOIN operations operation ON operation.operation_id=t.operation_id
+             WHERE o.object_id=?
+            """,
+            (native_id_to_bytes(motif_object_id),),
+        ).fetchall()
+        if not rows:
+            # Generic-object writers do not populate ``creating_transition``.
+            # Such a malformed DERIVED_MOTIF can never be B4C authority; the
+            # caller will fail closed through ordinary zero-member handling.
+            return False
+        if len(rows) != 1:
+            raise SubstrateInvariantViolation("native motif creation transition is ambiguous")
+        transition_id, operation_id, kind, origin, operation_kind, intent_text = rows[0]
+        if kind != MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_TRANSITION_KIND:
+            return False
+        if (
+            origin != "NATIVE"
+            or operation_kind != MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OPERATION_KIND
+        ):
+            raise SubstrateInvariantViolation("zero-member migration baseline has invalid operation identity")
+        outputs = self._connection.execute(
+            """
+            SELECT output_ordinal,output_role,output_kind,object_id,object_revision_id,
+                   object_revision_ordinal,relationship_id,relationship_revision_id,
+                   relationship_revision_ordinal
+              FROM operation_outputs
+             WHERE operation_id=?
+             ORDER BY output_ordinal
+            """,
+            (operation_id,),
+        ).fetchall()
+        if (
+            len(outputs) != 1
+            or outputs[0][0:6] != (
+                0,
+                MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OUTPUT_ROLE,
+                "OBJECT",
+                native_id_to_bytes(motif_object_id),
+                outputs[0][4],
+                1,
+            )
+            or outputs[0][4] is None
+            or any(value is not None for value in outputs[0][6:])
+        ):
+            raise SubstrateInvariantViolation("zero-member migration baseline output is malformed")
+        if self._connection.execute(
+            """
+            SELECT object_revision_id,object_revision_ordinal
+              FROM object_revision_effects
+             WHERE transition_id=? AND object_id=?
+            """,
+            (transition_id, native_id_to_bytes(motif_object_id)),
+        ).fetchall() != [(outputs[0][4], 1)]:
+            raise SubstrateInvariantViolation("zero-member migration baseline motif effect is malformed")
+        if self._connection.execute(
+            "SELECT 1 FROM relationship_revision_effects WHERE transition_id=?",
+            (transition_id,),
+        ).fetchone() is not None or self._connection.execute(
+            "SELECT 1 FROM relationships WHERE creating_transition_id=?",
+            (transition_id,),
+        ).fetchone() is not None:
+            raise SubstrateInvariantViolation("zero-member migration baseline emitted membership evidence")
+        row = self._connection.execute(
+            """
+            SELECT r.effective_semantic_scope_id,r.payload_format,r.payload_text
+              FROM object_revisions r
+             WHERE r.object_id=? AND r.object_revision_id=? AND r.revision_ordinal=1
+            """,
+            (native_id_to_bytes(motif_object_id), outputs[0][4]),
+        ).fetchone()
+        if row is None or row[1] != "JSON" or row[2] is None:
+            raise SubstrateInvariantViolation("zero-member migration baseline has no valid motif R1")
+        state = _state_from_payload(UUID(bytes=row[0]), row[2])
+        try:
+            intent = json.loads(intent_text)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise SubstrateInvariantViolation("zero-member migration baseline intent is malformed") from exc
+        if not isinstance(intent, dict):
+            raise SubstrateInvariantViolation("zero-member migration baseline intent is malformed")
+        evidence = intent.get("evidence")
+        if (
+            intent.get("kind") != MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_OPERATION_KIND
+            or intent.get("state") != state.intent()
+            or not isinstance(evidence, dict)
+            or evidence.get("contract") != MIGRATION_ZERO_MEMBER_MOTIF_BASELINE_CONTRACT
+            or evidence.get("source_member_count") != 0
+            or evidence.get("runtime_motif_id") != state.runtime_motif_id
+            or evidence.get("target_semantic_scope_id") != str(state.semantic_scope_id)
+            or evidence.get("source_state_digest") != _motif_state_digest(state)
+            or not _exact_zero_member_evidence_shape(evidence)
+        ):
+            raise SubstrateInvariantViolation("zero-member migration baseline evidence is incomplete")
+        return True
+
+    def _ordered_zero_member_migration_members(
+        self,
+        motif_object_id: UUID,
+        memberships: list[tuple[Any, ...]],
+    ) -> tuple[NativeOrderedMotifMember, ...]:
+        """Use normal successor publication evidence after the B4C baseline."""
+        if not memberships:
+            return ()
+        effects = self._connection.execute(
+            """
+            SELECT effect.relationship_id,effect.relationship_revision_id,
+                   effect.relationship_revision_ordinal,motif_effect.object_revision_ordinal,
+                   transition.transition_kind
+              FROM relationship_revision_effects effect
+              JOIN object_revision_effects motif_effect
+                ON motif_effect.transition_id=effect.transition_id
+               AND motif_effect.object_id=?
+              JOIN semantic_transitions transition ON transition.transition_id=effect.transition_id
+            """,
+            (native_id_to_bytes(motif_object_id),),
+        ).fetchall()
+        evidence: dict[tuple[bytes, bytes, int], tuple[int, str]] = {}
+        for relationship_id, revision_id, ordinal, motif_ordinal, transition_kind in effects:
+            key = (relationship_id, revision_id, ordinal)
+            if key in evidence:
+                raise SubstrateInvariantViolation("zero-member successor has ambiguous membership evidence")
+            evidence[key] = (motif_ordinal, transition_kind)
+        ordered: list[NativeOrderedMotifMember] = []
+        seen_members: set[bytes] = set()
+        seen_orders: set[int] = set()
+        for relationship_id, revision_id, ordinal, member_object_id, member_scope_id, member_kind in memberships:
+            if member_kind != _MEMORY_OBJECT_KIND:
+                raise SubstrateInvariantViolation("native motif membership does not target a LEGACY_CORE_NODE")
+            if member_object_id in seen_members:
+                raise SubstrateInvariantViolation("current motif memberships duplicate one member identity")
+            item = evidence.get((relationship_id, revision_id, ordinal))
+            if item is None or item[0] <= 1 or item[1] not in {
+                "NATIVE_MOTIF_ADD_MEMBER", "NATIVE_MEMORY_MOTIF_COMPOSITION",
+            }:
+                raise SubstrateInvariantViolation(
+                    "zero-member migration successor lacks ordinary append evidence"
+                )
+            if item[0] in seen_orders:
+                raise SubstrateInvariantViolation("current motif memberships share one publication ordinal")
+            seen_members.add(member_object_id)
+            seen_orders.add(item[0])
+            ordered.append(
+                NativeOrderedMotifMember(
+                    UUID(bytes=relationship_id), UUID(bytes=revision_id), ordinal,
+                    UUID(bytes=member_object_id), UUID(bytes=member_scope_id), item[0],
+                )
+            )
+        return tuple(sorted(ordered, key=lambda member: member.motif_publication_ordinal))
+
     def _migration_projection_baseline(
         self, motif_object_id: UUID
     ) -> dict[tuple[bytes, bytes, int], int] | None:
@@ -407,6 +588,8 @@ class NativeMotifRuntimeReader:
              WHERE o.object_id=?
             """, (native_id_to_bytes(motif_object_id),)
         ).fetchall()
+        if not rows:
+            return None
         if len(rows) != 1:
             raise SubstrateInvariantViolation("native motif creation transition is ambiguous")
         transition_id, operation_id, kind, origin, operation_kind = rows[0]
@@ -691,3 +874,66 @@ def _nonempty_text(field: str, value: Any) -> None:
 def _positive_dimension(value: Any) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ValueError("expected dimension must be a positive integer")
+
+
+def _motif_state_digest(state: Any) -> str:
+    return hashlib.sha256(
+        canonical_intent_text(state.payload()).encode("utf-8")
+    ).hexdigest()
+
+
+def _exact_zero_member_evidence_shape(evidence: dict[str, Any]) -> bool:
+    """Validate the durable B4C witness without treating empty as authority."""
+    uuid_keys = (
+        "native_core_id", "snapshot_id", "source_namespace_id",
+        "source_motif_object_id", "source_motif_revision_id",
+        "source_operation_id", "source_transition_id",
+        "source_motif_artifact_id", "workspace_metadata_artifact_id",
+        "motif_identity_namespace_id", "membership_identity_namespace_id",
+        "motif_alias_namespace_id", "target_semantic_scope_id",
+    )
+    if any(not _uuid_text(evidence.get(key)) for key in uuid_keys):
+        return False
+    digest_keys = (
+        "source_motif_artifact_digest", "workspace_metadata_digest",
+        "scope_plan_digest", "source_state_digest", "source_membership_digest",
+    )
+    if any(not _sha256_text(evidence.get(key)) for key in digest_keys):
+        return False
+    source_lane = evidence.get("source_geometry_lane")
+    target_lane = evidence.get("target_lane_identity")
+    if (
+        not isinstance(source_lane, list)
+        or len(source_lane) != 3
+        or not isinstance(source_lane[0], str)
+        or not source_lane[0]
+        or not isinstance(source_lane[1], str)
+        or not source_lane[1]
+        or not isinstance(source_lane[2], int)
+        or isinstance(source_lane[2], bool)
+        or source_lane[2] < 1
+        or not isinstance(target_lane, list)
+        or len(target_lane) != 8
+        or target_lane[:3] != source_lane
+        or target_lane[3:] != list(_ZERO_MEMBER_TARGET_LANE_TAIL)
+    ):
+        return False
+    return isinstance(evidence.get("runtime_motif_id"), str) and bool(evidence["runtime_motif_id"])
+
+
+def _uuid_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _sha256_text(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
