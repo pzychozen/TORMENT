@@ -473,7 +473,13 @@ class NativeQualifiedQueryReadModel:
     never from a guessed agent/domain relationship.
     """
 
-    def __init__(self, recovered_runtime: Any, *, embedder: Any) -> None:
+    def __init__(
+        self,
+        recovered_runtime: Any,
+        *,
+        embedder: Any,
+        srg_process_state: NativeSRGProcessState | None = None,
+    ) -> None:
         if not hasattr(recovered_runtime, "scopes") or not hasattr(recovered_runtime, "lookup_private") or not hasattr(recovered_runtime, "lookup_shared"):
             raise QualifiedQueryReadModelError("native query read model requires recovered multi-scope runtime")
         self._runtime = recovered_runtime
@@ -489,7 +495,12 @@ class NativeQualifiedQueryReadModel:
         self._embedder = embedder
         # A3 query breathing uses the existing process-local native SRG owner;
         # this model never publishes a SQLite successor merely because it read.
-        self._srg_process_state = NativeSRGProcessState()
+        # Qualification callers retain historical self-owned state, while the
+        # production request owner can pass its service-process state so it is
+        # not reset for every request.
+        if srg_process_state is not None and not isinstance(srg_process_state, NativeSRGProcessState):
+            raise QualifiedQueryReadModelError("native query SRG state must be NativeSRGProcessState")
+        self._srg_process_state = srg_process_state or NativeSRGProcessState()
         self._private_lanes: dict[str, _NativeQualifiedQueryLane] = {}
         self._shared_lanes: dict[str, _NativeQualifiedQueryLane] = {}
 

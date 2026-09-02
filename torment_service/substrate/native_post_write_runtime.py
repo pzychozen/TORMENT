@@ -34,6 +34,7 @@ from .fabric_native_routing import (
     NativeFabricMemoryRouter,
     NativeFabricRouteResult,
     NativeFabricRoutingCapability,
+    NativeProductionRoutingCapability,
     NativeFabricRoutingScope,
     _revalidate_capability_for_route,
 )
@@ -364,7 +365,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
 
     def __init__(
         self,
-        capability: NativeFabricRoutingCapability,
+        capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
         configuration: NativePostWriteQualificationConfiguration,
         *,
         _prepared_marker: object | None = None,
@@ -877,7 +878,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             embedder = external.character_embedder
             if embedder is None:
                 raise SubstrateConfigurationError("Character-qualified post-write requires the caller-owned embedder")
-            validate_fabric_embedder(self._capability.binding, embedder)
+            _validate_capability_embedder(self._capability, embedder)
             seed_id = str(external.identity.seed.get("seed_id", "") or "").strip()
             store = external.character_store
             if store is None:
@@ -1231,11 +1232,11 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
 
 def prepare_native_fabric_post_write_adapter(
     *,
-    capability: NativeFabricRoutingCapability,
+    capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
     configuration: NativePostWriteQualificationConfiguration,
 ) -> NativeFabricPostWriteAdapter:
-    """Prepare a staging-only adapter without opening a durable connection."""
-    if not isinstance(capability, NativeFabricRoutingCapability):
+    """Prepare a staging or owner-prepared active adapter without opening SQLite."""
+    if not isinstance(capability, (NativeFabricRoutingCapability, NativeProductionRoutingCapability)):
         raise SubstrateConfigurationError("post-write adapter requires prepared routing capability")
     if not isinstance(configuration, NativePostWriteQualificationConfiguration):
         raise SubstrateConfigurationError("post-write adapter requires explicit qualification configuration")
@@ -1326,6 +1327,23 @@ def _forbidden_random_chance(*_args: Any, **_kwargs: Any) -> bool:
 
 def _forbidden_checkpoint(*_args: Any, **_kwargs: Any) -> None:
     raise AssertionError("native post-write adapter attempted excluded checkpoint work")
+
+
+def _validate_capability_embedder(
+    capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
+    embedder: Any,
+) -> None:
+    """Preserve lane validation without fabricating a STAGING binding."""
+    if isinstance(capability, NativeFabricRoutingCapability):
+        validate_fabric_embedder(capability.binding, embedder)
+        return
+    lane = capability.representation_lane
+    if (
+        getattr(embedder, "provider", None) != lane.provider
+        or getattr(embedder, "model", None) != lane.model
+        or getattr(embedder, "dim", None) != lane.dimension
+    ):
+        raise SubstrateConfigurationError("production post-write embedder does not match the native lane")
 
 
 def _require_qualified(value: NativePostWriteBehavior, name: str) -> None:

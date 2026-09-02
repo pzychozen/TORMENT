@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 import sqlite3
+import threading
 import time
 from typing import Any, Mapping, Protocol
 from uuid import UUID
@@ -27,13 +28,14 @@ from .errors import (
     SubstrateError,
     SubstrateInvariantViolation,
 )
-from .ids import native_id_to_bytes
+from .ids import native_id_from_bytes, native_id_to_bytes
 from .runtime_binding import (
     NativeMemoryRuntimeBinding,
     NativeMemoryRuntimeScope,
     NativeRepresentationLane,
     prepare_native_memory_runtime_binding,
 )
+from .schema import require_current_schema
 
 
 _MEMORY_OBJECT_KIND = "LEGACY_CORE_NODE"
@@ -196,13 +198,7 @@ class NativeMemoryVectorRuntime:
             configuration.core_database_path
         )
         try:
-            self._binding: NativeMemoryRuntimeBinding = prepare_native_memory_runtime_binding(
-                connection=self._opened.connection,
-                core_database_path=configuration.core_database_path,
-                expected_core_id=configuration.expected_core_id,
-                scope_bindings=(configuration.scope,),
-                representation_lane=configuration.representation_lane,
-            )
+            self._qualify_opened_core()
             self._connection = self._opened.connection
             self._compatibility = NativeMemoryCompatibilityFacade(self._connection)
             self._embeddings = NativeCompatEmbeddingReader(self._connection)
@@ -213,7 +209,18 @@ class NativeMemoryVectorRuntime:
         self._dirty = True
         self._last_invalidation_reason: str | None = "initial-build"
         self._closed = False
+        self._thread_id = threading.get_ident()
         self._rebuild_count = 0
+
+    def _qualify_opened_core(self) -> None:
+        """Retain the original STAGING-only reader preparation law."""
+        self._binding: NativeMemoryRuntimeBinding = prepare_native_memory_runtime_binding(
+            connection=self._opened.connection,
+            core_database_path=self._configuration.core_database_path,
+            expected_core_id=self._configuration.expected_core_id,
+            scope_bindings=(self._configuration.scope,),
+            representation_lane=self._configuration.representation_lane,
+        )
 
     @property
     def configuration(self) -> NativeMemoryVectorRuntimeConfiguration:
@@ -759,6 +766,37 @@ class NativeMemoryVectorRuntime:
     def _require_open(self) -> None:
         if self._closed:
             raise RuntimeError("native memory vector runtime is closed")
+        if threading.get_ident() != self._thread_id:
+            raise RuntimeError("native memory vector runtime cannot cross threads")
+
+
+class NativeProductionMemoryVectorRuntime(NativeMemoryVectorRuntime):
+    """Active-core reader that reuses the native vector algorithm unchanged.
+
+    This class is deliberately only a resource primitive.  It establishes no
+    deployment authority: the production owner must have revalidated an exact
+    B5 agreement before constructing the recovered active scope that uses it.
+    The ordinary ``NativeMemoryVectorRuntime`` remains STAGING-only.
+    """
+
+    def _qualify_opened_core(self) -> None:
+        connection = self._opened.connection
+        metadata = require_current_schema(connection)
+        if native_id_from_bytes(metadata.core_id) != self._configuration.expected_core_id:
+            raise SubstrateConfigurationError("production vector reader opened another core")
+        if metadata.core_role != "ACTIVE_CORE":
+            raise SubstrateConfigurationError("production vector reader requires an ACTIVE_CORE")
+        deployment = connection.execute(
+            "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
+        ).fetchall()
+        if deployment != [("NATIVE_ACTIVE", native_id_to_bytes(self._configuration.expected_core_id))]:
+            raise SubstrateConfigurationError("production vector reader requires NATIVE_ACTIVE deployment")
+        # The lane/scope validators are fact checks only.  They do not create
+        # a STAGING binding and therefore cannot widen that authority seam.
+        from .runtime_binding import _validate_representation_lane, _validate_scope_bindings
+
+        _validate_representation_lane(self._configuration.representation_lane)
+        _validate_scope_bindings(connection, (self._configuration.scope,))
 
 
 def _validate_embedder(
@@ -838,6 +876,7 @@ def _snapshot_currentness_signature(
 
 __all__ = [
     "NativeMemoryVectorRuntime",
+    "NativeProductionMemoryVectorRuntime",
     "NativeMemoryVectorRuntimeConfiguration",
     "NativeVectorRuntimeEmbedder",
     "NativeVectorRuntimeRow",

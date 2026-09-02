@@ -23,6 +23,8 @@ from ..character_seed_witness import (
 from ..compat import NativeMemoryCompatibilityFacade
 from ..compat_embedding_reader import NativeCompatEmbeddingReader
 from ..connection import open_existing_native_core_connection, open_new_native_core_connection
+from ..deployment_core_maintenance import contained_core_path
+from ..deployment_types import DeploymentResolution, DeploymentResolutionMode, DeploymentState
 from ..errors import SubstrateConfigurationError
 from ..fabric_native_routing import (
     NativeFabricRoutingScope, prepare_native_fabric_routing_capability,
@@ -32,6 +34,7 @@ from ..motif_runtime_reader import NativeMotifRuntimeReader
 from ..native_memory_runtime_access import NativePostWriteMemoryAccess
 from ..native_memory_vector_runtime import (
     NativeMemoryVectorRuntime, NativeMemoryVectorRuntimeConfiguration,
+    NativeProductionMemoryVectorRuntime,
     NativeVectorRuntimeEmbedder,
 )
 from ..native_post_write_runtime import (
@@ -357,6 +360,61 @@ class RecoveredExistingWorkspaceNativeMultiScopeScope:
         if seed is None or not hasattr(seed, "to_dict") or seed.to_dict() != dict(witness.seed_definition):
             raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_CHARACTER_STORE_SEED_MISMATCH")
         return seed
+
+
+@dataclass(frozen=True)
+class RecoveredActiveExistingWorkspaceNativeMultiScopeScope:
+    """Active-core resource view over one already-recovered admission scope.
+
+    It deliberately delegates descriptor, reader, and Character-seed facts to
+    the established recovered scope.  Its only distinct behavior is choosing
+    the ACTIVE_CORE vector resource, after the B5 owner has recovered exact
+    deployment authority.  Thus the recovery model is not forked merely to
+    select a different request-scoped reader lifetime.
+    """
+
+    recovered_scope: RecoveredExistingWorkspaceNativeMultiScopeScope
+
+    @property
+    def core_database_path(self) -> Path:
+        return self.recovered_scope.core_database_path
+
+    @property
+    def native_core_id(self) -> UUID:
+        return self.recovered_scope.native_core_id
+
+    @property
+    def representation_lane(self) -> NativeRepresentationLane:
+        return self.recovered_scope.representation_lane
+
+    @property
+    def memory_runtime_scope(self) -> NativeMemoryRuntimeScope:
+        return self.recovered_scope.memory_runtime_scope
+
+    @property
+    def fabric_routing_scope(self) -> NativeFabricRoutingScope:
+        return self.recovered_scope.fabric_routing_scope
+
+    @property
+    def character_seed_witness(self) -> CharacterSeedWitness | None:
+        return self.recovered_scope.character_seed_witness
+
+    def open_readers(self) -> RecoveredExistingWorkspaceNativeMultiScopeReaders:
+        return self.recovered_scope.open_readers()
+
+    def new_vector_runtime(self, *, embedder: NativeVectorRuntimeEmbedder) -> NativeMemoryVectorRuntime:
+        return NativeProductionMemoryVectorRuntime(
+            NativeMemoryVectorRuntimeConfiguration(
+                self.core_database_path,
+                self.native_core_id,
+                self.memory_runtime_scope,
+                self.representation_lane,
+            ),
+            embedder=embedder,
+        )
+
+    def require_external_character_seed(self, character_store: Any) -> Any:
+        return self.recovered_scope.require_external_character_seed(character_store)
 
 
 @dataclass(frozen=True)
@@ -1088,6 +1146,101 @@ def recover_existing_workspace_native_multi_scope_runtime(*, native_core_databas
     return runtime
 
 
+def recover_active_existing_workspace_native_multi_scope_runtime(
+    *,
+    data_root: str | Path,
+    agreement: DeploymentResolution,
+    admission_descriptor_path: str | Path,
+    character_store: Any | None = None,
+) -> RecoveredExistingWorkspaceNativeMultiScopeRuntime:
+    """Recover the established multi-scope shape under exact B5 active facts.
+
+    This is intentionally separate from the original STAGING recovery above:
+    that function continues to invoke the STAGING-only runtime binding without
+    exception.  The active path accepts no core path or UUID from its caller;
+    it derives the single contained core only from a fresh B5-A2 agreement.
+    """
+
+    if not isinstance(agreement, DeploymentResolution):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_AGREEMENT_REQUIRED")
+    if agreement.mode is not DeploymentResolutionMode.NATIVE_AGREEMENT:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_AGREEMENT_REQUIRED")
+    state = agreement.selector_state
+    witness = agreement.core_witness
+    if (
+        state is None
+        or witness is None
+        or state.deployment_state is not DeploymentState.NATIVE_ACTIVE
+        or witness.deployment_state is not DeploymentState.NATIVE_ACTIVE
+        or witness.core_role != "ACTIVE_CORE"
+        or state.core_id != witness.core_id
+        or state.descriptor_digest != witness.descriptor_digest
+        or state.profile_digest != witness.profile_digest
+        or state.core_witness_digest != witness.digest
+        or state.core_relative_path is None
+    ):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_AGREEMENT_MISMATCH")
+
+    descriptor = load_existing_workspace_multi_scope_admission_descriptor(admission_descriptor_path)
+    if (
+        descriptor.state is not ExistingWorkspaceMultiScopeAdmissionState.ADMISSION_COMPLETE
+        or descriptor.digest != state.descriptor_digest
+        or descriptor.native_core_id != witness.core_id
+    ):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_DESCRIPTOR_MISMATCH")
+    core_path = contained_core_path(
+        data_root=data_root,
+        core_relative_path=state.core_relative_path,
+        require_exists=True,
+    )
+    recovered_scopes = tuple(
+        RecoveredExistingWorkspaceNativeMultiScopeScope(
+            core_path,
+            descriptor.native_core_id,
+            descriptor.representation_lane,
+            _runtime_scope(plan := _plan_from_payload(entry["plan"])),
+            _routing_scope(plan),
+            _character_witness_from_lane(entry, plan),
+        )
+        for entry in descriptor.payload["lanes"]
+    )
+    with open_existing_native_core_connection(core_path) as qualified:
+        metadata = open_schema(qualified.connection, writable=False)
+        if native_id_from_bytes(metadata.core_id) != witness.core_id:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_WRONG_CORE")
+        if metadata.core_role != "ACTIVE_CORE":
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_NOT_ACTIVE")
+        deployment = qualified.connection.execute(
+            "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
+        ).fetchall()
+        if deployment != [("NATIVE_ACTIVE", native_id_to_bytes(witness.core_id))]:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_NOT_ACTIVE")
+        # These are the exact existing scope/lane fact checks used by the
+        # STAGING binding.  They are deliberately not a call to that binding,
+        # whose STAGING guard must remain intact.
+        from ..runtime_binding import _validate_representation_lane, _validate_scope_bindings
+
+        _validate_representation_lane(descriptor.representation_lane)
+        _validate_scope_bindings(
+            qualified.connection,
+            tuple(scope.memory_runtime_scope for scope in recovered_scopes),
+        )
+    active_scopes = tuple(
+        RecoveredActiveExistingWorkspaceNativeMultiScopeScope(scope)
+        for scope in recovered_scopes
+    )
+    runtime = RecoveredExistingWorkspaceNativeMultiScopeRuntime(
+        core_path,
+        descriptor,
+        descriptor.representation_lane,
+        active_scopes,  # type: ignore[arg-type]
+    )
+    for scope in active_scopes:
+        if scope.character_seed_witness is not None:
+            scope.require_external_character_seed(character_store)
+    return runtime
+
+
 def _plan_from_payload(value: Any) -> ExistingWorkspaceNativeLanePlan:
     if not isinstance(value, dict):
         raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_DESCRIPTOR_TAMPERED")
@@ -1198,7 +1351,8 @@ __all__ = [
     "ExistingWorkspaceNativeMultiScopeDescriptor", "ExistingWorkspaceNativeMultiScopeLaneResult",
     "ExistingWorkspaceNativeMultiScopeAdmissionResult", "ExistingWorkspaceNativeMultiScopeAdmissionService",
     "RecoveredExistingWorkspaceNativeMultiScopeReaders", "RecoveredExistingWorkspaceNativeMultiScopeScope",
-    "RecoveredExistingWorkspaceNativeMultiScopeRuntime",
+    "RecoveredActiveExistingWorkspaceNativeMultiScopeScope", "RecoveredExistingWorkspaceNativeMultiScopeRuntime",
     "load_existing_workspace_multi_scope_admission_descriptor",
+    "recover_active_existing_workspace_native_multi_scope_runtime",
     "recover_existing_workspace_native_multi_scope_runtime",
 ]

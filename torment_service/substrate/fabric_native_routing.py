@@ -84,6 +84,7 @@ _LEGACY_ACTIVE_DEPLOYMENT = "LEGACY_ACTIVE"
 _PRIVATE_AGENT_SCOPE = "PRIVATE_AGENT"
 _SHARED_DOMAIN_SCOPE = "SHARED_DOMAIN"
 _PREPARED = object()
+_PRODUCTION_PREPARED = object()
 
 
 class NativeMotifProcessOrderError(SubstrateInvariantViolation):
@@ -244,6 +245,90 @@ class NativeFabricRoutingCapability:
 
 
 @dataclass(frozen=True)
+class _NativeProductionRoutingBindingFacts:
+    """Minimal active capability facts consumed by existing write adapters."""
+
+    representation_lane: NativeRepresentationLane
+
+
+@dataclass(frozen=True)
+class NativeProductionRoutingCapability:
+    """Owner-prepared ACTIVE_CORE capability for bounded production requests.
+
+    This is intentionally not a variant of ``NativeFabricRoutingCapability``:
+    the latter stays STAGING-only.  Only the B5 production resource owner
+    constructs this private-marker capability after exact agreement recovery.
+    It carries no SQLite connection.
+    """
+
+    core_database_path: Path
+    core_id: UUID
+    routing_scopes: tuple[NativeFabricRoutingScope, ...]
+    representation_lane: NativeRepresentationLane
+    process_order: NativeMotifProcessOrder = field(repr=False, compare=False)
+    srg_process_state: NativeSRGProcessState = field(repr=False, compare=False)
+    world_process_state: NativeWorldProcessState = field(repr=False, compare=False)
+    _prepared_marker: object = field(repr=False, compare=False, default=None)
+
+    def __post_init__(self) -> None:
+        if self._prepared_marker is not _PRODUCTION_PREPARED:
+            raise SubstrateConfigurationError(
+                "production routing capability must be prepared by its resource owner"
+            )
+        if not isinstance(self.core_database_path, Path) or not isinstance(self.core_id, UUID):
+            raise SubstrateConfigurationError("production routing capability core facts are invalid")
+        if not isinstance(self.routing_scopes, tuple) or not self.routing_scopes:
+            raise SubstrateConfigurationError("production routing capability requires claimed scopes")
+        if any(not isinstance(scope, NativeFabricRoutingScope) for scope in self.routing_scopes):
+            raise SubstrateConfigurationError("production routing capability scopes are invalid")
+        _validate_lane(self.representation_lane)
+
+    def claimed_scope(
+        self,
+        *,
+        workspace_id: str,
+        scope: str,
+        agent_id: str,
+        domain_id: str,
+    ) -> NativeFabricRoutingScope | None:
+        target = _request_scope_key(workspace_id, scope, agent_id, domain_id)
+        for routing_scope in self.routing_scopes:
+            if routing_scope.key == target:
+                return routing_scope
+        return None
+
+    @property
+    def binding(self) -> _NativeProductionRoutingBindingFacts:
+        """Compatibility facts only; this is never a STAGING binding/token."""
+
+        return _NativeProductionRoutingBindingFacts(self.representation_lane)
+
+
+def _prepare_production_routing_capability(
+    *,
+    core_database_path: Path,
+    core_id: UUID,
+    routing_scopes: tuple[NativeFabricRoutingScope, ...],
+    representation_lane: NativeRepresentationLane,
+    process_order: NativeMotifProcessOrder,
+    srg_process_state: NativeSRGProcessState,
+    world_process_state: NativeWorldProcessState,
+) -> NativeProductionRoutingCapability:
+    """Construct the active capability for the private production owner only."""
+
+    return NativeProductionRoutingCapability(
+        core_database_path=core_database_path,
+        core_id=core_id,
+        routing_scopes=routing_scopes,
+        representation_lane=representation_lane,
+        process_order=process_order,
+        srg_process_state=srg_process_state,
+        world_process_state=world_process_state,
+        _prepared_marker=_PRODUCTION_PREPARED,
+    )
+
+
+@dataclass(frozen=True)
 class NativeFabricRouteQualification:
     """Stable, explicit admission outcome for one Fabric-facing route."""
 
@@ -386,9 +471,12 @@ def prepare_native_fabric_routing_capability(
 class NativeFabricMemoryRouter:
     """Per-operation A3D adapter; it never owns a long-lived SQLite handle."""
 
-    def __init__(self, capability: NativeFabricRoutingCapability) -> None:
-        if not isinstance(capability, NativeFabricRoutingCapability):
-            raise ValueError("a prepared NativeFabricRoutingCapability is required")
+    def __init__(
+        self,
+        capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
+    ) -> None:
+        if not isinstance(capability, (NativeFabricRoutingCapability, NativeProductionRoutingCapability)):
+            raise ValueError("a prepared native routing capability is required")
         self._capability = capability
 
     def qualify(self, request: NativeFabricRouteRequest) -> NativeFabricRouteQualification:
@@ -403,7 +491,7 @@ class NativeFabricMemoryRouter:
             return NativeFabricRouteQualification(False, None, "SCOPE_NOT_CLAIMED")
         if request.native_operation_key is None:
             return NativeFabricRouteQualification(False, scope, "MISSING_NATIVE_OPERATION_KEY")
-        if request.embedder_lane != self._capability.binding.representation_lane:
+        if request.embedder_lane != _capability_representation_lane(self._capability):
             return NativeFabricRouteQualification(False, scope, "EMBEDDER_LANE_MISMATCH")
         try:
             _canonical_vector(request.incoming_embedding, request.embedder_lane.dimension)
@@ -903,9 +991,14 @@ def _validate_capability_inputs(
 
 
 def _revalidate_capability_for_route(
-    capability: NativeFabricRoutingCapability,
+    capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
     connection: sqlite3.Connection,
 ) -> None:
+    if isinstance(capability, NativeProductionRoutingCapability):
+        _revalidate_production_capability_for_route(capability, connection)
+        return
+    if not isinstance(capability, NativeFabricRoutingCapability):
+        raise SubstrateConfigurationError("native route requires a prepared capability")
     path = _validated_connection_path(connection, capability.core_database_path)
     if path != capability.core_database_path:
         raise SubstrateConfigurationError("native route opened an unexpected core path")
@@ -921,6 +1014,34 @@ def _revalidate_capability_for_route(
         raise SubstrateConfigurationError("native route deployment is no longer legacy-active")
     _validate_lane(capability.binding.representation_lane)
     _validate_routing_scopes(connection, capability.binding, capability.routing_scopes)
+
+
+def _revalidate_production_capability_for_route(
+    capability: NativeProductionRoutingCapability,
+    connection: sqlite3.Connection,
+) -> None:
+    """Revalidate only ACTIVE_CORE/NATIVE_ACTIVE resource facts.
+
+    Agreement resolution remains the production owner's responsibility; this
+    lower-level route guard independently prevents an active capability from
+    being used after the core itself leaves its exact durable active state.
+    """
+
+    path = _validated_connection_path(connection, capability.core_database_path)
+    if path != capability.core_database_path:
+        raise SubstrateConfigurationError("production route opened an unexpected core path")
+    metadata = require_current_schema(connection)
+    if native_id_from_bytes(metadata.core_id) != capability.core_id:
+        raise SubstrateConfigurationError("production route core identity changed")
+    if metadata.core_role != "ACTIVE_CORE":
+        raise SubstrateConfigurationError("production route requires an ACTIVE_CORE")
+    deployment = connection.execute(
+        "SELECT deployment_state,referenced_core_id FROM deployment_metadata"
+    ).fetchall()
+    if deployment != [("NATIVE_ACTIVE", native_id_to_bytes(capability.core_id))]:
+        raise SubstrateConfigurationError("production route requires NATIVE_ACTIVE deployment")
+    _validate_lane(capability.representation_lane)
+    _validate_production_routing_scopes(connection, capability.routing_scopes)
 
 
 def _validate_routing_scopes(
@@ -945,6 +1066,37 @@ def _validate_routing_scopes(
         _require_native_id_row(connection, "identity_namespaces", "identity_namespace_id", scope.motif_identity_namespace_id)
         _require_native_id_row(connection, "identity_namespaces", "identity_namespace_id", scope.membership_identity_namespace_id)
         _require_native_id_row(connection, "idempotency_namespaces", "idempotency_namespace_id", scope.idempotency_namespace_id)
+
+
+def _validate_production_routing_scopes(
+    connection: sqlite3.Connection,
+    routing_scopes: tuple[NativeFabricRoutingScope, ...],
+) -> None:
+    """Validate recovered active scope facts without constructing a binding."""
+
+    keys: set[tuple[str, str, str]] = set()
+    for scope in routing_scopes:
+        if scope.key in keys:
+            raise SubstrateConfigurationError("production routing scope collision")
+        keys.add(scope.key)
+        runtime = scope.runtime_scope
+        if runtime.legacy_source_namespace_id == scope.motif_alias_namespace_id:
+            raise SubstrateConfigurationError("memory and motif alias namespaces must remain distinct")
+        _require_native_id_row(connection, "legacy_source_namespaces", "legacy_source_namespace_id", runtime.legacy_source_namespace_id)
+        _require_native_id_row(connection, "identity_namespaces", "identity_namespace_id", runtime.identity_namespace_id)
+        _require_native_id_row(connection, "semantic_scopes", "semantic_scope_id", runtime.semantic_scope_id)
+        _require_native_id_row(connection, "legacy_source_namespaces", "legacy_source_namespace_id", scope.motif_alias_namespace_id)
+        _require_native_id_row(connection, "identity_namespaces", "identity_namespace_id", scope.motif_identity_namespace_id)
+        _require_native_id_row(connection, "identity_namespaces", "identity_namespace_id", scope.membership_identity_namespace_id)
+        _require_native_id_row(connection, "idempotency_namespaces", "idempotency_namespace_id", scope.idempotency_namespace_id)
+
+
+def _capability_representation_lane(
+    capability: NativeFabricRoutingCapability | NativeProductionRoutingCapability,
+) -> NativeRepresentationLane:
+    if isinstance(capability, NativeFabricRoutingCapability):
+        return capability.binding.representation_lane
+    return capability.representation_lane
 
 
 def _validated_connection_path(connection: sqlite3.Connection, expected_path: str | Path) -> Path:
