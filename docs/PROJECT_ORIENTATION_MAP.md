@@ -5,171 +5,74 @@
 ### Current repository state
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
-- **TORMENT Memory Substrate Phases 0–6 are frozen design/requirements lineage.** Their binding records remain the [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md).
-- **Phase 7 bounded implementation is materially complete through the B5-A6 formal production-shaped administration rehearsal.** `Blocker-1` through `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md), [B5-A3 production native resource lifecycle](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md), [B5-A4R1 public mutation identity/ingest orchestration](BLOCKER_5_A4R1_PUBLIC_MUTATION_IDENTITY_AND_INGEST_ORCHESTRATION.md), [B5-A4R2 native public-ingest recovery](BLOCKER_5_A4R2_NATIVE_PUBLIC_INGEST_RECOVERY.md), [B5-A4R3 public backend selection/transport](BLOCKER_5_A4R3_PUBLIC_BACKEND_SELECTION_AND_TRANSPORT.md), [B5-A5R0 immutable admission identity repair](BLOCKER_5_A5R0_ADMISSION_IDENTITY_PENDING_COMPATIBILITY.md), [B5-A5 offline controller/rehearsal](BLOCKER_5_A5_OFFLINE_CUTOVER_REHEARSAL.md), and [B5-A6 operator diagnostics/rehearsal](BLOCKER_5_A6_PRODUCTION_SHAPED_ADMINISTRATION_REHEARSAL.md) are the current implementation and qualification records.
-
-### Closed memory-substrate result
+- **Blocker-5 is CLOSED.** The bounded Phase-7 native-memory substrate is qualified only for the compression/deep-disabled profile. The authoritative final record is [B5-A7 final closure](BLOCKER_5_A7_FINAL_CLOSURE.md), reconciling [7G5E4D write/lifecycle](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read cognition](7G5E4E_FINAL_CLOSURE.md), and B5-A1 through B5-A6.
+- TORMENT Memory Substrate Phases 0–6 remain frozen design/requirements lineage; their records remain historical design authority, not an active implementation frontier.
 
 ```text
-7G5E4D_SHARED_WRITE_LIFECYCLE_SEMANTICS = PASS
-7G5E4E_QUERY_READ_COGNITION_SEMANTICS = PASS
-
-BLOCKER_4_SHARED_WRITE_SIDE = CLOSED
-BLOCKER_4_QUERY_READ_SIDE = CLOSED
+BLOCKER_1 = CLOSED
+BLOCKER_2 = CLOSED
+BLOCKER_3 = CLOSED
 BLOCKER_4 = CLOSED
-BLOCKER_5_B5_A2_DEPLOYMENT_FENCE = CLOSED
-BLOCKER_5_B5_A3_NATIVE_RESOURCE_LIFECYCLE = CLOSED
-BLOCKER_5_B5_A4R1_PUBLIC_MUTATION_IDENTITY = QUALIFIED
-BLOCKER_5_B5_A4R2_PUBLIC_INGEST_RECOVERY = QUALIFIED
-BLOCKER_5_B5_A4R3_PUBLIC_BACKEND_SELECTION = QUALIFIED
-BLOCKER_5_B5_A4_PUBLIC_BACKEND_SELECTION = QUALIFIED
-BLOCKER_5_B5_A5R0_ADMISSION_IDENTITY_REPAIR = CLOSED
-BLOCKER_5_B5_A5_OFFLINE_CUTOVER_REHEARSAL   = QUALIFIED
-BLOCKER_5_B5_A5 = CLOSED
-BLOCKER_5_B5_A6_PRODUCTION_SHAPED_ADMIN_REHEARSAL = PASS
-BLOCKER_5_B5_A6 = CLOSED
-PUBLIC_PRE_COGNITION_IDEMPOTENCY_RECOVERY = QUALIFIED
+BLOCKER_5 = CLOSED
 
+PHASE_7_NATIVE_MEMORY_SUBSTRATE = QUALIFIED FOR SELECTED PROFILE
 QUALIFIED_NATIVE_PROFILE = compression/deep disabled
-COMPRESSION_OR_DEEP_ENABLED = NOT_QUALIFIED_FOR_NATIVE_CUTOVER
+COMPRESSION_OR_DEEP_ENABLED = NOT_QUALIFIED
 COMPRESSION_OR_DEEP_ENABLED = REFUSE_PROFILE_ELIGIBILITY
+
+NATIVE_WRITE_LIFECYCLE = QUALIFIED
+NATIVE_QUERY_READ_COGNITION = QUALIFIED
+DURABLE_DEPLOYMENT_AUTHORITY = QUALIFIED
+PRODUCTION_NATIVE_RESOURCE_LIFECYCLE = QUALIFIED
+PUBLIC_BACKEND_SELECTION = QUALIFIED
+PUBLIC_NATIVE_INGEST = QUALIFIED
+PUBLIC_NATIVE_QUERY = QUALIFIED
+PUBLIC_NATIVE_RETRIEVE = QUALIFIED
+PUBLIC_PRE_COGNITION_IDEMPOTENCY_RECOVERY = QUALIFIED
+OFFLINE_CUTOVER_CONTROLLER = QUALIFIED
+PRODUCTION_SHAPED_OPERATOR_REHEARSAL = PASS
 ```
 
-SQLite owns native durable memory truth for memory objects/revisions,
-representations, motif truth/membership, provenance/governance facts, runtime
-order, and recovery/idempotency evidence.  `CharacterStore`, `BridgeRegistry`,
-`ConflictRegistry`, proposal/workflow stores, trajectory/checkpoint artifacts,
-Hivemind, world/SRG process-local state, and the deep-memory store remain
-external or process-local owners.
-
-```text
-EVERYTHING_TO_SQLITE = NO
-```
-
-Native shared write/lifecycle semantics and native query/read cognition parity
-are qualified for that profile.  The same Fabric query cognition consumes
-native SQLite-backed memory truth through the qualified read model; there is no
-native query-algorithm fork.  SQLite does not make TORMENT more intelligent;
-that claim is neither implemented nor experimentally established.
-
-### Preserved runtime and kernel boundaries
+### Frozen authority and safety boundary
 
 ```text
 PUBLIC_BACKEND_AUTHORITY_SOURCE = DURABLE_DEPLOYMENT_SELECTOR
-PUBLIC_RUNTIME_STARTUP = LEGACY | NATIVE | REFUSED
-PUBLIC_INGEST_BACKEND = SELECTOR_CONTROLLED
-PUBLIC_QUERY_BACKEND = SELECTOR_CONTROLLED
-NATIVE_ACTIVE_PUBLIC = QUALIFIED_ON_ISOLATED_REHEARSAL_ROOT_ONLY
+LEGACY_ACTIVE -> legacy public authority
+CUTOVER_PENDING -> maintenance only
+NATIVE_ACTIVE exact agreement -> native public authority
+
+ONE_DEPLOYMENT_AUTHORITY_PER_DATA_ROOT = YES
 DUAL_WRITE = NO
-DUAL_READ = NO
-PUBLIC_SELECTOR_CONSUMPTION = READ_ONLY
-CUTOVER_CONTROLLER = OFFLINE_ONLY_QUALIFIED
-POST_NATIVE_LEGACY_AUTHORITY = NONE
-LEGACY_EVIDENCE_UNCHANGED_AFTER_NATIVE_USE = PASS
+DUAL_READ_AUTHORITY = NO
+NATIVE_ACTIVE_RUNTIME_LEGACY_FALLBACK = NONE
+AUTOMATIC_POST_NATIVE_ROLLBACK_TO_LEGACY = NO
+
 REAL_PRODUCTION_CUTOVER_PERFORMED = NO
-
-KERNEL_FILES_CHANGED = 0
-KERNEL_MATHEMATICS_CHANGED = NO
-KERNEL_GEOMETRY_CHANGED = NO
-KERNEL_VECTORISATION_CHANGED = NO
-KERNEL_RUNTIME_BEHAVIOR_CHANGED = NO
+REAL_USER_MEMORY_ROOT_TOUCHED = NO
+REAL_PRODUCTION_CUTOVER_AUTHORIZED = NO
 ```
 
-The substrate remains a durable-memory system, not a kernel/database
-reinterpretation.  Memory may shape context but may not seize authority:
-stored content, retrieval, canon, Character state, and cognition results do
-not create execution permission.  `STORED != EXECUTABLE`; `EXECUTABLE !=
-ACTIVATED`; `ACTIVATED != AUTHORIZED`.
+SQLite is canonical durable representation truth; NumPy/Python retain live
+float32 matrices, vector-search geometry, and kernel/runtime calculation.
+`CharacterStore`, `BridgeRegistry`, `ConflictRegistry`, proposal/workflow
+side stores, trajectory/checkpoint artifacts, Hivemind, world/SRG process
+state, and deep memory remain external/process owners. `EVERYTHING_TO_SQLITE =
+NO`.
 
-### Environment state
+The same qualified Fabric cognition operates over the SQLite-backed substrate;
+no kernel mathematics, geometry, vectorisation, or runtime behavior changed.
+SQLite was not shown to make TORMENT more intelligent.
+
+### Actual production state and next action
+
+The actual/default production data root remains legacy/pre-selector unless it
+was independently changed outside this work. B5-A7's read-only check found no
+selector-era marker, no `selector.sqlite`, and no controlled active/pending
+native-core evidence at that root. No real production cutover was performed.
 
 ```text
-QUALIFIED_NATIVE_ENVIRONMENT = torment-substrate / SQLite 3.53.4
-ORDINARY_torment_ENVIRONMENT = SQLite 3.53.4 / native-runtime-qualified
-BLOCKER_5_B5_A1 = CLOSED
-BLOCKER_5_B5_A2 = CLOSED
-BLOCKER_5_B5_A3 = CLOSED
-BLOCKER_5_B5_A4R1 = CLOSED
-BLOCKER_5_B5_A4R2 = CLOSED
-BLOCKER_5_B5_A4R3 = CLOSED
-BLOCKER_5_B5_A4 = CLOSED
-BLOCKER_5_B5_A5R0 = CLOSED
-BLOCKER_5_B5_A5 = CLOSED
-PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = NO
-
-SOLVER_MOVEMENT_RULE_REVISED = NO
-AUTHORIZED_ENVIRONMENT_CHANGE = sqlite 3.51.2 -> 3.53.4; add libsqlite 3.53.4
-AUTHORIZED_OPENSSL_CHANGE = NO
-AUTHORIZED_CA_CERTIFICATES_CHANGE = NO
+NEXT_ACTION = FRESH CHAT
 ```
-
-The completed [B5-A1 production environment convergence record](BLOCKER_5_A1_PRODUCTION_ENVIRONMENT_CONVERGENCE.md)
-proves exact package movement, unmocked runtime qualification, native
-write/read requalification, public legacy regression, MCP regression, and
-real legacy REST lifecycle/restart smoke. The qualified profile remains
-compression/deep disabled.
-
-### Current authorized frontier
-
-```text
-BLOCKER_5_PREFLIGHT = CLOSED
-BLOCKER_5_B5_A1 = CLOSED
-BLOCKER_5_B5_A2 = CLOSED
-BLOCKER_5_B5_A3 = CLOSED
-BLOCKER_5_B5_A4R1 = QUALIFIED
-BLOCKER_5_B5_A4R2 = QUALIFIED
-BLOCKER_5_B5_A4R3 = QUALIFIED
-BLOCKER_5_B5_A4 = QUALIFIED
-BLOCKER_5_B5_A5R0 = CLOSED
-BLOCKER_5_B5_A5 = CLOSED
-BLOCKER_5_B5_A6 = CLOSED
-BLOCKER_5_NEXT = B5_A7_SEPARATELY_AUTHORIZED_ONLY
-
-PUBLIC_BACKEND_AUTHORITY_SOURCE = DURABLE_DEPLOYMENT_SELECTOR
-PUBLIC_SELECTOR_WIRING = QUALIFIED_READ_ONLY
-NATIVE_ACTIVE_PUBLIC = QUALIFIED_ON_ISOLATED_REHEARSAL_ROOT_ONLY
-DUAL_WRITE = NO
-DUAL_READ = NO
-CUTOVER_OPENED = ISOLATED_REHEARSAL_ONLY
-```
-
-Blocker-5 is deployment and selection work, not new cognition or memory
-semantics.  Its separately authorized boundary is production-environment
-convergence, deployment/profile eligibility, an explicit legacy/native
-selector, native resource lifecycle/ownership, the no-fallback-after-native-
-mutation law, cutover/restart/rollback qualification, and production-shaped
-service administration.
-
-Public runtime can start LEGACY or NATIVE only according to durable deployment
-authority, while pending/refused authority fails startup. B5-A5 uses that
-existing law in an offline-only controller: immutable admission identity,
-snapshots, selector evidence, completion witness, and core maintenance facts
-are recovered without a new progress ledger. The qualified P1--P8 rehearsal
-keeps public authority maintenance-only through P6, activates the selector
-last, performs native REST/Spine/MCP read/write/replay/restart checks, and
-proves no legacy `MemoryGraph` use or legacy workspace change after native
-activation. Real production cutover remains not performed.
-
-The completed [Blocker-5 A0 production selection preflight](BLOCKER_5_A0_PRODUCTION_SELECTION_PREFLIGHT.md)
-freezes the entrypoint, profile, selector/fence, lifecycle, fallback, rollback,
-crash, and rehearsal design. B5-A1 converged and requalified the ordinary
-environment. B5-A2 implemented the durable selector-era/ledger, pure agreement
-resolver, and contained-core maintenance mechanics. B5-A3 separately qualified
-the direct active-core resource owner, request-scoped SQLite resources, and
-process-local SRG/world/motif ownership recorded in the [B5-A3 closure](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md).
-Neither slice begins public Fabric routing, public activation, cutover, dual
-write/read, or rollback. B5-A4R1 separately qualified caller-supplied public
-mutation identity and an ingest preparation/storage/completion hand-off.
-B5-A4R2 then separately qualified private/direct native public-ingest
-reservation, pre-cognition recovery, prepared-carrier rehydration, native
-storage/post-write convergence, and exact completion replay. B5-A4R3 consumes
-those frozen mechanisms through one selector-owned REST/Spine/MCP facade,
-native query contexts, exact replay, and a fail-closed public route inventory.
-[B5-A5R0](BLOCKER_5_A5R0_ADMISSION_IDENTITY_PENDING_COMPATIBILITY.md) makes
-the offline pending/admission order lawful without changing the
-STAGING/LEGACY_ACTIVE admission law; [B5-A5](BLOCKER_5_A5_OFFLINE_CUTOVER_REHEARSAL.md)
-qualifies the complete isolated cutover/recovery/abort rehearsal. The next
-separately authorized boundary is B5-A6. It is not started here.
 
 ## 1. Current main project thread
 
