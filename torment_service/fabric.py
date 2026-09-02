@@ -3158,7 +3158,8 @@ class TormentFabric:
         skip_packet_emission: bool = False,
         suppress_canon: bool = False,
         public_mutation_key: str | None = None,
-    ) -> Dict[str, Any]:
+        _prepare_only: bool = False,
+    ) -> Dict[str, Any] | PreparedFabricIngest:
         # === GATE A LAYER 4 — ordinary-ingest candidate refusal (first brick) ===
         # FIRST executable statement. Structural, content-blind type refusal:
         # ordinary ingest must not accept a candidate-shaped value as ordinary
@@ -3478,6 +3479,26 @@ class TormentFabric:
                     _tool_hl_cap = 7.0
                 half_life_days = min(half_life_days, _tool_hl_cap)
 
+        # Native recovery needs the prior symbolic projection frozen before
+        # storage.  The legacy body retains its historical load/use site and
+        # therefore receives no changed storage behavior from this snapshot.
+        _prior_symbol = ""
+        _prior_symbol_trace: tuple[str, ...] = ()
+        _prior_motif_id = ""
+        _prior_tension = 0.0
+        if allow_write:
+            try:
+                _prior_symbol_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
+                _prior_symbol = str(_prior_symbol_state.get("last_symbol", "") or "")
+                _prior_symbol_trace = tuple(_prior_symbol_state.get("symbol_trace", []) or ())
+                _prior_motif_id = str(_prior_symbol_state.get("last_motif_id", "") or "")
+                _prior_tension = float(_prior_symbol_state.get("last_tension", 0.0) or 0.0)
+            except Exception:
+                # The legacy path has always treated the symbol side-store as
+                # best effort; preserve that failure posture in preparation.
+                pass
+        _prepared_ts = _now_ts()
+
         # Preparation ends before the legacy graph authority is selected.  R1
         # retains that storage implementation unchanged; this immutable carrier
         # is the narrow hand-off R2 will use once durable pre-cognition retry
@@ -3513,7 +3534,29 @@ class TormentFabric:
             skip_packet_emission=skip_packet_emission,
             public_request_fingerprint=_public_request_fingerprint,
             native_operation_key=_native_operation_key,
+            promotion_score=float(signals.promotion_score),
+            stability_delta=float(signals.stability_delta),
+            suppress_canon=bool(suppress_canon),
+            affect_classification_completed=affect_classification_completed,
+            frozen_created_ts=_prepared_ts,
+            frozen_last_active_ts=_prepared_ts,
+            frozen_last_reinforced_ts=_prepared_ts,
+            prior_symbol=_prior_symbol,
+            prior_symbol_trace=_prior_symbol_trace,
+            prior_motif_id=_prior_motif_id,
+            prior_tension=_prior_tension,
+            domain_ranked=tuple({"id": score.domain_id, "score": score.score} for score in dom_scores),
+            write_intent=bool(signals.write_intent),
+            signal_half_life_days=float(signals.half_life),
+            in_corridor=in_corr,
+            survival_steps=survival,
+            tearing_risk=tear,
+            half_life_multiplier=hl_mult,
         )
+        if _prepare_only:
+            # Private direct-use seam for B5-A4R2.  The public legacy path
+            # continues directly into the retained legacy storage body below.
+            return prepared_ingest
         motif_ids: list = []
         created_motif: Optional[str] = None
         _reinforced_eid: Optional[int] = None

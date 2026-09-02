@@ -657,6 +657,40 @@ class NativeFabricMemoryRouter:
                 reinforced.e2_representation_id,
             )
 
+        composition_request = _new_memory_composition_request(
+            request, routing_scope, translation, vector,
+        )
+        composition = NativeMemoryMotifCompositionService(connection)
+        recovered_composition = composition.recover_committed(composition_request)
+        if recovered_composition is not None:
+            # A completed new-memory source is the operation's durable truth.
+            # It must win over a later duplicate search, including after the
+            # process-local routing/world owners have been recreated.
+            reader = NativeMotifRuntimeReader(connection)
+            with self._capability.process_order.locked_catalog(
+                reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
+            ):
+                world_runtime.ensure_initialized()
+                world_runtime.register_fresh_created(
+                    eid=recovered_composition.memory_eid,
+                    memory_object_id=recovered_composition.memory_object_id,
+                    memory_revision_id=recovered_composition.memory_revision_id,
+                    memory_revision_ordinal=recovered_composition.memory_revision_ordinal,
+                    born_step=request.logical_step,
+                    channel=0,
+                )
+            if _test_stop_after == "source":
+                raise RuntimeError("forced interruption after committed native new-memory source")
+            representation = _publish_new_memory_representation(
+                connection, routing_scope, request, recovered_composition, vector,
+            )
+            return NativeFabricRouteResult(
+                True, False, recovered_composition.memory_eid, request.domain_id,
+                recovered_composition.affected_runtime_motif_ids or (recovered_composition.runtime_motif_id,),
+                recovered_composition.memory_object_id, recovered_composition.memory_revision_id,
+                representation.representation_id,
+            )
+
         selected = self._select_private_duplicate(
             connection, request, routing_scope, vector,
         )
@@ -713,48 +747,9 @@ class NativeFabricMemoryRouter:
             )
 
         reader = NativeMotifRuntimeReader(connection)
-        composition = NativeMemoryMotifCompositionService(connection)
         with self._capability.process_order.locked_catalog(
             reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
         ) as ordered_catalog:
-            composition_request = NativeMemoryMotifCompositionRequest(
-                legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
-                memory_identity_namespace_id=routing_scope.runtime_scope.identity_namespace_id,
-                semantic_scope_id=routing_scope.runtime_scope.semantic_scope_id,
-                summary=request.summary,
-                memory_type=request.memory_type,
-                memory_class=request.memory_class,
-                strength=request.strength,
-                confidence=request.confidence,
-                half_life_days=request.half_life_days,
-                user_id=request.agent_id,
-                logical_step=request.logical_step,
-                flexible_payload=request.flexible_payload,
-                lifecycle_state=request.lifecycle_state,
-                lifecycle_authoritative=request.lifecycle_authoritative,
-                governance_state=request.governance_state,
-                provenance=translation.provenance,
-                governance=translation.governance,
-                motif_alias_namespace_id=routing_scope.motif_alias_namespace_id,
-                motif_identity_namespace_id=routing_scope.motif_identity_namespace_id,
-                membership_identity_namespace_id=routing_scope.membership_identity_namespace_id,
-                domain_id=request.domain_id,
-                agent_id=request.agent_id,
-                idempotency_namespace_id=routing_scope.idempotency_namespace_id,
-                idempotency_key=_new_memory_source_key(request.native_operation_key),
-                incoming_embedding=vector,
-                attach_threshold=request.attach_threshold,
-                created_ts=request.created_ts,
-                last_active_ts=request.last_active_ts,
-                expected_dimension=request.embedder_lane.dimension,
-                stability_delta=request.stability_delta,
-                prior_symbol=request.prior_symbol,
-                prior_symbol_trace=request.prior_symbol_trace,
-                prior_motif_id=request.prior_motif_id,
-                prior_tension=request.prior_tension,
-                qualified_link_intents=translation.qualified_link_intents,
-                unresolved_link_references=translation.unresolved_link_references,
-            )
             preview = composition.prepare_plan_from_ordered_catalog(
                 composition_request, ordered_catalog
             )
@@ -829,6 +824,54 @@ class NativeFabricMemoryRouter:
                     continue
             return hit, _source_channel_for_current_object(connection, hit.object_id)
         return None
+
+
+def _new_memory_composition_request(
+    request: NativeFabricRouteRequest,
+    routing_scope: NativeFabricRoutingScope,
+    translation: Any,
+    vector: np.ndarray,
+) -> NativeMemoryMotifCompositionRequest:
+    """Build the one immutable A3C2 input for fresh and recovered routes."""
+    assert request.native_operation_key is not None
+    return NativeMemoryMotifCompositionRequest(
+        legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
+        memory_identity_namespace_id=routing_scope.runtime_scope.identity_namespace_id,
+        semantic_scope_id=routing_scope.runtime_scope.semantic_scope_id,
+        summary=request.summary,
+        memory_type=request.memory_type,
+        memory_class=request.memory_class,
+        strength=request.strength,
+        confidence=request.confidence,
+        half_life_days=request.half_life_days,
+        user_id=request.agent_id,
+        logical_step=request.logical_step,
+        flexible_payload=request.flexible_payload,
+        lifecycle_state=request.lifecycle_state,
+        lifecycle_authoritative=request.lifecycle_authoritative,
+        governance_state=request.governance_state,
+        provenance=translation.provenance,
+        governance=translation.governance,
+        motif_alias_namespace_id=routing_scope.motif_alias_namespace_id,
+        motif_identity_namespace_id=routing_scope.motif_identity_namespace_id,
+        membership_identity_namespace_id=routing_scope.membership_identity_namespace_id,
+        domain_id=request.domain_id,
+        agent_id=request.agent_id,
+        idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+        idempotency_key=_new_memory_source_key(request.native_operation_key),
+        incoming_embedding=vector,
+        attach_threshold=request.attach_threshold,
+        created_ts=request.created_ts,
+        last_active_ts=request.last_active_ts,
+        expected_dimension=request.embedder_lane.dimension,
+        stability_delta=request.stability_delta,
+        prior_symbol=request.prior_symbol,
+        prior_symbol_trace=request.prior_symbol_trace,
+        prior_motif_id=request.prior_motif_id,
+        prior_tension=request.prior_tension,
+        qualified_link_intents=translation.qualified_link_intents,
+        unresolved_link_references=translation.unresolved_link_references,
+    )
 
 
 def _publish_new_memory_representation(

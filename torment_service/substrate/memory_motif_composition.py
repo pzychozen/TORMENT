@@ -254,6 +254,36 @@ class NativeMemoryMotifCompositionService:
             request, catalog, self._reader, catalog_order_kind="RESTART_LEXICOGRAPHIC"
         )
 
+    def recover_committed(
+        self, request: NativeMemoryMotifCompositionRequest,
+    ) -> NativeMemoryMotifCompositionResult | None:
+        """Recover a completed source before later duplicate selection runs.
+
+        The immutable caller request is checked against its stored retry
+        contract.  Recovery deliberately does not need a fresh catalog
+        witness: unrelated motif evolution must not turn a lost response into
+        a new reinforcement.
+        """
+        if not isinstance(request, NativeMemoryMotifCompositionRequest):
+            raise ValueError("a NativeMemoryMotifCompositionRequest is required")
+        _reject_deferred_links(request)
+        existing = self._connection.execute(
+            "SELECT operation_id,canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (native_id_to_bytes(request.idempotency_namespace_id), request.idempotency_key),
+        ).fetchone()
+        if existing is None:
+            return None
+        try:
+            stored = json.loads(existing[1])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise SubstrateInvariantViolation("existing A3C2 operation intent is malformed") from exc
+        if stored.get("request_retry_contract") != _request_retry_contract(request):
+            raise SubstrateIdempotencyConflict("idempotency intent differs")
+        recovered = self._result_for_operation(existing[0])
+        if recovered is None:
+            raise SubstrateInvariantViolation("existing A3C2 operation has no complete durable result")
+        return recovered
+
     def prepare_plan_from_ordered_catalog(
         self,
         request: NativeMemoryMotifCompositionRequest,
