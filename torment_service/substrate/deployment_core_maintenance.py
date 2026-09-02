@@ -17,6 +17,7 @@ from uuid import UUID
 
 from .connection import open_existing_native_core_connection
 from .deployment_types import (
+    AdmissionCompletionWitness,
     CoreDeploymentWitness,
     DeploymentState,
     canonical_json,
@@ -45,6 +46,7 @@ class CoreDeploymentInspection:
     witness: CoreDeploymentWitness | None
     latest_maintenance_id: UUID | None
     ever_active: bool
+    activation_completion_witness: AdmissionCompletionWitness | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class CoreMaintenanceResult:
     selector_generation: int
     selector_witness_digest: str
     safe_abort_proven: bool = False
+    completion_witness: AdmissionCompletionWitness | None = None
 
 
 def inspect_contained_core_deployment(
@@ -169,11 +172,14 @@ def activate_core(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
+    completion_witness: AdmissionCompletionWitness | None = None,
 ) -> CoreMaintenanceResult:
     """Transition STAGING/CUTOVER_PENDING to ACTIVE_CORE/NATIVE_ACTIVE once."""
 
     if expected_witness.deployment_state is not DeploymentState.CUTOVER_PENDING:
         raise DeploymentAuthorityError("activation maintenance requires CUTOVER_PENDING predecessor witness")
+    if completion_witness is None:
+        raise DeploymentAuthorityError("activation requires a completed admission witness")
     return _transition(
         data_root=data_root,
         core_relative_path=core_relative_path,
@@ -182,6 +188,7 @@ def activate_core(
         selector_generation=selector_generation,
         selector_witness_digest=selector_witness_digest,
         operation_key=operation_key,
+        completion_witness=completion_witness,
     )
 
 
@@ -218,12 +225,25 @@ def _transition(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
+    completion_witness: AdmissionCompletionWitness | None = None,
 ) -> CoreMaintenanceResult:
     path = contained_core_path(
         data_root=data_root, core_relative_path=core_relative_path, require_exists=True
     )
     _require_operation_key(operation_key)
     _require_selector_facts(selector_generation, selector_witness_digest)
+    if completion_witness is not None:
+        if transition_kind != _ACTIVATE:
+            raise DeploymentAuthorityError("completion witness is valid only for core activation")
+        if (
+            completion_witness.admission_identity_digest != expected_witness.descriptor_digest
+            or completion_witness.native_core_id != expected_witness.core_id
+        ):
+            raise DeploymentAuthorityError("completion witness does not match the selected admission identity")
+        if completion_witness.profile_digest is None:
+            raise DeploymentAuthorityError("activation requires a completion witness bound to the selected profile")
+        if completion_witness.profile_digest != expected_witness.profile_digest:
+            raise DeploymentAuthorityError("completion witness does not match the selected deployment profile")
     with open_existing_native_core_connection(path) as opened:
         connection = opened.connection
         before = _inspect_connection(connection)
@@ -235,6 +255,7 @@ def _transition(
             selector_generation=selector_generation,
             selector_witness_digest=selector_witness_digest,
             operation_key=operation_key,
+            completion_witness=completion_witness,
         )
         existing = _event_for_operation(connection, operation_key)
         if existing is not None:
@@ -259,6 +280,7 @@ def _transition(
             selector_generation=selector_generation,
             selector_witness_digest=selector_witness_digest,
             recorded_at_ns=now_ns,
+            completion_witness=completion_witness,
         )
         connection.execute("BEGIN IMMEDIATE")
         try:
@@ -284,6 +306,7 @@ def _transition(
         selector_generation=selector_generation,
         selector_witness_digest=selector_witness_digest,
         safe_abort_proven=transition_kind == _ABORT_PENDING,
+        completion_witness=completion_witness,
     )
 
 
@@ -345,6 +368,11 @@ def _inspect_connection(connection: sqlite3.Connection) -> CoreDeploymentInspect
     if (metadata.core_role, deployment_state) != expected_chain:
         raise DeploymentAuthorityError("core metadata disagrees with immutable maintenance evidence")
     witness = _witness_from_event_result(latest["result"])
+    activation_completion = next(
+        (item.get("completion_witness") for item in reversed(events)
+         if item["transition_kind"] == _ACTIVATE),
+        None,
+    )
     return CoreDeploymentInspection(
         core_id=core_id,
         core_role=metadata.core_role,
@@ -352,6 +380,7 @@ def _inspect_connection(connection: sqlite3.Connection) -> CoreDeploymentInspect
         witness=witness,
         latest_maintenance_id=latest["maintenance_id"],
         ever_active=ever_active,
+        activation_completion_witness=activation_completion,
     )
 
 
@@ -378,6 +407,7 @@ def _core_events(connection: sqlite3.Connection, core_id: UUID) -> list[dict[str
             intent = detail["canonical_intent"]
             previous = detail["previous"]
             result = detail["result"]
+            completion = _completion_witness_from_payload(detail.get("completion_witness"))
             if (
                 kind not in _EVENT_KINDS
                 or not isinstance(key, str)
@@ -387,6 +417,7 @@ def _core_events(connection: sqlite3.Connection, core_id: UUID) -> list[dict[str
                 or not isinstance(result, dict)
                 or detail["maintenance_id"] != str(maintenance_id)
                 or detail["core_id"] != str(core_id)
+                or (kind != _ACTIVATE and completion is not None)
             ):
                 raise ValueError("invalid event shape")
             if key in seen_keys:
@@ -402,17 +433,25 @@ def _core_events(connection: sqlite3.Connection, core_id: UUID) -> list[dict[str
             if detail["selector_generation"] < 0:
                 raise ValueError("invalid selector generation")
             require_digest(detail["selector_witness_digest"], "selector_witness_digest")
-            if intent != _intent(
+            if ("completion_witness" in detail) != ("completion_witness" in intent):
+                raise ValueError("event completion witness is not intent-bound")
+            expected_intent = _intent(
                 transition_kind=kind,
                 expected_witness=_witness_from_event_result(previous),
                 selector_generation=detail["selector_generation"],
                 selector_witness_digest=detail["selector_witness_digest"],
                 operation_key=key,
-            ):
+                completion_witness=completion,
+            )
+            # Read old B5-A2 records exactly as written.  New records bind the
+            # optional completion witness in both detail and canonical intent.
+            if "completion_witness" not in intent:
+                expected_intent.pop("completion_witness")
+            if intent != expected_intent:
                 raise ValueError("event intent does not bind its transition evidence")
         except (KeyError, TypeError, ValueError, DeploymentAuthorityError) as exc:
             raise DeploymentAuthorityError("core maintenance evidence is incompatible") from exc
-        events.append({**detail, "maintenance_id": maintenance_id})
+        events.append({**detail, "maintenance_id": maintenance_id, "completion_witness": completion})
     return events
 
 
@@ -456,6 +495,7 @@ def _recover_existing_transition(
         selector_generation=event["selector_generation"],
         selector_witness_digest=event["selector_witness_digest"],
         safe_abort_proven=event["transition_kind"] == _ABORT_PENDING,
+        completion_witness=_completion_witness_from_payload(event.get("completion_witness")),
     )
 
 
@@ -526,6 +566,7 @@ def _intent(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
+    completion_witness: AdmissionCompletionWitness | None,
 ) -> dict[str, Any]:
     return {
         "contract": _CONTRACT,
@@ -534,6 +575,9 @@ def _intent(
         "expected_witness_digest": expected_witness.digest,
         "selector_generation": selector_generation,
         "selector_witness_digest": selector_witness_digest,
+        "completion_witness": (
+            None if completion_witness is None else completion_witness.payload()
+        ),
     }
 
 
@@ -547,9 +591,13 @@ def _event_detail(
     selector_generation: int,
     selector_witness_digest: str,
     recorded_at_ns: int,
+    completion_witness: AdmissionCompletionWitness | None,
 ) -> dict[str, Any]:
     return {
         "canonical_intent": intent,
+        "completion_witness": (
+            None if completion_witness is None else completion_witness.payload()
+        ),
         "contract": _CONTRACT,
         "core_id": str(result.core_id),
         "maintenance_id": str(maintenance_id),
@@ -561,6 +609,25 @@ def _event_detail(
         "selector_witness_digest": selector_witness_digest,
         "transition_kind": transition_kind,
     }
+
+
+def _completion_witness_from_payload(value: Any) -> AdmissionCompletionWitness | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise DeploymentAuthorityError("core activation completion witness is malformed")
+    try:
+        return AdmissionCompletionWitness(
+            admission_identity_digest=value["admission_identity_digest"],
+            completed_descriptor_digest=value["completed_descriptor_digest"],
+            completed_progress_digest=value["completed_progress_digest"],
+            native_core_id=UUID(value["native_core_id"]),
+            workspace_id=value["workspace_id"],
+            whole_workspace_closure_digest=value["whole_workspace_closure_digest"],
+            profile_digest=value.get("profile_digest"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DeploymentAuthorityError("core activation completion witness is malformed") from exc
 
 
 def _witness_payload(witness: CoreDeploymentWitness) -> dict[str, Any]:

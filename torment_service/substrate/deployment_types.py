@@ -124,6 +124,50 @@ class CoreDeploymentWitness:
 
 
 @dataclass(frozen=True)
+class AdmissionCompletionWitness:
+    """Immutable activation evidence for one completed mutable admission.
+
+    ``admission_identity_digest`` is the selector/core binding.  The two
+    descriptor digests retain the distinct mutable-progress proof needed at
+    activation: the ordinary full descriptor hash and the non-self-referential
+    completed-progress hash recorded inside that descriptor.
+    """
+
+    admission_identity_digest: str
+    completed_descriptor_digest: str
+    completed_progress_digest: str
+    native_core_id: UUID
+    workspace_id: str
+    whole_workspace_closure_digest: str
+    profile_digest: str | None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "admission_identity_digest",
+            "completed_descriptor_digest",
+            "completed_progress_digest",
+            "whole_workspace_closure_digest",
+        ):
+            _require_digest(getattr(self, name), name)
+        _require_uuid(self.native_core_id, "native_core_id")
+        if not isinstance(self.workspace_id, str) or not self.workspace_id:
+            raise DeploymentAuthorityError("completion witness workspace_id must be non-empty text")
+        if self.profile_digest is not None:
+            _require_digest(self.profile_digest, "completion witness profile_digest")
+
+    def payload(self) -> dict[str, str | None]:
+        return {
+            "admission_identity_digest": self.admission_identity_digest,
+            "completed_descriptor_digest": self.completed_descriptor_digest,
+            "completed_progress_digest": self.completed_progress_digest,
+            "native_core_id": str(self.native_core_id),
+            "profile_digest": self.profile_digest,
+            "whole_workspace_closure_digest": self.whole_workspace_closure_digest,
+            "workspace_id": self.workspace_id,
+        }
+
+
+@dataclass(frozen=True)
 class SelectorState:
     """One validated external-selector singleton snapshot."""
 
@@ -227,6 +271,7 @@ def _require_uuid(value: object, label: str) -> UUID:
 
 
 __all__ = [
+    "AdmissionCompletionWitness",
     "CoreDeploymentWitness",
     "DeploymentResolution",
     "DeploymentResolutionMode",

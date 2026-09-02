@@ -983,8 +983,12 @@ def _data_root(value: str | Path) -> Path:
     if not isinstance(value, (str, Path)) or not str(value).strip():
         raise DeploymentAuthorityError("deployment data root is required")
     root = Path(value).expanduser().resolve()
-    if not root.is_dir():
-        raise DeploymentAuthorityError("deployment data root must already exist")
+    # The resolver is read-only and must preserve ordinary first legacy
+    # startup: Fabric creates a new data root only after this pre-selector
+    # check has returned LEGACY_PUBLIC. A non-directory remains invalid, but
+    # a missing root is simply empty pre-selector authority.
+    if root.exists() and not root.is_dir():
+        raise DeploymentAuthorityError("deployment data root must be a directory when it exists")
     return root
 
 

@@ -31,6 +31,7 @@ from torment_service.substrate.deployment_selector import (
     resolve_deployment_agreement,
 )
 from torment_service.substrate.deployment_types import (
+    AdmissionCompletionWitness,
     DeploymentResolutionMode,
     QualifiedDeploymentProfile,
 )
@@ -237,6 +238,15 @@ def _active_fixture(tmp_path: Path, *, activate: bool = True):
         selector_generation=selected.generation,
         selector_witness_digest=selected.core_witness_digest or "",
         operation_key="core-active",
+        completion_witness=AdmissionCompletionWitness(
+            admission_identity_digest=descriptor_digest,
+            completed_descriptor_digest=descriptor_digest,
+            completed_progress_digest=_digest("b5-a3-completed-progress"),
+            native_core_id=core_id,
+            workspace_id="orchard",
+            whole_workspace_closure_digest=_digest("b5-a3-whole-workspace-closure"),
+            profile_digest=profile.digest,
+        ),
     )
     activate_selector_native(
         data_root=root,

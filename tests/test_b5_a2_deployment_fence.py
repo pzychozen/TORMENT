@@ -34,6 +34,7 @@ from torment_service.substrate.deployment_selector import (
     selector_paths,
 )
 from torment_service.substrate.deployment_types import (
+    AdmissionCompletionWitness,
     DeploymentResolutionMode,
     DeploymentState,
     QualifiedDeploymentProfile,
@@ -63,6 +64,17 @@ def _profile(**overrides: object) -> QualifiedDeploymentProfile:
     }
     values.update(overrides)
     return QualifiedDeploymentProfile(**values)  # type: ignore[arg-type]
+
+
+def test_absent_legacy_root_resolves_read_only_before_fabric_creation(tmp_path: Path):
+    root = tmp_path / "new-legacy-root"
+    assert not root.exists()
+
+    resolution = resolve_deployment_agreement(data_root=root, effective_profile=_profile())
+
+    assert resolution.mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    assert resolution.reason == "pre-selector-compatible"
+    assert not root.exists()
 
 
 def _root_with_staging_core(tmp_path: Path, name: str = "alpha.db") -> tuple[Path, str]:
@@ -109,6 +121,20 @@ def _core_pending(root: Path, name: str, selected):
     )
 
 
+def _completion(witness) -> AdmissionCompletionWitness:
+    """Synthetic immutable completion receipt for the isolated B5-A2 core."""
+
+    return AdmissionCompletionWitness(
+        admission_identity_digest=witness.descriptor_digest,
+        completed_descriptor_digest=_digest("completed-descriptor"),
+        completed_progress_digest=_digest("completed-progress"),
+        native_core_id=witness.core_id,
+        workspace_id="b5-a2-test",
+        whole_workspace_closure_digest=_digest("whole-workspace-closure"),
+        profile_digest=witness.profile_digest,
+    )
+
+
 def _activate(root: Path, name: str, selected):
     pending = _core_pending(root, name, selected)
     active = activate_core(
@@ -118,6 +144,7 @@ def _activate(root: Path, name: str, selected):
         selector_generation=selected.generation,
         selector_witness_digest=selected.core_witness_digest,
         operation_key="core-active",
+        completion_witness=_completion(pending.witness),
     )
     return pending, active
 
@@ -222,6 +249,7 @@ def test_lost_response_retries_are_exact_and_changed_intention_refuses(tmp_path:
         selector_generation=selected.generation,
         selector_witness_digest=selected.core_witness_digest,
         operation_key="core-active",
+        completion_witness=active.completion_witness,
     ) == active
     final = activate_selector_native(
         data_root=root,

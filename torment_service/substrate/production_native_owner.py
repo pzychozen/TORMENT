@@ -75,7 +75,7 @@ class NativeProductionAuthorityFacts:
     selector_generation: int
     core_id: UUID
     core_database_path: Path
-    descriptor_digest: str
+    admission_identity_digest: str
     profile_digest: str
     core_witness: CoreDeploymentWitness
     sqlite_runtime_witness: RuntimeQualificationResult
@@ -140,8 +140,23 @@ class NativeProductionResourceOwner:
         _require_same_agreement(agreement, current)
         state, witness = _native_agreement_parts(current)
         descriptor = load_existing_workspace_multi_scope_admission_descriptor(descriptor_path)
-        if descriptor.digest != state.descriptor_digest or descriptor.native_core_id != witness.core_id:
+        identity_digest = descriptor.admission_identity_digest
+        binding_digest = descriptor.digest if identity_digest is None else identity_digest
+        if binding_digest != state.descriptor_digest or descriptor.native_core_id != witness.core_id:
             raise NativeProductionResourceOwnerError("production owner descriptor does not match selected core")
+        if identity_digest is not None:
+            try:
+                descriptor.completed_admission_witness()
+                recover_active_existing_workspace_native_multi_scope_runtime(
+                    data_root=root,
+                    agreement=current,
+                    admission_descriptor_path=descriptor_path,
+                    character_store=character_store,
+                )
+            except ExistingWorkspaceMultiScopeAdmissionRefused as exc:
+                raise NativeProductionResourceOwnerError(
+                    "production owner completed admission descriptor is refused"
+                ) from exc
         _require_profile_lane(descriptor.representation_lane, effective_profile)
         _require_profile_scope_plan(descriptor, effective_profile)
         runtime_witness = _qualified_runtime_witness()
@@ -155,7 +170,7 @@ class NativeProductionResourceOwner:
             selector_generation=state.generation,
             core_id=witness.core_id,
             core_database_path=core_path,
-            descriptor_digest=state.descriptor_digest or "",
+            admission_identity_digest=state.descriptor_digest or "",
             profile_digest=state.profile_digest or "",
             core_witness=witness,
             sqlite_runtime_witness=runtime_witness,
@@ -261,7 +276,8 @@ class NativeProductionResourceOwner:
         if (
             runtime.native_core_id != self._authority_facts.core_id
             or runtime.native_core_database_path != self._authority_facts.core_database_path
-            or runtime.descriptor.digest != self._authority_facts.descriptor_digest
+            or (runtime.descriptor.admission_identity_digest or runtime.descriptor.digest)
+            != self._authority_facts.admission_identity_digest
         ):
             raise NativeProductionResourceOwnerError("production active recovery changed selected facts")
         _require_profile_lane(runtime.representation_lane, self._effective_profile)
@@ -278,7 +294,7 @@ class NativeProductionResourceOwner:
         if (
             state.generation != self._authority_facts.selector_generation
             or state.core_id != self._authority_facts.core_id
-            or state.descriptor_digest != self._authority_facts.descriptor_digest
+            or state.descriptor_digest != self._authority_facts.admission_identity_digest
             or state.profile_digest != self._authority_facts.profile_digest
             or witness != self._authority_facts.core_witness
         ):

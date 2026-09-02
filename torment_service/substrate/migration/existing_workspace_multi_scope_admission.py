@@ -23,8 +23,11 @@ from ..character_seed_witness import (
 from ..compat import NativeMemoryCompatibilityFacade
 from ..compat_embedding_reader import NativeCompatEmbeddingReader
 from ..connection import open_existing_native_core_connection, open_new_native_core_connection
-from ..deployment_core_maintenance import contained_core_path
-from ..deployment_types import DeploymentResolution, DeploymentResolutionMode, DeploymentState
+from ..deployment_core_maintenance import contained_core_path, inspect_contained_core_deployment
+from ..deployment_types import (
+    AdmissionCompletionWitness, DeploymentResolution, DeploymentResolutionMode, DeploymentState,
+    QualifiedDeploymentProfile,
+)
 from ..errors import SubstrateConfigurationError
 from ..fabric_native_routing import (
     NativeFabricRoutingScope, prepare_native_fabric_routing_capability,
@@ -78,6 +81,10 @@ _PRIVATE = "PRIVATE_AGENT"
 _SHARED = "SHARED_DOMAIN"
 _INCOMPLETE = "ADMISSION_INCOMPLETE_RESUMABLE"
 _COMPLETE = "ADMISSION_COMPLETE"
+_IDENTITY_CONTRACT = "TORMENT_EXISTING_WORKSPACE_MULTI_SCOPE_ADMISSION_IDENTITY"
+_IDENTITY_VERSION = 1
+_COMPLETION_CONTRACT = "TORMENT_EXISTING_WORKSPACE_MULTI_SCOPE_ADMISSION_COMPLETION"
+_COMPLETION_VERSION = 1
 
 
 class ExistingWorkspaceMultiScopeAdmissionRefused(SubstrateConfigurationError):
@@ -213,6 +220,7 @@ class ExistingWorkspaceNativeMultiScopeAdmissionRequest:
     production_feature_posture: WorkspaceNativeFeaturePosture
     qualification_embedder_identity: WorkspaceNativeEmbedderIdentity
     private_post_write_configuration: NativePostWriteQualificationConfiguration
+    effective_deployment_profile: QualifiedDeploymentProfile | None = None
     retained_side_store_eid_references: tuple[RetainedSideStoreEIDReference, ...] = ()
     retained_side_store_eid_observations: tuple[RetainedSideStoreEIDObservation, ...] = ()
 
@@ -235,6 +243,10 @@ class ExistingWorkspaceNativeMultiScopeAdmissionRequest:
             raise ValueError("qualification_embedder_identity must be typed")
         if not isinstance(self.private_post_write_configuration, NativePostWriteQualificationConfiguration):
             raise ValueError("private_post_write_configuration must be typed")
+        if self.effective_deployment_profile is not None and not isinstance(
+            self.effective_deployment_profile, QualifiedDeploymentProfile,
+        ):
+            raise ValueError("effective_deployment_profile must be typed when supplied")
         if any(plan.workspace_id != self.workspace_id for plan in self.lane_plans):
             raise ValueError("all lane plans must name the requested workspace")
         private = [plan for plan in self.lane_plans if plan.scope_kind == _PRIVATE]
@@ -272,6 +284,26 @@ class ExistingWorkspaceNativeMultiScopeDescriptor:
     def representation_lane(self) -> NativeRepresentationLane:
         return _lane_from_payload(self.payload["representation_lane"])
 
+    @property
+    def admission_identity_digest(self) -> str | None:
+        """The stable deployment binding for prepared admissions.
+
+        Pre-R0 descriptors intentionally have no identity field.  They retain
+        their historical complete-descriptor binding, but cannot model
+        pending-before-admission cutover.
+        """
+
+        return _identity_digest_from_payload(self.payload)
+
+    @property
+    def has_admission_identity(self) -> bool:
+        return self.admission_identity_digest is not None
+
+    def completed_admission_witness(self) -> AdmissionCompletionWitness:
+        """Verify and materialize immutable evidence for final activation."""
+
+        return _completed_admission_witness(self)
+
 
 @dataclass(frozen=True)
 class ExistingWorkspaceNativeMultiScopeLaneResult:
@@ -291,6 +323,33 @@ class ExistingWorkspaceNativeMultiScopeAdmissionResult:
     lane_results: tuple[ExistingWorkspaceNativeMultiScopeLaneResult, ...]
     multi_scope_b5: bool
     resumed: bool
+
+
+@dataclass(frozen=True)
+class ExistingWorkspaceNativeMultiScopeSnapshotWitness:
+    """One immutable frozen-lane fact returned by preparation."""
+
+    scope_kind: str
+    qualifier: str
+    legacy_snapshot_id: UUID
+    snapshot_manifest_digest: str
+
+
+@dataclass(frozen=True)
+class ExistingWorkspaceNativeMultiScopePreparedAdmission:
+    """Inert P1 result: frozen evidence and a STAGING/LEGACY_ACTIVE core only."""
+
+    descriptor: ExistingWorkspaceNativeMultiScopeDescriptor
+    native_core_id: UUID
+    native_core_database_path: Path
+    snapshot_witnesses: tuple[ExistingWorkspaceNativeMultiScopeSnapshotWitness, ...]
+    admission_identity_digest: str
+    descriptor_digest: str
+    resumed: bool
+
+    @property
+    def state(self) -> ExistingWorkspaceMultiScopeAdmissionState:
+        return self.descriptor.state
 
 
 @dataclass
@@ -449,17 +508,19 @@ class RecoveredExistingWorkspaceNativeMultiScopeRuntime:
 class ExistingWorkspaceNativeMultiScopeAdmissionService:
     """Coordinate frozen private and shared lanes into one qualified core."""
 
-    def admit(
-        self, request: ExistingWorkspaceNativeMultiScopeAdmissionRequest, *,
-        _test_interrupt_after: str | None = None,
-        _test_lose_response_after: str | None = None,
-    ) -> ExistingWorkspaceNativeMultiScopeAdmissionResult:
+    def prepare(
+        self,
+        request: ExistingWorkspaceNativeMultiScopeAdmissionRequest,
+    ) -> ExistingWorkspaceNativeMultiScopePreparedAdmission:
+        """Freeze P1 evidence and establish one inert, identity-bound core.
+
+        Preparation is deliberately bounded: it never runs B2, B3A, B4A, or
+        B5.  It is therefore safe while writers are externally drained but
+        before the selector moves external authority to CUTOVER_PENDING.
+        """
+
         if not isinstance(request, ExistingWorkspaceNativeMultiScopeAdmissionRequest):
             raise ValueError("request must be ExistingWorkspaceNativeMultiScopeAdmissionRequest")
-        if _test_interrupt_after not in {None, "PRIVATE_B2", "BETWEEN_PRIVATE_AND_SHARED", "SHARED_B3A", "SHARED_B4A", "BEFORE_B5", "B5"}:
-            raise ValueError("unknown multi-scope interruption point")
-        if _test_lose_response_after not in {None, "B2", "B3A", "B4A", "B5"}:
-            raise ValueError("unknown multi-scope response-loss point")
         paths = _paths(request)
         _validate_profile_and_topology(request, paths.workspace_root)
         descriptor = _load_or_create_descriptor(request, paths)
@@ -473,6 +534,46 @@ class ExistingWorkspaceNativeMultiScopeAdmissionService:
             if descriptor.payload.get("source_workspace_fingerprint") != source_fingerprint:
                 raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_SOURCE_EVIDENCE_MISMATCH")
 
+        _verify_lane_snapshots(descriptor, request)
+        qualified, core_id = _open_or_create_core(paths, descriptor)
+        try:
+            _ensure_namespaces(qualified.connection, request)
+        finally:
+            qualified.close()
+        if _tree_fingerprint(paths.workspace_root) != source_fingerprint:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_SOURCE_EVIDENCE_MISMATCH")
+        _freeze_admission_identity(descriptor.payload, request, paths, core_id)
+        _write_descriptor(paths.descriptor_path, descriptor.payload)
+        prepared_descriptor = load_existing_workspace_multi_scope_admission_descriptor(paths.descriptor_path)
+        identity_digest = prepared_descriptor.admission_identity_digest
+        if identity_digest is None:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_MISSING")
+        return ExistingWorkspaceNativeMultiScopePreparedAdmission(
+            descriptor=prepared_descriptor,
+            native_core_id=core_id,
+            native_core_database_path=paths.core_path,
+            snapshot_witnesses=_snapshot_witnesses(prepared_descriptor),
+            admission_identity_digest=identity_digest,
+            descriptor_digest=prepared_descriptor.digest,
+            resumed=resumed,
+        )
+
+    def admit(
+        self, request: ExistingWorkspaceNativeMultiScopeAdmissionRequest, *,
+        _test_interrupt_after: str | None = None,
+        _test_lose_response_after: str | None = None,
+    ) -> ExistingWorkspaceNativeMultiScopeAdmissionResult:
+        if _test_interrupt_after not in {None, "PRIVATE_B2", "BETWEEN_PRIVATE_AND_SHARED", "SHARED_B3A", "SHARED_B4A", "BEFORE_B5", "B5"}:
+            raise ValueError("unknown multi-scope interruption point")
+        if _test_lose_response_after not in {None, "B2", "B3A", "B4A", "B5"}:
+            raise ValueError("unknown multi-scope response-loss point")
+        prepared = self.prepare(request)
+        paths = _paths(request)
+        descriptor = prepared.descriptor
+        resumed = prepared.resumed
+        source_fingerprint = _tree_fingerprint(paths.workspace_root)
+        if descriptor.payload.get("source_workspace_fingerprint") != source_fingerprint:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_SOURCE_EVIDENCE_MISMATCH")
         _verify_lane_snapshots(descriptor, request)
         qualified, core_id = _open_or_create_core(paths, descriptor)
         try:
@@ -519,7 +620,7 @@ class ExistingWorkspaceNativeMultiScopeAdmissionService:
             if _test_interrupt_after == "BEFORE_B5":
                 raise RuntimeError("forced interruption before whole-workspace B5")
             reports = _run_whole_workspace_b5(connection, descriptor, request, core_id, paths.workspace_root)
-            _record_b5(descriptor.payload, request, reports, connection)
+            _record_b5(descriptor.payload, request, reports, connection, core_id)
             _write_descriptor(paths.descriptor_path, descriptor.payload)
             completed = load_existing_workspace_multi_scope_admission_descriptor(paths.descriptor_path)
             if _test_interrupt_after == "B5" or _test_lose_response_after == "B5":
@@ -646,6 +747,172 @@ def _new_descriptor(request: ExistingWorkspaceNativeMultiScopeAdmissionRequest, 
         "multi_scope_b5": None,
     }
     return ExistingWorkspaceNativeMultiScopeDescriptor(payload, _digest(payload))
+
+
+def _freeze_admission_identity(
+    payload: dict[str, Any],
+    request: ExistingWorkspaceNativeMultiScopeAdmissionRequest,
+    paths: _Paths,
+    core_id: UUID,
+) -> None:
+    """Install or re-verify P1's stable identity after evidence exists.
+
+    The mutable descriptor is intentionally not itself the deployment binding.
+    This payload is deliberately built only from request facts, source
+    fingerprints, snapshots, and the inert core identity; B2--B5 progress is
+    excluded by construction.
+    """
+
+    identity = _admission_identity_payload(payload, request, paths, core_id)
+    digest = _digest(identity)
+    existing_identity = payload.get("admission_identity")
+    existing_digest = payload.get("admission_identity_digest")
+    if existing_identity is None and existing_digest is None:
+        payload["admission_identity"] = identity
+        payload["admission_identity_digest"] = digest
+        return
+    if not isinstance(existing_identity, dict) or existing_digest != _digest(existing_identity):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_TAMPERED")
+    if existing_identity != identity or existing_digest != digest:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_REQUEST_MISMATCH")
+
+
+def _admission_identity_payload(
+    payload: dict[str, Any],
+    request: ExistingWorkspaceNativeMultiScopeAdmissionRequest,
+    paths: _Paths,
+    core_id: UUID,
+) -> dict[str, Any]:
+    snapshots: list[dict[str, Any]] = []
+    for plan in request.ordered_lane_plans:
+        lane = _lane_descriptor(payload, plan)
+        manifest_path = Path(lane["snapshot_manifest_path"])
+        manifest = load_snapshot_manifest(manifest_path)
+        manifest_digest = _file_digest(manifest_path)
+        if (
+            str(manifest.legacy_snapshot_id) != lane["legacy_snapshot_id"]
+            or manifest_digest != lane["snapshot_digest"]
+        ):
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_SNAPSHOT_DESCRIPTOR_MISMATCH")
+        snapshots.append({
+            "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
+            "scope_kind": plan.scope_kind,
+            "qualifier": plan.qualifier,
+            "snapshot_manifest_digest": manifest_digest,
+            "snapshot_manifest_path": str(manifest_path.resolve()),
+            "snapshot_root": str(Path(lane["snapshot_root"]).resolve()),
+        })
+    return {
+        "contract": _IDENTITY_CONTRACT,
+        "version": _IDENTITY_VERSION,
+        "descriptor_schema": _SCHEMA,
+        "descriptor_version": _VERSION,
+        "profile": _PROFILE,
+        "admission_key": request.admission_key,
+        "workspace_id": request.workspace_id,
+        "source_workspace_fingerprint": payload["source_workspace_fingerprint"],
+        "native_core_id": str(core_id),
+        "native_core_database_path": str(paths.core_path.resolve()),
+        "representation_lane": _lane_payload(request.qualified_representation_lane),
+        "lane_plan_digest": _digest([plan.payload() for plan in request.ordered_lane_plans]),
+        "ordered_lane_plans": [plan.payload() for plan in request.ordered_lane_plans],
+        "unknown_semantic_scope_id": str(request.unknown_semantic_scope_id),
+        "qualification_embedder_identity": {
+            "provider": request.qualification_embedder_identity.provider,
+            "model": request.qualification_embedder_identity.model,
+            "dim": request.qualification_embedder_identity.dim,
+        },
+        "staging_feature_posture": request.staging_feature_posture.intent(),
+        "production_feature_posture": request.production_feature_posture.intent(),
+        "effective_deployment_profile_digest": (
+            None if request.effective_deployment_profile is None
+            else request.effective_deployment_profile.digest
+        ),
+        "private_post_write_profile": _post_write_identity(request.private_post_write_configuration),
+        "retained_side_store_eid_references": _retained_reference_identity(
+            request.retained_side_store_eid_references,
+        ),
+        "retained_side_store_eid_observations": _retained_observation_identity(
+            request.retained_side_store_eid_observations,
+        ),
+        "retained_side_store_digest": payload["retained_side_store_digest"],
+        "snapshots": snapshots,
+    }
+
+
+def _post_write_identity(configuration: NativePostWriteQualificationConfiguration) -> dict[str, Any]:
+    profile = {
+        name: getattr(configuration.profile, name).value
+        for name in configuration.profile.__dataclass_fields__
+    }
+    requirements = {
+        name: getattr(configuration, name)
+        for name in (
+            "motif_suggestion_maintenance_required",
+            "persistent_trajectory_evidence_required",
+            "checkpoint_snapshots_required",
+            "bridge_suggestions_required",
+            "deep_memory_required",
+            "shared_bridge_suggestions_required",
+            "shared_motif_suggestion_maintenance_required",
+            "shared_hivemind_packet_emission_required",
+            "shared_trajectory_evidence_required",
+            "shared_checkpoint_snapshot_required",
+            "shared_compression_disabled_noop_required",
+            "shared_integrated_default_required",
+        )
+    }
+    return {"profile": profile, "requirements": requirements}
+
+
+def _retained_reference_identity(
+    values: tuple[RetainedSideStoreEIDReference, ...],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "side_store": item.side_store,
+            "legacy_source_namespace_id": (
+                None if item.legacy_source_namespace_id is None else str(item.legacy_source_namespace_id)
+            ),
+            "eid": item.eid,
+        }
+        for item in sorted(
+            values,
+            key=lambda item: (
+                item.side_store,
+                "" if item.legacy_source_namespace_id is None else str(item.legacy_source_namespace_id),
+                -1 if item.eid is None else item.eid,
+            ),
+        )
+    ]
+
+
+def _retained_observation_identity(
+    values: tuple[RetainedSideStoreEIDObservation, ...],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "side_store": item.side_store,
+            "state": item.state.value,
+            "references": _retained_reference_identity(item.references),
+        }
+        for item in sorted(values, key=lambda item: item.side_store)
+    ]
+
+
+def _snapshot_witnesses(
+    descriptor: ExistingWorkspaceNativeMultiScopeDescriptor,
+) -> tuple[ExistingWorkspaceNativeMultiScopeSnapshotWitness, ...]:
+    values: list[ExistingWorkspaceNativeMultiScopeSnapshotWitness] = []
+    for lane in descriptor.payload["lanes"]:
+        plan = lane["plan"]
+        values.append(ExistingWorkspaceNativeMultiScopeSnapshotWitness(
+            scope_kind=plan["scope_kind"],
+            qualifier=plan["qualifier"],
+            legacy_snapshot_id=UUID(lane["legacy_snapshot_id"]),
+            snapshot_manifest_digest=lane["snapshot_digest"],
+        ))
+    return tuple(values)
 
 
 def _create_lane_snapshot(workspace: Path, plan: ExistingWorkspaceNativeLanePlan, destination: Path) -> None:
@@ -862,7 +1129,13 @@ def _run_whole_workspace_b5(connection: Any, descriptor: ExistingWorkspaceNative
     return tuple(reports)
 
 
-def _record_b5(payload: dict[str, Any], request: ExistingWorkspaceNativeMultiScopeAdmissionRequest, reports: tuple[Any, ...], connection: Any) -> None:
+def _record_b5(
+    payload: dict[str, Any],
+    request: ExistingWorkspaceNativeMultiScopeAdmissionRequest,
+    reports: tuple[Any, ...],
+    connection: Any,
+    core_id: UUID,
+) -> None:
     for plan, report in zip(request.ordered_lane_plans, reports, strict=True):
         lane = _lane_descriptor(payload, plan)
         lane["readiness_report_digest"] = _report_digest(report)
@@ -878,6 +1151,19 @@ def _record_b5(payload: dict[str, Any], request: ExistingWorkspaceNativeMultiSco
         "lane_report_digests": [_report_digest(report) for report in reports], "joint_binding_constructible": True,
     }
     payload["admission_state"] = _COMPLETE
+    identity_digest = _identity_digest_from_payload(payload)
+    if identity_digest is None:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_MISSING")
+    payload["completion_witness"] = {
+        "contract": _COMPLETION_CONTRACT,
+        "version": _COMPLETION_VERSION,
+        "admission_identity_digest": identity_digest,
+        "completed_progress_digest": _digest(_descriptor_progress_payload(payload)),
+        "native_core_id": str(core_id),
+        "profile_digest": payload["admission_identity"]["effective_deployment_profile_digest"],
+        "whole_workspace_closure_digest": _digest(payload["multi_scope_b5"]),
+        "workspace_id": request.workspace_id,
+    }
 
 
 def _shared_b5_read_only_closure(
@@ -1091,7 +1377,69 @@ def load_existing_workspace_multi_scope_admission_descriptor(path: str | Path) -
     except (KeyError, ValueError) as exc:
         raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_DESCRIPTOR_TAMPERED") from exc
     _validate_descriptor_lane_set(payload)
+    _identity_digest_from_payload(payload)
     return ExistingWorkspaceNativeMultiScopeDescriptor(payload, digest)
+
+
+def _identity_digest_from_payload(payload: dict[str, Any]) -> str | None:
+    identity = payload.get("admission_identity")
+    digest = payload.get("admission_identity_digest")
+    if identity is None and digest is None:
+        return None
+    if not isinstance(identity, dict) or not isinstance(digest, str) or digest != _digest(identity):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_TAMPERED")
+    if (
+        identity.get("contract") != _IDENTITY_CONTRACT
+        or identity.get("version") != _IDENTITY_VERSION
+    ):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ADMISSION_IDENTITY_TAMPERED")
+    return digest
+
+
+def _descriptor_progress_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return all completed descriptor facts except its non-self-referential witness."""
+
+    return {key: value for key, value in payload.items() if key != "completion_witness"}
+
+
+def _completed_admission_witness(
+    descriptor: ExistingWorkspaceNativeMultiScopeDescriptor,
+) -> AdmissionCompletionWitness:
+    payload = descriptor.payload
+    identity_digest = _identity_digest_from_payload(payload)
+    if identity_digest is None or descriptor.state is not ExistingWorkspaceMultiScopeAdmissionState.ADMISSION_COMPLETE:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_COMPLETION_WITNESS_INCOMPLETE")
+    value = payload.get("completion_witness")
+    if not isinstance(value, dict) or set(value) != {
+        "contract", "version", "admission_identity_digest", "completed_progress_digest",
+        "native_core_id", "profile_digest", "whole_workspace_closure_digest", "workspace_id",
+    }:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_COMPLETION_WITNESS_TAMPERED")
+    try:
+        core_id = UUID(value["native_core_id"])
+        witness = AdmissionCompletionWitness(
+            admission_identity_digest=value["admission_identity_digest"],
+            completed_descriptor_digest=descriptor.digest,
+            completed_progress_digest=value["completed_progress_digest"],
+            native_core_id=core_id,
+            workspace_id=value["workspace_id"],
+            whole_workspace_closure_digest=value["whole_workspace_closure_digest"],
+            profile_digest=value["profile_digest"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_COMPLETION_WITNESS_TAMPERED") from exc
+    if (
+        value["contract"] != _COMPLETION_CONTRACT
+        or value["version"] != _COMPLETION_VERSION
+        or witness.admission_identity_digest != identity_digest
+        or witness.native_core_id != descriptor.native_core_id
+        or witness.workspace_id != payload.get("workspace_id")
+        or witness.completed_progress_digest != _digest(_descriptor_progress_payload(payload))
+        or payload.get("multi_scope_b5") is None
+        or witness.whole_workspace_closure_digest != _digest(payload["multi_scope_b5"])
+    ):
+        raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_COMPLETION_WITNESS_TAMPERED")
+    return witness
 
 
 def _validate_descriptor_lane_set(payload: dict[str, Any]) -> None:
@@ -1182,12 +1530,29 @@ def recover_active_existing_workspace_native_multi_scope_runtime(
         raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_AGREEMENT_MISMATCH")
 
     descriptor = load_existing_workspace_multi_scope_admission_descriptor(admission_descriptor_path)
-    if (
-        descriptor.state is not ExistingWorkspaceMultiScopeAdmissionState.ADMISSION_COMPLETE
-        or descriptor.digest != state.descriptor_digest
-        or descriptor.native_core_id != witness.core_id
-    ):
+    if descriptor.state is not ExistingWorkspaceMultiScopeAdmissionState.ADMISSION_COMPLETE:
         raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_DESCRIPTOR_MISMATCH")
+    identity_digest = descriptor.admission_identity_digest
+    if identity_digest is None:
+        # Historical B5-A2/A3 fixtures bound their already-complete descriptor
+        # hash directly.  Preserve that evidence model for old records only.
+        if descriptor.digest != state.descriptor_digest or descriptor.native_core_id != witness.core_id:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_DESCRIPTOR_MISMATCH")
+    else:
+        completion = descriptor.completed_admission_witness()
+        if (
+            identity_digest != state.descriptor_digest
+            or descriptor.native_core_id != witness.core_id
+            or completion.profile_digest is None
+            or completion.profile_digest != state.profile_digest
+        ):
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_DESCRIPTOR_MISMATCH")
+        inspection = inspect_contained_core_deployment(
+            data_root=data_root,
+            core_relative_path=state.core_relative_path,
+        )
+        if inspection.activation_completion_witness != completion:
+            raise ExistingWorkspaceMultiScopeAdmissionRefused("MULTI_SCOPE_ACTIVE_RECOVERY_COMPLETION_WITNESS_MISMATCH")
     core_path = contained_core_path(
         data_root=data_root,
         core_relative_path=state.core_relative_path,
@@ -1349,7 +1714,10 @@ __all__ = [
     "ExistingWorkspaceMultiScopeAdmissionRefused", "ExistingWorkspaceMultiScopeAdmissionState",
     "ExistingWorkspaceNativeLanePlan", "ExistingWorkspaceNativeMultiScopeAdmissionRequest",
     "ExistingWorkspaceNativeMultiScopeDescriptor", "ExistingWorkspaceNativeMultiScopeLaneResult",
-    "ExistingWorkspaceNativeMultiScopeAdmissionResult", "ExistingWorkspaceNativeMultiScopeAdmissionService",
+    "ExistingWorkspaceNativeMultiScopeAdmissionResult",
+    "ExistingWorkspaceNativeMultiScopeSnapshotWitness",
+    "ExistingWorkspaceNativeMultiScopePreparedAdmission",
+    "ExistingWorkspaceNativeMultiScopeAdmissionService",
     "RecoveredExistingWorkspaceNativeMultiScopeReaders", "RecoveredExistingWorkspaceNativeMultiScopeScope",
     "RecoveredActiveExistingWorkspaceNativeMultiScopeScope", "RecoveredExistingWorkspaceNativeMultiScopeRuntime",
     "load_existing_workspace_multi_scope_admission_descriptor",
