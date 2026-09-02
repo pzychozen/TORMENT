@@ -36,6 +36,9 @@ class SourceOwnerClass(StrEnum):
     EMBEDDING_MANIFEST = "EMBEDDING_MANIFEST"
     EMBEDDING_SHARD_OR_MAP = "EMBEDDING_SHARD_OR_MAP"
     LEGACY_REPRESENTATION_ARTIFACT = "LEGACY_REPRESENTATION_ARTIFACT"
+    METADATA_LESS_PER_EID_LEGACY_REPRESENTATION = (
+        "METADATA_LESS_PER_EID_LEGACY_REPRESENTATION"
+    )
     MOTIF_SOURCE = "MOTIF_SOURCE"
     EXTERNAL_OWNER_OBSERVATION = "EXTERNAL_OWNER_OBSERVATION"
 
@@ -282,6 +285,17 @@ def capture_present_source_evidence(
     )
 
 
+def resolve_explicit_source_evidence_path(
+    *,
+    data_root: str | Path,
+    evidence: ExplicitSourceEvidence,
+) -> Path:
+    """Resolve one declared source through the shared owner-containment doctrine."""
+    if not isinstance(evidence, ExplicitSourceEvidence):
+        raise ExplicitSourceEvidenceError("evidence must be ExplicitSourceEvidence")
+    return _resolve_evidence_path(data_root, evidence.owner_boundary, evidence.canonical_locator)
+
+
 def verify_explicit_source_manifest(
     manifest: RootEvidenceManifest,
     *,
@@ -430,6 +444,9 @@ def _validate_owner_role_boundary(
         SourceOwnerClass.EMBEDDING_MANIFEST: {EvidenceSemanticRole.EMBEDDING_MANIFEST},
         SourceOwnerClass.EMBEDDING_SHARD_OR_MAP: {EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP},
         SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT: {EvidenceSemanticRole.LEGACY_REPRESENTATION},
+        SourceOwnerClass.METADATA_LESS_PER_EID_LEGACY_REPRESENTATION: {
+            EvidenceSemanticRole.LEGACY_REPRESENTATION
+        },
         SourceOwnerClass.MOTIF_SOURCE: {EvidenceSemanticRole.MOTIFS},
         SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION: {EvidenceSemanticRole.EXTERNAL_OBSERVATION},
     }
@@ -445,6 +462,9 @@ def _validate_owner_role_boundary(
         SourceOwnerClass.EMBEDDING_MANIFEST: {EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, EvidenceOwnerBoundaryKind.SHARED_SCOPE},
         SourceOwnerClass.EMBEDDING_SHARD_OR_MAP: {EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, EvidenceOwnerBoundaryKind.SHARED_SCOPE},
         SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT: {EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, EvidenceOwnerBoundaryKind.SHARED_SCOPE},
+        SourceOwnerClass.METADATA_LESS_PER_EID_LEGACY_REPRESENTATION: {
+            EvidenceOwnerBoundaryKind.PRIVATE_SCOPE
+        },
         SourceOwnerClass.MOTIF_SOURCE: {EvidenceOwnerBoundaryKind.DOMAIN, EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, EvidenceOwnerBoundaryKind.SHARED_SCOPE},
         SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION: set(EvidenceOwnerBoundaryKind),
     }
@@ -540,6 +560,7 @@ __all__ = [
     "SourceOwnerClass",
     "capture_present_source_evidence",
     "load_explicit_source_manifest",
+    "resolve_explicit_source_evidence_path",
     "verify_explicit_source_manifest",
     "write_explicit_source_manifest",
 ]
