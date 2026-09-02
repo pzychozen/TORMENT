@@ -70,8 +70,24 @@ was independently changed outside this work. B5-A7's read-only check found no
 selector-era marker, no `selector.sqlite`, and no controlled active/pending
 native-core evidence at that root. No real production cutover was performed.
 
+### P8-R6 architecture freeze
+
 ```text
-NEXT_ACTION = FRESH CHAT
+P8_R6_ARCHITECTURE_FROZEN = YES
+ROOT_WIDE_GENERALIZED_NATIVE_PRODUCTION_DIRECTION = SELECTED
+REPRESENTATION_NORMALIZATION_TARGET = st / BAAI/bge-small-en-v1.5 / 384
+REAL_MEMORY_REEMBED_AUTHORIZED = NO
+CONVERGENCE_AND_DECOMMISSION_CONTRACT = FROZEN
+IMPLEMENTATION = NEXT
+REAL_PRODUCTION_CUTOVER_AUTHORIZED = NO
+```
+
+The frozen direction is documented by the root-wide multi-workspace native
+production profile and the native-memory convergence/decommission plan.  It
+selects no real-root admission, re-embedding, or cutover operation.
+
+```text
+NEXT_ACTION = DETAILED_GENERALIZED_IMPLEMENTATION_SEQUENCE
 ```
 
 ## 1. Current main project thread
