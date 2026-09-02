@@ -41,6 +41,7 @@ from .spine import (
     EXPOSURE_GUARDED,
 )
 from .fabric import TormentFabric
+from .public_mutation_identity import PublicMutationKeyError
 from .lifecycle import (
     LifecycleStateError,
     detect_lifecycle_legacy_marker_disagreement,
@@ -287,6 +288,7 @@ def _spine_call(
     workspace_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     mode: str = "auto",
+    idempotency_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute a governed Spine operation and return the full envelope.
 
@@ -320,13 +322,22 @@ def _spine_call(
         agent_id=agent_id,
     )
 
-    req = SpineRequest(
-        workspace_id=ctx.workspace_id,
-        agent_id=ctx.agent_id,
-        operation=operation,
-        payload=payload,
-        mode=mode,
-    )
+    try:
+        req = SpineRequest(
+            workspace_id=ctx.workspace_id,
+            agent_id=ctx.agent_id,
+            operation=operation,
+            payload=payload,
+            mode=mode,
+            idempotency_key=idempotency_key,
+        )
+    except PublicMutationKeyError as exc:
+        return {
+            "ok": False,
+            "reason": str(exc),
+            "decision_code": "blocked_mcp_invalid_idempotency_key",
+            "result_code": "none",
+        }
 
     logger.info(
         "MCP tool call: op=%s ws=%s agent=%s mode=%s",
@@ -403,6 +414,7 @@ def create_mcp_server() -> FastMCP:
         agent_id: str = "",
         payload: str = "{}",
         mode: str = "auto",
+        idempotency_key: Optional[str] = None,
     ) -> str:
         """Submit a governed task to the TORMENT Spine.
 
@@ -462,6 +474,7 @@ def create_mcp_server() -> FastMCP:
             workspace_id=workspace_id or None,
             agent_id=agent_id or None,
             mode=mode,
+            idempotency_key=idempotency_key,
         )
         return json.dumps(result, default=str)
 
@@ -490,6 +503,7 @@ def create_mcp_server() -> FastMCP:
             domain_id: str = "",
             step: int = 0,
             scope: str = "private",
+            idempotency_key: Optional[str] = None,
         ) -> str:
             """Ingest text as new memory.
 
@@ -506,7 +520,8 @@ def create_mcp_server() -> FastMCP:
                 payload["domain_id"] = domain_id
             result = _spine_call("ingest", payload,
                                  workspace_id=workspace_id or None,
-                                 agent_id=agent_id or None)
+                                 agent_id=agent_id or None,
+                                 idempotency_key=idempotency_key)
             return json.dumps(result, default=str)
 
     # --- torment_query_memory ---
@@ -588,6 +603,7 @@ def create_mcp_server() -> FastMCP:
             contradicted: bool = False,
             workspace_id: str = "",
             agent_id: str = "",
+            idempotency_key: Optional[str] = None,
         ) -> str:
             """Provide reinforcement feedback.
 
@@ -614,7 +630,8 @@ def create_mcp_server() -> FastMCP:
 
             result = _spine_call("feedback", payload,
                                  workspace_id=workspace_id or None,
-                                 agent_id=agent_id or None)
+                                 agent_id=agent_id or None,
+                                 idempotency_key=idempotency_key)
             return json.dumps(result, default=str)
 
     # --- torment_reinforce ---
@@ -631,6 +648,7 @@ def create_mcp_server() -> FastMCP:
             used_successfully: str = "[]",
             workspace_id: str = "",
             agent_id: str = "",
+            idempotency_key: Optional[str] = None,
         ) -> str:
             """Directly reinforce memories.
 
@@ -650,7 +668,8 @@ def create_mcp_server() -> FastMCP:
 
             result = _spine_call("reinforce", payload,
                                  workspace_id=workspace_id or None,
-                                 agent_id=agent_id or None)
+                                 agent_id=agent_id or None,
+                                 idempotency_key=idempotency_key)
             return json.dumps(result, default=str)
 
     # --- torment_tool_result_ingest (guarded tier) ---
@@ -675,6 +694,7 @@ def create_mcp_server() -> FastMCP:
             domain_id: str = "",
             session_id: str = "",
             scope: str = "private",
+            idempotency_key: Optional[str] = None,
         ) -> str:
             """Ingest tool output as governed memory.
 
@@ -703,7 +723,8 @@ def create_mcp_server() -> FastMCP:
                 payload["session_id"] = session_id
             result = _spine_call("tool_result_ingest", payload,
                                  workspace_id=workspace_id or None,
-                                 agent_id=agent_id or None)
+                                 agent_id=agent_id or None,
+                                 idempotency_key=idempotency_key)
             return json.dumps(result, default=str)
 
     # -----------------------------------------------------------------------

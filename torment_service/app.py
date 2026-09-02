@@ -25,6 +25,7 @@ from .auth import (
     get_key_store,
 )
 from .request_context import InsufficientTrustError
+from .public_mutation_identity import PublicMutationKeyError, normalize_public_mutation_key
 from .thinking_controller import ThinkingController
 from .scoring import derive_provenance_type as _derive_prov_type
 # v0.2.4-A1: archive FILTER-A defense-in-depth at /retrieve. Used in
@@ -90,6 +91,20 @@ def _safe_join_data_dir(*parts: str, validate_parts: bool = True) -> str:
 def _safe_log_value(value: str) -> str:
     """Escape CR/LF in values before logging to prevent log injection."""
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _idempotency_key_from_request(request: Request) -> str | None:
+    """Read the one REST mutation-key transport without logging its value."""
+
+    # Unit-level endpoint characterization may pass a minimal request double;
+    # its missing headers are equivalent to an absent optional header.
+    headers = getattr(request, "headers", {})
+    value = headers.get("Idempotency-Key")
+    try:
+        normalized = normalize_public_mutation_key(value)
+    except PublicMutationKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return None if normalized is None else normalized.value
 
 # Apply optional preset profile (defaults only; explicit env vars always win)
 ACTIVE_PROFILE = os.environ.get("TORMENT_PROFILE", "").strip().lower() or None
@@ -1132,6 +1147,7 @@ def ingest(req: IngestReq, request: Request) -> Dict[str, Any]:
             "supplied_summary": req.supplied_summary,
             "supplied_embedding": req.supplied_embedding, "scope": req.scope,
         },
+        idempotency_key=_idempotency_key_from_request(request),
     )
     resp = submit_task(spine_req, fabric, ctx)
     if not resp.allowed:
@@ -2902,6 +2918,7 @@ class SpineSubmitReq(BaseModel):
     operation: str                                  # registered operation name
     payload: Dict[str, Any] = Field(default_factory=dict)
     mode: str = Field(default="auto")               # fast | full | auto
+    idempotency_key: Optional[str] = None             # retry identity; never task_id
 
 
 @app.post("/spine/submit_task")
@@ -2926,13 +2943,17 @@ def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
     )
 
     # Build Spine request
-    spine_req = SpineRequest(
-        workspace_id=req.workspace_id,
-        agent_id=req.agent_id,
-        operation=req.operation,
-        payload=req.payload,
-        mode=req.mode,
-    )
+    try:
+        spine_req = SpineRequest(
+            workspace_id=req.workspace_id,
+            agent_id=req.agent_id,
+            operation=req.operation,
+            payload=req.payload,
+            mode=req.mode,
+            idempotency_key=req.idempotency_key,
+        )
+    except PublicMutationKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Preserve the established pre-dispatch provisioning for authorized write
     # operations, but never create state for an operation the caller cannot
@@ -3028,6 +3049,7 @@ def tool_result_ingest(req: ToolResultIngestReq, request: Request) -> Dict[str, 
             "supplied_embedding": req.supplied_embedding,
             "scope": req.scope,
         },
+        idempotency_key=_idempotency_key_from_request(request),
     )
     response = submit_task(spine_req, fabric, ctx)
     if not response.allowed:

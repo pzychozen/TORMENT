@@ -6,7 +6,7 @@
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **TORMENT Memory Substrate Phases 0–6 are frozen design/requirements lineage.** Their binding records remain the [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md).
-- **Phase 7 bounded implementation is materially complete through the current native qualification chain.** `Blocker-1`, `Blocker-2`, `Blocker-3`, and `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md), and [B5-A3 production native resource lifecycle](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md) are the current implementation and qualification records.
+- **Phase 7 bounded implementation is materially complete through the current native qualification chain.** `Blocker-1`, `Blocker-2`, `Blocker-3`, and `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md), [B5-A3 production native resource lifecycle](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md), and [B5-A4R1 public mutation identity/ingest orchestration](BLOCKER_5_A4R1_PUBLIC_MUTATION_IDENTITY_AND_INGEST_ORCHESTRATION.md) are the current implementation and qualification records.
 
 ### Closed memory-substrate result
 
@@ -19,6 +19,8 @@ BLOCKER_4_QUERY_READ_SIDE = CLOSED
 BLOCKER_4 = CLOSED
 BLOCKER_5_B5_A2_DEPLOYMENT_FENCE = CLOSED
 BLOCKER_5_B5_A3_NATIVE_RESOURCE_LIFECYCLE = CLOSED
+BLOCKER_5_B5_A4R1_PUBLIC_MUTATION_IDENTITY = QUALIFIED
+PUBLIC_PRE_COGNITION_IDEMPOTENCY_RECOVERY = BLOCKED
 
 QUALIFIED_NATIVE_PROFILE = compression/deep disabled
 COMPRESSION_OR_DEEP_ENABLED = NOT_QUALIFIED_FOR_NATIVE_CUTOVER
@@ -76,6 +78,7 @@ ORDINARY_torment_ENVIRONMENT = SQLite 3.53.4 / native-runtime-qualified
 BLOCKER_5_B5_A1 = CLOSED
 BLOCKER_5_B5_A2 = CLOSED
 BLOCKER_5_B5_A3 = CLOSED
+BLOCKER_5_B5_A4R1 = CLOSED_WITH_R2_RECOVERY_BLOCKER
 PRODUCTION_ENVIRONMENT_CONVERGENCE_REQUIRED = NO
 
 SOLVER_MOVEMENT_RULE_REVISED = NO
@@ -97,7 +100,9 @@ BLOCKER_5_PREFLIGHT = CLOSED
 BLOCKER_5_B5_A1 = CLOSED
 BLOCKER_5_B5_A2 = CLOSED
 BLOCKER_5_B5_A3 = CLOSED
-BLOCKER_5_NEXT = B5_A4_REQUIRES_SEPARATE_AUTHORIZATION
+BLOCKER_5_B5_A4R1 = QUALIFIED
+BLOCKER_5_B5_A4 = BLOCKED_BEFORE_SAFE_PUBLIC_SELECTION
+BLOCKER_5_NEXT = B5_A4R2_REQUIRES_SEPARATE_AUTHORIZATION
 
 PRODUCTION_SELECTOR_ADDED = NO
 DURABLE_SELECTOR_ERA_AND_FENCE = QUALIFICATION_ONLY
@@ -127,8 +132,12 @@ resolver, and contained-core maintenance mechanics. B5-A3 separately qualified
 the direct active-core resource owner, request-scoped SQLite resources, and
 process-local SRG/world/motif ownership recorded in the [B5-A3 closure](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md).
 Neither slice begins public Fabric routing, public activation, cutover, dual
-write/read, or rollback. The next boundary is B5-A4: explicit public Fabric
-startup/backend selection, `LEGACY` or `NATIVE`, never dual authority.
+write/read, or rollback. B5-A4R1 separately qualified caller-supplied public
+mutation identity and an ingest preparation/storage/completion hand-off, but
+the native evidence cannot recover a public operation before Fabric cognition.
+The next separately authorized boundary is B5-A4R2: native public ingest
+execution plus durable pre-cognition recovery. It is not authorized by this
+orientation update, and public backend selection remains blocked.
 
 ## 1. Current main project thread
 

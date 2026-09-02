@@ -42,6 +42,7 @@ from .request_context import (
     TRUST_OPERATOR,
 )
 from .incident_log import log_spine_decision
+from .public_mutation_identity import normalize_public_mutation_key
 
 try:
     from fastapi import HTTPException as _FastAPIHTTPException
@@ -592,9 +593,13 @@ class SpineRequest:
     payload: Dict[str, Any] = field(default_factory=dict)
     mode: str = MODE_AUTO       # "fast" | "full" | "auto"
     task_id: str = ""           # auto-generated if empty
+    # Deliberately independent from task_id: callers retain this exact opaque
+    # value across a lost-response retry, while task_id remains trace-only.
+    idempotency_key: str | None = None
     timestamp: float = 0.0
 
     def __post_init__(self):
+        normalize_public_mutation_key(self.idempotency_key)
         if not self.task_id:
             self.task_id = f"spine_{uuid.uuid4().hex[:12]}"
         if self.mode not in VALID_MODES:
@@ -669,7 +674,13 @@ def _classify_drift(drift_score: float) -> str:
         return "red"
 
 
-def _fast_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _fast_ingest(
+    fabric,
+    ctx: RequestContext,
+    payload: Dict[str, Any],
+    *,
+    idempotency_key: str | None = None,
+) -> Dict[str, Any]:
     """Fast-path ingest: trust-checked, locked, dispatched to Fabric."""
     with fabric.locks.agent_lock(ctx.workspace_id, ctx.agent_id):
         return fabric.ingest(
@@ -681,6 +692,7 @@ def _fast_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[s
             supplied_summary=payload.get("supplied_summary"),
             supplied_embedding=payload.get("supplied_embedding"),
             scope=payload.get("scope", "private"),
+            public_mutation_key=idempotency_key,
         )
 
 
@@ -928,7 +940,13 @@ def _fast_compression_run(fabric, ctx: RequestContext, payload: Dict[str, Any]) 
     return result
 
 
-def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _fast_tool_result_ingest(
+    fabric,
+    ctx: RequestContext,
+    payload: Dict[str, Any],
+    *,
+    idempotency_key: str | None = None,
+) -> Dict[str, Any]:
     """Fast-path tool-result ingest: governed write for externally obtained tool output.
 
     This is a MEMORY operation, not an execution operation.
@@ -990,6 +1008,7 @@ def _fast_tool_result_ingest(fabric, ctx: RequestContext, payload: Dict[str, Any
             scope=payload.get("scope", "private"),
             provenance=prov_dict,
             suppress_canon=True,
+            public_mutation_key=idempotency_key,
         )
 
 
@@ -1458,7 +1477,15 @@ def submit_task(
                 )
                 log_spine_decision(resp, req, ctx)
                 return resp
-            result = handler(fabric, ctx, req.payload)
+            if req.operation in {"ingest", "tool_result_ingest"}:
+                result = handler(
+                    fabric,
+                    ctx,
+                    req.payload,
+                    idempotency_key=req.idempotency_key,
+                )
+            else:
+                result = handler(fabric, ctx, req.payload)
         else:
             # Full cognition path
             result = _full_cognition(fabric, ctx, req)

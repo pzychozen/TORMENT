@@ -88,6 +88,12 @@ from .post_write_runtime import (
     LegacyFabricPostWriteDependencies,
     PostWriteStorageOutcome,
 )
+from .ingest_orchestration import LegacyFabricIngestStorageAdapter, PreparedFabricIngest
+from .public_mutation_identity import (
+    canonical_public_request_fingerprint,
+    derive_native_operation_key,
+    normalize_public_mutation_key,
+)
 from .world_runtime import LegacyWorldRuntime
 
 if TYPE_CHECKING:
@@ -3151,6 +3157,7 @@ class TormentFabric:
         *,
         skip_packet_emission: bool = False,
         suppress_canon: bool = False,
+        public_mutation_key: str | None = None,
     ) -> Dict[str, Any]:
         # === GATE A LAYER 4 — ordinary-ingest candidate refusal (first brick) ===
         # FIRST executable statement. Structural, content-blind type refusal:
@@ -3169,6 +3176,31 @@ class TormentFabric:
             raise TypeError(
                 "TormentFabric.ingest does not accept candidate-shaped values as "
                 "ordinary memory input (Gate A Layer 4 text-boundary refusal)."
+            )
+        # This opaque retry identity is intentionally independent from Spine's
+        # trace task_id. It is validated before cognition; legacy storage
+        # ignores it semantically in R1.
+        _public_mutation_key = normalize_public_mutation_key(public_mutation_key)
+        _public_request_fingerprint = None
+        _native_operation_key = None
+        if _public_mutation_key is not None:
+            _public_request_fingerprint = canonical_public_request_fingerprint(
+                operation="ingest",
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                semantic_payload={
+                    "text": text, "step": int(step), "domain_id": domain_id,
+                    "scope": scope, "supplied_summary": supplied_summary,
+                    "supplied_embedding": supplied_embedding,
+                    "provenance": provenance, "memory_class": memory_class,
+                    "extra_payload": extra_payload,
+                    "skip_packet_emission": bool(skip_packet_emission),
+                    "suppress_canon": bool(suppress_canon),
+                },
+            )
+            _native_operation_key = derive_native_operation_key(
+                operation="ingest", workspace_id=workspace_id,
+                agent_id=agent_id, key=_public_mutation_key,
             )
         # === BOUNDARY GUARD ===
         # Core ingest ALWAYS creates "core" memory. Archive documents use
@@ -3408,37 +3440,35 @@ class TormentFabric:
                     p = float(np.clip(p, 0.0, 1.0))
 
                     allow_write = random_chance(p)
-        half_life_days: Optional[float] = None
-        motif_ids: list = []
-        created_motif: Optional[str] = None
-        _reinforced_eid: Optional[int] = None
-        legacy_registry: Optional[MotifRegistry] = None
-        motif_runtime: Optional[LegacyMotifRuntimeAdapter] = None
-        state_symbol: Optional[str] = None
 
-        # choose graph early so world can evolve even when we don't store
+        # Retained at its historical point: selecting the legacy graph is a
+        # reference lookup, not an authoritative storage mutation.  Keeping it
+        # here preserves the old observable preparation order exactly.
         if scope == "shared":
             graph = ws.shared_graphs[chosen_domain]
         else:
             graph = self.private_graphs[ak]
 
+        # This is still preparation rather than storage.  Calculate the exact
+        # retention fact once so every downstream authority sees the same
+        # immutable value; the legacy mutation body below retains its existing
+        # duplicate/reinforcement/flush order.
+        half_life_days: Optional[float] = None
+        survival = 0.0
+        in_corr = False
+        tear = 0.0
+        hl_mult = 1.0
         if allow_write:
-            # --- metastability -> half-life (A-only: memory mechanics) ---
             decay_scale = float(ident.overlay.get("decay_scale", 1.0))
-
             survival = float(tri_mod.get("survival_steps", 0.0))
-            in_corr = bool(float(tri_mod.get("in_corridor", 0.0)) >= 0.5)  # telemetry only
+            in_corr = bool(float(tri_mod.get("in_corridor", 0.0)) >= 0.5)
             tear = float(tri_mod.get("tearing_risk", 0.0))
-
-            survival_boost = 1.0 + (0.20 * np.tanh(survival / 200.0))    # max ~ +20%
-            tear_penalty = 1.0 - 0.15 * tear                              # max ~ -15%
+            survival_boost = 1.0 + (0.20 * np.tanh(survival / 200.0))
+            tear_penalty = 1.0 - 0.15 * tear
             hl_mult = float(np.clip(survival_boost * tear_penalty, 0.85, 1.25))
-
             half_life_days = max(1.0, float(signals.half_life) * decay_scale * hl_mult)
 
             # Tool-result lifecycle: cap half-life for informational memories.
-            # Tool outputs are observations, not experiences — their value decays
-            # faster than experiential or identity memory.
             if (isinstance(_prov_dict, dict)
                     and _prov_dict.get("source_type") == "tool_result"):
                 try:
@@ -3448,6 +3478,50 @@ class TormentFabric:
                     _tool_hl_cap = 7.0
                 half_life_days = min(half_life_days, _tool_hl_cap)
 
+        # Preparation ends before the legacy graph authority is selected.  R1
+        # retains that storage implementation unchanged; this immutable carrier
+        # is the narrow hand-off R2 will use once durable pre-cognition retry
+        # recovery exists.  Its caller key is never written to legacy memory.
+        prepared_ingest = PreparedFabricIngest(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            scope=scope,
+            domain_id=chosen_domain,
+            logical_step=int(step),
+            summary=summary,
+            embedding=emb,
+            embedding_provider=emb_provider,
+            embedding_model=emb_model,
+            embedding_dimension=emb_dim,
+            embedding_checksum=emb_ck,
+            memory_type=signals.memory_type,
+            memory_class=memory_class,
+            strength=float(signals.strength),
+            confidence=float(signals.confidence),
+            half_life_days=half_life_days,
+            links=tuple(str(item) for item in signals.links),
+            provenance=_prov_dict,
+            flexible_payload=dict(extra_payload or {}),
+            tri_mod=tri_mod,
+            debug=debug,
+            srg_state=_srg_dict,
+            phase_durations=_pt_durations,
+            affect_tag=affect_tag,
+            affect_conf=affect_conf,
+            allow_write=allow_write,
+            attach_threshold=float(0.62 + 0.2 * ident.overlay.get("motif_sensitivity", 0.7)),
+            skip_packet_emission=skip_packet_emission,
+            public_request_fingerprint=_public_request_fingerprint,
+            native_operation_key=_native_operation_key,
+        )
+        motif_ids: list = []
+        created_motif: Optional[str] = None
+        _reinforced_eid: Optional[int] = None
+        legacy_registry: Optional[MotifRegistry] = None
+        motif_runtime: Optional[LegacyMotifRuntimeAdapter] = None
+        state_symbol: Optional[str] = None
+
+        if allow_write:
             # --- Duplicate suppression: reinforce existing instead of creating new ---
             # Same-agent only, strict threshold, recent-window search.
             _reinforce_sim_threshold = float(os.getenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0.92"))
@@ -3735,12 +3809,19 @@ class TormentFabric:
                 stored = True
                 state_symbol = sym.get("state_symbol")
 
-        if not stored:
-            storage_outcome = PostWriteStorageOutcome.NO_WRITE
-        elif _reinforced_eid is not None:
-            storage_outcome = PostWriteStorageOutcome.REINFORCED_EXISTING
-        else:
-            storage_outcome = PostWriteStorageOutcome.CREATED_NEW
+        legacy_storage = LegacyFabricIngestStorageAdapter().store(
+            prepared_ingest,
+            stored=stored,
+            reinforced=_reinforced_eid is not None,
+            eid=eid,
+            motif_ids=motif_ids,
+            created_motif=created_motif,
+            state_symbol=state_symbol,
+            # Retained legacy values are intentionally opaque outside this
+            # adapter; post-write receives only the normalized outcome facts.
+            storage_witness=(graph, legacy_registry, motif_runtime),
+        )
+        storage_outcome = PostWriteStorageOutcome(legacy_storage.disposition.value)
 
         post_write_context = FabricPostWriteContext.make(
             workspace_id=workspace_id,
@@ -3749,10 +3830,10 @@ class TormentFabric:
             chosen_domain=chosen_domain,
             step=int(step),
             storage_outcome=storage_outcome,
-            stored=stored,
-            eid=int(eid) if eid is not None else None,
-            created_motif=created_motif,
-            motif_ids=motif_ids,
+            stored=legacy_storage.stored,
+            eid=legacy_storage.eid,
+            created_motif=legacy_storage.created_motif,
+            motif_ids=legacy_storage.motif_ids,
             half_life_days=half_life_days,
             summary=summary,
             embedding=emb,
@@ -3766,7 +3847,7 @@ class TormentFabric:
             debug=debug,
             srg_state=_srg_dict,
             phase_durations=_pt_durations,
-            state_symbol=state_symbol,
+            state_symbol=legacy_storage.state_symbol,
             affect_tag=affect_tag,
             affect_conf=affect_conf,
             skip_packet_emission=skip_packet_emission,
@@ -3803,15 +3884,15 @@ class TormentFabric:
         ).proposal_id
 
         return {
-            "stored": stored,
-            "reinforced": bool(_reinforced_eid is not None),
+            "stored": legacy_storage.stored,
+            "reinforced": legacy_storage.reinforced,
             "proposal_id": proposal_id,
-            "eid": eid,
+            "eid": legacy_storage.eid,
             "domain_ranked": [{"id": d.domain_id, "score": d.score} for d in dom_scores],
             "domain_chosen": chosen_domain,
-            "motifs": motif_ids,
+            "motifs": list(legacy_storage.motif_ids),
             "tri_mod": tri_mod,
-            "created_motif": created_motif,
+            "created_motif": legacy_storage.created_motif,
             "signals": {
                 "write_intent": bool(signals.write_intent),
                 "memory_type": signals.memory_type,
