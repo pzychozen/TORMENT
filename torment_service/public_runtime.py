@@ -423,6 +423,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         return {
             "_native_workspace_view": self._workspace_view(request.workspace_id),
             "_native_identity": self._prepare_native_agent(request.workspace_id, request.agent_id),
+            "_native_public": True,
         }
 
     def _prepare_native_agent(self, workspace_id: str, agent_id: str) -> Any:

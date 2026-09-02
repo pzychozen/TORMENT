@@ -1920,10 +1920,20 @@ class TormentFabric:
 
 
     
-    def _role_context(self, ws: "Workspace", agent_id: str) -> Dict[str, Any]:
+    def _role_context(
+        self,
+        ws: "Workspace",
+        agent_id: str,
+        *,
+        read_only: bool = False,
+    ) -> Dict[str, Any]:
         """Return soft role context (guidance signal) for character continuity."""
         try:
-            rp = self.role_store.load(ws.workspace_id, agent_id)
+            rp = self.role_store.load(
+                ws.workspace_id,
+                agent_id,
+                create_if_missing=not read_only,
+            )
             r = dominant_role(rp)
             # return small payload to avoid noise
             top = sorted(((k, float(v)) for k, v in (rp.scores or {}).items()), key=lambda kv: kv[1], reverse=True)[:3]
@@ -3220,6 +3230,7 @@ class TormentFabric:
         _prepare_only: bool = False,
         _native_workspace_view: Any | None = None,
         _native_identity: AgentIdentity | None = None,
+        _native_public: bool = False,
     ) -> Dict[str, Any] | PreparedFabricIngest:
         # === GATE A LAYER 4 — ordinary-ingest candidate refusal (first brick) ===
         # FIRST executable statement. Structural, content-blind type refusal:
@@ -3272,6 +3283,8 @@ class TormentFabric:
         ak = self._agent_key(workspace_id, agent_id)
         if (_native_workspace_view is None) != (_native_identity is None):
             raise ValueError("native ingest cognition requires both workspace and identity facts")
+        if _native_public and _native_workspace_view is None:
+            raise ValueError("native public ingest requires a workspace and identity facts")
         if _native_workspace_view is not None:
             # R3 supplies this inert compatibility view only after the public
             # native runtime has recovered an admitted active scope and an
@@ -3411,13 +3424,15 @@ class TormentFabric:
                 )
 
         # Character continuity (v1.11): soft role inference (guidance signal).
-        # Updates slowly and is used only to tune memory behavior (anchors/recency), never persona writing.
-        try:
-            _rp = self.role_store.load(workspace_id, agent_id)
-            _rp = self.role_store.update_from_text(_rp, summary)
-            self.role_store.save(_rp)
-        except Exception as _role_exc:
-            log.debug("Role inference update failed: %s", _role_exc)
+        # The selector-owned native route may consume retained role evidence,
+        # but cannot advance this legacy-owned side store after cutover.
+        if not _native_public:
+            try:
+                _rp = self.role_store.load(workspace_id, agent_id)
+                _rp = self.role_store.update_from_text(_rp, summary)
+                self.role_store.save(_rp)
+            except Exception as _role_exc:
+                log.debug("Role inference update failed: %s", _role_exc)
 
         # Character continuity (v1.11): lightweight affect tagging.
         # This is a guidance signal only; it must not dominate or rewrite persona.
@@ -5214,7 +5229,7 @@ class TormentFabric:
                 "query_affect_conf": float(_q_affect_conf),
             }
             try:
-                rc = self._role_context(ws, agent_id)
+                rc = self._role_context(ws, agent_id, read_only=_native_public)
                 qsig["dominant_role"] = rc.get("dominant_role")
             except Exception:
                 qsig["dominant_role"] = None
@@ -5321,7 +5336,7 @@ class TormentFabric:
                 "dominant_thread": dominant,
             },
             "bridges": bridges,
-            "role_context": self._role_context(ws, agent_id),
+            "role_context": self._role_context(ws, agent_id, read_only=_native_public),
             "embed_context": self._embed_context(ws),
             **({"continuity_debug": continuity_dbg} if continuity_dbg is not None else {}),
             **({"character_context": _char_ctx} if _char_ctx is not None else {}),

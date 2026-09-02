@@ -94,11 +94,26 @@ class RoleStore:
             raise ValueError(f"Role path escapes data directory: {resolved!r}")
         return resolved
 
-    def load(self, workspace_id: str, agent_id: str) -> RoleProfile:
+    def load(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        *,
+        create_if_missing: bool = True,
+    ) -> RoleProfile:
+        """Return a role profile, optionally without materializing a default.
+
+        Native public cognition may consult retained role evidence, but it
+        cannot use a missing profile as permission to write into the frozen
+        legacy workspace.  The ordinary legacy owner preserves its historical
+        materialization behavior through the default argument.
+        """
+
         p = self._path(workspace_id, agent_id)
         if not os.path.exists(p):
             rp = RoleProfile(workspace_id=workspace_id, agent_id=agent_id, scores=_default_scores(), created_ts=_now_ts(), updated_ts=_now_ts(), samples=0)
-            self.save(rp)
+            if create_if_missing:
+                self.save(rp)
             return rp
         with open(p, "r", encoding="utf-8") as f:
             obj = json.load(f)
