@@ -1117,6 +1117,7 @@ DECISION_ESCALATED_FULL = "escalated_full"
 DECISION_BLOCKED_UNKNOWN_OP = "blocked_unknown_operation"
 DECISION_BLOCKED_TRUST = "blocked_insufficient_trust"
 DECISION_BLOCKED_NO_HANDLER = "blocked_no_handler"
+DECISION_BLOCKED_NATIVE_OPERATION = "blocked_native_public_operation"
 DECISION_ERROR_DISPATCH = "error_dispatch"
 DECISION_ERROR_TRUST = "error_trust"
 
@@ -1444,6 +1445,42 @@ def submit_task(
     esc_reasons = list(route_decision.escalation_reasons)
     drift_status = route_decision.drift_status
 
+    # R3 consumes the public runtime facade only after the established Spine
+    # trust/operation decision.  Unsupported native operations and missing
+    # mutation identity fail before advisory cognition, a handler, or a
+    # legacy-memory touch; ordinary TormentFabric callers retain their exact
+    # historical path because they expose no preflight hook.
+    preflight = getattr(fabric, "preflight_spine_operation", None)
+    if callable(preflight):
+        try:
+            preflight(
+                req.operation,
+                idempotency_key=req.idempotency_key,
+                path=chosen_path,
+            )
+        except Exception as exc:
+            reason = str(exc) or "native public operation refused"
+            _audit_blocked(req, ctx, reason, "native_public_operation")
+            resp = SpineResponse(
+                ok=False,
+                path=chosen_path,
+                operation=req.operation,
+                allowed=True,
+                workspace_id=req.workspace_id,
+                agent_id=req.agent_id,
+                trust_tier=ctx.trust_tier,
+                drift_status=drift_status,
+                reason=reason,
+                decision_code=DECISION_BLOCKED_NATIVE_OPERATION,
+                result_code=RESULT_NONE,
+                task_id=req.task_id,
+                audit=ctx.to_audit_dict(),
+                escalation_reasons=list(esc_reasons),
+                http_status=int(getattr(exc, "status_code", 409) or 409),
+            )
+            log_spine_decision(resp, req, ctx)
+            return resp
+
     if escalated:
         logger.info("Auto-escalated %s from fast->full for %s/%s (reasons: %s)",
                     req.operation, req.workspace_id, req.agent_id, ", ".join(esc_reasons))
@@ -1514,6 +1551,7 @@ def submit_task(
             logger.warning("Spine dispatch HTTPException(%d) for %s: %s",
                            http_status, req.operation, reason)
         else:
+            http_status = int(getattr(e, "status_code", 0) or 0)
             reason = f"{type(e).__name__}: {e}"
             _audit_blocked(req, ctx, reason, "dispatch_error")
             logger.exception("Spine dispatch error for %s", req.operation)

@@ -40,8 +40,8 @@ from .spine import (
     EXPOSURE_OPEN,
     EXPOSURE_GUARDED,
 )
-from .fabric import TormentFabric
 from .public_mutation_identity import PublicMutationKeyError
+from .public_runtime import close_public_runtime, create_public_runtime
 from .lifecycle import (
     LifecycleStateError,
     detect_lifecycle_legacy_marker_disagreement,
@@ -250,17 +250,38 @@ def _load_client_context() -> MCPClientContext:
 # Fabric singleton — initialized once at server startup
 # ---------------------------------------------------------------------------
 
-_fabric: Optional[TormentFabric] = None
+_fabric: Optional[Any] = None
 _client_ctx: Optional[MCPClientContext] = None
 
 
-def _get_fabric() -> TormentFabric:
+def _get_fabric() -> Any:
     global _fabric
     if _fabric is None:
         data_dir = os.environ.get("TORMENT_MCP_DATA_DIR", "./data")
-        _fabric = TormentFabric(data_dir=data_dir)
-        logger.info("TORMENT Fabric initialized (data_dir=%s)", data_dir)
+        _fabric = create_public_runtime(data_dir)
+        logger.info("TORMENT public runtime initialized (data_dir=%s mode=%s)", data_dir, _fabric.mode.value)
     return _fabric
+
+
+def _close_runtime() -> None:
+    """Close request-owned native resources when stdio service shuts down."""
+    global _fabric
+    if _fabric is None:
+        return
+    data_dir = getattr(_fabric, "data_dir", os.environ.get("TORMENT_MCP_DATA_DIR", "./data"))
+    try:
+        close_public_runtime(data_dir)
+    finally:
+        _fabric = None
+
+
+def _native_resource_refusal() -> str:
+    """A guarded legacy-core resource has no native read contract in R3."""
+    return json.dumps({
+        "ok": False,
+        "reason": "native MCP resource is refused before legacy core-memory access",
+        "decision_code": "blocked_native_public_operation",
+    })
 
 
 def _get_client_ctx() -> MCPClientContext:
@@ -770,6 +791,8 @@ def create_mcp_server() -> FastMCP:
     def resource_memory_summary(workspace_id: str, agent_id: str) -> str:
         """Read a summary of agent memory through Spine-backed helpers."""
         fabric = _get_fabric()
+        if bool(getattr(fabric, "native_mode", False)):
+            return _native_resource_refusal()
 
         summary: Dict[str, Any] = {
             "workspace_id": workspace_id,
@@ -822,6 +845,8 @@ def create_mcp_server() -> FastMCP:
             from .incident_log import get_incident_log
 
             fabric = _get_fabric()
+            if bool(getattr(fabric, "native_mode", False)):
+                return _native_resource_refusal()
             log = get_incident_log()
             result: Dict[str, Any] = {"ok": True, "timestamp": time.time()}
 
@@ -885,6 +910,8 @@ def create_mcp_server() -> FastMCP:
     def resource_collective_status(workspace_id: str) -> str:
         """Read collective status through read-safe Fabric wrappers."""
         fabric = _get_fabric()
+        if bool(getattr(fabric, "native_mode", False)):
+            return _native_resource_refusal()
 
         status: Dict[str, Any] = {"workspace_id": workspace_id}
 
@@ -948,6 +975,8 @@ def create_mcp_server() -> FastMCP:
         def resource_provenance(workspace_id: str, agent_id: str) -> str:
             """Read-only provenance inspection — guarded exposure tier required."""
             fabric = _get_fabric()
+            if bool(getattr(fabric, "native_mode", False)):
+                return _native_resource_refusal()
             limit = 50
 
             memories: List[Dict[str, Any]] = []
@@ -1051,7 +1080,10 @@ def main():
                 client.default_workspace_id, client.default_agent_id)
 
     mcp = create_mcp_server()
-    mcp.run(transport="stdio")
+    try:
+        mcp.run(transport="stdio")
+    finally:
+        _close_runtime()
 
 
 if __name__ == "__main__":

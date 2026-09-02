@@ -421,7 +421,7 @@ def test_contained_core_path_and_unselected_claims_fail_closed(tmp_path: Path):
     assert resolve_deployment_agreement(data_root=root, effective_profile=profile).mode is DeploymentResolutionMode.REFUSED
 
 
-def test_resolver_is_side_effect_free_and_public_entrypoints_remain_legacy(tmp_path: Path):
+def test_resolver_is_side_effect_free_and_public_entrypoints_refuse_disagreement(tmp_path: Path):
     root, name = _root_with_staging_core(tmp_path)
     profile, selected = _pending(root, name)
     _pending_receipt, active = _activate(root, name, selected)
@@ -452,9 +452,9 @@ def test_resolver_is_side_effect_free_and_public_entrypoints_remain_legacy(tmp_p
         if path.is_file()
     } == before_core_files
 
-    # Hide the selected active core.  The legacy public entrypoints must still
-    # start, proving that B5-A2 has not wired selector resolution, native-core
-    # opening, or a routing capability into either public surface.
+    # Hide the selected active core.  Import remains inert, but after B5-A4R3
+    # a public runtime factory must refuse this deployment disagreement rather
+    # than silently selecting legacy memory authority.
     hidden = paths.core_root / "hidden-active-core.db"
     core_path.rename(hidden)
     try:
@@ -472,7 +472,13 @@ def test_resolver_is_side_effect_free_and_public_entrypoints_remain_legacy(tmp_p
                 "assert (root / 'substrate' / 'deployment' / 'selector-era-v1.json').read_bytes() == marker",
                 "assert (root / 'substrate' / 'deployment' / 'selector.sqlite').read_bytes() == selector",
                 "from torment_service import mcp_server",
-                "assert mcp_server._get_fabric() is not None",
+                "from torment_service.public_runtime import PublicRuntimeStartupRefused",
+                "try:",
+                "    mcp_server._get_fabric()",
+                "except PublicRuntimeStartupRefused:",
+                "    pass",
+                "else:",
+                "    raise AssertionError('deployment disagreement must refuse public startup')",
                 "assert (root / 'substrate' / 'deployment' / 'selector-era-v1.json').read_bytes() == marker",
                 "assert (root / 'substrate' / 'deployment' / 'selector.sqlite').read_bytes() == selector",
             )

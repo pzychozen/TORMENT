@@ -43,9 +43,13 @@ class PublicMutationReceiptError(RuntimeError):
 class PublicMutationIdempotencyConflict(PublicMutationReceiptError):
     """The same public key was reused for distinct semantic request facts."""
 
+    status_code = 409
+
 
 class PublicMutationRecoveryRequired(PublicMutationReceiptError):
     """Cognition may have begun, so safe automatic re-execution is forbidden."""
+
+    status_code = 409
 
 
 class PublicMutationRecoveryState(str, Enum):

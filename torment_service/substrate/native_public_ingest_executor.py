@@ -159,6 +159,7 @@ class NativePublicIngestExecutor:
         owner: NativeProductionResourceOwner,
         fabric: TormentFabric,
         post_write_configuration: Callable[[PreparedFabricIngest], NativePostWriteQualificationConfiguration],
+        preparation_context: Callable[[NativePublicIngestRequest], Mapping[str, Any]] | None = None,
     ) -> None:
         if not isinstance(owner, NativeProductionResourceOwner):
             raise ValueError("native public executor requires a production owner")
@@ -167,6 +168,7 @@ class NativePublicIngestExecutor:
         self._owner = owner
         self._fabric = fabric
         self._post_write_configuration = post_write_configuration
+        self._preparation_context = preparation_context
         self._receipts = NativePublicMutationReceiptStore(owner)
         self._storage = NativeFabricIngestStorageAdapter(owner, fabric)
 
@@ -217,6 +219,15 @@ class NativePublicIngestExecutor:
         return self._receipts.complete(reservation, result)
 
     def _prepare(self, request: NativePublicIngestRequest) -> PreparedFabricIngest:
+        context: dict[str, Any] = {}
+        if self._preparation_context is not None:
+            supplied = self._preparation_context(request)
+            if not isinstance(supplied, Mapping):
+                raise NativePublicIngestExecutionError("native preparation context must be a mapping")
+            # This is a private executor seam, not public caller input.  The
+            # runtime factory uses it only to pass an inert native workspace
+            # view and an already-validated identity into Fabric cognition.
+            context = dict(supplied)
         prepared = self._fabric.ingest(
             request.workspace_id, request.agent_id, request.text, step=request.step,
             domain_id=request.domain_id, tri_mod=(None if request.tri_mod is None else dict(request.tri_mod)),
@@ -226,6 +237,7 @@ class NativePublicIngestExecutor:
             extra_payload=(None if request.extra_payload is None else dict(request.extra_payload)),
             skip_packet_emission=request.skip_packet_emission, suppress_canon=request.suppress_canon,
             public_mutation_key=request.public_mutation_key, _prepare_only=True,
+            **context,
         )
         if not isinstance(prepared, PreparedFabricIngest):
             raise NativePublicIngestExecutionError("Fabric preparation did not return PreparedFabricIngest")

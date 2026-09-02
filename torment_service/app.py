@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from . import spine as _spine_module
 from . import thinking_controller as _thinking_controller_module
-from .fabric import TormentFabric
 from .conflicts import ConflictRegistryError
 from .identity import PersistentIdentityCollisionError
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
@@ -26,6 +25,13 @@ from .auth import (
 )
 from .request_context import InsufficientTrustError
 from .public_mutation_identity import PublicMutationKeyError, normalize_public_mutation_key
+from .public_runtime import (
+    PublicRuntimeConfiguration,
+    PublicRuntimeStartupRefused,
+    close_public_runtime,
+    configure_public_runtime,
+    create_public_runtime,
+)
 from .thinking_controller import ThinkingController
 from .scoring import derive_provenance_type as _derive_prov_type
 # v0.2.4-A1: archive FILTER-A defense-in-depth at /retrieve. Used in
@@ -52,6 +58,36 @@ def _rest_auth_path(path: str) -> str:
 
 def is_public_safe_rest_route(method: str, path: str) -> bool:
     return (method.upper(), _rest_auth_path(path)) in PUBLIC_SAFE_REST_ROUTES
+
+
+def _native_rest_route_is_classified(method: str, path: str) -> bool:
+    """Allow only R3-supported or frozen-external REST surfaces in NATIVE.
+
+    A false result is intentionally a refusal, not a legacy fallback.  The
+    explicit allowlist also makes new future REST routes fail closed until a
+    work order classifies their memory authority.
+    """
+    normalized = _rest_auth_path(path)
+    method = method.upper()
+    exact = {
+        ("GET", "/health"), ("GET", "/profiles"), ("GET", "/config"),
+        ("GET", "/workspaces/meta"), ("GET", "/embedder/check"),
+        ("GET", "/retrieve/profiles"), ("POST", "/agent/ingest"),
+        ("POST", "/agent/query"), ("POST", "/retrieve"),
+        ("POST", "/spine/submit_task"), ("GET", "/spine/operations"),
+        ("POST", "/tool/ingest"),
+    }
+    if (method, normalized) in exact:
+        return True
+    if normalized.startswith("/archive/") or normalized == "/archive/query":
+        return True
+    if method == "GET" and (
+        normalized.startswith("/agent/")
+        or normalized.startswith("/workspace/") and normalized.endswith("/embed_audit")
+        or normalized == "/workspaces/embed_audit_summary"
+    ):
+        return True
+    return False
 
 
 def _validate_path_component(name: str, label: str = "identifier") -> str:
@@ -103,7 +139,7 @@ def _idempotency_key_from_request(request: Request) -> str | None:
     try:
         normalized = normalize_public_mutation_key(value)
     except PublicMutationKeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid Idempotency-Key") from exc
     return None if normalized is None else normalized.value
 
 # Apply optional preset profile (defaults only; explicit env vars always win)
@@ -116,6 +152,10 @@ SERVER_LAUNCHER_PATH = os.environ.get("TORMENT_SERVER_LAUNCHER_PATH", "").strip(
 
 @asynccontextmanager
 async def _fabric_lifespan(_: FastAPI):
+    # Runtime construction is startup-owned, never import-owned.  The factory
+    # only reads the B5 deployment resolver and refuses pending/corrupt
+    # authority instead of silently constructing a legacy service.
+    fabric.runtime()
     try:
         yield
     finally:
@@ -137,9 +177,36 @@ async def enforce_rest_auth_boundary(request: Request, call_next):
                 content={"detail": exc.detail},
                 headers=getattr(exc, "headers", None),
             )
+    try:
+        runtime = fabric.runtime()
+        if runtime.native_mode and not _native_rest_route_is_classified(request.method, request.url.path):
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "native public route is refused before legacy-memory effect"},
+            )
+    except PublicRuntimeStartupRefused as exc:
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
     return await call_next(request)
 
-fabric = TormentFabric(data_dir=DATA_DIR)
+class _AppRuntimeProxy:
+    """Keep existing endpoint call sites on one lazy public runtime surface."""
+
+    def runtime(self):
+        return create_public_runtime(DATA_DIR)
+
+    def close(self) -> None:
+        close_public_runtime(DATA_DIR)
+
+    def __getattr__(self, name: str):
+        return getattr(self.runtime(), name)
+
+
+fabric = _AppRuntimeProxy()
+
+
+def configure_app_public_runtime(configuration: PublicRuntimeConfiguration) -> None:
+    """Host/test setup hook; it supplies proof facts but never selects mode."""
+    configure_public_runtime(DATA_DIR, configuration)
 
 
 async def _close_fabric_on_shutdown() -> None:
@@ -514,6 +581,7 @@ class DecideProposalReq(BaseModel):
 # -------------------- endpoints --------------------
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    runtime_mode = fabric.runtime().mode.value
     embedder = getattr(getattr(fabric, "kernel", None), "embedder", None)
     info = {
         "provider": str(getattr(embedder, "provider", "")),
@@ -570,6 +638,7 @@ def health() -> Dict[str, Any]:
 
     return {
         "ok": True,
+        "public_memory_mode": runtime_mode,
         "version": app.version,
         "profile": {
             "name": ACTIVE_PROFILE or "",
@@ -2953,13 +3022,18 @@ def spine_submit_task(req: SpineSubmitReq, request: Request) -> Dict[str, Any]:
             idempotency_key=req.idempotency_key,
         )
     except PublicMutationKeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid Idempotency-Key") from exc
 
     # Preserve the established pre-dispatch provisioning for authorized write
     # operations, but never create state for an operation the caller cannot
     # perform.  Spine remains the dispatcher and final policy authority.
     spec = OPERATION_REGISTRY.get(req.operation)
-    if spec and spec.min_trust > 0 and ctx.trust_tier >= spec.min_trust:
+    if (
+        spec
+        and spec.min_trust > 0
+        and ctx.trust_tier >= spec.min_trust
+        and not fabric.runtime().native_mode
+    ):
         try:
             fabric.create_agent(req.workspace_id, req.agent_id)
         except Exception as exc:
@@ -3055,7 +3129,10 @@ def tool_result_ingest(req: ToolResultIngestReq, request: Request) -> Dict[str, 
     if not response.allowed:
         raise HTTPException(status_code=403, detail=response.reason)
     if not response.ok:
-        raise HTTPException(status_code=500, detail=response.reason)
+        raise HTTPException(
+            status_code=response.http_status if response.http_status else 500,
+            detail=response.reason,
+        )
     return response.result
 
 

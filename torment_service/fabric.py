@@ -2828,6 +2828,65 @@ class TormentFabric:
 
             return ident
 
+    def prepare_native_cognition_agent(
+        self,
+        workspace_id: str,
+        agent_id: str,
+    ) -> AgentIdentity:
+        """Recover only external identity plus process-local cognition state.
+
+        This private R3 seam is deliberately narrower than ``create_agent``:
+        an active native deployment has already admitted its core scopes, so
+        it must never create a legacy private ``MemoryGraph`` merely to run
+        Fabric cognition.  It neither creates an identity nor writes a
+        seed/memory object; unknown identities fail before cognition.
+        """
+        _validate_path_component(agent_id, "agent_id")
+        try:
+            initial = self.ident_store.load(workspace_id, agent_id)
+        except PersistentIdentityCollisionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if initial is None:
+            raise ValueError("native public runtime requires an existing admitted agent identity")
+        ak = self._agent_key(workspace_id, agent_id)
+        with self.locks.agent_lock(workspace_id, agent_id):
+            try:
+                ident = self.ident_store.load(workspace_id, agent_id)
+            except PersistentIdentityCollisionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if ident is None:
+                raise ValueError("native public runtime identity disappeared during preparation")
+            if ak not in self.agent_states:
+                char_mod = None
+                if self._character_enable:
+                    seed_text_val = str(ident.seed.get("seed_text", "") or "").strip()
+                    if seed_text_val:
+                        try:
+                            raw_name = str(
+                                ident.seed.get("character_name", "")
+                                or ident.seed.get("seed_id", "")
+                                or ""
+                            )
+                            char_mod = derive_kernel_modulation(
+                                CharacterSeed(
+                                    seed_id=str(ident.seed.get("seed_id", "") or ""),
+                                    character_name=raw_name,
+                                    seed_text=seed_text_val,
+                                ),
+                                self.kernel.embedder,
+                            )
+                        except Exception:
+                            char_mod = None
+                if char_mod:
+                    self._create_kernel_state_and_context(
+                        ak, seed_text=seed_text_val, character_modulation=char_mod,
+                    )
+                else:
+                    self._create_kernel_state_and_context(ak, seed_text=f"agent:{agent_id}")
+            elif ak not in self._kernel_contexts:
+                self._create_kernel_state_and_context(ak, seed_text=f"agent:{agent_id}")
+            return ident
+
     def _get_collective_field(self, workspace_id: str):
         """Lazy-init and return the CollectiveField for a workspace.
 
@@ -3159,6 +3218,8 @@ class TormentFabric:
         suppress_canon: bool = False,
         public_mutation_key: str | None = None,
         _prepare_only: bool = False,
+        _native_workspace_view: Any | None = None,
+        _native_identity: AgentIdentity | None = None,
     ) -> Dict[str, Any] | PreparedFabricIngest:
         # === GATE A LAYER 4 — ordinary-ingest candidate refusal (first brick) ===
         # FIRST executable statement. Structural, content-blind type refusal:
@@ -3209,8 +3270,20 @@ class TormentFabric:
         # This prevents archive content from entering the identity pipeline.
         # =====================
         ak = self._agent_key(workspace_id, agent_id)
-        ident = self.create_agent(workspace_id, agent_id)
-        ws = self.get_workspace(workspace_id)
+        if (_native_workspace_view is None) != (_native_identity is None):
+            raise ValueError("native ingest cognition requires both workspace and identity facts")
+        if _native_workspace_view is not None:
+            # R3 supplies this inert compatibility view only after the public
+            # native runtime has recovered an admitted active scope and an
+            # existing external identity.  It deliberately contains no
+            # MemoryGraph, so preparation cannot recreate legacy authority.
+            ident = _native_identity
+            ws = _native_workspace_view
+            if ak not in self.agent_states or ak not in self._kernel_contexts:
+                raise RuntimeError("native ingest cognition agent context is not prepared")
+        else:
+            ident = self.create_agent(workspace_id, agent_id)
+            ws = self.get_workspace(workspace_id)
 
         # --- Provenance (v2.4.x first-pass) ---
         # Rule 1: every ingested memory must have provenance.
@@ -3442,13 +3515,15 @@ class TormentFabric:
 
                     allow_write = random_chance(p)
 
-        # Retained at its historical point: selecting the legacy graph is a
-        # reference lookup, not an authoritative storage mutation.  Keeping it
-        # here preserves the old observable preparation order exactly.
-        if scope == "shared":
-            graph = ws.shared_graphs[chosen_domain]
-        else:
-            graph = self.private_graphs[ak]
+        # The R2 prepared-only carrier does not consume a graph.  Deferring
+        # this legacy-only compatibility lookup keeps R3's native preparation
+        # path graph-free while preserving the normal legacy write order.
+        graph: Optional[MemoryGraph] = None
+        if not _prepare_only:
+            if scope == "shared":
+                graph = ws.shared_graphs[chosen_domain]
+            else:
+                graph = self.private_graphs[ak]
 
         # This is still preparation rather than storage.  Calculate the exact
         # retention fact once so every downstream authority sees the same
@@ -4543,10 +4618,29 @@ class TormentFabric:
         continuity_debug: bool = False,
         memory_plan: Optional[Dict[str, Any]] = None,
         _qualification_read_model: QualifiedQueryReadModel | None = None,
+        _native_workspace_view: Any | None = None,
+        _native_identity: AgentIdentity | None = None,
+        _native_public: bool = False,
     ) -> Dict[str, Any]:
-        ws = self.get_workspace(workspace_id)
         ak = self._agent_key(workspace_id, agent_id)
-        ident = self.create_agent(workspace_id, agent_id)
+        if _native_public:
+            if (
+                _qualification_read_model is None
+                or _native_workspace_view is None
+                or _native_identity is None
+            ):
+                raise ValueError("native public query requires a read model, workspace, and identity")
+            # The public runtime supplies a read-only workspace projection and
+            # a pre-existing identity.  Calling get_workspace/create_agent
+            # here would construct legacy graphs before the native reader
+            # takes authority.
+            ws = _native_workspace_view
+            ident = _native_identity
+            if ak not in self.agent_states or ak not in self._kernel_contexts:
+                raise RuntimeError("native public query agent context is not prepared")
+        else:
+            ws = self.get_workspace(workspace_id)
+            ident = self.create_agent(workspace_id, agent_id)
 
         read_model = _qualification_read_model or self._legacy_query_read_model(
             ws,
@@ -4554,7 +4648,7 @@ class TormentFabric:
             agent_id=agent_id,
             preferred_private_domain=domain_id,
         )
-        native_qualification = isinstance(read_model, NativeQualifiedQueryReadModel)
+        native_qualification = _native_public or isinstance(read_model, NativeQualifiedQueryReadModel)
         if native_qualification and self._compress_enable:
             # A3 deliberately has no native deep lane.  Refuse the profile
             # rather than silently mixing native core candidates with legacy
@@ -4615,7 +4709,7 @@ class TormentFabric:
         _remaining = max(0, top_k - len(private_hits) - len(shared_hits))
         _deep_budget = min(_deep_k, _remaining) if _deep_key_present else _remaining
 
-        deep_hits = self._query_deep_lane(
+        deep_hits = [] if native_qualification else self._query_deep_lane(
             ak, workspace_id, agent_id, qemb,
             top_k=_deep_budget, canonical_step=_canonical_step,
         )
