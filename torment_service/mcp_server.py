@@ -41,7 +41,11 @@ from .spine import (
     EXPOSURE_GUARDED,
 )
 from .public_mutation_identity import PublicMutationKeyError
-from .public_runtime import close_public_runtime, create_public_runtime
+from .public_runtime import (
+    close_public_runtime,
+    create_public_runtime,
+    load_public_runtime_configuration_from_host_environment,
+)
 from .lifecycle import (
     LifecycleStateError,
     detect_lifecycle_legacy_marker_disagreement,
@@ -258,8 +262,9 @@ def _get_fabric() -> Any:
     global _fabric
     if _fabric is None:
         data_dir = os.environ.get("TORMENT_MCP_DATA_DIR", "./data")
-        _fabric = create_public_runtime(data_dir)
-        logger.info("TORMENT public runtime initialized (data_dir=%s mode=%s)", data_dir, _fabric.mode.value)
+        configuration = load_public_runtime_configuration_from_host_environment()
+        _fabric = create_public_runtime(data_dir, configuration)
+        logger.info("TORMENT public runtime initialized (mode=%s)", _fabric.mode.value)
     return _fabric
 
 

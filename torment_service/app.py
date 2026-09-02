@@ -31,6 +31,7 @@ from .public_runtime import (
     close_public_runtime,
     configure_public_runtime,
     create_public_runtime,
+    load_public_runtime_configuration_from_host_environment,
 )
 from .thinking_controller import ThinkingController
 from .scoring import derive_provenance_type as _derive_prov_type
@@ -207,6 +208,14 @@ fabric = _AppRuntimeProxy()
 def configure_app_public_runtime(configuration: PublicRuntimeConfiguration) -> None:
     """Host/test setup hook; it supplies proof facts but never selects mode."""
     configure_public_runtime(DATA_DIR, configuration)
+
+
+def configure_app_public_runtime_from_host_environment() -> None:
+    """Register optional host proof facts before this process starts serving."""
+
+    configuration = load_public_runtime_configuration_from_host_environment()
+    if configuration is not None:
+        configure_app_public_runtime(configuration)
 
 
 async def _close_fabric_on_shutdown() -> None:

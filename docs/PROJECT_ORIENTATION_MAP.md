@@ -6,7 +6,7 @@
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **TORMENT Memory Substrate Phases 0–6 are frozen design/requirements lineage.** Their binding records remain the [Phase 1 logical model](TORMENT_MEMORY_SUBSTRATE_PHASE_1_LOGICAL_MODEL_v0.1.md), [Phase 2 reliability, integrity, and recovery contract](TORMENT_MEMORY_SUBSTRATE_PHASE_2_RELIABILITY_INTEGRITY_RECOVERY_CONTRACT_v0.1.md), [Phase 3 physical architecture](TORMENT_MEMORY_SUBSTRATE_PHASE_3_PHYSICAL_ARCHITECTURE_v0.1.md), [Phase 4 SQLite transactional-core contract](TORMENT_MEMORY_SUBSTRATE_PHASE_4_SQLITE_TRANSACTIONAL_CORE_CONTRACT_v0.1.md), [Phase 5 native schema/transaction/migration design](TORMENT_MEMORY_SUBSTRATE_PHASE_5_NATIVE_SCHEMA_TRANSACTION_MIGRATION_DESIGN_v0.1.md), and [Phase 6 detailed SQLite engineering blueprint](TORMENT_MEMORY_SUBSTRATE_PHASE_6_DETAILED_SQLITE_ENGINEERING_BLUEPRINT_v0.1.md).
-- **Phase 7 bounded implementation is materially complete through the B5-A5 offline cutover rehearsal.** `Blocker-1` through `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md), [B5-A3 production native resource lifecycle](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md), [B5-A4R1 public mutation identity/ingest orchestration](BLOCKER_5_A4R1_PUBLIC_MUTATION_IDENTITY_AND_INGEST_ORCHESTRATION.md), [B5-A4R2 native public-ingest recovery](BLOCKER_5_A4R2_NATIVE_PUBLIC_INGEST_RECOVERY.md), [B5-A4R3 public backend selection/transport](BLOCKER_5_A4R3_PUBLIC_BACKEND_SELECTION_AND_TRANSPORT.md), [B5-A5R0 immutable admission identity repair](BLOCKER_5_A5R0_ADMISSION_IDENTITY_PENDING_COMPATIBILITY.md), and [B5-A5 offline controller/rehearsal](BLOCKER_5_A5_OFFLINE_CUTOVER_REHEARSAL.md) are the current implementation and qualification records.
+- **Phase 7 bounded implementation is materially complete through the B5-A6 formal production-shaped administration rehearsal.** `Blocker-1` through `Blocker-4` are closed. [7G5E4D shared write/lifecycle closure](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read closure](7G5E4E_FINAL_CLOSURE.md), [B5-A2 durable deployment fence/selector](BLOCKER_5_A2_DEPLOYMENT_FENCE_AND_SELECTOR.md), [B5-A3 production native resource lifecycle](BLOCKER_5_A3_PRODUCTION_NATIVE_RESOURCE_LIFECYCLE.md), [B5-A4R1 public mutation identity/ingest orchestration](BLOCKER_5_A4R1_PUBLIC_MUTATION_IDENTITY_AND_INGEST_ORCHESTRATION.md), [B5-A4R2 native public-ingest recovery](BLOCKER_5_A4R2_NATIVE_PUBLIC_INGEST_RECOVERY.md), [B5-A4R3 public backend selection/transport](BLOCKER_5_A4R3_PUBLIC_BACKEND_SELECTION_AND_TRANSPORT.md), [B5-A5R0 immutable admission identity repair](BLOCKER_5_A5R0_ADMISSION_IDENTITY_PENDING_COMPATIBILITY.md), [B5-A5 offline controller/rehearsal](BLOCKER_5_A5_OFFLINE_CUTOVER_REHEARSAL.md), and [B5-A6 operator diagnostics/rehearsal](BLOCKER_5_A6_PRODUCTION_SHAPED_ADMINISTRATION_REHEARSAL.md) are the current implementation and qualification records.
 
 ### Closed memory-substrate result
 
@@ -26,6 +26,8 @@ BLOCKER_5_B5_A4_PUBLIC_BACKEND_SELECTION = QUALIFIED
 BLOCKER_5_B5_A5R0_ADMISSION_IDENTITY_REPAIR = CLOSED
 BLOCKER_5_B5_A5_OFFLINE_CUTOVER_REHEARSAL   = QUALIFIED
 BLOCKER_5_B5_A5 = CLOSED
+BLOCKER_5_B5_A6_PRODUCTION_SHAPED_ADMIN_REHEARSAL = PASS
+BLOCKER_5_B5_A6 = CLOSED
 PUBLIC_PRE_COGNITION_IDEMPOTENCY_RECOVERY = QUALIFIED
 
 QUALIFIED_NATIVE_PROFILE = compression/deep disabled
@@ -120,7 +122,8 @@ BLOCKER_5_B5_A4R3 = QUALIFIED
 BLOCKER_5_B5_A4 = QUALIFIED
 BLOCKER_5_B5_A5R0 = CLOSED
 BLOCKER_5_B5_A5 = CLOSED
-BLOCKER_5_NEXT = B5_A6_FORMAL_OPERATOR_DIAGNOSTICS_DRESS_REHEARSAL
+BLOCKER_5_B5_A6 = CLOSED
+BLOCKER_5_NEXT = B5_A7_SEPARATELY_AUTHORIZED_ONLY
 
 PUBLIC_BACKEND_AUTHORITY_SOURCE = DURABLE_DEPLOYMENT_SELECTOR
 PUBLIC_SELECTOR_WIRING = QUALIFIED_READ_ONLY

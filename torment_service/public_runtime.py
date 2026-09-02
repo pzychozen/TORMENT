@@ -11,6 +11,7 @@ from enum import Enum
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import threading
 from types import MappingProxyType
@@ -90,6 +91,53 @@ class PublicRuntimeConfiguration:
         if path.is_symlink() or not path.is_file():
             raise ValueError("public runtime admission descriptor must be a real file")
         object.__setattr__(self, "admission_descriptor_path", path)
+
+
+_HOST_PROFILE_ENV = "TORMENT_DEPLOYMENT_PROFILE_JSON"
+_HOST_DESCRIPTOR_ENV = "TORMENT_ADMISSION_DESCRIPTOR_PATH"
+_HOST_PROFILE_FIELDS = frozenset({
+    "compression_enabled",
+    "deep_memory_enabled",
+    "representation_provider",
+    "representation_model",
+    "representation_dimension",
+    "admitted_scope_plan_digest",
+    "external_owner_digest",
+})
+
+
+def load_public_runtime_configuration_from_host_environment() -> PublicRuntimeConfiguration | None:
+    """Load explicit host proof facts without offering a backend override.
+
+    The two values are intentionally all-or-nothing.  They are consumed only
+    after the durable resolver has made its disposition: no environment value
+    can ask for LEGACY or NATIVE.  The error text is deliberately value-free
+    because these facts may be supplied by an operations environment.
+    """
+
+    profile_text = os.environ.get(_HOST_PROFILE_ENV)
+    descriptor_path = os.environ.get(_HOST_DESCRIPTOR_ENV)
+    if profile_text is None and descriptor_path is None:
+        return None
+    if not profile_text or not descriptor_path:
+        raise PublicRuntimeStartupRefused("host deployment proof configuration is incomplete")
+    try:
+        payload = json.loads(profile_text)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise PublicRuntimeStartupRefused("host deployment proof configuration is invalid") from exc
+    if not isinstance(payload, Mapping) or set(payload) != _HOST_PROFILE_FIELDS:
+        raise PublicRuntimeStartupRefused("host deployment proof configuration is invalid")
+    try:
+        profile = QualifiedDeploymentProfile(**dict(payload))
+        return PublicRuntimeConfiguration(
+            effective_profile=profile,
+            admission_descriptor_path=descriptor_path,
+        )
+    except Exception as exc:
+        # QualifiedDeploymentProfile intentionally raises its own detailed
+        # deployment errors.  Keep those details out of a host-facing startup
+        # channel and never echo environment values or descriptor paths.
+        raise PublicRuntimeStartupRefused("host deployment proof configuration is invalid") from exc
 
 
 class _ReadOnlyBridges:
@@ -715,5 +763,6 @@ __all__ = [
     "close_public_runtime",
     "configure_public_runtime",
     "create_public_runtime",
+    "load_public_runtime_configuration_from_host_environment",
     "reset_public_runtime_for_test",
 ]
