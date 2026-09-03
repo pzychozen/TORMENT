@@ -72,7 +72,7 @@ def _native_rest_route_is_classified(method: str, path: str) -> bool:
     method = method.upper()
     exact = {
         ("GET", "/health"), ("GET", "/profiles"), ("GET", "/config"),
-        ("GET", "/workspaces/meta"), ("GET", "/embedder/check"),
+        ("GET", "/embedder/check"),
         ("GET", "/retrieve/profiles"), ("POST", "/agent/ingest"),
         ("POST", "/agent/query"), ("POST", "/retrieve"),
         ("POST", "/spine/submit_task"), ("GET", "/spine/operations"),
@@ -81,12 +81,6 @@ def _native_rest_route_is_classified(method: str, path: str) -> bool:
     if (method, normalized) in exact:
         return True
     if normalized.startswith("/archive/") or normalized == "/archive/query":
-        return True
-    if method == "GET" and (
-        normalized.startswith("/agent/")
-        or normalized.startswith("/workspace/") and normalized.endswith("/embed_audit")
-        or normalized == "/workspaces/embed_audit_summary"
-    ):
         return True
     return False
 

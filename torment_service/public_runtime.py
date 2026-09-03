@@ -71,6 +71,76 @@ class NativePublicOperationRefused(RuntimeError):
     status_code = 409
 
 
+# The compatibility facade historically delegated every public TormentFabric
+# class member through __getattr__.  This explicit denominator is intentionally
+# maintained beside that delegation.  The I2 test suite compares it to the
+# class API, so a newly added fallthrough surface cannot silently acquire
+# native behavior.
+PUBLIC_TORMENT_FABRIC_FALLTHROUGH_CENSUS = frozenset({
+    "approve_domain_suggestion",
+    "cancel_repair_job",
+    "clone_workspace",
+    "commit_closure",
+    "consult_environment",
+    "create_agent",
+    "decide_bridge",
+    "decide_conflict",
+    "decide_motif_merge",
+    "decide_proposal",
+    "feedback",
+    "get_clone_job",
+    "get_closure",
+    "get_closure_current",
+    "get_kernel_runtime_context",
+    "get_repair_job",
+    "get_srg_relational_signal",
+    "get_workspace",
+    "ingest",
+    "ingest_reference",
+    "list_active_batons",
+    "list_active_loads",
+    "list_bridges",
+    "list_clone_jobs",
+    "list_closures",
+    "list_conflicts",
+    "list_motif_merges",
+    "list_orphaned_deep_hits",
+    "list_proposals",
+    "list_repair_jobs",
+    "list_workspaces_meta",
+    "load_reference",
+    "memory_chain",
+    "motif_entropy",
+    "native_memory_binding",
+    "native_memory_binding_readiness",
+    "prepare_native_cognition_agent",
+    "probe_environment_on_fail",
+    "process_proposals",
+    "propose_closure",
+    "propose_share",
+    "query",
+    "ratify_closure",
+    "reingest_convergence",
+    "reinforce",
+    "repair_embeddings",
+    "resolve_baton",
+    "revise_closure",
+    "start_repair_embeddings_job",
+    "trace",
+    "trace_bundle",
+    "trace_full_graph",
+    "trace_view",
+    "unload_reference",
+    "write_environment",
+})
+
+# I2 deliberately retains no generic native fallthrough.  Its explicit
+# methods are the only currently qualified native public operations.  This is
+# safer than treating a nominally read-only legacy helper as a native read
+# before its scope and authority semantics have been qualified.
+NATIVE_SAFE_FALLTHROUGH_SURFACES = frozenset()
+
+
 @dataclass(frozen=True)
 class PublicRuntimeConfiguration:
     """Host-supplied, non-transport facts needed to consume NATIVE_AGREEMENT.
@@ -316,6 +386,21 @@ class PublicTormentRuntime:
     def locks(self) -> Any:
         return self.cognition_fabric.locks
 
+    @property
+    def embedder_error(self) -> str:
+        """Expose the health-only embedder status without facade delegation."""
+        return str(getattr(self.cognition_fabric, "embedder_error", "") or "")
+
+    @property
+    def requested_embed_provider(self) -> str:
+        """Expose the health-only requested provider without facade delegation."""
+        return str(getattr(self.cognition_fabric, "requested_embed_provider", "") or "")
+
+    @property
+    def requested_embed_model(self) -> str:
+        """Expose the health-only requested model without facade delegation."""
+        return str(getattr(self.cognition_fabric, "requested_embed_model", "") or "")
+
     def close(self) -> None:
         if self._closed:
             return
@@ -336,6 +421,15 @@ class PublicTormentRuntime:
         """Legacy has no new preflight; subclasses constrain native routes."""
 
     def __getattr__(self, name: str) -> Any:
+        if self.native_mode:
+            classification = (
+                "classified legacy compatibility surface"
+                if name in PUBLIC_TORMENT_FABRIC_FALLTHROUGH_CENSUS
+                else "unclassified public fallthrough surface"
+            )
+            raise NativePublicOperationRefused(
+                f"native public runtime refuses {classification}: {name}"
+            )
         return getattr(self.cognition_fabric, name)
 
 
@@ -353,11 +447,20 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         )
         self._workspace_views: dict[str, NativePublicWorkspaceView] = {}
         self._side_store = _FabricDerivedMemorySideStore(cognition_fabric)
+        cognition_fabric._install_legacy_materialization_fence(
+            self._refuse_legacy_materialization,
+        )
         self._executor = NativePublicIngestExecutor(
             owner=native_owner,
             fabric=cognition_fabric,
             post_write_configuration=self._post_write_configuration,
             preparation_context=self._preparation_context,
+        )
+
+    @staticmethod
+    def _refuse_legacy_materialization(primitive: str) -> None:
+        raise NativePublicOperationRefused(
+            f"native root agreement refuses legacy {primitive} materialization"
         )
 
     @property
@@ -475,7 +578,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         }
 
     def _prepare_native_agent(self, workspace_id: str, agent_id: str) -> Any:
-        runtime = self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+        runtime = self._active_runtime()
         try:
             scope = runtime.lookup_private(agent_id).fabric_routing_scope
         except Exception as exc:
@@ -485,7 +588,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         return self.cognition_fabric.prepare_native_cognition_agent(workspace_id, agent_id)
 
     def _private_motif_domain(self, workspace_id: str, agent_id: str) -> str:
-        runtime = self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+        runtime = self._active_runtime()
         try:
             scope = runtime.lookup_private(agent_id).memory_runtime_scope
             domain = _private_motif_domains(runtime)[agent_id]
@@ -496,7 +599,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         return domain
 
     def _require_shared_scope(self, workspace_id: str, domain_id: str) -> None:
-        runtime = self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+        runtime = self._active_runtime()
         try:
             scope = runtime.lookup_shared(domain_id).memory_runtime_scope
         except Exception as exc:
@@ -505,10 +608,12 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             raise NativePublicOperationRefused("native public workspace is not admitted")
 
     def _workspace_view(self, workspace_id: str) -> NativePublicWorkspaceView:
+        # Revalidate before consulting the process cache.  A cached inert view
+        # must never outlive the selector/profile agreement that qualified it.
+        runtime = self._active_runtime()
         existing = self._workspace_views.get(workspace_id)
         if existing is not None:
             return existing
-        runtime = self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
         private_scopes = [
             item for item in runtime.scopes
             if item.memory_runtime_scope.scope_kind == "PRIVATE_AGENT"
@@ -553,10 +658,24 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         self._workspace_views[workspace_id] = view
         return view
 
+    def _active_runtime(self) -> Any:
+        """Recover current root-qualified scopes or surface one public refusal.
+
+        The production owner revalidates the frozen selector agreement and the
+        effective root profile on every recovery.  A stale/absent agreement is
+        therefore never translated into a legacy fallback.
+        """
+        try:
+            return self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+        except Exception as exc:
+            raise NativePublicOperationRefused(
+                "native public root/profile authority is absent or stale"
+            ) from exc
+
     def _post_write_configuration(
         self, prepared: PreparedFabricIngest,
     ) -> NativePostWriteQualificationConfiguration:
-        runtime = self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+        runtime = self._active_runtime()
         private = runtime.lookup_private(prepared.agent_id).fabric_routing_scope
         scope = private if prepared.scope == "private" else runtime.lookup_shared(prepared.domain_id).fabric_routing_scope
         identity = self._prepare_native_agent(prepared.workspace_id, prepared.agent_id)
@@ -756,6 +875,8 @@ def _read_bridges(path: Path) -> tuple[dict[str, Any], ...]:
 __all__ = [
     "NativePublicOperationRefused",
     "NativePublicTormentRuntime",
+    "NATIVE_SAFE_FALLTHROUGH_SURFACES",
+    "PUBLIC_TORMENT_FABRIC_FALLTHROUGH_CENSUS",
     "PublicRuntimeConfiguration",
     "PublicRuntimeMode",
     "PublicRuntimeStartupRefused",

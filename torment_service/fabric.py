@@ -1042,6 +1042,11 @@ class TormentFabric:
         # reads from or writes to this value.
         self._native_memory_binding: Optional["NativeMemoryRuntimeBinding"] = None
         self._native_memory_binding_readiness: Optional["NativeMemoryBindingReadiness"] = None
+        # A selector-authorized native public runtime installs this callback
+        # after construction.  Keeping the guard at the two legacy lazy
+        # materializers protects direct/internal callers as well as facade
+        # delegation, without changing legacy-root behavior.
+        self._legacy_materialization_fence: Optional[Callable[[str], None]] = None
         if native_memory_binding is not None:
             from .substrate.runtime_binding import validate_fabric_embedder
 
@@ -1160,6 +1165,27 @@ class TormentFabric:
         """Return an existing per-agent kernel context without creating it."""
         return self._kernel_contexts.get(self._agent_key(workspace_id, agent_id))
 
+    def _install_legacy_materialization_fence(
+        self, fence: Callable[[str], None],
+    ) -> None:
+        """Install the native-runtime refusal at legacy creation seams only.
+
+        This is an internal capability hand-off, not an alternative deployment
+        selector.  The public runtime installs it only after Blocker-5's
+        durable resolver has selected NATIVE_AGREEMENT for this exact Fabric.
+        """
+        if not callable(fence):
+            raise TypeError("legacy materialization fence must be callable")
+        if self._legacy_materialization_fence is not None:
+            raise RuntimeError("legacy materialization fence is already installed")
+        self._legacy_materialization_fence = fence
+
+    def _require_legacy_materialization_permitted(self, primitive: str) -> None:
+        """Refuse before a guarded legacy primitive can write or construct."""
+        fence = self._legacy_materialization_fence
+        if fence is not None:
+            fence(primitive)
+
     def get_srg_relational_signal(
         self, workspace_id: str, agent_id: str,
     ) -> Optional[float]:
@@ -1219,6 +1245,7 @@ class TormentFabric:
         return self._sqlite_indexes[key]
 
     def get_workspace(self, workspace_id: str, domains: Optional[List[str]] = None) -> Workspace:
+        self._require_legacy_materialization_permitted("get_workspace")
         _validate_path_component(workspace_id, "workspace_id")
         ws = self.workspaces.get(workspace_id)
         if ws is None:
@@ -2665,6 +2692,7 @@ class TormentFabric:
 
 
     def create_agent(self, workspace_id: str, agent_id: str, seed: Optional[Dict[str, Any]] = None) -> AgentIdentity:
+        self._require_legacy_materialization_permitted("create_agent")
         _validate_path_component(agent_id, "agent_id")
         # IdentityStore.load derives a validated path with mkdir=False, so this
         # existence probe cannot create an agent directory.  Preserve access to
