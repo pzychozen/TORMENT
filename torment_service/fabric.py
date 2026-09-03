@@ -5107,6 +5107,14 @@ class TormentFabric:
                             if isinstance(h.get("payload"), dict):
                                 h["payload"] = dict(h["payload"])
                                 h["payload"]["srg"] = dict(_native_effective_srg)
+                    except NativeQueryReadRefused:
+                        # A qualified native adapter uses this disposition when
+                        # it cannot prove the current SRG source.  It is not
+                        # optional SRG absence, so it must follow the same
+                        # fail-closed public/read-model path as a vector or
+                        # conflict read refusal rather than silently dropping
+                        # query scoring modifiers.
+                        raise
                     except Exception as e:
                         self._log.debug("failed to read native transient SRG state: %s", e)
                 if _srg_score_src:
@@ -5131,6 +5139,7 @@ class TormentFabric:
                 # for flattened top-level hits — writeback remains HOLD.
                 _srg_writeback_src = (h.get("payload") or {}).get("srg")
                 if _srg_writeback_src:
+                    _hit_eid = h.get("eid")
                     # Breathing evolution: retrieved memories are "active" → evolve
                     try:
                         from .srg_engine import SRGMemoryState as _SMS, evolve_breathing as _evolve
@@ -5141,7 +5150,6 @@ class TormentFabric:
                         _evolve(_srg_live)
                         # Write back evolved state only to the graph that
                         # produced this hit.  Raw EIDs are graph-local.
-                        _hit_eid = h.get("eid")
                         if native_qualification and isinstance(_qualified_hit, QualifiedQueryHit):
                             read_model.replace_srg_state(_qualified_hit, _srg_live.to_dict())  # type: ignore[attr-defined]
                         else:

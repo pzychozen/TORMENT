@@ -157,7 +157,7 @@ def _memory(
     payload = {
         "workspace_id": runtime_scope.workspace_id,
         "domain_id": "personal" if runtime_scope.scope_kind == "PRIVATE_AGENT" else runtime_scope.domain_id,
-        "agent_id": "aria",
+        "agent_id": runtime_scope.agent_id or "aria",
         "provenance_type": "user_input",
         "collective": False,
         "tool_result": False,
