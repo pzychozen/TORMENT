@@ -12,8 +12,9 @@ scope when membership is absent.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
-import hashlib
 import json
 import sqlite3
 from typing import Final
@@ -21,8 +22,8 @@ from uuid import UUID
 
 from .errors import SubstrateConfigurationError, SubstrateRevisionConflict
 from .ids import native_id_to_bytes
-from .objects import NativeObjectService
 from .relationships import Endpoint, NativeRelationshipService, RelationshipState
+from .root_profile import RootProfileGenerationRef, verify_root_profile_generation
 from .runtime_binding import NativeMemoryRuntimeScope
 from .schema import open_schema
 from .migration.root_scope import RootScopeKey, RootScopeKind
@@ -35,6 +36,8 @@ _ACTIVE: Final[str] = "ACTIVE"
 _RETIRED: Final[str] = "RETIRED"
 _PRIVATE: Final[str] = "PRIVATE_AGENT"
 _SHARED: Final[str] = "SHARED_DOMAIN"
+WITNESS_PROVENANCE_QUALIFICATION_TEST: Final[str] = "QUALIFICATION_TEST"
+WITNESS_PROVENANCE_EXTERNAL_ISSUED: Final[str] = "EXTERNAL_ISSUED"
 
 
 class RootScopeMembershipError(SubstrateConfigurationError):
@@ -68,9 +71,17 @@ class RootScopeMembershipWitness:
 
     witness_id: str
     witness_digest: str
+    issuer_reference: str
+    provenance_kind: str
 
     def __post_init__(self) -> None:
         _text(self.witness_id, "witness_id")
+        _text(self.issuer_reference, "issuer_reference")
+        if self.provenance_kind not in {
+            WITNESS_PROVENANCE_QUALIFICATION_TEST,
+            WITNESS_PROVENANCE_EXTERNAL_ISSUED,
+        }:
+            raise RootScopeMembershipError("witness provenance kind is not recognized")
         if (
             not isinstance(self.witness_digest, str)
             or len(self.witness_digest) != 64
@@ -79,42 +90,11 @@ class RootScopeMembershipWitness:
             raise RootScopeMembershipError("witness_digest must be a lowercase SHA-256 hex digest")
 
     def payload(self) -> dict[str, str]:
-        return {"witness_id": self.witness_id, "witness_digest": self.witness_digest}
-
-
-@dataclass(frozen=True)
-class RootProfileGenerationRef:
-    """Reference to an existing root-profile control-object revision.
-
-    The control object, not this value object, owns the root/profile fact.  The
-    reference is the canonical identity used by membership endpoints and
-    process-local resolution caches.
-    """
-
-    core_id: UUID
-    profile_generation: int
-    profile_object_id: UUID
-    profile_revision_id: UUID
-    profile_revision_ordinal: int
-    profile_semantic_scope_id: UUID
-
-    def __post_init__(self) -> None:
-        for value, label in (
-            (self.core_id, "core_id"),
-            (self.profile_object_id, "profile_object_id"),
-            (self.profile_revision_id, "profile_revision_id"),
-            (self.profile_semantic_scope_id, "profile_semantic_scope_id"),
-        ):
-            _native_uuid(value, label)
-        if not isinstance(self.profile_generation, int) or isinstance(self.profile_generation, bool) or self.profile_generation < 1:
-            raise RootScopeMembershipError("profile_generation must be a positive integer")
-        if not isinstance(self.profile_revision_ordinal, int) or isinstance(self.profile_revision_ordinal, bool) or self.profile_revision_ordinal < 1:
-            raise RootScopeMembershipError("profile_revision_ordinal must be a positive integer")
-
-    def payload(self) -> dict[str, object]:
         return {
-            "core_id": str(self.core_id),
-            "profile_generation": self.profile_generation,
+            "witness_id": self.witness_id,
+            "witness_digest": self.witness_digest,
+            "issuer_reference": self.issuer_reference,
+            "provenance_kind": self.provenance_kind,
         }
 
 
@@ -217,6 +197,17 @@ class RootQualifiedMemberScope:
         )
 
 
+class RootScopeMembershipReader:
+    """Read-only recovery of durable root-scope membership relationships."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        open_schema(connection)
+        self._connection = connection
+
+    def recover(self, profile: RootProfileGenerationRef) -> tuple[RootScopeMembershipRecord, ...]:
+        return _recover_memberships(self._connection, profile)
+
+
 class RootScopeMembershipService:
     """Durable membership lifecycle over existing relationship revisions."""
 
@@ -224,7 +215,6 @@ class RootScopeMembershipService:
         open_schema(connection)
         self._connection = connection
         self._relationships = NativeRelationshipService(connection)
-        self._objects = NativeObjectService(connection)
 
     def admit(
         self,
@@ -323,33 +313,7 @@ class RootScopeMembershipService:
 
     def recover(self, profile: RootProfileGenerationRef) -> tuple[RootScopeMembershipRecord, ...]:
         """Recover all durable memberships for one exact root-profile revision."""
-
-        self._validate_profile(profile)
-        rows = self._connection.execute(
-            "SELECT r.relationship_id,r.identity_namespace_id,rr.relationship_revision_id,"
-            "rr.revision_ordinal,rr.effective_semantic_scope_id,rr.lifecycle_state,"
-            "rr.lifecycle_authoritative,rr.payload_format,rr.payload_text "
-            "FROM relationships r "
-            "JOIN relationship_revisions rr ON rr.relationship_revision_id=r.current_revision_id "
-            "JOIN relationship_revision_endpoints e ON e.relationship_revision_id=rr.relationship_revision_id "
-            "WHERE r.relationship_kind=? AND e.endpoint_ordinal=0 "
-            "AND e.endpoint_role=? AND e.binding_mode='EXACT_REVISION' "
-            "AND e.endpoint_semantic_scope_id=? AND e.object_id=? "
-            "AND e.bound_object_revision_id=? AND e.bound_object_revision_ordinal=?",
-            (
-                ROOT_SCOPE_MEMBERSHIP_KIND,
-                _ROOT_PROFILE_ENDPOINT_ROLE,
-                native_id_to_bytes(profile.profile_semantic_scope_id),
-                native_id_to_bytes(profile.profile_object_id),
-                native_id_to_bytes(profile.profile_revision_id),
-                profile.profile_revision_ordinal,
-            ),
-        ).fetchall()
-        records = tuple(self._record_from_row(profile, row) for row in rows)
-        keys = [record.runtime_key for record in records]
-        if len(keys) != len(set(keys)):
-            raise RootScopeMembershipConflict("durable membership recovery found duplicate root-qualified scopes")
-        return tuple(sorted(records, key=lambda record: record.runtime_key.cache_key))
+        return _recover_memberships(self._connection, profile)
 
     def _record_by_id(
         self,
@@ -371,7 +335,13 @@ class RootScopeMembershipService:
         scope_key: RootScopeKey,
     ) -> tuple[RootScopeMembershipRecord, ...]:
         return tuple(
-            record for record in self.recover(profile) if record.runtime_key.scope_key == scope_key
+            record
+            for record in _recover_memberships(
+                self._connection,
+                profile,
+                verify_profile=not self._connection.in_transaction,
+            )
+            if record.runtime_key.scope_key == scope_key
         )
 
     def _require_admission_absent(
@@ -406,13 +376,10 @@ class RootScopeMembershipService:
     def _validate_profile(self, profile: RootProfileGenerationRef) -> None:
         if not isinstance(profile, RootProfileGenerationRef):
             raise RootScopeMembershipError("membership requires RootProfileGenerationRef")
-        current = self._objects.get_current_object(profile.profile_object_id)
-        if (
-            current.revision_id != profile.profile_revision_id
-            or current.ordinal != profile.profile_revision_ordinal
-            or current.scope_id != profile.profile_semantic_scope_id
-        ):
-            raise RootScopeMembershipError("root profile generation is absent, stale, or scope-mismatched")
+        try:
+            verify_root_profile_generation(self._connection, profile)
+        except Exception as exc:
+            raise RootScopeMembershipError("root profile generation is not a current admissible authority") from exc
 
     def _relationship_state(
         self,
@@ -449,55 +416,11 @@ class RootScopeMembershipService:
             payload={
                 "contract": ROOT_SCOPE_MEMBERSHIP_CONTRACT,
                 "profile": profile.payload(),
-                "scope_key": scope_key.identity_payload(),
+                "scope_key": _scope_key_payload(scope_key),
                 "external_witness": witness.payload(),
             },
             payload_format="JSON",
         )
-
-    def _record_from_row(
-        self,
-        profile: RootProfileGenerationRef,
-        row: tuple[object, ...],
-    ) -> RootScopeMembershipRecord:
-        (
-            relationship_id,
-            membership_identity_namespace_id,
-            relationship_revision_id,
-            ordinal,
-            semantic_scope_id,
-            lifecycle_state,
-            lifecycle_authoritative,
-            payload_format,
-            payload_text,
-        ) = row
-        if lifecycle_authoritative != 1 or payload_format != "JSON" or not isinstance(payload_text, str):
-            raise RootScopeMembershipError("membership relationship state is not authoritative JSON evidence")
-        try:
-            payload = json.loads(payload_text)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise RootScopeMembershipError("membership relationship payload is malformed") from exc
-        if not isinstance(payload, dict) or payload.get("contract") != ROOT_SCOPE_MEMBERSHIP_CONTRACT:
-            raise RootScopeMembershipError("relationship is not a root-scope membership contract")
-        if payload.get("profile") != profile.payload():
-            raise RootScopeMembershipConflict("membership profile facts conflict with its root endpoint")
-        scope_key = _scope_key_from_payload(payload.get("scope_key"))
-        witness = _witness_from_payload(payload.get("external_witness"))
-        if lifecycle_state not in {_ACTIVE, _RETIRED}:
-            raise RootScopeMembershipError("membership lifecycle is not active or retired")
-        return RootScopeMembershipRecord(
-            runtime_key=RootQualifiedRuntimeKey(profile, scope_key),
-            relationship_id=_uuid_from_blob(relationship_id, "relationship_id"),
-            relationship_revision_id=_uuid_from_blob(relationship_revision_id, "relationship_revision_id"),
-            relationship_revision_ordinal=_positive_ordinal(ordinal),
-            membership_identity_namespace_id=_uuid_from_blob(
-                membership_identity_namespace_id, "membership_identity_namespace_id"
-            ),
-            semantic_scope_id=_uuid_from_blob(semantic_scope_id, "semantic_scope_id"),
-            lifecycle_state=lifecycle_state,
-            witness=witness,
-        )
-
 
 class RootScopeMembershipRuntime:
     """Restart-safe resolver over durable membership and supplied native scopes.
@@ -515,8 +438,7 @@ class RootScopeMembershipRuntime:
         profile: RootProfileGenerationRef,
         runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
     ) -> None:
-        open_schema(connection, writable=False)
-        self._service = RootScopeMembershipService(connection)
+        self._reader = RootScopeMembershipReader(connection)
         self._profile = profile
         self._bindings = _binding_map(runtime_scopes)
         self._active: dict[RootQualifiedRuntimeKey, RootQualifiedMemberScope] = {}
@@ -528,13 +450,13 @@ class RootScopeMembershipRuntime:
 
         active: dict[RootQualifiedRuntimeKey, RootQualifiedMemberScope] = {}
         retired: set[RootQualifiedRuntimeKey] = set()
-        for record in self._service.recover(self._profile):
-            binding = self._bindings.get(record.runtime_key.scope_key)
-            if binding is None:
-                raise RootScopeMembershipError("durable membership has no supplied native runtime scope")
-            if binding.semantic_scope_id != record.semantic_scope_id:
-                raise RootScopeMembershipConflict("durable membership semantic scope conflicts with supplied runtime scope")
+        for record in self._reader.recover(self._profile):
             if record.active:
+                binding = self._bindings.get(record.runtime_key.scope_key)
+                if binding is None:
+                    raise RootScopeMembershipError("durable active membership has no supplied native runtime scope")
+                if binding.semantic_scope_id != record.semantic_scope_id:
+                    raise RootScopeMembershipConflict("durable membership semantic scope conflicts with supplied runtime scope")
                 active[record.runtime_key] = RootQualifiedMemberScope(record, binding)
             else:
                 retired.add(record.runtime_key)
@@ -572,6 +494,87 @@ class RootScopeMembershipRuntime:
     def cache_keys(self) -> tuple[RootQualifiedRuntimeKey, ...]:
         self.recover()
         return tuple(sorted(self._active, key=lambda key: key.cache_key))
+
+
+def _recover_memberships(
+    connection: sqlite3.Connection,
+    profile: RootProfileGenerationRef,
+    *,
+    verify_profile: bool = True,
+) -> tuple[RootScopeMembershipRecord, ...]:
+    if verify_profile:
+        try:
+            verify_root_profile_generation(connection, profile)
+        except Exception as exc:
+            raise RootScopeMembershipError("root profile generation is not a current admissible authority") from exc
+    rows = connection.execute(
+        "SELECT r.relationship_id,r.identity_namespace_id,rr.relationship_revision_id,"
+        "rr.revision_ordinal,rr.effective_semantic_scope_id,rr.lifecycle_state,"
+        "rr.lifecycle_authoritative,rr.payload_format,rr.payload_text "
+        "FROM relationships r "
+        "JOIN relationship_revisions rr ON rr.relationship_revision_id=r.current_revision_id "
+        "JOIN relationship_revision_endpoints e ON e.relationship_revision_id=rr.relationship_revision_id "
+        "WHERE r.relationship_kind=? AND e.endpoint_ordinal=0 "
+        "AND e.endpoint_role=? AND e.binding_mode='EXACT_REVISION' "
+        "AND e.endpoint_semantic_scope_id=? AND e.object_id=? "
+        "AND e.bound_object_revision_id=? AND e.bound_object_revision_ordinal=?",
+        (
+            ROOT_SCOPE_MEMBERSHIP_KIND,
+            _ROOT_PROFILE_ENDPOINT_ROLE,
+            native_id_to_bytes(profile.profile_semantic_scope_id),
+            native_id_to_bytes(profile.profile_object_id),
+            native_id_to_bytes(profile.profile_revision_id),
+            profile.profile_revision_ordinal,
+        ),
+    ).fetchall()
+    records = tuple(_membership_record_from_row(profile, row) for row in rows)
+    keys = [record.runtime_key for record in records]
+    if len(keys) != len(set(keys)):
+        raise RootScopeMembershipConflict("durable membership recovery found duplicate root-qualified scopes")
+    return tuple(sorted(records, key=lambda record: record.runtime_key.cache_key))
+
+
+def _membership_record_from_row(
+    profile: RootProfileGenerationRef,
+    row: tuple[object, ...],
+) -> RootScopeMembershipRecord:
+    (
+        relationship_id,
+        membership_identity_namespace_id,
+        relationship_revision_id,
+        ordinal,
+        semantic_scope_id,
+        lifecycle_state,
+        lifecycle_authoritative,
+        payload_format,
+        payload_text,
+    ) = row
+    if lifecycle_authoritative != 1 or payload_format != "JSON" or not isinstance(payload_text, str):
+        raise RootScopeMembershipError("membership relationship state is not authoritative JSON evidence")
+    try:
+        payload = json.loads(payload_text)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise RootScopeMembershipError("membership relationship payload is malformed") from exc
+    if not isinstance(payload, dict) or payload.get("contract") != ROOT_SCOPE_MEMBERSHIP_CONTRACT:
+        raise RootScopeMembershipError("relationship is not a root-scope membership contract")
+    if payload.get("profile") != profile.payload():
+        raise RootScopeMembershipConflict("membership profile facts conflict with its root endpoint")
+    scope_key = _scope_key_from_payload(payload.get("scope_key"))
+    witness = _witness_from_payload(payload.get("external_witness"))
+    if lifecycle_state not in {_ACTIVE, _RETIRED}:
+        raise RootScopeMembershipError("membership lifecycle is not active or retired")
+    return RootScopeMembershipRecord(
+        runtime_key=RootQualifiedRuntimeKey(profile, scope_key),
+        relationship_id=_uuid_from_blob(relationship_id, "relationship_id"),
+        relationship_revision_id=_uuid_from_blob(relationship_revision_id, "relationship_revision_id"),
+        relationship_revision_ordinal=_positive_ordinal(ordinal),
+        membership_identity_namespace_id=_uuid_from_blob(
+            membership_identity_namespace_id, "membership_identity_namespace_id"
+        ),
+        semantic_scope_id=_uuid_from_blob(semantic_scope_id, "semantic_scope_id"),
+        lifecycle_state=lifecycle_state,
+        witness=witness,
+    )
 
 
 def _scope_key(runtime_scope: NativeMemoryRuntimeScope) -> RootScopeKey:
@@ -613,8 +616,8 @@ def _scope_placeholder(scope_key: RootScopeKey, semantic_scope_id: UUID) -> Nati
 def _binding_map(
     runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
 ) -> dict[RootScopeKey, NativeMemoryRuntimeScope]:
-    if not isinstance(runtime_scopes, tuple) or not runtime_scopes:
-        raise RootScopeMembershipError("runtime resolution requires explicit typed scope bindings")
+    if not isinstance(runtime_scopes, tuple):
+        raise RootScopeMembershipError("runtime resolution requires typed scope bindings")
     result: dict[RootScopeKey, NativeMemoryRuntimeScope] = {}
     source_namespaces: set[UUID] = set()
     semantic_scopes: set[UUID] = set()
@@ -635,6 +638,17 @@ def _binding_map(
 def _scope_key_from_payload(value: object) -> RootScopeKey:
     if not isinstance(value, dict):
         raise RootScopeMembershipError("membership scope key evidence is malformed")
+    if value.get("encoding") == "UTF8_BASE64_EXACT_V1":
+        try:
+            kind = RootScopeKind(value.get("scope_kind"))
+            return RootScopeKey(
+                _decode_exact_identifier(value.get("workspace_id_b64"), "workspace_id"),
+                kind,
+                agent_id=_decode_exact_optional_identifier(value.get("agent_id_b64"), "agent_id"),
+                domain_id=_decode_exact_optional_identifier(value.get("domain_id_b64"), "domain_id"),
+            )
+        except (TypeError, ValueError, RootScopeMembershipError) as exc:
+            raise RootScopeMembershipError("membership exact scope key evidence is invalid") from exc
     try:
         kind = RootScopeKind(value.get("scope_kind"))
         return RootScopeKey(
@@ -647,10 +661,51 @@ def _scope_key_from_payload(value: object) -> RootScopeKey:
         raise RootScopeMembershipError("membership scope key evidence is invalid") from exc
 
 
+def _scope_key_payload(scope_key: RootScopeKey) -> dict[str, str | None]:
+    """Store exact UTF-8 identifiers without canonical-JSON NFC rewriting."""
+
+    return {
+        "encoding": "UTF8_BASE64_EXACT_V1",
+        "workspace_id_b64": _encode_exact_identifier(scope_key.workspace_id),
+        "scope_kind": scope_key.scope_kind.value,
+        "agent_id_b64": _encode_exact_optional_identifier(scope_key.agent_id),
+        "domain_id_b64": _encode_exact_optional_identifier(scope_key.domain_id),
+    }
+
+
+def _encode_exact_identifier(value: str) -> str:
+    return base64.b64encode(_text(value, "scope identifier").encode("utf-8")).decode("ascii")
+
+
+def _encode_exact_optional_identifier(value: str | None) -> str | None:
+    return None if value is None else _encode_exact_identifier(value)
+
+
+def _decode_exact_identifier(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RootScopeMembershipError(f"{label} exact encoding is missing")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True).decode("utf-8")
+    except (UnicodeError, ValueError, binascii.Error) as exc:
+        raise RootScopeMembershipError(f"{label} exact encoding is malformed") from exc
+    return _text(decoded, label)
+
+
+def _decode_exact_optional_identifier(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    return _decode_exact_identifier(value, label)
+
+
 def _witness_from_payload(value: object) -> RootScopeMembershipWitness:
     if not isinstance(value, dict):
         raise RootScopeMembershipError("membership witness evidence is malformed")
-    return RootScopeMembershipWitness(value.get("witness_id"), value.get("witness_digest"))
+    return RootScopeMembershipWitness(
+        value.get("witness_id"),
+        value.get("witness_digest"),
+        value.get("issuer_reference"),
+        value.get("provenance_kind"),
+    )
 
 
 def _native_uuid(value: object, label: str) -> UUID:
@@ -683,13 +738,6 @@ def _text(value: object, label: str) -> str:
     return value
 
 
-def synthetic_witness_digest(value: str) -> str:
-    """Deterministic helper for isolated qualification fixtures only."""
-
-    _text(value, "synthetic witness value")
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 __all__ = [
     "ROOT_SCOPE_MEMBERSHIP_CONTRACT",
     "ROOT_SCOPE_MEMBERSHIP_KIND",
@@ -701,9 +749,11 @@ __all__ = [
     "RootScopeMembershipConflict",
     "RootScopeMembershipError",
     "RootScopeMembershipRecord",
+    "RootScopeMembershipReader",
     "RootScopeMembershipRetired",
     "RootScopeMembershipRuntime",
     "RootScopeMembershipService",
     "RootScopeMembershipWitness",
-    "synthetic_witness_digest",
+    "WITNESS_PROVENANCE_EXTERNAL_ISSUED",
+    "WITNESS_PROVENANCE_QUALIFICATION_TEST",
 ]
