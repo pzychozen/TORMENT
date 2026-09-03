@@ -1,7 +1,7 @@
 """Phase 7D first-class relationship semantic path, sharing 7C transaction ownership."""
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 import sqlite3
 from .canonical_intent import canonical_intent_text
@@ -12,7 +12,7 @@ from .schema import open_schema
 
 @dataclass(frozen=True)
 class Endpoint:
-    ordinal:int; role:str; semantic_scope_id:UUID; object_id:UUID; binding_mode:str="IDENTITY"; object_revision_id:UUID|None=None
+    ordinal:int; role:str; semantic_scope_id:UUID; object_id:UUID; binding_mode:str="IDENTITY"; object_revision_id:UUID|None=None; object_revision_ordinal:int|None=None
 @dataclass(frozen=True)
 class RelationshipState:
     identity_namespace_id:UUID; semantic_scope_id:UUID; relationship_kind:str; existence_state:str; lifecycle_state:str; lifecycle_authoritative:bool; governance_state:str; authority_category:str="NOT_APPLICABLE"; endpoints:tuple[Endpoint,...]=(); payload:str|dict[str,Any]|None=None; payload_format:str="NONE"
@@ -28,8 +28,8 @@ class JointResult:
 
 class NativeRelationshipService:
     def __init__(self,connection:sqlite3.Connection)->None:open_schema(connection);self._connection=connection
-    def create_relationship(self,*,idempotency_namespace_id:UUID,idempotency_key:str,state:RelationshipState,relationship_id:UUID|None=None)->RelationshipResult:
-        return execute_semantic(self._connection,idempotency_namespace_id,idempotency_key,"CREATE_RELATIONSHIP",self._intent("CREATE",state,relationship_id,None),self._result,lambda tx:self._create(tx,state,relationship_id))
+    def create_relationship(self,*,idempotency_namespace_id:UUID,idempotency_key:str,state:RelationshipState,relationship_id:UUID|None=None,preflight:Callable[[SubstrateTx],None]|None=None)->RelationshipResult:
+        return execute_semantic(self._connection,idempotency_namespace_id,idempotency_key,"CREATE_RELATIONSHIP",self._intent("CREATE",state,relationship_id,None),self._result,lambda tx:self._create(tx,state,relationship_id,preflight))
     def transition_relationship(self,*,idempotency_namespace_id:UUID,idempotency_key:str,relationship_id:UUID,expected_revision_id:UUID,state:RelationshipState)->RelationshipResult:
         return execute_semantic(self._connection,idempotency_namespace_id,idempotency_key,"TRANSITION_RELATIONSHIP",self._intent("TRANSITION",state,relationship_id,expected_revision_id),self._result,lambda tx:self._successor(tx,relationship_id,expected_revision_id,state))
     def transition_object_and_relationship(self,*,idempotency_namespace_id:UUID,idempotency_key:str,object_id:UUID,expected_object_revision_id:UUID,object_state:ObjectState,relationship_id:UUID,expected_relationship_revision_id:UUID,relationship_state:RelationshipState,_omit_relationship_effect:bool=False)->JointResult:
@@ -44,9 +44,10 @@ class NativeRelationshipService:
         if not row:raise SubstrateObjectNotFound("native relationship revision was not found")
         return self._view(row)
     def _view(self,row:tuple)->RelationshipView:
-        endpoints=tuple(Endpoint(r[1],r[2],UUID(bytes=r[3]),UUID(bytes=r[4]),r[5],UUID(bytes=r[6]) if r[6] else None) for r in self._connection.execute("SELECT relationship_revision_id,endpoint_ordinal,endpoint_role,endpoint_semantic_scope_id,object_id,binding_mode,bound_object_revision_id FROM relationship_revision_endpoints WHERE relationship_revision_id=? ORDER BY endpoint_ordinal",(row[1],)))
+        endpoints=tuple(Endpoint(r[1],r[2],UUID(bytes=r[3]),UUID(bytes=r[4]),r[5],UUID(bytes=r[6]) if r[6] else None,r[7]) for r in self._connection.execute("SELECT relationship_revision_id,endpoint_ordinal,endpoint_role,endpoint_semantic_scope_id,object_id,binding_mode,bound_object_revision_id,bound_object_revision_ordinal FROM relationship_revision_endpoints WHERE relationship_revision_id=? ORDER BY endpoint_ordinal",(row[1],)))
         return RelationshipView(UUID(bytes=row[0]),UUID(bytes=row[1]),row[2],UUID(bytes=row[3]),endpoints)
-    def _create(self,tx:SubstrateTx,state:RelationshipState,requested:UUID|None)->RelationshipResult:
+    def _create(self,tx:SubstrateTx,state:RelationshipState,requested:UUID|None,preflight:Callable[[SubstrateTx],None]|None=None)->RelationshipResult:
+        if preflight:preflight(tx)
         oid=_b(requested) if requested else _new();rid,tid=_new(),_new();self._check(state,tx);tx.execute("INSERT INTO relationships(relationship_id,identity_namespace_id,relationship_kind,created_at_ns) VALUES (?,?,?,0)",(oid,_b(state.identity_namespace_id),state.relationship_kind));self._revision(tx,oid,rid,1,"NATIVE_CREATION",None,None,state);self._publish(tx,oid,rid,1,tid);return _result(oid,rid,tid,tx.operation_id)
     def _successor(self,tx:SubstrateTx,relationship_id:UUID,expected:UUID,state:RelationshipState)->RelationshipResult:
         oid,old=_b(relationship_id),_b(expected);row=tx.execute("SELECT current_revision_id,current_revision_ordinal FROM relationships WHERE relationship_id=?",(oid,)).fetchone()
@@ -58,11 +59,16 @@ class NativeRelationshipService:
         for e in state.endpoints:
             if e.binding_mode not in {"IDENTITY","EXACT_REVISION"}:raise ValueError("unsupported endpoint binding")
             if tx.execute("SELECT 1 FROM objects WHERE object_id=?",(_b(e.object_id),)).fetchone() is None:raise SubstrateObjectNotFound("endpoint object was not found")
-            if (e.binding_mode=="EXACT_REVISION") != (e.object_revision_id is not None):raise ValueError("exact endpoint revision shape is invalid")
-            if e.object_revision_id and tx.execute("SELECT 1 FROM object_revisions WHERE object_id=? AND object_revision_id=?",(_b(e.object_id),_b(e.object_revision_id))).fetchone() is None:raise SubstrateRevisionConflict("endpoint revision does not belong to endpoint object")
+            if e.binding_mode=="IDENTITY" and (e.object_revision_id is not None or e.object_revision_ordinal is not None):raise ValueError("identity endpoint revision shape is invalid")
+            if e.binding_mode=="EXACT_REVISION" and e.object_revision_id is None:raise ValueError("exact endpoint revision shape is invalid")
+            if e.object_revision_ordinal is not None and (not isinstance(e.object_revision_ordinal,int) or isinstance(e.object_revision_ordinal,bool) or e.object_revision_ordinal<1):raise ValueError("endpoint revision ordinal is invalid")
+            if e.object_revision_id:
+                actual=tx.execute("SELECT revision_ordinal FROM object_revisions WHERE object_id=? AND object_revision_id=?",(_b(e.object_id),_b(e.object_revision_id))).fetchone()
+                if actual is None:raise SubstrateRevisionConflict("endpoint revision does not belong to endpoint object")
+                if e.object_revision_ordinal is not None and actual[0]!=e.object_revision_ordinal:raise SubstrateRevisionConflict("endpoint revision ordinal does not match endpoint object")
     def _revision(self,tx:SubstrateTx,oid:bytes,rid:bytes,ordinal:int,lineage:str,pred:bytes|None,predord:int|None,state:RelationshipState)->None:
         fmt,text=_payload(state);tx.execute("INSERT INTO relationship_revisions(relationship_revision_id,relationship_id,revision_ordinal,lineage_kind,predecessor_revision_id,predecessor_revision_ordinal,effective_semantic_scope_id,existence_state,lifecycle_state,lifecycle_authoritative,governance_state,authority_category,payload_format,payload_text,created_at_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",(rid,oid,ordinal,lineage,pred,predord,_b(state.semantic_scope_id),state.existence_state,state.lifecycle_state,int(state.lifecycle_authoritative),state.governance_state,state.authority_category,fmt,text))
-        for e in state.endpoints:tx.execute("INSERT INTO relationship_revision_endpoints VALUES (?,?,?,?,?,?,?,?)",(rid,e.ordinal,e.role,_b(e.semantic_scope_id),_b(e.object_id),e.binding_mode,_b(e.object_revision_id) if e.object_revision_id else None,None if not e.object_revision_id else 1))
+        for e in state.endpoints:tx.execute("INSERT INTO relationship_revision_endpoints VALUES (?,?,?,?,?,?,?,?)",(rid,e.ordinal,e.role,_b(e.semantic_scope_id),_b(e.object_id),e.binding_mode,_b(e.object_revision_id) if e.object_revision_id else None,_endpoint_revision_ordinal(tx,e)))
     def _publish(self,tx:SubstrateTx,oid:bytes,rid:bytes,ordinal:int,tid:bytes)->None:
         tx.execute("INSERT INTO semantic_transitions VALUES (?,?,?,?,0)",(tid,tx.operation_id,"RELATIONSHIP_REVISION","NATIVE"));tx.execute("INSERT INTO relationship_revision_effects VALUES (?,?,?,?)",(tid,oid,rid,ordinal));tx.execute("INSERT INTO operation_outputs(operation_id,output_ordinal,output_role,output_kind,relationship_id,relationship_revision_id,relationship_revision_ordinal) VALUES (?,?,?,?,?,?,?)",(tx.operation_id,0,"RELATIONSHIP","RELATIONSHIP",oid,rid,ordinal));tx.execute("UPDATE relationships SET current_revision_id=?,current_revision_ordinal=? WHERE relationship_id=?",(rid,ordinal,oid));tx.transitions.append(tid);tx.relationship_published.append((oid,rid,ordinal))
     def _joint(self,tx:SubstrateTx,object_id:UUID,expected_object:UUID,object_state:ObjectState,relationship_id:UUID,expected_relationship:UUID,relationship_state:RelationshipState,omit:bool)->JointResult:
@@ -85,7 +91,7 @@ class NativeRelationshipService:
         tx.transitions.append(transition);tx.published.append((oid,object_revision,object_current[1]+1));tx.relationship_published.append((hid,relationship_revision,relationship_current[1]+1))
         return JointResult(object_id,UUID(bytes=object_revision),relationship_id,UUID(bytes=relationship_revision),UUID(bytes=transition),UUID(bytes=tx.operation_id))
     @staticmethod
-    def _intent(kind:str,s:RelationshipState,oid:UUID|None,expected:UUID|None)->str:return canonical_intent_text({"kind":kind,"relationship_id":str(oid) if oid else None,"expected_revision_id":str(expected) if expected else None,"namespace":str(s.identity_namespace_id),"scope":str(s.semantic_scope_id),"relationship_kind":s.relationship_kind,"payload":s.payload,"payload_format":s.payload_format,"endpoints":[{"ordinal":e.ordinal,"role":e.role,"scope":str(e.semantic_scope_id),"object":str(e.object_id),"binding":e.binding_mode,"revision":str(e.object_revision_id) if e.object_revision_id else None} for e in s.endpoints]})
+    def _intent(kind:str,s:RelationshipState,oid:UUID|None,expected:UUID|None)->str:return canonical_intent_text({"kind":kind,"relationship_id":str(oid) if oid else None,"expected_revision_id":str(expected) if expected else None,"namespace":str(s.identity_namespace_id),"scope":str(s.semantic_scope_id),"relationship_kind":s.relationship_kind,"payload":s.payload,"payload_format":s.payload_format,"endpoints":[_endpoint_intent(e) for e in s.endpoints]})
     def _result(self,op:bytes)->RelationshipResult|None:
         row=self._connection.execute("SELECT relationship_id,relationship_revision_id,t.transition_id,t.operation_id FROM operation_outputs o JOIN semantic_transitions t ON t.operation_id=o.operation_id WHERE o.operation_id=? AND output_kind='RELATIONSHIP'",(op,)).fetchone();return _result(*row) if row else None
     def _joint_result(self,op:bytes)->JointResult|None:
@@ -105,5 +111,16 @@ def _object_payload(s:ObjectState)->tuple[str,str|None]:
     if s.payload_format=="JSON" and isinstance(s.payload,dict):return "JSON",canonical_intent_text(s.payload)
     raise ValueError("payload does not match frozen format")
 def _b(v:UUID)->bytes:return native_id_to_bytes(v)
+def _endpoint_intent(e:Endpoint)->dict[str,Any]:
+    result={"ordinal":e.ordinal,"role":e.role,"scope":str(e.semantic_scope_id),"object":str(e.object_id),"binding":e.binding_mode,"revision":str(e.object_revision_id) if e.object_revision_id else None}
+    if e.object_revision_ordinal is not None:result["revision_ordinal"]=e.object_revision_ordinal
+    return result
+def _endpoint_revision_ordinal(tx:SubstrateTx,e:Endpoint)->int|None:
+    if e.binding_mode=="IDENTITY":return None
+    if e.object_revision_id is None:raise ValueError("exact endpoint revision shape is invalid")
+    if e.object_revision_ordinal is not None:return e.object_revision_ordinal
+    row=tx.execute("SELECT revision_ordinal FROM object_revisions WHERE object_id=? AND object_revision_id=?",(_b(e.object_id),_b(e.object_revision_id))).fetchone()
+    if row is None:raise SubstrateRevisionConflict("endpoint revision does not belong to endpoint object")
+    return row[0]
 def _new()->bytes:return native_id_to_bytes(generate_native_id())
 def _result(a:bytes,b:bytes,c:bytes,d:bytes)->RelationshipResult:return RelationshipResult(UUID(bytes=a),UUID(bytes=b),UUID(bytes=c),UUID(bytes=d))
