@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from torment_service.collective_models import MemoryGovernanceFlags
-from torment_service.fabric import TormentFabric, _detect_canon_conflict
+from torment_service.fabric import TormentFabric, _detect_canon_conflict, _mark_embed_audit_dirty
 from torment_service.ingest_orchestration import (
     FabricIngestStorageDisposition,
     FabricIngestStorageOutcome,
@@ -26,7 +26,12 @@ from torment_service.public_mutation_identity import (
     normalize_public_mutation_key,
 )
 
-from .fabric_native_routing import NativeFabricRouteRequest, NativeFabricRouteResult
+from .fabric_native_routing import (
+    NativeFabricRouteRequest,
+    NativeFabricRouteResult,
+    NativePrimaryOutcomeWitness,
+    NativePrecommitSymbolStateEffect,
+)
 from .native_post_write_runtime import (
     NativePostWriteQualificationConfiguration,
     NativePostWriteRouteWitness,
@@ -91,6 +96,11 @@ class NativeFabricIngestStorageAdapter:
                 disposition=FabricIngestStorageDisposition.NO_WRITE,
                 stored=False, eid=None, motif_ids=(), created_motif=None,
                 state_symbol=None, storage_witness=None,
+                primary_outcome_witness=_ordinary_no_write_witness(prepared),
+                # This deliberately is not inferred from ``stored``.  Legacy
+                # ordinary NO_WRITE reaches its always-run post-write tail,
+                # unlike a failed canonical flush.
+                post_write_eligible=True,
             )
         runtime = self._owner._recover_active_runtime()
         lane = runtime.representation_lane
@@ -122,6 +132,11 @@ class NativeFabricIngestStorageAdapter:
             prior_symbol_trace=prepared.prior_symbol_trace,
             prior_motif_id=prepared.prior_motif_id,
             prior_tension=prepared.prior_tension,
+            precommit_spawn_observer=lambda _eid: _mark_embed_audit_dirty(
+                self._fabric.data_dir, prepared.workspace_id,
+            ),
+            precommit_symbol_state_owner=lambda effect: self._apply_symbol_precommit_owner(effect),
+            precommit_parity_required=True,
             contradiction_guard=lambda incoming, existing, similarity: bool(
                 _detect_canon_conflict(incoming, existing, similarity)[0]
             ),
@@ -133,12 +148,26 @@ class NativeFabricIngestStorageAdapter:
                 f"native public storage is not qualified: {attempt.qualification.reason_code}"
             )
         result = attempt.result
+        primary_witness = result.primary_outcome
+        canonical_failure = (
+            not result.stored
+            and primary_witness is not None
+            and primary_witness.create_failure_disposition
+            == "CANONICAL_FLUSH_FAILURE_STRUCTURED"
+        )
+        if not result.stored and not canonical_failure:
+            raise NativePublicIngestExecutionError(
+                "native public storage returned an unclassified non-stored outcome"
+            )
         return FabricIngestStorageOutcome(
             workspace_id=prepared.workspace_id, agent_id=prepared.agent_id,
             scope=prepared.scope, domain_id=prepared.domain_id,
             disposition=(
-                FabricIngestStorageDisposition.REINFORCED_EXISTING
-                if result.reinforced else FabricIngestStorageDisposition.CREATED_NEW
+                FabricIngestStorageDisposition.NO_WRITE
+                if not result.stored else (
+                    FabricIngestStorageDisposition.REINFORCED_EXISTING
+                    if result.reinforced else FabricIngestStorageDisposition.CREATED_NEW
+                )
             ),
             stored=result.stored, eid=result.eid, motif_ids=result.motifs,
             # Native route results expose affected public runtime motif IDs;
@@ -146,7 +175,26 @@ class NativeFabricIngestStorageAdapter:
             # creation surface, without exposing native structural UUIDs.
             created_motif=(None if result.reinforced or not result.motifs else result.motifs[0]),
             state_symbol=None,
-            storage_witness=(result, request.native_operation_key),
+            # A failed canonical flush is never a stored route witness.  The
+            # legacy source returns before the storage/post-write adapter, so
+            # preserve its residue and public failure without entering the
+            # downstream tail.
+            storage_witness=(None if canonical_failure else (result, request.native_operation_key)),
+            primary_outcome_witness=primary_witness,
+            post_write_eligible=not canonical_failure,
+            failure_code=("canonical_commit_failed" if canonical_failure else None),
+        )
+
+    def _apply_symbol_precommit_owner(
+        self, effect: NativePrecommitSymbolStateEffect,
+    ) -> Mapping[str, Any]:
+        """Delegate native orchestration to Fabric's retained symbol owner."""
+        return self._fabric._apply_native_precommit_symbol_state(
+            effect.workspace_id,
+            effect.agent_id,
+            primary_motif_id=effect.runtime_motif_id,
+            current_tension=effect.current_tension,
+            enrichment=dict(effect.enrichment),
         )
 
 
@@ -247,6 +295,21 @@ class NativePublicIngestExecutor:
         self, prepared: PreparedFabricIngest, test_storage_stop_after: str | None,
     ) -> dict[str, Any]:
         outcome = self._storage.store(prepared, _test_stop_after=test_storage_stop_after)
+        if not outcome.post_write_eligible:
+            # This matches Fabric's canonical flush exception branch: it
+            # leaves precommit residue but returns before the post-write
+            # adapter, and it must not manufacture a route witness.
+            if outcome.failure_code != "canonical_commit_failed":
+                raise NativePublicIngestExecutionError(
+                    "native public storage withheld post-write without a canonical failure"
+                )
+            return {
+                "stored": False,
+                "reinforced": False,
+                "failure_code": outcome.failure_code,
+                "eid": None,
+                "domain_chosen": prepared.domain_id,
+            }
         route_result, route_key = _route_witness(outcome)
         context = FabricPostWriteContext.make(
             workspace_id=prepared.workspace_id, agent_id=prepared.agent_id,
@@ -312,6 +375,21 @@ def _fingerprint(request: NativePublicIngestRequest) -> str:
 
 def _storage_key(native_operation_key: str) -> str:
     return f"{native_operation_key}:STORAGE"
+
+
+def _ordinary_no_write_witness(prepared: PreparedFabricIngest) -> NativePrimaryOutcomeWitness:
+    """Observe a write-gate refusal without inventing a native source row."""
+    return NativePrimaryOutcomeWitness(
+        scope=prepared.scope,
+        attempt_origin="WRITE_GATE",
+        reinforcement_disposition="NOT_APPLICABLE",
+        final_storage_outcome="NO_WRITE",
+        create_failure_disposition="NONE",
+        primary_canonical_state_committed=False,
+        qualified_memory_eid=None,
+        qualified_memory_object_id=None,
+        qualified_memory_revision_id=None,
+    )
 
 
 def _native_flexible_payload(prepared: PreparedFabricIngest) -> dict[str, Any]:

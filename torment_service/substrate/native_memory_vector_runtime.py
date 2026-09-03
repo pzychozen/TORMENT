@@ -604,11 +604,12 @@ class NativeMemoryVectorRuntime:
                    r.effective_semantic_scope_id
               FROM legacy_object_aliases a
               JOIN objects o ON o.object_id=a.object_id
-              LEFT JOIN object_revisions r
+              JOIN object_revisions r
                 ON r.object_id=o.object_id
                AND r.object_revision_id=o.current_revision_id
                AND r.revision_ordinal=o.current_revision_ordinal
              WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID'
+               AND r.existence_state='EXISTS'
              ORDER BY a.alias_value
             """,
             (namespace,),

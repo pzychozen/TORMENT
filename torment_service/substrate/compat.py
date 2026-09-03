@@ -261,6 +261,8 @@ class NativeMemoryCompatibilityFacade:
                 raise SubstrateInvariantViolation("batch compatibility EID aliases are ambiguous")
             if row[2] != _MEMORY_OBJECT_KIND:
                 raise SubstrateInvariantViolation("EID alias does not target an admissible core memory")
+            if row[6] != "EXISTS":
+                continue
             by_eid[eid] = row
         if len(by_eid) != len(requested):
             raise SubstrateObjectNotFound("one or more namespaced EID compatibility aliases were not found")
@@ -812,9 +814,14 @@ class NativeMemoryCompatibilityFacade:
             JOIN representation_current_state s USING(representation_id)
             JOIN integrity_measurements m ON m.measurement_id=s.selected_integrity_measurement_id
             JOIN objects o ON o.object_id=r.source_object_id
+            JOIN object_revisions source
+              ON source.object_id=o.object_id
+             AND source.object_revision_id=o.current_revision_id
+             AND source.revision_ordinal=o.current_revision_ordinal
             JOIN legacy_object_aliases a ON a.object_id=o.object_id
             WHERE r.source_kind='OBJECT_REVISION'
               AND o.object_kind=?
+              AND source.existence_state='EXISTS'
               AND r.source_object_revision_id=o.current_revision_id
               AND r.source_object_revision_ordinal=o.current_revision_ordinal
               AND a.legacy_source_namespace_id=? AND a.alias_kind='EID'
@@ -851,6 +858,7 @@ class NativeMemoryCompatibilityFacade:
         row = self._connection.execute("""SELECT o.object_id,r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,r.authority_category,r.provenance_id,r.payload_format,r.payload_text FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?""", (native_id_to_bytes(namespace), str(eid))).fetchone()
         if row is None: raise SubstrateObjectNotFound("namespaced EID compatibility alias was not found")
         if self._connection.execute("SELECT object_kind FROM objects WHERE object_id=?", (row[0],)).fetchone()[0] != _MEMORY_OBJECT_KIND: raise SubstrateInvariantViolation("EID alias does not target an admissible core memory")
+        if row[4] != "EXISTS": raise SubstrateObjectNotFound("namespaced EID compatibility alias is not canonical")
         return row
 
     def _write_result_for_operation(self, operation_id: bytes, namespace: UUID) -> CompatibilityMemoryWriteResult | None:

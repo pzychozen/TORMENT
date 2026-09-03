@@ -34,6 +34,7 @@ from .object_revision_governance import (
     _insert_published_governance_for_qualification,
 )
 from .objects import NativeObjectService, ObjectState, SubstrateTx, execute_semantic
+from .provenance import NativeProvenanceRecord
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
     INTEGRITY_VALUE_ENCODING_RAW,
@@ -68,6 +69,7 @@ class NativeMemoryReinforcementRequest:
     last_reinforced_ts: int
     expected_dimension: int
     last_tool_refresh_ts: int | None = None
+    direct_ingest_provenance_backfill: NativeProvenanceRecord | None = None
     routing_input_digest: str | None = None
     srg_materialization: SRGSuccessorMaterialization | None = None
     world_diagnostic_materialization: WorldDiagnosticSuccessorMaterialization | None = None
@@ -95,6 +97,10 @@ class NativeMemoryReinforcementRequest:
             or self.last_tool_refresh_ts < 0
         ):
             raise ValueError("last_tool_refresh_ts must be a non-negative integer when supplied")
+        if self.direct_ingest_provenance_backfill is not None and not isinstance(
+            self.direct_ingest_provenance_backfill, NativeProvenanceRecord
+        ):
+            raise ValueError("direct_ingest_provenance_backfill must be NativeProvenanceRecord when supplied")
         if self.routing_input_digest is not None and (
             not isinstance(self.routing_input_digest, str)
             or len(self.routing_input_digest) != 64
@@ -155,6 +161,7 @@ class _SourcePlan:
     state: ObjectState
     governance: NativeMemoryGovernanceFacts
     provenance_source_channel: str | None
+    provenance_backfill: NativeProvenanceRecord | None
     patch: ReinforcementPatch
     e1_witness: QualifiedCompatEmbedding
     srg_materialization: SRGSuccessorMaterialization | None
@@ -292,21 +299,32 @@ class NativeMemoryReinforcementService:
         if governance is None:
             raise SubstrateInvariantViolation("qualified reinforcement requires explicit current governance")
         provenance_id = current["provenance_id"]
+        provenance_backfill: NativeProvenanceRecord | None = None
         if provenance_id is None:
-            raise SubstrateInvariantViolation("qualified reinforcement requires structural provenance")
-        provenance = self._connection.execute(
-            "SELECT source_channel FROM provenance_records WHERE provenance_id=?",
-            (native_id_to_bytes(provenance_id),),
-        ).fetchone()
-        if provenance is None:
-            raise SubstrateInvariantViolation("current reinforcement provenance is missing")
+            candidate = request.direct_ingest_provenance_backfill
+            if candidate is None or candidate.source_channel != "direct_ingest":
+                raise SubstrateInvariantViolation(
+                    "qualified reinforcement requires structural provenance or direct-ingest backfill"
+                )
+            provenance_id = generate_native_id()
+            provenance_source_channel = candidate.source_channel
+            provenance_backfill = candidate
+        else:
+            provenance = self._connection.execute(
+                "SELECT source_channel FROM provenance_records WHERE provenance_id=?",
+                (native_id_to_bytes(provenance_id),),
+            ).fetchone()
+            if provenance is None:
+                raise SubstrateInvariantViolation("current reinforcement provenance is missing")
+            provenance_source_channel = provenance[0]
         embedding = self._embeddings.read_current(
             current["object_id"], expected_dimension=request.expected_dimension
         )
         if embedding is None or embedding.representation_id != request.expected_representation_id:
             raise StaleReinforcementPlanError("expected qualified current E1 representation is stale")
         patch = realize_reinforcement_patch(
-            current["payload"], source_channel=provenance[0], reinforcement_step=request.reinforcement_step,
+            current["payload"], source_channel=provenance_source_channel,
+            reinforcement_step=request.reinforcement_step,
             last_reinforced_ts=request.last_reinforced_ts,
             last_tool_refresh_ts=request.last_tool_refresh_ts,
         )
@@ -337,7 +355,8 @@ class NativeMemoryReinforcementService:
         )
         return _SourcePlan(
             request, current["object_id"], current["revision_ordinal"], state,
-            governance.facts, provenance[0], patch, embedding, materialization, world_materialization,
+            governance.facts, provenance_source_channel, provenance_backfill,
+            patch, embedding, materialization, world_materialization,
         )
 
     def _commit_source(
@@ -379,8 +398,23 @@ class NativeMemoryReinforcementService:
         )
         if governance is None or governance.facts != plan.governance:
             raise StaleReinforcementPlanError("current governance changed before source commit")
-        if current["provenance_id"] != plan.state.provenance_id:
+        expected_predecessor_provenance = (
+            None if plan.provenance_backfill is not None else plan.state.provenance_id
+        )
+        if current["provenance_id"] != expected_predecessor_provenance:
             raise StaleReinforcementPlanError("current provenance changed before source commit")
+
+        if plan.provenance_backfill is not None:
+            tx.execute(
+                """
+                INSERT INTO provenance_records(
+                    provenance_id,origin_kind,source_channel,source_role,
+                    derivation_status,uncertainty_state,source_time_ns,
+                    capture_time_ns,memory_role,descriptive_notes
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                """,
+                (native_id_to_bytes(plan.state.provenance_id), *_provenance_values(plan.provenance_backfill)),
+            )
 
         revision_id, transition_id = _new(), _new()
         revision_ordinal = plan.revision_ordinal + 1
@@ -583,6 +617,9 @@ def _retry_contract(request: NativeMemoryReinforcementRequest) -> dict[str, Any]
         "reinforcement_step": request.reinforcement_step,
         "last_reinforced_ts": request.last_reinforced_ts,
         "last_tool_refresh_ts": request.last_tool_refresh_ts,
+        "direct_ingest_provenance_backfill": _provenance_intent(
+            request.direct_ingest_provenance_backfill
+        ),
         "expected_dimension": request.expected_dimension,
         "routing_input_digest": request.routing_input_digest,
     }
@@ -606,6 +643,7 @@ def _source_intent(plan: _SourcePlan) -> str:
         },
         "patch": dict(plan.patch.values),
         "is_tool_result": plan.patch.is_tool_result,
+        "provenance_backfill": _provenance_intent(plan.provenance_backfill),
         "e1_witness": plan.e1_witness.intent(),
         "source_state": {
             "identity_namespace_id": str(plan.state.identity_namespace_id),
@@ -623,6 +661,30 @@ def _source_intent(plan: _SourcePlan) -> str:
 
 def _subkey(base: str, suffix: str) -> str:
     return f"NATIVE_REINFORCEMENT:{suffix}:{base}"
+
+
+def _provenance_values(record: NativeProvenanceRecord) -> tuple[Any, ...]:
+    return (
+        record.origin_kind, record.source_channel, record.source_role,
+        record.derivation_status, record.uncertainty_state, record.source_time_ns,
+        record.capture_time_ns, record.memory_role, record.descriptive_notes,
+    )
+
+
+def _provenance_intent(record: NativeProvenanceRecord | None) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    return {
+        "origin_kind": record.origin_kind,
+        "source_channel": record.source_channel,
+        "source_role": record.source_role,
+        "derivation_status": record.derivation_status,
+        "uncertainty_state": record.uncertainty_state,
+        "source_time_ns": record.source_time_ns,
+        "capture_time_ns": record.capture_time_ns,
+        "memory_role": record.memory_role,
+        "descriptive_notes": record.descriptive_notes,
+    }
 
 
 def _intent_mapping(value: str) -> dict[str, Any]:

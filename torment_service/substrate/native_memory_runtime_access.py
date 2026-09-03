@@ -74,8 +74,15 @@ class NativePostWriteMemoryAccess:
         namespace = native_id_to_bytes(self._legacy_source_namespace_id)
         alias_rows = self._connection.execute(
             """
-            SELECT alias_value,object_id FROM legacy_object_aliases
-             WHERE legacy_source_namespace_id=? AND alias_kind='EID'
+            SELECT a.alias_value,a.object_id
+              FROM legacy_object_aliases a
+              JOIN objects o ON o.object_id=a.object_id
+              JOIN object_revisions r
+                ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id
+               AND r.revision_ordinal=o.current_revision_ordinal
+             WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID'
+               AND r.existence_state='EXISTS'
             """,
             (namespace,),
         ).fetchall()

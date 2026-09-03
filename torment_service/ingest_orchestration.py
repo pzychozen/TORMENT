@@ -278,6 +278,12 @@ class FabricIngestStorageOutcome:
     created_motif: str | None
     state_symbol: str | None
     storage_witness: Any = None
+    # Primary outcome evidence is observational.  It deliberately does not
+    # select the post-write path: legacy branches distinguish ordinary
+    # NO_WRITE from a failed canonical flush.
+    primary_outcome_witness: Any = None
+    post_write_eligible: bool = True
+    failure_code: str | None = None
 
     @property
     def reinforced(self) -> bool:

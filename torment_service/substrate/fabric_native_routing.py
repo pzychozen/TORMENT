@@ -58,12 +58,20 @@ from .native_derived_memory_runtime import (
     NativeDerivedMemoryRuntime,
     NativeDerivedMemoryRuntimeConfiguration,
 )
+from .native_primary_precommit import (
+    NativePrecommitMemoryAbort,
+    NativePrecommitMemoryCommit,
+    NativePrecommitMemoryReservation,
+    NativePrimaryPrecommitService,
+)
+from .provenance import NativeProvenanceRecord
 from .native_world_runtime import (
     NativeWorldProcessState,
     NativeWorldRuntime,
     WorldDiagnosticSuccessorMaterialization,
 )
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
+from .motifs import NativeMotifService
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
     INTEGRITY_VALUE_ENCODING_RAW,
@@ -339,6 +347,25 @@ class NativeFabricRouteQualification:
 
 
 @dataclass(frozen=True)
+class NativePrecommitSymbolStateEffect:
+    """Facts an existing external symbol owner needs after motif persistence."""
+
+    workspace_id: str
+    agent_id: str
+    runtime_motif_id: str
+    current_tension: float
+    enrichment: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        for name in ("workspace_id", "agent_id", "runtime_motif_id"):
+            if not isinstance(getattr(self, name), str) or not getattr(self, name):
+                raise ValueError(f"{name} must be non-empty text")
+        if not isinstance(self.enrichment, Mapping):
+            raise ValueError("enrichment must be a mapping")
+        object.__setattr__(self, "enrichment", MappingProxyType(dict(self.enrichment)))
+
+
+@dataclass(frozen=True)
 class NativeFabricRouteRequest:
     """Already-known Fabric facts for one explicitly qualified memory route."""
 
@@ -377,6 +404,13 @@ class NativeFabricRouteRequest:
     contradiction_guard: Callable[[str, str, float], bool] | None = field(
         default=None, repr=False, compare=False
     )
+    precommit_spawn_observer: Callable[[int], None] | None = field(
+        default=None, repr=False, compare=False
+    )
+    precommit_symbol_state_owner: Callable[[NativePrecommitSymbolStateEffect], Mapping[str, Any]] | None = field(
+        default=None, repr=False, compare=False
+    )
+    precommit_parity_required: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -411,6 +445,12 @@ class NativeFabricRouteRequest:
             or self.last_tool_refresh_ts < 0
         ):
             raise ValueError("last_tool_refresh_ts must be a non-negative integer when supplied")
+        if self.precommit_spawn_observer is not None and not callable(self.precommit_spawn_observer):
+            raise ValueError("precommit_spawn_observer must be callable when supplied")
+        if self.precommit_symbol_state_owner is not None and not callable(self.precommit_symbol_state_owner):
+            raise ValueError("precommit_symbol_state_owner must be callable when supplied")
+        if type(self.precommit_parity_required) is not bool:
+            raise ValueError("precommit_parity_required must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -419,18 +459,47 @@ class NativeFabricRouteResult:
 
     stored: bool
     reinforced: bool
-    eid: int
+    eid: int | None
     domain_id: str
     motifs: tuple[str, ...]
-    memory_object_id: UUID
-    memory_revision_id: UUID
-    representation_id: UUID
+    memory_object_id: UUID | None
+    memory_revision_id: UUID | None
+    representation_id: UUID | None
+    primary_outcome: "NativePrimaryOutcomeWitness | None" = None
+
+
+@dataclass(frozen=True)
+class NativePrimaryOutcomeWitness:
+    """Recorded primary-write truth; it never selects cognition or storage."""
+
+    scope: str
+    attempt_origin: str
+    reinforcement_disposition: str
+    final_storage_outcome: str
+    create_failure_disposition: str
+    primary_canonical_state_committed: bool
+    qualified_memory_eid: int | None
+    qualified_memory_object_id: UUID | None
+    qualified_memory_revision_id: UUID | None
+
+
+class NativePrecommitAttachFailure(RuntimeError):
+    """A legacy-equivalent raised attach/create failure with an outcome witness."""
+
+    def __init__(self, witness: NativePrimaryOutcomeWitness) -> None:
+        super().__init__("native precommit motif attach/create failed")
+        self.witness = witness
+
+
+class NativePrecommitTrueSplitRefused(RuntimeError):
+    """I4B-1 must not silently apply the atomic true-split route."""
 
 
 @dataclass(frozen=True)
 class NativeFabricRouteAttempt:
     qualification: NativeFabricRouteQualification
     result: NativeFabricRouteResult | None = None
+    primary_outcome: NativePrimaryOutcomeWitness | None = None
 
 
 def prepare_native_fabric_routing_capability(
@@ -553,7 +622,9 @@ class NativeFabricMemoryRouter:
         """
         qualification = self.qualify(request)
         if not qualification.eligible:
-            return NativeFabricRouteAttempt(qualification)
+            return NativeFabricRouteAttempt(
+                qualification, primary_outcome=_refused_primary_outcome(request),
+            )
         assert qualification.route_scope is not None
         vector = _canonical_vector(request.incoming_embedding, request.embedder_lane.dimension)
         with open_existing_native_core_connection(self._capability.core_database_path) as opened:
@@ -562,17 +633,20 @@ class NativeFabricMemoryRouter:
                 _revalidate_capability_for_route(self._capability, connection)
             except Exception:
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "CORE_NOT_CURRENT")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "CORE_NOT_CURRENT"),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
             try:
                 translation = _translate_route(request, qualification.route_scope)
             except (TypeError, ValueError):
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "PROVENANCE_NOT_QUALIFIED")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "PROVENANCE_NOT_QUALIFIED"),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
             if translation.link_classification != ABSENT:
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "LINKS_DEFERRED")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "LINKS_DEFERRED"),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
             try:
                 world_runtime = NativeWorldRuntime(
@@ -589,18 +663,31 @@ class NativeFabricMemoryRouter:
                 )
             except NativeMotifProcessOrderError:
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID"),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
             except StaleMotifCatalogError:
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID"),
+                    primary_outcome=_refused_primary_outcome(request),
+                )
+            except NativePrecommitTrueSplitRefused:
+                # This is a reachable topology, but no source reservation or
+                # motif mutation has started.  I4B-2 must qualify its durable
+                # precommit failure topology before native activation can use it.
+                return NativeFabricRouteAttempt(
+                    NativeFabricRouteQualification(
+                        False, qualification.route_scope, "TRUE_SPLIT_PENDING_I4B2",
+                    ),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
             except ValueError:
                 # Structural translation and A3C2 planning both reject before
                 # a source semantic transaction starts.  This remains an
                 # explicit native qualification refusal, never a legacy retry.
                 return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(False, qualification.route_scope, "STRUCTURAL_PAYLOAD_REFUSED")
+                    NativeFabricRouteQualification(False, qualification.route_scope, "STRUCTURAL_PAYLOAD_REFUSED"),
+                    primary_outcome=_refused_primary_outcome(request),
                 )
         return NativeFabricRouteAttempt(qualification, result)
 
@@ -655,47 +742,127 @@ class NativeFabricMemoryRouter:
                 True, True, reinforced.source.eid, request.domain_id, (),
                 reinforced.source.memory_object_id, reinforced.source.revision_id,
                 reinforced.e2_representation_id,
+                _primary_outcome(
+                    request,
+                    attempt_origin="INGEST_REINFORCEMENT_ATTEMPT",
+                    reinforcement_disposition="REINFORCED",
+                    final_storage_outcome="REINFORCED_EXISTING",
+                    create_failure_disposition="NONE",
+                    committed=True,
+                    eid=reinforced.source.eid,
+                    object_id=reinforced.source.memory_object_id,
+                    revision_id=reinforced.source.revision_id,
+                ),
             )
 
         composition_request = _new_memory_composition_request(
             request, routing_scope, translation, vector,
         )
         composition = NativeMemoryMotifCompositionService(connection)
-        recovered_composition = composition.recover_committed(composition_request)
-        if recovered_composition is not None:
-            # A completed new-memory source is the operation's durable truth.
-            # It must win over a later duplicate search, including after the
-            # process-local routing/world owners have been recreated.
+        precommit = NativePrimaryPrecommitService(connection)
+        recovered_primary = (
+            precommit.recover_canonical(composition_request)
+            if request.precommit_parity_required else None
+        )
+        if recovered_primary is not None:
+            # A completed canonical source must win over a later duplicate
+            # search, including after process-local owners are recreated.
+            motif_ids = _runtime_motif_ids_for_member(connection, routing_scope, recovered_primary.memory_object_id)
             reader = NativeMotifRuntimeReader(connection)
             with self._capability.process_order.locked_catalog(
                 reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
             ):
                 world_runtime.ensure_initialized()
                 world_runtime.register_fresh_created(
-                    eid=recovered_composition.memory_eid,
-                    memory_object_id=recovered_composition.memory_object_id,
-                    memory_revision_id=recovered_composition.memory_revision_id,
-                    memory_revision_ordinal=recovered_composition.memory_revision_ordinal,
+                    eid=recovered_primary.eid,
+                    memory_object_id=recovered_primary.memory_object_id,
+                    memory_revision_id=recovered_primary.memory_revision_id,
+                    memory_revision_ordinal=recovered_primary.memory_revision_ordinal,
                     born_step=request.logical_step,
                     channel=0,
                 )
             if _test_stop_after == "source":
                 raise RuntimeError("forced interruption after committed native new-memory source")
             representation = _publish_new_memory_representation(
-                connection, routing_scope, request, recovered_composition, vector,
+                connection, routing_scope, request, recovered_primary, vector,
             )
             return NativeFabricRouteResult(
-                True, False, recovered_composition.memory_eid, request.domain_id,
-                recovered_composition.affected_runtime_motif_ids or (recovered_composition.runtime_motif_id,),
-                recovered_composition.memory_object_id, recovered_composition.memory_revision_id,
+                True, False, recovered_primary.eid, request.domain_id, motif_ids,
+                recovered_primary.memory_object_id, recovered_primary.memory_revision_id,
                 representation.representation_id,
+                _primary_outcome(
+                    request,
+                    attempt_origin="DIRECT_CREATE_PATH",
+                    reinforcement_disposition="NOT_APPLICABLE",
+                    final_storage_outcome="CREATED_NEW",
+                    create_failure_disposition="NONE",
+                    committed=True,
+                    eid=recovered_primary.eid,
+                    object_id=recovered_primary.memory_object_id,
+                    revision_id=recovered_primary.memory_revision_id,
+                ),
             )
 
-        selected = self._select_private_duplicate(
-            connection, request, routing_scope, vector,
+        recovered_abort = (
+            precommit.recover_aborted(composition_request)
+            if request.precommit_parity_required else None
         )
-        if selected is not None:
-            hit, source_channel = selected
+        if recovered_abort is not None:
+            return _return_recovered_abort(
+                connection=connection,
+                request=request,
+                routing_scope=routing_scope,
+                aborted=recovered_abort,
+            )
+
+        if not request.precommit_parity_required:
+            recovered_composition = composition.recover_committed(composition_request)
+            if recovered_composition is not None:
+                reader = NativeMotifRuntimeReader(connection)
+                with self._capability.process_order.locked_catalog(
+                    reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
+                ):
+                    world_runtime.ensure_initialized()
+                    world_runtime.register_fresh_created(
+                        eid=recovered_composition.memory_eid,
+                        memory_object_id=recovered_composition.memory_object_id,
+                        memory_revision_id=recovered_composition.memory_revision_id,
+                        memory_revision_ordinal=recovered_composition.memory_revision_ordinal,
+                        born_step=request.logical_step,
+                        channel=0,
+                    )
+                if _test_stop_after == "source":
+                    raise RuntimeError("forced interruption after committed native new-memory source")
+                representation = _publish_new_memory_representation(
+                    connection, routing_scope, request, recovered_composition, vector,
+                )
+                return NativeFabricRouteResult(
+                    True, False, recovered_composition.memory_eid, request.domain_id,
+                    recovered_composition.affected_runtime_motif_ids or (recovered_composition.runtime_motif_id,),
+                    recovered_composition.memory_object_id, recovered_composition.memory_revision_id,
+                    representation.representation_id,
+                    _primary_outcome(
+                        request,
+                        attempt_origin="DIRECT_CREATE_PATH",
+                        reinforcement_disposition="NOT_APPLICABLE",
+                        final_storage_outcome="CREATED_NEW",
+                        create_failure_disposition="NONE",
+                        committed=True,
+                        eid=recovered_composition.memory_eid,
+                        object_id=recovered_composition.memory_object_id,
+                        revision_id=recovered_composition.memory_revision_id,
+                    ),
+                )
+
+        try:
+            hit, source_channel, duplicate_disposition = self._select_private_duplicate(
+                connection, request, routing_scope, vector,
+            )
+        except Exception:
+            # Legacy duplicate implementation failures are deliberately not
+            # refusals; ordinary CREATE owns the exception-fallthrough path.
+            hit, source_channel, duplicate_disposition = None, None, "EXCEPTION_FALLTHROUGH_TO_CREATE"
+        if hit is not None:
             tool_refresh = request.last_tool_refresh_ts if source_channel == "tool_result" else None
             srg_runtime = NativeSRGTransientRuntime(
                 connection,
@@ -719,31 +886,120 @@ class NativeFabricMemoryRouter:
                 last_reinforced_ts=request.last_reinforced_ts,
                 expected_dimension=request.embedder_lane.dimension,
                 last_tool_refresh_ts=tool_refresh,
+                direct_ingest_provenance_backfill=translation.provenance,
                 routing_input_digest=_routing_input_digest(request, routing_scope, vector),
                 srg_materialization=materialization,
                 world_diagnostic_materialization=world_materialization,
             )
-            reinforced = NativeMemoryReinforcementService(connection).reinforce(
-                reinforcement_request,
-                _test_stop_after=_test_stop_after,
-                on_source_committed=lambda source: _synchronize_world_successor(world_runtime, source),
+            try:
+                reinforced = NativeMemoryReinforcementService(connection).reinforce(
+                    reinforcement_request,
+                    _test_stop_after=_test_stop_after,
+                    on_source_committed=lambda source: _synchronize_world_successor(world_runtime, source),
+                )
+            except Exception:
+                # A committed R2 must be recovered/retried, never converted
+                # into a second CREATE.  Only a wholly uncommitted duplicate
+                # implementation error follows legacy exception fallthrough.
+                recovered_after_error = _recover_reinforcement_request(
+                    connection, routing_scope.idempotency_namespace_id, request.native_operation_key,
+                )
+                if recovered_after_error is None:
+                    hit, source_channel = None, None
+                    duplicate_disposition = "EXCEPTION_FALLTHROUGH_TO_CREATE"
+                else:
+                    reinforced = NativeMemoryReinforcementService(connection).reinforce(
+                        recovered_after_error,
+                        _test_stop_after=_test_stop_after,
+                        on_source_committed=lambda source: _synchronize_world_successor(world_runtime, source),
+                    )
+            if hit is not None:
+                if materialization is not None:
+                    srg_runtime.acknowledge_materialized_successor(
+                        materialization,
+                        eid=reinforced.source.eid,
+                        successor_revision_id=reinforced.source.revision_id,
+                    )
+                if world_materialization is not None:
+                    world_runtime.acknowledge_materialized_successor(
+                        world_materialization,
+                        eid=reinforced.source.eid,
+                        successor_revision_id=reinforced.source.revision_id,
+                    )
+                return NativeFabricRouteResult(
+                    True, True, reinforced.source.eid, request.domain_id, (),
+                    reinforced.source.memory_object_id, reinforced.source.revision_id,
+                    reinforced.e2_representation_id,
+                    _primary_outcome(
+                        request,
+                        attempt_origin="INGEST_REINFORCEMENT_ATTEMPT",
+                        reinforcement_disposition="REINFORCED",
+                        final_storage_outcome="REINFORCED_EXISTING",
+                        create_failure_disposition="NONE",
+                        committed=True,
+                        eid=reinforced.source.eid,
+                        object_id=reinforced.source.memory_object_id,
+                        revision_id=reinforced.source.revision_id,
+                    ),
+                )
+
+        if not request.precommit_parity_required:
+            # This is the established I3 native route.  I4B-1 is explicitly
+            # qualified by the public-ingest adapter below; keeping the
+            # default path intact preserves its R1 -> R2 reinforcement lineage
+            # and existing atomic composition contract.
+            reader = NativeMotifRuntimeReader(connection)
+            with self._capability.process_order.locked_catalog(
+                reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
+            ) as ordered_catalog:
+                preview = composition.prepare_plan_from_ordered_catalog(
+                    composition_request, ordered_catalog
+                )
+                world_runtime.ensure_initialized()
+                composition_result = composition.commit(preview)
+                if composition_result.split_child_runtime_motif_id is not None:
+                    self._capability.process_order.append_created(
+                        routing_scope=routing_scope,
+                        domain_id=request.domain_id,
+                        runtime_motif_id=composition_result.split_child_runtime_motif_id,
+                    )
+                elif composition_result.runtime_motif_id not in {
+                    item.read_model.runtime_motif_id for item in ordered_catalog
+                }:
+                    self._capability.process_order.append_created(
+                        routing_scope=routing_scope,
+                        domain_id=request.domain_id,
+                        runtime_motif_id=composition_result.runtime_motif_id,
+                    )
+                world_runtime.register_fresh_created(
+                    eid=composition_result.memory_eid,
+                    memory_object_id=composition_result.memory_object_id,
+                    memory_revision_id=composition_result.memory_revision_id,
+                    memory_revision_ordinal=composition_result.memory_revision_ordinal,
+                    born_step=request.logical_step,
+                    channel=0,
+                )
+            if _test_stop_after == "source":
+                raise RuntimeError("forced interruption after committed native new-memory source")
+            representation = _publish_new_memory_representation(
+                connection, routing_scope, request, composition_result, vector
             )
-            if materialization is not None:
-                srg_runtime.acknowledge_materialized_successor(
-                    materialization,
-                    eid=reinforced.source.eid,
-                    successor_revision_id=reinforced.source.revision_id,
-                )
-            if world_materialization is not None:
-                world_runtime.acknowledge_materialized_successor(
-                    world_materialization,
-                    eid=reinforced.source.eid,
-                    successor_revision_id=reinforced.source.revision_id,
-                )
             return NativeFabricRouteResult(
-                True, True, reinforced.source.eid, request.domain_id, (),
-                reinforced.source.memory_object_id, reinforced.source.revision_id,
-                reinforced.e2_representation_id,
+                True, False, composition_result.memory_eid, request.domain_id,
+                composition_result.affected_runtime_motif_ids or (composition_result.runtime_motif_id,),
+                composition_result.memory_object_id, composition_result.memory_revision_id,
+                representation.representation_id,
+                _primary_outcome(
+                    request,
+                    attempt_origin="DIRECT_CREATE_PATH",
+                    reinforcement_disposition=duplicate_disposition,
+                    final_storage_outcome="CREATED_NEW",
+                    create_failure_disposition="NONE",
+                    committed=True,
+                    eid=composition_result.memory_eid,
+                    object_id=composition_result.memory_object_id,
+                    revision_id=composition_result.memory_revision_id,
+                ),
             )
 
         reader = NativeMotifRuntimeReader(connection)
@@ -753,42 +1009,125 @@ class NativeFabricMemoryRouter:
             preview = composition.prepare_plan_from_ordered_catalog(
                 composition_request, ordered_catalog
             )
-            # A3C2 is the first source operation in this branch.  Planning is
-            # read-only; initialization must happen immediately before commit
-            # so a newly committed row receives fresh rather than reload state.
-            world_runtime.ensure_initialized()
-            composition_result = composition.commit(preview)
-            if composition_result.split_child_runtime_motif_id is not None:
-                self._capability.process_order.append_created(
-                    routing_scope=routing_scope,
-                    domain_id=request.domain_id,
-                    runtime_motif_id=composition_result.split_child_runtime_motif_id,
+            if preview.split_plan is not None:
+                # The I4B-1 precommit route reaches this topology.  Its
+                # established atomic implementation cannot stand in for the
+                # durable precommit residue contract, so refuse before an EID
+                # reservation or motif write.  The non-precommit branch above
+                # deliberately retains its established atomic split behavior.
+                raise NativePrecommitTrueSplitRefused(
+                    "true split requires I4B-2 precommit qualification"
                 )
-            elif composition_result.runtime_motif_id not in {
+            reservation = precommit.reserve(composition_request)
+            _observe_precommit_spawn(request, reservation.eid)
+            try:
+                motif_result = _commit_precommit_motif(
+                    connection, composition_request, preview, reservation,
+                )
+            except Exception as exc:
+                attempt_origin = _attempt_origin_for(duplicate_disposition)
+                precommit.abort(
+                    request=composition_request,
+                    reservation=reservation,
+                    disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
+                    attempt_origin=attempt_origin,
+                    reinforcement_disposition=duplicate_disposition,
+                )
+                raise NativePrecommitAttachFailure(
+                    _primary_outcome(
+                        request,
+                        attempt_origin=attempt_origin,
+                        reinforcement_disposition=duplicate_disposition,
+                        final_storage_outcome="NO_WRITE",
+                        create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                        committed=False,
+                        eid=reservation.eid,
+                        object_id=reservation.memory_object_id,
+                        revision_id=reservation.memory_revision_id,
+                    )
+                ) from exc
+            runtime_motif_id = preview.prospective_motif_state.runtime_motif_id
+            if runtime_motif_id not in {
                 item.read_model.runtime_motif_id for item in ordered_catalog
             }:
                 self._capability.process_order.append_created(
                     routing_scope=routing_scope,
                     domain_id=request.domain_id,
-                    runtime_motif_id=composition_result.runtime_motif_id,
+                    runtime_motif_id=runtime_motif_id,
+                )
+            enrichment_patch = dict(preview.enrichment_patch)
+            if request.precommit_symbol_state_owner is not None:
+                external_effect = NativePrecommitSymbolStateEffect(
+                    workspace_id=request.workspace_id,
+                    agent_id=request.agent_id,
+                    runtime_motif_id=runtime_motif_id,
+                    current_tension=float(preview.primary_field_row.get("tension", 0.0) or 0.0),
+                    enrichment=enrichment_patch,
+                )
+                enrichment_patch = dict(request.precommit_symbol_state_owner(external_effect))
+            # Keep the pre-existing world registration boundary unchanged:
+            # initialization is immediately before canonical source commit,
+            # while registration happens only if that commit returns.
+            world_runtime.ensure_initialized()
+            try:
+                if _test_stop_after == "precommit_canonical_failure":
+                    raise RuntimeError("forced canonical primary commit failure")
+                committed = precommit.commit(
+                    request=composition_request,
+                    reservation=reservation,
+                    enrichment_patch=enrichment_patch,
+                )
+            except Exception:
+                attempt_origin = _attempt_origin_for(duplicate_disposition)
+                precommit.abort(
+                    request=composition_request,
+                    reservation=reservation,
+                    disposition="CANONICAL_FLUSH_FAILURE",
+                    attempt_origin=attempt_origin,
+                    reinforcement_disposition=duplicate_disposition,
+                )
+                return NativeFabricRouteResult(
+                    False, False, None, request.domain_id, (runtime_motif_id,),
+                    None, None, None,
+                    _primary_outcome(
+                        request,
+                        attempt_origin=attempt_origin,
+                        reinforcement_disposition=duplicate_disposition,
+                        final_storage_outcome="NO_WRITE",
+                        create_failure_disposition="CANONICAL_FLUSH_FAILURE_STRUCTURED",
+                        committed=False,
+                        eid=reservation.eid,
+                        object_id=reservation.memory_object_id,
+                        revision_id=reservation.memory_revision_id,
+                    ),
                 )
             world_runtime.register_fresh_created(
-                eid=composition_result.memory_eid,
-                memory_object_id=composition_result.memory_object_id,
-                memory_revision_id=composition_result.memory_revision_id,
-                memory_revision_ordinal=composition_result.memory_revision_ordinal,
+                eid=committed.eid,
+                memory_object_id=committed.memory_object_id,
+                memory_revision_id=committed.memory_revision_id,
+                memory_revision_ordinal=committed.memory_revision_ordinal,
                 born_step=request.logical_step,
                 channel=0,
             )
         if _test_stop_after == "source":
             raise RuntimeError("forced interruption after committed native new-memory source")
         representation = _publish_new_memory_representation(
-            connection, routing_scope, request, composition_result, vector
+            connection, routing_scope, request, committed, vector
         )
         return NativeFabricRouteResult(
-            True, False, composition_result.memory_eid, request.domain_id,
-            composition_result.affected_runtime_motif_ids or (composition_result.runtime_motif_id,), composition_result.memory_object_id,
-            composition_result.memory_revision_id, representation.representation_id,
+            True, False, committed.eid, request.domain_id, (runtime_motif_id,),
+            committed.memory_object_id, committed.memory_revision_id, representation.representation_id,
+            _primary_outcome(
+                request,
+                attempt_origin=_attempt_origin_for(duplicate_disposition),
+                reinforcement_disposition=duplicate_disposition,
+                final_storage_outcome="CREATED_NEW",
+                create_failure_disposition="NONE",
+                committed=True,
+                eid=committed.eid,
+                object_id=committed.memory_object_id,
+                revision_id=committed.memory_revision_id,
+            ),
         )
 
     def _select_private_duplicate(
@@ -797,9 +1136,9 @@ class NativeFabricMemoryRouter:
         request: NativeFabricRouteRequest,
         routing_scope: NativeFabricRoutingScope,
         vector: np.ndarray,
-    ) -> tuple[Any, str | None] | None:
+    ) -> tuple[Any | None, str | None, str]:
         if request.scope != "private" or not _has_positive_norm(vector):
-            return None
+            return None, None, "NOT_APPLICABLE"
         facade = NativeMemoryCompatibilityFacade(connection)
         hits = facade.search_by_embedding(
             legacy_source_namespace_id=routing_scope.runtime_scope.legacy_source_namespace_id,
@@ -814,16 +1153,197 @@ class NativeFabricMemoryRouter:
             user_id=request.agent_id,
         )
         threshold = float(os.getenv("TORMENT_REINFORCE_SIM_THRESHOLD", "0.92"))
+        semantic_fallthrough = "NOT_APPLICABLE"
         for hit in hits:
             if hit.raw_score < threshold:
                 continue
             if str(hit.payload.get("memory_class", "core")) != request.memory_class:
+                semantic_fallthrough = "SEMANTIC_FALLTHROUGH_TO_CREATE"
                 continue
             if request.memory_class == "core" and request.contradiction_guard is not None:
                 if request.contradiction_guard(request.summary, hit.summary, hit.raw_score):
+                    semantic_fallthrough = "SEMANTIC_FALLTHROUGH_TO_CREATE"
                     continue
-            return hit, _source_channel_for_current_object(connection, hit.object_id)
-        return None
+            return hit, _source_channel_for_current_object(connection, hit.object_id), "REINFORCED"
+        return None, None, semantic_fallthrough
+
+
+def _commit_precommit_motif(
+    connection: sqlite3.Connection,
+    request: NativeMemoryMotifCompositionRequest,
+    preview: Any,
+    reservation: NativePrecommitMemoryReservation,
+) -> Any:
+    """Persist only the planned attach/create mutation before primary commit."""
+    motifs = NativeMotifService(connection)
+    if preview.decision.kind == "CREATE_NEW":
+        return motifs.create_motif_with_member(
+            idempotency_namespace_id=request.idempotency_namespace_id,
+            idempotency_key=f"I4B1:PRECOMMIT_MOTIF:{request.idempotency_key}",
+            motif_identity_namespace_id=request.motif_identity_namespace_id,
+            membership_identity_namespace_id=request.membership_identity_namespace_id,
+            motif_alias_namespace_id=request.motif_alias_namespace_id,
+            state=preview.prospective_motif_state,
+            member_object_id=reservation.memory_object_id,
+        )
+    if preview.selected_motif_object_id is None:
+        raise SubstrateInvariantViolation("precommit attach has no selected motif")
+    selected = next(
+        item for item in preview.catalog_witness
+        if item.motif_object_id == preview.selected_motif_object_id
+    )
+    return motifs.add_motif_member(
+        idempotency_namespace_id=request.idempotency_namespace_id,
+        idempotency_key=f"I4B1:PRECOMMIT_MOTIF:{request.idempotency_key}",
+        motif_alias_namespace_id=request.motif_alias_namespace_id,
+        membership_identity_namespace_id=request.membership_identity_namespace_id,
+        motif_object_id=preview.selected_motif_object_id,
+        expected_motif_revision_id=selected.motif_revision_id,
+        state=preview.prospective_motif_state,
+        member_object_id=reservation.memory_object_id,
+    )
+
+
+def _return_recovered_abort(
+    *,
+    connection: sqlite3.Connection,
+    request: NativeFabricRouteRequest,
+    routing_scope: NativeFabricRoutingScope,
+    aborted: NativePrecommitMemoryAbort,
+) -> NativeFabricRouteResult:
+    """Return the original failed-primary truth without redoing precommit work."""
+    reservation = aborted.reservation
+    motifs = _runtime_motif_ids_for_member(
+        connection, routing_scope, reservation.memory_object_id,
+    )
+    if aborted.disposition == "PRECOMMIT_MOTIF_ATTACH_FAILURE":
+        raise NativePrecommitAttachFailure(
+            _primary_outcome(
+                request,
+                attempt_origin=aborted.attempt_origin,
+                reinforcement_disposition=aborted.reinforcement_disposition,
+                final_storage_outcome="NO_WRITE",
+                create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                committed=False,
+                eid=reservation.eid,
+                object_id=reservation.memory_object_id,
+                revision_id=reservation.memory_revision_id,
+            )
+        )
+    if aborted.disposition != "CANONICAL_FLUSH_FAILURE":
+        raise SubstrateInvariantViolation("aborted precommit has an unknown disposition")
+    return NativeFabricRouteResult(
+        False, False, None, request.domain_id, motifs, None, None, None,
+        _primary_outcome(
+            request,
+            attempt_origin=aborted.attempt_origin,
+            reinforcement_disposition=aborted.reinforcement_disposition,
+            final_storage_outcome="NO_WRITE",
+            create_failure_disposition="CANONICAL_FLUSH_FAILURE_STRUCTURED",
+            committed=False,
+            eid=reservation.eid,
+            object_id=reservation.memory_object_id,
+            revision_id=reservation.memory_revision_id,
+        ),
+    )
+
+
+def _runtime_motif_ids_for_member(
+    connection: sqlite3.Connection,
+    routing_scope: NativeFabricRoutingScope,
+    member_object_id: UUID,
+) -> tuple[str, ...]:
+    """Recover only current motif aliases that still contain this source."""
+    rows = connection.execute(
+        """
+        SELECT alias.alias_value
+          FROM relationships membership
+          JOIN relationship_revisions revision
+            ON revision.relationship_id=membership.relationship_id
+           AND revision.relationship_revision_id=membership.current_revision_id
+           AND revision.revision_ordinal=membership.current_revision_ordinal
+          JOIN relationship_revision_endpoints motif_endpoint
+            ON motif_endpoint.relationship_revision_id=revision.relationship_revision_id
+           AND motif_endpoint.endpoint_ordinal=0 AND motif_endpoint.endpoint_role='MOTIF'
+           AND motif_endpoint.binding_mode='IDENTITY'
+          JOIN relationship_revision_endpoints member_endpoint
+            ON member_endpoint.relationship_revision_id=revision.relationship_revision_id
+           AND member_endpoint.endpoint_ordinal=1 AND member_endpoint.endpoint_role='MEMBER'
+           AND member_endpoint.binding_mode='IDENTITY'
+          JOIN legacy_object_aliases alias
+            ON alias.object_id=motif_endpoint.object_id
+         WHERE membership.relationship_kind='MOTIF_MEMBERSHIP'
+           AND revision.existence_state='EXISTS'
+           AND member_endpoint.object_id=?
+           AND alias.legacy_source_namespace_id=? AND alias.alias_kind='MOTIF_ID'
+         ORDER BY alias.alias_value
+        """,
+        (
+            native_id_to_bytes(member_object_id),
+            native_id_to_bytes(routing_scope.motif_alias_namespace_id),
+        ),
+    ).fetchall()
+    return tuple(str(row[0]) for row in rows)
+
+
+def _observe_precommit_spawn(request: NativeFabricRouteRequest, eid: int) -> None:
+    """Run the retained embed-audit observer as best-effort precommit state."""
+    observer = request.precommit_spawn_observer
+    if observer is None:
+        return
+    try:
+        observer(eid)
+    except Exception:
+        # The legacy dirty marker is observability-facing best effort.  Its
+        # failure neither changes primary truth nor blocks motif persistence.
+        return
+
+
+def _attempt_origin_for(reinforcement_disposition: str) -> str:
+    return (
+        "INGEST_REINFORCEMENT_ATTEMPT"
+        if reinforcement_disposition != "NOT_APPLICABLE" else "DIRECT_CREATE_PATH"
+    )
+
+
+def _primary_outcome(
+    request: NativeFabricRouteRequest,
+    *,
+    attempt_origin: str,
+    reinforcement_disposition: str,
+    final_storage_outcome: str,
+    create_failure_disposition: str,
+    committed: bool,
+    eid: int | None,
+    object_id: UUID | None,
+    revision_id: UUID | None,
+) -> NativePrimaryOutcomeWitness:
+    return NativePrimaryOutcomeWitness(
+        scope=request.scope,
+        attempt_origin=attempt_origin,
+        reinforcement_disposition=reinforcement_disposition,
+        final_storage_outcome=final_storage_outcome,
+        create_failure_disposition=create_failure_disposition,
+        primary_canonical_state_committed=committed,
+        qualified_memory_eid=eid,
+        qualified_memory_object_id=object_id,
+        qualified_memory_revision_id=revision_id,
+    )
+
+
+def _refused_primary_outcome(request: NativeFabricRouteRequest) -> NativePrimaryOutcomeWitness:
+    """Record a pre-source refusal without inventing a native memory identity."""
+    return _primary_outcome(
+        request,
+        attempt_origin="DIRECT_CREATE_PATH",
+        reinforcement_disposition="NOT_APPLICABLE",
+        final_storage_outcome="REFUSED",
+        create_failure_disposition="NONE",
+        committed=False,
+        eid=None,
+        object_id=None,
+        revision_id=None,
+    )
 
 
 def _new_memory_composition_request(
@@ -980,6 +1500,9 @@ def _recover_reinforcement_request(
             last_reinforced_ts=int(contract["last_reinforced_ts"]),
             expected_dimension=int(contract["expected_dimension"]),
             last_tool_refresh_ts=contract.get("last_tool_refresh_ts"),
+            direct_ingest_provenance_backfill=_provenance_from_intent(
+                contract.get("direct_ingest_provenance_backfill")
+            ),
             routing_input_digest=contract.get("routing_input_digest"),
             srg_materialization=(
                 None if materialization_intent is None
@@ -994,6 +1517,25 @@ def _recover_reinforcement_request(
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SubstrateInvariantViolation("stored native reinforcement route is malformed") from exc
+
+
+def _provenance_from_intent(value: Any) -> NativeProvenanceRecord | None:
+    """Recover only the typed direct-ingest backfill input from source intent."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("stored direct-ingest provenance backfill is malformed")
+    return NativeProvenanceRecord(
+        origin_kind=value["origin_kind"],
+        source_channel=value["source_channel"],
+        source_role=value["source_role"],
+        derivation_status=value["derivation_status"],
+        uncertainty_state=value["uncertainty_state"],
+        source_time_ns=value.get("source_time_ns"),
+        capture_time_ns=value.get("capture_time_ns"),
+        memory_role=value.get("memory_role"),
+        descriptive_notes=value.get("descriptive_notes"),
+    )
 
 
 def _source_channel_for_current_object(connection: sqlite3.Connection, object_id: UUID) -> str | None:
@@ -1273,6 +1815,8 @@ __all__ = [
     "NativeFabricRouteQualification",
     "NativeFabricRouteRequest",
     "NativeFabricRouteResult",
+    "NativePrecommitAttachFailure",
+    "NativePrimaryOutcomeWitness",
     "NativeFabricRoutingCapability",
     "NativeFabricRoutingScope",
     "NativeMotifProcessOrder",

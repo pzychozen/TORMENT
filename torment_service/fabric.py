@@ -2203,6 +2203,57 @@ class TormentFabric:
         return created_eid
 
     
+    def _persist_symbol_precommit_state(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        *,
+        symbol_state: Dict[str, Any],
+        primary_motif_id: str | None,
+        current_tension: float,
+        enrichment: Dict[str, Any],
+    ) -> bool:
+        """Run the retained external symbol-state write before primary flush.
+
+        The caller supplies already-derived symbol/resonance facts.  This
+        method owns only the historical ``symbol_state.json`` mutation and its
+        fail-soft disposition; it does not define symbolic mathematics.
+        """
+        try:
+            symbol_state["last_symbol"] = str(enrichment.get("state_symbol") or "")
+            symbol_state["last_motif_id"] = str(primary_motif_id or "")
+            symbol_state["last_tension"] = float(current_tension)
+            symbol_state["symbol_trace"] = list(enrichment.get("symbol_trace", []) or [])[-12:]
+            _save_symbol_state(self.data_dir, workspace_id, agent_id, symbol_state)
+            return True
+        except Exception as exc:
+            self._log.debug("Failed to enrich resonance data: %s", exc)
+            return False
+
+    def _apply_native_precommit_symbol_state(
+        self,
+        workspace_id: str,
+        agent_id: str,
+        *,
+        primary_motif_id: str,
+        current_tension: float,
+        enrichment: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply the existing symbol side-state owner for a native precommit.
+
+        Native routing supplies the prospective native motif projection after
+        its durable motif mutation.  The returned mapping is payload
+        enrichment only when this external owner successfully completed.
+        """
+        symbol_state = _load_symbol_state(self.data_dir, workspace_id, agent_id)
+        if not self._persist_symbol_precommit_state(
+            workspace_id, agent_id, symbol_state=symbol_state,
+            primary_motif_id=primary_motif_id, current_tension=current_tension,
+            enrichment=enrichment,
+        ):
+            return {}
+        return dict(enrichment)
+
     def _maybe_emit_mood_drift(
         self,
         ws: "Workspace",
@@ -3476,15 +3527,15 @@ class TormentFabric:
                 )
 
         # Character continuity (v1.11): soft role inference (guidance signal).
-        # The selector-owned native route may consume retained role evidence,
-        # but cannot advance this legacy-owned side store after cutover.
-        if not _native_public:
-            try:
-                _rp = self.role_store.load(workspace_id, agent_id)
-                _rp = self.role_store.update_from_text(_rp, summary)
-                self.role_store.save(_rp)
-            except Exception as _role_exc:
-                log.debug("Role inference update failed: %s", _role_exc)
+        # This is an existing external-owner precommit effect.  Native public
+        # preparation invokes this same Fabric owner before its storage choice;
+        # the role model remains in RoleStore rather than moving into SQLite.
+        try:
+            _rp = self.role_store.load(workspace_id, agent_id)
+            _rp = self.role_store.update_from_text(_rp, summary)
+            self.role_store.save(_rp)
+        except Exception as _role_exc:
+            log.debug("Role inference update failed: %s", _role_exc)
 
         # Character continuity (v1.11): lightweight affect tagging.
         # This is a guidance signal only; it must not dominate or rewrite persona.
@@ -3946,27 +3997,28 @@ class TormentFabric:
                         new_trace = append_symbol(prev_trace, new_symbol) if new_symbol else prev_trace
                         res = summarize_resonance(new_trace, prev_trace=prev_trace)
 
-                        sym_state["last_symbol"] = str(new_symbol or "")
-                        sym_state["last_motif_id"] = str(primary_motif_id or "")
-                        sym_state["last_tension"] = float(current_tension)
-                        sym_state["symbol_trace"] = list(new_trace[-12:])
-                        _save_symbol_state(self.data_dir, workspace_id, agent_id, sym_state)
-
-                        # Enrich payload in-memory (entity is already in graph.entities)
-                        ent = graph.entities.get(int(eid))
-                        if ent is not None:
-                            ent.payload.update({
-                                "state_symbol": sym.get("state_symbol"),
-                                "symbol_confidence": sym.get("symbol_confidence"),
-                                "symbol_reason": sym.get("symbol_reason"),
-                                "symbol_trace": list(res.get("symbol_trace", []) or []),
-                                "resonance_score": float(res.get("resonance_score", 0.0) or 0.0),
-                                "transition_entropy": float(res.get("transition_entropy", 0.0) or 0.0),
-                                "loop_type": str(res.get("loop_type", "mixed") or "mixed"),
-                                "phase_shift": bool(res.get("phase_shift", False)),
-                                "dominant_transition": res.get("dominant_transition"),
-                                "cycles": res.get("cycles", []),
-                            })
+                        enrichment = {
+                            "state_symbol": sym.get("state_symbol"),
+                            "symbol_confidence": sym.get("symbol_confidence"),
+                            "symbol_reason": sym.get("symbol_reason"),
+                            "symbol_trace": list(res.get("symbol_trace", []) or []),
+                            "resonance_score": float(res.get("resonance_score", 0.0) or 0.0),
+                            "transition_entropy": float(res.get("transition_entropy", 0.0) or 0.0),
+                            "loop_type": str(res.get("loop_type", "mixed") or "mixed"),
+                            "phase_shift": bool(res.get("phase_shift", False)),
+                            "dominant_transition": res.get("dominant_transition"),
+                            "cycles": res.get("cycles", []),
+                        }
+                        if self._persist_symbol_precommit_state(
+                            workspace_id, agent_id, symbol_state=sym_state,
+                            primary_motif_id=primary_motif_id,
+                            current_tension=current_tension,
+                            enrichment=enrichment,
+                        ):
+                            # Enrich payload in-memory (entity is already in graph.entities)
+                            ent = graph.entities.get(int(eid))
+                            if ent is not None:
+                                ent.payload.update(enrichment)
                 except Exception as e:
                     self._log.debug("Failed to enrich resonance data for eid=%s: %s", eid, e)
 
