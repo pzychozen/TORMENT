@@ -50,6 +50,11 @@ PUBLIC_SAFE_REST_ROUTES = frozenset(
     }
 )
 
+# Archive stores remain externally owned and have no qualified native read
+# adapter in this phase.  Keep the inventory explicit (and intentionally
+# empty) so a newly added archive endpoint is refused until classified.
+NATIVE_EXPLICIT_ARCHIVE_REST_ROUTES = frozenset()
+
 
 def _rest_auth_path(path: str) -> str:
     if path != "/" and path.endswith("/"):
@@ -80,9 +85,7 @@ def _native_rest_route_is_classified(method: str, path: str) -> bool:
     }
     if (method, normalized) in exact:
         return True
-    if normalized.startswith("/archive/") or normalized == "/archive/query":
-        return True
-    return False
+    return (method, normalized) in NATIVE_EXPLICIT_ARCHIVE_REST_ROUTES
 
 
 def _validate_path_component(name: str, label: str = "identifier") -> str:
@@ -1734,6 +1737,16 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
 
     Archive blocks NEVER outrank identity blocks.
     """
+    # Native archive recall would construct the legacy archive store and can
+    # persist promotion counters on this read route.  Refuse before either
+    # effect while allowing the selected non-archive native profile below.
+    runtime = fabric.runtime()
+    if runtime.native_mode and _thinking_controller_module._ARCHIVE_RECALL_ENABLE:
+        raise HTTPException(
+            status_code=409,
+            detail="native archive recall is not yet qualified",
+        )
+
     # 1. Core retrieval (existing fabric.query)
     core_result = fabric.query(
         workspace_id=req.workspace_id,

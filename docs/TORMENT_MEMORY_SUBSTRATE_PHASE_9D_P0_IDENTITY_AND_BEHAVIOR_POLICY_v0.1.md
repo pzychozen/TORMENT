@@ -32,6 +32,31 @@ Every use here of cognition, query cognition, cognition implementation, or
 cognition owner means **MAIN TORMENT COGNITION**, unless the text expressly
 states otherwise.  The policy makes no repository-wide one-cognition claim.
 
+### §0 update — P9D-I3B0 offline materialization fencing
+
+P9D-I3B0 qualified the next bounded implementation guard without changing the
+Phase-0 authority policy: admitted native query/read routes now fence the
+identified downstream legacy materializers, while collective and applicable
+archive composition refuse until their separately owned read parity exists.
+The correction narrows, but preserves, I2: primary native entry
+materialization was structurally blocked there; the complete downstream route
+census is fenced in I3B0.  Query mathematics, observable ordering policy,
+and post-write cognition remain unchanged.
+
+```text
+P9D_I3B0_NATIVE_MATERIALIZATION_FENCING = PASS
+FULL_NATIVE_ROUTE_LEGACY_MATERIALIZATION = FENCED
+COLLECTIVE_QUERY_NATIVE_DISPOSITION = REFUSE_WHEN_APPLICABLE
+ARCHIVE_RECALL_NATIVE_DISPOSITION =
+    REFUSE_UNTIL_PARITY_OR_EXPLICIT_INAPPLICABILITY
+STALE_NATIVE_QUERY_SNAPSHOT_DISPOSITION = DEFERRED_TO_I3B
+REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
+```
+
+The I3B0 receipt records a corrected documentation-exposure boundary:
+`BRAINVISION_FILES_READ = NOT_CERTIFIABLE_AS_ZERO`; no Brainvision code or
+second cognitive function was opened, inspected, touched, or used for I3B0.
+
 ## 1. P0A — external identity and scope admission
 
 ### 1.1 Four distinct operations

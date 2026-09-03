@@ -44,6 +44,15 @@ class QualifiedQueryReadModelError(ValueError):
     """Raised when a backend cannot prove the qualified A2 read contract."""
 
 
+class NativeQueryReadRefused(QualifiedQueryReadModelError):
+    """A qualified native read cannot safely preserve one query contract.
+
+    This lower-layer refusal deliberately carries no public-runtime authority.
+    The native public facade translates it to its stable public refusal; direct
+    qualification callers receive the same non-materializing disposition.
+    """
+
+
 @dataclass(frozen=True)
 class QualifiedQueryMotifIdentity:
     """A motif ID qualified by its domain and (where native) semantic scope.
@@ -473,6 +482,11 @@ class NativeQualifiedQueryReadModel:
     never from a guessed agent/domain relationship.
     """
 
+    # Fabric consumes this lower-level disposition rather than inferring
+    # read-only semantics from a public-runtime-only transport flag.  A native
+    # qualified model may therefore never cause legacy state creation on read.
+    native_read_disposition = True
+
     def __init__(
         self,
         recovered_runtime: Any,
@@ -715,6 +729,7 @@ def _nonempty(name: str, value: Any) -> None:
 __all__ = [
     "LegacyQualifiedQueryReadModel",
     "NativeQualifiedQueryReadModel",
+    "NativeQueryReadRefused",
     "QualifiedDomainGeometry",
     "QualifiedMotifGeometry",
     "QualifiedQueryHit",

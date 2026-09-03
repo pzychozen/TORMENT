@@ -22,6 +22,7 @@ from .motifs import MotifRegistry, cosine as cos_sim
 from .motif_geometry_port import LegacyMotifGeometryAdapter, MotifGeometryPort
 from .query_read_model import (
     LegacyQualifiedQueryReadModel,
+    NativeQueryReadRefused,
     NativeQualifiedQueryReadModel,
     QualifiedQueryHit,
     QualifiedQueryReadModel,
@@ -344,6 +345,10 @@ def _build_conflict_map(ws: Any, workspace_id: str, domains: List[str]) -> Dict[
     for domain_id in domains:
         try:
             conflicts = ws.conflicts[domain_id].list(status="open", limit=500)
+        except NativeQueryReadRefused:
+            # Native evidence failures are deliberate qualified-read refusals,
+            # not the historical optional-registry degradation path.
+            raise
         except Exception as exc:
             log.warning(
                 "Conflict registry unreadable for query/trace workspace=%s domain=%s: %s",
@@ -479,18 +484,35 @@ def _mark_embed_audit_dirty(data_dir: str, workspace_id: str) -> None:
         return
 
 
-def _affect_state_path(data_dir: str, workspace_id: str, agent_id: str) -> str:
+def _affect_state_path(
+    data_dir: str,
+    workspace_id: str,
+    agent_id: str,
+    *,
+    materialize_parent: bool = True,
+) -> str:
     _ag = _agent_dir(data_dir, workspace_id, agent_id)
-    # Sink-local guard for CodeQL at makedirs site.
-    _rp = os.path.realpath(_ag)
-    if not _rp.startswith(os.sep) and not os.path.isabs(_rp):
-        raise ValueError(f"Agent dir not absolute: {_rp!r}")
-    os.makedirs(_rp, exist_ok=True)
+    if materialize_parent:
+        # Legacy writes and historical legacy reads retain their established
+        # parent-directory behavior. Qualified native reads pass False.
+        _rp = os.path.realpath(_ag)
+        if not _rp.startswith(os.sep) and not os.path.isabs(_rp):
+            raise ValueError(f"Agent dir not absolute: {_rp!r}")
+        os.makedirs(_rp, exist_ok=True)
     return _safe_child(_ag, "affect_state.json")
 
 
-def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[str, Any]:
-    p = _affect_state_path(data_dir, workspace_id, agent_id)
+def _load_affect_state(
+    data_dir: str,
+    workspace_id: str,
+    agent_id: str,
+    *,
+    materialize_parent: bool = True,
+) -> Dict[str, Any]:
+    p = _affect_state_path(
+        data_dir, workspace_id, agent_id,
+        materialize_parent=materialize_parent,
+    )
     base = {"last_tag": None, "last_conf": 0.0, "last_step": -10**9, "drift_hist": []}
     if not os.path.exists(p):
         return dict(base)
@@ -516,7 +538,9 @@ def _load_affect_state(data_dir: str, workspace_id: str, agent_id: str) -> Dict[
 
 
 def _save_affect_state(data_dir: str, workspace_id: str, agent_id: str, state: Dict[str, Any]) -> None:
-    p = _affect_state_path(data_dir, workspace_id, agent_id)
+    p = _affect_state_path(
+        data_dir, workspace_id, agent_id, materialize_parent=True,
+    )
     try:
         # Keep payload small
         if isinstance(state, dict) and isinstance(state.get("drift_hist"), list):
@@ -4254,7 +4278,13 @@ class TormentFabric:
         continuity_debug: bool = False,
         memory_plan: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Private A3 qualification entrypoint; it is not an API selector."""
+        """Private A3 qualification entrypoint; it is not an API selector.
+
+        A read model with the native disposition follows the same
+        non-materializing external-read semantics as the native public path.
+        Fixture setup may pre-exist, but query execution cannot construct
+        workspace, agent, role, or side-store state.
+        """
         return self.query(
             workspace_id, agent_id, query_text,
             top_k=top_k, domain_id=domain_id, peek_bridges=peek_bridges,
@@ -4666,6 +4696,10 @@ class TormentFabric:
         _native_public: bool = False,
     ) -> Dict[str, Any]:
         ak = self._agent_key(workspace_id, agent_id)
+        native_read_disposition = bool(
+            _native_public
+            or getattr(_qualification_read_model, "native_read_disposition", False)
+        )
         if _native_public:
             if (
                 _qualification_read_model is None
@@ -4681,6 +4715,20 @@ class TormentFabric:
             ident = _native_identity
             if ak not in self.agent_states or ak not in self._kernel_contexts:
                 raise RuntimeError("native public query agent context is not prepared")
+        elif native_read_disposition:
+            # Qualification executes against fixture-prepared existing state.
+            # It must not call get_workspace/create_agent merely because the
+            # selected reader is native-qualified.
+            ws = self.workspaces.get(workspace_id)
+            ident = self.ident_store.load(workspace_id, agent_id)
+            if ws is None or ident is None:
+                raise NativeQueryReadRefused(
+                    "native qualified query requires pre-existing workspace and identity"
+                )
+            if ak not in self.agent_states or ak not in self._kernel_contexts:
+                raise NativeQueryReadRefused(
+                    "native qualified query agent context is not prepared"
+                )
         else:
             ws = self.get_workspace(workspace_id)
             ident = self.create_agent(workspace_id, agent_id)
@@ -4691,12 +4739,19 @@ class TormentFabric:
             agent_id=agent_id,
             preferred_private_domain=domain_id,
         )
-        native_qualification = _native_public or isinstance(read_model, NativeQualifiedQueryReadModel)
+        native_qualification = native_read_disposition
         if native_qualification and self._compress_enable:
             # A3 deliberately has no native deep lane.  Refuse the profile
             # rather than silently mixing native core candidates with legacy
             # deep-memory retrieval.
             raise ValueError("qualified native query does not support enabled deep retrieval")
+        if native_qualification and self._hivemind_enable:
+            # CollectiveField is a legacy external store whose constructor
+            # creates its directory. Native query has no qualified,
+            # non-materializing collective read adapter yet.
+            raise NativeQueryReadRefused(
+                "native query collective context is not yet qualified"
+            )
 
         qemb = self.kernel.embedder.embed(query_text)
         if int(np.asarray(qemb).reshape(-1).shape[0]) != int(ws.embed_dim):
@@ -4894,7 +4949,10 @@ class TormentFabric:
         _spiral_neg_recent = 0
         if _spiral_enable and ak in self.private_graphs:
             try:
-                _st = _load_affect_state(self.data_dir, ws.workspace_id, str(agent_id))
+                _st = _load_affect_state(
+                    self.data_dir, ws.workspace_id, str(agent_id),
+                    materialize_parent=not native_qualification,
+                )
                 _dh = _st.get("drift_hist") or []
                 if not isinstance(_dh, list):
                     _dh = []
@@ -5257,7 +5315,9 @@ class TormentFabric:
                 "query_affect_conf": float(_q_affect_conf),
             }
             try:
-                rc = self._role_context(ws, agent_id, read_only=_native_public)
+                rc = self._role_context(
+                    ws, agent_id, read_only=native_qualification,
+                )
                 qsig["dominant_role"] = rc.get("dominant_role")
             except Exception:
                 qsig["dominant_role"] = None
@@ -5364,7 +5424,9 @@ class TormentFabric:
                 "dominant_thread": dominant,
             },
             "bridges": bridges,
-            "role_context": self._role_context(ws, agent_id, read_only=_native_public),
+            "role_context": self._role_context(
+                ws, agent_id, read_only=native_qualification,
+            ),
             "embed_context": self._embed_context(ws),
             **({"continuity_debug": continuity_dbg} if continuity_dbg is not None else {}),
             **({"character_context": _char_ctx} if _char_ctx is not None else {}),

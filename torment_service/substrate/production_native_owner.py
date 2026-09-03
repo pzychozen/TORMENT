@@ -344,6 +344,10 @@ class _NativeProductionContext:
 class NativeProductionQueryContext(_NativeProductionContext):
     """One request-scoped native query model and its lazily created readers."""
 
+    # This wrapper owns the concrete model's lifetime while retaining its
+    # qualified-native, non-materializing read disposition.
+    native_read_disposition = True
+
     def __init__(self, owner: NativeProductionResourceOwner, model: NativeQualifiedQueryReadModel) -> None:
         super().__init__(owner)
         self._model = model

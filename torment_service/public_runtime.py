@@ -31,7 +31,7 @@ from .fabric import (
     _save_anchor_state,
 )
 from .ingest_orchestration import PreparedFabricIngest
-from .query_read_model import _private_motif_domains
+from .query_read_model import NativeQueryReadRefused, _private_motif_domains
 from .substrate.deployment_selector import resolve_deployment_agreement
 from .substrate.deployment_types import (
     DeploymentResolutionMode,
@@ -241,21 +241,21 @@ class _ReadOnlyConflictRegistry:
             except FileNotFoundError:
                 continue
             except (OSError, UnicodeDecodeError) as exc:
-                raise NativePublicOperationRefused("native public conflict evidence is unreadable") from exc
+                raise NativeQueryReadRefused("native conflict evidence is unreadable") from exc
             for line in lines:
                 if not line.strip():
                     continue
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise NativePublicOperationRefused("native public conflict evidence is malformed") from exc
+                    raise NativeQueryReadRefused("native conflict evidence is malformed") from exc
                 if not isinstance(payload, dict):
-                    raise NativePublicOperationRefused("native public conflict evidence is malformed")
+                    raise NativeQueryReadRefused("native conflict evidence is malformed")
                 if not is_event:
                     try:
                         conflict = CanonConflict(**payload)
                     except TypeError as exc:
-                        raise NativePublicOperationRefused("native public conflict evidence is malformed") from exc
+                        raise NativeQueryReadRefused("native conflict evidence is malformed") from exc
                     latest[conflict.conflict_id] = conflict
                     continue
                 conflict = latest.get(str(payload.get("conflict_id") or ""))
@@ -267,7 +267,7 @@ class _ReadOnlyConflictRegistry:
                 try:
                     conflict.decided_ts = int(payload.get("ts"))
                 except (TypeError, ValueError):
-                    raise NativePublicOperationRefused("native public conflict evidence is malformed") from None
+                    raise NativeQueryReadRefused("native conflict evidence is malformed") from None
                 if decision in {"keep_a", "keep_b", "merge", "demote_both"}:
                     conflict.status = "resolved"
                 elif decision == "fork":
@@ -349,7 +349,12 @@ class _FabricDerivedMemorySideStore:
         _save_anchor_state(self._fabric.data_dir, workspace_id, agent_id, dict(state))
 
     def load_affect_state(self, *, workspace_id: str, agent_id: str) -> Mapping[str, Any]:
-        return _load_affect_state(self._fabric.data_dir, workspace_id, agent_id)
+        return _load_affect_state(
+            self._fabric.data_dir,
+            workspace_id,
+            agent_id,
+            materialize_parent=False,
+        )
 
     def save_affect_state(self, *, workspace_id: str, agent_id: str, state: Mapping[str, Any]) -> None:
         _save_affect_state(self._fabric.data_dir, workspace_id, agent_id, dict(state))
@@ -558,17 +563,22 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         self.preflight_spine_operation("query_memory", path="fast")
         identity = self._prepare_native_agent(workspace_id, agent_id)
         view = self._workspace_view(workspace_id)
-        with self.native_owner.open_query_context(embedder=self.cognition_fabric.kernel.embedder) as read_model:  # type: ignore[union-attr]
-            return self.cognition_fabric.query(
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                query_text=query_text,
-                _qualification_read_model=read_model,  # NativeProductionQueryContext has this qualified surface.
-                _native_workspace_view=view,
-                _native_identity=identity,
-                _native_public=True,
-                **kwargs,
-            )
+        try:
+            with self.native_owner.open_query_context(embedder=self.cognition_fabric.kernel.embedder) as read_model:  # type: ignore[union-attr]
+                return self.cognition_fabric.query(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    query_text=query_text,
+                    _qualification_read_model=read_model,  # NativeProductionQueryContext has this qualified surface.
+                    _native_workspace_view=view,
+                    _native_identity=identity,
+                    _native_public=True,
+                    **kwargs,
+                )
+        except NativeQueryReadRefused as exc:
+            raise NativePublicOperationRefused(
+                "native public query is refused: qualified read evidence is unavailable"
+            ) from exc
 
     def _preparation_context(self, request: NativePublicIngestRequest) -> Mapping[str, Any]:
         return {
