@@ -31,6 +31,7 @@ ordinary meaning and must not be read as hidden approvals.
 |---|---|---|---|---|---|---|
 | Input write gate / provenance | `TormentFabric.ingest` input gate and provenance boundary | Legacy graph, identity, and provenance records | Native public ingest executor only after selected-policy proof | Main ingest census; direct-writer bypasses remain unresolved | I4 must preserve the gate and provenance authority | NO |
 | Memory create | `TormentFabric.ingest` / legacy storage adapter | Legacy graph, identity, external admission | Native public ingest executor | Native public route exists; full behavioral parity not yet qualified | I4 post-write composition | NO |
+| Embed-audit dirty marking | Legacy ingest and derived-memory creation audit invalidation | Existing workspace embed_audit.json when present | No qualified native writer | Main ingest/post-write census | Best-effort dirty state occurs after spawn and before motif/flush; it can remain after failed canonical commit | NO |
 | Reinforcement | Fabric / legacy post-write adapter | Legacy graph payload and JSONL | Native reinforcement/runtime primitive | `test_substrate_memory_reinforcement.py` | SRG successor and external consumers require I4 | NO |
 | Motif attach / create | Legacy motif runtime selected by `TormentFabric.ingest` | Live legacy motif registry | No qualified native post-write successor | Main ingest census | I4 must preserve attachment, creation, and live order | NO |
 | Motif maintenance / split / merge | Legacy motif runtime and merge policy | Live registry, merge suggestions, and policy records | No complete native post-write replacement | Main ingest/post-write census | I4 must preserve maintenance and explicit live-order witness | NO |
@@ -50,11 +51,14 @@ ordinary meaning and must not be read as hidden approvals.
 | `dominant_thread` | Fabric `dominant_thread` | Active motif context | Same Fabric function | I3B gravity/raw-strength fixture | No new tie policy | NO |
 | Character seed/context | Fabric + `assemble_character_context` | External `CharacterStore` | Retained external owner | A3 and I3C absent/read-failure characterization | Absence of `character_context` is not a health signal: disabled Character, absent seed/state, and `CharacterStore` read failure share the same broad fail-soft boundary; write composition is I4 | NO |
 | Character drift | Character runtime | External Character state | Retained external owner | Existing native drift/runtime tests; not query-write qualified | I4 | NO |
+| Character drift reflex | Fabric rising-edge callback after high-drift measurement | Process-local Fabric high-drift map plus external callback owner | No qualified native callback composition | Main ingest/post-write census | Restart clears the process-local edge map; the first later high-drift measurement may re-fire the callback | NO |
 | Character gravity | Character runtime | External Character state | Retained external owner | Existing native gravity/runtime tests; not query-write qualified | I4 | NO |
 | Conflict persistence | Conflict writer/policy | External conflict JSONL/evidence | No native writer parity | NOT YET QUALIFIED | BLOCKED_PENDING_I4 | NO |
 | Conflict query read | Fabric conflict map | Read-only external conflict evidence | `_ReadOnlyConflictRegistry` | I3B/I3B0 present, absent, malformed evidence tests | Writer/system parity still I4 | NO |
 | SRG read | Fabric score/explain source | Legacy payload or native qualified source | `effective_srg_state` | I3B source test; I3C modifier/refusal tests | Full valid state required; optional absence remains lawful | NO |
 | SRG query mutation / breathing | Fabric historical nested breathing gate | Live legacy payload / native process overlay | Native process-local overlay | I3C lifecycle characterization | Legacy live-payload mutation is lost after restart without same-entity write; unrelated flush does not persist it; later same-entity write serializes it. Native overlay is process-local only. Restart/write successor parity BLOCKED_PENDING_I4 | NO |
+| SRG last-ingest-band coupling | Fabric ingest-to-query/trace same-band resonance | Process-local Fabric state keyed by workspace_id and agent_id | No qualified native cross-route owner | Main ingest/query/trace census | Ingest stores R_band; query and trace apply the existing 1.08 multiplier only when the same agent's last band matches; restart clears it | NO |
+| SRG relational EMA | Fabric ingest-to-Spine geometric-context coupling | Process-local Fabric EMA keyed by workspace_id and agent_id | No qualified native cross-route owner | Main ingest/Spine census | First ingest seeds L_amplitude; later ingests use 0.8 previous + 0.2 new; restart clears it | NO |
 | SRG error-handler failure disposition | Fabric breathing error handler | No separate durable owner | Same handler; I3C defect repair | I3C first-hit evolution-failure characterization | `SRG_ERROR_HANDLER_LATENT_DEFECT_FIXED = YES`; the prior first-hit `UnboundLocalError` / later-hit stale-EID diagnostic behavior is not retained | NO |
 | SRG post-write collision / state | Legacy post-write adapter and SRG runtime | Legacy payload / collision effects | No qualified native write successor | Main ingest/post-write census | I4 must disposition overlay-write refusal and durable successor composition | NO |
 | World / trajectory | Legacy world and post-write runtime | Legacy trajectory evidence | Native world/post-write primitives | Partial unit evidence only | I4 general post-write | NO |
@@ -138,6 +142,15 @@ Every identifier below names a capability rather than an implementation
 helper. `MAPPED_MATRIX_ROW` names the row that owns its preservation and
 activation disposition. There are no `UNMAPPED` entries.
 
+~~~text
+CROSS_ROUTE_PROCESS_STATE_RULE =
+
+Any process-local Fabric state whose write site is on one live route and whose
+read site is on another live route, where the value changes observable or
+cognitive behavior, is a FUNCTIONAL CAPABILITY and must have its own matrix
+disposition. It is not merely a cache.
+~~~
+
 ### Public / service operation capabilities
 
 | ID | Capability / routed operation family | MAPPED_MATRIX_ROW |
@@ -155,7 +168,7 @@ activation disposition. There are no `UNMAPPED` entries.
 | C11 | Collective reingest | Shared ingest; Hivemind emission / convergence |
 | C12 | Public query invocation and result delivery | Query scoring; Provenance / explain |
 | C13 | Trace, chain, full-graph, bundle, and view operations | Trace / chain / index diagnostics |
-| C14 | Feedback and reinforcement | Reinforcement |
+| C14 | Feedback and explicit named-EID reinforcement through Fabric.reinforce / Spine reinforce | Reinforcement |
 | C15 | Active motif inspection, entropy, and merge decision | Motif maintenance / split / merge |
 | C16 | Bridge listing, queue inspection, and decision | Bridge registry inspection / decision |
 | C17 | Proposal processing, domain suggestions, and proposal decision | Proposals |
@@ -224,17 +237,21 @@ activation disposition. There are no `UNMAPPED` entries.
 | C70 | Shared ingest | Shared ingest |
 | C71 | Bridge suggestion mutation | Bridge suggestions |
 | C72 | Post-write proposal creation | Proposals |
+| C73 | Embed-audit dirty marking after ordinary or derived memory spawn | Embed-audit dirty marking |
+| C74 | High-drift rising-edge reflex state and optional callback dispatch | Character drift reflex |
+| C75 | Ingest-to-query/trace SRG last-ingest-band coupling | SRG last-ingest-band coupling |
+| C76 | Ingest-to-Spine geometric-context SRG relational EMA | SRG relational EMA |
 
 The remaining main post-write calls are mapped to their corresponding live
 capability above rather than counted twice: reinforcement is C14; checkpoint
 creation is C22; compression/deep export is C24; and promotion is C23.
 
 ```text
-FUNCTIONALITY_MATRIX_DENOMINATOR = ESTABLISHED
-TOTAL_ENUMERATED_LIVE_CAPABILITIES = 72
-MAPPED_CAPABILITIES = 72
+FUNCTIONALITY_MATRIX_DENOMINATOR = FROZEN_I4AFF
+TOTAL_ENUMERATED_LIVE_CAPABILITIES = 76
+MAPPED_CAPABILITIES = 76
 UNMAPPED_LIVE_CAPABILITIES = 0
-MATRIX_COMPLETENESS = QUALIFIED_BASELINE
+MATRIX_COMPLETENESS = QUALIFIED_BASELINE_FROZEN_I4AFF
 UNMAPPED_LIVE_CAPABILITY = ACTIVATION_BLOCKING
 MATRIX_ROW_ABSENT = RETIREMENT_FORBIDDEN
 ```
@@ -250,13 +267,17 @@ disappear through absence from a later slice.
 I4_REQUIRED_PARITY_ROWS =
     Input write gate / provenance
     Memory create
+    Embed-audit dirty marking
     Reinforcement
     Motif attach / create
     Motif maintenance / split / merge / live insertion order
     Conflict persistence
     SRG post-write collision / state and overlay-write refusal disposition
+    SRG last-ingest-band coupling
+    SRG relational EMA
     Character seed/context write composition
     Character drift
+    Character drift reflex
     Character gravity
     Role / affect write behavior
     Derived memory
