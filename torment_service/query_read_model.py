@@ -27,7 +27,10 @@ from .motif_geometry_port import (
 )
 from .motifs import MotifRegistry
 from .scoring import QueryMemoryIdentity, qualified_query_memory_identity
-from .substrate.native_memory_vector_runtime import NativeMemoryVectorRuntime
+from .substrate.native_memory_vector_runtime import (
+    NativeMemoryVectorRuntime,
+    NativeVectorReadConsistencyRefused,
+)
 from .substrate.native_srg_runtime import (
     NativeSRGProcessState,
     NativeSRGTransientRuntime,
@@ -50,6 +53,15 @@ class NativeQueryReadRefused(QualifiedQueryReadModelError):
     This lower-layer refusal deliberately carries no public-runtime authority.
     The native public facade translates it to its stable public refusal; direct
     qualification callers receive the same non-materializing disposition.
+    """
+
+
+class NativeQuerySnapshotReadRefused(NativeQueryReadRefused):
+    """The native candidate snapshot was stale or could not be qualified.
+
+    This is a read-model-level refusal rather than a successful empty lane.
+    It carries the existing native read refusal contract through Fabric and the
+    public wrapper without adding retry or query-scoring policy.
     """
 
 
@@ -408,10 +420,15 @@ class _NativeQualifiedQueryLane:
         min_score: float | None = None,
         type_filter: list[str] | tuple[str, ...] | None = None,
     ) -> tuple[QualifiedQueryHit, ...]:
-        hits = self._runtime.search(
-            query_text, top_k=top_k, user_id=user_id, min_score=min_score,
-            type_filter=type_filter,
-        )
+        try:
+            hits = self._runtime.search(
+                query_text, top_k=top_k, user_id=user_id, min_score=min_score,
+                type_filter=type_filter,
+            )
+        except NativeVectorReadConsistencyRefused as exc:
+            raise NativeQuerySnapshotReadRefused(
+                "native qualified vector snapshot is unavailable: " + exc.reason
+            ) from exc
         if not hits:
             return ()
         snapshot = self._runtime.snapshot
@@ -730,6 +747,7 @@ __all__ = [
     "LegacyQualifiedQueryReadModel",
     "NativeQualifiedQueryReadModel",
     "NativeQueryReadRefused",
+    "NativeQuerySnapshotReadRefused",
     "QualifiedDomainGeometry",
     "QualifiedMotifGeometry",
     "QualifiedQueryHit",

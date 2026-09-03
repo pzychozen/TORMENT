@@ -142,6 +142,8 @@ def _context(
     include_extra=True,
     include_source_node=True,
     scope_kind="PRIVATE_AGENT",
+    motif_strength: float = 0.91,
+    motif_stability: float = 0.83,
 ):
     qualified = open_temporary_test_connection(tmp_path / "b4c.db")
     connection = qualified.connection
@@ -195,8 +197,8 @@ def _context(
         "domain_id": "reflection",
         "label": "qualified empty basin",
         "centroid": [1.0] + [0.0] * (_TARGET_DIMENSION - 1),
-        "strength": 0.91,
-        "stability_score": 0.83,
+        "strength": motif_strength,
+        "stability_score": motif_stability,
         "contributing_agents": ["aria", "boris"],
         "created_ts": 4,
         "last_active_ts": 9,

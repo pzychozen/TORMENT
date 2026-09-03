@@ -101,20 +101,29 @@ def _namespace(connection, table: str, identifier, label: str) -> None:
         )
 
 
-def _scope(connection, database_path: Path, core_id, *, kind: str, qualifier: str, idempotency):
+def _scope(
+    connection,
+    database_path: Path,
+    core_id,
+    *,
+    kind: str,
+    qualifier: str,
+    idempotency,
+    workspace_id: str = "orchard",
+):
     identity, semantic, source = _id(), _id(), _id()
     motif_alias, motif_identity, membership_identity = _id(), _id(), _id()
     for table, identifier, label in (
-        ("identity_namespaces", identity, f"a2:memory:{kind}:{qualifier}"),
-        ("semantic_scopes", semantic, f"a2:semantic:{kind}:{qualifier}"),
-        ("legacy_source_namespaces", source, f"a2:source:{kind}:{qualifier}"),
-        ("legacy_source_namespaces", motif_alias, f"a2:motif-alias:{kind}:{qualifier}"),
-        ("identity_namespaces", motif_identity, f"a2:motif:{kind}:{qualifier}"),
-        ("identity_namespaces", membership_identity, f"a2:membership:{kind}:{qualifier}"),
+        ("identity_namespaces", identity, f"a2:{workspace_id}:memory:{kind}:{qualifier}"),
+        ("semantic_scopes", semantic, f"a2:{workspace_id}:semantic:{kind}:{qualifier}"),
+        ("legacy_source_namespaces", source, f"a2:{workspace_id}:source:{kind}:{qualifier}"),
+        ("legacy_source_namespaces", motif_alias, f"a2:{workspace_id}:motif-alias:{kind}:{qualifier}"),
+        ("identity_namespaces", motif_identity, f"a2:{workspace_id}:motif:{kind}:{qualifier}"),
+        ("identity_namespaces", membership_identity, f"a2:{workspace_id}:membership:{kind}:{qualifier}"),
     ):
         _namespace(connection, table, identifier, label)
     memory = NativeMemoryRuntimeScope(
-        workspace_id="orchard", scope_kind=kind,
+        workspace_id=workspace_id, scope_kind=kind,
         legacy_source_namespace_id=source, identity_namespace_id=identity,
         semantic_scope_id=semantic,
         agent_id=qualifier if kind == "PRIVATE_AGENT" else None,
@@ -142,16 +151,23 @@ def _memory(
     connection, scope, idempotency, key: str, vector: tuple[float, ...], *,
     memory_type: str = "episodic", user_id: str = "aria", half_life: float = 0.0,
     reinforced: bool = False, pending: bool = False,
+    srg_state: dict[str, object] | None = None,
 ):
     runtime_scope = scope.memory_runtime_scope
     payload = {
-        "workspace_id": "orchard",
+        "workspace_id": runtime_scope.workspace_id,
         "domain_id": "personal" if runtime_scope.scope_kind == "PRIVATE_AGENT" else runtime_scope.domain_id,
         "agent_id": "aria",
         "provenance_type": "user_input",
         "collective": False,
         "tool_result": False,
-        "srg": {"intensity": .31, "phase": "fixture"},
+        "srg": dict(srg_state or {
+            "R_band": 4,
+            "is_crystal": False,
+            "heartbeat_class": "A",
+            "L_amplitude": .31,
+            "L_phase": "fixture",
+        }),
         "created_ts": 100,
         "last_reinforced_ts": 100,
         "reinforcement_count": 4 if reinforced else 0,
@@ -160,16 +176,17 @@ def _memory(
     source = NativeMemoryCompatibilityFacade(connection).create_memory_state(
         legacy_source_namespace_id=runtime_scope.legacy_source_namespace_id,
         idempotency_namespace_id=idempotency,
-        idempotency_key=f"a2:memory:{runtime_scope.qualifier}:{key}",
+        idempotency_key=f"a2:memory:{runtime_scope.workspace_id}:{runtime_scope.qualifier}:{key}",
         identity_namespace_id=runtime_scope.identity_namespace_id,
         semantic_scope_id=runtime_scope.semantic_scope_id,
-        summary=f"{runtime_scope.qualifier} {key}", memory_type=memory_type,
+        summary=f"{runtime_scope.workspace_id} {runtime_scope.qualifier} {key}", memory_type=memory_type,
         memory_class="core", strength=.7, confidence=.8, half_life_days=half_life,
         user_id=user_id, logical_step=12, extra_payload=payload,
         governance_state="EXPLICIT", provenance_id=_provenance(connection),
     )
     representation = _representation(
-        connection, source, idempotency, f"{runtime_scope.qualifier}:{key}", vector,
+        connection, source, idempotency,
+        f"{runtime_scope.workspace_id}:{runtime_scope.qualifier}:{key}", vector,
         publish=not pending,
     )
     return source, representation
@@ -213,7 +230,10 @@ def _create_motif(connection, scope, idempotency, *, motif_id: str, domain_id: s
     )
     return NativeMotifService(connection).create_motif_with_member(
         idempotency_namespace_id=idempotency,
-        idempotency_key=f"a2:motif:{scope.memory_runtime_scope.qualifier}:{motif_id}",
+        idempotency_key=(
+            f"a2:motif:{scope.memory_runtime_scope.workspace_id}:"
+            f"{scope.memory_runtime_scope.qualifier}:{motif_id}"
+        ),
         motif_identity_namespace_id=routing.motif_identity_namespace_id,
         membership_identity_namespace_id=routing.membership_identity_namespace_id,
         motif_alias_namespace_id=routing.motif_alias_namespace_id,
@@ -222,7 +242,13 @@ def _create_motif(connection, scope, idempotency, *, motif_id: str, domain_id: s
 
 
 def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedder: _Embedder) -> MemoryGraph:
-    graph = MemoryGraph(str(tmp_path / f"legacy-{scope.memory_runtime_scope.qualifier}"), embedder=embedder)
+    graph = MemoryGraph(
+        str(
+            tmp_path
+            / f"legacy-{scope.memory_runtime_scope.workspace_id}-{scope.memory_runtime_scope.qualifier}"
+        ),
+        embedder=embedder,
+    )
     graph.world._next_id = 0
     reader = NativeMemoryCompatibilityFacade(connection)
     runtime_scope = scope.memory_runtime_scope
@@ -240,7 +266,7 @@ def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedd
         )
         payload = dict(view.payload)
         payload.update({
-            "workspace_id": "orchard",
+            "workspace_id": runtime_scope.workspace_id,
             "scope": "private" if runtime_scope.scope_kind == "PRIVATE_AGENT" else "shared",
             "agent_id": runtime_scope.agent_id or "aria",
             "domain_id": "personal" if runtime_scope.scope_kind == "PRIVATE_AGENT" else runtime_scope.domain_id,
@@ -252,7 +278,13 @@ def _legacy_graph(tmp_path: Path, connection, scope, sources_and_vectors, embedd
     return graph
 
 
-def _legacy_registry(graph: MemoryGraph, domain_id: str, motifs: list[tuple[str, int, tuple[float, ...], float, int]]) -> MotifRegistry:
+def _legacy_registry(
+    graph: MemoryGraph,
+    domain_id: str,
+    motifs: list[tuple[str, int, tuple[float, ...], float, int]],
+    *,
+    workspace_id: str = "orchard",
+) -> MotifRegistry:
     def entity_payload(eid: int):
         entity = graph.entities.get(eid)
         if entity is None:
@@ -262,15 +294,21 @@ def _legacy_registry(graph: MemoryGraph, domain_id: str, motifs: list[tuple[str,
         return payload
 
     registry = MotifRegistry(
-        graph.data_dir, "orchard", domain_id, shard_reader=graph._shard_reader,
+        graph.data_dir, workspace_id, domain_id, shard_reader=graph._shard_reader,
         entity_payload_fn=entity_payload,
     )
+    # The persisted legacy registry is written with ``sort_keys=True`` and
+    # reconstructed through JSON object order.  This fixture bypasses that
+    # serialization only for speed, so retain its durable lexical motif order
+    # explicitly instead of modeling a transient pre-save insertion order.
     registry.motifs = {
         motif_id: Motif(
             motif_id, domain_id, f"label {domain_id} {motif_id}", list(centroid), strength,
             [eid], ["aria"], .7, 100, last_active,
         )
-        for motif_id, eid, centroid, strength, last_active in motifs
+        for motif_id, eid, centroid, strength, last_active in sorted(
+            motifs, key=lambda item: item[0],
+        )
     }
     return registry
 
@@ -358,6 +396,8 @@ def qualified_models(tmp_path: Path, monkeypatch):
         recovered = _RecoveredRuntime("orchard", core_id, _lane(), (private, research, engineering, archive), descriptor)
         model = NativeQualifiedQueryReadModel(recovered, embedder=native_embedder)
         model._a3_fixture_runtime = recovered
+        model._a3_fixture_connection = connection
+        model._a3_fixture_idempotency = idempotency
         monkeypatch.setattr(memory_graph_module, "_now_ts", lambda: 100 + 86400)
         monkeypatch.setattr(vector_runtime_module.time, "time", lambda: float(100 + 86400))
         yield legacy, model, native_embedder, legacy_embedders
@@ -394,7 +434,13 @@ def test_filters_decay_namespaces_geometry_and_cold_rebuild(qualified_models):
     private_hits = private_native.search("q", min_score=.99)
     assert [item.memory_identity.eid for item in private_hits] == [1]
     assert private_hits[0].compatibility_hit["reinforcement_count"] == 5
-    assert private_hits[0].compatibility_hit["srg"] == {"intensity": .31, "phase": "fixture"}
+    assert private_hits[0].compatibility_hit["srg"] == {
+        "R_band": 4,
+        "is_crystal": False,
+        "heartbeat_class": "A",
+        "L_amplitude": .31,
+        "L_phase": "fixture",
+    }
     assert private_hits[0].motif_ids == ("private-anchor",)
 
     research_hit = native.shared_lane("orchard", "research").search("q", top_k=9)[0]

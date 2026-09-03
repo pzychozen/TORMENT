@@ -54,6 +54,22 @@ class NativeVectorRuntimeEmbedder(Protocol):
     def embed(self, text: str) -> Any: ...
 
 
+class NativeVectorReadConsistencyRefused(SubstrateInvariantViolation):
+    """A vector lane cannot prove one coherent current read.
+
+    An empty result is a valid retrieval outcome only after a usable snapshot
+    has been established.  This lower substrate disposition is deliberately
+    distinct from that outcome, so the qualified query adapter can translate
+    it without inventing a retry or silently dropping cognition.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = str(reason or "unknown")
+        super().__init__(
+            "native vector read consistency cannot be proven: " + self.reason
+        )
+
+
 @dataclass(frozen=True)
 class NativeMemoryVectorRuntimeConfiguration:
     """The complete durable identity of one rebuildable cache lane.
@@ -325,7 +341,14 @@ class NativeMemoryVectorRuntime:
         canon_only: bool,
     ) -> list[dict[str, Any]]:
         snapshot = self._ensure_snapshot()
-        if snapshot is None or snapshot.matrix is None:
+        if snapshot is None:
+            # ``None`` here means the candidate cache could not be rebuilt or
+            # its currentness could not be established.  It is not the same
+            # fact as a successfully built lane with no qualified vectors.
+            raise NativeVectorReadConsistencyRefused(
+                self._last_invalidation_reason or "snapshot-unavailable"
+            )
+        if snapshot.matrix is None:
             return []
         normalized_query = self._normalize(query)
         scores = (snapshot.matrix @ normalized_query).astype(np.float32)
@@ -347,7 +370,9 @@ class NativeMemoryVectorRuntime:
             self._snapshot = None
             self._dirty = True
             self._last_invalidation_reason = "concurrent-currentness-change"
-            return []
+            raise NativeVectorReadConsistencyRefused(
+                self._last_invalidation_reason
+            )
 
         now_ts = int(time.time())
         type_set = set(type_filter or [])
@@ -878,6 +903,7 @@ __all__ = [
     "NativeMemoryVectorRuntime",
     "NativeProductionMemoryVectorRuntime",
     "NativeMemoryVectorRuntimeConfiguration",
+    "NativeVectorReadConsistencyRefused",
     "NativeVectorRuntimeEmbedder",
     "NativeVectorRuntimeRow",
     "NativeVectorRuntimeSnapshot",

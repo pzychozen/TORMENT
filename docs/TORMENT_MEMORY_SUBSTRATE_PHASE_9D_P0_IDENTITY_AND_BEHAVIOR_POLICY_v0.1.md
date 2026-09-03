@@ -57,6 +57,34 @@ The I3B0 receipt records a corrected documentation-exposure boundary:
 `BRAINVISION_FILES_READ = NOT_CERTIFIABLE_AS_ZERO`; no Brainvision code or
 second cognitive function was opened, inspected, touched, or used for I3B0.
 
+### §0 update — P9D-I3B native query-read parity
+
+P9D-I3B qualifies the read side underneath the existing **MAIN TORMENT
+COGNITION** owner.  It preserves the existing vector selection, domain-routing,
+motif, continuity, conflict, Character, SRG, and final-ranking formulas.  The
+native adapter supplies qualified storage facts and a fail-closed snapshot
+disposition only; it does not become a second query algorithm or a new tie
+policy.
+
+```text
+P9D_I3B_QUERY_READ_PARITY = PASS
+ONE_ACTIVE_TORMENT_QUERY_COGNITION_IMPLEMENTATION = YES
+QUERY_FORMULA_CHANGES_REQUIRED = NO
+STALE_NATIVE_QUERY_SNAPSHOT = DETECTABLE
+LEGACY_OBSERVABLE_ORDER_PRESERVED = YES
+NATIVE_QUERY_NON_MATERIALIZATION = PASS
+CONFLICT_SYSTEM_PARITY = BLOCKED_PENDING_I4
+SRG_QUERY_MUTATION_PARITY = OPEN_I3C_GATE
+REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
+```
+
+The I3B receipt retains the prior corrected boundary without expanding it:
+`BRAINVISION_FILES_READ = NOT_CERTIFIABLE_AS_ZERO`,
+`BRAINVISION_SEARCH_SNIPPETS_EXPOSED = YES`, and
+`BRAINVISION_DOCUMENTATION_MENTION_OPENED = YES`; Brainvision code was not
+opened, inspected, touched, or used, and the second repository cognitive
+function was not inspected.
+
 ## 1. P0A — external identity and scope admission
 
 ### 1.1 Four distinct operations
