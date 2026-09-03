@@ -209,7 +209,7 @@ def _post_write_context(
         storage_outcome=PostWriteStorageOutcome.CREATED_NEW,
         stored=result.stored,
         eid=result.eid,
-        created_motif=result.motifs[0] if result.motifs else None,
+        created_motif=result.created_motif,
         motif_ids=result.motifs,
         half_life_days=request.half_life_days,
         summary=request.summary,

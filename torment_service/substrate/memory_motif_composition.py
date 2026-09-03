@@ -227,6 +227,32 @@ class NativeMemoryMotifCompositionResult:
     split_child_object_id: UUID | None = None
 
 
+def precommit_split_attach_state(
+    preview: NativeMemoryMotifCompositionPreview,
+    source_state: MotifState,
+) -> MotifState:
+    """Recreate only the durable Stage-A parent successor state for I4B-2.
+
+    A true-split preview deliberately stores its final parent state.  The
+    first durable stage must instead reflect the ordinary attach before the
+    bounded finalization changes the topology.  This helper preserves the
+    fixed decision mathematics while keeping that distinction explicit.
+    """
+    if preview.split_plan is None or preview.decision.kind != "ATTACH_EXISTING":
+        raise ValueError("precommit split attach requires an attach true-split preview")
+    aggregate = realize_attach_next_state(
+        preview.decision,
+        agent_id=preview.request.agent_id,
+        last_active_ts=preview.request.last_active_ts,
+    )
+    return _motif_state_from_aggregate(
+        aggregate,
+        preview.request.semantic_scope_id,
+        derivation_metadata=source_state.derivation_metadata,
+        extra_payload=source_state.extra_payload,
+    )
+
+
 class NativeMemoryMotifCompositionService:
     """v1.1-only native composition service; deliberately unwired."""
 

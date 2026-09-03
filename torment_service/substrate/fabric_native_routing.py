@@ -8,7 +8,7 @@ key before this boundary will open an existing native core.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -44,6 +44,7 @@ from .memory_motif_composition import (
     NativeMemoryMotifCompositionRequest,
     NativeMemoryMotifCompositionService,
     StaleMotifCatalogError,
+    precommit_split_attach_state,
 )
 from .memory_reinforcement import (
     NativeMemoryReinforcementRequest,
@@ -466,6 +467,11 @@ class NativeFabricRouteResult:
     memory_revision_id: UUID | None
     representation_id: UUID | None
     primary_outcome: "NativePrimaryOutcomeWitness | None" = None
+    # This is semantic creation truth, not a convenient projection of every
+    # affected motif.  In particular, attach-triggered true split has no
+    # created motif even though it creates a split child structurally.
+    created_motif: str | None = None
+    precommit_true_split: bool = False
 
 
 @dataclass(frozen=True)
@@ -489,10 +495,6 @@ class NativePrecommitAttachFailure(RuntimeError):
     def __init__(self, witness: NativePrimaryOutcomeWitness) -> None:
         super().__init__("native precommit motif attach/create failed")
         self.witness = witness
-
-
-class NativePrecommitTrueSplitRefused(RuntimeError):
-    """I4B-1 must not silently apply the atomic true-split route."""
 
 
 @dataclass(frozen=True)
@@ -671,16 +673,6 @@ class NativeFabricMemoryRouter:
                     NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID"),
                     primary_outcome=_refused_primary_outcome(request),
                 )
-            except NativePrecommitTrueSplitRefused:
-                # This is a reachable topology, but no source reservation or
-                # motif mutation has started.  I4B-2 must qualify its durable
-                # precommit failure topology before native activation can use it.
-                return NativeFabricRouteAttempt(
-                    NativeFabricRouteQualification(
-                        False, qualification.route_scope, "TRUE_SPLIT_PENDING_I4B2",
-                    ),
-                    primary_outcome=_refused_primary_outcome(request),
-                )
             except ValueError:
                 # Structural translation and A3C2 planning both reject before
                 # a source semantic transaction starts.  This remains an
@@ -760,6 +752,24 @@ class NativeFabricMemoryRouter:
         )
         composition = NativeMemoryMotifCompositionService(connection)
         precommit = NativePrimaryPrecommitService(connection)
+        motif_service = NativeMotifService(connection)
+        split_request_identity = _precommit_split_request_identity(composition_request)
+        recovered_split = (
+            motif_service.recover_precommit_attached_split_finalization(
+                idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                idempotency_key=_precommit_split_finalize_key(composition_request),
+                request_identity=split_request_identity,
+            )
+            if request.precommit_parity_required else None
+        )
+        recovered_split_attach = (
+            motif_service.recover_precommit_split_attach(
+                idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                idempotency_key=_precommit_split_attach_key(composition_request),
+                request_identity=split_request_identity,
+            )
+            if request.precommit_parity_required else None
+        )
         recovered_primary = (
             precommit.recover_canonical(composition_request)
             if request.precommit_parity_required else None
@@ -767,7 +777,27 @@ class NativeFabricMemoryRouter:
         if recovered_primary is not None:
             # A completed canonical source must win over a later duplicate
             # search, including after process-local owners are recreated.
-            motif_ids = _runtime_motif_ids_for_member(connection, routing_scope, recovered_primary.memory_object_id)
+            if recovered_split is not None:
+                if recovered_split_attach is None:
+                    raise SubstrateInvariantViolation(
+                        "precommit true split finalization has no Stage-A outcome context"
+                    )
+                motif_ids = _split_runtime_motif_ids(
+                    connection, routing_scope, recovered_split,
+                )
+                created_motif, precommit_true_split = None, True
+                duplicate_disposition = _precommit_split_reinforcement_disposition(
+                    recovered_split_attach,
+                )
+            else:
+                motif_ids = _runtime_motif_ids_for_member(
+                    connection, routing_scope, recovered_primary.memory_object_id,
+                )
+                created_motif = _recovered_precommit_created_motif(
+                    connection, routing_scope, composition_request, motif_ids,
+                )
+                precommit_true_split = False
+                duplicate_disposition = "NOT_APPLICABLE"
             reader = NativeMotifRuntimeReader(connection)
             with self._capability.process_order.locked_catalog(
                 reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
@@ -792,8 +822,8 @@ class NativeFabricMemoryRouter:
                 representation.representation_id,
                 _primary_outcome(
                     request,
-                    attempt_origin="DIRECT_CREATE_PATH",
-                    reinforcement_disposition="NOT_APPLICABLE",
+                    attempt_origin=_attempt_origin_for(duplicate_disposition),
+                    reinforcement_disposition=duplicate_disposition,
                     final_storage_outcome="CREATED_NEW",
                     create_failure_disposition="NONE",
                     committed=True,
@@ -801,6 +831,8 @@ class NativeFabricMemoryRouter:
                     object_id=recovered_primary.memory_object_id,
                     revision_id=recovered_primary.memory_revision_id,
                 ),
+                created_motif=created_motif,
+                precommit_true_split=precommit_true_split,
             )
 
         recovered_abort = (
@@ -808,11 +840,19 @@ class NativeFabricMemoryRouter:
             if request.precommit_parity_required else None
         )
         if recovered_abort is not None:
+            recovered_attach = motif_service.recover_precommit_split_attach(
+                idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                idempotency_key=_precommit_split_attach_key(composition_request),
+                request_identity=split_request_identity,
+            ) if request.precommit_parity_required else None
             return _return_recovered_abort(
                 connection=connection,
                 request=request,
                 routing_scope=routing_scope,
                 aborted=recovered_abort,
+                split_result=recovered_split,
+                split_attach=recovered_attach,
+                composition_request=composition_request,
             )
 
         if not request.precommit_parity_required:
@@ -852,16 +892,33 @@ class NativeFabricMemoryRouter:
                         object_id=recovered_composition.memory_object_id,
                         revision_id=recovered_composition.memory_revision_id,
                     ),
+                    created_motif=_recovered_composition_created_motif(
+                        connection,
+                        routing_scope,
+                        composition_request,
+                        recovered_composition.affected_runtime_motif_ids or (
+                            recovered_composition.runtime_motif_id,
+                        ),
+                    ),
                 )
 
-        try:
-            hit, source_channel, duplicate_disposition = self._select_private_duplicate(
-                connection, request, routing_scope, vector,
+        if recovered_split_attach is None:
+            try:
+                hit, source_channel, duplicate_disposition = self._select_private_duplicate(
+                    connection, request, routing_scope, vector,
+                )
+            except Exception:
+                # Legacy duplicate implementation failures are deliberately not
+                # refusals; ordinary CREATE owns the exception-fallthrough path.
+                hit, source_channel, duplicate_disposition = None, None, "EXCEPTION_FALLTHROUGH_TO_CREATE"
+        else:
+            # The Stage-A operation contains the original partition.  A retry
+            # is not allowed to turn it into a reinforcement or recalculate it
+            # against the now-attached parent catalog.
+            hit, source_channel = None, None
+            duplicate_disposition = _precommit_split_reinforcement_disposition(
+                recovered_split_attach,
             )
-        except Exception:
-            # Legacy duplicate implementation failures are deliberately not
-            # refusals; ordinary CREATE owns the exception-fallthrough path.
-            hit, source_channel, duplicate_disposition = None, None, "EXCEPTION_FALLTHROUGH_TO_CREATE"
         if hit is not None:
             tool_refresh = request.last_tool_refresh_ts if source_channel == "tool_result" else None
             srg_runtime = NativeSRGTransientRuntime(
@@ -1000,68 +1057,227 @@ class NativeFabricMemoryRouter:
                     object_id=composition_result.memory_object_id,
                     revision_id=composition_result.memory_revision_id,
                 ),
+                created_motif=(
+                    composition_result.runtime_motif_id
+                    if preview.decision.kind == "CREATE_NEW" else None
+                ),
             )
 
         reader = NativeMotifRuntimeReader(connection)
         with self._capability.process_order.locked_catalog(
             reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
         ) as ordered_catalog:
-            preview = composition.prepare_plan_from_ordered_catalog(
-                composition_request, ordered_catalog
-            )
-            if preview.split_plan is not None:
-                # The I4B-1 precommit route reaches this topology.  Its
-                # established atomic implementation cannot stand in for the
-                # durable precommit residue contract, so refuse before an EID
-                # reservation or motif write.  The non-precommit branch above
-                # deliberately retains its established atomic split behavior.
-                raise NativePrecommitTrueSplitRefused(
-                    "true split requires I4B-2 precommit qualification"
-                )
             reservation = precommit.reserve(composition_request)
             _observe_precommit_spawn(request, reservation.eid)
-            try:
-                motif_result = _commit_precommit_motif(
-                    connection, composition_request, preview, reservation,
-                )
-            except Exception as exc:
-                attempt_origin = _attempt_origin_for(duplicate_disposition)
-                precommit.abort(
-                    request=composition_request,
-                    reservation=reservation,
-                    disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
-                    attempt_origin=attempt_origin,
-                    reinforcement_disposition=duplicate_disposition,
-                )
-                raise NativePrecommitAttachFailure(
-                    _primary_outcome(
-                        request,
+            precommit_true_split = recovered_split_attach is not None
+            if recovered_split_attach is not None:
+                split_plan = recovered_split_attach.plan
+                if split_plan.candidate_member_object_id != reservation.memory_object_id:
+                    raise SubstrateInvariantViolation(
+                        "precommit split attach does not belong to the reserved memory"
+                    )
+                try:
+                    motif_result = motif_service.finalize_precommit_attached_split(
+                        idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                        idempotency_key=_precommit_split_finalize_key(composition_request),
+                        motif_identity_namespace_id=routing_scope.motif_identity_namespace_id,
+                        membership_identity_namespace_id=routing_scope.membership_identity_namespace_id,
+                        motif_alias_namespace_id=routing_scope.motif_alias_namespace_id,
+                        plan=split_plan,
+                        attached_parent_revision_id=recovered_split_attach.mutation.motif_revision_id,
+                        attached_candidate_membership_id=recovered_split_attach.mutation.membership_relationship_id,
+                        request_identity=split_request_identity,
+                    )
+                except Exception as exc:
+                    attempt_origin = _attempt_origin_for(duplicate_disposition)
+                    precommit.abort(
+                        request=composition_request,
+                        reservation=reservation,
+                        disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
                         attempt_origin=attempt_origin,
                         reinforcement_disposition=duplicate_disposition,
-                        final_storage_outcome="NO_WRITE",
-                        create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
-                        committed=False,
-                        eid=reservation.eid,
-                        object_id=reservation.memory_object_id,
-                        revision_id=reservation.memory_revision_id,
+                        failure_stage="I4B2_STAGE_1",
                     )
-                ) from exc
-            runtime_motif_id = preview.prospective_motif_state.runtime_motif_id
-            if runtime_motif_id not in {
-                item.read_model.runtime_motif_id for item in ordered_catalog
-            }:
+                    raise NativePrecommitAttachFailure(
+                        _primary_outcome(
+                            request,
+                            attempt_origin=attempt_origin,
+                            reinforcement_disposition=duplicate_disposition,
+                            final_storage_outcome="NO_WRITE",
+                            create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                            committed=False,
+                            eid=reservation.eid,
+                            object_id=reservation.memory_object_id,
+                            revision_id=reservation.memory_revision_id,
+                        )
+                    ) from exc
+                failure_stage_count = 2
+                runtime_motif_id = split_plan.parent_state.runtime_motif_id
+                motif_ids = _split_runtime_motif_ids(connection, routing_scope, motif_result)
+                # Stage A may have survived a restart, but the child joins live
+                # process order only after this Stage-B transaction commits.
+                # The original parent already owns its position.
                 self._capability.process_order.append_created(
                     routing_scope=routing_scope,
                     domain_id=request.domain_id,
-                    runtime_motif_id=runtime_motif_id,
+                    runtime_motif_id=motif_result.child_runtime_motif_id,
                 )
-            enrichment_patch = dict(preview.enrichment_patch)
+                enrichment_patch = dict(recovered_split_attach.precommit_context["enrichment_patch"])
+                primary_tension = float(recovered_split_attach.precommit_context["primary_tension"])
+            else:
+                preview = composition.prepare_plan_from_ordered_catalog(
+                    composition_request, ordered_catalog
+                )
+                if preview.split_plan is None:
+                    try:
+                        _commit_precommit_motif(
+                            connection, composition_request, preview, reservation,
+                        )
+                    except Exception as exc:
+                        attempt_origin = _attempt_origin_for(duplicate_disposition)
+                        precommit.abort(
+                            request=composition_request,
+                            reservation=reservation,
+                            disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
+                            attempt_origin=attempt_origin,
+                            reinforcement_disposition=duplicate_disposition,
+                        )
+                        raise NativePrecommitAttachFailure(
+                            _primary_outcome(
+                                request,
+                                attempt_origin=attempt_origin,
+                                reinforcement_disposition=duplicate_disposition,
+                                final_storage_outcome="NO_WRITE",
+                                create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                                committed=False,
+                                eid=reservation.eid,
+                                object_id=reservation.memory_object_id,
+                                revision_id=reservation.memory_revision_id,
+                            )
+                        ) from exc
+                    runtime_motif_id = preview.prospective_motif_state.runtime_motif_id
+                    motif_ids = (runtime_motif_id,)
+                    created_motif = (
+                        runtime_motif_id if preview.decision.kind == "CREATE_NEW" else None
+                    )
+                    if runtime_motif_id not in {
+                        item.read_model.runtime_motif_id for item in ordered_catalog
+                    }:
+                        self._capability.process_order.append_created(
+                            routing_scope=routing_scope,
+                            domain_id=request.domain_id,
+                            runtime_motif_id=runtime_motif_id,
+                        )
+                    enrichment_patch = dict(preview.enrichment_patch)
+                    primary_tension = float(preview.primary_field_row.get("tension", 0.0) or 0.0)
+                else:
+                    precommit_true_split = True
+                    failure_stage_count = 0
+                    source = motif_service.get_current_motif(preview.selected_motif_object_id)
+                    split_plan = replace(
+                        preview.split_plan,
+                        candidate_member_object_id=reservation.memory_object_id,
+                    )
+                    try:
+                        stage_a = motif_service.attach_member_for_precommit_split(
+                            idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                            idempotency_key=_precommit_split_attach_key(composition_request),
+                            motif_alias_namespace_id=routing_scope.motif_alias_namespace_id,
+                            membership_identity_namespace_id=routing_scope.membership_identity_namespace_id,
+                            plan=split_plan,
+                            attached_parent_state=precommit_split_attach_state(preview, source.state),
+                            request_identity=split_request_identity,
+                            precommit_context={
+                                "enrichment_patch": dict(preview.enrichment_patch),
+                                "primary_tension": float(
+                                    preview.primary_field_row.get("tension", 0.0) or 0.0
+                                ),
+                                "reinforcement_disposition": duplicate_disposition,
+                            },
+                        )
+                        failure_stage_count = 1
+                        if _test_stop_after == "precommit_split_after_stage_a":
+                            raise RuntimeError("forced interruption after precommit split stage A")
+                        motif_result = motif_service.finalize_precommit_attached_split(
+                            idempotency_namespace_id=routing_scope.idempotency_namespace_id,
+                            idempotency_key=_precommit_split_finalize_key(composition_request),
+                            motif_identity_namespace_id=routing_scope.motif_identity_namespace_id,
+                            membership_identity_namespace_id=routing_scope.membership_identity_namespace_id,
+                            motif_alias_namespace_id=routing_scope.motif_alias_namespace_id,
+                            plan=split_plan,
+                            attached_parent_revision_id=stage_a.motif_revision_id,
+                            attached_candidate_membership_id=stage_a.membership_relationship_id,
+                            request_identity=split_request_identity,
+                        )
+                        failure_stage_count = 2
+                    except RuntimeError as exc:
+                        if _test_stop_after == "precommit_split_after_stage_a":
+                            raise
+                        attempt_origin = _attempt_origin_for(duplicate_disposition)
+                        precommit.abort(
+                            request=composition_request,
+                            reservation=reservation,
+                            disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
+                            attempt_origin=attempt_origin,
+                            reinforcement_disposition=duplicate_disposition,
+                            failure_stage=f"I4B2_STAGE_{failure_stage_count}",
+                        )
+                        raise NativePrecommitAttachFailure(
+                            _primary_outcome(
+                                request,
+                                attempt_origin=attempt_origin,
+                                reinforcement_disposition=duplicate_disposition,
+                                final_storage_outcome="NO_WRITE",
+                                create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                                committed=False,
+                                eid=reservation.eid,
+                                object_id=reservation.memory_object_id,
+                                revision_id=reservation.memory_revision_id,
+                            )
+                        ) from exc
+                    except Exception as exc:
+                        attempt_origin = _attempt_origin_for(duplicate_disposition)
+                        precommit.abort(
+                            request=composition_request,
+                            reservation=reservation,
+                            disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE",
+                            attempt_origin=attempt_origin,
+                            reinforcement_disposition=duplicate_disposition,
+                            failure_stage=f"I4B2_STAGE_{failure_stage_count}",
+                        )
+                        raise NativePrecommitAttachFailure(
+                            _primary_outcome(
+                                request,
+                                attempt_origin=attempt_origin,
+                                reinforcement_disposition=duplicate_disposition,
+                                final_storage_outcome="NO_WRITE",
+                                create_failure_disposition="PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED",
+                                committed=False,
+                                eid=reservation.eid,
+                                object_id=reservation.memory_object_id,
+                                revision_id=reservation.memory_revision_id,
+                            )
+                        ) from exc
+                    runtime_motif_id = split_plan.parent_state.runtime_motif_id
+                    motif_ids = _split_runtime_motif_ids(connection, routing_scope, motif_result)
+                    created_motif = None
+                    self._capability.process_order.append_created(
+                        routing_scope=routing_scope,
+                        domain_id=request.domain_id,
+                        runtime_motif_id=motif_result.child_runtime_motif_id,
+                    )
+                    enrichment_patch = dict(preview.enrichment_patch)
+                    primary_tension = float(preview.primary_field_row.get("tension", 0.0) or 0.0)
+                    if _test_stop_after == "precommit_split_after_stage_b":
+                        raise RuntimeError("forced interruption after precommit split stage B")
+            if precommit_true_split:
+                created_motif = None
             if request.precommit_symbol_state_owner is not None:
                 external_effect = NativePrecommitSymbolStateEffect(
                     workspace_id=request.workspace_id,
                     agent_id=request.agent_id,
                     runtime_motif_id=runtime_motif_id,
-                    current_tension=float(preview.primary_field_row.get("tension", 0.0) or 0.0),
+                    current_tension=primary_tension,
                     enrichment=enrichment_patch,
                 )
                 enrichment_patch = dict(request.precommit_symbol_state_owner(external_effect))
@@ -1085,9 +1301,13 @@ class NativeFabricMemoryRouter:
                     disposition="CANONICAL_FLUSH_FAILURE",
                     attempt_origin=attempt_origin,
                     reinforcement_disposition=duplicate_disposition,
+                    failure_stage=(
+                        f"I4B2_STAGE_{failure_stage_count}"
+                        if precommit_true_split else None
+                    ),
                 )
                 return NativeFabricRouteResult(
-                    False, False, None, request.domain_id, (runtime_motif_id,),
+                    False, False, None, request.domain_id, motif_ids,
                     None, None, None,
                     _primary_outcome(
                         request,
@@ -1100,6 +1320,8 @@ class NativeFabricMemoryRouter:
                         object_id=reservation.memory_object_id,
                         revision_id=reservation.memory_revision_id,
                     ),
+                    created_motif=created_motif,
+                    precommit_true_split=precommit_true_split,
                 )
             world_runtime.register_fresh_created(
                 eid=committed.eid,
@@ -1115,7 +1337,7 @@ class NativeFabricMemoryRouter:
             connection, routing_scope, request, committed, vector
         )
         return NativeFabricRouteResult(
-            True, False, committed.eid, request.domain_id, (runtime_motif_id,),
+            True, False, committed.eid, request.domain_id, motif_ids,
             committed.memory_object_id, committed.memory_revision_id, representation.representation_id,
             _primary_outcome(
                 request,
@@ -1128,6 +1350,8 @@ class NativeFabricMemoryRouter:
                 object_id=committed.memory_object_id,
                 revision_id=committed.memory_revision_id,
             ),
+            created_motif=created_motif,
+            precommit_true_split=precommit_true_split,
         )
 
     def _select_private_duplicate(
@@ -1210,12 +1434,25 @@ def _return_recovered_abort(
     request: NativeFabricRouteRequest,
     routing_scope: NativeFabricRoutingScope,
     aborted: NativePrecommitMemoryAbort,
+    split_result: Any | None,
+    split_attach: Any | None,
+    composition_request: NativeMemoryMotifCompositionRequest,
 ) -> NativeFabricRouteResult:
     """Return the original failed-primary truth without redoing precommit work."""
     reservation = aborted.reservation
-    motifs = _runtime_motif_ids_for_member(
-        connection, routing_scope, reservation.memory_object_id,
-    )
+    if split_result is not None:
+        motifs = _split_runtime_motif_ids(connection, routing_scope, split_result)
+        precommit_true_split = True
+    elif split_attach is not None:
+        motifs = (_runtime_motif_id_for_object(
+            connection, routing_scope, split_attach.plan.parent_motif_object_id,
+        ),)
+        precommit_true_split = True
+    else:
+        motifs = _runtime_motif_ids_for_member(
+            connection, routing_scope, reservation.memory_object_id,
+        )
+        precommit_true_split = False
     if aborted.disposition == "PRECOMMIT_MOTIF_ATTACH_FAILURE":
         raise NativePrecommitAttachFailure(
             _primary_outcome(
@@ -1245,7 +1482,122 @@ def _return_recovered_abort(
             object_id=reservation.memory_object_id,
             revision_id=reservation.memory_revision_id,
         ),
+        created_motif=(
+            None if precommit_true_split else _recovered_precommit_created_motif(
+                connection, routing_scope, composition_request, motifs,
+            )
+        ),
+        precommit_true_split=precommit_true_split,
     )
+
+
+def _precommit_split_request_identity(
+    request: NativeMemoryMotifCompositionRequest,
+) -> dict[str, str]:
+    """The stable request owner carried by both I4B-2 motif stages."""
+    return {"composition_request_key": request.idempotency_key}
+
+
+def _precommit_split_attach_key(request: NativeMemoryMotifCompositionRequest) -> str:
+    return f"I4B2:PRECOMMIT_SPLIT_ATTACH:{request.idempotency_key}"
+
+
+def _precommit_split_finalize_key(request: NativeMemoryMotifCompositionRequest) -> str:
+    return f"I4B2:PRECOMMIT_SPLIT_FINALIZE:{request.idempotency_key}"
+
+
+def _precommit_split_reinforcement_disposition(split_attach: Any) -> str:
+    """Restore the original duplicate-path truth from the durable Stage-A intent."""
+    disposition = split_attach.precommit_context.get("reinforcement_disposition")
+    if not isinstance(disposition, str) or not disposition:
+        raise SubstrateInvariantViolation(
+            "precommit split attach is missing its original reinforcement disposition"
+        )
+    return disposition
+
+
+def _runtime_motif_id_for_object(
+    connection: sqlite3.Connection,
+    routing_scope: NativeFabricRoutingScope,
+    motif_object_id: UUID,
+) -> str:
+    rows = connection.execute(
+        """SELECT alias_value FROM legacy_object_aliases
+             WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND object_id=?""",
+        (native_id_to_bytes(routing_scope.motif_alias_namespace_id), native_id_to_bytes(motif_object_id)),
+    ).fetchall()
+    if len(rows) != 1 or not isinstance(rows[0][0], str) or not rows[0][0]:
+        raise SubstrateInvariantViolation("motif operation output has no exact runtime alias")
+    return rows[0][0]
+
+
+def _split_runtime_motif_ids(
+    connection: sqlite3.Connection,
+    routing_scope: NativeFabricRoutingScope,
+    split_result: Any,
+) -> tuple[str, str]:
+    """Project only exact Stage-B parent/child outputs, never membership scans."""
+    return (
+        _runtime_motif_id_for_object(
+            connection, routing_scope, split_result.parent_motif_object_id,
+        ),
+        str(split_result.child_runtime_motif_id),
+    )
+
+
+def _recovered_precommit_created_motif(
+    connection: sqlite3.Connection,
+    routing_scope: NativeFabricRoutingScope,
+    request: NativeMemoryMotifCompositionRequest,
+    motif_ids: tuple[str, ...],
+) -> str | None:
+    """Recover explicit ordinary creation truth from its motif operation."""
+    row = connection.execute(
+        "SELECT operation_kind FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+        (
+            native_id_to_bytes(routing_scope.idempotency_namespace_id),
+            f"I4B1:PRECOMMIT_MOTIF:{request.idempotency_key}",
+        ),
+    ).fetchone()
+    if row is None:
+        raise SubstrateInvariantViolation("canonical precommit source has no motif operation")
+    if row[0] == "NATIVE_MOTIF_CREATE_WITH_MEMBER":
+        if len(motif_ids) != 1:
+            raise SubstrateInvariantViolation("ordinary created motif recovery is ambiguous")
+        return motif_ids[0]
+    if row[0] == "NATIVE_MOTIF_ADD_MEMBER":
+        return None
+    raise SubstrateInvariantViolation("canonical precommit source has an unknown motif operation")
+
+
+def _recovered_composition_created_motif(
+    connection: sqlite3.Connection,
+    routing_scope: NativeFabricRoutingScope,
+    request: NativeMemoryMotifCompositionRequest,
+    motif_ids: tuple[str, ...],
+) -> str | None:
+    """Recover explicit ordinary composition creation truth from its plan."""
+    row = connection.execute(
+        "SELECT canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+        (
+            native_id_to_bytes(routing_scope.idempotency_namespace_id), request.idempotency_key,
+        ),
+    ).fetchone()
+    if row is None:
+        raise SubstrateInvariantViolation("committed composition has no owning operation")
+    try:
+        decision = json.loads(row[0])["decision"]
+    except (TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise SubstrateInvariantViolation("committed composition intent is malformed") from exc
+    if not isinstance(decision, Mapping) or not isinstance(decision.get("kind"), str):
+        raise SubstrateInvariantViolation("committed composition decision is malformed")
+    if decision["kind"] == "CREATE_NEW":
+        if len(motif_ids) != 1:
+            raise SubstrateInvariantViolation("ordinary composition creation recovery is ambiguous")
+        return motif_ids[0]
+    if decision["kind"] == "ATTACH_EXISTING":
+        return None
+    raise SubstrateInvariantViolation("committed composition has an unknown motif decision")
 
 
 def _runtime_motif_ids_for_member(

@@ -279,6 +279,21 @@ class NativeMotifSplitResult:
 
 
 @dataclass(frozen=True)
+class NativePrecommitSplitAttach:
+    """The durable first half of I4B-2's two-stage true split.
+
+    The incoming memory is deliberately attached to the existing parent in
+    this operation.  The stored final plan, rather than a later catalog read,
+    is the authority for the bounded finalization operation.
+    """
+
+    plan: NativeMotifSplitPlan
+    attached_parent_state: MotifState
+    mutation: NativeMotifMutationResult
+    precommit_context: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
 class NativeMotifMergeResult:
     """Durable outcome of one already-authorized native motif merge.
 
@@ -583,6 +598,209 @@ class NativeMotifService:
             ),
         )
 
+    def attach_member_for_precommit_split(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        motif_alias_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        plan: NativeMotifSplitPlan,
+        attached_parent_state: MotifState,
+        request_identity: Mapping[str, Any],
+        precommit_context: Mapping[str, Any],
+    ) -> NativeMotifMutationResult:
+        """Durably attach the pending candidate before a bounded true split.
+
+        This is intentionally separate from ordinary ``add_motif_member``.
+        Its operation intent retains both the attach successor and the final
+        split plan so a restart never recalculates the partition from a
+        changed catalog.
+        """
+        if not isinstance(plan, NativeMotifSplitPlan):
+            raise ValueError("a NativeMotifSplitPlan is required")
+        _validate_state(attached_parent_state)
+        _validate_mutation_ids(
+            idempotency_namespace_id, idempotency_key,
+            motif_alias_namespace_id, membership_identity_namespace_id,
+            plan.parent_motif_object_id, plan.expected_parent_revision_id,
+            plan.candidate_member_object_id,
+        )
+        if attached_parent_state.runtime_motif_id != plan.parent_state.runtime_motif_id:
+            raise ValueError("precommit split attach changes the parent runtime motif ID")
+        if not isinstance(request_identity, Mapping):
+            raise ValueError("precommit split request_identity must be a mapping")
+        if not isinstance(precommit_context, Mapping):
+            raise ValueError("precommit split precommit_context must be a mapping")
+        self._require_row("idempotency_namespaces", "idempotency_namespace_id", idempotency_namespace_id)
+        self._require_row("identity_namespaces", "identity_namespace_id", membership_identity_namespace_id)
+        self._require_row("legacy_source_namespaces", "legacy_source_namespace_id", motif_alias_namespace_id)
+        self._require_row("semantic_scopes", "semantic_scope_id", attached_parent_state.semantic_scope_id)
+        intent = canonical_intent_text({
+            "kind": "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH",
+            "request_identity": dict(request_identity),
+            "precommit_context": dict(precommit_context),
+            "parent": {
+                "motif_object_id": str(plan.parent_motif_object_id),
+                "predecessor_revision_id": str(plan.expected_parent_revision_id),
+                "attached_successor_state": attached_parent_state.intent(),
+            },
+            "incoming": {"memory_object_id": str(plan.candidate_member_object_id)},
+            "final_split": _split_plan_intent(plan),
+            "child_runtime_motif_id": plan.child_state.runtime_motif_id,
+        })
+        return execute_semantic(
+            self._connection, idempotency_namespace_id, idempotency_key,
+            "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH", intent,
+            self._result_for_operation,
+            lambda tx: self._add_member(
+                tx, motif_alias_namespace_id, membership_identity_namespace_id,
+                plan.parent_motif_object_id, plan.expected_parent_revision_id,
+                attached_parent_state, plan.candidate_member_object_id,
+                transition_kind="NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH",
+            ),
+        )
+
+    def recover_precommit_split_attach(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        request_identity: Mapping[str, Any],
+    ) -> NativePrecommitSplitAttach | None:
+        """Recover exactly one stored first-stage plan without replanning."""
+        if not isinstance(request_identity, Mapping):
+            raise ValueError("precommit split request_identity must be a mapping")
+        row = self._connection.execute(
+            "SELECT operation_id,canonical_intent_json FROM operations "
+            "WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (_blob(idempotency_namespace_id), idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            intent = json.loads(row[1])
+            if (
+                not isinstance(intent, dict)
+                or intent.get("kind") != "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH"
+                or intent.get("request_identity") != dict(request_identity)
+            ):
+                raise SubstrateRevisionConflict("precommit split attach idempotency intent differs")
+            parent = intent["parent"]
+            final_split = intent["final_split"]
+            if not isinstance(parent, Mapping) or not isinstance(final_split, Mapping):
+                raise ValueError("precommit split attach intent is incomplete")
+            plan = _split_plan_from_intent(final_split)
+            attached_state = _motif_state_from_intent(parent["attached_successor_state"])
+            precommit_context = intent["precommit_context"]
+            if not isinstance(precommit_context, Mapping):
+                raise ValueError("precommit split context is incomplete")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise SubstrateInvariantViolation("precommit split attach intent is malformed") from exc
+        mutation = self._result_for_operation(row[0])
+        if (
+            mutation is None
+            or mutation.motif_object_id != plan.parent_motif_object_id
+            or mutation.membership_relationship_id is None
+            or mutation.motif_revision_id == plan.expected_parent_revision_id
+        ):
+            raise SubstrateInvariantViolation("precommit split attach outputs are incomplete")
+        return NativePrecommitSplitAttach(
+            plan, attached_state, mutation, MappingProxyType(dict(precommit_context)),
+        )
+
+    def finalize_precommit_attached_split(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        plan: NativeMotifSplitPlan,
+        attached_parent_revision_id: UUID,
+        attached_candidate_membership_id: UUID,
+        request_identity: Mapping[str, Any],
+        _test_fail_after: str | None = None,
+    ) -> NativeMotifSplitResult:
+        """Publish the final topology after the candidate is already attached.
+
+        The original atomic split remains untouched.  In this variant only a
+        candidate sent to the child is retired/recreated; a parent candidate
+        keeps its Stage-A membership identity with no duplicate membership.
+        """
+        if not isinstance(plan, NativeMotifSplitPlan):
+            raise ValueError("a NativeMotifSplitPlan is required")
+        if not isinstance(request_identity, Mapping):
+            raise ValueError("precommit split request_identity must be a mapping")
+        _validate_state(plan.parent_state)
+        _validate_state(plan.child_state)
+        _validate_mutation_ids(
+            idempotency_namespace_id, idempotency_key, motif_identity_namespace_id,
+            membership_identity_namespace_id, motif_alias_namespace_id,
+            plan.parent_motif_object_id, attached_parent_revision_id,
+            attached_candidate_membership_id, *plan.moved_member_object_ids,
+            plan.candidate_member_object_id,
+        )
+        for table, column, value in (
+            ("idempotency_namespaces", "idempotency_namespace_id", idempotency_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", motif_identity_namespace_id),
+            ("identity_namespaces", "identity_namespace_id", membership_identity_namespace_id),
+            ("legacy_source_namespaces", "legacy_source_namespace_id", motif_alias_namespace_id),
+            ("semantic_scopes", "semantic_scope_id", plan.parent_state.semantic_scope_id),
+            ("semantic_scopes", "semantic_scope_id", plan.child_state.semantic_scope_id),
+        ):
+            self._require_row(table, column, value)
+        intent = canonical_intent_text({
+            "kind": "NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE",
+            "request_identity": dict(request_identity),
+            "attached_parent_revision_id": str(attached_parent_revision_id),
+            "attached_candidate_membership_id": str(attached_candidate_membership_id),
+            "final_split": _split_plan_intent(plan),
+        })
+        return execute_semantic(
+            self._connection, idempotency_namespace_id, idempotency_key,
+            "NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE", intent,
+            self._split_result_for_operation,
+            lambda tx: self._split_with_attached_member(
+                tx, motif_identity_namespace_id, membership_identity_namespace_id,
+                motif_alias_namespace_id, plan, attached_parent_revision_id,
+                attached_candidate_membership_id, _test_fail_after=_test_fail_after,
+            ),
+        )
+
+    def recover_precommit_attached_split_finalization(
+        self,
+        *,
+        idempotency_namespace_id: UUID,
+        idempotency_key: str,
+        request_identity: Mapping[str, Any],
+    ) -> NativeMotifSplitResult | None:
+        """Read exact stage-B outputs without reconstructing memberships."""
+        if not isinstance(request_identity, Mapping):
+            raise ValueError("precommit split request_identity must be a mapping")
+        row = self._connection.execute(
+            "SELECT operation_id,canonical_intent_json FROM operations "
+            "WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (_blob(idempotency_namespace_id), idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            intent = json.loads(row[1])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise SubstrateInvariantViolation("precommit split finalization intent is malformed") from exc
+        if (
+            not isinstance(intent, Mapping)
+            or intent.get("kind") != "NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE"
+            or intent.get("request_identity") != dict(request_identity)
+        ):
+            raise SubstrateRevisionConflict("precommit split finalization idempotency intent differs")
+        result = self._split_result_for_operation(row[0])
+        if result is None:
+            raise SubstrateInvariantViolation("precommit split finalization outputs are incomplete")
+        return result
+
     def merge_motifs(
         self,
         *,
@@ -868,6 +1086,8 @@ class NativeMotifService:
         expected_motif_revision_id: UUID,
         state: MotifState,
         member_object_id: UUID,
+        *,
+        transition_kind: str = "NATIVE_MOTIF_ADD_MEMBER",
     ) -> NativeMotifMutationResult:
         current = self._assert_current_motif(tx, motif_object_id, expected_motif_revision_id, state)
         self._assert_alias_target(tx, motif_alias_namespace_id, state.runtime_motif_id, motif_object_id)
@@ -890,13 +1110,142 @@ class NativeMotifService:
         return self._publish(
             tx,
             transition_id,
-            "NATIVE_MOTIF_ADD_MEMBER",
+            transition_kind,
             _blob(motif_object_id),
             motif_revision_id,
             ordinal,
             membership_id,
             membership_revision_id,
             1,
+        )
+
+    def _split_with_attached_member(
+        self,
+        tx: SubstrateTx,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        motif_alias_namespace_id: UUID,
+        plan: NativeMotifSplitPlan,
+        attached_parent_revision_id: UUID,
+        attached_candidate_membership_id: UUID,
+        *,
+        _test_fail_after: str | None,
+    ) -> NativeMotifSplitResult:
+        """The stage-B variant of the atomic splitter for an attached EID."""
+        current = self._assert_current_motif(
+            tx, plan.parent_motif_object_id, attached_parent_revision_id, plan.parent_state,
+        )
+        self._assert_alias_target(
+            tx, motif_alias_namespace_id, plan.parent_state.runtime_motif_id,
+            plan.parent_motif_object_id,
+        )
+        if self._alias_row(tx, motif_alias_namespace_id, plan.child_state.runtime_motif_id) is not None:
+            raise SubstrateRevisionConflict("split child runtime motif ID alias already exists")
+        if plan.parent_state.semantic_scope_id != plan.child_state.semantic_scope_id:
+            raise SubstrateInvariantViolation("split child changes the parent semantic scope")
+        moved = tuple(
+            self._current_active_membership(tx, plan.parent_motif_object_id, member_id)
+            for member_id in plan.moved_member_object_ids
+        )
+        candidate = self._current_active_membership(
+            tx, plan.parent_motif_object_id, plan.candidate_member_object_id,
+        )
+        if UUID(bytes=candidate[0]) != attached_candidate_membership_id:
+            raise SubstrateRevisionConflict("precommit split candidate membership differs from stage A")
+
+        transition_id = _new()
+        parent_revision_id = _new()
+        parent_ordinal = current[1] + 1
+        self._insert_motif_successor(
+            tx, plan.parent_motif_object_id, parent_revision_id, parent_ordinal,
+            attached_parent_revision_id, current[1],
+            _motif_object_state(UUID(bytes=current[2]), plan.parent_state),
+        )
+        if _test_fail_after == "parent_successor":
+            raise RuntimeError("forced native precommit split failure after parent successor")
+
+        child_object_id, child_revision_id = _new(), _new()
+        self._insert_motif_creation(
+            tx, child_object_id, child_revision_id, transition_id,
+            _motif_object_state(motif_identity_namespace_id, plan.child_state),
+        )
+        tx.execute(
+            "INSERT INTO legacy_object_aliases VALUES (?,?,?,?)",
+            (_blob(motif_alias_namespace_id), MOTIF_ID_ALIAS_KIND,
+             plan.child_state.runtime_motif_id, child_object_id),
+        )
+        if _test_fail_after == "child_object":
+            raise RuntimeError("forced native precommit split failure after child object")
+
+        retired: list[tuple[bytes, bytes, int]] = []
+        for index, membership in enumerate(moved):
+            revision_id = _new()
+            self._relationships._revision(
+                tx, membership[0], revision_id, membership[2] + 1, "NATIVE_ORDINARY",
+                membership[1], membership[2],
+                self._retired_membership_state(tx, membership[0], membership[1], membership[2]),
+            )
+            retired.append((membership[0], revision_id, membership[2] + 1))
+            if index == 0 and _test_fail_after == "first_retirement":
+                raise RuntimeError("forced native precommit split failure after first retirement")
+
+        child_members: list[tuple[bytes, bytes, int]] = []
+        for _relationship, _revision, _ordinal, member_id, member_scope in moved:
+            membership_id, membership_revision_id = _new(), _new()
+            self._insert_membership(
+                tx, membership_id, membership_revision_id, transition_id,
+                _membership_state(
+                    membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                    UUID(bytes=child_object_id), UUID(bytes=member_scope), UUID(bytes=member_id),
+                ),
+            )
+            child_members.append((membership_id, membership_revision_id, 1))
+
+        parent_candidate_membership: tuple[bytes, bytes, int] | None = None
+        if plan.candidate_in_child:
+            candidate_revision_id = _new()
+            self._relationships._revision(
+                tx, candidate[0], candidate_revision_id, candidate[2] + 1, "NATIVE_ORDINARY",
+                candidate[1], candidate[2],
+                self._retired_membership_state(tx, candidate[0], candidate[1], candidate[2]),
+            )
+            retired.append((candidate[0], candidate_revision_id, candidate[2] + 1))
+            membership_id, membership_revision_id = _new(), _new()
+            self._insert_membership(
+                tx, membership_id, membership_revision_id, transition_id,
+                _membership_state(
+                    membership_identity_namespace_id, plan.child_state.semantic_scope_id,
+                    UUID(bytes=child_object_id), UUID(bytes=candidate[4]), plan.candidate_member_object_id,
+                ),
+            )
+            child_members.append((membership_id, membership_revision_id, 1))
+        else:
+            # Stage A already created this parent membership.  Reusing that
+            # relationship identity is the key distinction from atomic split.
+            parent_candidate_membership = (candidate[0], candidate[1], candidate[2])
+        if _test_fail_after == "child_memberships":
+            raise RuntimeError("forced native precommit split failure after child memberships")
+        if _test_fail_after == "before_current_pointer_publication":
+            raise RuntimeError("forced native precommit split failure before current-pointer publication")
+
+        self._publish_split(
+            tx, transition_id, _blob(plan.parent_motif_object_id), parent_revision_id,
+            parent_ordinal, child_object_id, child_revision_id, retired, child_members,
+            None,
+            transition_kind="NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE",
+        )
+        self._validate_split_publication(
+            tx, transition_id, _blob(plan.parent_motif_object_id), parent_revision_id,
+            parent_ordinal, child_object_id, child_revision_id, retired, child_members, None,
+        )
+        return NativeMotifSplitResult(
+            plan.parent_motif_object_id, UUID(bytes=parent_revision_id), parent_ordinal,
+            UUID(bytes=child_object_id), UUID(bytes=child_revision_id),
+            plan.child_state.runtime_motif_id,
+            tuple(UUID(bytes=item[0]) for item in retired),
+            tuple(UUID(bytes=item[0]) for item in child_members),
+            UUID(bytes=candidate[0]) if not plan.candidate_in_child else None,
+            UUID(bytes=transition_id), UUID(bytes=tx.operation_id),
         )
 
     def _advance_state(
@@ -1283,9 +1632,11 @@ class NativeMotifService:
         child_revision_id: bytes, retired: list[tuple[bytes, bytes, int]],
         child_members: list[tuple[bytes, bytes, int]],
         candidate_parent_membership: tuple[bytes, bytes, int] | None,
+        *,
+        transition_kind: str = "NATIVE_MOTIF_SPLIT_WITH_MEMBER",
     ) -> None:
         tx.execute("INSERT INTO semantic_transitions VALUES (?,?,?,?,0)",
-                   (transition_id, tx.operation_id, "NATIVE_MOTIF_SPLIT_WITH_MEMBER", "NATIVE"))
+                   (transition_id, tx.operation_id, transition_kind, "NATIVE"))
         for object_id, revision_id, ordinal in ((parent_id, parent_revision_id, parent_ordinal), (child_id, child_revision_id, 1)):
             tx.execute("INSERT INTO object_revision_effects VALUES (?,?,?,?)", (transition_id, object_id, revision_id, ordinal))
         tx.execute("UPDATE objects SET current_revision_id=?,current_revision_ordinal=? WHERE object_id=?", (parent_revision_id, parent_ordinal, parent_id))
@@ -1636,7 +1987,11 @@ class NativeMotifService:
             return NativeMotifMutationResult(
                 UUID(bytes=motif[6]), UUID(bytes=motif[7]), motif[8], UUID(bytes=motif[0]), UUID(bytes=motif[1])
             )
-        if len(rows) != 2 or motif[2] not in {"NATIVE_MOTIF_CREATE_WITH_MEMBER", "NATIVE_MOTIF_ADD_MEMBER"}:
+        if len(rows) != 2 or motif[2] not in {
+            "NATIVE_MOTIF_CREATE_WITH_MEMBER",
+            "NATIVE_MOTIF_ADD_MEMBER",
+            "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH",
+        }:
             return None
         membership = rows[1]
         if membership[4:6] != ("MOTIF_MEMBERSHIP", "RELATIONSHIP"):
@@ -1718,7 +2073,10 @@ class NativeMotifService:
                    o.object_id,o.object_revision_id,o.object_revision_ordinal,
                    o.relationship_id,o.relationship_revision_id,o.relationship_revision_ordinal
               FROM semantic_transitions t JOIN operation_outputs o ON o.operation_id=t.operation_id
-             WHERE t.operation_id=? AND t.transition_kind='NATIVE_MOTIF_SPLIT_WITH_MEMBER'
+             WHERE t.operation_id=? AND t.transition_kind IN (
+                   'NATIVE_MOTIF_SPLIT_WITH_MEMBER',
+                   'NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE'
+             )
              ORDER BY o.output_ordinal
             """, (operation_id,),
         ).fetchall()
@@ -1901,6 +2259,47 @@ def _split_plan_intent(plan: NativeMotifSplitPlan) -> dict[str, Any]:
         "candidate_member_object_id": str(plan.candidate_member_object_id),
         "candidate_in_child": plan.candidate_in_child,
     }
+
+
+def _motif_state_from_intent(value: Any) -> MotifState:
+    if not isinstance(value, Mapping):
+        raise ValueError("motif state intent must be a mapping")
+    try:
+        state = MotifState(
+            UUID(str(value["semantic_scope_id"])),
+            value["runtime_motif_id"],
+            value["domain_id"],
+            value["label"],
+            tuple(value["centroid"]),
+            value["strength"],
+            value["stability_score"],
+            tuple(value["contributing_agents"]),
+            value["created_ts"],
+            value["last_active_ts"],
+            value.get("derivation_metadata"),
+            value.get("extra_payload"),
+        )
+        _validate_state(state)
+        return state
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("motif state intent is invalid") from exc
+
+
+def _split_plan_from_intent(value: Any) -> NativeMotifSplitPlan:
+    if not isinstance(value, Mapping):
+        raise ValueError("split plan intent must be a mapping")
+    try:
+        return NativeMotifSplitPlan(
+            UUID(str(value["parent_motif_object_id"])),
+            UUID(str(value["expected_parent_revision_id"])),
+            _motif_state_from_intent(value["parent_state"]),
+            _motif_state_from_intent(value["child_state"]),
+            tuple(UUID(str(item)) for item in value["moved_member_object_ids"]),
+            UUID(str(value["candidate_member_object_id"])),
+            value["candidate_in_child"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("split plan intent is invalid") from exc
 
 
 def _membership_state(

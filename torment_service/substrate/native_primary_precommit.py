@@ -340,6 +340,7 @@ class NativePrimaryPrecommitService:
         disposition: str,
         attempt_origin: str,
         reinforcement_disposition: str,
+        failure_stage: str | None = None,
     ) -> ObjectResult:
         """Make a failed primary intent explicit without removing precommit truth."""
         self._require_request(request)
@@ -350,6 +351,10 @@ class NativePrimaryPrecommitService:
             raise ValueError("precommit abort attempt_origin must be non-empty text")
         if not isinstance(reinforcement_disposition, str) or not reinforcement_disposition:
             raise ValueError("precommit abort reinforcement_disposition must be non-empty text")
+        if failure_stage is not None and (
+            not isinstance(failure_stage, str) or not failure_stage
+        ):
+            raise ValueError("precommit abort failure_stage must be non-empty text when supplied")
         intent = canonical_intent_text({
             "kind": "NATIVE_PRIMARY_PRECOMMIT_ABORT",
             "request": _request_contract(request),
@@ -357,6 +362,7 @@ class NativePrimaryPrecommitService:
             "disposition": disposition,
             "attempt_origin": attempt_origin,
             "reinforcement_disposition": reinforcement_disposition,
+            "failure_stage": failure_stage,
         })
 
         def mutate(tx: SubstrateTx) -> ObjectResult:
@@ -375,6 +381,7 @@ class NativePrimaryPrecommitService:
                     "failure_disposition": disposition,
                     "attempt_origin": attempt_origin,
                     "reinforcement_disposition": reinforcement_disposition,
+                    **({} if failure_stage is None else {"failure_stage": failure_stage}),
                 },
                 "JSON",
                 None,

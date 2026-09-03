@@ -5,12 +5,15 @@ active root.  No service, provider, or real workspace root is used.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from torment_service.fabric import _load_symbol_state
+from torment_service.post_write_runtime import LegacyFabricPostWriteAdapter
 from torment_service.public_mutation_identity import (
     derive_native_operation_key,
     normalize_public_mutation_key,
@@ -18,7 +21,12 @@ from torment_service.public_mutation_identity import (
 from torment_service.public_runtime import close_public_runtime
 from torment_service.roles import RoleStore
 from torment_service.substrate.connection import open_existing_native_core_connection
+from torment_service.substrate.compat import (
+    CompatibilityEmbeddingPublicationRequest,
+    NativeMemoryCompatibilityFacade,
+)
 from torment_service.substrate.fabric_native_routing import NativePrecommitAttachFailure
+from torment_service.substrate.motifs import NativeMotifService
 from torment_service.substrate.native_public_ingest_executor import NativePublicIngestRequest
 
 from tests.test_p9d_i3b0_native_materialization_fencing import _native_runtime
@@ -119,6 +127,51 @@ def _post_write_attempts(runtime, monkeypatch) -> list[object]:
     return observed
 
 
+def _seed_public_true_split_parent(runtime, *, seed_request: NativePublicIngestRequest) -> None:
+    """Build a synthetic bimodal parent through existing native test seams."""
+    seed = runtime._executor.execute(seed_request)  # noqa: SLF001 - public boundary fixture setup
+    assert seed["stored"] is True
+    scope = runtime._active_runtime().lookup_private("aria").fabric_routing_scope  # noqa: SLF001
+    core_path = runtime.native_owner.authority_facts.core_database_path
+    with open_existing_native_core_connection(core_path) as opened:
+        connection = opened.connection
+        motifs = NativeMotifService(connection)
+        parent = motifs.resolve_motif_alias(
+            motif_alias_namespace_id=scope.motif_alias_namespace_id,
+            runtime_motif_id=seed["motifs"][0],
+        )
+        facade = NativeMemoryCompatibilityFacade(connection)
+        for ordinal, vector in enumerate(
+            [(1.0, 0.0, 0.0)] * 47 + [(-1.0, 0.0, 0.0)] * 47,
+            start=2,
+        ):
+            raw = np.asarray(vector, dtype=np.float32)
+            source = facade.finalize_memory_draft(facade.begin_memory_draft(
+                legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+                idempotency_namespace_id=scope.idempotency_namespace_id,
+                idempotency_key=f"i4b2-public-split-source:{ordinal}",
+                identity_namespace_id=scope.runtime_scope.identity_namespace_id,
+                semantic_scope_id=scope.runtime_scope.semantic_scope_id,
+                summary=f"i4b2 public split source {ordinal}", memory_type="reflection",
+                logical_step=ordinal,
+                embedding_request=CompatibilityEmbeddingPublicationRequest(
+                    raw.tobytes(), "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR",
+                    dtype="float32", dimension=3,
+                ),
+            )).source
+            current = motifs.get_current_motif(parent)
+            motifs.add_motif_member(
+                idempotency_namespace_id=scope.idempotency_namespace_id,
+                idempotency_key=f"i4b2-public-split-member:{ordinal}",
+                motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                membership_identity_namespace_id=scope.membership_identity_namespace_id,
+                motif_object_id=parent,
+                expected_motif_revision_id=current.motif_revision_id,
+                state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
+                member_object_id=source.object_id,
+            )
+
+
 def test_i4b1f_full_public_create_uses_existing_canonical_source_owner(tmp_path: Path, monkeypatch):
     root, runtime = _native_runtime(tmp_path, monkeypatch)
     try:
@@ -132,6 +185,59 @@ def test_i4b1f_full_public_create_uses_existing_canonical_source_owner(tmp_path:
         _operation_owns_current_result(runtime, key=_canonical_source_key(request), eid=int(result["eid"]))
         assert _operation_count(runtime, f"I4B1:CANONICAL_COMMIT:{_canonical_source_key(request)}") == 0
         assert len(post_write) == 1
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4b2_full_public_true_split_enters_only_the_motif_tail(tmp_path: Path, monkeypatch):
+    """Cross the real public executor handoff with an actual true-split result."""
+    import torment_service.substrate.native_world_runtime as world_module
+
+    monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
+    monkeypatch.setattr(
+        world_module.NativeWorldRuntime,
+        "register_fresh_created",
+        lambda _self, **_kwargs: None,
+    )
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        _seed_public_true_split_parent(
+            runtime,
+            seed_request=_request("i4b2-public-seed", "seed a split parent", [1.0, 0.0, 0.0], step=1),
+        )
+        runtime.cognition_fabric._hivemind_enable = False
+        post_write = _post_write_attempts(runtime, monkeypatch)
+
+        def forbidden(*_args, **_kwargs):
+            raise AssertionError("I4B-2 public handoff reached an unqualified post-write owner")
+
+        for name in (
+            "_run_contradiction_surface",
+            "_run_srg_collision",
+            "_run_hivemind",
+            "_run_world_step",
+            "_run_character_drift",
+            "_run_proposal",
+            "_run_derived_memory",
+        ):
+            monkeypatch.setattr(LegacyFabricPostWriteAdapter, name, forbidden)
+
+        request = _request(
+            "i4b2-public-true-split",
+            "a public true split reaches only its qualified tail",
+            [0.7, 0.714, 0.0],
+            step=200,
+        )
+        result = runtime._executor.execute(request)  # noqa: SLF001 - required public-executor boundary
+
+        assert result["stored"] is True and result["reinforced"] is False
+        assert result["created_motif"] is None
+        assert len(result["motifs"]) == 2
+        assert len(post_write) == 1
+        configuration = post_write[0]
+        assert configuration.motif_suggestion_maintenance_required is True
+        assert configuration.profile.motif_suggestion_maintenance.name == "QUALIFIED"
+        assert configuration.profile.motif_auto_merge.name == "QUALIFIED"
     finally:
         close_public_runtime(root)
 

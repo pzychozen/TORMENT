@@ -516,6 +516,26 @@ def test_e1_mood_freshens_research_and_private_once_without_engineering(tmp_path
         _close(harness)
 
 
+def test_e1_shared_direct_attach_uses_route_owned_created_motif_truth(tmp_path: Path):
+    harness = _harness(tmp_path)
+    try:
+        created = harness.direct.execute(
+            _request("E1:CREATED-MOTIF", vector=(.2, .8, .1)),
+            _facts(),
+        ).route_attempt.result
+        attached = harness.direct.execute(
+            _request("E1:ATTACHED-MOTIF", vector=(.2, .8, .1)),
+            _facts(),
+        ).route_attempt.result
+        assert created is not None and attached is not None
+        assert created.created_motif == created.motifs[0]
+        assert attached.reinforced is False
+        assert attached.created_motif is None
+        assert attached.motifs == created.motifs
+    finally:
+        _close(harness)
+
+
 def test_e1_cold_recovery_reopens_ready_source_mood_motif_and_external_state(tmp_path: Path):
     harness = _harness(tmp_path, affect={"last_tag": "sad", "last_conf": .7, "last_step": 0, "drift_hist": []})
     core_path, core_id = harness.capability.core_database_path, harness.capability.core_id

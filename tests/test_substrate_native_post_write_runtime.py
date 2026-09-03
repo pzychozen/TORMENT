@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from torment_service.collective_models import MemoryGovernanceFlags
-from torment_service.post_write_runtime import FabricPostWriteContext, PostWriteStorageOutcome
+from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
+from torment_service.post_write_runtime import (
+    FabricPostWriteContext,
+    LegacyFabricPostWriteAdapter,
+    PostWriteStorageOutcome,
+)
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.connection import open_existing_native_core_connection, open_temporary_test_connection
 from torment_service.substrate.errors import SubstrateConfigurationError, SubstrateInvariantViolation
@@ -24,6 +29,7 @@ from torment_service.substrate.fabric_native_routing import (
 )
 from torment_service.substrate.ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from torment_service.substrate.native_derived_memory_runtime import NativeDerivedMemoryRuntimeConfiguration
+from torment_service.substrate.native_derived_memory_runtime import NativeDerivedMemoryRuntime
 from torment_service.substrate.native_post_write_runtime import (
     NativeFabricPostWriteAdapter,
     NativePostWriteExternalDependencies,
@@ -717,6 +723,236 @@ def test_explicit_m1_profile_runs_native_suggestion_maintenance_without_legacy_m
         # The workflow event is external; it did not create or mutate native
         # objects beyond the already-routed source/motif composition.
         assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == 4
+    finally:
+        qualified.close()
+
+
+def test_i4b2_true_split_runs_only_narrow_motif_and_anchor_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, side, conflicts, proposals = _environment(scope)
+        owner._hivemind_enable = False
+        identity.seed["coupling_mode"] = "read_only"
+        workflow_root = tmp_path / "i4b2-external-workflow"
+        workspace = SimpleNamespace(
+            data_dir=str(workflow_root),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        request = _request("i4b2-narrow-tail", 1)
+        routed = NativeFabricMemoryRouter(capability).route(request).result
+        assert routed is not None
+        result = replace(routed, created_motif=None, precommit_true_split=True)
+
+        def forbidden(*_args, **_kwargs):
+            raise AssertionError("I4B-2 reached a broad post-write consumer")
+
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_contradiction_surface", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_srg_collision", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_hivemind", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_world_step", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_proposal", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_derived_memory", forbidden)
+
+        outcome = _adapter(capability, configuration).run(
+            _context(result, request, created_motif=None),
+            route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
+        )
+        assert outcome.proposal_id is None
+        assert not conflicts.calls
+        assert not owner.field.packets
+        assert not proposals.calls
+        assert (workflow_root / "workspaces" / "ws" / "domains" / "personal" / "motif_events.jsonl").exists()
+        # Anchor failure/success is intentionally fail-soft, but mood drift is
+        # excluded: this run may write only the M1 workflow and N02 anchor state.
+        assert "affect" not in side.events
+    finally:
+        qualified.close()
+
+
+def test_i4b2_tail_keeps_maintenance_and_anchor_failures_independent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The qualified prefix preserves the legacy independent fail-soft slots."""
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, _owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        workflow_root = tmp_path / "i4b2-failure-workflow"
+        workspace = SimpleNamespace(
+            data_dir=str(workflow_root),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        request = _request("i4b2-independent-failures", 1)
+        routed = NativeFabricMemoryRouter(capability).route(request).result
+        assert routed is not None
+        split_result = replace(routed, created_motif=None, precommit_true_split=True)
+        context = _context(split_result, request, created_motif=None)
+        adapter = _adapter(capability, configuration)
+
+        calls: list[str] = []
+        monkeypatch.setattr(
+            NativeMotifMaintenanceAdapter,
+            "update_entropy_and_suggest",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced M1 failure")),
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "maybe_emit_identity_anchor",
+            lambda *_args, **_kwargs: calls.append("emit"),
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "refine_identity_anchors",
+            lambda *_args, **_kwargs: calls.append("refine"),
+        )
+        adapter.run(
+            context,
+            route_witness=NativePostWriteRouteWitness(split_result, request.native_operation_key),
+        )
+        assert calls == ["emit", "refine"]
+
+        calls.clear()
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "maybe_emit_identity_anchor",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced anchor emission failure")),
+        )
+        adapter.run(
+            context,
+            route_witness=NativePostWriteRouteWitness(split_result, request.native_operation_key),
+        )
+        assert calls == ["refine"]
+    finally:
+        qualified.close()
+
+
+def test_i4b2_tail_with_no_motif_runtime_is_a_complete_no_op(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, _owner, workspace, identity, side, _conflicts, _proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        workspace = SimpleNamespace(
+            data_dir=str(tmp_path / "i4b2-null-motif-runtime"),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        request = _request("i4b2-null-motif-runtime", 1)
+        routed = NativeFabricMemoryRouter(capability).route(request).result
+        assert routed is not None
+        split_result = replace(routed, created_motif=None, precommit_true_split=True)
+        adapter = _adapter(capability, configuration)
+        original_bind = NativeFabricPostWriteAdapter._bind_dependencies
+
+        def bind_without_motif_runtime(self, connection, context, witness):
+            return replace(
+                original_bind(self, connection, context, witness),
+                motif_runtime=None,
+            )
+
+        calls: list[str] = []
+        monkeypatch.setattr(
+            NativeFabricPostWriteAdapter,
+            "_bind_dependencies",
+            bind_without_motif_runtime,
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "maybe_emit_identity_anchor",
+            lambda *_args, **_kwargs: calls.append("emit"),
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "refine_identity_anchors",
+            lambda *_args, **_kwargs: calls.append("refine"),
+        )
+
+        assert adapter.run(
+            _context(split_result, request, created_motif=None),
+            route_witness=NativePostWriteRouteWitness(split_result, request.native_operation_key),
+        ).proposal_id is None
+        assert calls == []
+        assert side.events == []
+    finally:
+        qualified.close()
+
+
+def test_i4b2_tail_skips_reinforcement_and_no_write_before_any_motif_consumer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, _owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        workspace = SimpleNamespace(
+            data_dir=str(tmp_path / "i4b2-gate-workflow"),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        request = _request("i4b2-tail-gates", 1)
+        routed = NativeFabricMemoryRouter(capability).route(request).result
+        assert routed is not None
+        split_result = replace(routed, created_motif=None, precommit_true_split=True)
+        adapter = _adapter(capability, configuration)
+        monkeypatch.setattr(
+            NativeMotifMaintenanceAdapter,
+            "update_entropy_and_suggest",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("I4B-2 tail ran")),
+        )
+        witness = NativePostWriteRouteWitness(split_result, request.native_operation_key)
+
+        adapter.run(
+            _context(
+                split_result,
+                request,
+                outcome=PostWriteStorageOutcome.REINFORCED_EXISTING,
+                created_motif=None,
+            ),
+            route_witness=witness,
+        )
+        adapter.run(_no_write_context(2), route_witness=witness)
     finally:
         qualified.close()
 

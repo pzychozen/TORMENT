@@ -11,7 +11,11 @@ import numpy as np
 import pytest
 
 from torment_service.collective_models import ConvergenceEvent, MemoryGovernanceFlags
-from torment_service.post_write_runtime import FabricPostWriteContext, PostWriteStorageOutcome
+from torment_service.post_write_runtime import (
+    FabricPostWriteContext,
+    LegacyFabricPostWriteAdapter,
+    PostWriteStorageOutcome,
+)
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.connection import open_existing_native_core_connection, open_temporary_test_connection
@@ -374,6 +378,46 @@ def test_d1_shared_m1_retains_anchor_noops_and_creates_only_private_mood(tmp_pat
         workflow = tmp_path / "workflow" / "workspaces" / "ws" / "domains" / "research"
         events = [json.loads(line) for line in (workflow / "motif_events.jsonl").read_text(encoding="utf-8").splitlines()]
         assert events[0]["type"] == "MOTIF_ENTROPY" and not (workflow / "motifs.json").exists()
+    finally:
+        qualified.close()
+
+
+def test_i4b2_shared_witness_preserves_existing_shared_m1_dispatch(tmp_path: Path, monkeypatch):
+    qualified, _connection, capability, private, shared = _prepared(tmp_path)
+    try:
+        side = _SideStore()
+        configuration = _configuration(tmp_path, private=private, shared=shared, side=side)
+        result, request = _shared_created(capability, key="D1:I4B2-SHARED-WITNESS")
+        split_witness = replace(result, created_motif=None, precommit_true_split=True)
+        adapter = prepare_native_fabric_post_write_adapter(
+            capability=capability,
+            configuration=configuration,
+        )
+        dispatches: list[str] = []
+        original_dispatch = LegacyFabricPostWriteAdapter._run_motif_maintenance_and_anchors
+
+        def observe_shared_dispatch(consumers, context):
+            dispatches.append(context.scope)
+            return original_dispatch(consumers, context)
+
+        monkeypatch.setattr(
+            LegacyFabricPostWriteAdapter,
+            "_run_motif_maintenance_and_anchors",
+            observe_shared_dispatch,
+        )
+        monkeypatch.setattr(
+            adapter,
+            "_run_i4b2_true_split_tail",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("shared post-write entered the private I4B-2 tail")
+            ),
+        )
+
+        assert adapter.run(
+            replace(_context(result, request), created_motif=None),
+            route_witness=NativePostWriteRouteWitness(split_witness, request.native_operation_key),
+        ).proposal_id is None
+        assert dispatches == ["shared"]
     finally:
         qualified.close()
 

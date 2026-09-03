@@ -1,4 +1,4 @@
-"""Focused synthetic qualification for I4B-1 primary/precommit truth.
+"""Focused synthetic qualification for I4B-1/I4B-2 primary/precommit truth.
 
 These tests use only temporary native SQLite cores.  They do not start a
 service, open a real root, or contact a provider.
@@ -15,6 +15,7 @@ import pytest
 
 from torment_service.collective_models import MemoryGovernanceFlags
 from torment_service.fabric import TormentFabric
+from torment_service.motif_decision import motif_density
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.compat import (
     CompatibilityEmbeddingPublicationRequest,
@@ -38,6 +39,7 @@ from torment_service.substrate.memory_reinforcement import (
     NativeMemoryReinforcementService,
 )
 from torment_service.substrate.motif_runtime_reader import NativeMotifRuntimeReader
+from torment_service.substrate.native_motif_split import split_strength
 from torment_service.substrate.motifs import NativeMotifService
 from torment_service.substrate.native_memory_runtime_access import NativePostWriteMemoryAccess
 from torment_service.substrate.provenance import NativeProvenanceRecord
@@ -178,6 +180,79 @@ def _result(router: NativeFabricMemoryRouter, request: NativeFabricRouteRequest,
     return attempt.result
 
 
+def _prepare_true_split_fixture(connection, capability, private):
+    """Build the already-qualified, deliberately bimodal parent topology."""
+    router = NativeFabricMemoryRouter(capability)
+    seed = _result(router, _request(key="i4b2-split-seed", vector=(1.0, 0.0, 0.0)))
+    motif = NativeMotifService(connection)
+    parent = motif.resolve_motif_alias(
+        motif_alias_namespace_id=private.motif_alias_namespace_id,
+        runtime_motif_id=seed.motifs[0],
+    )
+    facade = NativeMemoryCompatibilityFacade(connection)
+    for ordinal, vector in enumerate(
+        [(1.0, 0.0, 0.0)] * 47 + [(-1.0, 0.0, 0.0)] * 47, start=2,
+    ):
+        raw = np.asarray(vector, dtype=np.float32)
+        source = facade.finalize_memory_draft(facade.begin_memory_draft(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            idempotency_namespace_id=private.idempotency_namespace_id,
+            idempotency_key=f"i4b2-split-source:{ordinal}",
+            identity_namespace_id=private.runtime_scope.identity_namespace_id,
+            semantic_scope_id=private.runtime_scope.semantic_scope_id,
+            summary=f"i4b2 split source {ordinal}", memory_type="reflection", logical_step=ordinal,
+            embedding_request=CompatibilityEmbeddingPublicationRequest(
+                raw.tobytes(), "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR",
+                dtype="float32", dimension=3,
+            ),
+        )).source
+        current = motif.get_current_motif(parent)
+        motif.add_motif_member(
+            idempotency_namespace_id=private.idempotency_namespace_id,
+            idempotency_key=f"i4b2-split-member:{ordinal}",
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            membership_identity_namespace_id=private.membership_identity_namespace_id,
+            motif_object_id=parent, expected_motif_revision_id=current.motif_revision_id,
+            state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
+            member_object_id=source.object_id,
+        )
+    return router, motif, parent, _request(
+        key="i4b2-qualified-true-split", vector=(0.7, 0.714, 0.0), attach_threshold=0.72,
+    )
+
+
+def _disable_world_observer(monkeypatch) -> None:
+    import torment_service.substrate.native_world_runtime as world_module
+
+    monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
+    monkeypatch.setattr(
+        world_module.NativeWorldRuntime,
+        "register_fresh_created",
+        lambda _self, **_kwargs: None,
+    )
+
+
+def _current_pending_or_aborted_payload(connection) -> dict[str, object]:
+    row = connection.execute(
+        """SELECT r.payload_text FROM objects o JOIN object_revisions r
+             ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+            AND r.revision_ordinal=o.current_revision_ordinal
+            WHERE o.object_kind='LEGACY_CORE_NODE' AND r.existence_state IN ('PENDING','ABORTED')
+            ORDER BY r.existence_state"""
+    ).fetchone()
+    assert row is not None
+    return json.loads(row[0])
+
+
+def _split_operation_intent(connection, operation_kind: str) -> dict[str, object]:
+    row = connection.execute(
+        "SELECT canonical_intent_json FROM operations WHERE operation_kind=?",
+        (operation_kind,),
+    ).fetchone()
+    assert row is not None
+    return json.loads(row[0])
+
+
 def test_i4b1_primary_outcomes_cover_private_shared_and_reinforcement(tmp_path: Path):
     qualified, connection, capability, private, shared = _prepared(tmp_path, shared=True)
     assert shared is not None
@@ -215,6 +290,7 @@ def test_i4b1_primary_outcomes_cover_private_shared_and_reinforcement(tmp_path: 
             private_create.primary_outcome.primary_canonical_state_committed,
             private_create.primary_outcome.qualified_memory_eid,
         ) == ("private", "DIRECT_CREATE_PATH", "NOT_APPLICABLE", "CREATED_NEW", "NONE", True, 0)
+        assert private_create.created_motif == private_create.motifs[0]
         assert connection.execute(
             "SELECT revision_ordinal,existence_state FROM object_revisions WHERE object_id=? ORDER BY revision_ordinal",
             (native_id_to_bytes(private_create.memory_object_id),),
@@ -236,6 +312,7 @@ def test_i4b1_primary_outcomes_cover_private_shared_and_reinforcement(tmp_path: 
             reinforced.primary_outcome.reinforcement_disposition,
             reinforced.primary_outcome.final_storage_outcome,
         ) == (True, private_create.eid, "INGEST_REINFORCEMENT_ATTEMPT", "REINFORCED", "REINFORCED_EXISTING")
+        assert reinforced.created_motif is None
     finally:
         qualified.close()
 
@@ -602,7 +679,42 @@ def test_i4b1_restart_retains_failed_eid_and_orphan_motif_without_canonical_visi
             qualified.close()
 
 
-def test_i4b1_reachable_true_split_refuses_before_precommit_reservation_or_motif_write(tmp_path: Path):
+def test_i4b2_t0_pre_stage_a_failure_leaves_no_true_split_motif_residue(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, motif, parent, request = _prepare_true_split_fixture(connection, capability, private)
+        before_members = motif.list_current_motif_members(parent)
+        monkeypatch.setattr(
+            NativeMotifService,
+            "attach_member_for_precommit_split",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced Stage A failure")),
+        )
+
+        with pytest.raises(NativePrecommitAttachFailure) as failed:
+            router.route(request)
+
+        assert failed.value.witness.create_failure_disposition == "PRECOMMIT_MOTIF_ATTACH_FAILURE_RAISED"
+        assert len(motif.list_current_motif_members(parent)) == len(before_members)
+        assert connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind LIKE 'NATIVE_I4B2_PRECOMMIT_SPLIT_%'"
+        ).fetchone()[0] == 0
+        assert _current_pending_or_aborted_payload(connection)["failure_stage"] == "I4B2_STAGE_0"
+        assert capability.process_order.runtime_ids_for_testing(
+            routing_scope=private, domain_id="research",
+        ) == ("motif_research_0001",)
+    finally:
+        qualified.close()
+
+
+def test_i4b2_reachable_true_split_uses_two_stage_precommit_topology(tmp_path: Path, monkeypatch):
+    # The synthetic historical members below deliberately omit structural
+    # provenance, which is immaterial to the motif topology under test.  Keep
+    # the world observer outside this focused, motif-only qualification.
+    import torment_service.substrate.native_world_runtime as world_module
+
+    monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
+    monkeypatch.setattr(world_module.NativeWorldRuntime, "register_fresh_created", lambda _self, **_kwargs: None)
     qualified, connection, capability, private, _shared = _prepared(tmp_path)
     try:
         router = NativeFabricMemoryRouter(capability)
@@ -639,27 +751,330 @@ def test_i4b1_reachable_true_split_refuses_before_precommit_reservation_or_motif
                 state=replace(current.state, last_active_ts=current.state.last_active_ts + 1),
                 member_object_id=source.object_id,
             )
-        before = tuple(
-            connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("objects", "object_revisions", "relationships", "operations")
-        )
-        refused = router.route(_request(
+        result = _result(router, _request(
             key="i4b1-qualified-true-split", vector=(0.7, 0.714, 0.0), attach_threshold=0.72,
         ))
-        assert (refused.qualification.eligible, refused.qualification.reason_code, refused.result) == (
-            False, "TRUE_SPLIT_PENDING_I4B2", None,
-        )
-        assert refused.primary_outcome is not None
+        assert result.primary_outcome is not None
         assert (
-            refused.primary_outcome.final_storage_outcome,
-            refused.primary_outcome.primary_canonical_state_committed,
-            refused.primary_outcome.qualified_memory_eid,
-        ) == ("REFUSED", False, None)
-        after = tuple(
-            connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("objects", "object_revisions", "relationships", "operations")
+            result.stored, result.reinforced, result.created_motif,
+            result.precommit_true_split, result.primary_outcome.final_storage_outcome,
+        ) == (True, False, None, True, "CREATED_NEW")
+        assert result.motifs[0] == "motif_research_0001"
+        assert result.motifs[1].startswith("motif_research_0001_split_")
+        rows = connection.execute(
+            "SELECT operation_kind FROM operations WHERE idempotency_key LIKE 'I4B2:%' ORDER BY operation_kind"
+        ).fetchall()
+        assert rows == [
+            ("NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH",),
+            ("NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE",),
+        ]
+        child = motif.resolve_motif_alias(
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            runtime_motif_id=result.motifs[1],
         )
-        assert after == before
+        candidate = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=private.runtime_scope.legacy_source_namespace_id,
+            eid=result.eid,
+        )
+        assert candidate is not None
+        parent_members = {member.member_object_id for member in motif.list_current_motif_members(parent)}
+        child_members = {member.member_object_id for member in motif.list_current_motif_members(child)}
+        assert candidate.object_id in parent_members | child_members
+        assert candidate.object_id not in parent_members & child_members
+        parent_state = motif.get_current_motif(parent).state
+        child_state = motif.get_current_motif(child).state
+        # The partition controls member count, centroid, strength, stability,
+        # density and therefore gravity inputs; no I4B-2 formula exists.
+        assert len(parent_members) + len(child_members) == 96
+        assert parent_state.strength == pytest.approx(split_strength(len(parent_members), floor=.18))
+        assert child_state.strength == pytest.approx(split_strength(len(child_members), floor=.15))
+        assert parent_state.stability_score == child_state.stability_score
+        assert motif_density(len(parent_members)) > 0.0
+        assert motif_density(len(child_members)) > 0.0
+        reader = NativeMotifRuntimeReader(connection)
+        domain_centroid = reader.domain_centroid(
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            domain_id="research",
+            dimension=3,
+            semantic_scope_id=private.runtime_scope.semantic_scope_id,
+        )
+        assert domain_centroid is not None and np.isfinite(domain_centroid).all()
+    finally:
+        qualified.close()
+
+
+def test_i4b2_stage_a_crash_replays_the_stored_partition_without_replanning(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    reopened = None
+    try:
+        router, motif, parent, request = _prepare_true_split_fixture(connection, capability, private)
+        with pytest.raises(RuntimeError, match="after precommit split stage A"):
+            router.route(request, _test_stop_after="precommit_split_after_stage_a")
+        stage_a = connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH'"
+        ).fetchone()[0]
+        stage_b = connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE'"
+        ).fetchone()[0]
+        pending = connection.execute(
+            "SELECT count(*) FROM objects o JOIN object_revisions r ON r.object_id=o.object_id "
+            "AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal "
+            "WHERE o.object_kind='LEGACY_CORE_NODE' AND r.existence_state='PENDING'"
+        ).fetchone()
+        assert (stage_a, stage_b, pending) == (1, 0, (1,))
+        assert len(motif.list_current_motif_members(parent)) == 96
+
+        # A restart recreates both the connection and process-order owner.  The
+        # persisted Stage-A operation is the sole authority for the Stage-B
+        # partition; recovery does not plan against the changed parent.
+        database_path = qualified.database_path
+        qualified.close()
+        qualified = None
+        reopened = open_existing_native_core_connection(database_path)
+        capability = prepare_native_fabric_routing_capability(
+            binding=capability.binding,
+            connection=reopened.connection,
+            routing_scopes=(private,),
+            expected_core_id=capability.core_id,
+        )
+        recovered = _result(NativeFabricMemoryRouter(capability), request)
+        assert recovered.precommit_true_split is True
+        assert recovered.motifs[0] == "motif_research_0001"
+        assert len(recovered.motifs) == 2
+        assert reopened.connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH'"
+        ).fetchone()[0] == 1
+        assert reopened.connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE'"
+        ).fetchone()[0] == 1
+        assert capability.process_order.runtime_ids_for_testing(
+            routing_scope=private, domain_id="research",
+        ) == recovered.motifs
+    finally:
+        if reopened is not None:
+            reopened.close()
+        if qualified is not None:
+            qualified.close()
+
+
+def test_i4b2_stage_b_and_canonical_failure_recover_exact_output_topology(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, _motif, _parent, request = _prepare_true_split_fixture(connection, capability, private)
+        with pytest.raises(RuntimeError, match="after precommit split stage B"):
+            router.route(request, _test_stop_after="precommit_split_after_stage_b")
+        staged = connection.execute(
+            "SELECT count(*) FROM objects o JOIN object_revisions r ON r.object_id=o.object_id "
+            "AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal "
+            "WHERE o.object_kind='LEGACY_CORE_NODE' AND r.existence_state='PENDING'"
+        ).fetchone()
+        assert staged == (1,)
+        failed = _result(
+            router, request, _test_stop_after="precommit_canonical_failure",
+        )
+        assert failed.primary_outcome is not None
+        assert (
+            failed.stored, failed.created_motif, failed.precommit_true_split,
+            failed.primary_outcome.create_failure_disposition, len(failed.motifs),
+        ) == (False, None, True, "CANONICAL_FLUSH_FAILURE_STRUCTURED", 2)
+        import torment_service.substrate.fabric_native_routing as routing_module
+        monkeypatch.setattr(
+            routing_module,
+            "_runtime_motif_ids_for_member",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("split recovery scanned memberships")),
+        )
+        assert _result(router, request) == failed
+    finally:
+        qualified.close()
+
+
+def test_i4b2_canonical_recovery_uses_stage_b_outputs_not_member_scan(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, _motif, _parent, request = _prepare_true_split_fixture(connection, capability, private)
+        with pytest.raises(RuntimeError, match="committed native new-memory source"):
+            router.route(request, _test_stop_after="source")
+
+        import torment_service.substrate.fabric_native_routing as routing_module
+
+        monkeypatch.setattr(
+            routing_module,
+            "_runtime_motif_ids_for_member",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("true-split canonical recovery scanned memberships")
+            ),
+        )
+        recovered = _result(router, request)
+        assert (recovered.stored, recovered.precommit_true_split, recovered.created_motif) == (True, True, None)
+        assert len(recovered.motifs) == 2
+        assert connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE'"
+        ).fetchone()[0] == 1
+    finally:
+        qualified.close()
+
+
+def test_i4b2_canonical_replay_preserves_the_original_create_disposition(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, _motif, _parent, request = _prepare_true_split_fixture(connection, capability, private)
+        first = _result(router, request)
+        replay = _result(router, request)
+        assert (first.stored, first.reinforced, first.created_motif, first.precommit_true_split) == (
+            True, False, None, True,
+        )
+        assert (replay.stored, replay.reinforced, replay.created_motif, replay.precommit_true_split) == (
+            True, False, None, True,
+        )
+        assert first.motifs == replay.motifs
+        assert first.primary_outcome is not None and replay.primary_outcome is not None
+        assert (
+            replay.primary_outcome.attempt_origin,
+            replay.primary_outcome.reinforcement_disposition,
+            replay.primary_outcome.final_storage_outcome,
+        ) == (
+            first.primary_outcome.attempt_origin,
+            first.primary_outcome.reinforcement_disposition,
+            "CREATED_NEW",
+        )
+    finally:
+        qualified.close()
+
+
+def test_i4b2_stage_b_moves_the_stored_candidate_to_child_without_duplication(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _disable_world_observer(monkeypatch)
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, motif, parent, request = _prepare_true_split_fixture(connection, capability, private)
+        request = replace(
+            request,
+            native_operation_key=f"{request.native_operation_key}:child",
+            incoming_embedding=(0.7, 0.714, 0.0),
+            attach_threshold=0.0,
+        )
+        with pytest.raises(RuntimeError, match="after precommit split stage A"):
+            router.route(request, _test_stop_after="precommit_split_after_stage_a")
+
+        intent = _split_operation_intent(connection, "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH")
+        assert intent["final_split"]["candidate_in_child"] is True
+        candidate_row = connection.execute(
+            """SELECT o.object_id FROM objects o JOIN object_revisions r
+                 ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+                AND r.revision_ordinal=o.current_revision_ordinal
+                WHERE o.object_kind='LEGACY_CORE_NODE' AND r.existence_state='PENDING'"""
+        ).fetchone()
+        assert candidate_row is not None
+        candidate_object_id = native_id_from_bytes(candidate_row[0])
+        stage_a_member = next(
+            member for member in motif.list_current_motif_members(parent)
+            if member.member_object_id == candidate_object_id
+        )
+
+        result = _result(router, request)
+        child = motif.resolve_motif_alias(
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            runtime_motif_id=result.motifs[1],
+        )
+        parent_members = {
+            member.member_object_id: member.relationship_id
+            for member in motif.list_current_motif_members(parent)
+        }
+        child_members = {
+            member.member_object_id: member.relationship_id
+            for member in motif.list_current_motif_members(child)
+        }
+        assert candidate_object_id not in parent_members
+        assert child_members[candidate_object_id] != stage_a_member.relationship_id
+    finally:
+        qualified.close()
+
+
+def test_i4b2_stage_b_keeps_a_parent_candidate_current_without_duplication(tmp_path: Path, monkeypatch):
+    """Exercise Stage B's explicit candidate-in-parent storage contract.
+
+    The policy fixture reaches the child branch above.  This focused service
+    test supplies the complementary already-attached plan, proving that Stage
+    B retains the Stage-A relationship instead of manufacturing a second one.
+    """
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, motif, parent, request = _prepare_true_split_fixture(connection, capability, private)
+        with pytest.raises(RuntimeError, match="after precommit split stage A"):
+            router.route(request, _test_stop_after="precommit_split_after_stage_a")
+
+        from torment_service.substrate.motifs import _split_plan_from_intent
+
+        intent = _split_operation_intent(connection, "NATIVE_I4B2_PRECOMMIT_SPLIT_ATTACH")
+        plan = replace(_split_plan_from_intent(intent["final_split"]), candidate_in_child=False)
+        candidate_row = connection.execute(
+            """SELECT o.object_id FROM objects o JOIN object_revisions r
+                 ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+                AND r.revision_ordinal=o.current_revision_ordinal
+                WHERE o.object_kind='LEGACY_CORE_NODE' AND r.existence_state='PENDING'"""
+        ).fetchone()
+        assert candidate_row is not None
+        candidate_object_id = native_id_from_bytes(candidate_row[0])
+        stage_a_member = next(
+            member for member in motif.list_current_motif_members(parent)
+            if member.member_object_id == candidate_object_id
+        )
+        result = motif.finalize_precommit_attached_split(
+            idempotency_namespace_id=private.idempotency_namespace_id,
+            idempotency_key="i4b2-direct-parent-candidate",
+            motif_identity_namespace_id=private.motif_identity_namespace_id,
+            membership_identity_namespace_id=private.membership_identity_namespace_id,
+            motif_alias_namespace_id=private.motif_alias_namespace_id,
+            plan=plan,
+            attached_parent_revision_id=motif.get_current_motif(parent).motif_revision_id,
+            attached_candidate_membership_id=stage_a_member.relationship_id,
+            request_identity={"fixture": "i4b2-direct-parent-candidate"},
+        )
+        child_members = motif.list_current_motif_members(result.child_motif_object_id)
+        parent_members = motif.list_current_motif_members(parent)
+        assert any(
+            member.member_object_id == candidate_object_id
+            and member.relationship_id == stage_a_member.relationship_id
+            for member in parent_members
+        )
+        assert all(member.member_object_id != candidate_object_id for member in child_members)
+    finally:
+        qualified.close()
+
+
+def test_i4b2_stage_b_failure_records_instrumented_stage_count(tmp_path: Path, monkeypatch):
+    _disable_world_observer(monkeypatch)
+    qualified, connection, capability, private, _shared = _prepared(tmp_path)
+    try:
+        router, motif, parent, request = _prepare_true_split_fixture(connection, capability, private)
+        original = NativeMotifService.finalize_precommit_attached_split
+
+        def fail_after_child_creation(self, *args, **kwargs):
+            kwargs["_test_fail_after"] = "child_object"
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(NativeMotifService, "finalize_precommit_attached_split", fail_after_child_creation)
+        with pytest.raises(NativePrecommitAttachFailure):
+            router.route(request)
+        # The Stage-B semantic transaction rolled back, so Stage A is the only
+        # surviving topology: the parent still holds the candidate and no
+        # child alias/current relationship was published.
+        assert len(motif.list_current_motif_members(parent)) == 96
+        assert connection.execute(
+            "SELECT count(*) FROM operations WHERE operation_kind='NATIVE_I4B2_PRECOMMIT_SPLIT_FINALIZE'"
+        ).fetchone()[0] == 0
+        assert _current_pending_or_aborted_payload(connection)["failure_stage"] == "I4B2_STAGE_1"
+        assert capability.process_order.runtime_ids_for_testing(
+            routing_scope=private, domain_id="research",
+        ) == ("motif_research_0001",)
     finally:
         qualified.close()
 

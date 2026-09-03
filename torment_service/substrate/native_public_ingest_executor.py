@@ -5,7 +5,7 @@ backend selector.  It proves one owner-qualified execution/recovery envelope.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from typing import Any, Callable, Mapping
 
@@ -34,6 +34,7 @@ from .fabric_native_routing import (
 )
 from .native_post_write_runtime import (
     NativePostWriteQualificationConfiguration,
+    NativePostWriteQualificationProfile,
     NativePostWriteRouteWitness,
 )
 from .native_public_mutation_receipts import (
@@ -136,7 +137,10 @@ class NativeFabricIngestStorageAdapter:
                 self._fabric.data_dir, prepared.workspace_id,
             ),
             precommit_symbol_state_owner=lambda effect: self._apply_symbol_precommit_owner(effect),
-            precommit_parity_required=True,
+            # I4B-2's two-stage true-split proof is a private native-public
+            # route only. Shared public ingest retains its established route
+            # and post-write dispatch without this opt-in.
+            precommit_parity_required=prepared.scope == "private",
             contradiction_guard=lambda incoming, existing, similarity: bool(
                 _detect_canon_conflict(incoming, existing, similarity)[0]
             ),
@@ -170,10 +174,10 @@ class NativeFabricIngestStorageAdapter:
                 )
             ),
             stored=result.stored, eid=result.eid, motif_ids=result.motifs,
-            # Native route results expose affected public runtime motif IDs;
-            # for a new source the first one is the normal compatibility
-            # creation surface, without exposing native structural UUIDs.
-            created_motif=(None if result.reinforced or not result.motifs else result.motifs[0]),
+            # This is route-owned semantic truth.  It must not be inferred
+            # from affected motifs: I4B-2 attach-then-split affects parent and
+            # child but did not create a normal public motif.
+            created_motif=result.created_motif,
             state_symbol=None,
             # A failed canonical flush is never a stored route witness.  The
             # legacy source returns before the storage/post-write adapter, so
@@ -328,6 +332,19 @@ class NativePublicIngestExecutor:
             skip_packet_emission=prepared.skip_packet_emission,
         )
         configuration = self._post_write_configuration(prepared)
+        if (
+            route_result is not None
+            and route_result.precommit_true_split
+            and prepared.scope == "private"
+        ):
+            # I4B-2 opts into one narrow motif/anchor tail only for its
+            # stored true-split outcome.  Ordinary public writes retain their
+            # existing core-staging profile and broad post-write sequence.
+            configuration = replace(
+                configuration,
+                profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+                motif_suggestion_maintenance_required=True,
+            )
         with self._owner.open_post_write_context(configuration=configuration) as post_write:
             post = post_write.run(
                 context,

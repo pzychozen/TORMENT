@@ -115,8 +115,9 @@ witness.
 
 ## Precommit residue and motif truth
 
-The public-ingest storage adapter opts into the protocol with
-`precommit_parity_required=True` and retains Fabric's existing
+The public-ingest storage adapter opts into the protocol for the currently
+claimed private native-public scope (`precommit_parity_required =
+prepared.scope == "private"`) and retains Fabric's existing
 `_mark_embed_audit_dirty` call as a best-effort observer after reservation and
 before motif persistence. The native route does not replace the audit file's
 external durable owner. Synthetic qualification proves the ordering and that
@@ -203,8 +204,8 @@ or a cross-owner transaction.
 |---|---|---|---|
 | Role | After kernel summary and before the write decision, `RoleStore.load → update_from_text → save` | private and shared; CREATE, REINFORCE, and NO_WRITE | failures are debug-log fail-soft; durable `roles.json` remains after later primary failure and reload |
 | Affect | `classify_affect(summary)` before the write decision | private and shared; CREATE, REINFORCE, and NO_WRITE | classifier failure is silent fail-soft (`completed=False`); classification is an ephemeral/prepared fact. `affect_state.json` belongs to post-write mood-drift continuity and is not a precommit effect |
-| Symbol state | After durable motif attach/create and before flush/primary commit, Fabric's retained symbol-state writer saves `symbol_state.json` | CREATE only; private and shared | writer failure is debug-log fail-soft; successful side state remains after later primary failure and reload |
-| Resonance enrichment | Same symbolic projection, returned to the primary payload | CREATE only | it becomes durable only with canonical commit; failed primary memory has no canonical resonance payload |
+| Symbol state | After durable motif attach/create and before flush/primary commit, Fabric's retained symbol-state writer saves `symbol_state.json` | CREATE only; current claimed private native-public precommit scope | writer failure is debug-log fail-soft; successful side state remains after later primary failure and reload |
+| Resonance enrichment | Same symbolic projection, returned to the primary payload | CREATE only; current claimed private native-public precommit scope | it becomes durable only with canonical commit; failed primary memory has no canonical resonance payload |
 
 Native preparation now invokes the existing RoleStore owner even when
 `_native_public=True`. Affect already followed source behavior in preparation;
@@ -225,9 +226,9 @@ EXACT_PRECOMMIT_CAUSAL_ORDER =
 
 ROLE_PRECOMMIT_PARITY = PASS
 AFFECT_PRECOMMIT_PARITY = PASS
-SYMBOL_STATE_PRECOMMIT_PARITY = PASS
-RESONANCE_PRECOMMIT_PARITY = PASS
-PRECOMMIT_EXTERNAL_OWNER_PARITY = PASS
+SYMBOL_STATE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
+RESONANCE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
+PRECOMMIT_EXTERNAL_OWNER_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
 EXTERNAL_OWNER_MIGRATION_TO_SQLITE = NO
 EXTERNAL_OWNER_FAILURE_DISPOSITION_PARITY = PASS
 EXTERNAL_OWNER_RESIDUE_AFTER_PRIMARY_FAILURE = PASS
@@ -331,7 +332,7 @@ REINFORCEMENT_SEMANTIC_FALLTHROUGH = PASS
 REINFORCEMENT_EXCEPTION_FALLTHROUGH = PASS
 CREATE_COMMIT_BOUNDARY = PASS
 REINFORCE_COMMIT_BOUNDARY = PASS
-EMBED_AUDIT_DIRTY_PARITY = PASS_TESTED (synthetic external observer residue)
+EMBED_AUDIT_DIRTY_PARITY = PASS_TESTED_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE (synthetic external observer residue)
 MOTIF_ATTACH_CREATE_PARITY = PASS
 MOTIF_LIVE_ORDER_WITNESS = QUALIFIED
 ORPHAN_MOTIF_POLICY = QUALIFIED
@@ -345,9 +346,12 @@ TRUE_SPLIT_NATIVE_DISPOSITION = REFUSED_PENDING_I4B2
 I4B1_ATTACH_FAILURE_STAGE_MODEL = COMPLETE_TWO_STAGE
 ROLE_PRECOMMIT_PARITY = PASS
 AFFECT_PRECOMMIT_PARITY = PASS
-SYMBOL_STATE_PRECOMMIT_PARITY = PASS
-RESONANCE_PRECOMMIT_PARITY = PASS
-PRECOMMIT_EXTERNAL_OWNER_PARITY = PASS
+SYMBOL_STATE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
+RESONANCE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
+PRECOMMIT_EXTERNAL_OWNER_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
+I4B1_PRECOMMIT_EXTERNAL_OWNER_SCOPE = PRIVATE_QUALIFIED
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = YES
+I4C_SHARED_SCOPE_PREREQUISITE = DO_NOT_INFER_SHARED_PRECOMMIT_PARITY_FROM_PRIVATE_I4B1_RECEIPTS
 PUBLIC_NATIVE_NO_WRITE_REPORTING_DEFECT_FIXED = YES
 CANONICAL_FAILURE_POSTWRITE_DISPOSITION = SHORT_CIRCUIT
 ORDINARY_NO_WRITE_DISPOSITION = QUALIFIED_BOUNDED

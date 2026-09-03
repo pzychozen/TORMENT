@@ -32,7 +32,10 @@ from torment_service.substrate.native_public_mutation_receipts import (
     PublicMutationRecoveryState,
 )
 from torment_service.substrate.connection import open_existing_native_core_connection
-from torment_service.substrate.production_native_owner import NativeProductionResourceOwner
+from torment_service.substrate.production_native_owner import (
+    NativeProductionResourceOwner,
+    NativeProductionWriteContext,
+)
 
 # Reuse B5-A3's real active core/admission fixture.  It creates an ACTIVE core
 # with the admitted private ``aria`` scope and actual SQLite operation ledger.
@@ -562,18 +565,29 @@ def test_new_and_reinforcement_results_replay_without_second_native_source(tmp_p
         owner.close()
 
 
-def test_shared_source_replay_does_not_duplicate_its_native_source(tmp_path: Path):
+def test_shared_source_replay_does_not_duplicate_its_native_source(tmp_path: Path, monkeypatch):
     executor, owner, fabric = _executor(tmp_path)
     request = _request(
         "shared-source", scope="shared", domain_id="research", step=200,
         text="I feel very angry and furious",
     )
     try:
+        observed_precommit_opt_ins: list[bool] = []
+        original_route = NativeProductionWriteContext.route
+
+        def observe_route(self, route_request, **kwargs):
+            if route_request.scope == "shared":
+                observed_precommit_opt_ins.append(route_request.precommit_parity_required)
+            return original_route(self, route_request, **kwargs)
+
+        monkeypatch.setattr(NativeProductionWriteContext, "route", observe_route)
         first = executor.execute(request)
         replay = executor.execute(request)
         assert first == replay
         assert first["stored"] is True and first["domain_chosen"] == "research"
+        assert observed_precommit_opt_ins == [False]
         assert _native_operation_count(owner, "NATIVE_FABRIC_NEW_MEMORY:SOURCE:") == 1
+        assert _native_operation_count(owner, "I4B2:") == 0
     finally:
         fabric.close()
         owner.close()

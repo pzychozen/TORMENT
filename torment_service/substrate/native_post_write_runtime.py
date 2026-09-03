@@ -409,6 +409,12 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         if not isinstance(context, FabricPostWriteContext):
             raise ValueError("context must be FabricPostWriteContext")
         witness = route_witness or NativePostWriteRouteWitness(None, None)
+        if (
+            context.scope == "private"
+            and witness.route_result is not None
+            and witness.route_result.precommit_true_split
+        ):
+            return self._run_i4b2_true_split_tail(context, witness)
         if context.scope == "shared":
             if self._configuration.shared_integrated_default_required:
                 return self.run_shared_integrated_default(context, route_witness=witness).outcome
@@ -491,6 +497,85 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             consumers._run_character_drift(context)
             proposal_id = consumers._run_proposal(context)
             return FabricPostWriteOutcome(proposal_id=proposal_id)
+
+    def _run_i4b2_true_split_tail(
+        self,
+        context: FabricPostWriteContext,
+        witness: NativePostWriteRouteWitness,
+    ) -> FabricPostWriteOutcome:
+        """Run I4B-2's bounded motif tail and nothing from the broad runtime.
+
+        A true split's child is a structural consequence of an attach route,
+        not a public ``created_motif``.  The eligibility gate is therefore
+        the primary ``CREATED_NEW`` outcome, while reinforcement and ordinary
+        no-write perform no I4B-2 tail work.
+        """
+        if context.storage_outcome is not PostWriteStorageOutcome.CREATED_NEW:
+            return FabricPostWriteOutcome()
+        if context.scope != "private":
+            raise SubstrateInvariantViolation("I4B-2 true split has an unsupported scope")
+        self._validate_i4b2_true_split_tail_pre_effect(context)
+        with open_existing_native_core_connection(self._capability.core_database_path) as opened:
+            connection = opened.connection
+            _revalidate_capability_for_route(self._capability, connection)
+            self._validate_context_and_route(connection, context, witness)
+            consumers = LegacyFabricPostWriteAdapter(self._bind_dependencies(connection, context, witness))
+            self._run_i4b2_motif_maintenance_and_anchors(consumers, context, emit_anchors=True)
+        return FabricPostWriteOutcome()
+
+    @staticmethod
+    def _run_i4b2_motif_maintenance_and_anchors(
+        consumers: LegacyFabricPostWriteAdapter,
+        context: FabricPostWriteContext,
+        *,
+        emit_anchors: bool,
+    ) -> None:
+        """Preserve only M1 plus the qualified anchor sub-slots, fail-soft."""
+        deps = consumers._deps
+        if deps.motif_runtime is None:
+            return
+        policy = deps.workspace.domain_policies.get(context.chosen_domain, {})
+        try:
+            deps.motif_runtime.update_entropy_and_suggest(
+                target_n=int(policy.get("motif_entropy_target_n", 24)),
+                entropy_high=float(policy.get("motif_entropy_high", 0.72)),
+                sim_threshold=float(policy.get("motif_merge_similarity", 0.93)),
+                max_suggestions=int(policy.get("motif_merge_max_suggestions", 20)),
+                auto_merge=bool(policy.get("auto_merge_motifs", False)),
+                auto_merge_trigger=float(policy.get("auto_merge_entropy_trigger", 0.80)),
+            )
+        except Exception as exc:
+            deps.owner._log.debug("motif entropy update failed for domain=%s: %s", context.chosen_domain, exc)
+        if not emit_anchors:
+            return
+        derived_context = DerivedMemoryRuntimeContext(
+            workspace_id=context.workspace_id,
+            agent_id=context.agent_id,
+            domain_id=context.chosen_domain,
+            trigger_scope=context.scope,
+            step=int(context.step),
+            motif_ids=tuple(context.motif_ids),
+            affect_tag=context.affect_tag,
+            affect_conf=context.affect_conf,
+        )
+        try:
+            deps.derived_memory_runtime.maybe_emit_identity_anchor(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("identity anchor emission failed: %s", exc)
+        try:
+            deps.derived_memory_runtime.refine_identity_anchors(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("identity anchor refinement failed: %s", exc)
+
+    def _validate_i4b2_true_split_tail_pre_effect(
+        self, context: FabricPostWriteContext,
+    ) -> None:
+        profile = self._configuration.profile
+        policy = self._configuration.external.workspace.domain_policies.get(context.chosen_domain, {})
+        _require_qualified(profile.derived_memory, "derived memory")
+        _require_qualified(profile.motif_suggestion_maintenance, "motif suggestion maintenance")
+        if bool(policy.get("auto_merge_motifs", False)):
+            _require_qualified(profile.motif_auto_merge, "motif auto-merge")
 
     def run_shared_integrated_default(
         self,
