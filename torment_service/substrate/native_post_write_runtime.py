@@ -14,7 +14,7 @@ import sqlite3
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from torment_service.checkpoint import build_motif_summary, save_checkpoint
+from torment_service.checkpoint import build_motif_summary, build_shard_snapshot, save_checkpoint
 from torment_service.post_write_runtime import (
     DerivedMemoryRuntimeContext,
     FabricPostWriteContext,
@@ -124,6 +124,15 @@ class NativePostWriteQualificationProfile:
         return replace(
             cls.core_staging_with_motif_merge_maintenance(),
             character=NativePostWriteBehavior.QUALIFIED,
+        )
+
+    @classmethod
+    def core_staging_with_i4e_private_tail(cls) -> "NativePostWriteQualificationProfile":
+        """I4E's private SRG/world/trajectory/checkpoint continuation."""
+        return replace(
+            cls.core_staging_with_character_and_motif_merge_maintenance(),
+            checkpoint=NativePostWriteBehavior.QUALIFIED,
+            trajectory_evidence=NativePostWriteBehavior.QUALIFIED,
         )
 
     @classmethod
@@ -270,6 +279,28 @@ class NativeSharedCheckpointSnapshotBinding:
 
 
 @dataclass(frozen=True)
+class NativePrivateTrajectoryEvidenceBinding:
+    """Exact external private artifact root and frozen legacy writer selection."""
+
+    artifact_root_dir: str
+    trajectory_format: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.artifact_root_dir, str) or not self.artifact_root_dir:
+            raise ValueError("artifact_root_dir must be non-empty text")
+        if self.trajectory_format not in {"v2", "legacy"}:
+            raise ValueError("trajectory_format must be v2 or legacy")
+
+
+@dataclass(frozen=True)
+class NativePrivateCheckpointSnapshotBinding:
+    """Private caller-owned live state for the existing external writer."""
+
+    model_state: Any | None
+    kernel_runtime_context: Any | None
+
+
+@dataclass(frozen=True)
 class _NativeCheckpointMotifProjection:
     """Read-only shape consumed by the existing checkpoint summary builder."""
 
@@ -302,6 +333,8 @@ class NativePostWriteQualificationConfiguration:
     shared_checkpoint_snapshot_required: bool = False
     shared_compression_disabled_noop_required: bool = False
     shared_integrated_default_required: bool = False
+    private_trajectory_evidence_binding: NativePrivateTrajectoryEvidenceBinding | None = None
+    private_checkpoint_snapshot_binding: NativePrivateCheckpointSnapshotBinding | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.routing_scope, NativeFabricRoutingScope):
@@ -329,6 +362,18 @@ class NativePostWriteQualificationConfiguration:
         ):
             raise ValueError(
                 "shared_checkpoint_snapshot_binding must be NativeSharedCheckpointSnapshotBinding or None"
+            )
+        if self.private_trajectory_evidence_binding is not None and not isinstance(
+            self.private_trajectory_evidence_binding, NativePrivateTrajectoryEvidenceBinding,
+        ):
+            raise ValueError(
+                "private_trajectory_evidence_binding must be NativePrivateTrajectoryEvidenceBinding or None"
+            )
+        if self.private_checkpoint_snapshot_binding is not None and not isinstance(
+            self.private_checkpoint_snapshot_binding, NativePrivateCheckpointSnapshotBinding,
+        ):
+            raise ValueError(
+                "private_checkpoint_snapshot_binding must be NativePrivateCheckpointSnapshotBinding or None"
             )
         for name in (
             "motif_suggestion_maintenance_required", "persistent_trajectory_evidence_required",
@@ -387,7 +432,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         self._shared_trajectory_evidence: NativeTrajectoryEvidenceRuntime | None = None
 
     def close(self) -> None:
-        """Release the D3 evidence tail without granting any storage authority."""
+        """Release only request-owned shared evidence without storage authority."""
         runtime = self._shared_trajectory_evidence
         if runtime is not None:
             runtime.close()
@@ -503,8 +548,13 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
                     consumers._run_motif_maintenance_and_anchors(context)
                 else:
                     consumers._run_derived_memory(context)
-            consumers._run_world_step(context)
+            if self._private_trajectory_evidence_enabled:
+                self._run_private_world_and_trajectory(consumers, context)
+            else:
+                consumers._run_world_step(context)
             consumers._run_character_drift(context)
+            if self._private_checkpoint_snapshot_enabled:
+                self._run_private_checkpoint_snapshot(connection, context)
             proposal_id = consumers._run_proposal(context)
             return FabricPostWriteOutcome(proposal_id=proposal_id)
 
@@ -513,16 +563,17 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         context: FabricPostWriteContext,
         witness: NativePostWriteRouteWitness,
     ) -> FabricPostWriteOutcome:
-        """Run I4C's conflict prefix and I4B-2/I4D's bounded private tail.
+        """Run I4C/I4D and opt-in I4E's bounded private true-split tail.
 
         A true split's child is a structural consequence of an attach route,
         not a public ``created_motif``.  The eligibility gate is therefore
         the primary ``CREATED_NEW`` outcome. I4C restores only the first
         legacy created-memory consumer: the existing external, fail-soft
-        contradiction surface. I4D then composes only mood drift and Character
-        after I4B-2's preserved M1/anchor slot; the world step and every later
-        I4E consumer remain excluded. Reinforcement and ordinary no-write
-        perform neither conflict persistence nor I4B-2/I4D tail work.
+        contradiction surface. I4D composes mood drift after I4B-2's preserved
+        M1/anchor slot. The I4E profile inserts SRG before that slot, then
+        world/trajectory before Character and checkpoint after Character.
+        Hivemind remains excluded. Reinforcement and ordinary no-write perform
+        neither conflict persistence nor true-split created-only work.
         """
         if context.storage_outcome is not PostWriteStorageOutcome.CREATED_NEW:
             return FabricPostWriteOutcome()
@@ -535,9 +586,15 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             self._validate_context_and_route(connection, context, witness)
             consumers = LegacyFabricPostWriteAdapter(self._bind_dependencies(connection, context, witness))
             consumers._run_contradiction_surface(context)
+            if self._private_i4e_enabled:
+                consumers._run_srg_collision(context)
             self._run_i4b2_motif_maintenance_and_anchors(consumers, context, emit_anchors=True)
             self._run_i4d_mood_drift(consumers, context)
+            if self._private_i4e_enabled:
+                self._run_private_world_and_trajectory(consumers, context)
             consumers._run_character_drift(context)
+            if self._private_i4e_enabled:
+                self._run_private_checkpoint_snapshot(connection, context)
         return FabricPostWriteOutcome()
 
     @staticmethod
@@ -628,6 +685,130 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             _refuse(profile.character, "Character drift")
         if bool(policy.get("auto_merge_motifs", False)):
             _require_qualified(profile.motif_auto_merge, "motif auto-merge")
+        if self._private_i4e_enabled:
+            _require_qualified(profile.srg, "SRG")
+            _require_qualified(profile.world, "world")
+            _require_qualified(profile.trajectory_evidence, "trajectory evidence")
+            _require_qualified(profile.checkpoint, "checkpoint")
+
+    @property
+    def _private_i4e_enabled(self) -> bool:
+        return self._private_trajectory_evidence_enabled or self._private_checkpoint_snapshot_enabled
+
+    @property
+    def _private_trajectory_evidence_enabled(self) -> bool:
+        return self._configuration.profile.trajectory_evidence is NativePostWriteBehavior.QUALIFIED
+
+    @property
+    def _private_checkpoint_snapshot_enabled(self) -> bool:
+        return self._configuration.profile.checkpoint is NativePostWriteBehavior.QUALIFIED
+
+    def _run_private_world_and_trajectory(
+        self,
+        consumers: LegacyFabricPostWriteAdapter,
+        context: FabricPostWriteContext,
+    ) -> None:
+        """Advance native physics once even when external evidence fails."""
+        world = consumers._deps.world_runtime
+        if not isinstance(world, NativeWorldRuntime):
+            raise SubstrateInvariantViolation("private I4E world binding is not native")
+        evidence: NativeTrajectoryEvidenceRuntime | None = None
+        try:
+            evidence = self._private_trajectory_runtime()
+        except Exception as exc:
+            self._configuration.external.owner._log.debug(
+                "trajectory evidence initialization failed at step=%s for workspace_id=%s agent_id=%s: %s",
+                context.step, context.workspace_id, context.agent_id, exc,
+            )
+        if evidence is not None and context.storage_outcome is PostWriteStorageOutcome.CREATED_NEW and context.eid is not None:
+            try:
+                world.write_trajectory_genesis_for_post_write(eid=int(context.eid), evidence=evidence)
+            except Exception as exc:
+                self._configuration.external.owner._log.debug(
+                    "trajectory genesis failed at step=%s for eid=%s: %s",
+                    context.step, context.eid, exc,
+                )
+        try:
+            if evidence is None:
+                world.advance_for_post_write(step=int(context.step))
+            else:
+                world.advance_for_post_write_with_trajectory_evidence(step=int(context.step), evidence=evidence)
+        except Exception as exc:
+            self._configuration.external.owner._log.debug(
+                "step_world failed at step=%s for workspace_id=%s agent_id=%s: %s",
+                context.step, context.workspace_id, context.agent_id, exc,
+            )
+
+    def _private_trajectory_runtime(self) -> NativeTrajectoryEvidenceRuntime:
+        binding = self._configuration.private_trajectory_evidence_binding
+        if binding is None:
+            raise SubstrateConfigurationError("private I4E trajectory profile requires an evidence binding")
+        scope = self._configuration.routing_scope.runtime_scope
+        return self._capability.private_trajectory_evidence_process_state.acquire(
+            core_id=self._capability.core_id,
+            legacy_source_namespace_id=scope.legacy_source_namespace_id,
+            root_dir=binding.artifact_root_dir,
+            trajectory_format=binding.trajectory_format,
+        )
+
+    def _run_private_checkpoint_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        context: FabricPostWriteContext,
+    ) -> None:
+        """Run the retained private checkpoint writer after Character, fail-soft."""
+        owner = self._configuration.external.owner
+        if not (
+            owner._checkpoint_enable
+            and int(context.step) > 0
+            and int(context.step) % owner._checkpoint_interval == 0
+        ):
+            return
+        binding = self._configuration.private_checkpoint_snapshot_binding
+        assert binding is not None  # private I4E preflight proves the binding.
+        try:
+            motif_summary = None
+            try:
+                motif_summary = self._build_native_checkpoint_motif_summary(connection, context)
+            except Exception as exc:
+                owner._log.debug("checkpoint motif summary build failed: %s", exc)
+            shard_snapshot = None
+            try:
+                embeddings_dir = (
+                    Path(owner.data_dir)
+                    / "workspaces" / context.workspace_id / "agents" / context.agent_id
+                    / "private" / "embeddings"
+                )
+                shard_snapshot = build_shard_snapshot(
+                    str(embeddings_dir), base_dir=owner.data_dir,
+                )
+            except Exception as exc:
+                owner._log.debug("checkpoint shard manifest build failed: %s", exc)
+            character_state = None
+            try:
+                from dataclasses import asdict
+
+                character_store = self._configuration.external.character_store
+                if character_store is not None:
+                    state = character_store.load_state(context.workspace_id, context.agent_id)
+                    if state:
+                        character_state = asdict(state)
+            except Exception as exc:
+                owner._log.debug("checkpoint character state load failed: %s", exc)
+            if binding.kernel_runtime_context is None:
+                owner._log.debug("checkpoint skipped: KernelRuntimeContext missing for %s", self._configuration.external.agent_key)
+            else:
+                save_checkpoint(
+                    data_dir=owner.data_dir, workspace_id=context.workspace_id,
+                    agent_id=context.agent_id, step=int(context.step),
+                    model_state=binding.model_state,
+                    corridor_monitor=binding.kernel_runtime_context.mon,
+                    kernel_runtime_context=binding.kernel_runtime_context,
+                    character_state_dict=character_state, motif_summary=motif_summary,
+                    shard_snapshot=shard_snapshot, max_checkpoints=owner._checkpoint_max_keep,
+                )
+        except Exception as exc:
+            owner._log.debug("checkpoint save failed for step=%s: %s", context.step, exc)
 
     def run_shared_integrated_default(
         self,
@@ -1268,10 +1449,14 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         checkpoint_due = bool(getattr(owner, "_checkpoint_enable", False)) and int(context.step) > 0 and (
             int(context.step) % int(getattr(owner, "_checkpoint_interval", 1)) == 0
         )
-        if checkpoint_due or self._configuration.checkpoint_snapshots_required:
-            _refuse(profile.checkpoint, "checkpoint")
-        if self._configuration.persistent_trajectory_evidence_required:
-            _refuse(profile.trajectory_evidence, "trajectory evidence")
+        if checkpoint_due or self._private_checkpoint_snapshot_enabled:
+            if profile.checkpoint is not NativePostWriteBehavior.QUALIFIED:
+                _refuse(profile.checkpoint, "checkpoint")
+            _validate_private_checkpoint_snapshot_binding(self._configuration)
+        if self._private_trajectory_evidence_enabled:
+            if profile.trajectory_evidence is not NativePostWriteBehavior.QUALIFIED:
+                _refuse(profile.trajectory_evidence, "trajectory evidence")
+            _validate_private_trajectory_evidence_binding(self._configuration)
         if self._configuration.bridge_suggestions_required:
             _refuse(profile.bridge_suggestions, "bridge suggestions")
         if self._configuration.deep_memory_required:
@@ -1394,6 +1579,7 @@ def prepare_native_fabric_post_write_adapter(
             or template.idempotency_namespace_id != scope.idempotency_namespace_id
         ):
             raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
+        _validate_private_i4e_configuration(configuration)
     elif scope.runtime_scope.scope_kind == "SHARED_DOMAIN":
         shared_d1 = configuration.shared_motif_suggestion_maintenance_required
         shared_hivemind = configuration.shared_hivemind_packet_emission_required
@@ -1643,6 +1829,81 @@ def _validate_shared_trajectory_evidence_binding(
         raise SubstrateConfigurationError("shared trajectory evidence format does not match current legacy selection")
 
 
+def _validate_private_i4e_configuration(
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    """Keep I4E's separately owned private tail complete but non-transactional."""
+    trajectory = configuration.persistent_trajectory_evidence_required
+    checkpoint = configuration.checkpoint_snapshots_required
+    profile_trajectory = (
+        configuration.profile.trajectory_evidence is NativePostWriteBehavior.QUALIFIED
+    )
+    profile_checkpoint = (
+        configuration.profile.checkpoint is NativePostWriteBehavior.QUALIFIED
+    )
+    if trajectory != profile_trajectory or checkpoint != profile_checkpoint:
+        raise SubstrateConfigurationError(
+            "private I4E profile/configuration disagreement refuses effects"
+        )
+    if profile_trajectory != profile_checkpoint:
+        raise SubstrateConfigurationError(
+            "private I4E profile refuses a partial trajectory/checkpoint selection before effects"
+        )
+    if profile_trajectory:
+        _require_qualified(configuration.profile.srg, "SRG")
+        _require_qualified(configuration.profile.world, "world")
+        _require_qualified(configuration.profile.trajectory_evidence, "trajectory evidence")
+        _require_qualified(configuration.profile.checkpoint, "checkpoint")
+        _validate_private_trajectory_evidence_binding(configuration)
+        _validate_private_checkpoint_snapshot_binding(configuration)
+    elif (
+        configuration.private_trajectory_evidence_binding is not None
+        or configuration.private_checkpoint_snapshot_binding is not None
+    ):
+        raise SubstrateConfigurationError("private I4E bindings require both private I4E consumers")
+
+
+def _validate_private_trajectory_evidence_binding(
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    binding = configuration.private_trajectory_evidence_binding
+    if binding is None:
+        raise SubstrateConfigurationError("private I4E trajectory profile requires an evidence binding")
+    data_dir = getattr(configuration.external.workspace, "data_dir", None)
+    if not isinstance(data_dir, str) or not data_dir:
+        raise SubstrateConfigurationError("private I4E trajectory profile requires workspace.data_dir")
+    scope = configuration.routing_scope.runtime_scope
+    expected_root = (
+        Path(data_dir).resolve()
+        / "workspaces" / scope.workspace_id / "agents" / str(scope.agent_id) / "private"
+    )
+    if Path(binding.artifact_root_dir).resolve() != expected_root:
+        raise SubstrateConfigurationError("private trajectory evidence root does not match the claimed private agent")
+    if binding.trajectory_format != resolve_trajectory_format():
+        raise SubstrateConfigurationError("private trajectory evidence format does not match current legacy selection")
+
+
+def _validate_private_checkpoint_snapshot_binding(
+    configuration: NativePostWriteQualificationConfiguration,
+) -> None:
+    binding = configuration.private_checkpoint_snapshot_binding
+    if binding is None:
+        raise SubstrateConfigurationError("private I4E checkpoint profile requires an explicit live-state binding")
+    owner = configuration.external.owner
+    for name in ("_checkpoint_enable", "_checkpoint_interval", "_checkpoint_max_keep", "data_dir", "_log"):
+        if not hasattr(owner, name):
+            raise SubstrateConfigurationError(f"private I4E checkpoint profile requires owner.{name}")
+    if not isinstance(owner.data_dir, str) or not owner.data_dir:
+        raise SubstrateConfigurationError("private I4E checkpoint profile requires a non-empty owner.data_dir")
+    if not isinstance(owner._checkpoint_interval, int) or isinstance(owner._checkpoint_interval, bool) or owner._checkpoint_interval < 1:
+        raise SubstrateConfigurationError("private I4E checkpoint profile requires a positive owner._checkpoint_interval")
+    if not isinstance(owner._checkpoint_max_keep, int) or isinstance(owner._checkpoint_max_keep, bool) or owner._checkpoint_max_keep < 0:
+        raise SubstrateConfigurationError("private I4E checkpoint profile requires a non-negative owner._checkpoint_max_keep")
+    # The legacy checkpoint writer captures Character state as an independent,
+    # fail-soft component read.  A missing or failing CharacterStore therefore
+    # omits only that optional snapshot field; it is not a pre-effect refusal.
+
+
 def _validate_shared_checkpoint_snapshot_binding(
     configuration: NativePostWriteQualificationConfiguration,
 ) -> None:
@@ -1683,6 +1944,8 @@ __all__ = [
     "NativeFabricPostWriteAdapter",
     "NativePostWriteBehavior",
     "NativePostWriteExternalDependencies",
+    "NativePrivateCheckpointSnapshotBinding",
+    "NativePrivateTrajectoryEvidenceBinding",
     "NativePostWriteQualificationConfiguration",
     "NativePostWriteQualificationProfile",
     "NativePostWriteRouteWitness",

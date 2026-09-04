@@ -11,7 +11,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from torment_service.checkpoint import load_latest_checkpoint
 from torment_service.collective_models import MemoryGovernanceFlags
+from torment_service.kernel.trajectory_v2 import TrajectoryPathsV2, TrajectoryV2Verifier
+from torment_service.memory_kernel import TriOctaMemoryKernel
 from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
 from torment_service.post_write_runtime import (
     FabricPostWriteContext,
@@ -33,6 +36,8 @@ from torment_service.substrate.native_derived_memory_runtime import NativeDerive
 from torment_service.substrate.native_post_write_runtime import (
     NativeFabricPostWriteAdapter,
     NativePostWriteExternalDependencies,
+    NativePrivateCheckpointSnapshotBinding,
+    NativePrivateTrajectoryEvidenceBinding,
     NativePostWriteQualificationConfiguration,
     NativePostWriteQualificationProfile,
     NativePostWriteRouteWitness,
@@ -40,6 +45,10 @@ from torment_service.substrate.native_post_write_runtime import (
 )
 from torment_service.substrate.native_memory_runtime_access import NativePostWriteMemoryAccess
 from torment_service.substrate.native_srg_runtime import NativeSRGTransientRuntime
+from torment_service.substrate.native_trajectory_evidence_runtime import (
+    NativePrivateTrajectoryEvidenceProcessState,
+    NativeTrajectoryEvidenceRuntime,
+)
 from torment_service.substrate.native_world_runtime import NativeWorldRuntime
 from torment_service.substrate.runtime_binding import (
     NativeMemoryRuntimeScope,
@@ -306,6 +315,42 @@ def _adapter(capability, configuration):
     return prepare_native_fabric_post_write_adapter(capability=capability, configuration=configuration)
 
 
+def _i4e_private_configuration(tmp_path: Path, scope, configuration, owner, workspace):
+    """Bind I4E's two distinct external owners to one private test route."""
+    data_root = tmp_path / "i4e-private-root"
+    workspace.data_dir = str(data_root)
+    owner.data_dir = str(data_root)
+    owner._checkpoint_enable = True
+    owner._checkpoint_interval = 1
+    owner._checkpoint_max_keep = 2
+    kernel = TriOctaMemoryKernel()
+    model_state = kernel.init_state("ws/aria")
+    runtime_context = kernel.new_runtime_context()
+    private_root = data_root / "workspaces" / "ws" / "agents" / "aria" / "private"
+    return replace(
+        configuration,
+        profile=NativePostWriteQualificationProfile.core_staging_with_i4e_private_tail(),
+        external=replace(
+            configuration.external,
+            workspace=workspace,
+            character_store=SimpleNamespace(
+                load_seed=lambda *_args: None,
+                load_state=lambda *_args: None,
+                save_state=lambda *_args, **_kwargs: None,
+            ),
+            character_embedder=_CharacterEmbedder(),
+        ),
+        persistent_trajectory_evidence_required=True,
+        checkpoint_snapshots_required=True,
+        private_trajectory_evidence_binding=NativePrivateTrajectoryEvidenceBinding(
+            str(private_root), "v2",
+        ),
+        private_checkpoint_snapshot_binding=NativePrivateCheckpointSnapshotBinding(
+            model_state, runtime_context,
+        ),
+    ), data_root, private_root
+
+
 def test_adapter_requires_explicit_preparation_and_does_not_grant_activation(tmp_path: Path):
     _qualified, _connection, capability, scope = _prepared(tmp_path)
     try:
@@ -472,6 +517,338 @@ def test_route_witness_mismatch_refuses_before_any_post_write_effect(tmp_path: P
             )
         assert _counts(connection) == before
         assert not owner.field.packets and not side.events and not conflicts.calls and not proposals.calls
+    finally:
+        qualified.close()
+
+
+def test_i4e_private_srg_world_trajectory_and_checkpoint_preserve_owner_boundaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """I4E keeps collision transient, physics local, and artifacts external."""
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
+    qualified, connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._hivemind_enable = True
+        identity.seed["coupling_mode"] = "read_only"
+        configuration, data_root, private_root = _i4e_private_configuration(
+            tmp_path, scope, configuration, owner, workspace,
+        )
+        manifest = {
+            "active_shard": 3,
+            "next_row": 7,
+            "total_rows": 19,
+            "embedding_dim": 3,
+        }
+        embeddings_dir = private_root / "embeddings"
+        embeddings_dir.mkdir(parents=True)
+        (embeddings_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        hivemind_calls: list[str] = []
+        original_hivemind = LegacyFabricPostWriteAdapter._run_hivemind
+
+        def observe_hivemind(consumers, context):
+            hivemind_calls.append(context.storage_outcome.value)
+            return original_hivemind(consumers, context)
+
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_hivemind", observe_hivemind)
+        router = NativeFabricMemoryRouter(capability)
+        first_request = _request("i4e-first", 1, vector=(1.0, 0.0, 0.0))
+        first = router.route(first_request).result
+        assert first is not None and not first.reinforced
+        adapter = _adapter(capability, configuration)
+        adapter.run(
+            _context(first, first_request),
+            route_witness=NativePostWriteRouteWitness(first, first_request.native_operation_key),
+        )
+        after_first = _world(connection, capability, scope)
+
+        second_request = _request("i4e-second", 2, vector=(1.0, 0.0, 0.0))
+        second = router.route(second_request).result
+        assert second is not None and not second.reinforced
+        adapter.run(
+            _context(second, second_request),
+            route_witness=NativePostWriteRouteWitness(second, second_request.native_operation_key),
+        )
+        after_second = _world(connection, capability, scope)
+        assert after_second.history_lengths[: len(after_first.history_lengths)] == tuple(
+            value + 1 for value in after_first.history_lengths
+        )
+
+        reads = NativePostWriteMemoryAccess(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            expected_dimension=3,
+        )
+        current = {item.eid: item for item in reads.list_current()}
+        live_srg = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            process_state=capability.srg_process_state,
+        )
+        assert live_srg.effective_collision_report(current[second.eid])["collision"] is True
+        assert "srg_collision" not in current[second.eid].payload
+        restarted_srg = NativeSRGTransientRuntime(
+            connection,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+        )
+        assert restarted_srg.effective_collision_report(current[second.eid]) is None
+
+        checkpoint = load_latest_checkpoint(str(data_root), "ws", "aria")
+        assert checkpoint is not None
+        assert checkpoint["step"] == 2
+        assert checkpoint["shard_snapshot"] == manifest
+        assert checkpoint["motif_summary"] is not None
+        assert checkpoint["kernel_runtime_context"] is not None
+        assert hivemind_calls == ["CREATED_NEW", "CREATED_NEW"]
+        assert len(owner.field.packets) == 2
+        assert len(owner.telemetry) == 2
+
+        no_write = _no_write_context(3)
+        adapter.run(no_write)
+        after_no_write = _world(connection, capability, scope)
+        adapter.run(no_write)
+        after_replay = _world(connection, capability, scope)
+        assert after_replay.history_lengths == tuple(value + 1 for value in after_no_write.history_lengths)
+        checkpoint_dir = private_root / "checkpoints"
+        assert sorted(path.name for path in checkpoint_dir.glob("checkpoint_*.json")) == [
+            "checkpoint_000002.json", "checkpoint_000003.json",
+        ]
+        adapter.close()
+        capability.private_trajectory_evidence_process_state.close()
+        assert TrajectoryV2Verifier(str(private_root)).verify(mode="sealed").valid
+    finally:
+        qualified.close()
+
+
+def test_i4e_private_world_and_checkpoint_failures_are_independent_and_fail_soft(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    qualified, connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._hivemind_enable = False
+        identity.seed["coupling_mode"] = "read_only"
+        configuration, data_root, _private_root = _i4e_private_configuration(
+            tmp_path, scope, configuration, owner, workspace,
+        )
+        request = _request("i4e-failure-source", 1)
+        result = NativeFabricMemoryRouter(capability).route(request).result
+        assert result is not None
+        adapter = _adapter(capability, configuration)
+        character_calls: list[str] = []
+        original_character = LegacyFabricPostWriteAdapter._run_character_drift
+
+        def observe_character(consumers, context):
+            character_calls.append(context.storage_outcome.value)
+            return original_character(consumers, context)
+
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", observe_character)
+        monkeypatch.setattr(
+            NativeWorldRuntime,
+            "advance_for_post_write_with_trajectory_evidence",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("world")),
+        )
+        adapter.run(
+            _context(result, request),
+            route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
+        )
+        assert character_calls == ["CREATED_NEW"]
+        checkpoint = load_latest_checkpoint(str(data_root), "ws", "aria")
+        assert checkpoint is not None
+        assert checkpoint["shard_snapshot"] is None
+
+        import torment_service.substrate.native_post_write_runtime as post_write_runtime
+
+        before = _counts(connection)
+        monkeypatch.setattr(
+            post_write_runtime,
+            "save_checkpoint",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("checkpoint")),
+        )
+        adapter.run(_no_write_context(2))
+        assert character_calls == ["CREATED_NEW", "NO_WRITE"]
+        assert _counts(connection) == before
+    finally:
+        capability.private_trajectory_evidence_process_state.close()
+        qualified.close()
+
+
+def test_i4e_private_trajectory_evidence_faults_do_not_suppress_one_world_advance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """External construction/genesis/evidence faults leave one physics step."""
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
+    qualified, connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._hivemind_enable = False
+        identity.seed["coupling_mode"] = "read_only"
+        configuration, _data_root, _private_root = _i4e_private_configuration(
+            tmp_path, scope, configuration, owner, workspace,
+        )
+        adapter = _adapter(capability, configuration)
+        router = NativeFabricMemoryRouter(capability)
+        advances: list[int] = []
+        original_advance = NativeWorldRuntime._advance_for_post_write
+
+        def observe_advance(world, *, step, trajectory_evidence):
+            advances.append(int(step))
+            return original_advance(world, step=step, trajectory_evidence=trajectory_evidence)
+
+        monkeypatch.setattr(NativeWorldRuntime, "_advance_for_post_write", observe_advance)
+        with monkeypatch.context() as evidence_fault:
+            evidence_fault.setattr(
+                NativePrivateTrajectoryEvidenceProcessState,
+                "acquire",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("constructor")),
+            )
+            first_request = _request("i4e-evidence-constructor", 1, vector=(1.0, 0.0, 0.0))
+            first = router.route(first_request).result
+            assert first is not None
+            adapter.run(
+                _context(first, first_request),
+                route_witness=NativePostWriteRouteWitness(first, first_request.native_operation_key),
+            )
+        assert advances == [1]
+
+        with monkeypatch.context() as genesis_fault:
+            genesis_fault.setattr(
+                NativeWorldRuntime,
+                "write_trajectory_genesis_for_post_write",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("genesis")),
+            )
+            second_request = _request("i4e-evidence-genesis", 2, vector=(0.0, 1.0, 0.0))
+            second = router.route(second_request).result
+            assert second is not None
+            adapter.run(
+                _context(second, second_request),
+                route_witness=NativePostWriteRouteWitness(second, second_request.native_operation_key),
+            )
+        assert advances == [1, 2]
+
+        with monkeypatch.context() as step_fault:
+            step_fault.setattr(
+                NativeTrajectoryEvidenceRuntime,
+                "write_step",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("step evidence")),
+            )
+            adapter.run(_no_write_context(3))
+        with monkeypatch.context() as classify_fault:
+            classify_fault.setattr(
+                NativeTrajectoryEvidenceRuntime,
+                "write_classification_event",
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("classification evidence")),
+            )
+            adapter.run(_no_write_context(50))
+        assert advances == [1, 2, 3, 50]
+        assert all(item is not None for item in _world(connection, capability, scope).classifications)
+    finally:
+        capability.private_trajectory_evidence_process_state.close()
+        qualified.close()
+
+
+def test_i4e_private_trajectory_writer_is_owned_by_native_process_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Two request adapters share one V2 tail; a new owner gets a new epoch."""
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, identity, _side, _conflicts, _proposals = _environment(scope)
+        owner._hivemind_enable = False
+        identity.seed["coupling_mode"] = "read_only"
+        configuration, _data_root, private_root = _i4e_private_configuration(
+            tmp_path, scope, configuration, owner, workspace,
+        )
+        router = NativeFabricMemoryRouter(capability)
+        first_request = _request("i4e-owner-first", 1, vector=(1.0, 0.0, 0.0))
+        first = router.route(first_request).result
+        assert first is not None
+        first_adapter = _adapter(capability, configuration)
+        first_adapter.run(
+            _context(first, first_request),
+            route_witness=NativePostWriteRouteWitness(first, first_request.native_operation_key),
+        )
+        state = capability.private_trajectory_evidence_process_state
+        first_runtime = state.runtime_for_testing(
+            core_id=capability.core_id,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+        )
+        assert first_runtime is not None
+        first_adapter.close()
+
+        second_request = _request("i4e-owner-second", 2, vector=(0.0, 1.0, 0.0))
+        second = router.route(second_request).result
+        assert second is not None
+        second_adapter = _adapter(capability, configuration)
+        second_adapter.run(
+            _context(second, second_request),
+            route_witness=NativePostWriteRouteWitness(second, second_request.native_operation_key),
+        )
+        assert state.runtime_for_testing(
+            core_id=capability.core_id,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+        ) is first_runtime
+        assert first_runtime.reset_boundary_facts_for_testing() == (2, 2)
+        second_adapter.close()
+        state.close()
+
+        paths = TrajectoryPathsV2(private_root)
+        manifest = [json.loads(line) for line in paths.manifest.read_text(encoding="utf-8").splitlines()]
+        boundaries = [json.loads(line) for line in paths.boundaries.read_text(encoding="utf-8").splitlines()]
+        assert [entry["frame_count"] for entry in manifest] == [2]
+        assert [(entry["frame_seq_from"], entry["frame_seq_to"]) for entry in manifest] == [(1, 2)]
+        assert [entry["epoch"] for entry in boundaries if entry["type"] == "EPOCH_START"] == [1]
+        assert TrajectoryV2Verifier(str(private_root)).verify(mode="sealed").valid
+
+        restarted_state = NativePrivateTrajectoryEvidenceProcessState()
+        restarted_state.acquire(
+            core_id=capability.core_id,
+            legacy_source_namespace_id=scope.runtime_scope.legacy_source_namespace_id,
+            root_dir=str(private_root),
+            trajectory_format="v2",
+        )
+        restarted_state.close()
+        restarted_boundaries = [
+            json.loads(line) for line in paths.boundaries.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [entry["epoch"] for entry in restarted_boundaries if entry["type"] == "EPOCH_START"] == [1, 2]
+    finally:
+        capability.private_trajectory_evidence_process_state.close()
+        qualified.close()
+
+
+def test_i4e_private_profile_and_requested_flags_must_agree_before_effects(tmp_path: Path):
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, workspace, _identity, _side, _conflicts, _proposals = _environment(scope)
+        configuration, _data_root, _private_root = _i4e_private_configuration(
+            tmp_path, scope, configuration, owner, workspace,
+        )
+        with pytest.raises(SubstrateConfigurationError, match="profile/configuration disagreement"):
+            _adapter(
+                capability,
+                replace(
+                    configuration,
+                    persistent_trajectory_evidence_required=False,
+                    checkpoint_snapshots_required=False,
+                ),
+            )
+        with pytest.raises(SubstrateConfigurationError, match="profile/configuration disagreement"):
+            _adapter(
+                capability,
+                replace(
+                    configuration,
+                    profile=NativePostWriteQualificationProfile.core_staging_with_character(),
+                ),
+            )
     finally:
         qualified.close()
 

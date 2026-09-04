@@ -337,14 +337,14 @@ class NativePublicIngestExecutor:
             and route_result.precommit_true_split
             and prepared.scope == "private"
         ):
-            # I4C composes the qualified conflict prefix ahead of I4B-2's
-            # motif/anchor tail. I4D continues only with mood and Character;
-            # its true split deliberately does not acquire I4E world authority.
+            # I4C composes conflict ahead of I4B-2's motif/anchor tail. I4D
+            # retains mood and Character; I4E adds SRG, private trajectory/
+            # world, and checkpoint around their frozen legacy positions.
             configuration = replace(
                 configuration,
                 profile=(
                     NativePostWriteQualificationProfile
-                    .core_staging_with_character_and_motif_merge_maintenance()
+                    .core_staging_with_i4e_private_tail()
                 ),
                 motif_suggestion_maintenance_required=True,
             )

@@ -40,10 +40,13 @@ from .substrate.deployment_types import (
 from .substrate.native_derived_memory_runtime import NativeDerivedMemoryRuntimeConfiguration
 from .substrate.native_post_write_runtime import (
     NativePostWriteExternalDependencies,
+    NativePrivateCheckpointSnapshotBinding,
+    NativePrivateTrajectoryEvidenceBinding,
     NativePostWriteQualificationConfiguration,
     NativePostWriteQualificationProfile,
     NativeSharedTriggerMoodDriftBinding,
 )
+from .substrate.native_trajectory_evidence_runtime import resolve_trajectory_format
 from .substrate.native_public_ingest_executor import (
     NativePublicIngestExecutor,
     NativePublicIngestRequest,
@@ -733,16 +736,28 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
                 shared_motif_suggestion_maintenance_required=True,
                 shared_mood_drift_binding=NativeSharedTriggerMoodDriftBinding(private, template),
             )
+        agent_key = self.cognition_fabric._agent_key(prepared.workspace_id, prepared.agent_id)
+        private_artifact_root = (
+            Path(self.cognition_fabric.data_dir)
+            / "workspaces" / prepared.workspace_id / "agents" / prepared.agent_id / "private"
+        )
         return NativePostWriteQualificationConfiguration(
             routing_scope=scope,
-            profile=NativePostWriteQualificationProfile.core_staging_with_character(),
+            profile=NativePostWriteQualificationProfile.core_staging_with_i4e_private_tail(),
             external=external,
             derived_runtime_template=template,
             motif_suggestion_maintenance_required=False,
-            persistent_trajectory_evidence_required=False,
-            checkpoint_snapshots_required=False,
+            persistent_trajectory_evidence_required=True,
+            checkpoint_snapshots_required=True,
             bridge_suggestions_required=False,
             deep_memory_required=False,
+            private_trajectory_evidence_binding=NativePrivateTrajectoryEvidenceBinding(
+                str(private_artifact_root), resolve_trajectory_format(),
+            ),
+            private_checkpoint_snapshot_binding=NativePrivateCheckpointSnapshotBinding(
+                self.cognition_fabric.agent_states.get(agent_key),
+                self.cognition_fabric.get_kernel_runtime_context(prepared.workspace_id, prepared.agent_id),
+            ),
         )
 
 

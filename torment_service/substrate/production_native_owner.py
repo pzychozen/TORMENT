@@ -45,6 +45,7 @@ from .migration.existing_workspace_multi_scope_admission import (
     recover_active_existing_workspace_native_multi_scope_runtime,
 )
 from .native_srg_runtime import NativeSRGProcessState
+from .native_trajectory_evidence_runtime import NativePrivateTrajectoryEvidenceProcessState
 from .native_post_write_runtime import (
     NativeFabricPostWriteAdapter,
     NativePostWriteQualificationConfiguration,
@@ -109,6 +110,7 @@ class NativeProductionResourceOwner:
         self._character_store = character_store
         self._srg_process_state = NativeSRGProcessState()
         self._world_process_state = NativeWorldProcessState()
+        self._private_trajectory_evidence_process_state = NativePrivateTrajectoryEvidenceProcessState()
         self._motif_process_order = NativeMotifProcessOrder()
         self._contexts: set[_NativeProductionContext] = set()
         self._closed = False
@@ -239,10 +241,12 @@ class NativeProductionResourceOwner:
         for context in tuple(self._contexts):
             context.close()
         self._contexts.clear()
+        self._private_trajectory_evidence_process_state.close()
         # No SQLite handle exists here.  Dropping these process-only owners is
         # the established restart behavior; durable core truth remains intact.
         self._srg_process_state = None  # type: ignore[assignment]
         self._world_process_state = None  # type: ignore[assignment]
+        self._private_trajectory_evidence_process_state = None  # type: ignore[assignment]
         self._motif_process_order = None  # type: ignore[assignment]
 
     def _discard_context(self, context: "_NativeProductionContext") -> None:
@@ -257,6 +261,7 @@ class NativeProductionResourceOwner:
             process_order=self._motif_process_order,
             srg_process_state=self._srg_process_state,
             world_process_state=self._world_process_state,
+            private_trajectory_evidence_process_state=self._private_trajectory_evidence_process_state,
         )
 
     def _recover_active_runtime(self) -> Any:

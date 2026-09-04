@@ -71,6 +71,7 @@ from .native_world_runtime import (
     NativeWorldRuntime,
     WorldDiagnosticSuccessorMaterialization,
 )
+from .native_trajectory_evidence_runtime import NativePrivateTrajectoryEvidenceProcessState
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
 from .motifs import NativeMotifService
 from .representations import (
@@ -226,6 +227,7 @@ class NativeFabricRoutingCapability:
     process_order: NativeMotifProcessOrder = field(repr=False, compare=False)
     srg_process_state: NativeSRGProcessState = field(repr=False, compare=False)
     world_process_state: NativeWorldProcessState = field(repr=False, compare=False)
+    private_trajectory_evidence_process_state: NativePrivateTrajectoryEvidenceProcessState = field(repr=False, compare=False)
     production_activation_allowed: bool = False
     qualification_only: bool = True
     _prepared_marker: object = field(repr=False, compare=False, default=None)
@@ -277,6 +279,7 @@ class NativeProductionRoutingCapability:
     process_order: NativeMotifProcessOrder = field(repr=False, compare=False)
     srg_process_state: NativeSRGProcessState = field(repr=False, compare=False)
     world_process_state: NativeWorldProcessState = field(repr=False, compare=False)
+    private_trajectory_evidence_process_state: NativePrivateTrajectoryEvidenceProcessState = field(repr=False, compare=False)
     _prepared_marker: object = field(repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
@@ -322,6 +325,7 @@ def _prepare_production_routing_capability(
     process_order: NativeMotifProcessOrder,
     srg_process_state: NativeSRGProcessState,
     world_process_state: NativeWorldProcessState,
+    private_trajectory_evidence_process_state: NativePrivateTrajectoryEvidenceProcessState,
 ) -> NativeProductionRoutingCapability:
     """Construct the active capability for the private production owner only."""
 
@@ -333,6 +337,7 @@ def _prepare_production_routing_capability(
         process_order=process_order,
         srg_process_state=srg_process_state,
         world_process_state=world_process_state,
+        private_trajectory_evidence_process_state=private_trajectory_evidence_process_state,
         _prepared_marker=_PRODUCTION_PREPARED,
     )
 
@@ -535,6 +540,7 @@ def prepare_native_fabric_routing_capability(
         process_order=NativeMotifProcessOrder(),
         srg_process_state=NativeSRGProcessState(),
         world_process_state=NativeWorldProcessState(),
+        private_trajectory_evidence_process_state=NativePrivateTrajectoryEvidenceProcessState(),
         _prepared_marker=_PREPARED,
     )
 

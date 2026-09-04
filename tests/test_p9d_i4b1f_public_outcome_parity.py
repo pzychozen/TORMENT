@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 
 from torment_service.fabric import _load_symbol_state
+from torment_service.checkpoint import load_latest_checkpoint
+from torment_service.kernel.trajectory_v2 import TrajectoryPathsV2, TrajectoryV2Verifier
 from torment_service.post_write_runtime import LegacyFabricPostWriteAdapter
 from torment_service.public_mutation_identity import (
     derive_native_operation_key,
@@ -27,6 +29,7 @@ from torment_service.substrate.compat import (
 )
 from torment_service.substrate.fabric_native_routing import NativePrecommitAttachFailure
 from torment_service.substrate.motifs import NativeMotifService
+from torment_service.substrate.native_post_write_runtime import NativeFabricPostWriteAdapter
 from torment_service.substrate.native_public_ingest_executor import NativePublicIngestRequest
 
 from tests.test_p9d_i3b0_native_materialization_fencing import _native_runtime
@@ -189,8 +192,8 @@ def test_i4b1f_full_public_create_uses_existing_canonical_source_owner(tmp_path:
         close_public_runtime(root)
 
 
-def test_i4d_full_public_true_split_enters_conflict_motif_mood_character_tail(tmp_path: Path, monkeypatch):
-    """Cross the real public handoff into I4C/I4B-2/I4D's bounded tail."""
+def test_i4e_full_public_true_split_enters_conflict_srg_motif_mood_world_character_checkpoint_tail(tmp_path: Path, monkeypatch):
+    """Cross the real public handoff into I4C/I4B-2/I4D/I4E's bounded tail."""
     import torment_service.substrate.native_world_runtime as world_module
 
     monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
@@ -211,20 +214,55 @@ def test_i4d_full_public_true_split_enters_conflict_motif_mood_character_tail(tm
         def forbidden(*_args, **_kwargs):
             raise AssertionError("I4B-2 public handoff reached an unqualified post-write owner")
 
-        conflict_runs: list[str] = []
+        events: list[str] = []
         original_contradiction_surface = LegacyFabricPostWriteAdapter._run_contradiction_surface
+        original_srg = LegacyFabricPostWriteAdapter._run_srg_collision
+        original_motif_prefix = NativeFabricPostWriteAdapter._run_i4b2_motif_maintenance_and_anchors
+        original_mood = NativeFabricPostWriteAdapter._run_i4d_mood_drift
+        original_world = NativeFabricPostWriteAdapter._run_private_world_and_trajectory
+        original_character = LegacyFabricPostWriteAdapter._run_character_drift
+        original_checkpoint = NativeFabricPostWriteAdapter._run_private_checkpoint_snapshot
 
         def record_contradiction_surface(adapter, context):
-            conflict_runs.append(context.scope)
+            events.append("conflict")
             return original_contradiction_surface(adapter, context)
+
+        def record_srg(adapter, context):
+            events.append("srg")
+            return original_srg(adapter, context)
+
+        def record_motif_prefix(_adapter, consumers, context, *, emit_anchors):
+            events.append("motif_anchor_prefix")
+            return original_motif_prefix(consumers, context, emit_anchors=emit_anchors)
+
+        def record_mood(_adapter, consumers, context):
+            events.append("mood")
+            return original_mood(consumers, context)
+
+        def record_world(adapter, consumers, context):
+            events.append("world")
+            return original_world(adapter, consumers, context)
+
+        def record_character(adapter, context):
+            events.append("character")
+            return original_character(adapter, context)
+
+        def record_checkpoint(adapter, connection, context):
+            events.append("checkpoint")
+            return original_checkpoint(adapter, connection, context)
 
         monkeypatch.setattr(
             LegacyFabricPostWriteAdapter,
             "_run_contradiction_surface",
             record_contradiction_surface,
         )
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_srg_collision", record_srg)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_i4b2_motif_maintenance_and_anchors", record_motif_prefix)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_i4d_mood_drift", record_mood)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_private_world_and_trajectory", record_world)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", record_character)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_private_checkpoint_snapshot", record_checkpoint)
         for name in (
-            "_run_srg_collision",
             "_run_hivemind",
             "_run_world_step",
             "_run_proposal",
@@ -243,13 +281,126 @@ def test_i4d_full_public_true_split_enters_conflict_motif_mood_character_tail(tm
         assert result["stored"] is True and result["reinforced"] is False
         assert result["created_motif"] is None
         assert len(result["motifs"]) == 2
-        assert conflict_runs == ["private"]
+        assert events == [
+            "conflict", "srg", "motif_anchor_prefix", "mood",
+            "world", "character", "checkpoint",
+        ]
         assert len(post_write) == 1
         configuration = post_write[0]
         assert configuration.motif_suggestion_maintenance_required is True
         assert configuration.profile.motif_suggestion_maintenance.name == "QUALIFIED"
         assert configuration.profile.motif_auto_merge.name == "QUALIFIED"
         assert configuration.profile.character.name == "QUALIFIED"
+        assert configuration.profile.srg.name == "QUALIFIED"
+        assert configuration.profile.hivemind.name == "QUALIFIED"
+        assert configuration.profile.world.name == "QUALIFIED"
+        assert configuration.profile.trajectory_evidence.name == "QUALIFIED"
+        assert configuration.profile.checkpoint.name == "QUALIFIED"
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4e_full_public_private_owner_tail_runs_only_after_nonfailure_storage_outcomes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The public route retains I4E's all-outcome and failure gates exactly."""
+    monkeypatch.setenv("TORMENT_TRAJECTORY_FORMAT", "v2")
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        fabric = runtime.cognition_fabric
+        fabric._hivemind_enable = True
+        fabric._checkpoint_enable = True
+        fabric._checkpoint_interval = 1
+        fabric._checkpoint_max_keep = 2
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        events: list[tuple[str, str]] = []
+        original_srg = LegacyFabricPostWriteAdapter._run_srg_collision
+        original_hivemind = LegacyFabricPostWriteAdapter._run_hivemind
+        original_world = NativeFabricPostWriteAdapter._run_private_world_and_trajectory
+        original_character = LegacyFabricPostWriteAdapter._run_character_drift
+        original_checkpoint = NativeFabricPostWriteAdapter._run_private_checkpoint_snapshot
+
+        def record_srg(adapter, context):
+            events.append(("srg", context.storage_outcome.value))
+            return original_srg(adapter, context)
+
+        def record_hivemind(adapter, context):
+            events.append(("hivemind", context.storage_outcome.value))
+            return original_hivemind(adapter, context)
+
+        def record_world(adapter, consumers, context):
+            events.append(("world", context.storage_outcome.value))
+            return original_world(adapter, consumers, context)
+
+        def record_character(adapter, context):
+            events.append(("character", context.storage_outcome.value))
+            return original_character(adapter, context)
+
+        def record_checkpoint(adapter, connection, context):
+            events.append(("checkpoint", context.storage_outcome.value))
+            return original_checkpoint(adapter, connection, context)
+
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_srg_collision", record_srg)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_hivemind", record_hivemind)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_private_world_and_trajectory", record_world)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", record_character)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_private_checkpoint_snapshot", record_checkpoint)
+
+        created_request = _request(
+            "i4e-public-create", "I4E public private owner source", [1.0, 0.0, 0.0], step=1,
+        )
+        created = runtime._executor.execute(created_request)  # noqa: SLF001 - public executor boundary
+        reinforced = runtime._executor.execute(_request(
+            "i4e-public-reinforce", "I4E public private owner source", [1.0, 0.0, 0.0], step=2,
+        ))  # noqa: SLF001 - public executor boundary
+        no_write = runtime._executor.execute(_request(
+            "i4e-public-no-write", "", [1.0, 0.0, 0.0], step=3,
+        ))  # noqa: SLF001 - public executor boundary
+        failed = runtime._executor.execute(  # noqa: SLF001 - public executor boundary
+            _request("i4e-public-failure", "I4E canonical failure", [0.0, 1.0, 0.0], step=4),
+            _test_storage_stop_after="precommit_canonical_failure",
+        )
+
+        assert created["stored"] is True and created["reinforced"] is False
+        assert reinforced["stored"] is True and reinforced["reinforced"] is True
+        assert no_write["stored"] is False and no_write["reinforced"] is False
+        assert failed["failure_code"] == "canonical_commit_failed"
+        assert events == [
+            ("srg", "CREATED_NEW"),
+            ("hivemind", "CREATED_NEW"),
+            ("world", "CREATED_NEW"),
+            ("character", "CREATED_NEW"),
+            ("checkpoint", "CREATED_NEW"),
+            ("world", "REINFORCED_EXISTING"),
+            ("character", "REINFORCED_EXISTING"),
+            ("checkpoint", "REINFORCED_EXISTING"),
+            ("world", "NO_WRITE"),
+            ("character", "NO_WRITE"),
+            ("checkpoint", "NO_WRITE"),
+        ]
+        assert len(configurations) == 3
+        assert all(item.persistent_trajectory_evidence_required for item in configurations)
+        assert all(item.checkpoint_snapshots_required for item in configurations)
+        assert all(item.private_trajectory_evidence_binding is not None for item in configurations)
+        assert all(item.private_checkpoint_snapshot_binding is not None for item in configurations)
+        assert load_latest_checkpoint(str(root), "orchard", "aria")["step"] == 3
+        private_root = root / "workspaces" / "orchard" / "agents" / "aria" / "private"
+        assert (private_root / "checkpoints" / "checkpoint_000003.json").is_file()
+        packet_path = root / "workspaces" / "orchard" / "collective" / "packets.jsonl"
+        assert len(packet_path.read_text(encoding="utf-8").splitlines()) == 1
+        assert not (root / "workspaces" / "orchard" / "domains" / "personal" / "shared" / "checkpoints").exists()
+
+        # Each public request opens/closes a request adapter. The production
+        # owner, not those adapters, owns and seals the one private V2 tail.
+        paths = TrajectoryPathsV2(private_root)
+        assert not paths.manifest.exists()
+        close_public_runtime(root)
+        manifest = [json.loads(line) for line in paths.manifest.read_text(encoding="utf-8").splitlines()]
+        assert [entry["frame_count"] for entry in manifest] == [3]
+        assert [(entry["frame_seq_from"], entry["frame_seq_to"]) for entry in manifest] == [(1, 3)]
+        assert len({entry["epoch"] for entry in manifest}) == 1
+        assert TrajectoryV2Verifier(str(private_root)).verify(mode="sealed").valid
     finally:
         close_public_runtime(root)
 
