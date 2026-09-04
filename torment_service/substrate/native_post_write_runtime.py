@@ -117,6 +117,16 @@ class NativePostWriteQualificationProfile:
         return replace(cls.core_staging(), character=NativePostWriteBehavior.QUALIFIED)
 
     @classmethod
+    def core_staging_with_character_and_motif_merge_maintenance(
+        cls,
+    ) -> "NativePostWriteQualificationProfile":
+        """I4D's explicit private true-split composition profile only."""
+        return replace(
+            cls.core_staging_with_motif_merge_maintenance(),
+            character=NativePostWriteBehavior.QUALIFIED,
+        )
+
+    @classmethod
     def core_staging_with_motif_suggestion_maintenance(cls) -> "NativePostWriteQualificationProfile":
         """Explicit M1 profile; auto-merge remains an unsupported mutation."""
         return replace(
@@ -503,14 +513,16 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         context: FabricPostWriteContext,
         witness: NativePostWriteRouteWitness,
     ) -> FabricPostWriteOutcome:
-        """Run I4C's conflict prefix followed by I4B-2's bounded motif tail.
+        """Run I4C's conflict prefix and I4B-2/I4D's bounded private tail.
 
         A true split's child is a structural consequence of an attach route,
         not a public ``created_motif``.  The eligibility gate is therefore
         the primary ``CREATED_NEW`` outcome. I4C restores only the first
         legacy created-memory consumer: the existing external, fail-soft
-        contradiction surface. Reinforcement and ordinary no-write perform
-        neither conflict persistence nor I4B-2 tail work.
+        contradiction surface. I4D then composes only mood drift and Character
+        after I4B-2's preserved M1/anchor slot; the world step and every later
+        I4E consumer remain excluded. Reinforcement and ordinary no-write
+        perform neither conflict persistence nor I4B-2/I4D tail work.
         """
         if context.storage_outcome is not PostWriteStorageOutcome.CREATED_NEW:
             return FabricPostWriteOutcome()
@@ -524,7 +536,36 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             consumers = LegacyFabricPostWriteAdapter(self._bind_dependencies(connection, context, witness))
             consumers._run_contradiction_surface(context)
             self._run_i4b2_motif_maintenance_and_anchors(consumers, context, emit_anchors=True)
+            self._run_i4d_mood_drift(consumers, context)
+            consumers._run_character_drift(context)
         return FabricPostWriteOutcome()
+
+    @staticmethod
+    def _run_i4d_mood_drift(
+        consumers: LegacyFabricPostWriteAdapter,
+        context: FabricPostWriteContext,
+    ) -> None:
+        """Retain only the fail-soft mood slot after I4B-2's anchor prefix."""
+        deps = consumers._deps
+        # The legacy derived slot is reached only through motif maintenance;
+        # preserve that predecessor gate instead of granting mood its own
+        # independent route when I4B-2 supplied no runtime.
+        if deps.motif_runtime is None:
+            return
+        derived_context = DerivedMemoryRuntimeContext(
+            workspace_id=context.workspace_id,
+            agent_id=context.agent_id,
+            domain_id=context.chosen_domain,
+            trigger_scope=context.scope,
+            step=int(context.step),
+            motif_ids=tuple(context.motif_ids),
+            affect_tag=context.affect_tag,
+            affect_conf=context.affect_conf,
+        )
+        try:
+            deps.derived_memory_runtime.maybe_emit_mood_drift(derived_context)
+        except Exception as exc:
+            deps.owner._log.debug("mood drift emission failed: %s", exc)
 
     @staticmethod
     def _run_i4b2_motif_maintenance_and_anchors(
@@ -578,6 +619,13 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         _require_qualified(profile.conflict_consumer, "conflict consumer")
         _require_qualified(profile.derived_memory, "derived memory")
         _require_qualified(profile.motif_suggestion_maintenance, "motif suggestion maintenance")
+        owner = self._configuration.external.owner
+        character_due = bool(getattr(owner, "_character_enable", False)) and context.stored and (
+            int(context.step) > 0
+            and int(context.step) % int(getattr(owner, "_character_drift_every", 1)) == 0
+        )
+        if character_due and profile.character is not NativePostWriteBehavior.QUALIFIED:
+            _refuse(profile.character, "Character drift")
         if bool(policy.get("auto_merge_motifs", False)):
             _require_qualified(profile.motif_auto_merge, "motif auto-merge")
 

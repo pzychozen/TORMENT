@@ -727,7 +727,7 @@ def test_explicit_m1_profile_runs_native_suggestion_maintenance_without_legacy_m
         qualified.close()
 
 
-def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
+def test_i4d_true_split_runs_conflict_motif_anchor_mood_and_character_tail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -746,8 +746,20 @@ def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
         )
         configuration = replace(
             configuration,
-            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
-            external=replace(configuration.external, workspace=workspace),
+            profile=(
+                NativePostWriteQualificationProfile
+                .core_staging_with_character_and_motif_merge_maintenance()
+            ),
+            external=replace(
+                configuration.external,
+                workspace=workspace,
+                character_store=SimpleNamespace(
+                    load_seed=lambda *_args: None,
+                    load_state=lambda *_args: None,
+                    save_state=lambda *_args, **_kwargs: None,
+                ),
+                character_embedder=_CharacterEmbedder(),
+            ),
             motif_suggestion_maintenance_required=True,
         )
         router = NativeFabricMemoryRouter(capability)
@@ -772,15 +784,36 @@ def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
             events.append("motif_maintenance")
             return original_maintenance(adapter, *args, **kwargs)
 
+        original_character_drift = LegacyFabricPostWriteAdapter._run_character_drift
+
+        def record_character_drift(adapter, context):
+            events.append("character")
+            return original_character_drift(adapter, context)
+
         def forbidden(*_args, **_kwargs):
             raise AssertionError("I4C reached an unqualified post-write consumer")
 
         monkeypatch.setattr(conflicts, "add", record_conflict)
         monkeypatch.setattr(NativeMotifMaintenanceAdapter, "update_entropy_and_suggest", record_maintenance)
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "maybe_emit_identity_anchor",
+            lambda *_args, **_kwargs: events.append("anchor"),
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "refine_identity_anchors",
+            lambda *_args, **_kwargs: events.append("refine"),
+        )
+        monkeypatch.setattr(
+            NativeDerivedMemoryRuntime,
+            "maybe_emit_mood_drift",
+            lambda *_args, **_kwargs: events.append("mood"),
+        )
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_srg_collision", forbidden)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_hivemind", forbidden)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_world_step", forbidden)
-        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", forbidden)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_character_drift", record_character_drift)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_proposal", forbidden)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_derived_memory", forbidden)
 
@@ -789,7 +822,7 @@ def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
             route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
         )
         assert outcome.proposal_id is None
-        assert events[:2] == ["conflict", "motif_maintenance"]
+        assert events == ["conflict", "motif_maintenance", "anchor", "refine", "mood", "character"]
         assert len(conflicts.calls) == 1
         conflict = conflicts.calls[0]
         assert conflict["eid_a"] == seed.eid
@@ -800,8 +833,9 @@ def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
         assert not owner.field.packets
         assert not proposals.calls
         assert (workflow_root / "workspaces" / "ws" / "domains" / "personal" / "motif_events.jsonl").exists()
-        # Anchor failure/success is intentionally fail-soft, but mood drift is
-        # excluded: this run may write only the M1 workflow and N02 anchor state.
+        # The I4D mood slot and Character boundary are both reached after M1
+        # and anchors. The neutral fixture has no affect or Character seed, so
+        # neither creates additional state here.
         assert "affect" not in side.events
     finally:
         qualified.close()

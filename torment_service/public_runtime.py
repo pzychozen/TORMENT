@@ -735,7 +735,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             )
         return NativePostWriteQualificationConfiguration(
             routing_scope=scope,
-            profile=NativePostWriteQualificationProfile.core_staging(),
+            profile=NativePostWriteQualificationProfile.core_staging_with_character(),
             external=external,
             derived_runtime_template=template,
             motif_suggestion_maintenance_required=False,

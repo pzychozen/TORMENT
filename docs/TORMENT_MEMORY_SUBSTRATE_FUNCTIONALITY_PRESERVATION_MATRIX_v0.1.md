@@ -2,7 +2,7 @@
 
 **Version:** 0.1
 
-**Status:** living I3C / bounded I4B-1 and I4B-2 preservation artifact. It records current offline
+**Status:** living I3C / bounded I4B-1, I4B-2, I4C, and I4D preservation artifact. It records current offline
 evidence and does not authorize a real-root contact, service start, provider
 contact, re-embedding, selected-profile activation, or component retirement.
 
@@ -30,11 +30,11 @@ ordinary meaning and must not be read as hidden approvals.
 | Function / behavior | Legacy semantic owner | Durable / external owner | Native replacement or adapter | Parity evidence | Composition gate | Retirement allowed? |
 |---|---|---|---|---|---|---|
 | Input write gate / provenance | `TormentFabric.ingest` input gate and provenance boundary | Legacy graph, identity, and provenance records | Native public ingest executor only after selected-policy proof | Main ingest census; direct-writer bypasses remain unresolved | I4 must preserve the gate and provenance authority | NO |
-| Memory create | `TormentFabric.ingest` / legacy storage adapter | Legacy graph, identity, external admission | `NativePrimaryPrecommitService` through the bounded native route | I4B-1 primary fixtures; private I4B-2 T0/T1/T2/recovery fixtures; I4B2 full private native-public true-split CREATE; I4C true-split conflict-prefix fixtures | Ordinary and private reachable true-split precommit retain the existing `NATIVE_FABRIC_NEW_MEMORY:SOURCE` canonical owner. I4C adds only the retained private conflict prefix ahead of I4B-2's motif tail; all remaining broad post-write remains open | NO |
+| Memory create | `TormentFabric.ingest` / legacy storage adapter | Legacy graph, identity, external admission | `NativePrimaryPrecommitService` through the bounded native route | I4B-1 primary fixtures; private I4B-2 T0/T1/T2/recovery fixtures; I4C conflict-prefix and I4D Character/derived true-split fixtures | Ordinary and private reachable true-split precommit retain the existing `NATIVE_FABRIC_NEW_MEMORY:SOURCE` canonical owner. I4C/I4D compose only conflict, I4B-2 M1/anchors, mood, and Character in the true-split continuation; I4E systems remain open | NO |
 | Embed-audit dirty marking | Legacy ingest and derived-memory creation audit invalidation | Existing workspace embed_audit.json when present | Bounded public-ingest observer; external file owner retained | I4B-1 synthetic temp-path observer proves post-spawn/pre-motif ordering and survival after canonical failure | Best-effort dirty state occurs after spawn and before motif/flush; real-root/service activation remains forbidden | NO |
 | Reinforcement | Fabric / legacy post-write adapter | Legacy graph payload and JSONL | Native reinforcement/runtime primitive | `test_substrate_memory_reinforcement.py`, I4B-1 formula/backfill fixtures, and I4B1F full native-public reinforcement fixture | I4B-1 preserves formulas and the existing reinforcement source owner; RoleStore/affect preparation runs while CREATE-only motif/symbol effects remain absent; SRG and post-commit consumers remain separately gated | NO |
 | Motif attach / create | Legacy motif runtime selected by `TormentFabric.ingest` | Live legacy motif registry | I4B-1 precommit motif mutation plus private I4B-2 two-stage existing-schema split operations | I4B-1 ordinary attach/flush fixtures; private I4B-2 T0/T1/T2, candidate disposition, source/abort recovery and public CREATE fixtures | Private true split is qualified only as attach -> durable parent -> atomic final parent/child topology; no formula/schema/outbox change. Shared I4B-2 topology is not qualified | NO |
-| Motif maintenance / split / merge | Legacy motif runtime and merge policy | Live registry, merge suggestions, and policy records | Private I4B-2 bounded true-split `CREATED_NEW` M1/M2 workflow plus existing native motif split/merge owners | Private I4B-2 motif-only tail, null-runtime, independent failure, public-handoff, I4C conflict-before-M1, and motif regression fixtures | Qualified only for the private true-split motif prefix: I4C's retained conflict prefix, then entropy/suggestions, policy-authorized auto-merge, and bounded anchors. Shared post-write remains on its existing dispatch; SRG/world/Character/proposal/bridge/mood remain outside the profile | NO |
+| Motif maintenance / split / merge | Legacy motif runtime and merge policy | Live registry, merge suggestions, and policy records | Private I4B-2 bounded true-split `CREATED_NEW` M1/M2 workflow plus existing native motif split/merge owners | Private I4B-2 motif-only tail, null-runtime, independent failure, public-handoff, I4C conflict-before-M1, I4D ordered continuation, and motif regression fixtures | Qualified only for the private true-split prefix: I4C conflict, then entropy/suggestions, policy-authorized auto-merge, frozen anchors, I4D mood, and I4D Character. Shared remains separately dispatched; SRG/world/proposal/bridge remain outside this profile | NO |
 | Query embedding | Fabric kernel embedder | Configured provider/model lane | Same Fabric owner and admitted native lane validation | I3A/I3B query parity | Representation identity remains selected-profile gate | NO |
 | ThinkingController MemoryPlan policy | `ThinkingController.build_memory_plan` + `TormentFabric.query` | Ephemeral policy state; no native storage owner | Same existing cognition owner | Main query census: lane budgets, weights, bounded allocation, and deep-lane interaction | Native storage must not become the MemoryPlan owner | NO |
 | Candidate retrieval | `MemoryGraph.search` | Legacy graph embeddings | `NativeMemoryVectorRuntime` through `NativeQualifiedQueryReadModel` | I3B candidate shape, stale, and I3C malformed-vector tests | Qualified snapshot required | NO |
@@ -50,9 +50,9 @@ ordinary meaning and must not be read as hidden approvals.
 | Active motif context | Motif registry + Fabric presentation | Persisted motif state | Native motif reader plus existing `_active_summary` | I3B active-order parity; I4B-1 orphan member-count/domain-centroid fixture | I4B-1 preserves precommit orphan-motif read effect; post-commit maintenance remains open | NO |
 | `dominant_thread` | Fabric `dominant_thread` | Active motif context | Same Fabric function | I3B gravity/raw-strength fixture | No new tie policy | NO |
 | Character seed/context | Fabric + `assemble_character_context` | External `CharacterStore` | Retained external owner | A3 and I3C absent/read-failure characterization | Absence of `character_context` is not a health signal: disabled Character, absent seed/state, and `CharacterStore` read failure share the same broad fail-soft boundary; write composition is I4 | NO |
-| Character drift | Character runtime | External Character state | Retained external owner | Existing native drift/runtime tests; not query-write qualified | I4 | NO |
-| Character drift reflex | Fabric rising-edge callback after high-drift measurement | Process-local Fabric high-drift map plus external callback owner | No qualified native callback composition | Main ingest/post-write census | Restart clears the process-local edge map; the first later high-drift measurement may re-fire the callback | NO |
-| Character gravity | Character runtime | External Character state | Retained external owner | Legacy invariant mapped; I4B-1 did not exercise nested-write parity | `GRAVITY_ORPHAN_POLICY_PARITY = NOT_YET_QUALIFIED_I4D`; gravity nested write must not call Fabric ingest or re-enter full post-write | NO |
+| Character drift | Character runtime | External `CharacterStore` state JSON | Qualified native measurement with retained external state owner | I4D full public create/state/reload and native drift parity suites | Private native-public only: exact measurement/order/formula/cadence/history retained; reinforcement is an effective no-op, no-write is not due, canonical failure stops before post-write | NO |
+| Character drift reflex | Fabric rising-edge callback after high-drift measurement | Process-local Fabric high-drift map plus external callback owner | Retained callback composed after qualified native Character/gravity | I4D public high-drift/reflex fixture | Existing rising-edge and callback-failure behavior retained. Restart clears the process-local map, so the first later high measurement may re-fire. No autonomous control authority | NO |
+| Character gravity | Character runtime | Native additive correction plus retained external Character state | Existing native gravity runtime | I4D public high-drift fixture and native gravity/recovery suites | Private native-public only: additive qualified child, retained formula, and best-effort motif work; it never calls Fabric ingest or re-enters full post-write | NO |
 | Conflict persistence | `LegacyFabricPostWriteAdapter._run_contradiction_surface` and existing conflict heuristic | External `ConflictRegistry` JSONL/evidence | Retained legacy contradiction surface composed only for private native-public `CREATED_NEW` true splits, ahead of the I4B-2 motif tail | I4C true-split order, private-origin, soft-failure, public-handoff, and existing created/reinforce/NO_WRITE/canonical-failure fixtures | Private/core/EID gates, candidate filtering, conflict mathematics, append owner, and fail-soft disposition are preserved. Owner re-entry after incomplete post-write has no exactly-once claim; shared is not qualified | NO |
 | Conflict query read | Fabric conflict map | Read-only external conflict evidence | `_ReadOnlyConflictRegistry` | I3B/I3B0 present, absent, malformed evidence tests; I4C origin-isolation regression | Frozen reader: qualified origin map, scoring condition, explain shape, and query ordering remain unchanged. Private writer scope does not claim shared reader/writer parity | NO |
 | SRG read | Fabric score/explain source | Legacy payload or native qualified source | `effective_srg_state` | I3B source test; I3C modifier/refusal tests | Full valid state required; optional absence remains lawful | NO |
@@ -72,7 +72,7 @@ ordinary meaning and must not be read as hidden approvals.
 | Shared ingest | Fabric shared ingest / proposal policy | Shared graph and external policy | Native public ingest route | Storage path exists; shared direct `created_motif` now follows route truth (`ATTACH_EXISTING` -> `None`); system parity NOT YET QUALIFIED | Current native-public shared scope is not claimed. I4B-2 excludes shared requests from the private-qualified I4B precommit route and does not qualify shared true-split topology or post-write. Existing shared post-write claims remain separately qualified; I4 post-write and conflict composition remain open | NO |
 | Proposals | Proposal orchestration | External proposal records / receipts | Native authorized proposal primitives | Existing substrate tests; no full query/system parity | I4 route composition | NO |
 | Role / affect / symbol | RoleStore, affect classifier, and Fabric symbol-state writer | External role file / affect history / symbol state | I4B1E/F source-selected native precommit composition | I3B0 read fencing plus I4B1E storage and I4B1F full public create/reinforce/NO_WRITE/failure/restart fixtures | Role and classifier precommit parity is qualified on each reachable branch; affect history is post-write mood drift; symbol/resonance state is CREATE-only precommit | NO |
-| Derived memory | Derived-memory runtime | Derived/external state | Native derived runtime primitives | Existing N02 lifecycle tests; private I4B-2 true-split anchor prefix, null-runtime, and independent failure fixtures | I4B-2 qualifies only private identity-anchor create/refinement and its existing N02 lifecycle successor. Mood and all remaining derived composition stay open | NO |
+| Derived memory | Derived-memory runtime | Native derived children plus retained anchor/affect external state | Native derived runtime primitives | Existing N02 lifecycle tests; I4B-2 anchor prefix; I4D public mood success/miss/failure/replay and derived recovery suites | Identity anchors remain frozen N02. I4D qualifies only private native-public mood after the retained M1/anchor gate; no general SRG successor, shared, or remaining derived composition is claimed | NO |
 | Compression / deep-memory export | Legacy compression post-write runtime | Deep-memory files and compressed source metadata | No qualified native post-write path | Main ingest/post-write and public-service census | Deep export/compression control remains pre-activation gated | NO |
 | Deep memory / spirit return | Legacy `_query_deep_lane` and spirit-return enrichers | Per-agent deep-memory store | NATIVE SUPPORT = NO | Main query/service census: spirit modes `resonance`, `surfacing`, `recollection`; `_is_deep` classification; Character voice recommendations can consume spirit hits | When `TORMENT_COMPRESS_ENABLE` / deep retrieval applies, activation is refused; `DEEP_RETRIEVAL_PROFILE_GATE = OPEN_PRE_ACTIVATION` | NO |
 | Hivemind emission / convergence | Legacy post-write adapter / collective field | External collective packets, events, and proposals | No qualified native write adapter | Main ingest/post-write census | I4 collective emission/convergence parity; query remains refuse-when-applicable | NO |
@@ -111,7 +111,10 @@ SRG_SAME_PROCESS_MUTATION = PASS_WITHIN_HISTORICAL_NESTED_GATE
 SRG_RESTART_WRITE_COMPOSITION = BLOCKED_PENDING_I4
 MOTIF_LIVE_INSERTION_ORDER = QUALIFIED_I4B1_PRIMARY_CREATE_PLUS_PRIVATE_I4B2_TRUE_SPLIT_SCOPE
 CHARACTER_QUERY_READ = PASS
-CHARACTER_WRITE_COMPOSITION = BLOCKED_PENDING_I4
+CHARACTER_WRITE_COMPOSITION = QUALIFIED_I4D_PRIVATE_NATIVE_PUBLIC_SCOPE
+DERIVED_MOOD_WRITE_COMPOSITION = QUALIFIED_I4D_PRIVATE_NATIVE_PUBLIC_SCOPE
+CHARACTER_WORLD_ORDER_DEPENDENCY = INDEPENDENT_FOR_I4D
+SHARED_I4D_PARITY = NOT_CLAIMED
 CONFLICT_QUERY_READ = PASS_FROZEN
 CONFLICT_WRITER_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
 CONFLICT_SYSTEM = QUALIFIED_BOUNDED_PRIVATE_NATIVE_PUBLIC_SCOPE
@@ -168,8 +171,8 @@ EXTERNAL_OWNER_REINFORCEMENT_PARITY = PASS
 EXTERNAL_OWNER_RESTART_PARITY = PASS (RoleStore/symbol-state residue; affect has no precommit durable mutation)
 I4B1_READY_TO_FREEZE = YES (bounded artifact; final narrow review still required)
 
-CHARACTER_GRAVITY_NESTED_WRITE_RECURSION = LEGACY_INVARIANT_MAPPED
-GRAVITY_ORPHAN_POLICY_PARITY = NOT_YET_QUALIFIED_I4D
+CHARACTER_GRAVITY_NESTED_WRITE_RECURSION = QUALIFIED_I4D_NO_FABRIC_REENTRY
+GRAVITY_ORPHAN_POLICY_PARITY = QUALIFIED_BOUNDED_PRIVATE_NATIVE_PUBLIC_SCOPE
 
 ROLE_PRECOMMIT_PARITY = PASS
 AFFECT_PRECOMMIT_PARITY = PASS
@@ -374,5 +377,13 @@ SRG_RESTART_PARITY = BLOCKED_PENDING_I4
 SRG_QUERY_WRITE_COMPOSITION_PARITY = BLOCKED_PENDING_I4
 MOTIF_LIVE_INSERTION_ORDER_PARITY = QUALIFIED_I4B1_PRIMARY_CREATE_PLUS_PRIVATE_I4B2_TRUE_SPLIT_SCOPE
 CONFLICT_SYSTEM_PARITY = PASS_BOUNDED_PRIVATE_NATIVE_PUBLIC_SCOPE
-CHARACTER_WRITE_COMPOSITION = BLOCKED_PENDING_I4
+DERIVED_MOOD_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
+CHARACTER_DRIFT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
+CHARACTER_GRAVITY_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
+CHARACTER_REFLEX_EDGE_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
+CHARACTER_WORLD_ORDER_DEPENDENCY = INDEPENDENT_FOR_I4D
+SHARED_I4D_PARITY = NOT_CLAIMED
+I4E_SYSTEMS_MIGRATED = NO
+RETIREMENT_ALLOWED = NO
+REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
 ```

@@ -338,12 +338,14 @@ class NativePublicIngestExecutor:
             and prepared.scope == "private"
         ):
             # I4C composes the qualified conflict prefix ahead of I4B-2's
-            # narrow motif/anchor tail for its stored true-split outcome.
-            # Ordinary public writes retain their existing core-staging
-            # profile and broad post-write sequence.
+            # motif/anchor tail. I4D continues only with mood and Character;
+            # its true split deliberately does not acquire I4E world authority.
             configuration = replace(
                 configuration,
-                profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+                profile=(
+                    NativePostWriteQualificationProfile
+                    .core_staging_with_character_and_motif_merge_maintenance()
+                ),
                 motif_suggestion_maintenance_required=True,
             )
         with self._owner.open_post_write_context(configuration=configuration) as post_write:

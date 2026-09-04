@@ -189,8 +189,8 @@ def test_i4b1f_full_public_create_uses_existing_canonical_source_owner(tmp_path:
         close_public_runtime(root)
 
 
-def test_i4c_full_public_true_split_enters_conflict_then_the_motif_tail(tmp_path: Path, monkeypatch):
-    """Cross the real public handoff into I4C's prefix and I4B-2's tail."""
+def test_i4d_full_public_true_split_enters_conflict_motif_mood_character_tail(tmp_path: Path, monkeypatch):
+    """Cross the real public handoff into I4C/I4B-2/I4D's bounded tail."""
     import torment_service.substrate.native_world_runtime as world_module
 
     monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
@@ -227,7 +227,6 @@ def test_i4c_full_public_true_split_enters_conflict_then_the_motif_tail(tmp_path
             "_run_srg_collision",
             "_run_hivemind",
             "_run_world_step",
-            "_run_character_drift",
             "_run_proposal",
             "_run_derived_memory",
         ):
@@ -250,6 +249,7 @@ def test_i4c_full_public_true_split_enters_conflict_then_the_motif_tail(tmp_path
         assert configuration.motif_suggestion_maintenance_required is True
         assert configuration.profile.motif_suggestion_maintenance.name == "QUALIFIED"
         assert configuration.profile.motif_auto_merge.name == "QUALIFIED"
+        assert configuration.profile.character.name == "QUALIFIED"
     finally:
         close_public_runtime(root)
 
