@@ -24,6 +24,7 @@ from .deployment_core_maintenance import (
     activate_core,
     enter_cutover_pending,
     inspect_contained_core_deployment,
+    read_root_disposition_execution_receipt,
     staging_legacy_witness,
 )
 from .deployment_types import (
@@ -32,6 +33,7 @@ from .deployment_types import (
     DeploymentResolutionMode,
     DeploymentState,
     QualifiedDeploymentProfile,
+    RootAdmissionCompletionWitness,
     SelectorState,
     canonical_json,
     require_digest,
@@ -299,6 +301,7 @@ def activate_selector_native(
     core_result: CoreMaintenanceResult,
     expected_generation: int,
     operation_key: str,
+    disposition_execution_receipt_digest: str | None = None,
 ) -> SelectorState:
     """Finalize external PENDING -> NATIVE only after core-side activation."""
 
@@ -306,6 +309,16 @@ def activate_selector_native(
     _require_operation_key(operation_key)
     if core_result.transition_kind != "ACTIVATE_CORE":
         raise DeploymentAuthorityError("selector activation requires an ACTIVATE_CORE receipt")
+    root_completion = core_result.completion_witness
+    if isinstance(root_completion, RootAdmissionCompletionWitness):
+        if disposition_execution_receipt_digest is None:
+            raise DeploymentAuthorityError("root selector activation requires a disposition execution receipt")
+        require_digest(
+            disposition_execution_receipt_digest,
+            "disposition_execution_receipt_digest",
+        )
+    elif disposition_execution_receipt_digest is not None:
+        raise DeploymentAuthorityError("v1 selector activation must not bind a root disposition receipt")
     intent = {
         "contract": _SELECTOR_CONTRACT,
         "kind": "ACTIVATE_SELECTOR_NATIVE",
@@ -316,6 +329,8 @@ def activate_selector_native(
         "activation_maintenance_id": str(core_result.maintenance_id),
         "core_witness_digest": core_result.witness.digest,
     }
+    if disposition_execution_receipt_digest is not None:
+        intent["disposition_execution_receipt_digest"] = disposition_execution_receipt_digest
     recovered = _recover_selector_operation(data_root, operation_key, intent)
     if recovered is not None:
         return recovered
@@ -329,6 +344,16 @@ def activate_selector_native(
         or actual.deployment_state is not DeploymentState.NATIVE_ACTIVE
     ):
         raise DeploymentAuthorityError("selector activation requires an ACTIVE_CORE/NATIVE_ACTIVE core")
+    if isinstance(root_completion, RootAdmissionCompletionWitness):
+        if actual.activation_completion_witness != root_completion:
+            raise DeploymentAuthorityError("root selector activation completion witness no longer matches the core")
+        receipt = read_root_disposition_execution_receipt(
+            data_root=data_root,
+            core_relative_path=core_relative_path,
+            completion_witness=root_completion,
+        )
+        if receipt is None or receipt.digest != disposition_execution_receipt_digest:
+            raise DeploymentAuthorityError("root selector activation receipt is missing or mismatched")
     result_witness = core_result.witness
     result = SelectorState(
         generation=expected_generation + 1,

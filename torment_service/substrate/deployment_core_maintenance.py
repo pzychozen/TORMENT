@@ -18,11 +18,16 @@ from uuid import UUID
 from .connection import open_existing_native_core_connection
 from .deployment_types import (
     AdmissionCompletionWitness,
+    CompletionWitness,
     CoreDeploymentWitness,
     DeploymentState,
+    RootAdmissionCompletionWitness,
+    RootDispositionExecutionReceipt,
     canonical_json,
+    completion_witness_from_payload,
     require_digest,
     require_relative_core_path,
+    root_disposition_receipt_from_payload,
 )
 from .errors import DeploymentAuthorityError, DeploymentIdempotencyConflict
 from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
@@ -34,6 +39,11 @@ _ENTER_PENDING = "ENTER_CUTOVER_PENDING"
 _ACTIVATE = "ACTIVATE_CORE"
 _ABORT_PENDING = "ABORT_CUTOVER_PENDING"
 _EVENT_KINDS = frozenset({_ENTER_PENDING, _ACTIVATE, _ABORT_PENDING})
+# ``maintenance_events`` has a frozen kind CHECK constraint.  The receipt is
+# part of the existing CUTOVER evidence stream and carries its own explicit
+# contract, so no schema expansion or parallel ledger is introduced.
+_ROOT_DISPOSITION_MAINTENANCE_KIND = "CUTOVER"
+_ROOT_DISPOSITION_CONTRACT = "TORMENT_ROOT_DISPOSITION_EXECUTION_V1"
 
 
 @dataclass(frozen=True)
@@ -46,7 +56,7 @@ class CoreDeploymentInspection:
     witness: CoreDeploymentWitness | None
     latest_maintenance_id: UUID | None
     ever_active: bool
-    activation_completion_witness: AdmissionCompletionWitness | None = None
+    activation_completion_witness: CompletionWitness | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +69,7 @@ class CoreMaintenanceResult:
     selector_generation: int
     selector_witness_digest: str
     safe_abort_proven: bool = False
-    completion_witness: AdmissionCompletionWitness | None = None
+    completion_witness: CompletionWitness | None = None
 
 
 def inspect_contained_core_deployment(
@@ -172,7 +182,7 @@ def activate_core(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
-    completion_witness: AdmissionCompletionWitness | None = None,
+    completion_witness: CompletionWitness | None = None,
 ) -> CoreMaintenanceResult:
     """Transition STAGING/CUTOVER_PENDING to ACTIVE_CORE/NATIVE_ACTIVE once."""
 
@@ -190,6 +200,127 @@ def activate_core(
         operation_key=operation_key,
         completion_witness=completion_witness,
     )
+
+
+def record_root_disposition_execution(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    completion_witness: RootAdmissionCompletionWitness,
+    receipt: RootDispositionExecutionReceipt,
+    operation_key: str,
+) -> RootDispositionExecutionReceipt:
+    """Persist the one post-P6 root disposition receipt in existing core evidence.
+
+    This function is deliberately unavailable before the immutable P6 core
+    activation event.  It appends evidence to the existing maintenance table;
+    it neither changes selector authority nor introduces a progress ledger.
+    """
+
+    if not isinstance(completion_witness, RootAdmissionCompletionWitness):
+        raise DeploymentAuthorityError("root disposition execution requires a v2 root completion witness")
+    if not isinstance(receipt, RootDispositionExecutionReceipt):
+        raise DeploymentAuthorityError("root disposition execution requires a typed receipt")
+    _require_operation_key(operation_key)
+    _require_root_receipt_matches_completion(receipt, completion_witness)
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True
+    )
+    intent = {
+        "contract": _ROOT_DISPOSITION_CONTRACT,
+        "kind": "RECORD_ROOT_DISPOSITION_EXECUTION",
+        "operation_key": operation_key,
+        "receipt_digest": receipt.digest,
+        "root_admission_envelope_digest": completion_witness.root_admission_envelope_digest,
+    }
+    with open_existing_native_core_connection(path) as opened:
+        connection = opened.connection
+        inspection = _inspect_connection(connection)
+        if (
+            inspection.core_role != "ACTIVE_CORE"
+            or inspection.deployment_state is not DeploymentState.NATIVE_ACTIVE
+            or inspection.activation_completion_witness != completion_witness
+        ):
+            raise DeploymentAuthorityError("root disposition execution requires the exact active P6 completion")
+        existing = _root_disposition_events(connection)
+        same_operation = next(
+            (item for item in existing if item["operation_key"] == operation_key), None,
+        )
+        if same_operation is not None:
+            if same_operation["canonical_intent"] != canonical_json(intent):
+                raise DeploymentIdempotencyConflict("root disposition operation key was reused with different intent")
+            return same_operation["receipt"]
+        same_root = [
+            item for item in existing
+            if item["receipt"].root_admission_envelope_digest
+            == completion_witness.root_admission_envelope_digest
+        ]
+        if same_root:
+            if len(same_root) != 1 or same_root[0]["receipt"] != receipt:
+                raise DeploymentAuthorityError("root disposition receipt conflicts with immutable root evidence")
+            return same_root[0]["receipt"]
+        detail = {
+            "canonical_intent": intent,
+            "contract": _ROOT_DISPOSITION_CONTRACT,
+            "core_id": str(inspection.core_id),
+            "operation_key": operation_key,
+            "receipt": receipt.payload(),
+            "receipt_digest": receipt.digest,
+            "recorded_at_ns": time.time_ns(),
+            "version": 1,
+        }
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "INSERT INTO maintenance_events VALUES (?, ?, ?, ?, ?)",
+                (
+                    native_id_to_bytes(generate_native_id()),
+                    _ROOT_DISPOSITION_MAINTENANCE_KIND,
+                    detail["recorded_at_ns"],
+                    detail["recorded_at_ns"],
+                    canonical_json(detail),
+                ),
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+    return receipt
+
+
+def read_root_disposition_execution_receipt(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    completion_witness: RootAdmissionCompletionWitness,
+) -> RootDispositionExecutionReceipt | None:
+    """Read the exact P6-to-P7 receipt without changing core state."""
+
+    if not isinstance(completion_witness, RootAdmissionCompletionWitness):
+        raise DeploymentAuthorityError("root disposition lookup requires a v2 root completion witness")
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True
+    )
+    connection = _open_readonly_core(path)
+    try:
+        inspection = _inspect_connection(connection)
+        if inspection.activation_completion_witness != completion_witness:
+            raise DeploymentAuthorityError("root disposition lookup completion witness mismatch")
+        matches = [
+            item["receipt"]
+            for item in _root_disposition_events(connection)
+            if item["receipt"].root_admission_envelope_digest
+            == completion_witness.root_admission_envelope_digest
+        ]
+        if len(matches) > 1:
+            raise DeploymentAuthorityError("multiple root disposition receipts bind one completion")
+        if matches:
+            _require_root_receipt_matches_completion(matches[0], completion_witness)
+            return matches[0]
+        return None
+    finally:
+        connection.close()
 
 
 def abort_cutover_pending(
@@ -225,7 +356,7 @@ def _transition(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
-    completion_witness: AdmissionCompletionWitness | None = None,
+    completion_witness: CompletionWitness | None = None,
 ) -> CoreMaintenanceResult:
     path = contained_core_path(
         data_root=data_root, core_relative_path=core_relative_path, require_exists=True
@@ -455,6 +586,65 @@ def _core_events(connection: sqlite3.Connection, core_id: UUID) -> list[dict[str
     return events
 
 
+def _root_disposition_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        "SELECT detail_json FROM maintenance_events WHERE maintenance_kind=? "
+        "ORDER BY completed_at_ns,maintenance_id",
+        (_ROOT_DISPOSITION_MAINTENANCE_KIND,),
+    ).fetchall()
+    events: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    for (detail_raw,) in rows:
+        try:
+            detail = json.loads(detail_raw)
+            if not isinstance(detail, dict) or detail.get("contract") != _ROOT_DISPOSITION_CONTRACT:
+                continue
+            if (
+                detail.get("version") != 1
+                or canonical_json(detail) != detail_raw
+                or not isinstance(detail.get("operation_key"), str)
+                or not detail["operation_key"]
+                or not isinstance(detail.get("canonical_intent"), dict)
+                or not isinstance(detail.get("receipt_digest"), str)
+            ):
+                raise ValueError("event shape")
+            receipt = root_disposition_receipt_from_payload(detail.get("receipt"))
+            if receipt.digest != detail["receipt_digest"]:
+                raise ValueError("receipt digest")
+            expected_intent = {
+                "contract": _ROOT_DISPOSITION_CONTRACT,
+                "kind": "RECORD_ROOT_DISPOSITION_EXECUTION",
+                "operation_key": detail["operation_key"],
+                "receipt_digest": receipt.digest,
+                "root_admission_envelope_digest": receipt.root_admission_envelope_digest,
+            }
+            if detail["canonical_intent"] != expected_intent:
+                raise ValueError("intent")
+            if detail["operation_key"] in keys:
+                raise ValueError("duplicate operation key")
+            keys.add(detail["operation_key"])
+        except (TypeError, ValueError, json.JSONDecodeError, DeploymentAuthorityError) as exc:
+            raise DeploymentAuthorityError("root disposition execution evidence is malformed") from exc
+        events.append({
+            "operation_key": detail["operation_key"],
+            "canonical_intent": canonical_json(detail["canonical_intent"]),
+            "receipt": receipt,
+        })
+    return events
+
+
+def _require_root_receipt_matches_completion(
+    receipt: RootDispositionExecutionReceipt,
+    completion: RootAdmissionCompletionWitness,
+) -> None:
+    if (
+        receipt.root_admission_envelope_digest != completion.root_admission_envelope_digest
+        or receipt.native_staging_core_id != completion.native_staging_core_id
+        or receipt.geometry_disposition_table_digest != completion.geometry_disposition_table_digest
+    ):
+        raise DeploymentAuthorityError("root disposition receipt does not match root completion evidence")
+
+
 def _event_for_operation(connection: sqlite3.Connection, operation_key: str) -> dict[str, Any] | None:
     rows = connection.execute(
         "SELECT maintenance_id,detail_json FROM maintenance_events WHERE maintenance_kind='CUTOVER'"
@@ -566,7 +756,7 @@ def _intent(
     selector_generation: int,
     selector_witness_digest: str,
     operation_key: str,
-    completion_witness: AdmissionCompletionWitness | None,
+    completion_witness: CompletionWitness | None,
 ) -> dict[str, Any]:
     return {
         "contract": _CONTRACT,
@@ -591,7 +781,7 @@ def _event_detail(
     selector_generation: int,
     selector_witness_digest: str,
     recorded_at_ns: int,
-    completion_witness: AdmissionCompletionWitness | None,
+    completion_witness: CompletionWitness | None,
 ) -> dict[str, Any]:
     return {
         "canonical_intent": intent,
@@ -611,22 +801,12 @@ def _event_detail(
     }
 
 
-def _completion_witness_from_payload(value: Any) -> AdmissionCompletionWitness | None:
+def _completion_witness_from_payload(value: Any) -> CompletionWitness | None:
     if value is None:
         return None
-    if not isinstance(value, dict):
-        raise DeploymentAuthorityError("core activation completion witness is malformed")
     try:
-        return AdmissionCompletionWitness(
-            admission_identity_digest=value["admission_identity_digest"],
-            completed_descriptor_digest=value["completed_descriptor_digest"],
-            completed_progress_digest=value["completed_progress_digest"],
-            native_core_id=UUID(value["native_core_id"]),
-            workspace_id=value["workspace_id"],
-            whole_workspace_closure_digest=value["whole_workspace_closure_digest"],
-            profile_digest=value.get("profile_digest"),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
+        return completion_witness_from_payload(value)
+    except DeploymentAuthorityError as exc:
         raise DeploymentAuthorityError("core activation completion witness is malformed") from exc
 
 
@@ -713,5 +893,7 @@ __all__ = [
     "contained_core_path",
     "enter_cutover_pending",
     "inspect_contained_core_deployment",
+    "read_root_disposition_execution_receipt",
+    "record_root_disposition_execution",
     "staging_legacy_witness",
 ]
