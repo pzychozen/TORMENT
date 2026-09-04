@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import sqlite3
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from .connection import open_existing_native_core_connection
@@ -25,6 +25,7 @@ from .deployment_types import (
     RootDispositionExecutionReceipt,
     canonical_json,
     completion_witness_from_payload,
+    digest_mapping,
     require_digest,
     require_relative_core_path,
     root_disposition_receipt_from_payload,
@@ -32,6 +33,9 @@ from .deployment_types import (
 from .errors import DeploymentAuthorityError, DeploymentIdempotencyConflict
 from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from .schema import SCHEMA_ID, SCHEMA_MAJOR, SCHEMA_MINOR, require_current_schema
+
+if TYPE_CHECKING:
+    from .root_blocker5_binding import RootAdmissionEnvelope, RootAdmissionEnvelopeRecord
 
 
 _CONTRACT = "TORMENT_B5_A2_CORE_MAINTENANCE_V1"
@@ -44,6 +48,8 @@ _EVENT_KINDS = frozenset({_ENTER_PENDING, _ACTIVATE, _ABORT_PENDING})
 # contract, so no schema expansion or parallel ledger is introduced.
 _ROOT_DISPOSITION_MAINTENANCE_KIND = "CUTOVER"
 _ROOT_DISPOSITION_CONTRACT = "TORMENT_ROOT_DISPOSITION_EXECUTION_V1"
+_ROOT_ENVELOPE_MAINTENANCE_KIND = "CUTOVER"
+_ROOT_ENVELOPE_CONTRACT = "TORMENT_ROOT_ADMISSION_ENVELOPE_RECORD_V1"
 
 
 @dataclass(frozen=True)
@@ -200,6 +206,119 @@ def activate_core(
         operation_key=operation_key,
         completion_witness=completion_witness,
     )
+
+
+def record_root_admission_envelope(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    envelope: RootAdmissionEnvelope,
+    operation_key: str,
+) -> RootAdmissionEnvelopeRecord:
+    """Persist one pre-P2 immutable root recovery record in core evidence."""
+
+    from .root_blocker5_binding import RootAdmissionEnvelope, RootAdmissionEnvelopeRecord
+
+    if not isinstance(envelope, RootAdmissionEnvelope):
+        raise DeploymentAuthorityError("root envelope record requires a typed root envelope")
+    _require_operation_key(operation_key)
+    record = RootAdmissionEnvelopeRecord.from_envelope(envelope)
+    record_digest = digest_mapping(record.payload())
+    intent = {
+        "contract": _ROOT_ENVELOPE_CONTRACT,
+        "kind": "RECORD_ROOT_ADMISSION_ENVELOPE",
+        "operation_key": operation_key,
+        "root_admission_envelope_digest": envelope.digest,
+        "record_digest": record_digest,
+    }
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True,
+    )
+    with open_existing_native_core_connection(path) as opened:
+        connection = opened.connection
+        inspection = _inspect_connection(connection)
+        if (
+            inspection.core_id != envelope.native_staging_core_id
+            or inspection.core_role != "STAGING"
+            or inspection.deployment_state is not DeploymentState.LEGACY_ACTIVE
+            or inspection.witness is not None
+            or inspection.ever_active
+        ):
+            raise DeploymentAuthorityError("root envelope record requires an inert staging core")
+        existing = _root_envelope_events(connection)
+        same_operation = next((item for item in existing if item["operation_key"] == operation_key), None)
+        if same_operation is not None:
+            if same_operation["canonical_intent"] != canonical_json(intent):
+                raise DeploymentIdempotencyConflict("root envelope operation key was reused with different intent")
+            return same_operation["record"]
+        same_envelope = [
+            item for item in existing
+            if item["record"].envelope_digest == envelope.digest
+        ]
+        if same_envelope:
+            if len(same_envelope) != 1 or same_envelope[0]["record"] != record:
+                raise DeploymentAuthorityError("root envelope record conflicts with immutable admission evidence")
+            return same_envelope[0]["record"]
+        now_ns = time.time_ns()
+        detail = {
+            "canonical_intent": intent,
+            "contract": _ROOT_ENVELOPE_CONTRACT,
+            "core_id": str(inspection.core_id),
+            "operation_key": operation_key,
+            "record": record.payload(),
+            "record_digest": record_digest,
+            "recorded_at_ns": now_ns,
+            "version": 1,
+        }
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "INSERT INTO maintenance_events VALUES (?, ?, ?, ?, ?)",
+                (
+                    native_id_to_bytes(generate_native_id()),
+                    _ROOT_ENVELOPE_MAINTENANCE_KIND,
+                    now_ns,
+                    now_ns,
+                    canonical_json(detail),
+                ),
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+    return record
+
+
+def read_root_admission_envelope_record(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    root_admission_envelope_digest: str,
+) -> RootAdmissionEnvelopeRecord | None:
+    """Read one exact immutable root envelope record without mutation."""
+
+    require_digest(root_admission_envelope_digest, "root_admission_envelope_digest")
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True,
+    )
+    connection = _open_readonly_core(path)
+    try:
+        inspection = _inspect_connection(connection)
+        matches = [
+            item["record"] for item in _root_envelope_events(connection)
+            if item["record"].envelope_digest == root_admission_envelope_digest
+        ]
+        if len(matches) > 1:
+            raise DeploymentAuthorityError("multiple root envelope records bind one admission identity")
+        if not matches:
+            return None
+        record = matches[0]
+        if record.envelope_payload.get("native_staging_core_id") != str(inspection.core_id):
+            raise DeploymentAuthorityError("root envelope record names another core")
+        return record
+    finally:
+        connection.close()
 
 
 def record_root_disposition_execution(
@@ -633,6 +752,62 @@ def _root_disposition_events(connection: sqlite3.Connection) -> list[dict[str, A
     return events
 
 
+def _root_envelope_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Decode only explicit immutable root-envelope evidence records."""
+
+    from .root_blocker5_binding import (
+        RootBlocker5BindingRefused,
+        root_admission_envelope_record_from_payload,
+    )
+
+    rows = connection.execute(
+        "SELECT detail_json FROM maintenance_events WHERE maintenance_kind=? "
+        "ORDER BY completed_at_ns,maintenance_id",
+        (_ROOT_ENVELOPE_MAINTENANCE_KIND,),
+    ).fetchall()
+    events: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    for (detail_raw,) in rows:
+        try:
+            detail = json.loads(detail_raw)
+            if not isinstance(detail, dict) or detail.get("contract") != _ROOT_ENVELOPE_CONTRACT:
+                continue
+            if (
+                detail.get("version") != 1
+                or canonical_json(detail) != detail_raw
+                or not isinstance(detail.get("operation_key"), str)
+                or not detail["operation_key"]
+                or not isinstance(detail.get("canonical_intent"), dict)
+                or not isinstance(detail.get("record_digest"), str)
+                or not isinstance(detail.get("core_id"), str)
+            ):
+                raise ValueError("event shape")
+            record = root_admission_envelope_record_from_payload(detail.get("record"))
+            record_digest = digest_mapping(record.payload())
+            if record_digest != detail["record_digest"]:
+                raise ValueError("record digest")
+            expected_intent = {
+                "contract": _ROOT_ENVELOPE_CONTRACT,
+                "kind": "RECORD_ROOT_ADMISSION_ENVELOPE",
+                "operation_key": detail["operation_key"],
+                "root_admission_envelope_digest": record.envelope_digest,
+                "record_digest": record_digest,
+            }
+            if detail["canonical_intent"] != expected_intent:
+                raise ValueError("intent")
+            if detail["operation_key"] in keys:
+                raise ValueError("duplicate operation key")
+            keys.add(detail["operation_key"])
+        except (TypeError, ValueError, json.JSONDecodeError, DeploymentAuthorityError, RootBlocker5BindingRefused) as exc:
+            raise DeploymentAuthorityError("root admission envelope evidence is malformed") from exc
+        events.append({
+            "operation_key": detail["operation_key"],
+            "canonical_intent": canonical_json(detail["canonical_intent"]),
+            "record": record,
+        })
+    return events
+
+
 def _require_root_receipt_matches_completion(
     receipt: RootDispositionExecutionReceipt,
     completion: RootAdmissionCompletionWitness,
@@ -893,7 +1068,9 @@ __all__ = [
     "contained_core_path",
     "enter_cutover_pending",
     "inspect_contained_core_deployment",
+    "read_root_admission_envelope_record",
     "read_root_disposition_execution_receipt",
+    "record_root_admission_envelope",
     "record_root_disposition_execution",
     "staging_legacy_witness",
 ]

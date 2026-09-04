@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import sqlite3
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from .deployment_types import (
@@ -25,13 +25,15 @@ from .deployment_types import (
     digest_mapping,
     require_digest,
 )
+from .canonical_intent import canonical_intent_text
 from .errors import DeploymentAuthorityError
 from .migration.root_admission_description import RootNativeProductionAdmissionDescription
 from .migration.root_normalization import RootNormalizationResult
 from .migration.root_scope import RootScopeKey, RootScopeKind
+from .migration.runtime_readiness import MigrationRuntimeScopePlan
 from .root_profile import RootProfileGenerationRef
 from .root_scope_membership import RootScopeMembershipRuntime
-from .runtime_binding import NativeMemoryRuntimeScope
+from .runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 
 
 class RootBlocker5BindingRefused(DeploymentAuthorityError):
@@ -224,6 +226,32 @@ def frozen_root_geometry_disposition_plan(
     ))
 
 
+def root_runtime_scope_plan_digest(
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...],
+    target_representation_lane: NativeRepresentationLane,
+) -> str:
+    """Digest the canonical root-qualified runtime plans without inference."""
+
+    return digest_mapping({
+        "runtime_scope_plans": [
+            _runtime_scope_plan_payload(plan, target_representation_lane)
+            for plan in _ordered_runtime_scope_plans(runtime_scope_plans)
+        ],
+    })
+
+
+def root_runtime_scope_plan_payloads(
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...],
+    target_representation_lane: NativeRepresentationLane,
+) -> tuple[dict[str, object], ...]:
+    """Expose the exact recoverable plan tuple used by the root envelope."""
+
+    return tuple(
+        _runtime_scope_plan_payload(plan, target_representation_lane)
+        for plan in _ordered_runtime_scope_plans(runtime_scope_plans)
+    )
+
+
 @dataclass(frozen=True)
 class RootAdmissionEnvelope:
     """P2-frozen root identity used as the existing selector descriptor digest."""
@@ -236,6 +264,7 @@ class RootAdmissionEnvelope:
     native_staging_core_id: UUID
     root_profile: RootProfileGenerationRef
     root_membership_closure_digest: str
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...]
 
     def __post_init__(self) -> None:
         _require_description(self.description)
@@ -256,6 +285,13 @@ class RootAdmissionEnvelope:
             raise RootBlocker5BindingRefused("root profile belongs to another staging core")
         require_digest(self.root_membership_closure_digest, "root_membership_closure_digest")
         _require_profile_matches_description(self.effective_profile, self.description)
+        ordered = _ordered_runtime_scope_plans(self.runtime_scope_plans)
+        if (
+            self.effective_profile.admitted_scope_plan_digest
+            != root_runtime_scope_plan_digest(ordered, self.description.target_representation_lane)
+        ):
+            raise RootBlocker5BindingRefused("ROOT_QUALIFIED_PROFILE_SCOPE_PLAN_MISMATCH")
+        object.__setattr__(self, "runtime_scope_plans", ordered)
 
     @property
     def digest(self) -> str:
@@ -276,7 +312,199 @@ class RootAdmissionEnvelope:
             "qualified_deployment_profile_digest": self.effective_profile.digest,
             "root_profile": self.root_profile.payload(),
             "root_membership_closure_digest": self.root_membership_closure_digest,
+            "root_runtime_scope_plan_digest": root_runtime_scope_plan_digest(
+                self.runtime_scope_plans, self.description.target_representation_lane,
+            ),
         }
+
+
+@dataclass(frozen=True)
+class RootAdmissionEnvelopeRecord:
+    """Immutable v2 recovery evidence persisted in the existing core stream.
+
+    This is a subordinate copy of the P2-frozen proposition.  Its envelope
+    digest remains the sole selector/core/completion identity; the record does
+    not mint another deployment or completion authority.
+    """
+
+    envelope_digest: str
+    envelope_payload: dict[str, object]
+    root_description_payload: dict[str, object]
+    declared_census_payload: dict[str, object]
+    discovered_census_payload: dict[str, object]
+    writer_freeze_payload: dict[str, str]
+    target_representation_lane: NativeRepresentationLane
+    geometry_disposition_entries: tuple[dict[str, str], ...]
+    effective_profile_payload: dict[str, object]
+    root_profile_payload: dict[str, object]
+    root_membership_closure_digest: str
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...]
+
+    CONTRACT = "TORMENT_ROOT_ADMISSION_ENVELOPE_RECORD"
+    VERSION = 1
+
+    def __post_init__(self) -> None:
+        require_digest(self.envelope_digest, "root admission envelope digest")
+        if not isinstance(self.envelope_payload, dict) or not isinstance(self.root_description_payload, dict):
+            raise RootBlocker5BindingRefused("root envelope record payloads must be mappings")
+        if not isinstance(self.declared_census_payload, dict) or not isinstance(self.discovered_census_payload, dict):
+            raise RootBlocker5BindingRefused("root envelope record census payloads must be mappings")
+        if not isinstance(self.writer_freeze_payload, dict) or not isinstance(self.effective_profile_payload, dict):
+            raise RootBlocker5BindingRefused("root envelope record evidence payloads must be mappings")
+        if not isinstance(self.root_profile_payload, dict):
+            raise RootBlocker5BindingRefused("root envelope record profile payload must be a mapping")
+        if not isinstance(self.target_representation_lane, NativeRepresentationLane):
+            raise RootBlocker5BindingRefused("root envelope record lane must be typed")
+        if not isinstance(self.geometry_disposition_entries, tuple) or any(
+            not isinstance(item, dict) for item in self.geometry_disposition_entries
+        ):
+            raise RootBlocker5BindingRefused("root envelope record geometry entries must be typed")
+        ordered = _ordered_runtime_scope_plans(self.runtime_scope_plans)
+        scope_digest = root_runtime_scope_plan_digest(ordered, self.target_representation_lane)
+        required_envelope_keys = {
+            "data_root_identity", "root_description_digest", "writer_freeze",
+            "declared_census_digest", "discovered_census_digest", "manifest_digest",
+            "external_owner_observation_digest", "geometry_disposition_table_digest",
+            "target_representation_identity", "native_staging_core_id",
+            "qualified_deployment_profile_digest", "root_profile",
+            "root_membership_closure_digest", "root_runtime_scope_plan_digest",
+        }
+        if set(self.envelope_payload) != required_envelope_keys:
+            raise RootBlocker5BindingRefused("root envelope record envelope payload is noncanonical")
+        if self.envelope_digest != digest_mapping(self.envelope_payload):
+            raise RootBlocker5BindingRefused("root envelope record digest does not recompute")
+        if self.envelope_payload.get("root_description_digest") != hashlib.sha256(
+            canonical_intent_text(self.root_description_payload).encode("utf-8")
+        ).hexdigest():
+            raise RootBlocker5BindingRefused("root envelope record root description disagrees")
+        if (
+            self.envelope_payload.get("data_root_identity")
+            != self.root_description_payload.get("data_root_identity")
+            or self.root_description_payload.get("target_representation_lane")
+            != _lane_payload(self.target_representation_lane)
+            or self.root_description_payload.get("expected_census") != self.declared_census_payload
+        ):
+            raise RootBlocker5BindingRefused("root envelope record root description facts disagree")
+        if self.envelope_payload.get("root_runtime_scope_plan_digest") != scope_digest:
+            raise RootBlocker5BindingRefused("root envelope record scope-plan digest disagrees")
+        if self.envelope_payload.get("qualified_deployment_profile_digest") != _profile_digest_from_payload(
+            self.effective_profile_payload,
+        ):
+            raise RootBlocker5BindingRefused("root envelope record profile payload disagrees")
+        if self.envelope_payload.get("root_membership_closure_digest") != self.root_membership_closure_digest:
+            raise RootBlocker5BindingRefused("root envelope record membership payload disagrees")
+        root_profile = root_profile_ref_from_record_payload(self.root_profile_payload)
+        if self.envelope_payload.get("root_profile") != root_profile.payload():
+            raise RootBlocker5BindingRefused("root envelope record root profile disagrees")
+        if self.envelope_payload.get("writer_freeze") != self.writer_freeze_payload:
+            raise RootBlocker5BindingRefused("root envelope record writer freeze disagrees")
+        if self.envelope_payload.get("geometry_disposition_table_digest") != digest_mapping({
+            "entries": list(self.geometry_disposition_entries),
+        }):
+            raise RootBlocker5BindingRefused("root envelope record geometry disposition disagrees")
+        if self.envelope_payload.get("declared_census_digest") != hashlib.sha256(
+            canonical_json(self.declared_census_payload).encode("utf-8")
+        ).hexdigest():
+            raise RootBlocker5BindingRefused("root envelope record declared census disagrees")
+        if self.envelope_payload.get("discovered_census_digest") != digest_mapping(
+            self.discovered_census_payload,
+        ):
+            raise RootBlocker5BindingRefused("root envelope record discovered census disagrees")
+        object.__setattr__(self, "runtime_scope_plans", ordered)
+
+    @classmethod
+    def from_envelope(cls, envelope: RootAdmissionEnvelope) -> "RootAdmissionEnvelopeRecord":
+        if not isinstance(envelope, RootAdmissionEnvelope):
+            raise RootBlocker5BindingRefused("root envelope record requires a typed envelope")
+        return cls(
+            envelope_digest=envelope.digest,
+            envelope_payload=envelope.payload(),
+            root_description_payload=envelope.description.canonical_payload,
+            declared_census_payload=envelope.description.expected_census.identity_payload(),
+            discovered_census_payload=envelope.discovered_census.payload(),
+            writer_freeze_payload=envelope.writer_freeze.payload(),
+            target_representation_lane=envelope.description.target_representation_lane,
+            geometry_disposition_entries=tuple(item.payload() for item in envelope.geometry_disposition_plan.entries),
+            effective_profile_payload=_profile_payload(envelope.effective_profile),
+            root_profile_payload=_root_profile_record_payload(envelope.root_profile),
+            root_membership_closure_digest=envelope.root_membership_closure_digest,
+            runtime_scope_plans=envelope.runtime_scope_plans,
+        )
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "contract": self.CONTRACT,
+            "version": self.VERSION,
+            "root_admission_envelope_digest": self.envelope_digest,
+            "root_admission_envelope_payload": self.envelope_payload,
+            "root_admission_description_payload": self.root_description_payload,
+            "declared_census_payload": self.declared_census_payload,
+            "discovered_census_payload": self.discovered_census_payload,
+            "writer_freeze_payload": self.writer_freeze_payload,
+            "target_representation_lane": _lane_payload(self.target_representation_lane),
+            "geometry_disposition_entries": list(self.geometry_disposition_entries),
+            "qualified_deployment_profile_payload": self.effective_profile_payload,
+            "root_profile_payload": self.root_profile_payload,
+            "root_membership_closure_digest": self.root_membership_closure_digest,
+            "root_runtime_scope_plan_digest": root_runtime_scope_plan_digest(
+                self.runtime_scope_plans, self.target_representation_lane,
+            ),
+            "runtime_scope_plans": list(root_runtime_scope_plan_payloads(
+                self.runtime_scope_plans, self.target_representation_lane,
+            )),
+        }
+
+
+def root_admission_envelope_record_from_payload(value: object) -> RootAdmissionEnvelopeRecord:
+    """Decode one explicit versioned record; unknown shapes never downgrade."""
+
+    if not isinstance(value, dict) or value.get("contract") != RootAdmissionEnvelopeRecord.CONTRACT:
+        raise RootBlocker5BindingRefused("root envelope record contract is unsupported")
+    if value.get("version") != RootAdmissionEnvelopeRecord.VERSION:
+        raise RootBlocker5BindingRefused("root envelope record version is unsupported")
+    required = {
+        "contract", "version", "root_admission_envelope_digest", "root_admission_envelope_payload",
+        "root_admission_description_payload", "declared_census_payload", "discovered_census_payload",
+        "writer_freeze_payload", "target_representation_lane", "geometry_disposition_entries",
+        "qualified_deployment_profile_payload", "root_profile_payload", "root_membership_closure_digest",
+        "root_runtime_scope_plan_digest", "runtime_scope_plans",
+    }
+    if set(value) != required or not isinstance(value["runtime_scope_plans"], list):
+        raise RootBlocker5BindingRefused("root envelope record shape is invalid")
+    lane = _lane_from_payload(value["target_representation_lane"])
+    plans = tuple(_runtime_scope_plan_from_payload(item, lane) for item in value["runtime_scope_plans"])
+    record = RootAdmissionEnvelopeRecord(
+        envelope_digest=value["root_admission_envelope_digest"],
+        envelope_payload=value["root_admission_envelope_payload"],
+        root_description_payload=value["root_admission_description_payload"],
+        declared_census_payload=value["declared_census_payload"],
+        discovered_census_payload=value["discovered_census_payload"],
+        writer_freeze_payload=value["writer_freeze_payload"],
+        target_representation_lane=lane,
+        geometry_disposition_entries=tuple(value["geometry_disposition_entries"]),
+        effective_profile_payload=value["qualified_deployment_profile_payload"],
+        root_profile_payload=value["root_profile_payload"],
+        root_membership_closure_digest=value["root_membership_closure_digest"],
+        runtime_scope_plans=plans,
+    )
+    if value["root_runtime_scope_plan_digest"] != root_runtime_scope_plan_digest(plans, lane):
+        raise RootBlocker5BindingRefused("root envelope record serialized scope-plan digest disagrees")
+    if canonical_json(record.payload()) != canonical_json(value):
+        raise RootBlocker5BindingRefused("root envelope record is not canonical")
+    return record
+
+
+def require_persisted_root_admission_envelope(
+    *, envelope: RootAdmissionEnvelope, record: RootAdmissionEnvelopeRecord | None,
+) -> RootAdmissionEnvelopeRecord:
+    """Require a durable record equal to the already-frozen in-memory envelope."""
+
+    if not isinstance(envelope, RootAdmissionEnvelope) or record is None:
+        raise RootBlocker5BindingRefused("ROOT_ADMISSION_ENVELOPE_RECORD_REQUIRED")
+    expected = RootAdmissionEnvelopeRecord.from_envelope(envelope)
+    if record != expected:
+        raise RootBlocker5BindingRefused("ROOT_ADMISSION_ENVELOPE_RECORD_MISMATCH")
+    return record
 
 
 def build_root_admission_envelope(
@@ -289,6 +517,7 @@ def build_root_admission_envelope(
     native_staging_core_id: UUID,
     root_profile: RootProfileGenerationRef,
     runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...],
     connection: sqlite3.Connection,
 ) -> RootAdmissionEnvelope:
     """Build P2 identity only after manifest, census and membership agreement."""
@@ -302,6 +531,7 @@ def build_root_admission_envelope(
         runtime_scopes=runtime_scopes,
         declared_scope_keys=_declared_scope_keys(description),
     )
+    _require_runtime_scope_plan_bindings(runtime_scope_plans, runtime_scopes)
     return RootAdmissionEnvelope(
         description=description,
         writer_freeze=writer_freeze,
@@ -311,6 +541,7 @@ def build_root_admission_envelope(
         native_staging_core_id=native_staging_core_id,
         root_profile=root_profile,
         root_membership_closure_digest=closure,
+        runtime_scope_plans=runtime_scope_plans,
     )
 
 
@@ -596,6 +827,187 @@ def _target_representation_identity(description: RootNativeProductionAdmissionDe
     return f"{lane.provider}:{lane.model}:{lane.dimension}:{lane.representation_class}"
 
 
+def _ordered_runtime_scope_plans(
+    value: tuple[MigrationRuntimeScopePlan, ...],
+) -> tuple[MigrationRuntimeScopePlan, ...]:
+    if not isinstance(value, tuple) or any(not isinstance(item, MigrationRuntimeScopePlan) for item in value):
+        raise RootBlocker5BindingRefused("root runtime scope plans must be typed")
+    ordered = tuple(sorted(value, key=lambda item: _root_scope_key_from_plan(item).canonical_key))
+    keys = tuple(_root_scope_key_from_plan(item) for item in ordered)
+    if len(set(keys)) != len(keys):
+        raise RootBlocker5BindingRefused("root runtime scope plans contain duplicate RootScopeKeys")
+    return ordered
+
+
+def _runtime_scope_plan_payload(
+    plan: MigrationRuntimeScopePlan,
+    lane: NativeRepresentationLane,
+) -> dict[str, object]:
+    if not isinstance(plan, MigrationRuntimeScopePlan) or not isinstance(lane, NativeRepresentationLane):
+        raise RootBlocker5BindingRefused("root runtime scope plan payload requires typed facts")
+    return {
+        "scope_key": _root_scope_key_from_plan(plan).identity_payload(),
+        "scope_plan": plan.intent(),
+        "representation_lane": _lane_payload(lane),
+    }
+
+
+def _runtime_scope_plan_from_payload(
+    value: object,
+    lane: NativeRepresentationLane,
+) -> MigrationRuntimeScopePlan:
+    if not isinstance(value, dict) or set(value) != {"scope_key", "scope_plan", "representation_lane"}:
+        raise RootBlocker5BindingRefused("root runtime scope plan record is malformed")
+    if value["representation_lane"] != _lane_payload(lane):
+        raise RootBlocker5BindingRefused("root runtime scope plan lane disagrees")
+    scope_key = _root_scope_key_from_payload(value["scope_key"])
+    plan_payload = value["scope_plan"]
+    if not isinstance(plan_payload, dict) or set(plan_payload) != {
+        "legacy_source_namespace_id", "workspace_id", "scope_kind", "qualifier",
+        "target_identity_namespace_id", "target_semantic_scope_id", "motif_alias_namespace_id",
+        "motif_identity_namespace_id", "membership_identity_namespace_id", "idempotency_namespace_id",
+        "motif_domain_id",
+    }:
+        raise RootBlocker5BindingRefused("root runtime scope plan facts are malformed")
+    try:
+        plan = MigrationRuntimeScopePlan(
+            legacy_source_namespace_id=UUID(plan_payload["legacy_source_namespace_id"]),
+            workspace_id=plan_payload["workspace_id"],
+            scope_kind=plan_payload["scope_kind"],
+            target_identity_namespace_id=UUID(plan_payload["target_identity_namespace_id"]),
+            target_semantic_scope_id=UUID(plan_payload["target_semantic_scope_id"]),
+            motif_alias_namespace_id=UUID(plan_payload["motif_alias_namespace_id"]),
+            motif_identity_namespace_id=UUID(plan_payload["motif_identity_namespace_id"]),
+            membership_identity_namespace_id=UUID(plan_payload["membership_identity_namespace_id"]),
+            idempotency_namespace_id=UUID(plan_payload["idempotency_namespace_id"]),
+            agent_id=scope_key.agent_id,
+            domain_id=scope_key.domain_id,
+            motif_domain_id=plan_payload["motif_domain_id"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RootBlocker5BindingRefused("root runtime scope plan facts are invalid") from exc
+    if plan.intent() != plan_payload or _root_scope_key_from_plan(plan) != scope_key:
+        raise RootBlocker5BindingRefused("root runtime scope plan facts are noncanonical")
+    return plan
+
+
+def _root_scope_key_from_plan(plan: MigrationRuntimeScopePlan) -> RootScopeKey:
+    if plan.scope_kind == "PRIVATE_AGENT":
+        return RootScopeKey(plan.workspace_id, RootScopeKind.PRIVATE, agent_id=plan.agent_id)
+    if plan.scope_kind == "SHARED_DOMAIN":
+        return RootScopeKey(plan.workspace_id, RootScopeKind.SHARED, domain_id=plan.domain_id)
+    raise RootBlocker5BindingRefused("root runtime scope plan kind is unsupported")
+
+
+def _root_scope_key_from_payload(value: object) -> RootScopeKey:
+    if not isinstance(value, dict) or set(value) != {"workspace_id", "scope_kind", "agent_id", "domain_id"}:
+        raise RootBlocker5BindingRefused("root runtime scope key is malformed")
+    try:
+        return RootScopeKey(
+            value["workspace_id"], RootScopeKind(value["scope_kind"]),
+            agent_id=value["agent_id"], domain_id=value["domain_id"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise RootBlocker5BindingRefused("root runtime scope key is invalid") from exc
+
+
+def _lane_payload(lane: NativeRepresentationLane) -> dict[str, object]:
+    return {name: getattr(lane, name) for name in lane.__dataclass_fields__}
+
+
+def _lane_from_payload(value: object) -> NativeRepresentationLane:
+    if not isinstance(value, dict):
+        raise RootBlocker5BindingRefused("root envelope record representation lane is malformed")
+    try:
+        return NativeRepresentationLane(**value)
+    except (TypeError, ValueError) as exc:
+        raise RootBlocker5BindingRefused("root envelope record representation lane is invalid") from exc
+
+
+def _profile_payload(profile: QualifiedDeploymentProfile) -> dict[str, object]:
+    return {name: getattr(profile, name) for name in profile.__dataclass_fields__}
+
+
+def _profile_digest_from_payload(value: object) -> str:
+    if not isinstance(value, dict):
+        raise RootBlocker5BindingRefused("root envelope record profile is malformed")
+    try:
+        return QualifiedDeploymentProfile(**value).digest
+    except (TypeError, ValueError, DeploymentAuthorityError) as exc:
+        raise RootBlocker5BindingRefused("root envelope record profile is invalid") from exc
+
+
+def _root_profile_record_payload(profile: RootProfileGenerationRef) -> dict[str, object]:
+    if not isinstance(profile, RootProfileGenerationRef):
+        raise RootBlocker5BindingRefused("root envelope record root profile is invalid")
+    return {
+        "core_id": str(profile.core_id),
+        "profile_generation": profile.profile_generation,
+        "profile_object_id": str(profile.profile_object_id),
+        "profile_revision_id": str(profile.profile_revision_id),
+        "profile_revision_ordinal": profile.profile_revision_ordinal,
+        "profile_semantic_scope_id": str(profile.profile_semantic_scope_id),
+    }
+
+
+def root_profile_ref_from_record_payload(value: object) -> RootProfileGenerationRef:
+    """Decode the full root-profile identity retained by immutable evidence."""
+
+    required = {
+        "core_id", "profile_generation", "profile_object_id", "profile_revision_id",
+        "profile_revision_ordinal", "profile_semantic_scope_id",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise RootBlocker5BindingRefused("root envelope record root profile is malformed")
+    try:
+        return RootProfileGenerationRef(
+            core_id=UUID(value["core_id"]),
+            profile_generation=value["profile_generation"],
+            profile_object_id=UUID(value["profile_object_id"]),
+            profile_revision_id=UUID(value["profile_revision_id"]),
+            profile_revision_ordinal=value["profile_revision_ordinal"],
+            profile_semantic_scope_id=UUID(value["profile_semantic_scope_id"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise RootBlocker5BindingRefused("root envelope record root profile is invalid") from exc
+
+
+def _require_runtime_scope_plan_bindings(
+    plans: tuple[MigrationRuntimeScopePlan, ...],
+    scopes: tuple[NativeMemoryRuntimeScope, ...],
+) -> None:
+    ordered_plans = _ordered_runtime_scope_plans(plans)
+    if not isinstance(scopes, tuple) or any(not isinstance(item, NativeMemoryRuntimeScope) for item in scopes):
+        raise RootBlocker5BindingRefused("root runtime scopes must be typed")
+    bindings = {
+        _root_scope_key_from_plan(plan): (
+            plan.legacy_source_namespace_id,
+            plan.target_identity_namespace_id,
+            plan.target_semantic_scope_id,
+        )
+        for plan in ordered_plans
+    }
+    observed: dict[RootScopeKey, tuple[UUID, UUID, UUID]] = {}
+    for scope in scopes:
+        try:
+            key = (
+                RootScopeKey(scope.workspace_id, RootScopeKind.PRIVATE, agent_id=scope.agent_id)
+                if scope.scope_kind == "PRIVATE_AGENT"
+                else RootScopeKey(scope.workspace_id, RootScopeKind.SHARED, domain_id=scope.domain_id)
+            )
+        except (TypeError, ValueError) as exc:
+            raise RootBlocker5BindingRefused("root runtime scope does not map to a RootScopeKey") from exc
+        if key in observed:
+            raise RootBlocker5BindingRefused("root runtime scopes contain duplicate RootScopeKeys")
+        observed[key] = (
+            scope.legacy_source_namespace_id,
+            scope.identity_namespace_id,
+            scope.semantic_scope_id,
+        )
+    if bindings != observed:
+        raise RootBlocker5BindingRefused("root runtime scope plans disagree with membership bindings")
+
+
 def _declared_scope_keys(description: RootNativeProductionAdmissionDescription) -> tuple[RootScopeKey, ...]:
     return tuple(sorted(
         (
@@ -645,6 +1057,7 @@ def _require_description(value: object) -> RootNativeProductionAdmissionDescript
 
 __all__ = [
     "RootAdmissionEnvelope",
+    "RootAdmissionEnvelopeRecord",
     "RootBlocker5BindingRefused",
     "RootCompletionVerification",
     "RootDiscoveredCensus",
@@ -658,7 +1071,12 @@ __all__ = [
     "execute_synthetic_root_disposition_plan",
     "frozen_root_geometry_disposition_plan",
     "normalization_closure_digest",
+    "require_persisted_root_admission_envelope",
     "require_discovered_declared_census_parity",
     "root_membership_closure_digest",
+    "root_admission_envelope_record_from_payload",
+    "root_profile_ref_from_record_payload",
+    "root_runtime_scope_plan_digest",
+    "root_runtime_scope_plan_payloads",
     "verify_root_completion",
 ]

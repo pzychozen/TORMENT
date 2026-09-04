@@ -41,9 +41,11 @@ from .motif_geometry_port import (
 from .proposals import ProposalRegistry
 from .query_read_model import NativeQueryReadRefused, _private_motif_domains
 from .substrate.deployment_selector import resolve_deployment_agreement
+from .substrate.deployment_core_maintenance import inspect_contained_core_deployment
 from .substrate.deployment_types import (
     DeploymentResolutionMode,
     QualifiedDeploymentProfile,
+    RootAdmissionCompletionWitness,
 )
 from .substrate.native_derived_memory_runtime import NativeDerivedMemoryRuntimeConfiguration
 from .substrate.native_post_write_runtime import (
@@ -165,11 +167,13 @@ class PublicRuntimeConfiguration:
     """
 
     effective_profile: QualifiedDeploymentProfile
-    admission_descriptor_path: Path | str
+    admission_descriptor_path: Path | str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.effective_profile, QualifiedDeploymentProfile):
             raise ValueError("public runtime requires a qualified deployment profile")
+        if self.admission_descriptor_path is None:
+            return
         path = Path(self.admission_descriptor_path).expanduser().resolve()
         if path.is_symlink() or not path.is_file():
             raise ValueError("public runtime admission descriptor must be a real file")
@@ -192,17 +196,16 @@ _HOST_PROFILE_FIELDS = frozenset({
 def load_public_runtime_configuration_from_host_environment() -> PublicRuntimeConfiguration | None:
     """Load explicit host proof facts without offering a backend override.
 
-    The two values are intentionally all-or-nothing.  They are consumed only
-    after the durable resolver has made its disposition: no environment value
-    can ask for LEGACY or NATIVE.  The error text is deliberately value-free
-    because these facts may be supplied by an operations environment.
+    The profile never selects a recovery mode.  A descriptor remains optional
+    host evidence because only the durable completion witness selects v1/v2;
+    v1 recovery later refuses if its descriptor is absent.
     """
 
     profile_text = os.environ.get(_HOST_PROFILE_ENV)
     descriptor_path = os.environ.get(_HOST_DESCRIPTOR_ENV)
     if profile_text is None and descriptor_path is None:
         return None
-    if not profile_text or not descriptor_path:
+    if not profile_text:
         raise PublicRuntimeStartupRefused("host deployment proof configuration is incomplete")
     try:
         payload = json.loads(profile_text)
@@ -295,15 +298,24 @@ class _ReadOnlyConflictRegistry:
 class _NativeDomainRouter:
     """Existing cosine/stable domain-ranking law over request-scoped native geometry."""
 
-    def __init__(self, owner: NativeProductionResourceOwner, embedder: Any, domains: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        owner: NativeProductionResourceOwner,
+        embedder: Any,
+        domains: tuple[str, ...],
+        workspace_id: str,
+    ) -> None:
         self._owner = owner
         self._embedder = embedder
         self._domains = domains
+        self._workspace_id = workspace_id
 
     def rank_domains(self, vector: Any, top_k: int = 2) -> list[DomainScore]:
         incoming = np.asarray(vector, dtype=np.float32).reshape(-1)
         scores: list[DomainScore] = []
-        with self._owner.open_query_context(embedder=self._embedder) as query:
+        with self._owner.open_query_context(
+            embedder=self._embedder, workspace_id=self._workspace_id,
+        ) as query:
             for domain_id in self._domains:
                 centroid = np.asarray(query.domain_geometry(domain_id).centroid, dtype=np.float32).reshape(-1)
                 if centroid.size != incoming.size:
@@ -677,7 +689,10 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         identity = self._prepare_native_agent(workspace_id, agent_id)
         view = self._workspace_view(workspace_id)
         try:
-            with self.native_owner.open_query_context(embedder=self.cognition_fabric.kernel.embedder) as read_model:  # type: ignore[union-attr]
+            with self.native_owner.open_query_context(  # type: ignore[union-attr]
+                embedder=self.cognition_fabric.kernel.embedder,
+                workspace_id=workspace_id,
+            ) as read_model:
                 return self.cognition_fabric.query(
                     workspace_id=workspace_id,
                     agent_id=agent_id,
@@ -701,7 +716,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         }
 
     def _prepare_native_agent(self, workspace_id: str, agent_id: str) -> Any:
-        runtime = self._active_runtime()
+        runtime = self._active_runtime(workspace_id)
         try:
             scope = runtime.lookup_private(agent_id).fabric_routing_scope
         except Exception as exc:
@@ -711,7 +726,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         return self.cognition_fabric.prepare_native_cognition_agent(workspace_id, agent_id)
 
     def _private_motif_domain(self, workspace_id: str, agent_id: str) -> str:
-        runtime = self._active_runtime()
+        runtime = self._active_runtime(workspace_id)
         try:
             scope = runtime.lookup_private(agent_id).memory_runtime_scope
             domain = _private_motif_domains(runtime)[agent_id]
@@ -722,7 +737,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         return domain
 
     def _require_shared_scope(self, workspace_id: str, domain_id: str) -> None:
-        runtime = self._active_runtime()
+        runtime = self._active_runtime(workspace_id)
         try:
             scope = runtime.lookup_shared(domain_id).memory_runtime_scope
         except Exception as exc:
@@ -733,7 +748,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
     def _workspace_view(self, workspace_id: str) -> NativePublicWorkspaceView:
         # Revalidate before consulting the process cache.  A cached inert view
         # must never outlive the selector/profile agreement that qualified it.
-        runtime = self._active_runtime()
+        runtime = self._active_runtime(workspace_id)
         existing = self._workspace_views.get(workspace_id)
         if existing is not None:
             return existing
@@ -768,7 +783,9 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
                 workspace_id,
                 tuple(dict.fromkeys((*domains, *private_motif_domains))),
             ),
-            router=_NativeDomainRouter(self.native_owner, self.cognition_fabric.kernel.embedder, domains),  # type: ignore[arg-type]
+            router=_NativeDomainRouter(  # type: ignore[arg-type]
+                self.native_owner, self.cognition_fabric.kernel.embedder, domains, workspace_id,
+            ),
             bridges=_ReadOnlyBridges(Path(self.cognition_fabric.data_dir) / "workspaces" / workspace_id / "bridges.json"),
             conflicts=MappingProxyType({
                 domain: _ReadOnlyConflictRegistry(
@@ -781,7 +798,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         self._workspace_views[workspace_id] = view
         return view
 
-    def _active_runtime(self) -> Any:
+    def _active_runtime(self, workspace_id: str | None = None) -> Any:
         """Recover current root-qualified scopes or surface one public refusal.
 
         The production owner revalidates the frozen selector agreement and the
@@ -789,7 +806,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         therefore never translated into a legacy fallback.
         """
         try:
-            return self.native_owner._recover_active_runtime()  # type: ignore[union-attr]
+            return self.native_owner._recover_active_runtime(workspace_id=workspace_id)  # type: ignore[union-attr]
         except Exception as exc:
             raise NativePublicOperationRefused(
                 "native public root/profile authority is absent or stale"
@@ -798,7 +815,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
     def _post_write_configuration(
         self, prepared: PreparedFabricIngest,
     ) -> NativePostWriteQualificationConfiguration:
-        runtime = self._active_runtime()
+        runtime = self._active_runtime(prepared.workspace_id)
         private = runtime.lookup_private(prepared.agent_id).fabric_routing_scope
         scope = private if prepared.scope == "private" else runtime.lookup_shared(prepared.domain_id).fabric_routing_scope
         identity = self._prepare_native_agent(prepared.workspace_id, prepared.agent_id)
@@ -1005,20 +1022,52 @@ def create_public_runtime(
             )
         elif resolution.mode is DeploymentResolutionMode.NATIVE_AGREEMENT:
             if configured is None:
-                raise PublicRuntimeStartupRefused("native public startup requires host-qualified profile and descriptor")
-            fabric = TormentFabric(data_dir=str(root))
-            try:
+                raise PublicRuntimeStartupRefused("native public startup requires a host-qualified profile")
+            state = resolution.selector_state
+            root_v2 = (
+                state is not None
+                and state.core_relative_path is not None
+                and isinstance(
+                    inspect_contained_core_deployment(
+                        data_root=root, core_relative_path=state.core_relative_path,
+                    ).activation_completion_witness,
+                    RootAdmissionCompletionWitness,
+                )
+            )
+            if root_v2:
+                # Root-v2 has no host descriptor dependency.  Recover its
+                # single native owner from selected-core evidence before
+                # constructing any ordinary Fabric compatibility surface.
                 owner = NativeProductionResourceOwner.from_native_agreement(
                     data_root=root,
                     effective_profile=configured.effective_profile,
                     agreement=resolution,
                     admission_descriptor_path=configured.admission_descriptor_path,
-                    character_store=fabric.character_store,
+                    character_store=None,
                 )
-                runtime = NativePublicTormentRuntime(cognition_fabric=fabric, native_owner=owner)
-            except Exception:
-                fabric.close()
-                raise
+                fabric: TormentFabric | None = None
+                try:
+                    fabric = TormentFabric(data_dir=str(root))
+                    runtime = NativePublicTormentRuntime(cognition_fabric=fabric, native_owner=owner)
+                except Exception:
+                    if fabric is not None:
+                        fabric.close()
+                    owner.close()
+                    raise
+            else:
+                fabric = TormentFabric(data_dir=str(root))
+                try:
+                    owner = NativeProductionResourceOwner.from_native_agreement(
+                        data_root=root,
+                        effective_profile=configured.effective_profile,
+                        agreement=resolution,
+                        admission_descriptor_path=configured.admission_descriptor_path,
+                        character_store=fabric.character_store,
+                    )
+                    runtime = NativePublicTormentRuntime(cognition_fabric=fabric, native_owner=owner)
+                except Exception:
+                    fabric.close()
+                    raise
         else:
             raise PublicRuntimeStartupRefused(
                 f"public startup refused by durable deployment authority: {resolution.reason}"

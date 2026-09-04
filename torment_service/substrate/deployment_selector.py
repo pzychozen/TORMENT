@@ -377,6 +377,35 @@ def activate_selector_native(
     )
 
 
+def read_selector_native_activation_intent(*, data_root: str | Path) -> dict[str, Any]:
+    """Read the committed P7 activation intent without changing selector state.
+
+    The selector ledger remains the authority.  This returns only the already
+    validated final activation proposition so root-v2 startup can bind the
+    disposition receipt it must never recreate.
+    """
+
+    paths = selector_paths(data_root)
+    connection = _open_selector(paths.selector_path, writable=False)
+    try:
+        state, ledger = _validated_selector(connection)
+        if state.deployment_state is not DeploymentState.NATIVE_ACTIVE or not ledger:
+            raise DeploymentAuthorityError("native activation intent requires NATIVE_ACTIVE selector state")
+        record = ledger[-1]
+        intent = record["intent"]
+        if (
+            record["generation"] != state.generation
+            or record["reason_kind"] != "ACTIVATE_SELECTOR_NATIVE"
+            or not isinstance(intent, dict)
+            or intent.get("contract") != _SELECTOR_CONTRACT
+            or intent.get("kind") != "ACTIVATE_SELECTOR_NATIVE"
+        ):
+            raise DeploymentAuthorityError("current selector state lacks an activation intent")
+        return dict(intent)
+    finally:
+        connection.close()
+
+
 def abort_selector_pending(
     *,
     data_root: str | Path,
@@ -1076,6 +1105,7 @@ __all__ = [
     "begin_cutover_pending",
     "establish_selector_era",
     "initialize_selector",
+    "read_selector_native_activation_intent",
     "read_selector_state",
     "resolve_deployment_agreement",
     "selector_paths",

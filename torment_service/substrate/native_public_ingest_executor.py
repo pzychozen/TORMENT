@@ -146,7 +146,7 @@ class NativeFabricIngestStorageAdapter:
                 _detect_canon_conflict(incoming, existing, similarity)[0]
             ),
         )
-        with self._owner.open_write_context() as context:
+        with self._owner.open_write_context(workspace_id=prepared.workspace_id) as context:
             attempt = context.route(request, _test_stop_after=_test_stop_after)
         if not attempt.qualification.eligible or attempt.result is None:
             if (

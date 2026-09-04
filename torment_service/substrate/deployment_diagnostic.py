@@ -19,8 +19,11 @@ from typing import Any
 from .deployment_core_maintenance import (
     CoreDeploymentInspection,
     inspect_contained_core_deployment,
+    read_root_admission_envelope_record,
+    read_root_disposition_execution_receipt,
 )
 from .deployment_selector import (
+    read_selector_native_activation_intent,
     read_selector_state,
     resolve_deployment_agreement,
     selector_paths,
@@ -29,6 +32,7 @@ from .deployment_types import (
     DeploymentResolutionMode,
     DeploymentState,
     QualifiedDeploymentProfile,
+    RootAdmissionCompletionWitness,
     SelectorState,
 )
 from .migration.existing_workspace_multi_scope_admission import (
@@ -36,6 +40,15 @@ from .migration.existing_workspace_multi_scope_admission import (
     load_existing_workspace_multi_scope_admission_descriptor,
 )
 from .runtime_qualification import RuntimeQualificationResult, inspect_runtime
+from .connection import open_existing_native_core_connection
+from .migration.root_scope import RootScopeKey, RootScopeKind
+from .root_blocker5_binding import (
+    root_membership_closure_digest,
+    root_profile_ref_from_record_payload,
+    root_runtime_scope_plan_digest,
+)
+from .root_profile import verify_root_profile_generation
+from .runtime_binding import NativeMemoryRuntimeScope
 
 
 _SCHEMA = "TORMENT_B5_A6_DEPLOYMENT_DIAGNOSTIC"
@@ -125,11 +138,27 @@ def inspect_deployment_diagnostic(request: DeploymentDiagnosticRequest) -> Deplo
     )
     state, selector_issue = _read_selector_state(root)
     inspection, core_inspection_failed = _read_core_inspection(root, state)
-    descriptor, descriptor_invalid = _read_descriptor(request.admission_descriptor_path)
-
-    admission_state = None if descriptor is None else descriptor.state.value
-    identity_matches = _identity_matches(descriptor, state)
-    completion_valid = _completion_witness_valid(descriptor)
+    root_completion = (
+        None if inspection is None else inspection.activation_completion_witness
+    )
+    if isinstance(root_completion, RootAdmissionCompletionWitness):
+        # Root-v2 diagnostics intentionally ignore a host descriptor path:
+        # only durable core evidence selects this version and its record.
+        descriptor = None
+        descriptor_invalid = False
+        admission_state = "ROOT_V2_EVIDENCE"
+        identity_matches, completion_valid = _root_v2_evidence_status(
+            root=root,
+            state=state,
+            inspection=inspection,
+            profile=request.effective_profile,
+            completion=root_completion,
+        )
+    else:
+        descriptor, descriptor_invalid = _read_descriptor(request.admission_descriptor_path)
+        admission_state = None if descriptor is None else descriptor.state.value
+        identity_matches = _identity_matches(descriptor, state)
+        completion_valid = _completion_witness_valid(descriptor)
 
     mode = resolution.mode
     reason = resolution.reason
@@ -171,6 +200,13 @@ def inspect_deployment_diagnostic(request: DeploymentDiagnosticRequest) -> Deplo
         if request.effective_profile is None:
             mode = DeploymentResolutionMode.REFUSED
             reason = "host-profile-configuration-required"
+        elif isinstance(root_completion, RootAdmissionCompletionWitness):
+            if identity_matches is not True or completion_valid is not True:
+                mode = DeploymentResolutionMode.REFUSED
+                reason = "root-v2-native-evidence-invalid"
+            elif not runtime.runtime_admissible:
+                mode = DeploymentResolutionMode.REFUSED
+                reason = "actual-sqlite-runtime-is-not-qualified"
         elif descriptor is None:
             mode = DeploymentResolutionMode.REFUSED
             reason = (
@@ -300,6 +336,92 @@ def _completion_witness_valid(
         return True
     except Exception:
         return False
+
+
+def _root_v2_evidence_status(
+    *,
+    root: Path,
+    state: SelectorState | None,
+    inspection: CoreDeploymentInspection | None,
+    profile: QualifiedDeploymentProfile | None,
+    completion: RootAdmissionCompletionWitness,
+) -> tuple[bool | None, bool | None]:
+    """Read root-v2 native evidence only; this is never a legacy scan."""
+
+    if state is None or inspection is None or profile is None or state.core_relative_path is None:
+        return None, False
+    try:
+        record = read_root_admission_envelope_record(
+            data_root=root,
+            core_relative_path=state.core_relative_path,
+            root_admission_envelope_digest=completion.root_admission_envelope_digest,
+        )
+        if record is None:
+            return False, False
+        stored_profile = QualifiedDeploymentProfile(**record.effective_profile_payload)
+        scope_digest = root_runtime_scope_plan_digest(
+            record.runtime_scope_plans, record.target_representation_lane,
+        )
+        scopes = tuple(
+            NativeMemoryRuntimeScope(
+                workspace_id=plan.workspace_id,
+                scope_kind=plan.scope_kind,
+                legacy_source_namespace_id=plan.legacy_source_namespace_id,
+                identity_namespace_id=plan.target_identity_namespace_id,
+                semantic_scope_id=plan.target_semantic_scope_id,
+                agent_id=plan.agent_id,
+                domain_id=plan.domain_id,
+            )
+            for plan in record.runtime_scope_plans
+        )
+        keys = tuple(
+            RootScopeKey(
+                plan.workspace_id,
+                RootScopeKind.PRIVATE if plan.scope_kind == "PRIVATE_AGENT" else RootScopeKind.SHARED,
+                agent_id=plan.agent_id,
+                domain_id=plan.domain_id,
+            )
+            for plan in record.runtime_scope_plans
+        )
+        root_profile = root_profile_ref_from_record_payload(record.root_profile_payload)
+        with open_existing_native_core_connection(root / "substrate" / "cores" / state.core_relative_path) as opened:
+            verify_root_profile_generation(opened.connection, root_profile)
+            closure = root_membership_closure_digest(
+                connection=opened.connection,
+                profile=root_profile,
+                runtime_scopes=scopes,
+                declared_scope_keys=keys,
+            )
+        receipt = read_root_disposition_execution_receipt(
+            data_root=root,
+            core_relative_path=state.core_relative_path,
+            completion_witness=completion,
+        )
+        intent = read_selector_native_activation_intent(data_root=root)
+        identity = (
+            record.envelope_digest == completion.root_admission_envelope_digest
+            == state.descriptor_digest
+            and completion.native_staging_core_id == inspection.core_id == state.core_id
+        )
+        complete = (
+            identity
+            and stored_profile == profile
+            and stored_profile.digest == completion.qualified_deployment_profile_digest
+            and stored_profile.admitted_scope_plan_digest == scope_digest
+            and record.envelope_payload.get("root_runtime_scope_plan_digest") == scope_digest
+            and closure == record.root_membership_closure_digest == completion.root_membership_closure_digest
+            and root_profile.profile_object_id == completion.root_profile_object_id
+            and root_profile.profile_revision_id == completion.root_profile_revision_id
+            and root_profile.profile_revision_ordinal == completion.root_profile_ordinal
+            and receipt is not None
+            and receipt.root_admission_envelope_digest == completion.root_admission_envelope_digest
+            and receipt.native_staging_core_id == completion.native_staging_core_id
+            and receipt.geometry_disposition_table_digest == completion.geometry_disposition_table_digest
+            and intent.get("disposition_execution_receipt_digest") == receipt.digest
+        )
+        return identity, complete
+    except Exception:
+        return False, False
 
 
 def _observation_profile() -> QualifiedDeploymentProfile:

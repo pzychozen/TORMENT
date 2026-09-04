@@ -10,6 +10,8 @@ import pytest
 
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.deployment_core_maintenance import (
+    read_root_admission_envelope_record,
+    record_root_admission_envelope,
     record_root_disposition_execution,
 )
 from torment_service.substrate.deployment_selector import activate_selector_native
@@ -30,6 +32,7 @@ from torment_service.substrate.migration.explicit_source_evidence import (
 from torment_service.substrate.migration.existing_workspace_multi_scope_admission import (
     WorkspaceNativeEmbedderIdentity,
 )
+from torment_service.substrate.migration.runtime_readiness import MigrationRuntimeScopePlan
 from torment_service.substrate.migration.root_admission_description import (
     ExpectedRootCensus,
     GeometryDerivedExternalStateDisposition,
@@ -56,8 +59,11 @@ from torment_service.substrate.offline_cutover_controller import (
     RootOfflineCutoverRequest,
 )
 from torment_service.substrate.root_blocker5_binding import (
+    RootBlocker5BindingRefused,
     RootWriterFreezeWitness,
     discover_canonical_root_layout,
+    root_admission_envelope_record_from_payload,
+    root_runtime_scope_plan_digest,
 )
 from torment_service.substrate.root_profile import (
     ROOT_NATIVE_PROFILE_GENERATION_KIND,
@@ -195,7 +201,7 @@ def _root_fixture(tmp_path: Path):
         representation_provider=lane.provider,
         representation_model=lane.model,
         representation_dimension=lane.dimension,
-        admitted_scope_plan_digest=_digest("zero-scope-plan"),
+        admitted_scope_plan_digest=root_runtime_scope_plan_digest((), lane),
         external_owner_digest=description.external_owner_observation_digest,
     )
     normalization_request = RootNormalizationRequest(
@@ -263,6 +269,10 @@ def test_v1_decoder_remains_historical_and_v2_root_has_explicit_contract(tmp_pat
     assert decoded_root == root_witness
     assert root_witness.payload()["contract"] == "TORMENT_ROOT_ADMISSION_COMPLETION_WITNESS"
     assert root_witness.payload()["version"] == 2
+    unsupported_root = dict(root_witness.payload())
+    unsupported_root["version"] = 3
+    with pytest.raises(DeploymentAuthorityError):
+        completion_witness_from_payload(unsupported_root)
 
     legacy = AdmissionCompletionWitness(
         admission_identity_digest=_digest("legacy-admission"),
@@ -366,3 +376,142 @@ def test_root_discovery_refuses_an_undeclared_canonical_workspace(tmp_path: Path
 
     with pytest.raises(OfflineCutoverRefused):
         OfflineCutoverController().prepare_root(request)
+
+
+def test_root_runtime_scope_plan_digest_is_sorted_and_profile_bound(tmp_path: Path) -> None:
+    request, _normalization = _root_fixture(tmp_path)
+    lane = request.description.target_representation_lane
+    private = MigrationRuntimeScopePlan(
+        legacy_source_namespace_id=generate_native_id(),
+        workspace_id="ws-one",
+        scope_kind="PRIVATE_AGENT",
+        target_identity_namespace_id=generate_native_id(),
+        target_semantic_scope_id=generate_native_id(),
+        motif_alias_namespace_id=generate_native_id(),
+        motif_identity_namespace_id=generate_native_id(),
+        membership_identity_namespace_id=generate_native_id(),
+        idempotency_namespace_id=generate_native_id(),
+        agent_id="agent-one",
+        motif_domain_id="agent-one",
+    )
+    shared = MigrationRuntimeScopePlan(
+        legacy_source_namespace_id=generate_native_id(),
+        workspace_id="ws-one",
+        scope_kind="SHARED_DOMAIN",
+        target_identity_namespace_id=generate_native_id(),
+        target_semantic_scope_id=generate_native_id(),
+        motif_alias_namespace_id=generate_native_id(),
+        motif_identity_namespace_id=generate_native_id(),
+        membership_identity_namespace_id=generate_native_id(),
+        idempotency_namespace_id=generate_native_id(),
+        domain_id="domain-one",
+        motif_domain_id="domain-one",
+    )
+    assert root_runtime_scope_plan_digest((private, shared), lane) == root_runtime_scope_plan_digest(
+        (shared, private), lane,
+    )
+
+    invalid_profile = replace(
+        request.effective_profile,
+        admitted_scope_plan_digest=_digest("not-the-frozen-root-plan"),
+    )
+    invalid_request = replace(request, effective_profile=invalid_profile)
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
+        OfflineCutoverController().prepare_root(invalid_request)
+
+
+def test_root_envelope_record_is_immutable_readable_without_legacy_layout(tmp_path: Path) -> None:
+    request, _normalization = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    envelope = controller._root_envelope(request)
+
+    recorded = record_root_admission_envelope(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        envelope=envelope,
+        operation_key="root-v2-b1:record",
+    )
+    assert recorded.envelope_digest == envelope.digest
+    assert record_root_admission_envelope(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        envelope=envelope,
+        operation_key="root-v2-b1:record",
+    ) == recorded
+
+    legacy_layout = request.root / "workspaces"
+    legacy_layout.rename(request.root / "legacy-layout-unavailable")
+    loaded = read_root_admission_envelope_record(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        root_admission_envelope_digest=envelope.digest,
+    )
+    assert loaded == recorded
+    assert loaded is not None
+    assert loaded.envelope_digest == envelope.digest
+
+
+def test_root_envelope_record_refuses_conflict_and_unknown_version(tmp_path: Path) -> None:
+    request, _normalization = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    envelope = controller._root_envelope(request)
+    record_root_admission_envelope(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        envelope=envelope,
+        operation_key="root-v2-b1:conflict",
+    )
+    changed_request = replace(
+        request,
+        writer_freeze=replace(
+            request.writer_freeze,
+            writer_evidence_digest=_digest("different-writer-evidence"),
+        ),
+    )
+    with pytest.raises(DeploymentIdempotencyConflict):
+        record_root_admission_envelope(
+            data_root=changed_request.root,
+            core_relative_path=changed_request.core_relative_path,
+            envelope=controller._root_envelope(changed_request),
+            operation_key="root-v2-b1:conflict",
+        )
+
+    recorded_payload = record_root_admission_envelope(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        envelope=envelope,
+        operation_key="root-v2-b1:version",
+    ).payload()
+    unsupported = dict(recorded_payload)
+    unsupported["version"] = 2
+    with pytest.raises(RootBlocker5BindingRefused, match="version is unsupported"):
+        root_admission_envelope_record_from_payload(unsupported)
+    noncanonical = dict(recorded_payload)
+    noncanonical_envelope = dict(recorded_payload["root_admission_envelope_payload"])
+    noncanonical_envelope["unexpected"] = "not-authority"
+    noncanonical["root_admission_envelope_payload"] = noncanonical_envelope
+    with pytest.raises(RootBlocker5BindingRefused, match="noncanonical"):
+        root_admission_envelope_record_from_payload(noncanonical)
+
+
+def test_p4_and_immediately_pre_p6_refuse_missing_or_mismatched_envelope_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, normalization = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    controller.prepare_root(request)
+    controller.enter_root_external_pending(request)
+
+    import torment_service.substrate.offline_cutover_controller as controller_module
+
+    monkeypatch.setattr(controller_module, "read_root_admission_envelope_record", lambda **_kwargs: None)
+    with pytest.raises(OfflineCutoverRefused, match="COMPLETION_REFUSED"):
+        controller.verify_root_completion(request, normalization)
+
+    monkeypatch.undo()
+    controller.verify_root_completion(request, normalization)
+    controller.enter_root_core_pending(request, normalization)
+    monkeypatch.setattr(controller_module, "read_root_admission_envelope_record", lambda **_kwargs: object())
+    with pytest.raises(OfflineCutoverRefused, match="COMPLETION_REFUSED"):
+        controller.activate_root_core(request, normalization)

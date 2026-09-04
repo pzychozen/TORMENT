@@ -23,7 +23,9 @@ from .deployment_core_maintenance import (
     activate_core,
     enter_cutover_pending,
     inspect_contained_core_deployment,
+    read_root_admission_envelope_record,
     read_root_disposition_execution_receipt,
+    record_root_admission_envelope,
     record_root_disposition_execution,
     staging_legacy_witness,
 )
@@ -71,6 +73,7 @@ from .root_blocker5_binding import (
     build_root_admission_envelope,
     execute_synthetic_root_disposition_plan,
     frozen_root_geometry_disposition_plan,
+    require_persisted_root_admission_envelope,
     verify_root_completion,
 )
 from .root_profile import RootProfileGenerationRef
@@ -474,6 +477,21 @@ class OfflineCutoverController:
 
         envelope = self._root_envelope(request)
         self._root_inert_core(request)
+        try:
+            record_root_admission_envelope(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                envelope=envelope,
+                operation_key=self._key(request, "root-admission-envelope-record"),
+            )
+            record = read_root_admission_envelope_record(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                root_admission_envelope_digest=envelope.digest,
+            )
+            require_persisted_root_admission_envelope(envelope=envelope, record=record)
+        except (DeploymentAuthorityError, RootBlocker5BindingRefused) as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ENVELOPE_RECORD_REFUSED") from exc
         state = self._ensure_selector(request)
         if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
             state = begin_cutover_pending(
@@ -804,6 +822,9 @@ class OfflineCutoverController:
                     native_staging_core_id=request.native_staging_core_id,
                     root_profile=request.root_profile,
                     runtime_scopes=request.runtime_scopes,
+                    runtime_scope_plans=tuple(
+                        item.scope_plan for item in request.normalization_request.scope_inputs
+                    ),
                     connection=opened.connection,
                 )
         except RootBlocker5BindingRefused as exc:
@@ -818,6 +839,12 @@ class OfflineCutoverController:
         normalization: RootNormalizationResult,
     ) -> RootCompletionVerification:
         try:
+            record = read_root_admission_envelope_record(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                root_admission_envelope_digest=envelope.digest,
+            )
+            require_persisted_root_admission_envelope(envelope=envelope, record=record)
             with open_existing_native_core_connection(
                 request.normalization_request.native_core_database_path,
             ) as opened:
