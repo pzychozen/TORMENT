@@ -45,6 +45,17 @@ Blocker-5 evidence, or create a second production runtime.  During
 qualification, coexistence means fenced evidence and import support, never
 dual public read/write authority.
 
+## Post-I4 ratification supersession
+
+The detailed post-I4 root-wide activation contract is frozen in
+`TORMENT_MEMORY_SUBSTRATE_POST_I4_ROOT_WIDE_CONVERGENCE_RATIFICATION_v0.1.md`.
+It supersedes this plan's pre-Phase-9D future-tense assumptions about
+root-scope membership, bounded native public fallthrough, and root-wide
+administration integration. This plan remains the lifecycle/retirement roadmap;
+the ratification is authoritative for owner-specific geometry disposition,
+P2/P6/P7 sequencing, completion-witness v2, writer-freeze and discovered-census
+requirements, and the continued prohibition on real activation or retirement.
+
 ## Lifecycle classes
 
 Every semantic component in the ledger below receives exactly one class:
