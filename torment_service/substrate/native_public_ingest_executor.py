@@ -337,9 +337,10 @@ class NativePublicIngestExecutor:
             and route_result.precommit_true_split
             and prepared.scope == "private"
         ):
-            # I4B-2 opts into one narrow motif/anchor tail only for its
-            # stored true-split outcome.  Ordinary public writes retain their
-            # existing core-staging profile and broad post-write sequence.
+            # I4C composes the qualified conflict prefix ahead of I4B-2's
+            # narrow motif/anchor tail for its stored true-split outcome.
+            # Ordinary public writes retain their existing core-staging
+            # profile and broad post-write sequence.
             configuration = replace(
                 configuration,
                 profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),

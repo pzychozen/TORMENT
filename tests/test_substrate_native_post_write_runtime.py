@@ -727,7 +727,7 @@ def test_explicit_m1_profile_runs_native_suggestion_maintenance_without_legacy_m
         qualified.close()
 
 
-def test_i4b2_true_split_runs_only_narrow_motif_and_anchor_tail(
+def test_i4c_true_split_runs_conflict_then_i4b2_motif_and_anchor_tail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -750,15 +750,33 @@ def test_i4b2_true_split_runs_only_narrow_motif_and_anchor_tail(
             external=replace(configuration.external, workspace=workspace),
             motif_suggestion_maintenance_required=True,
         )
-        request = _request("i4b2-narrow-tail", 1)
-        routed = NativeFabricMemoryRouter(capability).route(request).result
+        router = NativeFabricMemoryRouter(capability)
+        assert router.route(_request("i4c-conflict-zero-eid", 1)).result is not None
+        seed_request = _request("i4c-conflict-seed", 2)
+        seed = router.route(seed_request).result
+        assert seed is not None
+        request = _request("i4c-conflict-true-split", 3)
+        routed = router.route(request).result
         assert routed is not None
         result = replace(routed, created_motif=None, precommit_true_split=True)
 
-        def forbidden(*_args, **_kwargs):
-            raise AssertionError("I4B-2 reached a broad post-write consumer")
+        events: list[str] = []
+        original_add = conflicts.add
+        original_maintenance = NativeMotifMaintenanceAdapter.update_entropy_and_suggest
 
-        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_contradiction_surface", forbidden)
+        def record_conflict(**kwargs):
+            events.append("conflict")
+            return original_add(**kwargs)
+
+        def record_maintenance(adapter, *args, **kwargs):
+            events.append("motif_maintenance")
+            return original_maintenance(adapter, *args, **kwargs)
+
+        def forbidden(*_args, **_kwargs):
+            raise AssertionError("I4C reached an unqualified post-write consumer")
+
+        monkeypatch.setattr(conflicts, "add", record_conflict)
+        monkeypatch.setattr(NativeMotifMaintenanceAdapter, "update_entropy_and_suggest", record_maintenance)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_srg_collision", forbidden)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_hivemind", forbidden)
         monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_world_step", forbidden)
@@ -771,13 +789,106 @@ def test_i4b2_true_split_runs_only_narrow_motif_and_anchor_tail(
             route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
         )
         assert outcome.proposal_id is None
-        assert not conflicts.calls
+        assert events[:2] == ["conflict", "motif_maintenance"]
+        assert len(conflicts.calls) == 1
+        conflict = conflicts.calls[0]
+        assert conflict["eid_a"] == seed.eid
+        assert conflict["eid_b"] == routed.eid
+        assert conflict["origin_scope"] == "private"
+        assert conflict["origin_agent_id"] == "aria"
+        assert conflict["origin_domain_id"] is None
         assert not owner.field.packets
         assert not proposals.calls
         assert (workflow_root / "workspaces" / "ws" / "domains" / "personal" / "motif_events.jsonl").exists()
         # Anchor failure/success is intentionally fail-soft, but mood drift is
         # excluded: this run may write only the M1 workflow and N02 anchor state.
         assert "affect" not in side.events
+    finally:
+        qualified.close()
+
+
+def test_i4c_true_split_conflict_failure_is_soft_and_does_not_skip_motif_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, _owner, workspace, identity, _side, conflicts, _proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        workflow_root = tmp_path / "i4c-conflict-failure-workflow"
+        workspace = SimpleNamespace(
+            data_dir=str(workflow_root),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        router = NativeFabricMemoryRouter(capability)
+        assert router.route(_request("i4c-conflict-failure-zero-eid", 1)).result is not None
+        assert router.route(_request("i4c-conflict-failure-seed", 2)).result is not None
+        request = _request("i4c-conflict-failure", 3)
+        routed = router.route(request).result
+        assert routed is not None
+        split_result = replace(routed, created_motif=None, precommit_true_split=True)
+        monkeypatch.setattr(
+            conflicts,
+            "add",
+            lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("forced conflict owner failure")),
+        )
+
+        assert _adapter(capability, configuration).run(
+            _context(split_result, request, created_motif=None),
+            route_witness=NativePostWriteRouteWitness(split_result, request.native_operation_key),
+        ).proposal_id is None
+        assert (workflow_root / "workspaces" / "ws" / "domains" / "personal" / "motif_events.jsonl").exists()
+    finally:
+        qualified.close()
+
+
+def test_i4c_true_split_conflict_reentry_has_no_invented_exactly_once_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, _owner, workspace, identity, _side, conflicts, _proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        workspace = SimpleNamespace(
+            data_dir=str(tmp_path / "i4c-conflict-reentry-workflow"),
+            domain_policies={"personal": {"auto_merge_motifs": False}},
+            conflicts=workspace.conflicts,
+            proposals=workspace.proposals,
+        )
+        configuration = replace(
+            configuration,
+            profile=NativePostWriteQualificationProfile.core_staging_with_motif_merge_maintenance(),
+            external=replace(configuration.external, workspace=workspace),
+            motif_suggestion_maintenance_required=True,
+        )
+        router = NativeFabricMemoryRouter(capability)
+        assert router.route(_request("i4c-conflict-reentry-zero-eid", 1)).result is not None
+        assert router.route(_request("i4c-conflict-reentry-seed", 2)).result is not None
+        request = _request("i4c-conflict-reentry", 3)
+        routed = router.route(request).result
+        assert routed is not None
+        split_result = replace(routed, created_motif=None, precommit_true_split=True)
+        context = _context(split_result, request, created_motif=None)
+        adapter = _adapter(capability, configuration)
+        witness = NativePostWriteRouteWitness(split_result, request.native_operation_key)
+
+        adapter.run(context, route_witness=witness)
+        adapter.run(context, route_witness=witness)
+
+        assert len(conflicts.calls) == 2
+        assert all(call["eid_b"] == routed.eid for call in conflicts.calls)
+        assert all(call["origin_scope"] == "private" for call in conflicts.calls)
     finally:
         qualified.close()
 
@@ -940,6 +1051,11 @@ def test_i4b2_tail_skips_reinforcement_and_no_write_before_any_motif_consumer(
             NativeMotifMaintenanceAdapter,
             "update_entropy_and_suggest",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("I4B-2 tail ran")),
+        )
+        monkeypatch.setattr(
+            LegacyFabricPostWriteAdapter,
+            "_run_contradiction_surface",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("I4C conflict ran")),
         )
         witness = NativePostWriteRouteWitness(split_result, request.native_operation_key)
 

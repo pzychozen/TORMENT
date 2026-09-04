@@ -189,8 +189,8 @@ def test_i4b1f_full_public_create_uses_existing_canonical_source_owner(tmp_path:
         close_public_runtime(root)
 
 
-def test_i4b2_full_public_true_split_enters_only_the_motif_tail(tmp_path: Path, monkeypatch):
-    """Cross the real public executor handoff with an actual true-split result."""
+def test_i4c_full_public_true_split_enters_conflict_then_the_motif_tail(tmp_path: Path, monkeypatch):
+    """Cross the real public handoff into I4C's prefix and I4B-2's tail."""
     import torment_service.substrate.native_world_runtime as world_module
 
     monkeypatch.setattr(world_module.NativeWorldRuntime, "ensure_initialized", lambda _self: None)
@@ -211,8 +211,19 @@ def test_i4b2_full_public_true_split_enters_only_the_motif_tail(tmp_path: Path, 
         def forbidden(*_args, **_kwargs):
             raise AssertionError("I4B-2 public handoff reached an unqualified post-write owner")
 
-        for name in (
+        conflict_runs: list[str] = []
+        original_contradiction_surface = LegacyFabricPostWriteAdapter._run_contradiction_surface
+
+        def record_contradiction_surface(adapter, context):
+            conflict_runs.append(context.scope)
+            return original_contradiction_surface(adapter, context)
+
+        monkeypatch.setattr(
+            LegacyFabricPostWriteAdapter,
             "_run_contradiction_surface",
+            record_contradiction_surface,
+        )
+        for name in (
             "_run_srg_collision",
             "_run_hivemind",
             "_run_world_step",
@@ -233,6 +244,7 @@ def test_i4b2_full_public_true_split_enters_only_the_motif_tail(tmp_path: Path, 
         assert result["stored"] is True and result["reinforced"] is False
         assert result["created_motif"] is None
         assert len(result["motifs"]) == 2
+        assert conflict_runs == ["private"]
         assert len(post_write) == 1
         configuration = post_write[0]
         assert configuration.motif_suggestion_maintenance_required is True

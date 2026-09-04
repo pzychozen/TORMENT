@@ -503,12 +503,14 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
         context: FabricPostWriteContext,
         witness: NativePostWriteRouteWitness,
     ) -> FabricPostWriteOutcome:
-        """Run I4B-2's bounded motif tail and nothing from the broad runtime.
+        """Run I4C's conflict prefix followed by I4B-2's bounded motif tail.
 
         A true split's child is a structural consequence of an attach route,
         not a public ``created_motif``.  The eligibility gate is therefore
-        the primary ``CREATED_NEW`` outcome, while reinforcement and ordinary
-        no-write perform no I4B-2 tail work.
+        the primary ``CREATED_NEW`` outcome. I4C restores only the first
+        legacy created-memory consumer: the existing external, fail-soft
+        contradiction surface. Reinforcement and ordinary no-write perform
+        neither conflict persistence nor I4B-2 tail work.
         """
         if context.storage_outcome is not PostWriteStorageOutcome.CREATED_NEW:
             return FabricPostWriteOutcome()
@@ -520,6 +522,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             _revalidate_capability_for_route(self._capability, connection)
             self._validate_context_and_route(connection, context, witness)
             consumers = LegacyFabricPostWriteAdapter(self._bind_dependencies(connection, context, witness))
+            consumers._run_contradiction_surface(context)
             self._run_i4b2_motif_maintenance_and_anchors(consumers, context, emit_anchors=True)
         return FabricPostWriteOutcome()
 
@@ -572,6 +575,7 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
     ) -> None:
         profile = self._configuration.profile
         policy = self._configuration.external.workspace.domain_policies.get(context.chosen_domain, {})
+        _require_qualified(profile.conflict_consumer, "conflict consumer")
         _require_qualified(profile.derived_memory, "derived memory")
         _require_qualified(profile.motif_suggestion_maintenance, "motif suggestion maintenance")
         if bool(policy.get("auto_merge_motifs", False)):
