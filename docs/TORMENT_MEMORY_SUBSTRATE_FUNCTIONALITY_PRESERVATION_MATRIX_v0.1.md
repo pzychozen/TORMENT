@@ -60,7 +60,7 @@ ordinary meaning and must not be read as hidden approvals.
 | Character drift reflex | Fabric rising-edge callback after high-drift measurement | Process-local Fabric high-drift map plus external callback owner | Retained callback composed after qualified native Character/gravity | I4D public high-drift/reflex fixture | Existing rising-edge and callback-failure behavior retained. Restart clears the process-local map, so the first later high measurement may re-fire. No autonomous control authority | NO |
 | Character gravity | Character runtime | Native additive correction plus retained external Character state | Existing native gravity runtime | I4D public high-drift fixture and native gravity/recovery suites | Private native-public only: additive qualified child, retained formula, and best-effort motif work; it never calls Fabric ingest or re-enters full post-write | NO |
 | Conflict persistence | `LegacyFabricPostWriteAdapter._run_contradiction_surface` and existing conflict heuristic | External `ConflictRegistry` JSONL/evidence | Retained legacy contradiction surface on private native-public `CREATED_NEW`: frozen I4C true-split prefix plus I4F-A's corrected ordinary broad-private private-domain binding | I4C true-split evidence; I4F-A broad-private external-owner/write-side/failure/replay fixtures | True-split private conflict roundtrip remains qualified. I4F-A qualifies the ordinary broad-private external writer only: private/core/EID gates, candidate filtering, conflict mathematics, append owner, and fail-soft disposition are preserved. Owner re-entry after incomplete post-write has no exactly-once claim | NO |
-| Conflict query read | Fabric conflict map | Read-only external conflict evidence | `_ReadOnlyConflictRegistry` | I3B/I3B0 present, absent, malformed evidence tests; I4C origin-isolation regression | Frozen reader: qualified origin map, scoring condition, explain shape, and query ordering remain unchanged. It does not currently include the broad-private conflict domain written by I4F-A; broad-private reader roundtrip is I4C-R1, while shared parity remains unclaimed | NO |
+| Conflict query read | Fabric conflict map | Read-only external conflict evidence | `_ReadOnlyConflictRegistry` | I3B/I3B0 present, absent, malformed evidence tests; I4C origin-isolation regression; I4C-R1 source archaeology | Frozen reader: qualified origin map, shared-only scoring condition, explain shape, and query ordering remain unchanged. I4C-R1 confirmed that broad-private conflict evidence is not part of legacy query/trace law: private hits are separate and no private conflict penalty is authorized. Shared parity remains unclaimed | NO |
 | SRG read | Fabric score/explain source | Legacy payload or native qualified source | `effective_srg_state` | I3B source test; I3C modifier/refusal tests | Full valid state required; optional absence remains lawful | NO |
 | SRG query mutation / breathing | Fabric historical nested breathing gate | Live legacy payload / native process overlay | Native process-local overlay | I3C lifecycle characterization | Legacy live-payload mutation is lost after restart without same-entity write; unrelated flush does not persist it; later same-entity write serializes it. Native overlay is process-local only. Restart/write successor parity BLOCKED_PENDING_I4 | NO |
 | SRG last-ingest-band coupling | Fabric ingest-to-query/trace same-band resonance | Process-local Fabric state keyed by workspace_id and agent_id | No qualified native cross-route owner | Main ingest/query/trace census | Ingest stores R_band; query and trace apply the existing 1.08 multiplier only when the same agent's last band matches; restart clears it | NO |
@@ -134,11 +134,18 @@ HIVEMIND_NEW_SCOPE = EXCLUDED
 SHARED_I4E_PARITY = NOT_CLAIMED
 CONFLICT_QUERY_READ = PASS_FROZEN
 I4C_TRUE_SPLIT_CONFLICT_ROUNDTRIP = QUALIFIED
+I4C_TRUE_SPLIT_CONFLICT_PARITY = FROZEN_PRESERVED
 I4C_BROAD_PRIVATE_CONFLICT_WRITER = PASS_WRITE_SIDE_ONLY
-I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_YET_QUALIFIED
-I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_YET_QUALIFIED
-I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
-I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
+I4C_BROAD_PRIVATE_CONFLICT_EXTERNAL_OWNER = PRESERVED
+I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_PART_OF_LEGACY_QUERY_TRACE_LAW
+I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_CLAIMED
+I4C_R1_ARCHAEOLOGY = CLOSED_BY_STOP_CONDITION
+I4C_R1_IMPLEMENTATION = NOT_AUTHORIZED
+I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_APPLICABLE_TO_LEGACY_QUERY_TRACE_LAW
+I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = NO
+I4C_R1 = CLOSED_WITHOUT_IMPLEMENTATION
+I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = OPEN
+I4G_READY_TO_OPEN_AFTER_CLOSURE_COMMIT = YES
 SHARED_I4C_PARITY = NOT_CLAIMED
 SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
 SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = NO_LONGER_OPEN
@@ -260,8 +267,13 @@ SHARED_NATIVE_PUBLIC_PARITY = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
 SHARED_REINFORCEMENT_EXCLUSION_DEPENDS_ON_SHARED_AGENT_ID_REPRESENTATION = YES_CURRENTLY
 I4G_SHARED_REINFORCEMENT_SCOPE_GUARD_REVIEW_REQUIRED = YES
 
-I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
-I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
+I4C_R1_ARCHAEOLOGY = CLOSED_BY_STOP_CONDITION
+I4C_R1_IMPLEMENTATION = NOT_AUTHORIZED
+I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_APPLICABLE_TO_LEGACY_QUERY_TRACE_LAW
+I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = NO
+I4C_R1 = CLOSED_WITHOUT_IMPLEMENTATION
+I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = OPEN
+I4G_READY_TO_OPEN_AFTER_CLOSURE_COMMIT = YES
 NEW_SQLITE_EXTERNAL_OWNER_SHADOWS = 0
 FORMULA_CHANGES = 0
 TORMENT_MATHEMATICS_PRESERVED = YES
@@ -469,7 +481,7 @@ ARCHIVE_RECALL_NATIVE_DISPOSITION = REFUSE_UNTIL_PARITY_OR_EXPLICIT_INAPPLICABIL
 SRG_RESTART_PARITY = QUALIFIED_PRIVATE_NATIVE_PUBLIC_DURABLE_BASELINE_ONLY
 SRG_QUERY_WRITE_COMPOSITION_PARITY = BLOCKED_PENDING_I4
 MOTIF_LIVE_INSERTION_ORDER_PARITY = QUALIFIED_I4B1_PRIMARY_CREATE_PLUS_PRIVATE_I4B2_TRUE_SPLIT_SCOPE
-CONFLICT_SYSTEM_PARITY = TRUE_SPLIT_QUALIFIED_BROAD_PRIVATE_READ_ROUNDTRIP_OPEN_I4C_R1
+CONFLICT_SYSTEM_PARITY = TRUE_SPLIT_QUALIFIED_BROAD_PRIVATE_WRITER_ONLY
 DERIVED_MOOD_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
 CHARACTER_DRIFT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
 CHARACTER_GRAVITY_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE

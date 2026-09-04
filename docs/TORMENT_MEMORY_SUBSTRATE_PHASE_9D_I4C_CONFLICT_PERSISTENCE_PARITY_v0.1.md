@@ -213,8 +213,8 @@ I4C_TRUE_SPLIT_READER_WRITER_CONTRACT = FROZEN_PRESERVED
 I4C_BROAD_PRIVATE_PREEXISTING_WRITER_ASSUMPTION = FALSIFIED_DURING_I4F_A_REVIEW
 I4C_BROAD_PRIVATE_CONFLICT_WRITER = PASS_WRITE_SIDE_ONLY
 I4C_BROAD_PRIVATE_CONFLICT_EXTERNAL_OWNER = QUALIFIED_PRESERVED
-I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_YET_QUALIFIED
-I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_YET_QUALIFIED
+I4F_A_I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_YET_QUALIFIED
+I4F_A_I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_YET_QUALIFIED
 I4C_BROAD_PRIVATE_CONFLICT_OWNER = CORRECTED_I4F_A_EXTERNAL_CONFLICTREGISTRY
 CONFLICT_MATHEMATICS_CHANGE = NO
 CONFLICT_QUERY_READER_CHANGE = NO
@@ -226,18 +226,19 @@ CONFLICT_REPLAY_MODEL = RETAINED_APPEND_NO_EXACTLY_ONCE_CLAIM
 SHARED_I4C_PARITY = NOT_CLAIMED
 ```
 
-This amendment does not re-qualify the true-split work by association. It
-records the separately corrected ordinary broad-private writer binding. The
-remaining query-domain-composition gap is a named prerequisite, not a reason
-to alter the frozen reader in this proposal/bridge slice.
+This I4F-A amendment does not re-qualify the true-split work by association.
+It records the separately corrected ordinary broad-private writer binding. At
+that point, the apparent query-domain-composition gap was recorded as a named
+prerequisite, not a reason to alter the frozen reader in that proposal/bridge
+slice.
 
 ```text
-I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
-I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
+I4F_A_I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
+I4F_A_I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
 ```
 
-I4C-R1 must establish this unchanged chain in its own archaeology and
-qualification work:
+The then-pending I4C-R1 archaeology was asked to establish this unchanged
+chain:
 
 ```text
 broad-private external ConflictRegistry evidence
@@ -247,3 +248,59 @@ broad-private external ConflictRegistry evidence
 
 It must not change the conflict heuristic, record schema, query scoring
 formula, query ordering, or origin semantics.
+
+## I4C-R1 archaeology closure — no implementation
+
+I4C-R1 re-established the actual query and trace composition without changing
+production code. The qualified key law remains valid:
+
+```text
+private = (scope, agent_id, eid)
+shared = (scope, domain_id, eid)
+origin-less = ignored for qualified lookup
+```
+
+The premise that broad-private writer evidence could be restored to query and
+trace by a read-domain binding alone was falsified. Both legacy/native query
+composition and legacy trace build their conflict map from ranked shared
+domains (with the existing domain override behavior); private hits are
+retrieved separately. Both scoring surfaces then apply conflict evidence only
+when `hit.scope == "shared"` and the hit is canonical. The current native
+workspace binds read-only conflict registries only for admitted shared domains.
+
+Adding the prepared private domain to the read-only registry map would not
+change that shared-only application law. Closing the proposed broad-private
+roundtrip would therefore require a conflict-scoring semantic change, which is
+not migration parity and is not authorized. The public `trace` operation also
+remains in the Fabric fallthrough census; I4C-R1 does not introduce a new
+native public trace surface solely for this evidence.
+
+```text
+I4C_R1_ARCHAEOLOGY = CLOSED_BY_STOP_CONDITION
+I4C_R1_IMPLEMENTATION = NOT_AUTHORIZED
+I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_APPLICABLE_TO_LEGACY_QUERY_TRACE_LAW
+I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = NO
+I4C_R1 = CLOSED_WITHOUT_IMPLEMENTATION
+
+I4C_TRUE_SPLIT_CONFLICT_PARITY = FROZEN_PRESERVED
+I4C_BROAD_PRIVATE_CONFLICT_WRITER = PASS_WRITE_SIDE_ONLY
+I4C_BROAD_PRIVATE_CONFLICT_EXTERNAL_OWNER = PRESERVED
+I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_PART_OF_LEGACY_QUERY_TRACE_LAW
+I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_CLAIMED
+
+I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = OPEN
+I4G_READY_TO_OPEN_AFTER_CLOSURE_COMMIT = YES
+
+LEGACY_QUERY_SEMANTICS_CHANGED = NO
+CONFLICT_SCORING_FORMULA_CHANGES = 0
+QUERY_ORDER_CHANGES = 0
+TORMENT_MATHEMATICS_PRESERVED = YES
+RETIREMENT_ALLOWED = NO
+REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
+```
+
+The open I4G question is only whether final native public lifecycle/capability
+parity requires a qualified native public trace route. If it does, that route
+must preserve legacy trace semantics; it must not introduce private-hit
+conflict scoring merely because lawful broad-private external conflict evidence
+exists.
