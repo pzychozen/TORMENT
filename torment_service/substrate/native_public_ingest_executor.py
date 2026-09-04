@@ -347,6 +347,9 @@ class NativePublicIngestExecutor:
                     .core_staging_with_i4e_private_tail()
                 ),
                 motif_suggestion_maintenance_required=True,
+                # I4F's ordinary broad-private proposal/bridge continuation
+                # is not part of I4B-2's frozen created-only true-split tail.
+                bridge_suggestions_required=False,
             )
         with self._owner.open_post_write_context(configuration=configuration) as post_write:
             post = post_write.run(

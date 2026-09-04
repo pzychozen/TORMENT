@@ -8,28 +8,37 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from torment_service.fabric import _load_symbol_state
+from torment_service.bridges import BridgeRegistry
 from torment_service.checkpoint import load_latest_checkpoint
+from torment_service.conflicts import ConflictRegistry
 from torment_service.kernel.trajectory_v2 import TrajectoryPathsV2, TrajectoryV2Verifier
+from torment_service.motif_geometry_port import NativePrivateBridgeGeometryAdapter
 from torment_service.post_write_runtime import LegacyFabricPostWriteAdapter
+from torment_service.proposals import ProposalRegistry
 from torment_service.public_mutation_identity import (
     derive_native_operation_key,
     normalize_public_mutation_key,
 )
-from torment_service.public_runtime import close_public_runtime
+from torment_service.public_runtime import _ReadOnlyConflictRegistry, close_public_runtime
 from torment_service.roles import RoleStore
 from torment_service.substrate.connection import open_existing_native_core_connection
+from torment_service.substrate.errors import SubstrateConfigurationError
 from torment_service.substrate.compat import (
     CompatibilityEmbeddingPublicationRequest,
     NativeMemoryCompatibilityFacade,
 )
 from torment_service.substrate.fabric_native_routing import NativePrecommitAttachFailure
 from torment_service.substrate.motifs import NativeMotifService
-from torment_service.substrate.native_post_write_runtime import NativeFabricPostWriteAdapter
+from torment_service.substrate.native_post_write_runtime import (
+    NativeFabricPostWriteAdapter,
+    NativePostWriteQualificationProfile,
+)
 from torment_service.substrate.native_public_ingest_executor import NativePublicIngestRequest
 
 from tests.test_p9d_i3b0_native_materialization_fencing import _native_runtime
@@ -266,6 +275,7 @@ def test_i4e_full_public_true_split_enters_conflict_srg_motif_mood_world_charact
             "_run_hivemind",
             "_run_world_step",
             "_run_proposal",
+            "_run_bridges",
             "_run_derived_memory",
         ):
             monkeypatch.setattr(LegacyFabricPostWriteAdapter, name, forbidden)
@@ -401,6 +411,541 @@ def test_i4e_full_public_private_owner_tail_runs_only_after_nonfailure_storage_o
         assert [(entry["frame_seq_from"], entry["frame_seq_to"]) for entry in manifest] == [(1, 3)]
         assert len({entry["epoch"] for entry in manifest}) == 1
         assert TrajectoryV2Verifier(str(private_root)).verify(mode="sealed").valid
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_private_proposal_and_bridge_use_retained_external_owners_after_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """I4F restores only the ordinary broad-private post-checkpoint tail."""
+    import torment_service.public_runtime as public_runtime
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        identity = runtime._prepare_native_agent("orchard", "aria")  # noqa: SLF001 - native owner setup
+        identity.seed["coupling_mode"] = "propose"
+        runtime.cognition_fabric.ident_store.save(identity)
+        runtime.cognition_fabric._checkpoint_enable = True
+        runtime.cognition_fabric._checkpoint_interval = 1
+        runtime.cognition_fabric._checkpoint_max_keep = 2
+
+        events: list[object] = []
+        bridge_calls: list[tuple[object, float, int]] = []
+        bridge_probabilities: list[float] = []
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        original_checkpoint = NativeFabricPostWriteAdapter._run_private_checkpoint_snapshot
+        original_proposal = LegacyFabricPostWriteAdapter._run_proposal
+        original_bridges = LegacyFabricPostWriteAdapter._run_bridges
+
+        def record_checkpoint(adapter, connection, context):
+            events.append("checkpoint")
+            return original_checkpoint(adapter, connection, context)
+
+        def record_proposal(adapter, context):
+            events.append(("proposal", context.stored, context.scope, context.half_life_days))
+            return original_proposal(adapter, context)
+
+        def record_bridges(adapter, context):
+            events.append("bridges")
+            return original_bridges(adapter, context)
+
+        def observe_bridge(self, geometry, *, sim_threshold, max_new):
+            bridge_calls.append((geometry, sim_threshold, max_new))
+            return []
+
+        def approve_bridge_probability(probability: float) -> bool:
+            bridge_probabilities.append(probability)
+            return True
+
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "_run_private_checkpoint_snapshot", record_checkpoint)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_proposal", record_proposal)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_bridges", record_bridges)
+        monkeypatch.setattr(public_runtime, "random_chance", approve_bridge_probability)
+        monkeypatch.setattr(public_runtime, "_proposal_allowed", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(BridgeRegistry, "suggest", observe_bridge)
+
+        request = _request(
+            "i4f-private-proposal-bridge", "I4F retained private external owners", [1.0, 0.0, 0.0], step=1,
+        )
+        result = runtime._executor.execute(request)  # noqa: SLF001 - required public-executor boundary
+        replay = runtime._executor.execute(request)  # noqa: SLF001 - completed receipt must not re-enter the tail
+
+        proposal_path = root / "workspaces" / "orchard" / "domains" / "personal" / "proposals.jsonl"
+        assert configurations[0].external.identity.seed["coupling_mode"] == "propose"
+        assert configurations[0].external.proposal_allowed() is True
+        assert configurations[0].external.workspace.proposals.get("personal") is not None
+        assert result["proposal_id"], events
+        assert proposal_path.is_file()
+        proposal_rows = [line for line in proposal_path.read_text(encoding="utf-8").splitlines() if line]
+        assert result["stored"] is True and result["proposal_id"]
+        assert replay == result
+        assert len(proposal_rows) == 1
+        assert events == [
+            "checkpoint",
+            ("proposal", True, "private", result["signals"]["half_life"]),
+            "bridges",
+        ]
+        assert len(bridge_calls) == 1
+        geometry, threshold, max_new = bridge_calls[0]
+        tearing_risk = float(result["tri_mod"].get("tearing_risk", 0.0) or 0.0)
+        expected_probability = max(
+            0.02,
+            min(0.12, float(result["tri_mod"].get("bridge_p", 0.08)) * (1.0 - 0.4 * tearing_risk)),
+        )
+        expected_threshold = max(
+            0.84,
+            min(0.92, float(result["tri_mod"].get("bridge_sim", 0.86)) + 0.03 * tearing_risk),
+        )
+        assert bridge_probabilities == [pytest.approx(expected_probability)]
+        assert isinstance(geometry, NativePrivateBridgeGeometryAdapter)
+        assert geometry.domain_ids() == ("personal", "archive", "research")
+        assert geometry.private_agent_id == "aria"
+        assert geometry.private_domain_id == "personal"
+        assert threshold == pytest.approx(expected_threshold) and max_new == 5
+        assert len(configurations) == 1
+        configuration = configurations[0]
+        assert configuration.profile.bridge_suggestions.name == "QUALIFIED"
+        assert configuration.bridge_suggestions_required is True
+        assert configuration.external.private_bridge_geometry is geometry
+        proposal_owner = configuration.external.workspace.proposals
+        assert proposal_owner.get("personal") is proposal_owner.get("personal")
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_private_bridge_failure_propagates_after_a_durable_proposal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Bridge failure remains caller-visible and cannot roll back earlier owners."""
+    import torment_service.public_runtime as public_runtime
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        identity = runtime._prepare_native_agent("orchard", "aria")  # noqa: SLF001 - native owner setup
+        identity.seed["coupling_mode"] = "propose"
+        runtime.cognition_fabric.ident_store.save(identity)
+        events: list[str] = []
+        original_proposal = LegacyFabricPostWriteAdapter._run_proposal
+        original_bridges = LegacyFabricPostWriteAdapter._run_bridges
+
+        def record_proposal(adapter, context):
+            events.append("proposal")
+            return original_proposal(adapter, context)
+
+        def record_bridges(adapter, context):
+            events.append("bridges")
+            return original_bridges(adapter, context)
+
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_proposal", record_proposal)
+        monkeypatch.setattr(LegacyFabricPostWriteAdapter, "_run_bridges", record_bridges)
+        monkeypatch.setattr(public_runtime, "_proposal_allowed", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: True)
+        monkeypatch.setattr(
+            BridgeRegistry,
+            "suggest",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("I4F bridge owner failure")),
+        )
+
+        with pytest.raises(RuntimeError, match="I4F bridge owner failure"):
+            runtime._executor.execute(_request(
+                "i4f-private-bridge-failure", "I4F bridge failure after proposal", [1.0, 0.0, 0.0], step=1,
+            ))  # noqa: SLF001 - required public-executor boundary
+
+        proposal_path = root / "workspaces" / "orchard" / "domains" / "personal" / "proposals.jsonl"
+        assert events == ["proposal", "bridges"]
+        assert len([line for line in proposal_path.read_text(encoding="utf-8").splitlines() if line]) == 1
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_a_private_bridge_uses_authoritative_workspace_order_and_external_dedupe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """I4F-A offers legacy's complete ordered private-plus-shared pair set."""
+    import torment_service.public_runtime as public_runtime
+
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        gate = {"open": False}
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: gate["open"])
+
+        # Seed all three declared workspace domains through their admitted
+        # native routes.  The private gate stays closed until every candidate
+        # is present, so the final call alone proves the capped ordered sweep.
+        c = float(np.sqrt(.85))
+        residual = float(np.sqrt(.15))
+        candidates = {
+            "personal": ([c, residual, 0.0], [c, -residual, 0.0]),
+            "archive": ([c, 0.0, residual], [c, 0.0, -residual]),
+            "research": ([1.0, 0.0, 0.0],),
+        }
+        for domain_id in ("archive", "research"):
+            for ordinal, vector in enumerate(candidates[domain_id]):
+                shared = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+                    f"i4f-a-shared-{domain_id}-{ordinal}",
+                    f"I4F-A {domain_id} candidate {ordinal}", vector,
+                    step=ordinal + 1, scope="shared", domain_id=domain_id,
+                ))
+                assert shared["stored"] is True and shared["reinforced"] is False
+        for ordinal, vector in enumerate(candidates["personal"]):
+            private = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+                f"i4f-a-private-seed-{ordinal}",
+                f"I4F-A personal candidate {ordinal}", vector, step=10 + ordinal,
+            ))
+            assert private["stored"] is True and private["reinforced"] is False
+
+        captured: list[object] = []
+        original_suggest = BridgeRegistry.suggest
+
+        def record_suggest(self, geometry, *, sim_threshold, max_new):
+            captured.append(geometry)
+            return original_suggest(self, geometry, sim_threshold=sim_threshold, max_new=max_new)
+
+        monkeypatch.setattr(BridgeRegistry, "suggest", record_suggest)
+        gate["open"] = True
+        result = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-private-bridge-cap", "I4F-A capped private bridge candidate", candidates["personal"][0], step=20,
+        ))
+
+        assert result["stored"] is True and len(captured) == 1
+        geometry = captured[0]
+        assert isinstance(geometry, NativePrivateBridgeGeometryAdapter)
+        # ``domains.json`` is [personal, archive, research]; no sorting or
+        # generic shared-domain set union may change this durable order.
+        assert geometry.domain_ids() == ("personal", "archive", "research")
+        assert geometry.list_motifs("personal")
+        assert geometry.list_motifs("archive")
+        assert geometry.list_motifs("research")
+
+        registry = BridgeRegistry(str(root), "orchard")
+        first_rows = [
+            (bridge.from_domain, bridge.to_domain, bridge.from_motif, bridge.to_motif)
+            for bridge in registry.bridges
+        ]
+        # Two motifs in each of the first two ordered domains yield four
+        # eligible personal↔archive pairs, followed by two personal↔research
+        # candidates.  The legacy max_new=5 cap therefore exposes both
+        # private↔shared reachability and order-sensitive survival.
+        # The retained loop checks the cap inside each outer domain pair.
+        # Its exact historical traversal therefore admits one archive↔research
+        # candidate after the fifth prior candidate; this is legacy behavior,
+        # not a revised cap law.
+        assert len(first_rows) == 6
+        assert [row[:2] for row in first_rows] == [
+            ("personal", "archive"),
+            ("personal", "archive"),
+            ("personal", "archive"),
+            ("personal", "archive"),
+            ("personal", "research"),
+            ("archive", "research"),
+        ]
+
+        # Continue the unchanged external owner until its existing `_exists`
+        # relation exhausts the complete geometry, then prove a further replay
+        # yields no duplicate bridge.  No request-level dedupe is introduced.
+        for _ in range(10):
+            added = original_suggest(registry, geometry, sim_threshold=.84, max_new=5)
+            if not added:
+                break
+        else:
+            raise AssertionError("I4F-A geometry did not exhaust its finite bridge candidates")
+        assert original_suggest(
+            BridgeRegistry(str(root), "orchard"), geometry, sim_threshold=.84, max_new=5,
+        ) == []
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_a_broad_private_conflict_persists_through_external_owner_and_read_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The I4C broad-private correction reaches the retained writable registry."""
+    import torment_service.public_runtime as public_runtime
+    import torment_service.substrate.native_public_ingest_executor as ingest_executor
+
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        # The legacy conflict loop deliberately ignores the zero EID.  Seed
+        # that reserved first position before constructing the real candidate.
+        runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-zero", "I4F-A conflict zero", [0.0, 1.0, 0.0], step=0,
+        ))
+        prior = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-prior", "I4F-A conflict prior", [1.0, 0.0, 0.0], step=1,
+        ))
+        assert prior["stored"] is True and prior["reinforced"] is False
+
+        # Keep the primary native write a plain new-memory outcome while the
+        # frozen post-write detector deterministically exposes its conflict.
+        monkeypatch.setattr(ingest_executor, "_detect_canon_conflict", lambda *_args: (False, .0, "none"))
+        detector_calls: list[tuple[object, ...]] = []
+
+        def force_conflict(*args):
+            detector_calls.append(args)
+            return True, .97, "I4F-A forced"
+
+        monkeypatch.setattr(public_runtime, "_detect_canon_conflict", force_conflict)
+        import torment_service.substrate.native_post_write_runtime as native_post_write_runtime
+        monkeypatch.setattr(
+            native_post_write_runtime.NativePostWriteMemoryAccess,
+            "search_by_embedding",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                status="OK",
+                hits=(SimpleNamespace(
+                    eid=prior["eid"], raw_score=.91,
+                    view=SimpleNamespace(memory_class="core", summary="I4F-A conflict prior"),
+                ),),
+            ),
+        )
+        original_contradiction_surface = LegacyFabricPostWriteAdapter._run_contradiction_surface
+        original_conflict_add = ConflictRegistry.add
+        original_native_post_write_run = NativeFabricPostWriteAdapter.run
+        contradiction_attempts: list[tuple[object, object, object]] = []
+        conflict_adds: list[dict[str, object]] = []
+        native_post_write_runs: list[tuple[object, object]] = []
+
+        def observe_contradiction_surface(adapter, context):
+            contradiction_attempts.append((context.memory_class, context.eid, adapter._deps.workspace.conflicts))
+            return original_contradiction_surface(adapter, context)
+
+        monkeypatch.setattr(
+            LegacyFabricPostWriteAdapter,
+            "_run_contradiction_surface",
+            observe_contradiction_surface,
+        )
+
+        def observe_native_post_write_run(adapter, context, *, route_witness):
+            native_post_write_runs.append((context, route_witness))
+            return original_native_post_write_run(adapter, context, route_witness=route_witness)
+
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "run", observe_native_post_write_run)
+
+        def record_conflict_add(registry, **kwargs):
+            conflict_adds.append(kwargs)
+            return original_conflict_add(registry, **kwargs)
+
+        monkeypatch.setattr(ConflictRegistry, "add", record_conflict_add)
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        conflicting = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-created", "I4F-A deterministic conflict", [1.0, 0.0, 0.0], step=2,
+        ))
+
+        conflict_path = root / "workspaces" / "orchard" / "domains" / "personal" / "conflicts.jsonl"
+        assert contradiction_attempts == [("core", conflicting["eid"], configurations[-1].external.workspace.conflicts)]
+        assert prior["eid"] != conflicting["eid"]
+        assert detector_calls
+        assert conflict_adds
+        rows = [json.loads(line) for line in conflict_path.read_text(encoding="utf-8").splitlines() if line]
+        assert conflicting["stored"] is True and conflicting["reinforced"] is False
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["workspace_id"] == "orchard"
+        assert row["domain_id"] == "personal"
+        assert row["eid_a"] == prior["eid"] and row["eid_b"] == conflicting["eid"]
+        assert row["sim"] == pytest.approx(.91)
+        assert row["conflict_score"] == pytest.approx(.97)
+        assert row["reason"] == "I4F-A forced"
+        assert row["origin_scope"] == "private"
+        assert row["origin_agent_id"] == "aria"
+        assert row["origin_domain_id"] is None
+        assert configurations[-1].external.workspace.conflicts["personal"].path == str(conflict_path)
+        with pytest.raises(KeyError):
+            configurations[-1].external.workspace.conflicts["archive"]
+        # The I3B reader remains a separate, frozen read-only view over the
+        # same legacy JSONL artifact; the writer never mutates that view.
+        readable = _ReadOnlyConflictRegistry(conflict_path.parent).list()
+        assert [(item.eid_a, item.eid_b, item.origin_scope, item.origin_agent_id) for item in readable] == [
+            (prior["eid"], conflicting["eid"], "private", "aria"),
+        ]
+
+        # A completed public receipt does not re-run its post-write tail.  The
+        # retained owner has no operation-level wrapper, though, so recovery
+        # or direct re-entry at this real production binding repeats its own
+        # append law.  Re-enter the captured lawful context rather than
+        # substituting a different public request for this replay witness.
+        assert len(native_post_write_runs) == 1
+        with runtime.native_owner.open_post_write_context(configuration=configurations[-1]) as post_write:
+            post_write.run(
+                native_post_write_runs[0][0],
+                route_witness=native_post_write_runs[0][1],
+            )
+        rows_after_replay = [json.loads(line) for line in conflict_path.read_text(encoding="utf-8").splitlines() if line]
+        assert len(native_post_write_runs) == 2
+        assert len(contradiction_attempts) == 2
+        assert len(rows_after_replay) == 2
+        assert {(item["eid_a"], item["eid_b"]) for item in rows_after_replay} == {
+            (prior["eid"], conflicting["eid"]),
+        }
+        assert len({item["conflict_id"] for item in rows_after_replay}) == len(rows_after_replay)
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_a_bridge_profile_and_configuration_disagreement_refuses_before_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The I4F bridge slot is selected by profile, never a lone flag."""
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        result = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-profile-control", "I4F-A bridge profile control", [1.0, 0.0, 0.0], step=1,
+        ))
+        assert result["stored"] is True and len(configurations) == 1
+        configuration = configurations[0]
+        assert configuration.profile.bridge_suggestions.name == "QUALIFIED"
+        assert configuration.bridge_suggestions_required is True
+
+        # Preparation performs both refusals before it can expose an adapter
+        # or run any earlier post-write consumer.
+        with pytest.raises(SubstrateConfigurationError, match="I4F bridge profile/configuration disagreement"):
+            runtime.native_owner.open_post_write_context(
+                configuration=replace(configuration, bridge_suggestions_required=False),
+            )
+        with pytest.raises(SubstrateConfigurationError, match="I4F bridge profile/configuration disagreement"):
+            runtime.native_owner.open_post_write_context(
+                configuration=replace(
+                    configuration,
+                    profile=NativePostWriteQualificationProfile.core_staging_with_i4e_private_tail(),
+                ),
+            )
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_a_convergence_proposal_is_restored_and_remains_distinct_from_general_proposal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The live Hivemind side effect precedes, but cannot replace, proposal_id."""
+    import torment_service.public_runtime as public_runtime
+
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        identity = runtime._prepare_native_agent("orchard", "aria")  # noqa: SLF001 - native owner setup
+        identity.seed["coupling_mode"] = "propose"
+        runtime.cognition_fabric.ident_store.save(identity)
+        runtime.cognition_fabric._hivemind_enable = True
+        runtime.cognition_fabric._hivemind_telemetry_enable = False
+        monkeypatch.setattr(public_runtime, "_proposal_allowed", lambda *_args, **_kwargs: True)
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+
+        convergence = SimpleNamespace(to_dict=lambda: {
+            "event_id": "i4f-a-convergence", "domain_id": "personal", "confidence": 1.0,
+        })
+        convergence_calls: list[tuple[object, object]] = []
+
+        class _ConvergentField:
+            def append_packet(self, _packet, *, embedding):
+                assert np.asarray(embedding).shape == (3,)
+                return convergence
+
+        class _SubmittingBridge:
+            def maybe_draft_proposal(self, *, event, proposal_registry, embedding):
+                convergence_calls.append((event, proposal_registry))
+                return proposal_registry.submit(
+                    agent_id="collective", summary="I4F-A convergence proposal", embedding=embedding,
+                    mtype="collective_echo", confidence=1.0, strength=.5,
+                )
+
+        monkeypatch.setattr(runtime.cognition_fabric, "_get_collective_field", lambda _workspace: _ConvergentField())
+        monkeypatch.setattr(runtime.cognition_fabric, "_get_proposal_bridge", lambda _workspace: _SubmittingBridge())
+        submit_order: list[tuple[str, str]] = []
+        original_submit = ProposalRegistry.submit
+
+        def record_submit(registry, *args, **kwargs):
+            proposal = original_submit(registry, *args, **kwargs)
+            submit_order.append((str(kwargs["mtype"]), proposal.proposal_id))
+            return proposal
+
+        monkeypatch.setattr(ProposalRegistry, "submit", record_submit)
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        result = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-convergence-general", "I4F-A convergence and general proposal", [1.0, 0.0, 0.0], step=1,
+        ))
+
+        assert [mtype for mtype, _proposal_id in submit_order] == [
+            "collective_echo", result["signals"]["memory_type"],
+        ]
+        assert len({proposal_id for _mtype, proposal_id in submit_order}) == 2
+        assert result["proposal_id"] == submit_order[-1][1]
+        assert convergence_calls == [
+            (convergence.to_dict(), configurations[0].external.workspace.proposals.get("personal")),
+        ]
+        proposal_path = root / "workspaces" / "orchard" / "domains" / "personal" / "proposals.jsonl"
+        assert len([line for line in proposal_path.read_text(encoding="utf-8").splitlines() if line]) == 2
+
+        class _FailingBridge:
+            def maybe_draft_proposal(self, **_kwargs):
+                raise RuntimeError("I4F-A injected convergence proposal failure")
+
+        monkeypatch.setattr(runtime.cognition_fabric, "_get_proposal_bridge", lambda _workspace: _FailingBridge())
+        independent = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-convergence-failure", "I4F-A convergence failure independent general proposal", [0.0, 1.0, 0.0], step=2,
+        ))
+        assert independent["stored"] is True and independent["proposal_id"]
+        assert len([line for line in proposal_path.read_text(encoding="utf-8").splitlines() if line]) == 3
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4f_a_broad_private_conflict_writer_failure_is_fail_soft_after_canonical_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A retained conflict-owner failure cannot roll back the primary write."""
+    import torment_service.public_runtime as public_runtime
+    import torment_service.substrate.native_public_ingest_executor as ingest_executor
+
+    monkeypatch.setenv("TORMENT_REINFORCE_SIM_THRESHOLD", "1.1")
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-failure-zero", "I4F-A failure zero", [0.0, 1.0, 0.0], step=0,
+        ))
+        prior = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-failure-prior", "I4F-A failure prior", [1.0, 0.0, 0.0], step=1,
+        ))
+        identity = runtime._prepare_native_agent("orchard", "aria")  # noqa: SLF001 - native owner setup
+        identity.seed["coupling_mode"] = "propose"
+        runtime.cognition_fabric.ident_store.save(identity)
+        monkeypatch.setattr(ingest_executor, "_detect_canon_conflict", lambda *_args: (False, .0, "none"))
+        monkeypatch.setattr(public_runtime, "_detect_canon_conflict", lambda *_args: (True, .97, "I4F-A forced"))
+        monkeypatch.setattr(public_runtime, "_proposal_allowed", lambda *_args, **_kwargs: True)
+        import torment_service.substrate.native_post_write_runtime as native_post_write_runtime
+        monkeypatch.setattr(
+            native_post_write_runtime.NativePostWriteMemoryAccess,
+            "search_by_embedding",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                status="OK",
+                hits=(SimpleNamespace(
+                    eid=prior["eid"], raw_score=.91,
+                    view=SimpleNamespace(memory_class="core", summary="I4F-A failure prior"),
+                ),),
+            ),
+        )
+        monkeypatch.setattr(
+            ConflictRegistry,
+            "add",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("I4F-A injected conflict owner failure")),
+        )
+
+        result = runtime._executor.execute(_request(  # noqa: SLF001 - public-executor boundary
+            "i4f-a-conflict-failure", "I4F-A conflict failure", [1.0, 0.0, 0.0], step=2,
+        ))
+        proposal_path = root / "workspaces" / "orchard" / "domains" / "personal" / "proposals.jsonl"
+        assert result["stored"] is True and result["reinforced"] is False
+        assert result["proposal_id"]
+        assert len([line for line in proposal_path.read_text(encoding="utf-8").splitlines() if line]) == 1
     finally:
         close_public_runtime(root)
 

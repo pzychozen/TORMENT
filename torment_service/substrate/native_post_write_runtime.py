@@ -25,7 +25,11 @@ from torment_service.post_write_runtime import (
     PostWriteStorageOutcome,
     run_bridge_suggestions,
 )
-from torment_service.motif_geometry_port import NativeMotifGeometryAdapter, NativeScopedMotifGeometryAdapter
+from torment_service.motif_geometry_port import (
+    NativeMotifGeometryAdapter,
+    NativePrivateBridgeGeometryAdapter,
+    NativeScopedMotifGeometryAdapter,
+)
 from torment_service.motif_maintenance import NativeMotifMaintenanceAdapter
 
 from .connection import open_existing_native_core_connection
@@ -136,6 +140,19 @@ class NativePostWriteQualificationProfile:
         )
 
     @classmethod
+    def core_staging_with_i4f_private_tail(cls) -> "NativePostWriteQualificationProfile":
+        """I4F's retained private proposal and bridge continuation.
+
+        Proposal behavior has been part of the frozen core-staging profile;
+        I4F supplies its deliberately narrow external proposal owner and adds
+        only the separately qualified bridge slot after that proposal call.
+        """
+        return replace(
+            cls.core_staging_with_i4e_private_tail(),
+            bridge_suggestions=NativePostWriteBehavior.QUALIFIED,
+        )
+
+    @classmethod
     def core_staging_with_motif_suggestion_maintenance(cls) -> "NativePostWriteQualificationProfile":
         """Explicit M1 profile; auto-merge remains an unsupported mutation."""
         return replace(
@@ -238,6 +255,7 @@ class NativePostWriteExternalDependencies:
     hivemind_log: logging.Logger
     character_store: Any | None = None
     character_embedder: Any | None = None
+    private_bridge_geometry: NativePrivateBridgeGeometryAdapter | None = None
     shared_bridge_geometry: NativeMotifGeometryAdapter | None = None
     random_chance: Callable[[float], bool] | None = None
 
@@ -556,6 +574,8 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             if self._private_checkpoint_snapshot_enabled:
                 self._run_private_checkpoint_snapshot(connection, context)
             proposal_id = consumers._run_proposal(context)
+            if self._private_bridge_suggestions_enabled:
+                consumers._run_bridges(context)
             return FabricPostWriteOutcome(proposal_id=proposal_id)
 
     def _run_i4b2_true_split_tail(
@@ -702,6 +722,13 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
     @property
     def _private_checkpoint_snapshot_enabled(self) -> bool:
         return self._configuration.profile.checkpoint is NativePostWriteBehavior.QUALIFIED
+
+    @property
+    def _private_bridge_suggestions_enabled(self) -> bool:
+        return (
+            self._configuration.profile.bridge_suggestions
+            is NativePostWriteBehavior.QUALIFIED
+        )
 
     def _run_private_world_and_trajectory(
         self,
@@ -1242,13 +1269,17 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             model_state=None, kernel_context=None, agent_key=external.agent_key,
             detect_canon_conflict=external.detect_canon_conflict,
             proposal_allowed=external.proposal_allowed,
-            random_chance=_forbidden_random_chance,
+            random_chance=(
+                external.random_chance
+                if callable(external.random_chance) else _forbidden_random_chance
+            ),
             save_checkpoint=_forbidden_checkpoint,
             build_motif_summary=_forbidden_checkpoint,
             build_shard_snapshot=_forbidden_checkpoint,
             hivemind_log=external.hivemind_log,
             character_drift_runtime=character_drift,
             character_gravity_runtime=character_correction,
+            bridge_geometry=external.private_bridge_geometry,
         )
 
     def _bind_shared_m1_mood_dependencies(
@@ -1457,8 +1488,16 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             if profile.trajectory_evidence is not NativePostWriteBehavior.QUALIFIED:
                 _refuse(profile.trajectory_evidence, "trajectory evidence")
             _validate_private_trajectory_evidence_binding(self._configuration)
-        if self._configuration.bridge_suggestions_required:
-            _refuse(profile.bridge_suggestions, "bridge suggestions")
+        if self._private_bridge_suggestions_enabled:
+            _require_private_bridge_geometry(
+                ext.private_bridge_geometry,
+                self._capability,
+                self._configuration.routing_scope,
+            )
+            if not callable(ext.random_chance):
+                raise SubstrateConfigurationError(
+                    "private bridge profile requires an injected random_chance dependency"
+                )
         if self._configuration.deep_memory_required:
             _refuse(profile.deep_memory, "deep memory")
 
@@ -1579,7 +1618,7 @@ def prepare_native_fabric_post_write_adapter(
             or template.idempotency_namespace_id != scope.idempotency_namespace_id
         ):
             raise SubstrateConfigurationError("derived runtime template does not match prepared scope")
-        _validate_private_i4e_configuration(configuration)
+        _validate_private_i4e_configuration(capability, configuration)
     elif scope.runtime_scope.scope_kind == "SHARED_DOMAIN":
         shared_d1 = configuration.shared_motif_suggestion_maintenance_required
         shared_hivemind = configuration.shared_hivemind_packet_emission_required
@@ -1830,6 +1869,7 @@ def _validate_shared_trajectory_evidence_binding(
 
 
 def _validate_private_i4e_configuration(
+    capability: NativeFabricRoutingCapability,
     configuration: NativePostWriteQualificationConfiguration,
 ) -> None:
     """Keep I4E's separately owned private tail complete but non-transactional."""
@@ -1841,9 +1881,17 @@ def _validate_private_i4e_configuration(
     profile_checkpoint = (
         configuration.profile.checkpoint is NativePostWriteBehavior.QUALIFIED
     )
+    bridge = configuration.bridge_suggestions_required
+    profile_bridge = (
+        configuration.profile.bridge_suggestions is NativePostWriteBehavior.QUALIFIED
+    )
     if trajectory != profile_trajectory or checkpoint != profile_checkpoint:
         raise SubstrateConfigurationError(
             "private I4E profile/configuration disagreement refuses effects"
+        )
+    if bridge != profile_bridge:
+        raise SubstrateConfigurationError(
+            "private I4F bridge profile/configuration disagreement refuses effects"
         )
     if profile_trajectory != profile_checkpoint:
         raise SubstrateConfigurationError(
@@ -1861,6 +1909,16 @@ def _validate_private_i4e_configuration(
         or configuration.private_checkpoint_snapshot_binding is not None
     ):
         raise SubstrateConfigurationError("private I4E bindings require both private I4E consumers")
+    if profile_bridge:
+        _require_private_bridge_geometry(
+            configuration.external.private_bridge_geometry,
+            capability,
+            configuration.routing_scope,
+        )
+        if not callable(configuration.external.random_chance):
+            raise SubstrateConfigurationError(
+                "private bridge profile requires an injected random_chance dependency"
+            )
 
 
 def _validate_private_trajectory_evidence_binding(
@@ -1938,6 +1996,32 @@ def _require_shared_bridge_geometry(
     }
     if set(geometry.domain_ids()) != admitted_domains:
         raise SubstrateConfigurationError("shared bridge geometry does not cover exactly the admitted shared domains")
+
+
+def _require_private_bridge_geometry(
+    geometry: NativePrivateBridgeGeometryAdapter | None,
+    capability: NativeFabricRoutingCapability,
+    routing_scope: NativeFabricRoutingScope,
+) -> None:
+    """Require the exact private-plus-shared geometry for a private source."""
+    if not isinstance(geometry, NativePrivateBridgeGeometryAdapter):
+        raise SubstrateConfigurationError(
+            "private bridge profile requires qualified native private bridge geometry"
+        )
+    if routing_scope.runtime_scope.scope_kind != "PRIVATE_AGENT":
+        raise SubstrateConfigurationError("private bridge profile requires a private routing scope")
+    if geometry.private_agent_id != routing_scope.runtime_scope.agent_id:
+        raise SubstrateConfigurationError("private bridge geometry does not match the claimed private agent")
+    admitted_shared_domains = {
+        scope.runtime_scope.domain_id
+        for scope in capability.routing_scopes
+        if scope.runtime_scope.scope_kind == "SHARED_DOMAIN"
+    }
+    expected_domains = admitted_shared_domains | {geometry.private_domain_id}
+    if set(geometry.domain_ids()) != expected_domains:
+        raise SubstrateConfigurationError(
+            "private bridge geometry does not cover exactly the admitted private and shared domains"
+        )
 
 
 __all__ = [

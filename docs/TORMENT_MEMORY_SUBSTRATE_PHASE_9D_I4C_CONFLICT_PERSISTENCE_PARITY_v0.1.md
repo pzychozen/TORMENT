@@ -158,12 +158,12 @@ isolation and query behavior.
 ## Bounded verdict
 
 ```text
-I4C_ARCHAEOLOGY = COMPLETE
-I4C_WRITER_READER_RECONCILIATION = LAWFUL_PRIVATE_SCOPE
-P9D_I4C_CONFLICT_PERSISTENCE_PARITY = PASS_BOUNDED_PRIVATE_NATIVE_PUBLIC_SCOPE
+I4C_TRUE_SPLIT_ARCHAEOLOGY = COMPLETE
+I4C_TRUE_SPLIT_WRITER_READER_RECONCILIATION = LAWFUL_PRIVATE_SCOPE
+P9D_I4C_TRUE_SPLIT_CONFLICT_PERSISTENCE_PARITY = PASS_BOUNDED_PRIVATE_NATIVE_PUBLIC_SCOPE
 CONFLICT_READ_PARITY = FROZEN_PRESERVED
-CONFLICT_WRITER_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_SCOPE
-CONFLICT_READER_WRITER_CONTRACT = QUALIFIED
+CONFLICT_WRITER_PARITY = PASS_PRIVATE_TRUE_SPLIT_NATIVE_PUBLIC_SCOPE
+CONFLICT_READER_WRITER_CONTRACT = QUALIFIED_TRUE_SPLIT_SCOPE
 CONFLICT_POSTCOMMIT_ORDER_PARITY = PASS
 CONFLICT_FAILURE_DISPOSITION = PASS
 CONFLICT_RESTART_PARITY = PASS
@@ -179,3 +179,71 @@ REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
 I4C_READY_TO_FREEZE = YES
 I4D_STARTED = NO
 ```
+
+## I4F-A adversarial amendment — broad-private writer correction
+
+The original I4C true-split qualification above remains frozen and valid: its
+retained external `ConflictRegistry` call precedes the true-split motif tail,
+and its reader, mathematics, ordering, schema, failure, replay, and shared
+non-claim are unchanged. During I4F-A review, however, the historic statement
+that ordinary broad-private `CREATED_NEW` already reached that writer was
+falsified.
+
+Before I4F-A, the public workspace view provided shared read-only conflict
+registries. The broad-private chosen domain could not obtain a writable
+private registry from that map; the initial I4F narrow workspace then omitted
+`conflicts` altogether. Consequently, the otherwise retained legacy
+contradiction surface was fail-soft but produced zero ordinary broad-private
+conflict rows. That was a writer-binding gap, not a change to the frozen
+reader contract or conflict heuristic.
+
+I4F-A corrects only this bounded binding. Its private external workspace maps
+the prepared agent's admitted private motif domain to the existing writable
+`ConflictRegistry`, and maps no shared domain. The existing legacy
+contradiction method now receives that registry through its normal workspace
+lookup and appends the existing private-origin JSONL record. The frozen
+`_ReadOnlyConflictRegistry` query reader was not changed or replaced, and its
+qualified native query composition does not currently include this private
+conflict domain. The durable external evidence is therefore lawful write-side
+parity, not a qualified broad-private reader/writer roundtrip.
+
+```text
+I4C_TRUE_SPLIT_CONFLICT_PREFIX = FROZEN_PRESERVED
+I4C_TRUE_SPLIT_READER_WRITER_CONTRACT = FROZEN_PRESERVED
+I4C_BROAD_PRIVATE_PREEXISTING_WRITER_ASSUMPTION = FALSIFIED_DURING_I4F_A_REVIEW
+I4C_BROAD_PRIVATE_CONFLICT_WRITER = PASS_WRITE_SIDE_ONLY
+I4C_BROAD_PRIVATE_CONFLICT_EXTERNAL_OWNER = QUALIFIED_PRESERVED
+I4C_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_YET_QUALIFIED
+I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_YET_QUALIFIED
+I4C_BROAD_PRIVATE_CONFLICT_OWNER = CORRECTED_I4F_A_EXTERNAL_CONFLICTREGISTRY
+CONFLICT_MATHEMATICS_CHANGE = NO
+CONFLICT_QUERY_READER_CHANGE = NO
+CONFLICT_QUERY_ORDERING_CHANGE = NO
+CONFLICT_REGISTRY_SCHEMA_CHANGE = NO
+CONFLICT_EXTERNAL_OWNER = PRESERVED_LEGACY_JSONL
+CONFLICT_FAILURE_DISPOSITION = RETAINED_FAIL_SOFT
+CONFLICT_REPLAY_MODEL = RETAINED_APPEND_NO_EXACTLY_ONCE_CLAIM
+SHARED_I4C_PARITY = NOT_CLAIMED
+```
+
+This amendment does not re-qualify the true-split work by association. It
+records the separately corrected ordinary broad-private writer binding. The
+remaining query-domain-composition gap is a named prerequisite, not a reason
+to alter the frozen reader in this proposal/bridge slice.
+
+```text
+I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
+I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
+```
+
+I4C-R1 must establish this unchanged chain in its own archaeology and
+qualification work:
+
+```text
+broad-private external ConflictRegistry evidence
+  -> qualified native conflict reader
+  -> existing conflict scoring / trace semantics
+```
+
+It must not change the conflict heuristic, record schema, query scoring
+formula, query ordering, or origin semantics.

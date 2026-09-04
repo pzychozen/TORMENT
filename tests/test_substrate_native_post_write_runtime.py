@@ -457,6 +457,65 @@ def test_created_new_runs_the_qualified_native_core_in_frozen_order(tmp_path: Pa
         qualified.close()
 
 
+def test_i4f_direct_post_write_reentry_preserves_packet_and_proposal_no_dedupe(tmp_path: Path):
+    """The retained external owners have no new global exactly-once wrapper."""
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, _workspace, _identity, _side, _conflicts, proposals = _environment(scope)
+        request = _request("i4f-post-write-reentry", 1)
+        result = NativeFabricMemoryRouter(capability).route(request).result
+        assert result is not None and result.reinforced is False
+        context = _context(result, request)
+        witness = NativePostWriteRouteWitness(result, request.native_operation_key)
+        adapter = _adapter(capability, configuration)
+
+        first = adapter.run(context, route_witness=witness)
+        second = adapter.run(context, route_witness=witness)
+
+        assert first.proposal_id == "proposal-1"
+        assert second.proposal_id == "proposal-2"
+        assert len(owner.field.packets) == 2
+        assert owner.field.packets[0][0].packet_id != owner.field.packets[1][0].packet_id
+        assert len(proposals.calls) == 2
+        assert owner.ident_store.saved == 2
+    finally:
+        qualified.close()
+
+
+def test_i4f_hivemind_convergence_preserves_its_existing_proposal_bridge_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Collective convergence remains distinct from the general proposal tail."""
+    qualified, _connection, capability, scope = _prepared(tmp_path)
+    try:
+        configuration, owner, _workspace, identity, _side, _conflicts, proposals = _environment(scope)
+        identity.seed["coupling_mode"] = "read_only"
+        request = _request("i4f-hivemind-convergence", 1)
+        result = NativeFabricMemoryRouter(capability).route(request).result
+        assert result is not None
+        observed: dict[str, object] = {}
+        convergence = SimpleNamespace(to_dict=lambda: {"event_id": "cev_i4f", "domain_id": "personal"})
+
+        monkeypatch.setattr(owner.field, "append_packet", lambda *_args, **_kwargs: convergence)
+
+        def record_collective_proposal(**kwargs):
+            observed.update(kwargs)
+
+        monkeypatch.setattr(owner.bridge, "maybe_draft_proposal", record_collective_proposal)
+        outcome = _adapter(capability, configuration).run(
+            _context(result, request),
+            route_witness=NativePostWriteRouteWitness(result, request.native_operation_key),
+        )
+
+        assert outcome.proposal_id is None
+        assert observed["event"] == convergence.to_dict()
+        assert observed["proposal_registry"] is proposals
+        assert np.array_equal(observed["embedding"], np.asarray(request.incoming_embedding, dtype=np.float32))
+    finally:
+        qualified.close()
+
+
 def test_reinforcement_runs_only_all_outcome_native_consumers(tmp_path: Path):
     qualified, connection, capability, scope = _prepared(tmp_path)
     try:

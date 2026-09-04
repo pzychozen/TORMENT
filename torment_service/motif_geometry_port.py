@@ -152,6 +152,127 @@ class NativeMotifGeometryAdapter:
         return self._runtime.lookup_shared(domain_id)
 
 
+class NativePrivateBridgeGeometryAdapter:
+    """Read one private motif lane together with qualified shared lanes.
+
+    This is deliberately distinct from :class:`NativeMotifGeometryAdapter`.
+    A private bridge decision historically consumes the ordered workspace motif
+    map, which includes its own private motif domain as well as each shared
+    domain.  The caller supplies that already-authorized workspace order; this
+    adapter only composes the one named private lane with the named shared
+    readers and never derives a domain from a label or directory.
+    """
+
+    def __init__(
+        self,
+        recovered_runtime: Any,
+        *,
+        domain_ids: tuple[str, ...],
+        private_agent_id: str,
+        private_domain_id: str,
+        expected_dimension: int,
+    ) -> None:
+        if not isinstance(domain_ids, tuple) or not domain_ids or any(
+            not isinstance(domain, str) or not domain for domain in domain_ids
+        ) or len(set(domain_ids)) != len(domain_ids):
+            raise ValueError("private bridge geometry requires distinct explicit domain IDs")
+        if not isinstance(private_agent_id, str) or not private_agent_id:
+            raise ValueError("private bridge geometry requires a private agent ID")
+        if not isinstance(private_domain_id, str) or not private_domain_id:
+            raise ValueError("private bridge geometry requires a private motif domain ID")
+        if domain_ids.count(private_domain_id) != 1:
+            raise ValueError("private bridge geometry must include its private motif domain exactly once")
+        if not isinstance(expected_dimension, int) or isinstance(expected_dimension, bool) or expected_dimension < 1:
+            raise ValueError("private bridge geometry expected_dimension must be positive")
+        if not hasattr(recovered_runtime, "lookup_private") or not hasattr(recovered_runtime, "lookup_shared"):
+            raise ValueError("private bridge geometry requires a recovered multi-scope runtime")
+        descriptor = getattr(recovered_runtime, "descriptor", None)
+        payload = getattr(descriptor, "payload", None)
+        lanes = payload.get("lanes") if isinstance(payload, dict) else None
+        private_motif_domains = [
+            plan.get("motif_domain_id")
+            for entry in lanes if isinstance(entry, dict)
+            for plan in [entry.get("plan")]
+            if isinstance(plan, dict)
+            and plan.get("scope_kind") == "PRIVATE_AGENT"
+            and plan.get("agent_id") == private_agent_id
+        ] if isinstance(lanes, list) else []
+        if private_motif_domains != [private_domain_id]:
+            raise ValueError("private bridge geometry does not match admitted private motif-domain evidence")
+        try:
+            private_scope = recovered_runtime.lookup_private(private_agent_id)
+        except Exception as exc:
+            raise ValueError("private bridge geometry private lane is not admitted") from exc
+        shared_scopes: dict[str, Any] = {}
+        for domain_id in domain_ids:
+            if domain_id == private_domain_id:
+                continue
+            try:
+                shared_scopes[domain_id] = recovered_runtime.lookup_shared(domain_id)
+            except Exception as exc:
+                raise ValueError(f"private bridge geometry domain is not admitted: {domain_id!r}") from exc
+        self._domain_ids = domain_ids
+        self._private_agent_id = private_agent_id
+        self._private_domain_id = private_domain_id
+        self._private_scope = private_scope
+        self._shared_scopes = shared_scopes
+        self._expected_dimension = expected_dimension
+
+    @property
+    def private_agent_id(self) -> str:
+        return self._private_agent_id
+
+    @property
+    def private_domain_id(self) -> str:
+        return self._private_domain_id
+
+    def domain_ids(self) -> tuple[str, ...]:
+        return self._domain_ids
+
+    def list_motifs(self, domain_id: str) -> tuple[RuntimeMotifGeometry, ...]:
+        scope = self._scope(domain_id)
+        with scope.open_readers() as readers:
+            motifs = readers.motifs.list_runtime_motifs(
+                motif_alias_namespace_id=scope.fabric_routing_scope.motif_alias_namespace_id,
+                domain_id=domain_id,
+                semantic_scope_id=scope.memory_runtime_scope.semantic_scope_id,
+            )
+        return tuple(
+            RuntimeMotifGeometry(
+                domain_id=item.read_model.domain_id,
+                runtime_motif_id=item.read_model.runtime_motif_id,
+                label=str(item.read_model.label),
+                centroid=tuple(float(value) for value in item.read_model.centroid),
+                strength=float(item.read_model.strength),
+                stability_score=float(item.read_model.stability_score),
+                member_count=int(item.read_model.member_count),
+                created_ts=int(item.read_model.created_ts),
+                last_active_ts=int(item.read_model.last_active_ts),
+            )
+            for item in motifs
+        )
+
+    def domain_centroid(self, domain_id: str, expected_dimension: int) -> np.ndarray:
+        if expected_dimension != self._expected_dimension:
+            raise ValueError("private bridge geometry dimension differs from its qualified lane")
+        scope = self._scope(domain_id)
+        with scope.open_readers() as readers:
+            return readers.motifs.domain_centroid(
+                motif_alias_namespace_id=scope.fabric_routing_scope.motif_alias_namespace_id,
+                domain_id=domain_id,
+                dimension=expected_dimension,
+                semantic_scope_id=scope.memory_runtime_scope.semantic_scope_id,
+            )
+
+    def _scope(self, domain_id: str) -> Any:
+        if domain_id == self._private_domain_id:
+            return self._private_scope
+        try:
+            return self._shared_scopes[domain_id]
+        except KeyError as exc:
+            raise KeyError(f"geometry is not available for unadmitted private bridge domain {domain_id!r}") from exc
+
+
 class NativeScopedMotifGeometryAdapter:
     """Read one explicitly-bound native motif lane through its existing reader.
 
@@ -228,6 +349,7 @@ __all__ = [
     "LegacyMotifGeometryAdapter",
     "MotifGeometryPort",
     "NativeMotifGeometryAdapter",
+    "NativePrivateBridgeGeometryAdapter",
     "NativeScopedMotifGeometryAdapter",
     "RuntimeMotifGeometry",
 ]

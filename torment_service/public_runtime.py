@@ -6,7 +6,7 @@ state, and it contains no request-controlled backend choice.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import hashlib
 import json
@@ -19,7 +19,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .conflicts import CanonConflict
+from .conflicts import CanonConflict, ConflictRegistry
+from .bridges import BridgeRegistry
 from .fabric import (
     DEFAULT_DOMAIN_POLICIES,
     DomainScore,
@@ -27,10 +28,17 @@ from .fabric import (
     _detect_canon_conflict,
     _load_affect_state,
     _load_anchor_state,
+    _proposal_allowed,
     _save_affect_state,
     _save_anchor_state,
+    random_chance,
 )
 from .ingest_orchestration import PreparedFabricIngest
+from .motif_geometry_port import (
+    NativeMotifGeometryAdapter,
+    NativePrivateBridgeGeometryAdapter,
+)
+from .proposals import ProposalRegistry
 from .query_read_model import NativeQueryReadRefused, _private_motif_domains
 from .substrate.deployment_selector import resolve_deployment_agreement
 from .substrate.deployment_types import (
@@ -337,6 +345,95 @@ class NativePublicWorkspaceView:
             domain: None
             for domain in (*self.domains, *self.private_motif_domains)
         })
+
+
+@dataclass(frozen=True)
+class NativePrivatePostWriteExternalWorkspace:
+    """I4F's narrow retained external writers for a private post-write tail.
+
+    This is intentionally not the native public workspace view and does not
+    expose legacy graphs, motif registries, routing, or shared writers.  The
+    retained proposal, private conflict, and bridge owners remain their
+    existing JSON/JSONL external implementations; native motif geometry is
+    supplied separately by the native post-write binding.
+    """
+
+    data_dir: str
+    workspace_id: str
+    domain_policies: Mapping[str, Mapping[str, Any]]
+    conflicts: Mapping[str, ConflictRegistry]
+    proposals: Any
+    bridges: Any
+
+
+class _NativePrivateProposalRegistryMap:
+    """Resolve one existing proposal owner only after its legacy gate passes."""
+
+    def __init__(self, *, data_dir: str, workspace_id: str, domain_ids: tuple[str, ...]) -> None:
+        self._data_dir = data_dir
+        self._workspace_id = workspace_id
+        self._domain_ids = frozenset(domain_ids)
+        self._registries: dict[str, ProposalRegistry] = {}
+
+    def get(self, domain_id: str, default: Any = None) -> ProposalRegistry | Any:
+        if domain_id not in self._domain_ids:
+            return default
+        registry = self._registries.get(domain_id)
+        if registry is None:
+            registry = ProposalRegistry(
+                data_dir=self._data_dir,
+                workspace_id=self._workspace_id,
+                domain_id=domain_id,
+            )
+            self._registries[domain_id] = registry
+        return registry
+
+
+class _NativePrivateConflictRegistryMap(Mapping[str, ConflictRegistry]):
+    """Lazily retain only the external conflict writers owned by this route."""
+
+    def __init__(self, *, data_dir: str, workspace_id: str, domain_ids: tuple[str, ...]) -> None:
+        if not domain_ids or any(not isinstance(domain_id, str) or not domain_id for domain_id in domain_ids):
+            raise ValueError("private conflict registry map requires explicit domain IDs")
+        if len(set(domain_ids)) != len(domain_ids):
+            raise ValueError("private conflict registry map requires distinct domain IDs")
+        self._data_dir = data_dir
+        self._workspace_id = workspace_id
+        self._domain_ids = domain_ids
+        self._registries: dict[str, ConflictRegistry] = {}
+
+    def __getitem__(self, domain_id: str) -> ConflictRegistry:
+        if domain_id not in self._domain_ids:
+            raise KeyError(domain_id)
+        registry = self._registries.get(domain_id)
+        if registry is None:
+            registry = ConflictRegistry(
+                data_dir=self._data_dir,
+                workspace_id=self._workspace_id,
+                domain_id=domain_id,
+            )
+            self._registries[domain_id] = registry
+        return registry
+
+    def __iter__(self):
+        return iter(self._domain_ids)
+
+    def __len__(self) -> int:
+        return len(self._domain_ids)
+
+
+class _NativePrivateBridgeWriter:
+    """Open the retained bridge owner at the existing bridge-call slot only."""
+
+    def __init__(self, *, data_dir: str, workspace_id: str) -> None:
+        self._data_dir = data_dir
+        self._workspace_id = workspace_id
+
+    def suggest(self, *args: Any, **kwargs: Any) -> Any:
+        return BridgeRegistry(
+            data_dir=self._data_dir,
+            workspace_id=self._workspace_id,
+        ).suggest(*args, **kwargs)
 
 
 class _FabricDerivedMemorySideStore:
@@ -736,6 +833,62 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
                 shared_motif_suggestion_maintenance_required=True,
                 shared_mood_drift_binding=NativeSharedTriggerMoodDriftBinding(private, template),
             )
+        try:
+            private_domain = _private_motif_domains(runtime)[prepared.agent_id]
+        except Exception as exc:
+            raise NativePublicOperationRefused(
+                "native private bridge domain is not admitted for the prepared agent"
+            ) from exc
+        legacy_bridge_domain_order = _read_workspace_domain_order(
+            self.cognition_fabric.data_dir,
+            prepared.workspace_id,
+        )
+        admitted_bridge_domains = set(view.domains) | {private_domain}
+        if set(legacy_bridge_domain_order) != admitted_bridge_domains:
+            raise NativePublicOperationRefused(
+                "native private bridge geometry does not cover the authoritative workspace domains"
+            )
+        # I4F restores only the two established private external post-write
+        # owners and I4C's existing external conflict owner.  It does not
+        # materialize a legacy workspace or grant a legacy graph/motif writer:
+        # the JSON/JSONL side-store owners are retained while bridge geometry
+        # composes the qualified private and shared native readers below.
+        private_external_workspace = NativePrivatePostWriteExternalWorkspace(
+            data_dir=self.cognition_fabric.data_dir,
+            workspace_id=prepared.workspace_id,
+            domain_policies=view.domain_policies,
+            conflicts=_NativePrivateConflictRegistryMap(
+                data_dir=self.cognition_fabric.data_dir,
+                workspace_id=prepared.workspace_id,
+                # The broad-private route owns only its admitted private
+                # conflict domain; shared/reference lanes remain read-only.
+                domain_ids=(private_domain,),
+            ),
+            proposals=_NativePrivateProposalRegistryMap(
+                data_dir=self.cognition_fabric.data_dir,
+                workspace_id=prepared.workspace_id,
+                # Private proposals use the prepared private motif domain;
+                # it is separately admitted from the shared geometry domains.
+                domain_ids=tuple(dict.fromkeys((*view.domains, *view.private_motif_domains))),
+            ),
+            bridges=_NativePrivateBridgeWriter(
+                data_dir=self.cognition_fabric.data_dir,
+                workspace_id=prepared.workspace_id,
+            ),
+        )
+        private_external = replace(
+            external,
+            workspace=private_external_workspace,
+            proposal_allowed=_proposal_allowed,
+            private_bridge_geometry=NativePrivateBridgeGeometryAdapter(
+                runtime,
+                domain_ids=legacy_bridge_domain_order,
+                private_agent_id=prepared.agent_id,
+                private_domain_id=private_domain,
+                expected_dimension=int(runtime.representation_lane.dimension),
+            ),
+            random_chance=random_chance,
+        )
         agent_key = self.cognition_fabric._agent_key(prepared.workspace_id, prepared.agent_id)
         private_artifact_root = (
             Path(self.cognition_fabric.data_dir)
@@ -743,13 +896,13 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         )
         return NativePostWriteQualificationConfiguration(
             routing_scope=scope,
-            profile=NativePostWriteQualificationProfile.core_staging_with_i4e_private_tail(),
-            external=external,
+            profile=NativePostWriteQualificationProfile.core_staging_with_i4f_private_tail(),
+            external=private_external,
             derived_runtime_template=template,
             motif_suggestion_maintenance_required=False,
             persistent_trajectory_evidence_required=True,
             checkpoint_snapshots_required=True,
-            bridge_suggestions_required=False,
+            bridge_suggestions_required=True,
             deep_memory_required=False,
             private_trajectory_evidence_binding=NativePrivateTrajectoryEvidenceBinding(
                 str(private_artifact_root), resolve_trajectory_format(),
@@ -852,6 +1005,32 @@ def _legacy_compatibility_profile() -> QualifiedDeploymentProfile:
         admitted_scope_plan_digest=digest,
         external_owner_digest=digest,
     )
+
+
+def _read_workspace_domain_order(data_dir: str, workspace_id: str) -> tuple[str, ...]:
+    """Return the legacy workspace's declared motif-map order without repair.
+
+    ``Workspace.domains`` is the authority that determines the insertion order
+    of legacy ``motif_regs`` and consequently the ordered bridge candidate
+    traversal.  A native private bridge composition must therefore consume
+    this durable source rather than sorting or unioning admitted lanes.
+    """
+    path = Path(data_dir) / "workspaces" / workspace_id / "domains.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise NativePublicOperationRefused("native private bridge domain order is absent") from exc
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise NativePublicOperationRefused("native private bridge domain order is unreadable") from exc
+    values = payload.get("domains") if isinstance(payload, Mapping) else None
+    if (
+        not isinstance(values, list)
+        or not values
+        or any(not isinstance(domain_id, str) or not domain_id for domain_id in values)
+        or len(set(values)) != len(values)
+    ):
+        raise NativePublicOperationRefused("native private bridge domain order is malformed")
+    return tuple(values)
 
 
 def _read_domain_policies(data_dir: str, workspace_id: str, domains: tuple[str, ...]) -> Mapping[str, Mapping[str, Any]]:
