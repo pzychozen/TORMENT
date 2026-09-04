@@ -2,12 +2,15 @@
 
 **Version:** 0.1
 
-**Status:** living I3C / bounded I4B-1, I4B-2, I4C, I4D, I4E, and frozen
-I4F-A preservation artifact. I4E correction state is **FROZEN** after focused delta review;
-I4F-A is D1 scope-corrected and **READY_TO_FREEZE**. Its shared I4F-B
-prerequisite is not claimed. It records current offline evidence and
-does not authorize a real-root contact, service start, provider contact,
-re-embedding, selected-profile activation, or component retirement.
+**Status:** living I3C / bounded I4B-1, I4B-2, I4C, I4D, I4E, I4F-A, and
+I4F-B preservation artifact. I4E correction state is **FROZEN** after focused
+delta review; I4F-A is the frozen D1 scope-corrected historical baseline.
+I4F-B satisfies its prior shared prerequisite for bounded non-true-split
+shared scope: restored precommit external owners, ordinary shared storage, and
+the existing qualified shared E1 composition. Shared I4B-2 true-split parity
+remains structurally fenced and unclaimed. This matrix records current offline
+evidence and does not authorize a real-root contact, service start, provider
+contact, re-embedding, selected-profile activation, or component retirement.
 
 ## Preservation law
 
@@ -33,7 +36,7 @@ ordinary meaning and must not be read as hidden approvals.
 | Function / behavior | Legacy semantic owner | Durable / external owner | Native replacement or adapter | Parity evidence | Composition gate | Retirement allowed? |
 |---|---|---|---|---|---|---|
 | Input write gate / provenance | `TormentFabric.ingest` input gate and provenance boundary | Legacy graph, identity, and provenance records | Native public ingest executor only after selected-policy proof | Main ingest census; direct-writer bypasses remain unresolved | I4 must preserve the gate and provenance authority | NO |
-| Memory create | `TormentFabric.ingest` / legacy storage adapter | Legacy graph, identity, external admission | `NativePrimaryPrecommitService` through the bounded native route | I4B-1 primary fixtures; private I4B-2/I4C/I4D fixtures; I4E and I4F-A public outcome fixtures | Ordinary broad-private create retains the existing external Hivemind call. I4E extends the tail with SRG, private world/trajectory, and checkpoint; I4F-A corrects the broad-private conflict map and retains proposal then bridge after the deferred compression slot. True split adds none of those tails and shared is not claimed | NO |
+| Memory create | `TormentFabric.ingest` / legacy storage adapter | Legacy graph, identity, external admission | `NativePrimaryPrecommitService` through the bounded native route | I4B-1 primary fixtures; private I4B-2/I4C/I4D fixtures; I4E/I4F-A public outcome fixtures; I4F-B shared ordinary-create/replay/failure fixtures | Ordinary broad-private create retains the existing external Hivemind call. I4E extends the tail with SRG, private world/trajectory, and checkpoint; I4F-A corrects the broad-private conflict map and retains proposal then bridge after the deferred compression slot. I4F-B restores the bounded ordinary-shared precommit sequence and qualified E1 composition; true split remains private-only and shared true split is fenced | NO |
 | Embed-audit dirty marking | Legacy ingest and derived-memory creation audit invalidation | Existing workspace embed_audit.json when present | Bounded public-ingest observer; external file owner retained | I4B-1 synthetic temp-path observer proves post-spawn/pre-motif ordering and survival after canonical failure | Best-effort dirty state occurs after spawn and before motif/flush; real-root/service activation remains forbidden | NO |
 | Reinforcement | Fabric / legacy post-write adapter | Legacy graph payload and JSONL | Native reinforcement/runtime primitive | `test_substrate_memory_reinforcement.py`, I4B-1 formula/backfill fixtures, and I4B1F full native-public reinforcement fixture | I4B-1 preserves formulas and the existing reinforcement source owner; RoleStore/affect preparation runs while CREATE-only motif/symbol effects remain absent; SRG and post-commit consumers remain separately gated | NO |
 | Motif attach / create | Legacy motif runtime selected by `TormentFabric.ingest` | Live legacy motif registry | I4B-1 precommit motif mutation plus private I4B-2 two-stage existing-schema split operations | I4B-1 ordinary attach/flush fixtures; private I4B-2 T0/T1/T2, candidate disposition, source/abort recovery and public CREATE fixtures | Private true split is qualified only as attach -> durable parent -> atomic final parent/child topology; no formula/schema/outbox change. Shared I4B-2 topology is not qualified | NO |
@@ -67,18 +70,21 @@ ordinary meaning and must not be read as hidden approvals.
 | World / trajectory | Legacy world and post-write runtime | Process-local world plus external private trajectory artifacts | `NativeWorldRuntime` plus `NativePrivateTrajectoryEvidenceProcessState` and separately bound `NativePrivateTrajectoryEvidenceRuntime` | I4E private replay/failure/V2 sealing and public outcome suites; existing native world/trajectory suites | Private native-public only, all successful post-write outcomes; V2 genesis is created-only, physics remains process-local, evidence stays external and has one writer lifetime per core/private-source process owner. Shared D3 ownership is separate | NO |
 | Checkpoint | Checkpoint subsystem | External private checkpoint files | Separately bound private existing `save_checkpoint` writer with qualified native reads | I4E checkpoint content/absence/failure/public-owner suites; existing D4 checkpoint suites | Private native-public only, after Character on legacy cadence and all successful outcomes. Snapshot is non-authoritative; existing private embeddings manifest is read through `build_shard_snapshot`, otherwise snapshot is `None`; shared D4 is separate | NO |
 | Bridge peek | Fabric `_query_shared_lane` | Existing bridge registry and domain policies | Same query owner over qualified shared reads | Main query census: `bridge_peek_requires_approval`, approved-or-confidence `>= 0.65`, `via_bridge` marking | Query-side retrieval is distinct from bridge suggestion mutation | NO |
-| Bridge suggestions | Bridge policy / post-write behavior | External `BridgeRegistry` JSON/files | I4F-A retained private post-write writer with a private-specific, authoritative-order native geometry | I4F-A public outcome/formula/owner/failure fixtures; existing bridge suites | Ordinary broad-private successful private outcomes only, after general proposal. Geometry preserves the full legacy private-plus-admitted-shared domain set and `domains.json` order; random/geometry/registry failures propagate. I4B-2 true split and shared system parity remain excluded | NO |
+| Bridge suggestions | Bridge policy / post-write behavior | External `BridgeRegistry` JSON/files | I4F-A retained private post-write writer with a private-specific, authoritative-order native geometry; I4F-B preserves the existing qualified shared E1 bridge slot with shared admitted-domain geometry | I4F-A private public outcome/formula/owner/failure fixtures; I4F-B shared E1 composition/geometry fixtures; existing bridge suites | Ordinary broad-private successful private outcomes retain the private geometry. Bounded ordinary shared outcomes retain E1's existing shared bridge owner and geometry. Random/geometry/registry failures propagate. I4B-2 true split and shared two-stage topology remain excluded | NO |
 | Bridge registry inspection / decision | Existing bridge registry routes | External bridge records | No native public route parity | I2/public-service census | Root-native path remains refused until route parity | NO |
 | Hivemind / collective context | Collective presentation owner | External collective field | No native read adapter | I3B0 refusal test | REFUSE_WHEN_APPLICABLE; activation gate OPEN | NO |
 | Archive recall | `/retrieve` composite assembler | External archive store | No native composite adapter | I3B0 refusal test | REFUSE_UNTIL_PARITY_OR_EXPLICIT_INAPPLICABILITY | NO |
 | Archive retrieval-count write | Archive promotion/read accounting | External archive counter | No native adapter | Not reached after archive refusal | BLOCKING composite gate | NO |
-| Shared ingest | Fabric shared ingest / proposal policy | Shared graph and external policy | Native public ingest route | Storage path exists; shared direct `created_motif` now follows route truth (`ATTACH_EXISTING` -> `None`); system parity NOT YET QUALIFIED | Current native-public shared scope is not claimed. I4B-2 excludes shared requests from the private-qualified I4B precommit route and does not qualify shared true-split topology or post-write. Existing shared post-write claims remain separately qualified; I4 post-write and conflict composition remain open | NO |
-| Proposals | General post-write proposal and proposal orchestration | External `ProposalRegistry` records / existing receipts | I4F-A retained private post-write proposal binding with one memoized registry per admissible domain/configuration; native authorized proposal primitives remain separate | I4F-A public proposal-result/replay/failure and collective convergence co-existence fixtures and existing substrate suites | Ordinary broad-private private scope only. Existing gates/formulas/identity-save-after-submit disposition retained; a convergence proposal and general proposal remain independently appendable. Shared system parity remains excluded | NO |
+| Shared ingest | Fabric shared ingest / proposal policy | Shared graph and external policy | Native public ingest route with I4F-B restored external precommit owners and existing qualified shared E1 composition | I4F-B ordinary CREATE, NO_WRITE, canonical-failure, shared-true-split-refusal, replay/restart, and retained-owner fixtures | Bounded ordinary shared scope is qualified: preparation -> restored precommit owners -> ordinary storage -> canonical commit -> existing shared E1 composition. Shared true split is structurally fenced before reservation and returns `shared_true_split_refused`; shared I4B-2 topology and shared conflict parity remain unclaimed | NO |
+| Shared precommit owner sequence | Shared ingest's existing source / audit / motif / symbol-resonance owners | Existing native primary source and external owner files | I4F-B bounded public shared route selects the existing owner sequence | I4F-B owner-order, canonical-failure, replay/restart fixtures | Spawn observer, embed-audit dirty owner, shared motif precommit, symbol state, and resonance are restored for bounded ordinary non-true-split shared CREATE. Role/Affect remain their broader existing preparation qualification | NO |
+| Shared true-split disposition | Private I4B-2 two-stage split owner | Existing native motif and primary evidence | I4F-B explicit route capability fence; no new writer | I4F-B deterministic split, full-table/EID, Stage-A/Stage-B witness, replay, and restart evidence | `precommit owner parity` and `true-split authority` are separate capabilities. Shared true split is refused before reservation as `shared_true_split_refused`; receipt rows are lawful, ordinary Role preparation may precede the fence, and native precommit/EID/topology/post-write residue is absent. Private Stage-A/Stage-B recovery is frozen and preserved | NO |
+| Shared E1 post-write composition | Existing qualified shared E1 consumers | Existing Hivemind, trajectory, checkpoint, motif/mood, bridge, and narrow derived/no-op owners | I4F-B selects the existing shared-integrated E1 profile and authority adapter; it creates no new owner | I4F-B shared E1 order, profile refusal, failure-boundary, trajectory/checkpoint/bridge, and retained-owner fixtures | Existing shared Hivemind, trajectory, checkpoint, motif/mood, bridge, and narrow derived/no-op boundaries are preserved in their qualified E1 order. Shared conflict writer parity is not claimed | NO |
+| Proposals | General post-write proposal and proposal orchestration | External `ProposalRegistry` records / existing receipts | I4F-A retained private post-write proposal binding with one memoized registry per admissible domain/configuration; I4F-B supplies the existing shared E1 authority adapter needed for retained Hivemind convergence and E1's existing proposal gate | I4F-A private public proposal-result/replay/failure and collective convergence co-existence fixtures; I4F-B shared E1 composition fixtures; existing substrate suites | Existing gates/formulas/identity-save-after-submit disposition retained. Private and bounded shared E1 compositions retain their respective external owner/geometry boundaries; shared true split and conflict parity remain excluded | NO |
 | Role / affect / symbol | RoleStore, affect classifier, and Fabric symbol-state writer | External role file / affect history / symbol state | I4B1E/F source-selected native precommit composition | I3B0 read fencing plus I4B1E storage and I4B1F full public create/reinforce/NO_WRITE/failure/restart fixtures | Role and classifier precommit parity is qualified on each reachable branch; affect history is post-write mood drift; symbol/resonance state is CREATE-only precommit | NO |
 | Derived memory | Derived-memory runtime | Native derived children plus retained anchor/affect external state | Native derived runtime primitives | Existing N02 lifecycle tests; I4B-2 anchor prefix; I4D public mood success/miss/failure/replay and derived recovery suites | Identity anchors remain frozen N02. I4D qualifies only private native-public mood after the retained M1/anchor gate; no general SRG successor, shared, or remaining derived composition is claimed | NO |
 | Compression / deep-memory export | Legacy compression post-write runtime | Deep-memory files and compressed source metadata | No qualified native post-write path | Main ingest/post-write and public-service census | Deep export/compression control remains pre-activation gated | NO |
 | Deep memory / spirit return | Legacy `_query_deep_lane` and spirit-return enrichers | Per-agent deep-memory store | NATIVE SUPPORT = NO | Main query/service census: spirit modes `resonance`, `surfacing`, `recollection`; `_is_deep` classification; Character voice recommendations can consume spirit hits | When `TORMENT_COMPRESS_ENABLE` / deep retrieval applies, activation is refused; `DEEP_RETRIEVAL_PROFILE_GATE = OPEN_PRE_ACTIVATION` | NO |
-| Hivemind emission / convergence | Legacy post-write adapter / collective field | External collective packets, events, convergence-pattern records, and retained proposal owner | Retained existing broad-private external call; I4F-A restores its previously inert convergence-proposal side effect through the memoized external proposal owner map | I4E retained-call regression, I4F-A direct re-entry/convergence-proposal/failure-independence evidence, collective suites | Existing broad-private created-only owner remains preserved. Packet re-entry remains append-only; restart loses embedding/cooldown process state. Convergence drafting is fail-soft and distinct from the later general proposal. Query remains refuse-when-applicable; no shared/new-owner parity is claimed | NO |
+| Hivemind emission / convergence | Legacy post-write adapter / collective field | External collective packets, events, convergence-pattern records, and retained proposal owner | Retained existing broad-private external call; I4F-A restores its previously inert convergence-proposal side effect through the memoized external proposal owner map; I4F-B selects the existing shared E1 Hivemind owner through its narrow authority adapter | I4E retained-call regression, I4F-A direct re-entry/convergence-proposal/failure-independence evidence, I4F-B shared E1 composition fixtures, collective suites | Existing broad-private and bounded shared E1 owners remain separately preserved. Packet re-entry remains append-only; restart loses embedding/cooldown process state. Convergence drafting is fail-soft and distinct from the later general proposal. Query remains refuse-when-applicable; no new owner or shared true-split claim | NO |
 | Failure dispositions | Each current semantic owner | Owner-specific files/state | Qualified read refusal and existing fail-soft paths | I3B snapshot/conflict; I3C SRG/Character/malformed vector; I4B-1 attach/flush/fallthrough witnesses | Preserve per-surface behavior; no universal normalization | NO |
 | Provenance / explain | Fabric result assembly | Candidate payload/external provenance | Same Fabric owner over qualified hits | I3A/I3B explain differential | Query math and provenance owner retained | NO |
 | Restart / recovery | Legacy graph reload; native root recovery | Legacy files / qualified root profile | Native recovery and process-local overlays | I1/I1C and I3C SRG restart characterization | SRG query-to-write composition I4; real activation prohibited | NO |
@@ -134,7 +140,11 @@ I4C_BROAD_PRIVATE_CONFLICT_SYSTEM_PARITY = NOT_YET_QUALIFIED
 I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
 I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
 SHARED_I4C_PARITY = NOT_CLAIMED
-SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = YES
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = NO_LONGER_OPEN
+SHARED_TRUE_SPLIT_DISPOSITION = STRUCTURALLY_FENCED
+SHARED_I4B2_TWO_STAGE_PARITY = NOT_CLAIMED
+SHARED_NATIVE_PUBLIC_PARITY = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
 RETIREMENT_ALLOWED = NO
 REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
 COLLECTIVE = REFUSE_WHEN_APPLICABLE
@@ -195,8 +205,9 @@ SYMBOL_STATE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
 RESONANCE_PRECOMMIT_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
 PRECOMMIT_EXTERNAL_OWNER_PARITY = PASS_PRIVATE_NATIVE_PUBLIC_PRECOMMIT_SCOPE
 I4B1_PRECOMMIT_EXTERNAL_OWNER_SCOPE = PRIVATE_QUALIFIED
-SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = YES
-I4C_SHARED_SCOPE_PREREQUISITE = DO_NOT_INFER_SHARED_PRECOMMIT_PARITY_FROM_PRIVATE_I4B1_RECEIPTS
+I4B1_SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = YES (HISTORICAL_PRIVATE_ONLY_BOUNDARY)
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = NO_LONGER_OPEN
+I4C_SHARED_SCOPE_PREREQUISITE = SATISFIED_BY_I4F_B_BOUNDED_NON_TRUE_SPLIT_SCOPE
 EXTERNAL_OWNER_MIGRATION_TO_SQLITE = NO
 ```
 
@@ -206,6 +217,73 @@ affect classification remains pre-decision while affect-state/mood-drift stays
 post-write; and Fabric's symbol-state writer runs after motif persistence but
 before canonical commit on CREATE only. Symbol state may survive a failed
 primary memory; resonance enrichment may not become canonical without it.
+
+The I4B-1 private qualification did not by itself establish shared parity. From
+I4B-1 through I4F-A, shared external-owner restoration was an open
+prerequisite. I4F-B is the bounded non-true-split shared result that satisfies
+that prerequisite; its exact capability, owner, refusal, and post-write limits
+are recorded next.
+
+## I4F-B shared precommit restoration and bounded E1 composition
+
+```text
+P9D_I4F_B_SHARED_COMPOSITION_PARITY = PASS_BOUNDED_SHARED_NON_TRUE_SPLIT_SCOPE
+I4F_B_ADVERSARIAL_REVIEW = PASS_AFTER_REQUIRED_DOCUMENTATION_CORRECTION
+I4F_B_READY_TO_FREEZE = YES
+
+PRECOMMIT_OWNER_PARITY_AUTHORITY != TRUE_SPLIT_AUTHORITY
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION = PASS
+SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION_REQUIRED = NO_LONGER_OPEN
+SHARED_SPAWN_OBSERVER_PARITY = PASS
+SHARED_EMBED_AUDIT_DIRTY_PARITY = PASS
+SHARED_MOTIF_PRECOMMIT_PARITY = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
+SHARED_SYMBOL_STATE_PARITY = PASS
+SHARED_RESONANCE_PARITY = PASS
+ROLE_PRECOMMIT_PARITY = EXISTING_BROADER_PREPARATION_QUALIFICATION
+AFFECT_PRECOMMIT_PARITY = EXISTING_BROADER_PREPARATION_QUALIFICATION
+
+SHARED_TRUE_SPLIT_DISPOSITION = STRUCTURALLY_FENCED
+SHARED_I4B2_TWO_STAGE_PARITY = NOT_CLAIMED
+SHARED_TRUE_SPLIT_EID_CONSUMPTION = NONE
+SHARED_TRUE_SPLIT_PRECOMMIT_STORAGE_RESIDUE = NONE
+SHARED_TRUE_SPLIT_REFUSAL_RESIDUE = PUBLIC_MUTATION_RECEIPT_ONLY
+PUBLIC_MUTATION_RECEIPT = PRESENT_LAWFUL
+PREPARATION_ROLE_STATE = MAY_PRECEDE_FENCE_LAWFUL
+SHARED_STAGE_A_RECOVERY = STRUCTURALLY_REFUSED
+SHARED_STAGE_B_RECOVERY = STRUCTURALLY_REFUSED
+PRIVATE_STAGE_A_STAGE_B_RECOVERY = FROZEN_PRESERVED
+PRIVATE_I4B2_TRUE_SPLIT_PARITY = FROZEN_PRESERVED
+
+SHARED_EXISTING_POSTWRITE_DISPATCH = PRESERVED
+SHARED_POSTWRITE_PARITY = PASS_BOUNDED_EXISTING_QUALIFIED_COMPOSITION
+SHARED_NATIVE_PUBLIC_PARITY = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
+SHARED_REINFORCEMENT_EXCLUSION_DEPENDS_ON_SHARED_AGENT_ID_REPRESENTATION = YES_CURRENTLY
+I4G_SHARED_REINFORCEMENT_SCOPE_GUARD_REVIEW_REQUIRED = YES
+
+I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = OPEN
+I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = YES
+NEW_SQLITE_EXTERNAL_OWNER_SHADOWS = 0
+FORMULA_CHANGES = 0
+TORMENT_MATHEMATICS_PRESERVED = YES
+RETIREMENT_ALLOWED = NO
+REAL_PRODUCTION_ACTIVATION = NOT_AUTHORIZED
+```
+
+The bounded shared route is `preparation -> restored precommit owners ->
+ordinary shared storage -> canonical commit -> existing qualified E1 shared
+post-write composition`. Its retained E1 consumers are Hivemind, trajectory,
+checkpoint, motif/mood, bridge, and narrow derived/no-op boundaries in their
+existing shared order. The shared contradiction slot remains a scope-gated
+no-op: I4F-B does not qualify a shared conflict writer.
+
+The true-split fence is a deliberate capability limit, not an ordinary shared
+parity failure. A refused shared split writes only the lawful public mutation
+receipt; ordinary Role preparation may already have persisted before the
+fence. It consumes no EID alias, and it creates no native precommit storage,
+Stage-A attach, Stage-B topology, canonical memory, or shared post-write
+residue. A pre-existing Stage-A or Stage-B witness is refused as a shared
+result without deletion or rewrite; the frozen private recovery behavior is
+unchanged.
 
 ## Functionality-preservation denominator
 

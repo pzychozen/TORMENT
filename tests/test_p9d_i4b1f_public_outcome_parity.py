@@ -25,7 +25,12 @@ from torment_service.public_mutation_identity import (
     derive_native_operation_key,
     normalize_public_mutation_key,
 )
-from torment_service.public_runtime import _ReadOnlyConflictRegistry, close_public_runtime
+from torment_service.public_runtime import (
+    _ReadOnlyConflictRegistry,
+    close_public_runtime,
+    create_public_runtime,
+    PublicRuntimeConfiguration,
+)
 from torment_service.roles import RoleStore
 from torment_service.substrate.connection import open_existing_native_core_connection
 from torment_service.substrate.errors import SubstrateConfigurationError
@@ -39,6 +44,7 @@ from torment_service.substrate.native_post_write_runtime import (
     NativeFabricPostWriteAdapter,
     NativePostWriteQualificationProfile,
 )
+from torment_service.substrate.native_primary_precommit import NativePrimaryPrecommitService
 from torment_service.substrate.native_public_ingest_executor import NativePublicIngestRequest
 
 from tests.test_p9d_i3b0_native_materialization_fencing import _native_runtime
@@ -139,11 +145,20 @@ def _post_write_attempts(runtime, monkeypatch) -> list[object]:
     return observed
 
 
-def _seed_public_true_split_parent(runtime, *, seed_request: NativePublicIngestRequest) -> None:
+def _seed_public_true_split_parent(
+    runtime,
+    *,
+    seed_request: NativePublicIngestRequest,
+    shared: bool = False,
+) -> None:
     """Build a synthetic bimodal parent through existing native test seams."""
     seed = runtime._executor.execute(seed_request)  # noqa: SLF001 - public boundary fixture setup
     assert seed["stored"] is True
-    scope = runtime._active_runtime().lookup_private("aria").fabric_routing_scope  # noqa: SLF001
+    active = runtime._active_runtime()  # noqa: SLF001 - public fixture routing evidence
+    scope = (
+        active.lookup_shared(seed_request.domain_id).fabric_routing_scope
+        if shared else active.lookup_private("aria").fabric_routing_scope
+    )
     core_path = runtime.native_owner.authority_facts.core_database_path
     with open_existing_native_core_connection(core_path) as opened:
         connection = opened.connection
@@ -1158,5 +1173,325 @@ def test_i4b1f_precommit_attach_failure_is_publicly_raised_without_post_write(tm
         assert _operation_count(runtime, _canonical_source_key(request)) == 0
         assert post_write == []
         assert not _symbol_path(root).exists()
+    finally:
+        close_public_runtime(root)
+
+
+def _native_topology_counts(runtime) -> tuple[int, ...]:
+    """Count only topology-bearing rows; public receipts are deliberately excluded."""
+    core_path = runtime.native_owner.authority_facts.core_database_path
+    with open_existing_native_core_connection(core_path) as opened:
+        return tuple(
+            int(opened.connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            for table in (
+                "objects",
+                "object_revisions",
+                "relationships",
+                "relationship_revisions",
+                "representations",
+                "representation_payloads",
+            )
+        )
+
+
+def _restart_configuration(runtime) -> PublicRuntimeConfiguration:
+    """Reuse the exact host-qualified facts for an offline owner restart test."""
+    owner = runtime.native_owner
+    assert owner is not None
+    return PublicRuntimeConfiguration(
+        effective_profile=owner._effective_profile,  # noqa: SLF001 - frozen host fact
+        admission_descriptor_path=owner._admission_descriptor_path,  # noqa: SLF001 - frozen host fact
+    )
+
+
+def test_i4fb_shared_public_create_restores_precommit_owners_and_enters_e1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Ordinary shared CREATE owns I4B-1 effects, then the existing E1 composition."""
+    import torment_service.public_runtime as public_runtime
+    import torment_service.substrate.fabric_native_routing as routing_module
+    import torment_service.substrate.native_public_ingest_executor as ingest_module
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    reopened = None
+    try:
+        runtime.cognition_fabric._checkpoint_enable = True
+        runtime.cognition_fabric._checkpoint_interval = 1
+        runtime.cognition_fabric._checkpoint_max_keep = 2
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+        events: list[str] = []
+        configurations = _post_write_attempts(runtime, monkeypatch)
+        original_reserve = NativePrimaryPrecommitService.reserve
+        original_motif = routing_module._commit_precommit_motif
+        original_dirty = ingest_module._mark_embed_audit_dirty
+        original_symbol = runtime.cognition_fabric._persist_symbol_precommit_state
+        original_canonical = NativePrimaryPrecommitService.commit
+        original_e1 = NativeFabricPostWriteAdapter.run_shared_integrated_default
+
+        def reserve(self, request):
+            events.append("reservation")
+            return original_reserve(self, request)
+
+        def motif(*args, **kwargs):
+            events.append("motif")
+            return original_motif(*args, **kwargs)
+
+        def dirty(*args, **kwargs):
+            events.append("embed_audit")
+            return original_dirty(*args, **kwargs)
+
+        def symbol(*args, **kwargs):
+            events.append("symbol_resonance")
+            return original_symbol(*args, **kwargs)
+
+        def canonical(self, **kwargs):
+            events.append("canonical")
+            return original_canonical(self, **kwargs)
+
+        def e1(self, *args, **kwargs):
+            events.append("e1")
+            return original_e1(self, *args, **kwargs)
+
+        monkeypatch.setattr(NativePrimaryPrecommitService, "reserve", reserve)
+        monkeypatch.setattr(routing_module, "_commit_precommit_motif", motif)
+        monkeypatch.setattr(ingest_module, "_mark_embed_audit_dirty", dirty)
+        monkeypatch.setattr(runtime.cognition_fabric, "_persist_symbol_precommit_state", symbol)
+        monkeypatch.setattr(NativePrimaryPrecommitService, "commit", canonical)
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "run_shared_integrated_default", e1)
+
+        request = _request(
+            "i4fb-shared-create", "shared owner composition", [1.0, 0.0, 0.0],
+            step=1, scope="shared", domain_id="archive",
+        )
+        role_before = _role_samples(root)
+        result = runtime._executor.execute(request)  # noqa: SLF001 - public-executor boundary
+        replay = runtime._executor.execute(request)  # noqa: SLF001 - completed public receipt
+
+        assert result["stored"] is True and result["reinforced"] is False
+        assert replay == result
+        assert _role_samples(root) == role_before + 1
+        assert events == [
+            "reservation", "embed_audit", "motif", "symbol_resonance", "canonical", "e1",
+        ]
+        assert len(configurations) == 1
+        configuration = configurations[0]
+        assert configuration.profile == NativePostWriteQualificationProfile.core_staging_with_shared_integrated_default()
+        assert configuration.shared_integrated_default_required is True
+        assert configuration.shared_mood_drift_binding is not None
+        assert configuration.shared_trajectory_evidence_binding is not None
+        assert configuration.shared_checkpoint_snapshot_binding is not None
+        assert configuration.external.shared_bridge_geometry is not None
+        assert configuration.external.shared_bridge_geometry.domain_ids() == ("archive", "research")
+        assert (root / "workspaces" / "orchard" / "domains" / "archive" / "shared").is_dir()
+
+        # Recovery replays the completed public result rather than re-running
+        # any external owner.  It also proves the ordinary shared source is
+        # readable after process-local native owners are recreated.
+        restart_configuration = _restart_configuration(runtime)
+        close_public_runtime(root)
+        reopened = create_public_runtime(root, restart_configuration)
+        assert reopened._executor.execute(request) == result  # noqa: SLF001 - public receipt replay
+        assert events == [
+            "reservation", "embed_audit", "motif", "symbol_resonance", "canonical", "e1",
+        ]
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4fb_shared_true_split_is_refused_before_precommit_or_post_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A shared true split has no native topology residue and no E1 tail."""
+    import torment_service.public_runtime as public_runtime
+    import torment_service.substrate.fabric_native_routing as routing_module
+    import torment_service.substrate.native_public_ingest_executor as ingest_module
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    reopened = None
+    try:
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+        _seed_public_true_split_parent(
+            runtime,
+            seed_request=_request(
+                "i4fb-shared-split-seed", "shared split parent", [1.0, 0.0, 0.0],
+                step=1, scope="shared", domain_id="archive",
+            ),
+            shared=True,
+        )
+        before = _native_topology_counts(runtime)
+        post_write = _post_write_attempts(runtime, monkeypatch)
+        attempted: list[str] = []
+        monkeypatch.setattr(
+            NativePrimaryPrecommitService,
+            "reserve",
+            lambda *_args, **_kwargs: attempted.append("reservation"),
+        )
+        monkeypatch.setattr(
+            routing_module,
+            "_commit_precommit_motif",
+            lambda *_args, **_kwargs: attempted.append("motif"),
+        )
+        monkeypatch.setattr(
+            ingest_module,
+            "_mark_embed_audit_dirty",
+            lambda *_args, **_kwargs: attempted.append("embed_audit"),
+        )
+        monkeypatch.setattr(
+            runtime.cognition_fabric,
+            "_persist_symbol_precommit_state",
+            lambda *_args, **_kwargs: attempted.append("symbol_resonance"),
+        )
+
+        request = _request(
+            "i4fb-shared-true-split", "shared split is not qualified", [0.7, 0.714, 0.0],
+            step=200, scope="shared", domain_id="archive",
+        )
+        refused = runtime._executor.execute(request)  # noqa: SLF001 - public-executor boundary
+        replay = runtime._executor.execute(request)  # noqa: SLF001 - completed refusal receipt
+
+        assert refused == {
+            "stored": False,
+            "reinforced": False,
+            "failure_code": "shared_true_split_refused",
+            "eid": None,
+            "domain_chosen": "archive",
+        }
+        assert replay == refused
+        assert attempted == []
+        assert post_write == []
+        assert _native_topology_counts(runtime) == before
+
+        restart_configuration = _restart_configuration(runtime)
+        close_public_runtime(root)
+        reopened = create_public_runtime(root, restart_configuration)
+        assert reopened._executor.execute(request) == refused  # noqa: SLF001 - restart replay
+        assert _native_topology_counts(reopened) == before
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4fb_shared_no_write_skips_precommit_but_reaches_e1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Ordinary shared NO_WRITE preserves its all-outcome post-write disposition."""
+    import torment_service.public_runtime as public_runtime
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+        events: list[str] = []
+        original_e1 = NativeFabricPostWriteAdapter.run_shared_integrated_default
+        monkeypatch.setattr(
+            NativePrimaryPrecommitService,
+            "reserve",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("NO_WRITE reserved a source")),
+        )
+
+        def e1(self, context, **kwargs):
+            events.append(context.storage_outcome.value)
+            return original_e1(self, context, **kwargs)
+
+        monkeypatch.setattr(NativeFabricPostWriteAdapter, "run_shared_integrated_default", e1)
+        result = runtime._executor.execute(_request(
+            "i4fb-shared-no-write", "", [1.0, 0.0, 0.0],
+            step=3, scope="shared", domain_id="archive",
+        ))  # noqa: SLF001 - public-executor boundary
+
+        assert result["stored"] is False and result["reinforced"] is False
+        assert "failure_code" not in result
+        assert events == ["NO_WRITE"]
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4fb_shared_canonical_failure_keeps_precommit_residue_but_no_e1_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Shared canonical failure preserves the retained precommit disposition."""
+    import torment_service.public_runtime as public_runtime
+    import torment_service.substrate.fabric_native_routing as routing_module
+    import torment_service.substrate.native_public_ingest_executor as ingest_module
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+        events: list[str] = []
+        post_write = _post_write_attempts(runtime, monkeypatch)
+        original_reserve = NativePrimaryPrecommitService.reserve
+        original_motif = routing_module._commit_precommit_motif
+        original_dirty = ingest_module._mark_embed_audit_dirty
+        original_symbol = runtime.cognition_fabric._persist_symbol_precommit_state
+
+        def reserve(self, request):
+            events.append("reservation")
+            return original_reserve(self, request)
+
+        def motif(*args, **kwargs):
+            events.append("motif")
+            return original_motif(*args, **kwargs)
+
+        def dirty(*args, **kwargs):
+            events.append("embed_audit")
+            return original_dirty(*args, **kwargs)
+
+        def symbol(*args, **kwargs):
+            events.append("symbol_resonance")
+            return original_symbol(*args, **kwargs)
+
+        monkeypatch.setattr(NativePrimaryPrecommitService, "reserve", reserve)
+        monkeypatch.setattr(routing_module, "_commit_precommit_motif", motif)
+        monkeypatch.setattr(ingest_module, "_mark_embed_audit_dirty", dirty)
+        monkeypatch.setattr(runtime.cognition_fabric, "_persist_symbol_precommit_state", symbol)
+
+        request = _request(
+            "i4fb-shared-canonical-failure", "shared canonical failure", [0.0, 1.0, 0.0],
+            step=1, scope="shared", domain_id="archive",
+        )
+        failed = runtime._executor.execute(
+            request, _test_storage_stop_after="precommit_canonical_failure",
+        )  # noqa: SLF001 - public-executor boundary
+
+        assert failed == {
+            "stored": False,
+            "reinforced": False,
+            "failure_code": "canonical_commit_failed",
+            "eid": None,
+            "domain_chosen": "archive",
+        }
+        assert events == ["reservation", "embed_audit", "motif", "symbol_resonance"]
+        assert post_write == []
+        assert _symbol_path(root).is_file()
+        assert runtime._executor.execute(request) == failed  # noqa: SLF001 - completed failure receipt
+        assert events == ["reservation", "embed_audit", "motif", "symbol_resonance"]
+    finally:
+        close_public_runtime(root)
+
+
+def test_i4fb_repeated_shared_input_is_not_recast_as_private_reinforcement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Shared has no legacy duplicate/reinforcement path to qualify or change."""
+    import torment_service.public_runtime as public_runtime
+
+    root, runtime = _native_runtime(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(public_runtime, "random_chance", lambda _probability: False)
+        first = runtime._executor.execute(_request(
+            "i4fb-shared-repeat-first", "same shared source", [1.0, 0.0, 0.0],
+            step=1, scope="shared", domain_id="archive",
+        ))  # noqa: SLF001 - public-executor boundary
+        repeated = runtime._executor.execute(_request(
+            "i4fb-shared-repeat-second", "same shared source", [1.0, 0.0, 0.0],
+            step=2, scope="shared", domain_id="archive",
+        ))  # noqa: SLF001 - distinct shared operation, not a replay
+
+        assert first["stored"] is True and first["reinforced"] is False
+        assert repeated["stored"] is True and repeated["reinforced"] is False
+        assert first["eid"] != repeated["eid"]
     finally:
         close_public_runtime(root)

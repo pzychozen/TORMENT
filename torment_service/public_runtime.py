@@ -52,6 +52,8 @@ from .substrate.native_post_write_runtime import (
     NativePrivateTrajectoryEvidenceBinding,
     NativePostWriteQualificationConfiguration,
     NativePostWriteQualificationProfile,
+    NativeSharedCheckpointSnapshotBinding,
+    NativeSharedTrajectoryEvidenceBinding,
     NativeSharedTriggerMoodDriftBinding,
 )
 from .substrate.native_trajectory_evidence_runtime import resolve_trajectory_format
@@ -362,6 +364,17 @@ class NativePrivatePostWriteExternalWorkspace:
     workspace_id: str
     domain_policies: Mapping[str, Mapping[str, Any]]
     conflicts: Mapping[str, ConflictRegistry]
+    proposals: Any
+    bridges: Any
+
+
+@dataclass(frozen=True)
+class NativeSharedPostWriteExternalWorkspace:
+    """The retained shared post-write owners, without legacy graph authority."""
+
+    data_dir: str
+    workspace_id: str
+    domain_policies: Mapping[str, Mapping[str, Any]]
     proposals: Any
     bridges: Any
 
@@ -820,18 +833,55 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             side_store=self._side_store,
         )
         if prepared.scope == "shared":
+            agent_key = self.cognition_fabric._agent_key(prepared.workspace_id, prepared.agent_id)
+            shared_artifact_root = (
+                Path(self.cognition_fabric.data_dir)
+                / "workspaces" / prepared.workspace_id / "domains" / prepared.domain_id / "shared"
+            )
+            shared_external = replace(
+                external,
+                workspace=NativeSharedPostWriteExternalWorkspace(
+                    data_dir=self.cognition_fabric.data_dir,
+                    workspace_id=prepared.workspace_id,
+                    domain_policies=view.domain_policies,
+                    proposals=_NativePrivateProposalRegistryMap(
+                        data_dir=self.cognition_fabric.data_dir,
+                        workspace_id=prepared.workspace_id,
+                        domain_ids=view.domains,
+                    ),
+                    bridges=_NativePrivateBridgeWriter(
+                        data_dir=self.cognition_fabric.data_dir,
+                        workspace_id=prepared.workspace_id,
+                    ),
+                ),
+                shared_bridge_geometry=NativeMotifGeometryAdapter(
+                    runtime,
+                    domain_ids=view.domains,
+                    expected_dimension=int(runtime.representation_lane.dimension),
+                ),
+                random_chance=random_chance,
+            )
             return NativePostWriteQualificationConfiguration(
                 routing_scope=scope,
-                profile=NativePostWriteQualificationProfile.core_staging_with_shared_m1_mood_drift(),
-                external=external,
+                profile=NativePostWriteQualificationProfile.core_staging_with_shared_integrated_default(),
+                external=shared_external,
                 derived_runtime_template=None,
                 motif_suggestion_maintenance_required=False,
                 persistent_trajectory_evidence_required=False,
                 checkpoint_snapshots_required=False,
                 bridge_suggestions_required=False,
                 deep_memory_required=False,
-                shared_motif_suggestion_maintenance_required=True,
                 shared_mood_drift_binding=NativeSharedTriggerMoodDriftBinding(private, template),
+                shared_trajectory_evidence_binding=NativeSharedTrajectoryEvidenceBinding(
+                    str(shared_artifact_root), resolve_trajectory_format(),
+                ),
+                shared_checkpoint_snapshot_binding=NativeSharedCheckpointSnapshotBinding(
+                    self.cognition_fabric.agent_states.get(agent_key),
+                    self.cognition_fabric.get_kernel_runtime_context(
+                        prepared.workspace_id, prepared.agent_id,
+                    ),
+                ),
+                shared_integrated_default_required=True,
             )
         try:
             private_domain = _private_motif_domains(runtime)[prepared.agent_id]

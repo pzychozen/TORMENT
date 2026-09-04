@@ -168,6 +168,7 @@ def _request(
         "governance": MemoryGovernanceFlags(),
         "flexible_payload": {"qualification_marker": "i4b1"},
         "precommit_parity_required": True,
+        "precommit_true_split_authorized": True,
     }
     values.update(changes)
     return NativeFabricRouteRequest(**values)

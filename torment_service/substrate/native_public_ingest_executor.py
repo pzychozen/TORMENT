@@ -137,10 +137,11 @@ class NativeFabricIngestStorageAdapter:
                 self._fabric.data_dir, prepared.workspace_id,
             ),
             precommit_symbol_state_owner=lambda effect: self._apply_symbol_precommit_owner(effect),
-            # I4B-2's two-stage true-split proof is a private native-public
-            # route only. Shared public ingest retains its established route
-            # and post-write dispatch without this opt-in.
-            precommit_parity_required=prepared.scope == "private",
+            # Shared ordinary CREATE restores the same external precommit-owner
+            # sequence.  I4B-2's two-stage true split remains a separate,
+            # private-qualified capability and is explicitly fenced for shared.
+            precommit_parity_required=True,
+            precommit_true_split_authorized=prepared.scope == "private",
             contradiction_guard=lambda incoming, existing, similarity: bool(
                 _detect_canon_conflict(incoming, existing, similarity)[0]
             ),
@@ -148,6 +149,20 @@ class NativeFabricIngestStorageAdapter:
         with self._owner.open_write_context() as context:
             attempt = context.route(request, _test_stop_after=_test_stop_after)
         if not attempt.qualification.eligible or attempt.result is None:
+            if (
+                prepared.scope == "shared"
+                and attempt.qualification.reason_code == "PRECOMMIT_TRUE_SPLIT_NOT_AUTHORIZED"
+            ):
+                return FabricIngestStorageOutcome(
+                    workspace_id=prepared.workspace_id, agent_id=prepared.agent_id,
+                    scope=prepared.scope, domain_id=prepared.domain_id,
+                    disposition=FabricIngestStorageDisposition.NO_WRITE,
+                    stored=False, eid=None, motif_ids=(), created_motif=None,
+                    state_symbol=None, storage_witness=None,
+                    primary_outcome_witness=attempt.primary_outcome,
+                    post_write_eligible=False,
+                    failure_code="shared_true_split_refused",
+                )
             raise NativePublicIngestExecutionError(
                 f"native public storage is not qualified: {attempt.qualification.reason_code}"
             )
@@ -303,9 +318,11 @@ class NativePublicIngestExecutor:
             # This matches Fabric's canonical flush exception branch: it
             # leaves precommit residue but returns before the post-write
             # adapter, and it must not manufacture a route witness.
-            if outcome.failure_code != "canonical_commit_failed":
+            if outcome.failure_code not in {
+                "canonical_commit_failed", "shared_true_split_refused",
+            }:
                 raise NativePublicIngestExecutionError(
-                    "native public storage withheld post-write without a canonical failure"
+                    "native public storage withheld post-write without a qualified failure disposition"
                 )
             return {
                 "stored": False,

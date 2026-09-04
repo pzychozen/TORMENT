@@ -572,12 +572,14 @@ def test_shared_source_replay_does_not_duplicate_its_native_source(tmp_path: Pat
         text="I feel very angry and furious",
     )
     try:
-        observed_precommit_opt_ins: list[bool] = []
+        observed_precommit_owner_parity: list[bool] = []
+        observed_true_split_authority: list[bool] = []
         original_route = NativeProductionWriteContext.route
 
         def observe_route(self, route_request, **kwargs):
             if route_request.scope == "shared":
-                observed_precommit_opt_ins.append(route_request.precommit_parity_required)
+                observed_precommit_owner_parity.append(route_request.precommit_parity_required)
+                observed_true_split_authority.append(route_request.precommit_true_split_authorized)
             return original_route(self, route_request, **kwargs)
 
         monkeypatch.setattr(NativeProductionWriteContext, "route", observe_route)
@@ -585,7 +587,8 @@ def test_shared_source_replay_does_not_duplicate_its_native_source(tmp_path: Pat
         replay = executor.execute(request)
         assert first == replay
         assert first["stored"] is True and first["domain_chosen"] == "research"
-        assert observed_precommit_opt_ins == [False]
+        assert observed_precommit_owner_parity == [True]
+        assert observed_true_split_authority == [False]
         assert _native_operation_count(owner, "NATIVE_FABRIC_NEW_MEMORY:SOURCE:") == 1
         assert _native_operation_count(owner, "I4B2:") == 0
     finally:

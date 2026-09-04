@@ -417,6 +417,10 @@ class NativeFabricRouteRequest:
         default=None, repr=False, compare=False
     )
     precommit_parity_required: bool = False
+    # The I4B-1 owner sequence and I4B-2's two-stage split topology are
+    # distinct capabilities.  Public callers must state the latter explicitly;
+    # shared owner parity does not silently grant private split authority.
+    precommit_true_split_authorized: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -457,6 +461,10 @@ class NativeFabricRouteRequest:
             raise ValueError("precommit_symbol_state_owner must be callable when supplied")
         if type(self.precommit_parity_required) is not bool:
             raise ValueError("precommit_parity_required must be a boolean")
+        if type(self.precommit_true_split_authorized) is not bool:
+            raise ValueError("precommit_true_split_authorized must be a boolean")
+        if self.precommit_true_split_authorized and not self.precommit_parity_required:
+            raise ValueError("precommit true-split authority requires precommit owner parity")
 
 
 @dataclass(frozen=True)
@@ -500,6 +508,10 @@ class NativePrecommitAttachFailure(RuntimeError):
     def __init__(self, witness: NativePrimaryOutcomeWitness) -> None:
         super().__init__("native precommit motif attach/create failed")
         self.witness = witness
+
+
+class NativePrecommitTrueSplitRefused(RuntimeError):
+    """A qualified precommit route lacks authority for its planned split."""
 
 
 @dataclass(frozen=True)
@@ -679,6 +691,13 @@ class NativeFabricMemoryRouter:
                     NativeFabricRouteQualification(False, qualification.route_scope, "PROCESS_ORDER_INVALID"),
                     primary_outcome=_refused_primary_outcome(request),
                 )
+            except NativePrecommitTrueSplitRefused:
+                return NativeFabricRouteAttempt(
+                    NativeFabricRouteQualification(
+                        False, qualification.route_scope, "PRECOMMIT_TRUE_SPLIT_NOT_AUTHORIZED",
+                    ),
+                    primary_outcome=_refused_primary_outcome(request),
+                )
             except ValueError:
                 # Structural translation and A3C2 planning both reject before
                 # a source semantic transaction starts.  This remains an
@@ -776,6 +795,15 @@ class NativeFabricMemoryRouter:
             )
             if request.precommit_parity_required else None
         )
+        if not request.precommit_true_split_authorized and (
+            recovered_split is not None or recovered_split_attach is not None
+        ):
+            # No currently qualified shared route can create these witnesses.
+            # If one is nevertheless present, never reinterpret private I4B-2
+            # topology as an ordinary shared precommit recovery.
+            raise NativePrecommitTrueSplitRefused(
+                "pre-existing precommit true-split topology is not authorized for this route"
+            )
         recovered_primary = (
             precommit.recover_canonical(composition_request)
             if request.precommit_parity_required else None
@@ -846,18 +874,13 @@ class NativeFabricMemoryRouter:
             if request.precommit_parity_required else None
         )
         if recovered_abort is not None:
-            recovered_attach = motif_service.recover_precommit_split_attach(
-                idempotency_namespace_id=routing_scope.idempotency_namespace_id,
-                idempotency_key=_precommit_split_attach_key(composition_request),
-                request_identity=split_request_identity,
-            ) if request.precommit_parity_required else None
             return _return_recovered_abort(
                 connection=connection,
                 request=request,
                 routing_scope=routing_scope,
                 aborted=recovered_abort,
                 split_result=recovered_split,
-                split_attach=recovered_attach,
+                split_attach=recovered_split_attach,
                 composition_request=composition_request,
             )
 
@@ -1073,6 +1096,18 @@ class NativeFabricMemoryRouter:
         with self._capability.process_order.locked_catalog(
             reader=reader, routing_scope=routing_scope, domain_id=request.domain_id,
         ) as ordered_catalog:
+            # A non-authorized route may still restore every ordinary precommit
+            # owner.  Preview is pure and is therefore the earliest truthful
+            # place to reject the one topology it has not qualified.
+            preview = None
+            if not request.precommit_true_split_authorized and recovered_split_attach is None:
+                preview = composition.prepare_plan_from_ordered_catalog(
+                    composition_request, ordered_catalog,
+                )
+                if preview.split_plan is not None:
+                    raise NativePrecommitTrueSplitRefused(
+                        "precommit motif plan requires unqualified true-split topology"
+                    )
             reservation = precommit.reserve(composition_request)
             _observe_precommit_spawn(request, reservation.eid)
             precommit_true_split = recovered_split_attach is not None
@@ -1131,9 +1166,10 @@ class NativeFabricMemoryRouter:
                 enrichment_patch = dict(recovered_split_attach.precommit_context["enrichment_patch"])
                 primary_tension = float(recovered_split_attach.precommit_context["primary_tension"])
             else:
-                preview = composition.prepare_plan_from_ordered_catalog(
-                    composition_request, ordered_catalog
-                )
+                if preview is None:
+                    preview = composition.prepare_plan_from_ordered_catalog(
+                        composition_request, ordered_catalog
+                    )
                 if preview.split_plan is None:
                     try:
                         _commit_precommit_motif(
