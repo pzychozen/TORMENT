@@ -2,15 +2,18 @@
 
 **Version:** 0.1
 
-**Status:** living I3C / bounded I4B-1, I4B-2, I4C, I4D, I4E, I4F-A, and
-I4F-B preservation artifact. I4E correction state is **FROZEN** after focused
-delta review; I4F-A is the frozen D1 scope-corrected historical baseline.
-I4F-B satisfies its prior shared prerequisite for bounded non-true-split
-shared scope: restored precommit external owners, ordinary shared storage, and
-the existing qualified shared E1 composition. Shared I4B-2 true-split parity
-remains structurally fenced and unclaimed. This matrix records current offline
-evidence and does not authorize a real-root contact, service start, provider
-contact, re-embedding, selected-profile activation, or component retirement.
+**Status:** living I3C / bounded I4B-1, I4B-2, I4C, I4D, I4E, I4F-A, I4F-B,
+and I4G preservation artifact. I4E correction state is **FROZEN** after
+focused delta review; I4F-A is the frozen D1 scope-corrected historical
+baseline. I4F-B satisfies its prior shared prerequisite for bounded
+non-true-split shared scope: restored precommit external owners, ordinary
+shared storage, and the existing qualified shared E1 composition. I4G closes
+the bounded native-public lifecycle census: all 55 declared Fabric fallthrough
+members are now explicitly qualified or refused in native mode, while shared
+I4B-2 true-split parity remains structurally fenced and unclaimed. This matrix
+records current offline evidence and does not authorize a real-root contact,
+service start, provider contact, re-embedding, selected-profile activation, or
+component retirement.
 
 ## Preservation law
 
@@ -73,7 +76,7 @@ ordinary meaning and must not be read as hidden approvals.
 | Bridge suggestions | Bridge policy / post-write behavior | External `BridgeRegistry` JSON/files | I4F-A retained private post-write writer with a private-specific, authoritative-order native geometry; I4F-B preserves the existing qualified shared E1 bridge slot with shared admitted-domain geometry | I4F-A private public outcome/formula/owner/failure fixtures; I4F-B shared E1 composition/geometry fixtures; existing bridge suites | Ordinary broad-private successful private outcomes retain the private geometry. Bounded ordinary shared outcomes retain E1's existing shared bridge owner and geometry. Random/geometry/registry failures propagate. I4B-2 true split and shared two-stage topology remain excluded | NO |
 | Bridge registry inspection / decision | Existing bridge registry routes | External bridge records | No native public route parity | I2/public-service census | Root-native path remains refused until route parity | NO |
 | Hivemind / collective context | Collective presentation owner | External collective field | No native read adapter | I3B0 refusal test | REFUSE_WHEN_APPLICABLE; activation gate OPEN | NO |
-| Archive recall | `/retrieve` composite assembler | External archive store | No native composite adapter | I3B0 refusal test | REFUSE_UNTIL_PARITY_OR_EXPLICIT_INAPPLICABILITY | NO |
+| Archive recall / retrieval assembly | `/retrieve` composite assembler | External archive store plus pure response assembly | I4G retains only qualified core query plus pure assembly in the native public route; archive recall and scoped reference foregrounding are refused at the route before effect | I4G native REST lifecycle fixture; I3B0 archive refusal evidence | Native `/retrieve` is available only with archive recall disabled and no `scope_tag`. Archive recall or a scoped reference load returns an explicit 409; no archive/reference owner is reclassified or moved | NO |
 | Archive retrieval-count write | Archive promotion/read accounting | External archive counter | No native adapter | Not reached after archive refusal | BLOCKING composite gate | NO |
 | Shared ingest | Fabric shared ingest / proposal policy | Shared graph and external policy | Native public ingest route with I4F-B restored external precommit owners and existing qualified shared E1 composition | I4F-B ordinary CREATE, NO_WRITE, canonical-failure, shared-true-split-refusal, replay/restart, and retained-owner fixtures | Bounded ordinary shared scope is qualified: preparation -> restored precommit owners -> ordinary storage -> canonical commit -> existing shared E1 composition. Shared true split is structurally fenced before reservation and returns `shared_true_split_refused`; shared I4B-2 topology and shared conflict parity remain unclaimed | NO |
 | Shared precommit owner sequence | Shared ingest's existing source / audit / motif / symbol-resonance owners | Existing native primary source and external owner files | I4F-B bounded public shared route selects the existing owner sequence | I4F-B owner-order, canonical-failure, replay/restart fixtures | Spawn observer, embed-audit dirty owner, shared motif precommit, symbol state, and resonance are restored for bounded ordinary non-true-split shared CREATE. Role/Affect remain their broader existing preparation qualification | NO |
@@ -144,7 +147,7 @@ I4C_R1_IMPLEMENTATION = NOT_AUTHORIZED
 I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_APPLICABLE_TO_LEGACY_QUERY_TRACE_LAW
 I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = NO
 I4C_R1 = CLOSED_WITHOUT_IMPLEMENTATION
-I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = OPEN
+I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = ANSWERED_NO_FOR_BOUNDED_SELECTED_PROFILE
 I4G_READY_TO_OPEN_AFTER_CLOSURE_COMMIT = YES
 SHARED_I4C_PARITY = NOT_CLAIMED
 SHARED_PRECOMMIT_EXTERNAL_OWNER_RESTORATION = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
@@ -264,15 +267,16 @@ PRIVATE_I4B2_TRUE_SPLIT_PARITY = FROZEN_PRESERVED
 SHARED_EXISTING_POSTWRITE_DISPATCH = PRESERVED
 SHARED_POSTWRITE_PARITY = PASS_BOUNDED_EXISTING_QUALIFIED_COMPOSITION
 SHARED_NATIVE_PUBLIC_PARITY = PASS_BOUNDED_NON_TRUE_SPLIT_SCOPE
-SHARED_REINFORCEMENT_EXCLUSION_DEPENDS_ON_SHARED_AGENT_ID_REPRESENTATION = YES_CURRENTLY
-I4G_SHARED_REINFORCEMENT_SCOPE_GUARD_REVIEW_REQUIRED = YES
+SHARED_REINFORCEMENT_GUARD = ROBUST_EXPLICIT_EXISTING_GUARD
+SHARED_REINFORCEMENT_REPRESENTATION_DEPENDENCY = NO
+I4G_SHARED_REINFORCEMENT_SCOPE_GUARD_REVIEW_REQUIRED = RETIRED_BY_EXPLICIT_EXISTING_GUARD
 
 I4C_R1_ARCHAEOLOGY = CLOSED_BY_STOP_CONDITION
 I4C_R1_IMPLEMENTATION = NOT_AUTHORIZED
 I4C_R1_BROAD_PRIVATE_CONFLICT_READ_ROUNDTRIP = NOT_APPLICABLE_TO_LEGACY_QUERY_TRACE_LAW
 I4C_R1_REQUIRED_BEFORE_I4G_FINAL_FREEZE = NO
 I4C_R1 = CLOSED_WITHOUT_IMPLEMENTATION
-I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = OPEN
+I4G_NATIVE_TRACE_QUALIFICATION_QUESTION = ANSWERED_NO_FOR_BOUNDED_SELECTED_PROFILE
 I4G_READY_TO_OPEN_AFTER_CLOSURE_COMMIT = YES
 NEW_SQLITE_EXTERNAL_OWNER_SHADOWS = 0
 FORMULA_CHANGES = 0

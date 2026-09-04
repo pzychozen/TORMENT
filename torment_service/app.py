@@ -1746,6 +1746,15 @@ def retrieve_assembled(req: AssembleContextReq) -> Dict[str, Any]:
             status_code=409,
             detail="native archive recall is not yet qualified",
         )
+    # A scoped reference foreground would call the legacy reference-load
+    # owner below.  The native route qualifies only core query plus pure
+    # assembly, so reject that optional composition before any query or
+    # legacy-reference effect.
+    if runtime.native_mode and req.scope_tag:
+        raise HTTPException(
+            status_code=409,
+            detail="native reference-load composition is not yet qualified",
+        )
 
     # 1. Core retrieval (existing fabric.query)
     core_result = fabric.query(

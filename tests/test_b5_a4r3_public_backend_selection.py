@@ -347,6 +347,22 @@ def test_rest_native_transport_uses_one_configured_runtime(tmp_path: Path, monke
                 "workspace_id": "orchard", "agent_id": "aria", "query": "rest native memory",
             })
             assert retrieve.status_code == 200
+            native_runtime = app_module.fabric.runtime()
+            scoped_query_calls = 0
+
+            def _refuse_scoped_query(*_args, **_kwargs):
+                nonlocal scoped_query_calls
+                scoped_query_calls += 1
+                raise AssertionError("scoped native retrieve reached core query")
+
+            monkeypatch.setattr(native_runtime, "query", _refuse_scoped_query)
+            scoped_retrieve = client.post("/retrieve", json={
+                "workspace_id": "orchard", "agent_id": "aria", "query": "rest native memory",
+                "scope_tag": "legacy-reference-scope",
+            })
+            assert scoped_retrieve.status_code == 409
+            assert scoped_retrieve.json()["detail"] == "native reference-load composition is not yet qualified"
+            assert scoped_query_calls == 0
             refused = client.post("/agent/feedback", json={
                 "workspace_id": "orchard", "agent_id": "aria",
             })
