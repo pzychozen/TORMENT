@@ -753,6 +753,50 @@ class OfflineCutoverController:
             raise OfflineCutoverRefused("OFFLINE_CUTOVER_ABORT_DID_NOT_RESTORE_LEGACY")
         return result
 
+    def safe_root_pending_abort(self, request: RootOfflineCutoverRequest) -> SelectorState:
+        """Abort an unactivated root P5 core through the existing authorities only."""
+
+        envelope = self._root_envelope(request)
+        state = self._selector_state(request)
+        if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
+            self._require_root_pre_active_legacy(request)
+            return state
+        self._require_root_pending(request, envelope, state)
+        inspection = self._inspection(request)
+        if inspection.deployment_state is DeploymentState.LEGACY_ACTIVE:
+            if inspection.witness is None or inspection.latest_maintenance_id is None or inspection.ever_active:
+                raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ABORT_EVIDENCE_MISMATCH")
+            aborted = CoreMaintenanceResult(
+                transition_kind="ABORT_CUTOVER_PENDING",
+                maintenance_id=inspection.latest_maintenance_id,
+                witness=inspection.witness,
+                selector_generation=state.generation,
+                selector_witness_digest=state.core_witness_digest or "",
+                safe_abort_proven=True,
+            )
+        elif inspection.deployment_state is DeploymentState.CUTOVER_PENDING and inspection.witness is not None:
+            aborted = abort_cutover_pending(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                expected_witness=inspection.witness,
+                selector_generation=state.generation,
+                selector_witness_digest=state.core_witness_digest or "",
+                operation_key=self._key(request, "root-core-abort"),
+            )
+        else:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ABORT_PENDING_WITNESS_MISSING")
+        result = abort_selector_pending(
+            data_root=request.root,
+            core_relative_path=request.core_relative_path,
+            core_result=aborted,
+            expected_generation=state.generation,
+            operation_key=self._key(request, "root-external-abort"),
+        )
+        if result.deployment_state is not DeploymentState.LEGACY_ACTIVE:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ABORT_DID_NOT_RESTORE_LEGACY")
+        self._require_root_pre_active_legacy(request)
+        return result
+
     def current_stage(self, request: OfflineCutoverRequest) -> OfflineCutoverStage:
         """Derive the recoverable stage from authority records; never guess it."""
 
@@ -790,7 +834,7 @@ class OfflineCutoverController:
         except OfflineCutoverRefused:
             return OfflineCutoverStage.PREPARED
         if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
-            self._root_inert_core(request)
+            self._require_root_pre_active_legacy(request)
             return OfflineCutoverStage.PREPARED
         if state.deployment_state is DeploymentState.NATIVE_ACTIVE:
             if (
@@ -873,6 +917,21 @@ class OfflineCutoverController:
             or inspection.ever_active
         ):
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_PREPARED_CORE_NOT_INERT")
+        return inspection
+
+    def _require_root_pre_active_legacy(
+        self, request: RootOfflineCutoverRequest,
+    ) -> CoreDeploymentInspection:
+        """Validate either an inert or safely aborted root without erasing evidence."""
+
+        inspection = self._inspection(request)
+        if (
+            inspection.core_id != request.native_staging_core_id
+            or inspection.core_role != "STAGING"
+            or inspection.deployment_state is not DeploymentState.LEGACY_ACTIVE
+            or inspection.ever_active
+        ):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ABORT_STATE_MISMATCH")
         return inspection
 
     def _require_root_pending(

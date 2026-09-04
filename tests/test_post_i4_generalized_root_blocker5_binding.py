@@ -515,3 +515,24 @@ def test_p4_and_immediately_pre_p6_refuse_missing_or_mismatched_envelope_record(
     monkeypatch.setattr(controller_module, "read_root_admission_envelope_record", lambda **_kwargs: object())
     with pytest.raises(OfflineCutoverRefused, match="COMPLETION_REFUSED"):
         controller.activate_root_core(request, normalization)
+
+
+def test_root_pre_active_abort_restores_legacy_without_disposition_or_native_residue(
+    tmp_path: Path,
+) -> None:
+    request, normalization = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    controller.prepare_root(request)
+    controller.enter_root_external_pending(request)
+    controller.verify_root_completion(request, normalization)
+    controller.enter_root_core_pending(request, normalization)
+
+    aborted = controller.safe_root_pending_abort(request)
+
+    assert aborted.deployment_state.value == "LEGACY_ACTIVE"
+    inspection = controller._inspection(request)
+    assert inspection.deployment_state.value == "LEGACY_ACTIVE"
+    assert inspection.core_role == "STAGING"
+    assert inspection.ever_active is False
+    assert controller.root_current_stage(request) is OfflineCutoverStage.PREPARED
+    assert controller.safe_root_pending_abort(request).deployment_state.value == "LEGACY_ACTIVE"

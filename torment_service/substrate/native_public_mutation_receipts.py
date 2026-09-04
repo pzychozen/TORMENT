@@ -300,7 +300,7 @@ class NativePublicMutationReceiptStore:
         # The admitted private-agent scope exists independently of a later
         # shared-domain route.  Its idempotency namespace is recovery-key
         # ownership only; it never makes shared memory private.
-        runtime = self._owner._recover_active_runtime()
+        runtime = self._owner._recover_active_runtime(workspace_id=workspace_id)
         try:
             scope = runtime.lookup_private(agent_id).fabric_routing_scope
         except Exception as exc:

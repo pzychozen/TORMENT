@@ -103,7 +103,7 @@ class NativeFabricIngestStorageAdapter:
                 # unlike a failed canonical flush.
                 post_write_eligible=True,
             )
-        runtime = self._owner._recover_active_runtime()
+        runtime = self._owner._recover_active_runtime(workspace_id=prepared.workspace_id)
         lane = runtime.representation_lane
         request = NativeFabricRouteRequest(
             workspace_id=prepared.workspace_id,
