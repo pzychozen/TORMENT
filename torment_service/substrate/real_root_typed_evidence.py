@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import stat
 import struct
 from typing import Final
 
@@ -23,6 +24,9 @@ from .corrective_freeze_packet import (
     CorrectiveFreezeTypedEvidence,
     DeclaredEmptySharedSourceEvidence,
     EmptyPrivateSourceEvidence,
+    ExcludedAlternateRootExpectation,
+    ExcludedAlternateRootObservation,
+    ExcludedAlternateRootRole,
     ExcludedSourceArtifactExpectation,
     ExcludedSourceArtifactObservation,
     MetadataLessPerEidEvidence,
@@ -94,6 +98,19 @@ class ExcludedSourceArtifactLocator:
 
 
 @dataclass(frozen=True)
+class ExcludedAlternateRootLocator:
+    """A selected alternate top-level root excluded without reading contents."""
+
+    canonical_locator: str
+    exclusion_role: ExcludedAlternateRootRole = ExcludedAlternateRootRole.ALTERNATE_SELECTED_ROOT
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "canonical_locator", _top_level_locator(self.canonical_locator))
+        if not isinstance(self.exclusion_role, ExcludedAlternateRootRole):
+            raise CorrectiveFreezePacketRefused("alternate root exclusion role must be typed")
+
+
+@dataclass(frozen=True)
 class RealRootTypedEvidenceAdapter:
     """Strict read-only adapter for a source tree frozen by a future caller.
 
@@ -108,6 +125,7 @@ class RealRootTypedEvidenceAdapter:
     profile_name: str = "held-freeze-typed-evidence"
     target_representation_lane: NativeRepresentationLane = _TARGET_LANE
     excluded_source_artifacts: tuple[ExcludedSourceArtifactLocator, ...] = ()
+    excluded_alternate_roots: tuple[ExcludedAlternateRootLocator, ...] = ()
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -125,6 +143,16 @@ class RealRootTypedEvidenceAdapter:
             raise CorrectiveFreezePacketRefused("excluded source artifacts must be typed")
         if len({item.canonical_locator for item in self.excluded_source_artifacts}) != len(self.excluded_source_artifacts):
             raise CorrectiveFreezePacketRefused("excluded source artifact locators must be unique")
+        if not isinstance(self.excluded_alternate_roots, tuple) or any(
+            not isinstance(item, ExcludedAlternateRootLocator) for item in self.excluded_alternate_roots
+        ):
+            raise CorrectiveFreezePacketRefused("excluded alternate roots must be typed")
+        if len({item.canonical_locator for item in self.excluded_alternate_roots}) != len(self.excluded_alternate_roots):
+            raise CorrectiveFreezePacketRefused("duplicate excluded alternate root locator")
+        if {item.canonical_locator for item in self.excluded_source_artifacts} & {
+            item.canonical_locator for item in self.excluded_alternate_roots
+        }:
+            raise CorrectiveFreezePacketRefused("file artifacts and alternate roots cannot share a locator")
 
     def excluded_artifact_expectations(self, *, data_root: Path) -> tuple[ExcludedSourceArtifactExpectation, ...]:
         """Hash configured top-level excluded artifacts without changing them."""
@@ -143,6 +171,26 @@ class RealRootTypedEvidenceAdapter:
             _hash_file(root / item.canonical_locator),
         ) for item in self.excluded_source_artifacts)
 
+    def excluded_alternate_root_expectations(
+        self, *, data_root: Path,
+    ) -> tuple[ExcludedAlternateRootExpectation, ...]:
+        """Declare configured alternate roots after presence-only validation."""
+
+        root = _source_root(data_root)
+        self._validate_excluded_alternate_roots(root)
+        return tuple(ExcludedAlternateRootExpectation(item.canonical_locator, item.exclusion_role)
+                     for item in self.excluded_alternate_roots)
+
+    def capture_excluded_alternate_roots(
+        self, *, data_root: Path,
+    ) -> tuple[ExcludedAlternateRootObservation, ...]:
+        """Capture directory presence only; no alternate-root child is read."""
+
+        root = _source_root(data_root)
+        self._validate_excluded_alternate_roots(root)
+        return tuple(ExcludedAlternateRootObservation(item.canonical_locator, item.exclusion_role)
+                     for item in self.excluded_alternate_roots)
+
     def capture_typed_evidence(
         self, *, data_root: Path, discovered_census: RootDiscoveredCensus,
     ) -> CorrectiveFreezeTypedEvidence:
@@ -154,6 +202,7 @@ class RealRootTypedEvidenceAdapter:
         direct_census = discover_canonical_root_layout(data_root=root)
         if direct_census != discovered_census:
             raise CorrectiveFreezePacketRefused("typed evidence discovered census does not match fixed layout")
+        self._validate_excluded_alternate_roots(root)
         self._validate_root_children(root)
         workspaces_root = _real_directory(root / "workspaces", "workspaces root")
 
@@ -203,7 +252,10 @@ class RealRootTypedEvidenceAdapter:
         )
 
     def _validate_root_children(self, root: Path) -> None:
-        allowed = {"workspaces", *(item.canonical_locator for item in self.excluded_source_artifacts)}
+        allowed = {
+            "workspaces", *(item.canonical_locator for item in self.excluded_source_artifacts),
+            *(item.canonical_locator for item in self.excluded_alternate_roots),
+        }
         observed = {item.name for item in root.iterdir()}
         if observed - allowed:
             raise CorrectiveFreezePacketRefused("unclassified durable root artifact is not allowed")
@@ -212,6 +264,10 @@ class RealRootTypedEvidenceAdapter:
         for item in root.iterdir():
             if item.is_symlink():
                 raise CorrectiveFreezePacketRefused("typed evidence source paths must not be symlinks")
+
+    def _validate_excluded_alternate_roots(self, root: Path) -> None:
+        for item in self.excluded_alternate_roots:
+            _alternate_root_directory(root / item.canonical_locator)
 
     def _capture_workspace(self, root: Path, path: Path, workspace_id: str) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
@@ -727,6 +783,17 @@ def _real_directory(path: Path, label: str) -> Path:
     return path
 
 
+def _alternate_root_directory(path: Path) -> Path:
+    try:
+        information = path.lstat()
+    except OSError as exc:
+        raise CorrectiveFreezePacketRefused("excluded alternate root is missing or cannot be inspected") from exc
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if stat.S_ISLNK(information.st_mode) or getattr(information, "st_file_attributes", 0) & reparse_flag or not path.is_dir():
+        raise CorrectiveFreezePacketRefused("excluded alternate root must be a real top-level directory")
+    return path
+
+
 def _regular_file(path: Path) -> Path:
     if path.is_symlink() or not path.is_file():
         raise CorrectiveFreezePacketRefused("typed evidence source must be a non-symlink regular file")
@@ -816,6 +883,7 @@ def _top_level_locator(value: object) -> str:
 
 
 __all__ = [
+    "ExcludedAlternateRootLocator",
     "ExcludedSourceArtifactLocator",
     "RealRootTypedEvidenceAdapter",
 ]

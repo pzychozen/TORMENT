@@ -18,6 +18,7 @@ from enum import StrEnum
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import stat
 from typing import Callable, Protocol
 
 from .canonical_intent import canonical_intent_text
@@ -77,7 +78,7 @@ from .writer_freeze_evidence import (
 
 
 CORRECTIVE_FREEZE_PACKET_CONTRACT = "TORMENT_HELD_FREEZE_CORRECTIVE_PACKET"
-CORRECTIVE_FREEZE_PACKET_VERSION = 2
+CORRECTIVE_FREEZE_PACKET_VERSION = 3
 _MINIMUM_FREEZE_INTERVAL_SECONDS = 60
 
 
@@ -93,6 +94,12 @@ class SourceArtifactPresence(StrEnum):
 class SourceArtifactKind(StrEnum):
     FILE = "FILE"
     DIRECTORY = "DIRECTORY"
+
+
+class ExcludedAlternateRootRole(StrEnum):
+    """Frozen purpose for a selected root excluded from this packet's source."""
+
+    ALTERNATE_SELECTED_ROOT = "ALTERNATE_SELECTED_ROOT"
 
 
 @dataclass(frozen=True)
@@ -169,6 +176,57 @@ class ExcludedSourceArtifactObservation:
             "source_role": self.source_role,
             "byte_length": self.byte_length,
             "sha256": self.sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ExcludedAlternateRootExpectation:
+    """A declared top-level directory outside the selected source root."""
+
+    canonical_locator: str
+    exclusion_role: ExcludedAlternateRootRole
+
+    def __post_init__(self) -> None:
+        _top_level_locator(self.canonical_locator)
+        if not isinstance(self.exclusion_role, ExcludedAlternateRootRole):
+            raise CorrectiveFreezePacketRefused("alternate root exclusion role must be typed")
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "canonical_locator": self.canonical_locator,
+            "exclusion_role": self.exclusion_role.value,
+            "artifact_kind": SourceArtifactKind.DIRECTORY.value,
+        }
+
+
+@dataclass(frozen=True)
+class ExcludedAlternateRootObservation:
+    """Presence-only evidence for an excluded alternate selected root.
+
+    It intentionally records no tree digest, child count, child path, or
+    content-derived identity.
+    """
+
+    canonical_locator: str
+    exclusion_role: ExcludedAlternateRootRole
+    artifact_kind: SourceArtifactKind = SourceArtifactKind.DIRECTORY
+    presence: SourceArtifactPresence = SourceArtifactPresence.PRESENT
+
+    def __post_init__(self) -> None:
+        _top_level_locator(self.canonical_locator)
+        if not isinstance(self.exclusion_role, ExcludedAlternateRootRole):
+            raise CorrectiveFreezePacketRefused("alternate root exclusion role must be typed")
+        if self.artifact_kind is not SourceArtifactKind.DIRECTORY:
+            raise CorrectiveFreezePacketRefused("alternate root must retain DIRECTORY kind")
+        if self.presence is not SourceArtifactPresence.PRESENT:
+            raise CorrectiveFreezePacketRefused("alternate root must retain PRESENT presence")
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "canonical_locator": self.canonical_locator,
+            "exclusion_role": self.exclusion_role.value,
+            "artifact_kind": self.artifact_kind.value,
+            "presence": self.presence.value,
         }
 
 
@@ -624,6 +682,7 @@ class CorrectiveFreezePacket:
     typed_evidence: CorrectiveFreezeTypedEvidence
     predecessor_lineage: dict[str, object]
     excluded_source_artifacts: tuple[ExcludedSourceArtifactObservation, ...]
+    excluded_alternate_roots: tuple[ExcludedAlternateRootObservation, ...]
 
 
 def capture_corrective_freeze_packet(
@@ -637,6 +696,7 @@ def capture_corrective_freeze_packet(
     excluded_artifacts: tuple[ExcludedSourceArtifactExpectation, ...],
     expected_root_admission_description_contract: str,
     invalidation_rule_version: str,
+    excluded_alternate_roots: tuple[ExcludedAlternateRootExpectation, ...] = (),
     minimum_delta_seconds: int = _MINIMUM_FREEZE_INTERVAL_SECONDS,
 ) -> CorrectiveFreezePacket:
     """Capture one successor witness and a closed typed packet.
@@ -662,19 +722,32 @@ def capture_corrective_freeze_packet(
         raise CorrectiveFreezePacketRefused("excluded artifacts must be a typed tuple")
     if len({item.canonical_locator for item in excluded_artifacts}) != len(excluded_artifacts):
         raise CorrectiveFreezePacketRefused("excluded artifact locators must be unique")
+    if not isinstance(excluded_alternate_roots, tuple) or any(
+        not isinstance(item, ExcludedAlternateRootExpectation) for item in excluded_alternate_roots
+    ):
+        raise CorrectiveFreezePacketRefused("excluded alternate roots must be typed")
+    if len({item.canonical_locator for item in excluded_alternate_roots}) != len(excluded_alternate_roots):
+        raise CorrectiveFreezePacketRefused("duplicate excluded alternate root locator")
+    if {item.canonical_locator for item in excluded_artifacts} & {
+        item.canonical_locator for item in excluded_alternate_roots
+    }:
+        raise CorrectiveFreezePacketRefused("file artifacts and alternate roots cannot share a locator")
     if not isinstance(minimum_delta_seconds, int) or minimum_delta_seconds < _MINIMUM_FREEZE_INTERVAL_SECONDS:
         raise CorrectiveFreezePacketRefused("corrective capture requires a minimum 60-second stability interval")
 
     captured_evidence: CorrectiveFreezeTypedEvidence | None = None
     before_excluded: tuple[ExcludedSourceArtifactObservation, ...] | None = None
     after_excluded: tuple[ExcludedSourceArtifactObservation, ...] | None = None
+    before_alternate_roots: tuple[ExcludedAlternateRootObservation, ...] | None = None
+    after_alternate_roots: tuple[ExcludedAlternateRootObservation, ...] | None = None
 
     def _pre_capture(snapshot: WorkspaceTreeSnapshot) -> None:
         lineage.predecessor_tree.require_matches(snapshot)
 
     def _during_capture(_stability: RootTreeStabilityObservation) -> None:
-        nonlocal captured_evidence, before_excluded
+        nonlocal captured_evidence, before_excluded, before_alternate_roots
         before_excluded = _observe_excluded_artifacts(root, excluded_artifacts)
+        before_alternate_roots = _observe_excluded_alternate_roots(root, excluded_alternate_roots)
         direct_census = discover_canonical_root_layout(data_root=root)
         evidence = source_adapter.capture_typed_evidence(data_root=root, discovered_census=direct_census)
         if not isinstance(evidence, CorrectiveFreezeTypedEvidence):
@@ -688,12 +761,15 @@ def capture_corrective_freeze_packet(
         captured_evidence = evidence
 
     def _post_capture(payload: RootWriterFreezeEvidencePayload) -> None:
-        nonlocal after_excluded
+        nonlocal after_excluded, after_alternate_roots
         if payload.external_owner_observation_digest != _external_owner_digest(captured_evidence):
             raise CorrectiveFreezePacketRefused("writer payload external owner digest disagrees with typed evidence")
         after_excluded = _observe_excluded_artifacts(root, excluded_artifacts)
         if before_excluded != after_excluded:
             raise CorrectiveFreezePacketRefused("SUCCESSOR_FREEZE_EXCLUDED_ARTIFACT_DRIFT")
+        after_alternate_roots = _observe_excluded_alternate_roots(root, excluded_alternate_roots)
+        if before_alternate_roots != after_alternate_roots:
+            raise CorrectiveFreezePacketRefused("SUCCESSOR_FREEZE_ALTERNATE_ROOT_DRIFT")
 
     try:
         captured = capture_root_writer_freeze_evidence(
@@ -717,7 +793,10 @@ def capture_corrective_freeze_packet(
         )
     except RootWriterFreezeEvidenceRefused as exc:
         raise CorrectiveFreezePacketRefused(str(exc)) from exc
-    if captured_evidence is None or before_excluded is None or after_excluded is None:
+    if (
+        captured_evidence is None or before_excluded is None or after_excluded is None
+        or before_alternate_roots is None or after_alternate_roots is None
+    ):
         raise CorrectiveFreezePacketRefused("corrective capture did not complete its typed evidence callbacks")
     # The writer payload is constructed after the adapter.  Its owner digest
     # cannot be supplied earlier, so bind its exact typed value and then prove
@@ -745,6 +824,7 @@ def capture_corrective_freeze_packet(
         typed=captured_evidence,
         lineage_payload=lineage_payload,
         excluded=after_excluded,
+        alternate_roots=after_alternate_roots,
     )
     return load_corrective_freeze_packet(destination)
 
@@ -830,6 +910,9 @@ def load_corrective_freeze_packet(packet_directory: str | Path) -> CorrectiveFre
     excluded = _decode_excluded_artifacts(
         _read_artifact(directory, "excluded_source_artifacts.json", "EXCLUDED_SOURCE_ARTIFACTS"),
     )
+    alternate_roots = _decode_excluded_alternate_roots(
+        _read_artifact(directory, "excluded_alternate_roots.json", "EXCLUDED_ALTERNATE_ROOTS"),
+    )
     lineage = _decode_lineage(_read_artifact(directory, "predecessor_lineage.json", "PREDECESSOR_LINEAGE"))
     typed = CorrectiveFreezeTypedEvidence(
         description=description,
@@ -856,6 +939,7 @@ def load_corrective_freeze_packet(packet_directory: str | Path) -> CorrectiveFre
         typed_evidence=typed,
         predecessor_lineage=lineage,
         excluded_source_artifacts=excluded,
+        excluded_alternate_roots=alternate_roots,
     )
 
 
@@ -866,6 +950,7 @@ def _write_packet(
     typed: CorrectiveFreezeTypedEvidence,
     lineage_payload: dict[str, object],
     excluded: tuple[ExcludedSourceArtifactObservation, ...],
+    alternate_roots: tuple[ExcludedAlternateRootObservation, ...],
 ) -> None:
     destination.mkdir(parents=False, exist_ok=False)
     artifacts: dict[str, dict[str, object]] = {
@@ -913,6 +998,9 @@ def _write_packet(
         }),
         "excluded_source_artifacts.json": _artifact("EXCLUDED_SOURCE_ARTIFACTS", {
             "entries": [item.payload() for item in excluded],
+        }),
+        "excluded_alternate_roots.json": _artifact("EXCLUDED_ALTERNATE_ROOTS", {
+            "entries": [item.payload() for item in alternate_roots],
         }),
         "predecessor_lineage.json": _artifact("PREDECESSOR_LINEAGE", {"lineage": lineage_payload}),
     }
@@ -1030,6 +1118,14 @@ def _decode_geometry_plan(value: dict[str, object]) -> RootGeometryDispositionPl
 
 def _decode_excluded_artifacts(value: dict[str, object]) -> tuple[ExcludedSourceArtifactObservation, ...]:
     return tuple(_excluded_observation_from_payload(item) for item in _entries(value, "EXCLUDED_SOURCE_ARTIFACTS"))
+
+
+def _decode_excluded_alternate_roots(value: dict[str, object]) -> tuple[ExcludedAlternateRootObservation, ...]:
+    entries = _entries(value, "EXCLUDED_ALTERNATE_ROOTS")
+    decoded = tuple(_excluded_alternate_root_from_payload(item) for item in entries)
+    if len({item.canonical_locator for item in decoded}) != len(decoded):
+        raise CorrectiveFreezePacketRefused("excluded alternate roots contain duplicate locators")
+    return tuple(sorted(decoded, key=lambda item: item.canonical_locator))
 
 
 def _decode_lineage(value: dict[str, object]) -> dict[str, object]:
@@ -1155,6 +1251,29 @@ def _observe_excluded_artifacts(
     return tuple(observations)
 
 
+def _observe_excluded_alternate_roots(
+    root: Path, expectations: tuple[ExcludedAlternateRootExpectation, ...],
+) -> tuple[ExcludedAlternateRootObservation, ...]:
+    observations: list[ExcludedAlternateRootObservation] = []
+    for expected in sorted(expectations, key=lambda item: item.canonical_locator):
+        path = root / expected.canonical_locator
+        if _is_link_or_reparse(path) or not path.is_dir():
+            raise CorrectiveFreezePacketRefused("excluded alternate root is missing or not a real directory")
+        observations.append(ExcludedAlternateRootObservation(
+            expected.canonical_locator, expected.exclusion_role,
+        ))
+    return tuple(observations)
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        information = path.lstat()
+    except OSError as exc:
+        raise CorrectiveFreezePacketRefused("excluded alternate root cannot be inspected") from exc
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return stat.S_ISLNK(information.st_mode) or bool(getattr(information, "st_file_attributes", 0) & reparse_flag)
+
+
 def _external_owner_digest(value: CorrectiveFreezeTypedEvidence | None) -> str:
     if value is None:
         raise CorrectiveFreezePacketRefused("typed evidence is unavailable")
@@ -1194,6 +1313,7 @@ def _packet_artifact_names() -> set[str]:
         "source_scope_plans.json", "unknown_identity_evidence.json", "empty_private_evidence.json",
         "declared_empty_shared_evidence.json", "external_owner_observations.json",
         "geometry_disposition_plan.json", "excluded_source_artifacts.json", "predecessor_lineage.json",
+        "excluded_alternate_roots.json",
     }
 
 
@@ -1337,6 +1457,21 @@ def _excluded_observation_from_payload(value: object) -> ExcludedSourceArtifactO
     return ExcludedSourceArtifactObservation(**value)
 
 
+def _excluded_alternate_root_from_payload(value: object) -> ExcludedAlternateRootObservation:
+    required = {"canonical_locator", "exclusion_role", "artifact_kind", "presence"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise CorrectiveFreezePacketRefused("excluded alternate root payload is invalid")
+    try:
+        return ExcludedAlternateRootObservation(
+            canonical_locator=value["canonical_locator"],
+            exclusion_role=ExcludedAlternateRootRole(value["exclusion_role"]),
+            artifact_kind=SourceArtifactKind(value["artifact_kind"]),
+            presence=SourceArtifactPresence(value["presence"]),
+        )
+    except (TypeError, ValueError, DeploymentAuthorityError) as exc:
+        raise CorrectiveFreezePacketRefused("excluded alternate root cannot decode") from exc
+
+
 def _workspace_plan_from_payload(value: object) -> WorkspaceRootAdmissionPlan:
     required = {
         "workspace_id", "private_materialized_scopes", "shared_materialized_scopes", "identity_only_agents",
@@ -1452,6 +1587,9 @@ __all__ = [
     "CorrectiveSourceEvidenceAdapter",
     "DeclaredEmptySharedSourceEvidence",
     "EmptyPrivateSourceEvidence",
+    "ExcludedAlternateRootExpectation",
+    "ExcludedAlternateRootObservation",
+    "ExcludedAlternateRootRole",
     "ExcludedSourceArtifactExpectation",
     "ExcludedSourceArtifactObservation",
     "FrozenWorkspaceTreeTriple",

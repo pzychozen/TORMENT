@@ -459,10 +459,11 @@ def test_packet_file_changed_or_manifest_hash_mismatch_refuses(tmp_path: Path, f
         load_corrective_freeze_packet(packet)
 
 
-def test_packet_file_missing_refuses(tmp_path: Path) -> None:
+@pytest.mark.parametrize("filename", ("unknown_identity_evidence.json", "excluded_alternate_roots.json"))
+def test_packet_file_missing_refuses(tmp_path: Path, filename: str) -> None:
     fixture = _fixture(tmp_path)
     packet = _capture(fixture, tmp_path / "packet").directory
-    (packet / "unknown_identity_evidence.json").unlink()
+    (packet / filename).unlink()
     with pytest.raises(CorrectiveFreezePacketRefused):
         load_corrective_freeze_packet(packet)
 

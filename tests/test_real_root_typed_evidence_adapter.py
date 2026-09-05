@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -11,6 +12,7 @@ import pytest
 from torment_service.substrate.corrective_freeze_packet import (
     CorrectiveCaptureObservations,
     CorrectiveFreezePacketRefused,
+    ExcludedAlternateRootRole,
     FrozenWorkspaceTreeTriple,
     PredecessorFreezeLineage,
     SourceArtifactPresence,
@@ -22,6 +24,7 @@ from torment_service.substrate.migration.root_admission_description import (
     RootRepresentationDisposition,
 )
 from torment_service.substrate.real_root_typed_evidence import (
+    ExcludedAlternateRootLocator,
     ExcludedSourceArtifactLocator,
     RealRootTypedEvidenceAdapter,
 )
@@ -124,12 +127,15 @@ def _fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
     _json(motif / "motifs.json", {"motif": "synthetic"})
     _write(root / "unscoped_nodes.jsonl", "residual")
     _write(root / "unscoped_embeddings.bin", b"residual-vectors")
+    _write(root / "lived_use" / "arbitrary_nested_basin" / "embedding_manifest.json", "not source JSON")
+    _write(root / "lived_use" / "arbitrary_nested_basin" / "malformed.npy", b"not a NumPy file")
     return root, RealRootTypedEvidenceAdapter(
         data_root_identity="synthetic-real-root", operator_identity="synthetic-operator",
         excluded_source_artifacts=(
             ExcludedSourceArtifactLocator("unscoped_nodes.jsonl", "TOP_LEVEL_UNSCOPED_NODES"),
             ExcludedSourceArtifactLocator("unscoped_embeddings.bin", "TOP_LEVEL_UNSCOPED_EMBEDDINGS"),
         ),
+        excluded_alternate_roots=(ExcludedAlternateRootLocator("lived_use"),),
     )
 
 
@@ -236,6 +242,17 @@ def test_excluded_artifact_expectations_and_observations_are_typed(tmp_path: Pat
     assert all(item.sha256 == expected.predecessor_sha256 for item, expected in zip(observed, expectations))
 
 
+def test_alternate_root_is_presence_only_and_never_enters_source_evidence(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    typed = _capture(root, adapter)
+    alternate = adapter.capture_excluded_alternate_roots(data_root=root)
+
+    assert alternate[0].canonical_locator == "lived_use"
+    assert alternate[0].exclusion_role is ExcludedAlternateRootRole.ALTERNATE_SELECTED_ROOT
+    assert all("lived_use" not in entry.canonical_locator for entry in typed.description.explicit_source_manifest.entries)
+    assert all("lived_use" not in plan.scope_key.canonical_key for plan in typed.source_scope_plans)
+
+
 def test_adapter_leaves_disposable_source_tree_exactly_unchanged(tmp_path: Path) -> None:
     root, adapter = _fixture(tmp_path)
     before = _source_snapshot(root)
@@ -275,16 +292,19 @@ def test_packet_round_trip_uses_actual_adapter_then_reloads_without_source(tmp_p
         data_root=root, packet_directory=tmp_path / "packet", data_root_identity="synthetic-real-root",
         lineage=lineage, observations=observations, source_adapter=adapter,
         excluded_artifacts=adapter.excluded_artifact_expectations(data_root=root),
+        excluded_alternate_roots=adapter.excluded_alternate_root_expectations(data_root=root),
         expected_root_admission_description_contract="ROOT_ADMISSION_DESCRIPTION_V1",
         invalidation_rule_version="ROOT_WRITER_FREEZE_INVALIDATION_V1",
     )
 
     assert _source_snapshot(root) == before
     assert packet.typed_evidence.description.expected_census.total_runtime_scope_count == 9
+    assert packet.excluded_alternate_roots == adapter.capture_excluded_alternate_roots(data_root=root)
     shutil.rmtree(root)
     reloaded = load_corrective_freeze_packet(packet.directory)
     assert reloaded.packet_digest == packet.packet_digest
     assert reloaded.typed_evidence.description.identity_digest == packet.typed_evidence.description.identity_digest
+    assert reloaded.excluded_alternate_roots == packet.excluded_alternate_roots
     assert not root.exists()
 
 
@@ -295,3 +315,50 @@ def test_empty_shared_motif_is_captured_as_a_distinct_source_posture(tmp_path: P
 
     assert motif.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
     assert motif.motif_presence is SourceArtifactPresence.PRESENT
+
+
+def test_undeclared_alternate_root_and_unexpected_fourth_root_refuse(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    no_alternate = RealRootTypedEvidenceAdapter(
+        data_root_identity=adapter.data_root_identity, operator_identity=adapter.operator_identity,
+        excluded_source_artifacts=adapter.excluded_source_artifacts,
+    )
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        _capture(root, no_alternate)
+
+    _write(root / "fourth_top_level.txt", "unexpected")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        _capture(root, adapter)
+
+
+def test_alternate_root_requires_a_real_top_level_directory(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    shutil.rmtree(root / "lived_use")
+    _write(root / "lived_use", "not a directory")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="alternate root"):
+        _capture(root, adapter)
+
+
+def test_alternate_root_nested_and_duplicate_declarations_refuse(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    with pytest.raises(CorrectiveFreezePacketRefused, match="direct child"):
+        ExcludedAlternateRootLocator("lived_use/nested")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="duplicate"):
+        RealRootTypedEvidenceAdapter(
+            data_root_identity=adapter.data_root_identity, operator_identity=adapter.operator_identity,
+            excluded_source_artifacts=adapter.excluded_source_artifacts,
+            excluded_alternate_roots=(ExcludedAlternateRootLocator("lived_use"), ExcludedAlternateRootLocator("lived_use")),
+        )
+
+
+def test_alternate_root_symlink_refuses_when_supported(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    target = tmp_path / "alternate-target"
+    target.mkdir()
+    shutil.rmtree(root / "lived_use")
+    try:
+        os.symlink(target, root / "lived_use", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows host")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="alternate root"):
+        _capture(root, adapter)
