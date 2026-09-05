@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<final-practical-held-freeze-capture>", line 75, in <module>
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\corrective_freeze_packet.py", line 775, in capture_corrective_freeze_packet
+    captured = capture_root_writer_freeze_evidence(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\writer_freeze_evidence.py", line 463, in capture_root_writer_freeze_evidence
+    during_capture(stability)
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\corrective_freeze_packet.py", line 752, in _during_capture
+    evidence = source_adapter.capture_typed_evidence(data_root=root, discovered_census=direct_census)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\real_root_typed_evidence.py", line 247, in capture_typed_evidence
+    result = self._capture_workspace(root, workspace_path, workspace_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\real_root_typed_evidence.py", line 395, in _capture_workspace
+    capture = _capture_shared_scope(
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\real_root_typed_evidence.py", line 572, in _capture_shared_scope
+    _validate_direct_children(path, set(), "empty shared scope")
+  File "C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\torment_service\substrate\real_root_typed_evidence.py", line 1055, in _validate_direct_children
+    raise CorrectiveFreezePacketRefused(f"{label} contains an unclassified durable artifact")
+torment_service.substrate.corrective_freeze_packet.CorrectiveFreezePacketRefused: empty shared scope contains an unclassified durable artifact
