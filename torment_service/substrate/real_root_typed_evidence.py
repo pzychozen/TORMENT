@@ -1,0 +1,821 @@
+"""Read-only, typed evidence collection for the held-freeze source layout.
+
+This module intentionally owns no admission, runtime, provider, or writer
+logic.  It reads only the small, explicit source-file contract below and
+turns those facts into the already-authoritative corrective packet types.
+In particular, it never writes below ``data_root``, walks arbitrary trees,
+opens SQLite, or loads vector values.
+"""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import struct
+from typing import Final
+
+from .canonical_intent import canonical_intent_text
+from .corrective_freeze_packet import (
+    CorrectiveFreezePacketRefused,
+    CorrectiveFreezeTypedEvidence,
+    DeclaredEmptySharedSourceEvidence,
+    EmptyPrivateSourceEvidence,
+    ExcludedSourceArtifactExpectation,
+    ExcludedSourceArtifactObservation,
+    MetadataLessPerEidEvidence,
+    RootSourceScopePlan,
+    SourceArtifactKind,
+    SourceArtifactObservation,
+    SourceArtifactPresence,
+)
+from .migration.explicit_source_evidence import (
+    EvidenceAbsenceReason,
+    EvidenceOwnerBoundary,
+    EvidenceOwnerBoundaryKind,
+    EvidencePresenceExpectation,
+    EvidenceSemanticRole,
+    ExplicitSourceEvidence,
+    RootEvidenceManifest,
+    SourceOwnerClass,
+)
+from .migration.root_admission_description import (
+    DeclaredUnmaterializedDomain,
+    ExpectedRootCensus,
+    ExternalOwnerObservation,
+    ExternalOwnerObservationKind,
+    IdentityOnlyAgentObservation,
+    MaterializedRootScopePlan,
+    MaterializedScopePosture,
+    RepresentationDispositionCount,
+    RootFeaturePosture,
+    RootNativeProductionAdmissionDescription,
+    RootRepresentationDisposition,
+    WorkspaceRootAdmissionPlan,
+    WorkspaceTopologyCounts,
+)
+from .migration.root_scope import RootScopeKey, RootScopeKind
+from .root_blocker5_binding import (
+    RootDiscoveredCensus,
+    discover_canonical_root_layout,
+    frozen_root_geometry_disposition_plan,
+)
+from .runtime_binding import NativeRepresentationLane
+
+
+_TARGET_LANE: Final[NativeRepresentationLane] = NativeRepresentationLane(
+    "st", "BAAI/bge-small-en-v1.5", 384,
+    "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR", "float32",
+)
+_WORKSPACE_FILES: Final[frozenset[str]] = frozenset({
+    "workspace_meta.json", "domains.json", "domain_policies.json",
+    "external_owner_observations.json",
+})
+_NPY_DTYPE_NAMES: Final[dict[str, str]] = {
+    "<f4": "float32", ">f4": "float32", "|f4": "float32",
+    "<f8": "float64", ">f8": "float64", "|u1": "uint8",
+}
+
+
+@dataclass(frozen=True)
+class ExcludedSourceArtifactLocator:
+    """One consciously retained top-level artifact outside ``workspaces``."""
+
+    canonical_locator: str
+    source_role: str
+
+    def __post_init__(self) -> None:
+        locator = _top_level_locator(self.canonical_locator)
+        if not isinstance(self.source_role, str) or not self.source_role:
+            raise CorrectiveFreezePacketRefused("excluded source role must be non-empty")
+        object.__setattr__(self, "canonical_locator", locator)
+
+
+@dataclass(frozen=True)
+class RealRootTypedEvidenceAdapter:
+    """Strict read-only adapter for a source tree frozen by a future caller.
+
+    The name identifies the production-shaped contract, not permission to
+    contact a production root.  Qualification tests pass disposable roots.
+    A caller must separately provide any writer-freeze evidence to the packet
+    capture seam; this adapter performs no process or listener observation.
+    """
+
+    data_root_identity: str
+    operator_identity: str
+    profile_name: str = "held-freeze-typed-evidence"
+    target_representation_lane: NativeRepresentationLane = _TARGET_LANE
+    excluded_source_artifacts: tuple[ExcludedSourceArtifactLocator, ...] = ()
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.data_root_identity, "data_root_identity"),
+            (self.operator_identity, "operator_identity"),
+            (self.profile_name, "profile_name"),
+        ):
+            if not isinstance(value, str) or not value:
+                raise CorrectiveFreezePacketRefused(f"{label} must be non-empty text")
+        if self.target_representation_lane != _TARGET_LANE:
+            raise CorrectiveFreezePacketRefused("typed evidence adapter requires the frozen target lane")
+        if not isinstance(self.excluded_source_artifacts, tuple) or any(
+            not isinstance(item, ExcludedSourceArtifactLocator) for item in self.excluded_source_artifacts
+        ):
+            raise CorrectiveFreezePacketRefused("excluded source artifacts must be typed")
+        if len({item.canonical_locator for item in self.excluded_source_artifacts}) != len(self.excluded_source_artifacts):
+            raise CorrectiveFreezePacketRefused("excluded source artifact locators must be unique")
+
+    def excluded_artifact_expectations(self, *, data_root: Path) -> tuple[ExcludedSourceArtifactExpectation, ...]:
+        """Hash configured top-level excluded artifacts without changing them."""
+
+        root = _source_root(data_root)
+        return tuple(ExcludedSourceArtifactExpectation(
+            item.canonical_locator, item.source_role, _hash_file(_regular_file(root / item.canonical_locator)),
+        ) for item in self.excluded_source_artifacts)
+
+    def capture_excluded_source_artifacts(self, *, data_root: Path) -> tuple[ExcludedSourceArtifactObservation, ...]:
+        """Return typed facts corresponding exactly to configured exclusions."""
+
+        root = _source_root(data_root)
+        return tuple(ExcludedSourceArtifactObservation(
+            item.canonical_locator, item.source_role, _regular_file(root / item.canonical_locator).stat().st_size,
+            _hash_file(root / item.canonical_locator),
+        ) for item in self.excluded_source_artifacts)
+
+    def capture_typed_evidence(
+        self, *, data_root: Path, discovered_census: RootDiscoveredCensus,
+    ) -> CorrectiveFreezeTypedEvidence:
+        """Read the fixed source contract and create no source-side artifacts."""
+
+        root = _source_root(data_root)
+        if not isinstance(discovered_census, RootDiscoveredCensus):
+            raise CorrectiveFreezePacketRefused("typed evidence requires a discovered root census")
+        direct_census = discover_canonical_root_layout(data_root=root)
+        if direct_census != discovered_census:
+            raise CorrectiveFreezePacketRefused("typed evidence discovered census does not match fixed layout")
+        self._validate_root_children(root)
+        workspaces_root = _real_directory(root / "workspaces", "workspaces root")
+
+        entries: list[ExplicitSourceEvidence] = []
+        workspace_plans: list[WorkspaceRootAdmissionPlan] = []
+        source_plans: list[RootSourceScopePlan] = []
+        unknown_evidence: list[MetadataLessPerEidEvidence] = []
+        empty_private_evidence: list[EmptyPrivateSourceEvidence] = []
+        declared_empty_evidence: list[DeclaredEmptySharedSourceEvidence] = []
+        external_observations: list[ExternalOwnerObservation] = []
+
+        for workspace_path in _direct_directories(workspaces_root, "workspace"):
+            workspace_id = workspace_path.name
+            result = self._capture_workspace(root, workspace_path, workspace_id)
+            entries.extend(result.entries)
+            workspace_plans.append(result.workspace_plan)
+            source_plans.extend(result.source_plans)
+            unknown_evidence.extend(result.unknown_evidence)
+            empty_private_evidence.extend(result.empty_private_evidence)
+            declared_empty_evidence.extend(result.declared_empty_evidence)
+            external_observations.extend(result.external_observations)
+
+        if not workspace_plans:
+            raise CorrectiveFreezePacketRefused("typed evidence requires at least one workspace")
+        manifest = RootEvidenceManifest(tuple(entries))
+        expected = _expected_census(tuple(workspace_plans))
+        description = RootNativeProductionAdmissionDescription(
+            data_root_identity=self.data_root_identity,
+            operator_identity=self.operator_identity,
+            workspace_plans=tuple(workspace_plans),
+            target_representation_lane=self.target_representation_lane,
+            expected_census=expected,
+            explicit_source_manifest=manifest,
+            external_owner_observations=tuple(external_observations),
+            feature_posture=RootFeaturePosture(self.profile_name, False, False),
+        )
+        return CorrectiveFreezeTypedEvidence(
+            description=description,
+            discovered_census=discovered_census,
+            source_scope_plans=tuple(source_plans),
+            unknown_identity_evidence=tuple(unknown_evidence),
+            empty_private_evidence=tuple(empty_private_evidence),
+            declared_empty_shared_evidence=tuple(declared_empty_evidence),
+            geometry_disposition_plan=frozen_root_geometry_disposition_plan(
+                external_owner_observation_digest=description.external_owner_observation_digest,
+            ),
+        )
+
+    def _validate_root_children(self, root: Path) -> None:
+        allowed = {"workspaces", *(item.canonical_locator for item in self.excluded_source_artifacts)}
+        observed = {item.name for item in root.iterdir()}
+        if observed - allowed:
+            raise CorrectiveFreezePacketRefused("unclassified durable root artifact is not allowed")
+        if "workspaces" not in observed:
+            raise CorrectiveFreezePacketRefused("typed evidence source requires workspaces")
+        for item in root.iterdir():
+            if item.is_symlink():
+                raise CorrectiveFreezePacketRefused("typed evidence source paths must not be symlinks")
+
+    def _capture_workspace(self, root: Path, path: Path, workspace_id: str) -> "_WorkspaceCapture":
+        workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
+        workspace_meta = _capture_present(
+            root, path / "workspace_meta.json", SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+            workspace_boundary, "workspace_meta.json", EvidenceSemanticRole.WORKSPACE_META,
+        )
+        domains_evidence = _capture_present(
+            root, path / "domains.json", SourceOwnerClass.DOMAIN_DECLARATION,
+            workspace_boundary, "domains.json", EvidenceSemanticRole.DOMAINS,
+        )
+        declared_domains = _declared_domains(_read_json(path / "domains.json"))
+        entries = [workspace_meta, domains_evidence]
+        policy_path = path / "domain_policies.json"
+        if policy_path.exists():
+            entries.append(_capture_present(
+                root, policy_path, SourceOwnerClass.DOMAIN_POLICY, workspace_boundary,
+                "domain_policies.json", EvidenceSemanticRole.DOMAIN_POLICY,
+            ))
+
+        owner_entries, owner_observations, owner_files = _external_owner_observations(
+            root=root, workspace_path=path, workspace_id=workspace_id, workspace_boundary=workspace_boundary,
+        )
+        entries.extend(owner_entries)
+        self._validate_workspace_children(path, owner_files)
+
+        private_scopes: list[MaterializedRootScopePlan] = []
+        shared_scopes: list[MaterializedRootScopePlan] = []
+        identities: list[IdentityOnlyAgentObservation] = []
+        unmaterialized: list[DeclaredUnmaterializedDomain] = []
+        source_plans: list[RootSourceScopePlan] = []
+        unknown_evidence: list[MetadataLessPerEidEvidence] = []
+        empty_evidence: list[EmptyPrivateSourceEvidence] = []
+        declared_evidence: list[DeclaredEmptySharedSourceEvidence] = []
+
+        agents_path = path / "agents"
+        if agents_path.exists():
+            for agent_path in _direct_directories(_real_directory(agents_path, "agents directory"), "agent"):
+                self._validate_agent_children(agent_path)
+                agent_id = agent_path.name
+                identity_boundary = EvidenceOwnerBoundary(
+                    workspace_id, EvidenceOwnerBoundaryKind.AGENT, agent_id=agent_id,
+                )
+                identity = _capture_present(
+                    root, agent_path / "identity.json", SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION,
+                    identity_boundary, "identity.json", EvidenceSemanticRole.EXTERNAL_OBSERVATION,
+                )
+                entries.append(identity)
+                private_path = agent_path / "private"
+                if not private_path.exists():
+                    continue
+                scope = RootScopeKey(workspace_id, RootScopeKind.PRIVATE, agent_id=agent_id)
+                capture = _capture_private_scope(root, private_path, scope, identity, self.target_representation_lane)
+                entries.extend(capture.entries)
+                private_scopes.append(capture.scope_plan)
+                source_plans.append(capture.source_plan)
+                if capture.empty_evidence is not None:
+                    empty_evidence.append(capture.empty_evidence)
+                    identities.append(IdentityOnlyAgentObservation(agent_id, f"identity:{workspace_id}:{agent_id}"))
+                unknown_evidence.extend(capture.unknown_evidence)
+
+        domains_path = path / "domains"
+        physical_domains: set[str] = set()
+        if domains_path.exists():
+            for domain_path in _direct_directories(_real_directory(domains_path, "domains directory"), "domain"):
+                domain_id = domain_path.name
+                physical_domains.add(domain_id)
+                if domain_id not in declared_domains:
+                    raise CorrectiveFreezePacketRefused("materialized domain lacks a direct declaration")
+                self._validate_domain_children(domain_path)
+                shared_path = domain_path / "shared"
+                if not shared_path.exists():
+                    raise CorrectiveFreezePacketRefused("materialized domain must contain shared or be absent")
+                scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
+                capture = _capture_shared_scope(root, shared_path, scope, self.target_representation_lane)
+                entries.extend(capture.entries)
+                shared_scopes.append(capture.scope_plan)
+                source_plans.append(capture.source_plan)
+                unknown_evidence.extend(capture.unknown_evidence)
+
+        for domain_id in sorted(declared_domains - physical_domains):
+            scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
+            boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id=domain_id)
+            nodes = _absent(
+                SourceOwnerClass.SHARED_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
+                scope, EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION,
+            )
+            entries.append(nodes)
+            shared_scopes.append(MaterializedRootScopePlan(
+                scope, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+            ))
+            source_plans.append(RootSourceScopePlan(
+                scope, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+                RootRepresentationDisposition.NO_VECTOR, domain_id, self.target_representation_lane,
+                SourceArtifactPresence.ABSENT,
+            ))
+            shared_directory = SourceArtifactObservation(
+                "shared", SourceArtifactPresence.ABSENT, "ABSENT", artifact_kind=SourceArtifactKind.DIRECTORY,
+            )
+            motif = SourceArtifactObservation("motifs.json", SourceArtifactPresence.ABSENT, "ABSENT")
+            key = f"declared-empty:{workspace_id}:{domain_id}"
+            unsigned = {
+                "workspace_id": workspace_id, "domain_id": domain_id,
+                "domains_declaration_evidence": domains_evidence.identity_payload(),
+                "shared_directory_observation": shared_directory.payload(),
+                "nodes_absence_evidence": nodes.identity_payload(),
+                "motif_observation": motif.payload(), "observation_key": key,
+            }
+            declared_evidence.append(DeclaredEmptySharedSourceEvidence(
+                workspace_id, domain_id, domains_evidence, shared_directory, nodes, motif, key, _digest(unsigned),
+            ))
+            unmaterialized.append(DeclaredUnmaterializedDomain(domain_id, f"domains:{workspace_id}:{domain_id}"))
+
+        materialized = tuple(private_scopes) + tuple(
+            item for item in shared_scopes
+            if item.materialization_posture is not MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        )
+        return _WorkspaceCapture(
+            entries=tuple(entries),
+            workspace_plan=WorkspaceRootAdmissionPlan(
+                workspace_id, tuple(private_scopes), tuple(shared_scopes), tuple(identities),
+                tuple(unmaterialized), no_memory_scope=not materialized,
+            ),
+            source_plans=tuple(source_plans), unknown_evidence=tuple(unknown_evidence),
+            empty_private_evidence=tuple(empty_evidence), declared_empty_evidence=tuple(declared_evidence),
+            external_observations=tuple(owner_observations),
+        )
+
+    @staticmethod
+    def _validate_workspace_children(path: Path, owner_files: set[str]) -> None:
+        allowed = set(_WORKSPACE_FILES) | {"agents", "domains"} | owner_files
+        observed = {item.name for item in path.iterdir()}
+        if observed - allowed:
+            raise CorrectiveFreezePacketRefused("unclassified durable workspace owner is not allowed")
+        if {"workspace_meta.json", "domains.json"} - observed:
+            raise CorrectiveFreezePacketRefused("workspace source is missing required declarations")
+        for item in path.iterdir():
+            if item.is_symlink():
+                raise CorrectiveFreezePacketRefused("workspace source paths must not be symlinks")
+
+    @staticmethod
+    def _validate_agent_children(path: Path) -> None:
+        _validate_direct_children(path, {"identity.json", "private"}, "agent")
+        if not (path / "identity.json").is_file():
+            raise CorrectiveFreezePacketRefused("agent source lacks identity declaration")
+
+    @staticmethod
+    def _validate_domain_children(path: Path) -> None:
+        _validate_direct_children(path, {"shared"}, "domain")
+
+
+@dataclass(frozen=True)
+class _WorkspaceCapture:
+    entries: tuple[ExplicitSourceEvidence, ...]
+    workspace_plan: WorkspaceRootAdmissionPlan
+    source_plans: tuple[RootSourceScopePlan, ...]
+    unknown_evidence: tuple[MetadataLessPerEidEvidence, ...]
+    empty_private_evidence: tuple[EmptyPrivateSourceEvidence, ...]
+    declared_empty_evidence: tuple[DeclaredEmptySharedSourceEvidence, ...]
+    external_observations: tuple[ExternalOwnerObservation, ...]
+
+
+@dataclass(frozen=True)
+class _ScopeCapture:
+    entries: tuple[ExplicitSourceEvidence, ...]
+    scope_plan: MaterializedRootScopePlan
+    source_plan: RootSourceScopePlan
+    unknown_evidence: tuple[MetadataLessPerEidEvidence, ...]
+    empty_evidence: EmptyPrivateSourceEvidence | None = None
+
+
+def _capture_private_scope(
+    root: Path, path: Path, scope: RootScopeKey, identity: ExplicitSourceEvidence,
+    target_lane: NativeRepresentationLane,
+) -> _ScopeCapture:
+    path = _real_directory(path, "private scope")
+    boundary = EvidenceOwnerBoundary(
+        scope.workspace_id, EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id=scope.agent_id,
+    )
+    nodes_path = path / "nodes.jsonl"
+    embedding_path = path / "embedding_manifest.json"
+    memory_events = path / "memory_events.jsonl"
+    if not nodes_path.exists():
+        _validate_direct_children(path, {"embedding_manifest.json", "memory_events.jsonl"}, "empty private scope")
+        embedding = _capture_present(
+            root, embedding_path, SourceOwnerClass.EMBEDDING_MANIFEST, boundary,
+            "embedding_manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, scope,
+        )
+        metadata = _read_json(embedding_path)
+        if not isinstance(metadata, dict) or set(metadata) != {"total_rows", "next_row"}:
+            raise CorrectiveFreezePacketRefused("empty private embedding manifest must state only row counters")
+        total_rows, next_row = metadata["total_rows"], metadata["next_row"]
+        if total_rows != 0 or next_row != 0:
+            raise CorrectiveFreezePacketRefused("empty private embedding manifest must prove zero rows and next row")
+        if memory_events.exists() and (_regular_file(memory_events).stat().st_size != 0):
+            raise CorrectiveFreezePacketRefused("empty private memory events must be absent or empty")
+        nodes = _absent(
+            SourceOwnerClass.PRIVATE_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
+            scope, EvidenceAbsenceReason.EMPTY_GRAPH,
+        )
+        directory = SourceArtifactObservation(
+            "private", SourceArtifactPresence.PRESENT, "DIRECTORY_PRESENT", artifact_kind=SourceArtifactKind.DIRECTORY,
+        )
+        memory = _file_observation(memory_events, "memory_events.jsonl")
+        unsigned = {
+            "scope_key": scope.identity_payload(), "identity_declaration_evidence": identity.identity_payload(),
+            "private_directory_observation": directory.payload(), "nodes_absence_evidence": nodes.identity_payload(),
+            "memory_events_observation": memory.payload(), "embedding_manifest_evidence": embedding.identity_payload(),
+            "embedding_manifest_total_rows": total_rows, "embedding_manifest_next_row": next_row,
+        }
+        empty = EmptyPrivateSourceEvidence(
+            scope, identity, directory, nodes, memory, embedding, total_rows, next_row, _digest(unsigned),
+        )
+        return _ScopeCapture(
+            (nodes, embedding), MaterializedRootScopePlan(
+                scope, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_PRIVATE,
+            ), RootSourceScopePlan(
+                scope, MaterializedScopePosture.EMPTY_PRIVATE, RootRepresentationDisposition.NO_VECTOR,
+                None, target_lane, SourceArtifactPresence.ABSENT,
+            ), (), empty,
+        )
+
+    _validate_regular_file(nodes_path, "private nodes")
+    _validate_direct_children(path, {"nodes.jsonl", "embedding_manifest.json"}, "private scope", allow_from_manifest=embedding_path)
+    return _capture_memory_scope(root, path, scope, boundary, SourceOwnerClass.PRIVATE_GRAPH_SOURCE, target_lane)
+
+
+def _capture_shared_scope(
+    root: Path, path: Path, scope: RootScopeKey, target_lane: NativeRepresentationLane,
+) -> _ScopeCapture:
+    path = _real_directory(path, "shared scope")
+    boundary = EvidenceOwnerBoundary(
+        scope.workspace_id, EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id=scope.domain_id,
+    )
+    nodes_path = path / "nodes.jsonl"
+    motifs_path = path / "motifs.json"
+    if not nodes_path.exists():
+        _validate_direct_children(path, {"motifs.json"}, "empty shared scope")
+        motifs = _capture_present(
+            root, motifs_path, SourceOwnerClass.MOTIF_SOURCE, boundary, "motifs.json", EvidenceSemanticRole.MOTIFS, scope,
+        )
+        nodes = _absent(
+            SourceOwnerClass.SHARED_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
+            scope, EvidenceAbsenceReason.EMPTY_GRAPH,
+        )
+        return _ScopeCapture(
+            (nodes, motifs), MaterializedRootScopePlan(
+                scope, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+            ), RootSourceScopePlan(
+                scope, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF, RootRepresentationDisposition.NO_VECTOR,
+                scope.domain_id, target_lane, SourceArtifactPresence.PRESENT,
+            ), (), None,
+        )
+    _validate_regular_file(nodes_path, "shared nodes")
+    _validate_direct_children(path, {"nodes.jsonl", "embedding_manifest.json"}, "shared scope", allow_from_manifest=path / "embedding_manifest.json")
+    return _capture_memory_scope(root, path, scope, boundary, SourceOwnerClass.SHARED_GRAPH_SOURCE, target_lane)
+
+
+def _capture_memory_scope(
+    root: Path, path: Path, scope: RootScopeKey, boundary: EvidenceOwnerBoundary,
+    graph_owner: SourceOwnerClass, target_lane: NativeRepresentationLane,
+) -> _ScopeCapture:
+    embedding_path = path / "embedding_manifest.json"
+    nodes = _capture_present(root, path / "nodes.jsonl", graph_owner, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES, scope)
+    embedding = _capture_present(
+        root, embedding_path, SourceOwnerClass.EMBEDDING_MANIFEST, boundary,
+        "embedding_manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, scope,
+    )
+    metadata = _read_json(embedding_path)
+    representation = _representation(metadata)
+    disposition = _representation_disposition(representation, target_lane)
+    motif_domain_id = representation.get("motif_domain_id")
+    if motif_domain_id is not None and not isinstance(motif_domain_id, str):
+        raise CorrectiveFreezePacketRefused("persisted motif domain identity must be text")
+    entries = [nodes, embedding]
+    unknown: tuple[MetadataLessPerEidEvidence, ...] = ()
+    allowed = {"nodes.jsonl", "embedding_manifest.json"}
+    if disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+        unknown, extra_entries, allowed_unknown = _metadata_less_evidence(root, path, scope, boundary, representation)
+        entries.extend(extra_entries)
+        allowed |= allowed_unknown
+    _validate_direct_children(path, allowed, "memory scope")
+    return _ScopeCapture(
+        tuple(entries), MaterializedRootScopePlan(scope, disposition),
+        RootSourceScopePlan(scope, MaterializedScopePosture.MEMORY_GRAPH, disposition, motif_domain_id, target_lane),
+        unknown,
+    )
+
+
+def _representation(metadata: object) -> dict[str, object]:
+    if not isinstance(metadata, dict) or set(metadata) != {"representation"} or not isinstance(metadata["representation"], dict):
+        raise CorrectiveFreezePacketRefused("embedding manifest must carry one explicit representation record")
+    return metadata["representation"]
+
+
+def _representation_disposition(value: dict[str, object], lane: NativeRepresentationLane) -> RootRepresentationDisposition:
+    disposition = value.get("disposition")
+    try:
+        result = RootRepresentationDisposition(disposition)
+    except (TypeError, ValueError) as exc:
+        raise CorrectiveFreezePacketRefused("embedding representation disposition is not persisted and explicit") from exc
+    if result is RootRepresentationDisposition.TARGET_COMPATIBLE:
+        required = {"disposition", "provider", "model", "dimension"}
+        if set(value) - {"motif_domain_id"} != required or any(key not in value for key in required):
+            raise CorrectiveFreezePacketRefused("target representation identity must be explicit")
+        if (value["provider"], value["model"], value["dimension"]) != (lane.provider, lane.model, lane.dimension):
+            raise CorrectiveFreezePacketRefused("TARGET_COMPATIBLE must exactly match the frozen target identity")
+    elif result is RootRepresentationDisposition.REEMBED_REQUIRED:
+        if set(value) - {"motif_domain_id"} != {"disposition", "legacy_hash"} or not _digest_text(value.get("legacy_hash")):
+            raise CorrectiveFreezePacketRefused("REEMBED_REQUIRED requires persisted legacy hash metadata")
+    elif result is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+        if set(value) - {"motif_domain_id"} != {"disposition", "metadata_less_source_evidence"}:
+            raise CorrectiveFreezePacketRefused("UNKNOWN_IDENTITY requires explicit metadata-less source evidence")
+    else:
+        raise CorrectiveFreezePacketRefused("memory scopes may not infer empty or unusable vector dispositions")
+    return result
+
+
+def _metadata_less_evidence(
+    root: Path, path: Path, scope: RootScopeKey, boundary: EvidenceOwnerBoundary, representation: dict[str, object],
+) -> tuple[tuple[MetadataLessPerEidEvidence, ...], tuple[ExplicitSourceEvidence, ...], set[str]]:
+    raw = representation["metadata_less_source_evidence"]
+    if not isinstance(raw, list) or not raw:
+        raise CorrectiveFreezePacketRefused("metadata-less representation requires per-EID evidence")
+    evidence: list[MetadataLessPerEidEvidence] = []
+    entries: list[ExplicitSourceEvidence] = []
+    allowed: set[str] = set()
+    for item in raw:
+        required = {"eid", "vector_locator", "canonical_text_locator", "metadata_less_source_evidence_identity"}
+        if not isinstance(item, dict) or set(item) != required or not isinstance(item["eid"], int) or item["eid"] < 0:
+            raise CorrectiveFreezePacketRefused("metadata-less per-EID evidence shape is invalid")
+        eid = item["eid"]
+        vector_locator = item["vector_locator"]
+        text_locator = item["canonical_text_locator"]
+        if vector_locator != f"emb_{eid}.npy" or text_locator != f"canonical_text_{eid}.json":
+            raise CorrectiveFreezePacketRefused("metadata-less evidence must use exact per-EID source locators")
+        identity = item["metadata_less_source_evidence_identity"]
+        if not isinstance(identity, str) or not identity:
+            raise CorrectiveFreezePacketRefused("metadata-less source evidence identity must be text")
+        vector_path, text_path = path / vector_locator, path / text_locator
+        dtype, shape = _npy_header(vector_path)
+        vector = _capture_present(
+            root, vector_path, SourceOwnerClass.METADATA_LESS_PER_EID_LEGACY_REPRESENTATION,
+            boundary, vector_locator, EvidenceSemanticRole.LEGACY_REPRESENTATION, scope,
+        )
+        text = _capture_present(
+            root, text_path, SourceOwnerClass.PRIVATE_GRAPH_SOURCE, boundary,
+            text_locator, EvidenceSemanticRole.NODES, scope,
+        )
+        evidence.append(MetadataLessPerEidEvidence(scope, eid, vector, text, dtype, shape, identity))
+        entries.extend((vector, text))
+        allowed.update((vector_locator, text_locator))
+    if len({item.eid for item in evidence}) != len(evidence):
+        raise CorrectiveFreezePacketRefused("metadata-less per-EID evidence repeats an EID")
+    return tuple(evidence), tuple(entries), allowed
+
+
+def _external_owner_observations(
+    *, root: Path, workspace_path: Path, workspace_id: str, workspace_boundary: EvidenceOwnerBoundary,
+) -> tuple[tuple[ExplicitSourceEvidence, ...], tuple[ExternalOwnerObservation, ...], set[str]]:
+    registry = workspace_path / "external_owner_observations.json"
+    if not registry.exists():
+        return (), (), set()
+    registry_evidence = _capture_present(
+        root, registry, SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION, workspace_boundary,
+        "external_owner_observations.json", EvidenceSemanticRole.EXTERNAL_OBSERVATION,
+    )
+    raw = _read_json(registry)
+    if not isinstance(raw, dict) or set(raw) != {"observations"} or not isinstance(raw["observations"], list):
+        raise CorrectiveFreezePacketRefused("external owner registry shape is invalid")
+    entries = [registry_evidence]
+    observations: list[ExternalOwnerObservation] = []
+    owner_files: set[str] = set()
+    for item in raw["observations"]:
+        required = {"owner_kind", "observation_key", "locator"}
+        if not isinstance(item, dict) or set(item) != required:
+            raise CorrectiveFreezePacketRefused("external owner record has unclassified durable state")
+        locator = _top_level_locator(item["locator"])
+        try:
+            kind = ExternalOwnerObservationKind(item["owner_kind"])
+        except (TypeError, ValueError) as exc:
+            raise CorrectiveFreezePacketRefused("external owner kind must use the frozen taxonomy") from exc
+        key = item["observation_key"]
+        if not isinstance(key, str) or not key:
+            raise CorrectiveFreezePacketRefused("external owner observation key must be text")
+        source_path = _regular_file(workspace_path / locator)
+        entries.append(_capture_present(
+            root, source_path, SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION, workspace_boundary,
+            locator, EvidenceSemanticRole.EXTERNAL_OBSERVATION,
+        ))
+        observations.append(ExternalOwnerObservation(workspace_id, kind, key, _hash_file(source_path)))
+        owner_files.add(locator)
+    if len({item.canonical_key for item in observations}) != len(observations):
+        raise CorrectiveFreezePacketRefused("external owner observations are not unique")
+    return tuple(entries), tuple(observations), owner_files
+
+
+def _expected_census(workspaces: tuple[WorkspaceRootAdmissionPlan, ...]) -> ExpectedRootCensus:
+    materialized = tuple(scope for workspace in workspaces for scope in workspace.materialized_scopes)
+    runtime = tuple(scope for workspace in workspaces for scope in workspace.runtime_scopes)
+    counts = tuple(RepresentationDispositionCount(
+        disposition, sum(scope.representation_disposition is disposition for scope in runtime),
+    ) for disposition in RootRepresentationDisposition)
+    return ExpectedRootCensus(
+        workspace_count=len(workspaces),
+        materialized_private_scope_count=sum(scope.scope_key.scope_kind is RootScopeKind.PRIVATE for scope in materialized),
+        materialized_shared_scope_count=sum(scope.scope_key.scope_kind is RootScopeKind.SHARED for scope in materialized),
+        total_materialized_scope_count=len(materialized),
+        declared_empty_shared_scope_count=sum(
+            scope.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED for scope in runtime
+        ),
+        empty_private_identity_scope_count=sum(
+            scope.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE for scope in runtime
+        ),
+        representation_disposition_counts=counts,
+        workspace_topology_counts=WorkspaceTopologyCounts(
+            zero_private_workspaces=sum(not workspace.private_materialized_scopes for workspace in workspaces),
+            one_private_workspace=sum(len(workspace.private_materialized_scopes) == 1 for workspace in workspaces),
+            multiple_private_workspaces=sum(len(workspace.private_materialized_scopes) > 1 for workspace in workspaces),
+            zero_shared_workspaces=sum(not workspace.shared_materialized_scopes for workspace in workspaces),
+            one_shared_workspace=sum(len(workspace.shared_materialized_scopes) == 1 for workspace in workspaces),
+            multiple_shared_workspaces=sum(len(workspace.shared_materialized_scopes) > 1 for workspace in workspaces),
+        ),
+    )
+
+
+def _declared_domains(value: object) -> set[str]:
+    if not isinstance(value, dict) or "domains" not in value or set(value) - {"domains", "legacy_default_domain"}:
+        raise CorrectiveFreezePacketRefused("domains declaration must use the direct/default source contract")
+    domains = value["domains"]
+    if not isinstance(domains, list) or any(not isinstance(item, str) or not item for item in domains):
+        raise CorrectiveFreezePacketRefused("domains declaration must list text domain identities")
+    declared = set(domains)
+    if len(declared) != len(domains):
+        raise CorrectiveFreezePacketRefused("domains declaration repeats an identity")
+    default = value.get("legacy_default_domain")
+    if default is not None:
+        if not isinstance(default, str) or not default:
+            raise CorrectiveFreezePacketRefused("legacy default domain identity must be text")
+        declared.add(default)
+    return declared
+
+
+def _capture_present(
+    root: Path, path: Path, owner_class: SourceOwnerClass, boundary: EvidenceOwnerBoundary,
+    locator: str, role: EvidenceSemanticRole, scope: RootScopeKey | None = None,
+) -> ExplicitSourceEvidence:
+    source = _regular_file(path)
+    return ExplicitSourceEvidence(
+        owner_class=owner_class, owner_boundary=boundary, canonical_locator=locator, semantic_role=role,
+        presence_expectation=EvidencePresenceExpectation.EXPECTED_PRESENT, scope_key=scope,
+        byte_length=source.stat().st_size, sha256_hex=_hash_file(source),
+    )
+
+
+def _absent(
+    owner_class: SourceOwnerClass, boundary: EvidenceOwnerBoundary, locator: str, role: EvidenceSemanticRole,
+    scope: RootScopeKey, reason: EvidenceAbsenceReason,
+) -> ExplicitSourceEvidence:
+    return ExplicitSourceEvidence(
+        owner_class=owner_class, owner_boundary=boundary, canonical_locator=locator, semantic_role=role,
+        presence_expectation=EvidencePresenceExpectation.EXPECTED_ABSENT, scope_key=scope, absence_reason=reason,
+    )
+
+
+def _file_observation(path: Path, locator: str) -> SourceArtifactObservation:
+    if not path.exists():
+        return SourceArtifactObservation(locator, SourceArtifactPresence.ABSENT, "ABSENT")
+    source = _regular_file(path)
+    return SourceArtifactObservation(locator, SourceArtifactPresence.PRESENT, "PRESENT", source.stat().st_size, _hash_file(source))
+
+
+def _npy_header(path: Path) -> tuple[str, tuple[int, ...]]:
+    """Read just an ``.npy`` header; never materialize vector values."""
+
+    source = _regular_file(path)
+    try:
+        with source.open("rb") as stream:
+            prefix = stream.read(8)
+            if len(prefix) != 8 or prefix[:6] != b"\x93NUMPY":
+                raise ValueError
+            major = prefix[6]
+            if major == 1:
+                raw_length = stream.read(2)
+                header_length = struct.unpack("<H", raw_length)[0]
+            elif major in {2, 3}:
+                raw_length = stream.read(4)
+                header_length = struct.unpack("<I", raw_length)[0]
+            else:
+                raise ValueError
+            header = ast.literal_eval(stream.read(header_length).decode("latin1"))
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError, struct.error) as exc:
+        raise CorrectiveFreezePacketRefused("metadata-less vector must have a readable NumPy header") from exc
+    if not isinstance(header, dict) or set(header) != {"descr", "fortran_order", "shape"}:
+        raise CorrectiveFreezePacketRefused("metadata-less NumPy header shape is unsupported")
+    dtype = header["descr"]
+    shape = header["shape"]
+    if not isinstance(dtype, str) or dtype not in _NPY_DTYPE_NAMES or header["fortran_order"] is not False:
+        raise CorrectiveFreezePacketRefused("metadata-less NumPy dtype/order is unsupported")
+    if not isinstance(shape, tuple) or not shape or any(not isinstance(item, int) or item < 0 for item in shape):
+        raise CorrectiveFreezePacketRefused("metadata-less NumPy shape is unsupported")
+    return _NPY_DTYPE_NAMES[dtype], shape
+
+
+def _source_root(value: Path) -> Path:
+    root = Path(value).expanduser().resolve()
+    return _real_directory(root, "typed evidence source root")
+
+
+def _real_directory(path: Path, label: str) -> Path:
+    if path.is_symlink() or not path.is_dir():
+        raise CorrectiveFreezePacketRefused(f"{label} must be a non-symlink directory")
+    return path
+
+
+def _regular_file(path: Path) -> Path:
+    if path.is_symlink() or not path.is_file():
+        raise CorrectiveFreezePacketRefused("typed evidence source must be a non-symlink regular file")
+    return path
+
+
+def _validate_regular_file(path: Path, label: str) -> None:
+    try:
+        _regular_file(path)
+    except CorrectiveFreezePacketRefused as exc:
+        raise CorrectiveFreezePacketRefused(f"{label} must be a regular file") from exc
+
+
+def _direct_directories(path: Path, label: str) -> tuple[Path, ...]:
+    directories: list[Path] = []
+    for item in path.iterdir():
+        if item.is_symlink():
+            raise CorrectiveFreezePacketRefused(f"{label} path must not be a symlink")
+        if item.is_dir():
+            directories.append(item)
+        elif item.is_file():
+            raise CorrectiveFreezePacketRefused(f"{label} container contains an unclassified durable file")
+    return tuple(sorted(directories, key=lambda item: item.name))
+
+
+def _validate_direct_children(
+    path: Path, allowed: set[str], label: str, *, allow_from_manifest: Path | None = None,
+) -> None:
+    allowed_names = set(allowed)
+    if allow_from_manifest is not None and allow_from_manifest.exists():
+        metadata = _read_json(allow_from_manifest)
+        representation = metadata.get("representation") if isinstance(metadata, dict) else None
+        if isinstance(representation, dict) and isinstance(representation.get("metadata_less_source_evidence"), list):
+            for item in representation["metadata_less_source_evidence"]:
+                if isinstance(item, dict):
+                    for key in ("vector_locator", "canonical_text_locator"):
+                        value = item.get(key)
+                        if isinstance(value, str):
+                            allowed_names.add(value)
+    observed = {item.name for item in path.iterdir()}
+    if observed - allowed_names:
+        raise CorrectiveFreezePacketRefused(f"{label} contains an unclassified durable artifact")
+    for item in path.iterdir():
+        if item.is_symlink():
+            raise CorrectiveFreezePacketRefused(f"{label} paths must not be symlinks")
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with _regular_file(path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise CorrectiveFreezePacketRefused("typed evidence source file cannot be read") from exc
+    return digest.hexdigest()
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(_regular_file(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CorrectiveFreezePacketRefused("typed evidence JSON source is invalid") from exc
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(canonical_intent_text(value).encode("utf-8")).hexdigest()
+
+
+def _digest_text(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 64 or value.lower() != value:
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def _top_level_locator(value: object) -> str:
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise CorrectiveFreezePacketRefused("source locator must be a non-empty POSIX relative path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or len(path.parts) != 1 or any(part in {"", ".", ".."} for part in path.parts):
+        raise CorrectiveFreezePacketRefused("source locator must be a direct child")
+    return value
+
+
+__all__ = [
+    "ExcludedSourceArtifactLocator",
+    "RealRootTypedEvidenceAdapter",
+]

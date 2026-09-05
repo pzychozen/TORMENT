@@ -12,6 +12,7 @@ import pytest
 from torment_service.substrate.canonical_intent import canonical_intent_text
 from torment_service.substrate.deployment_types import digest_mapping
 from torment_service.substrate.corrective_freeze_packet import (
+    CORRECTIVE_FREEZE_PACKET_VERSION,
     CorrectiveCaptureObservations,
     CorrectiveFreezePacketRefused,
     CorrectiveFreezeTypedEvidence,
@@ -432,7 +433,11 @@ def _rewrite_manifest(packet: Path) -> None:
             continue
         raw = path.read_bytes()
         files.append({"filename": path.name, "byte_length": len(raw), "sha256": _digest(raw)})
-    unsigned = {"contract": "TORMENT_HELD_FREEZE_CORRECTIVE_PACKET", "version": 1, "artifacts": files}
+    unsigned = {
+        "contract": "TORMENT_HELD_FREEZE_CORRECTIVE_PACKET",
+        "version": CORRECTIVE_FREEZE_PACKET_VERSION,
+        "artifacts": files,
+    }
     (packet / "packet_manifest.json").write_text(canonical_intent_text({**unsigned, "packet_digest": _digest(unsigned)}) + "\n", encoding="utf-8")
 
 

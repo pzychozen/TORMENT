@@ -77,7 +77,7 @@ from .writer_freeze_evidence import (
 
 
 CORRECTIVE_FREEZE_PACKET_CONTRACT = "TORMENT_HELD_FREEZE_CORRECTIVE_PACKET"
-CORRECTIVE_FREEZE_PACKET_VERSION = 1
+CORRECTIVE_FREEZE_PACKET_VERSION = 2
 _MINIMUM_FREEZE_INTERVAL_SECONDS = 60
 
 
@@ -386,6 +386,7 @@ class RootSourceScopePlan:
     representation_disposition: RootRepresentationDisposition
     motif_domain_id: str | None
     target_representation_lane: NativeRepresentationLane
+    motif_presence: SourceArtifactPresence = SourceArtifactPresence.ABSENT
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope_key, RootScopeKey):
@@ -398,6 +399,8 @@ class RootSourceScopePlan:
             _text(self.motif_domain_id, "motif_domain_id")
         if not isinstance(self.target_representation_lane, NativeRepresentationLane):
             raise CorrectiveFreezePacketRefused("source scope target lane must be typed")
+        if not isinstance(self.motif_presence, SourceArtifactPresence):
+            raise CorrectiveFreezePacketRefused("source scope motif presence must be typed")
         if self.materialization_posture in {
             MaterializedScopePosture.EMPTY_PRIVATE,
             MaterializedScopePosture.DECLARED_EMPTY_SHARED,
@@ -415,6 +418,7 @@ class RootSourceScopePlan:
             "representation_disposition": self.representation_disposition.value,
             "motif_domain_id": self.motif_domain_id,
             "target_representation_lane": _lane_payload(self.target_representation_lane),
+            "motif_presence": self.motif_presence.value,
         }
 
 
@@ -1303,7 +1307,7 @@ def _declared_empty_from_payload(value: object) -> DeclaredEmptySharedSourceEvid
 def _source_scope_plan_from_payload(value: object) -> RootSourceScopePlan:
     required = {
         "scope_key", "materialization_posture", "representation_disposition", "motif_domain_id",
-        "target_representation_lane",
+        "target_representation_lane", "motif_presence",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise CorrectiveFreezePacketRefused("source scope plan payload is invalid")
@@ -1312,6 +1316,7 @@ def _source_scope_plan_from_payload(value: object) -> RootSourceScopePlan:
         materialization_posture=MaterializedScopePosture(value["materialization_posture"]),
         representation_disposition=RootRepresentationDisposition(value["representation_disposition"]),
         motif_domain_id=value["motif_domain_id"], target_representation_lane=_lane_from_payload(value["target_representation_lane"]),
+        motif_presence=SourceArtifactPresence(value["motif_presence"]),
     )
 
 
