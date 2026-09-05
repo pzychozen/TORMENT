@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import struct
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -34,6 +35,7 @@ from torment_service.substrate.real_root_typed_evidence import (
     ExcludedAlternateRootLocator,
     ExcludedSourceArtifactLocator,
     RealRootTypedEvidenceAdapter,
+    build_real_direct_admission_source_adapter,
 )
 from torment_service.substrate.root_blocker5_binding import (
     build_real_root_v2_admission_envelope,
@@ -184,6 +186,81 @@ def _fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
 def _capture(root: Path, adapter: RealRootTypedEvidenceAdapter):
     discovered = discover_canonical_root_layout(data_root=root)
     return adapter.capture_typed_evidence(data_root=root, discovered_census=discovered)
+
+
+def _real_named_root_fixture(tmp_path: Path) -> Path:
+    """Return the smallest root using the qualified production child names."""
+
+    root = tmp_path / "real-named-production-shaped-source"
+    workspace = root / "workspaces" / "empty"
+    _json(workspace / "workspace_meta.json", {"workspace": "empty", **_target_lock()})
+    _json(workspace / "domains.json", {"domains": []})
+    _write(root / "nodes.jsonl", "retained unscoped nodes")
+    _write(root / "emb_1.npy", b"retained unscoped representation")
+    _write(root / "lived_use" / "opaque-basin" / "must-not-be-read.bin", b"opaque alternate data")
+    return root
+
+
+def test_real_direct_admission_factory_binds_only_qualified_root_exclusions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _real_named_root_fixture(tmp_path)
+    generic = RealRootTypedEvidenceAdapter(
+        data_root_identity="generic-root",
+        operator_identity="generic-operator",
+    )
+    assert generic.excluded_source_artifacts == ()
+    assert generic.excluded_alternate_roots == ()
+
+    adapter = build_real_direct_admission_source_adapter(
+        data_root_identity="qualified-real-root",
+        operator_identity="qualified-real-operator",
+    )
+
+    assert [(item.canonical_locator, item.source_role) for item in adapter.excluded_source_artifacts] == [
+        ("nodes.jsonl", "TOP_LEVEL_UNSCOPED_NODES"),
+        ("emb_1.npy", "TOP_LEVEL_UNSCOPED_EMBEDDINGS"),
+    ]
+    assert tuple(item.canonical_locator for item in adapter.excluded_alternate_roots) == ("lived_use",)
+
+    lived_use = root / "lived_use"
+    original_iterdir = Path.iterdir
+    original_open = Path.open
+
+    def _no_lived_use_descendant_iteration(path: Path):
+        if path == lived_use:
+            raise AssertionError("lived_use descendants must not be enumerated")
+        return original_iterdir(path)
+
+    def _no_lived_use_descendant_read(path: Path, *args: object, **kwargs: object):
+        if lived_use in path.parents:
+            raise AssertionError("lived_use descendants must not be read or hashed")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "iterdir", _no_lived_use_descendant_iteration)
+    monkeypatch.setattr(Path, "open", _no_lived_use_descendant_read)
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+    assert prepared.description.expected_census.workspace_count == 1
+
+    for omitted_locator in ("nodes.jsonl", "emb_1.npy"):
+        omitted = replace(
+            adapter,
+            excluded_source_artifacts=tuple(
+                item for item in adapter.excluded_source_artifacts
+                if item.canonical_locator != omitted_locator
+            ),
+        )
+        with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+            omitted.prepare_direct_admission_source(data_root=root)
+
+    without_lived_use = replace(adapter, excluded_alternate_roots=())
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        without_lived_use.prepare_direct_admission_source(data_root=root)
+
+    _write(root / "unexpected_fourth_root_artifact", "must refuse")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        adapter.prepare_direct_admission_source(data_root=root)
 
 
 def _source_snapshot(root: Path) -> dict[str, str]:

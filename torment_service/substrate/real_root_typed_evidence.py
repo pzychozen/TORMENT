@@ -111,6 +111,13 @@ _NPY_DTYPE_NAMES: Final[dict[str, str]] = {
     "<f4": "float32", ">f4": "float32", "|f4": "float32",
     "<f8": "float64", ">f8": "float64", "|u1": "uint8",
 }
+_REAL_DIRECT_ADMISSION_EXCLUDED_SOURCE_ARTIFACTS: Final[
+    tuple[tuple[str, str], ...]
+] = (
+    ("nodes.jsonl", "TOP_LEVEL_UNSCOPED_NODES"),
+    ("emb_1.npy", "TOP_LEVEL_UNSCOPED_EMBEDDINGS"),
+)
+_REAL_DIRECT_ADMISSION_EXCLUDED_ALTERNATE_ROOT: Final[str] = "lived_use"
 
 
 @dataclass(frozen=True)
@@ -559,6 +566,34 @@ class RealRootTypedEvidenceAdapter:
         _validate_direct_children(
             path, {"shared", "motifs.json"} | set(_DOMAIN_OWNER_FILES) | set(_DOMAIN_RETAINED_FILES), "domain",
         )
+
+
+def build_real_direct_admission_source_adapter(
+    *,
+    data_root_identity: str,
+    operator_identity: str,
+    profile_name: str = "held-freeze-typed-evidence",
+) -> RealRootTypedEvidenceAdapter:
+    """Build the explicit adapter for the qualified real production root.
+
+    The retained top-level files and alternate basin are root-specific
+    exclusions established by the held-freeze administration.  They are bound
+    here at the real admission caller seam rather than becoming defaults for
+    every source root.  Unknown direct children therefore still refuse.
+    """
+
+    return RealRootTypedEvidenceAdapter(
+        data_root_identity=data_root_identity,
+        operator_identity=operator_identity,
+        profile_name=profile_name,
+        excluded_source_artifacts=tuple(
+            ExcludedSourceArtifactLocator(locator, role)
+            for locator, role in _REAL_DIRECT_ADMISSION_EXCLUDED_SOURCE_ARTIFACTS
+        ),
+        excluded_alternate_roots=(
+            ExcludedAlternateRootLocator(_REAL_DIRECT_ADMISSION_EXCLUDED_ALTERNATE_ROOT),
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -1199,6 +1234,7 @@ def _top_level_locator(value: object) -> str:
 
 
 __all__ = [
+    "build_real_direct_admission_source_adapter",
     "DirectAdmissionSourcePreparation",
     "ExcludedAlternateRootLocator",
     "ExcludedSourceArtifactLocator",
