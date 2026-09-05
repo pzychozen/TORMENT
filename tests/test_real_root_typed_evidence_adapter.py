@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -35,6 +36,12 @@ from torment_service.substrate.real_root_typed_evidence import (
     ExcludedAlternateRootLocator,
     ExcludedSourceArtifactLocator,
     RealRootTypedEvidenceAdapter,
+    _file_observation,
+    _hash_file,
+    _npy_header,
+    _read_json,
+    _regular_file,
+    _validate_regular_file,
     build_real_direct_admission_source_adapter,
 )
 from torment_service.substrate.root_blocker5_binding import (
@@ -83,6 +90,19 @@ def _npy(path: Path, *, dimension: int = 384) -> None:
     raw = header.encode("latin1")
     raw += b" " * ((16 - ((10 + len(raw) + 1) % 16)) % 16) + b"\n"
     _write(path, b"\x93NUMPY\x01\x00" + struct.pack("<H", len(raw)) + raw + (b"\x00" * (dimension * 4)))
+
+
+def _assert_regular_file_refusal(
+    operation: Callable[[], object], path: Path, shape: str,
+) -> None:
+    with pytest.raises(CorrectiveFreezePacketRefused) as refusal:
+        operation()
+    message = str(refusal.value)
+    assert message.startswith("typed evidence source must be a non-symlink regular file") or (
+        "typed evidence source must be a non-symlink regular file" in message
+    )
+    assert f"path={path}" in message
+    assert f"shape={shape}" in message
 
 
 def _storage(path: Path, *, dimension: int = 384, total_rows: int = 1, next_row: int = 1) -> None:
@@ -186,6 +206,51 @@ def _fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
 def _capture(root: Path, adapter: RealRootTypedEvidenceAdapter):
     discovered = discover_canonical_root_layout(data_root=root)
     return adapter.capture_typed_evidence(data_root=root, discovered_census=discovered)
+
+
+def test_regular_file_refusals_preserve_the_exact_path_and_shape(tmp_path: Path) -> None:
+    regular = tmp_path / "typed-source.json"
+    _write(regular, "synthetic")
+    missing = tmp_path / "missing-source.json"
+    directory = tmp_path / "directory-at-file-path"
+    directory.mkdir()
+
+    assert _regular_file(regular) == regular
+    _assert_regular_file_refusal(lambda: _regular_file(missing), missing, "ABSENT")
+    _assert_regular_file_refusal(lambda: _regular_file(directory), directory, "NON_FILE")
+
+
+def test_regular_file_symlink_refusal_preserves_the_exact_path_and_shape(tmp_path: Path) -> None:
+    target = tmp_path / "typed-source-target.json"
+    link = tmp_path / "typed-source-link.json"
+    _write(target, "synthetic")
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows host")
+
+    _assert_regular_file_refusal(lambda: _regular_file(link), link, "SYMLINK")
+
+
+def test_regular_file_context_survives_direct_helper_wrappers(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    missing = root / "workspaces" / "empty" / "workspace_meta.json"
+    missing.unlink()
+    directory = tmp_path / "directory-at-file-path"
+    directory.mkdir()
+
+    _assert_regular_file_refusal(
+        lambda: adapter.prepare_direct_admission_source(data_root=root), missing, "ABSENT",
+    )
+    _assert_regular_file_refusal(
+        lambda: _validate_regular_file(missing, "private nodes"), missing, "ABSENT",
+    )
+    _assert_regular_file_refusal(lambda: _read_json(missing), missing, "ABSENT")
+    _assert_regular_file_refusal(lambda: _hash_file(directory), directory, "NON_FILE")
+    _assert_regular_file_refusal(
+        lambda: _file_observation(directory, "directory-at-file-path"), directory, "NON_FILE",
+    )
+    _assert_regular_file_refusal(lambda: _npy_header(missing), missing, "ABSENT")
 
 
 def _orchard_empty_shared_fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:

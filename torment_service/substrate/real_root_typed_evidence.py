@@ -1206,16 +1206,26 @@ def _alternate_root_directory(path: Path) -> Path:
 
 
 def _regular_file(path: Path) -> Path:
-    if path.is_symlink() or not path.is_file():
-        raise CorrectiveFreezePacketRefused("typed evidence source must be a non-symlink regular file")
-    return path
+    if path.is_symlink():
+        shape = "SYMLINK"
+    elif not path.exists():
+        shape = "ABSENT"
+    elif not path.is_file():
+        shape = "NON_FILE"
+    else:
+        return path
+    raise CorrectiveFreezePacketRefused(
+        "typed evidence source must be a non-symlink regular file:\n"
+        f"path={path}\n"
+        f"shape={shape}"
+    )
 
 
 def _validate_regular_file(path: Path, label: str) -> None:
     try:
         _regular_file(path)
     except CorrectiveFreezePacketRefused as exc:
-        raise CorrectiveFreezePacketRefused(f"{label} must be a regular file") from exc
+        raise CorrectiveFreezePacketRefused(f"{label} must be a regular file:\n{exc}") from exc
 
 
 def _direct_directories(path: Path, label: str) -> tuple[Path, ...]:
