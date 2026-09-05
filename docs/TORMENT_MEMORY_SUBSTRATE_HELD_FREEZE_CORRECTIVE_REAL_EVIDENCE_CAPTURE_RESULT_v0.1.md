@@ -1,0 +1,99 @@
+# TORMENT MEMORY SUBSTRATE — HELD FREEZE CORRECTIVE REAL EVIDENCE CAPTURE RESULT v0.1
+
+## Result
+
+```text
+HELD_FREEZE_CORRECTIVE_REAL_CAPTURE = STOPPED
+STOP_REASON = COMMITTED_TOOLING_HAS_NO_REAL_ROOT_TYPED_EVIDENCE_ADAPTER
+```
+
+The held real-root corrective-capture authorization was received. The
+committed packet boundary was inspected without modifying it. Its capture API
+requires a `CorrectiveSourceEvidenceAdapter`; the repository has the protocol
+and a disposable-test fixture adapter, but no committed real-root collector
+capable of producing the required typed description, manifest, per-scope
+postures, Phase-9B evidence, empty-private evidence, declared-empty-shared
+evidence, and owner observations.
+
+The work order requires a stop rather than a live tooling patch when that
+condition is found. No t0 snapshot, typed root evidence capture, successor
+payload, successor witness, or corrective packet was created.
+
+## Observations performed before stop
+
+```text
+STARTING_HEAD = 85323e8cfbe7767e6c079f72a34044e8a68138ec
+ORIGIN_MAIN = 85323e8cfbe7767e6c079f72a34044e8a68138ec
+
+WRITER_CENSUS = PASS
+REST_SERVICE = ABSENT
+MCP_SERVER = ABSENT
+DIRECT_TORMENT_TOOL_OR_SCRIPT = ABSENT
+AGENT_RUNNER_OR_OTHER_FABRIC_HOST = ABSENT
+NONTERMINAL_ROOT_JOB = ABSENT
+LISTENER_8787 = ABSENT
+```
+
+The process census excluded the Codex application/tool infrastructure from
+the TORMENT writer classes. The established clone/repair job locations were
+absent. No process was stopped, killed, started, or otherwise changed.
+
+## Required ledger
+
+```text
+PREDECESSOR_STATE_EQUALITY = FAIL
+PREDECESSOR_TREE_DIGEST = 52ff2f04d839015d43ef73a0ad02415d19587126ff2e6e0b3fbe4737f4487275
+CURRENT_PRE_CAPTURE_TREE_DIGEST = NOT_CAPTURED
+PREDECESSOR_FILE_COUNT = 1748
+CURRENT_PRE_CAPTURE_FILE_COUNT = NOT_CAPTURED
+PREDECESSOR_MAX_MTIME_NS = 1788363578805346200
+CURRENT_PRE_CAPTURE_MAX_MTIME_NS = NOT_CAPTURED
+PREDECESSOR_UNSCOPED_ARTIFACT_EQUALITY = NOT_CAPTURED
+CONTINUOUS_FREEZE_RECERTIFIED = NO
+
+T0_T1_STABILITY = NOT_CAPTURED
+T1_T2_STABILITY = NOT_CAPTURED
+FULL_TYPED_PACKET_CAPTURED = NO
+PACKET_DIGEST_CLOSURE = NOT_CAPTURED
+PACKET_SELF_CHECK = NOT_CAPTURED
+SUCCESSOR_FREEZE_OPERATION_ID = NOT_CREATED
+SUCCESSOR_FREEZE_WITNESS_DIGEST = NOT_CREATED
+SUCCESSOR_FREEZE_PAYLOAD_DIGEST = NOT_CREATED
+CORRECTIVE_PACKET_DIGEST = NOT_CREATED
+
+DISCOVERED_WORKSPACES = NOT_CAPTURED
+DISCOVERED_PRIVATE = NOT_CAPTURED
+DISCOVERED_SHARED_MATERIALIZED = NOT_CAPTURED
+DECLARED_EMPTY_SHARED = NOT_CAPTURED
+EMPTY_PRIVATE = NOT_CAPTURED
+TARGET_ST_BGE = NOT_CAPTURED
+LEGACY_HASH = NOT_CAPTURED
+UNKNOWN_IDENTITY = NOT_CAPTURED
+UNKNOWN_IDENTITY_PHASE9B = NOT_CAPTURED
+TYPED_ROOT_EVIDENCE_MANIFEST = NOT_CAPTURED
+TYPED_EXTERNAL_OWNER_OBSERVATIONS = NOT_CAPTURED
+GEOMETRY_DISPOSITION_PLAN = NOT_CAPTURED
+SOURCE_SCOPE_PLAN_INPUTS = NOT_CAPTURED
+EXCLUDED_SOURCE_ARTIFACTS = NOT_CAPTURED
+FINAL_WRITER_RECHECK = NOT_PERFORMED_AFTER_STOP
+
+REAL_ROOT_WRITE_CONTACT = NONE
+WRITERS_REMAIN_STOPPED = YES
+FREEZE_EPOCH_VALID = NOT_RECERTIFIED
+REAL_ADMISSION_AUTHORIZED = NO
+CUTOVER_PENDING_AUTHORIZED = NO
+NORMALIZATION_AUTHORIZED = NO
+P6_AUTHORIZED = NO
+P7_AUTHORIZED = NO
+PRODUCTION_CODE_CHANGES = 0
+TESTS_RUN = 0
+PROVIDER_CONTACT = NONE
+MODEL_LOADING = NONE
+BRAINVISION_OPENED = NO
+SECOND_COGNITIVE_FUNCTION_INSPECTED = NO
+```
+
+No real-root write occurred. Production writers remain intentionally stopped.
+A future implementation/qualification phase must add and qualify the missing
+committed real-root typed-evidence adapter before a new corrective-capture
+authorization can be used.
