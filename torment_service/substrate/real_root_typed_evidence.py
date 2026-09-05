@@ -260,6 +260,7 @@ class RealRootTypedEvidenceAdapter:
             root=root,
             discovered_census=discovered_census,
             allow_known_empty_shared_residue=False,
+            allow_known_empty_private_residue=False,
         )
         return CorrectiveFreezeTypedEvidence(
             description=prepared.description,
@@ -276,9 +277,9 @@ class RealRootTypedEvidenceAdapter:
     ) -> DirectAdmissionSourcePreparation:
         """Prepare direct in-memory root-admission facts with no packet lane.
 
-        The direct seam accepts known retained or storage residue in an empty
-        shared scope. It still refuses unknown direct children and never treats
-        residue as canonical memory.
+        The direct seam accepts known retained or storage residue in empty
+        shared and private scopes. It still refuses unknown direct children and
+        never treats residue as canonical memory.
         """
 
         root = _source_root(data_root)
@@ -286,6 +287,7 @@ class RealRootTypedEvidenceAdapter:
             root=root,
             discovered_census=discover_canonical_root_layout(data_root=root),
             allow_known_empty_shared_residue=True,
+            allow_known_empty_private_residue=True,
         )
 
     def _prepare_source(
@@ -294,6 +296,7 @@ class RealRootTypedEvidenceAdapter:
         root: Path,
         discovered_census: RootDiscoveredCensus,
         allow_known_empty_shared_residue: bool,
+        allow_known_empty_private_residue: bool,
     ) -> DirectAdmissionSourcePreparation:
         """Single source grammar shared by direct and compatibility callers."""
 
@@ -319,6 +322,7 @@ class RealRootTypedEvidenceAdapter:
                 workspace_path,
                 workspace_id,
                 allow_known_empty_shared_residue=allow_known_empty_shared_residue,
+                allow_known_empty_private_residue=allow_known_empty_private_residue,
             )
             entries.extend(result.entries)
             workspace_plans.append(result.workspace_plan)
@@ -379,6 +383,7 @@ class RealRootTypedEvidenceAdapter:
         workspace_id: str,
         *,
         allow_known_empty_shared_residue: bool,
+        allow_known_empty_private_residue: bool,
     ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
         workspace_meta = _capture_present(
@@ -447,6 +452,7 @@ class RealRootTypedEvidenceAdapter:
                 capture = _capture_private_scope(
                     root, private_path, scope, identity, self.target_representation_lane,
                     representation_lock,
+                    allow_known_empty_private_residue=allow_known_empty_private_residue,
                 )
                 entries.extend(capture.entries)
                 private_scopes.append(capture.scope_plan)
@@ -619,6 +625,7 @@ class _ScopeCapture:
 def _capture_private_scope(
     root: Path, path: Path, scope: RootScopeKey, identity: ExplicitSourceEvidence,
     target_lane: NativeRepresentationLane, representation_lock: tuple[str, str, int] | None,
+    *, allow_known_empty_private_residue: bool,
 ) -> _ScopeCapture:
     path = _real_directory(path, "private scope")
     boundary = EvidenceOwnerBoundary(
@@ -628,7 +635,10 @@ def _capture_private_scope(
     embedding_path = path / "embeddings" / "manifest.json"
     memory_events = path / "memory_events.jsonl"
     if not nodes_path.exists():
-        _validate_direct_children(path, {"embeddings", "memory_events.jsonl"}, "empty private scope")
+        if allow_known_empty_private_residue:
+            _validate_empty_private_residue(path, scope)
+        else:
+            _validate_direct_children(path, {"embeddings", "memory_events.jsonl"}, "empty private scope")
         embedding = _capture_present(
             root, embedding_path, SourceOwnerClass.EMBEDDING_MANIFEST, boundary,
             "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, scope,
@@ -637,9 +647,13 @@ def _capture_private_scope(
         _validate_storage_manifest(metadata, representation_lock)
         _validate_embedding_storage(path / "embeddings")
         total_rows, next_row = metadata["total_rows"], metadata["next_row"]
-        if total_rows != 0 or next_row != 0:
+        if not allow_known_empty_private_residue and (total_rows != 0 or next_row != 0):
             raise CorrectiveFreezePacketRefused("empty private embedding manifest must prove zero rows and next row")
-        if memory_events.exists() and (_regular_file(memory_events).stat().st_size != 0):
+        if (
+            not allow_known_empty_private_residue
+            and memory_events.exists()
+            and (_regular_file(memory_events).stat().st_size != 0)
+        ):
             raise CorrectiveFreezePacketRefused("empty private memory events must be absent or empty")
         nodes = _absent(
             SourceOwnerClass.PRIVATE_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
@@ -894,6 +908,13 @@ def _validate_empty_shared_residue(
         candidate = path / name
         if candidate.exists():
             _retained_directory(candidate, f"retained empty shared {name}")
+
+
+def _validate_empty_private_residue(path: Path, scope: RootScopeKey) -> None:
+    """Validate known private residue without promoting it to canonical memory."""
+
+    _validate_direct_children(path, _memory_scope_direct_children(scope), "empty private scope")
+    _validate_memory_scope_side_stores(path, scope)
 
 
 def _retained_directory(path: Path, label: str) -> Path:

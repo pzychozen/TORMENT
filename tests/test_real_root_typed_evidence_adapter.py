@@ -499,6 +499,67 @@ def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_
         adapter.prepare_direct_admission_source(data_root=root)
 
 
+@pytest.mark.parametrize(("total_rows", "next_row"), ((0, 0), (1, 1)))
+def test_direct_empty_private_keeps_known_residue_outside_canonical_memory(
+    tmp_path: Path,
+    total_rows: int,
+    next_row: int,
+) -> None:
+    root, adapter = _fixture(tmp_path)
+    private = root / "workspaces" / "multi" / "agents" / "empty-private" / "private"
+    _storage(private, total_rows=total_rows, next_row=next_row)
+    if total_rows:
+        _write(private / "embeddings" / "shard_0.npy", b"historical orphan vector")
+    _write(private / "memory_events.jsonl", "historical retained audit event")
+    _write(private / "edges.jsonl", "historical retained edge residue")
+    _write(private / "logs" / "retained.jsonl", "retained log")
+    _write(private / "trajectories" / "retained.jsonl", "retained trajectory")
+    _write(private / "checkpoints" / "checkpoint.json", "retained checkpoint")
+    _write(private / "trajectories.jsonl", "retained legacy trajectory")
+    before = _source_snapshot(root)
+
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+
+    empty = next(item for item in prepared.empty_private_evidence if item.scope_key.agent_id == "empty-private")
+    source_plan = next(item for item in prepared.source_scope_plans if item.scope_key.agent_id == "empty-private")
+    workspace = next(item for item in prepared.description.workspace_plans if item.workspace_id == "multi")
+    manifest_entries = [
+        item for item in prepared.description.explicit_source_manifest.entries
+        if item.scope_key == source_plan.scope_key
+    ]
+    assert empty.embedding_manifest_total_rows == total_rows
+    assert empty.embedding_manifest_next_row == next_row
+    assert empty.memory_events_observation.presence is SourceArtifactPresence.PRESENT
+    assert empty.memory_events_observation.byte_length > 0
+    assert source_plan.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+    assert source_plan.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    assert [item.agent_id for item in workspace.identity_only_agents] == ["empty-private"]
+    assert [(item.canonical_locator, item.presence_expectation.value) for item in manifest_entries] == [
+        ("embeddings/manifest.json", "EXPECTED_PRESENT"),
+        ("nodes.jsonl", "EXPECTED_ABSENT"),
+    ]
+    assert _source_snapshot(root) == before
+
+    _write(private / "unknown_private_artifact.json", "must refuse")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_empty_private_residue_does_not_relax_compatibility_capture(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    private = root / "workspaces" / "multi" / "agents" / "empty-private" / "private"
+    _storage(private, total_rows=1, next_row=1)
+    _write(private / "embeddings" / "shard_0.npy", b"historical orphan vector")
+
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+
+    assert next(
+        item for item in prepared.source_scope_plans if item.scope_key.agent_id == "empty-private"
+    ).materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+    with pytest.raises(CorrectiveFreezePacketRefused, match="must prove zero rows and next row"):
+        _capture(root, adapter)
+
+
 def test_direct_preparation_feeds_writer_callback_and_root_envelope_without_packet(
     tmp_path: Path,
 ) -> None:
