@@ -2,88 +2,120 @@
 
 **Date:** 2026-09-05
 **Authorization:** `FILE_BACKED_REAL_ADMISSION_ADMINISTRATION_RUNNER_QUALIFICATION = YES`
-**Starting revision:** `1b3961a5af13fe9be07f3b74e05b68c563fc9c7e` (`HEAD == origin/main`)
+**Completion starting revision:** `1b0d149243afdff951a702cdce17db57f7acba7a` (`HEAD == origin/main`)
 
 ## Result
 
-`FILE_BACKED_REAL_ADMISSION_ADMINISTRATION_RUNNER_QUALIFICATION = PASS`
+`FILE_BACKED_REAL_ADMISSION_ADMINISTRATION_RUNNER_QUALIFICATION = QUALIFIED`
 
-The new `FileBackedRealAdmissionAdministrationRunner` is an administrative
-checkpoint recorder only. It contains no direct source adapter invocation,
-writer/listener census, writer-freeze capture, SQLite connection, P1 bootstrap,
-admission envelope, normalization, selector, service, or runtime authority.
-The caller remains responsible for every future authorized operation and records
-the resulting state explicitly.
+`FileBackedRealAdmissionAdministrationRunner` is a narrow administration
+checkpoint recorder. It does not invoke direct-source grammar, migration,
+writer-freeze capture, SQLite, P1 implementation, normalization, services, or
+runtime authority. A future separately authorized caller supplies all such
+work; this runner only retains caller-supplied administrative facts outside the
+caller-supplied data root.
 
-## Result boundary and durability
+## Durable identity and checkpoint contract
 
-The runner requires all of:
+The caller must provide an explicit result directory outside `data_root`, an
+operation ID, expected repository head, data-root identity, and immutable P1
+authorization. The canonical `administration_state.json` has the typed
+`run_context` section with all of:
 
-- an explicit `data_root` solely for destination containment checks;
-- an explicit caller-owned `result_directory`; and
-- a bounded `operation_id`.
+- `operation_id`
+- `expected_repository_head`
+- `data_root_identity`
+- `P1_authorized`
+- `P1_started`
+- `durable_native_state_created`
 
-It rejects a result directory that resolves inside the supplied data root, so it
-cannot write to legacy source or `data/substrate`. It does not hard-code a
-production path. The result directory is suitable for a caller-supplied layout
-such as `administration_results/<operation-id>/` outside the data root.
+alongside typed `state`, monotonic `sequence`, `recorded_at_ns`, and JSON
+`detail`. Reopening a directory refuses if its operation ID, expected head,
+data-root identity, or P1 authorization differs. `P1_authorized` cannot be
+changed by a transition.
 
-`administration_state.json` is the one canonical current state. Each checkpoint
-writes canonical JSON to a unique temporary sibling, flushes and file-syncs it,
-closes it, then calls `os.replace(...)`. A failed replacement leaves the prior
-canonical file current; temporary files are not authoritative.
+Each current-state update writes canonical JSON to a unique sibling temporary
+file, flushes and file-syncs it, closes it, then uses `os.replace(...)`. The
+temporary file is never authoritative; a failed replacement retains the prior
+canonical state. The optional `administration_events.jsonl` is append-only,
+written only after the current state commits, and holds the same context and
+detail payload. It is simple administrative evidence, not a database,
+provenance framework, or authority source.
 
-The optional `administration_events.jsonl` is a small append-only audit aid. It
-is written only after the canonical checkpoint commits, carries no hash chain,
-and is never an authority source.
+The event detail contract retains capture facts—writer-freeze operation ID,
+payload digest, writer-evidence/witness relationship, stability delta, file
+count, tree digest, jobs, listener, and covered writer—and direct-preparation
+facts—description identity/digest, counts, posture/dispositions, unknown-scope
+keys, empty-private count, and geometry summary. Synthetic tests recover those
+values from state/event files alone after the caller has completed.
 
-## State model
+## P1 boundary retention only
 
-The typed state machine supports every required outcome:
-
-```text
-RUNNER_STARTED
-PRECHECK_STARTED / PRECHECK_PASS / PRECHECK_REFUSED
-CAPTURE_STARTED / CAPTURE_RETURNED / CAPTURE_REFUSED / CAPTURE_EXCEPTION
-DIRECT_PREPARATION_PASS / DIRECT_PREPARATION_REFUSED
-P1_NOT_AUTHORIZED / P1_READY / P1_STARTED / P1_PASS / P1_FAILED_AFTER_DURABLE_STATE
-FINAL_VERIFICATION_PASS / FINAL_STOP
-ADMINISTRATION_EXCEPTION
-```
-
-Legal transitions are intentionally bounded. A reopened runner requires the
-same operation identity and continues the durable sequence; it cannot silently
-reuse a result directory for another operation.
+The runner has a synthetic callback seam for qualification of administrative
+ordering only. It atomically records `P1_STARTED` before calling a supplied
+callback. A callback that creates a caller-owned durable artifact must explicitly
+record that fact while still in `P1_STARTED`. If that callback then raises, the
+runner records `P1_FAILED_AFTER_DURABLE_STATE`, retains the artifact, and offers
+no retry or cleanup path. This is not P1 implementation and does not grant P1
+authority.
 
 ## Synthetic-only verification
 
-The qualification used only pytest disposable roots. It covered result-directory
-containment refusal, external-only state/event writes, every required normal and
-P1-failure state path, exception retention without an event log, restart
-sequence continuity, and failed atomic replacement preserving the prior state.
+All tests used disposable synthetic roots and synthetic child Python processes.
+The detached-output test redirected child stdout/stderr to null, did not obtain
+the result from terminal output, later reopened the result directory, and
+recovered `FINAL_STOP`. The interruption test first observed a valid durable
+`CAPTURE_STARTED`, terminated the child, then reopened the valid canonical
+state with no later event. The callback tests used only fake artifacts outside
+their synthetic data roots.
 
 ```text
 python -m py_compile torment_service\substrate\file_backed_real_admission_administration_runner.py tests\test_file_backed_real_admission_administration_runner.py
-pytest -q -p no:cacheprovider --basetemp C:\TORMENT\pdm9 tests\test_file_backed_real_admission_administration_runner.py
-12 passed in 0.62s
+pytest -q -p no:cacheprovider --basetemp C:\TORMENT\pdm11 tests\test_file_backed_real_admission_administration_runner.py
+19 passed in 2.48s
 
-pytest -q -p no:cacheprovider --basetemp C:\TORMENT\pdm10 \
+pytest -q -p no:cacheprovider --basetemp C:\TORMENT\pdm12 \
   tests\test_file_backed_real_admission_administration_runner.py \
   tests\test_root_writer_freeze_evidence.py \
   tests\test_substrate_root_admission_description.py
-39 passed, 1 skipped in 3.29s
+46 passed, 1 skipped in 5.04s
 ```
 
-The second command emitted the environment's intermittent Windows/Numpy access
-violation traceback during import, but returned success and the test summary
-above. This is recorded as host-environment noise, not a claimed runner
-property. No real root, production process/listener, source model, production
-SQLite database, P1/P2, normalization, service, Brainvision, or cognitive
-function was contacted or changed.
+The focused command emitted the host environment's intermittent Windows
+subprocess access-violation traceback while waiting for the synthetic detached
+child, but exited successfully with the complete passing summary above. That
+host noise is not claimed as a runner property.
 
-## Authority boundary
+## Exact verdict ledger
 
-This qualification changes only administrative result retention. It grants no
-authority to repeat Attempt 5, prepare a real source, create a native core, or
-advance P2 through P7. A future separately authorized administration must name
-its result directory and operation ID before recording any real-run state.
+```text
+FILE_BACKED_REAL_ADMISSION_ADMINISTRATION_RUNNER = QUALIFIED
+ATOMIC_CHECKPOINT_WRITE = PASS
+RESULT_PATH_OUTSIDE_DATA_ENFORCED = PASS
+DETACHED_OUTPUT_RESULT_RECOVERY = PASS
+INTERRUPTED_RUN_LAST_CHECKPOINT_RECOVERABLE = PASS
+CAPTURE_RESULT_RETENTION = PASS
+DIRECT_PREPARATION_RESULT_RETENTION = PASS
+SOURCE_REFUSAL_RETENTION = PASS
+UNEXPECTED_EXCEPTION_RETENTION = PASS
+P1_BOUNDARY_CHECKPOINT_ORDERING = PASS
+P1_DURABLE_FAILURE_RETENTION = PASS
+RUN_CONTEXT_HEAD_BOUND = PASS
+RUN_CONTEXT_DATA_ROOT_IDENTITY_BOUND = PASS
+P1_AUTHORIZATION_STATE_BOUND = PASS
+STDOUT_DEPENDENCY = NONE
+ATTACHED_HOST_DEPENDENCY = NONE
+WRITER_FREEZE_SEMANTICS_CHANGED = NO
+DIRECT_SOURCE_SEMANTICS_CHANGED = NO
+DATABASE_SEMANTICS_CHANGED = NO
+AUTHORITY_MODEL_CHANGED = NO
+REAL_ROOT_CONTACT = NONE
+SQLITE_PRODUCTION_WRITE = NONE
+P1 = NOT_EXECUTED
+P2 = NOT_EXECUTED
+READY_FOR_DIRECT_REAL_PREPARATION_ATTEMPT_6 = YES
+```
+
+No production writer census, listener contact, SQLite, source mutation,
+normalization, service operation, Brainvision, or cognitive-function work was
+performed. Attempt 6 was not started.
