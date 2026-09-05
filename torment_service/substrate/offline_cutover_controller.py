@@ -78,6 +78,7 @@ from .root_blocker5_binding import (
 )
 from .root_profile import RootProfileGenerationRef
 from .runtime_binding import NativeMemoryRuntimeScope
+from .writer_freeze_evidence import RootWriterFreezeEvidencePayload, RootWriterFreezeRecheck
 
 
 class OfflineCutoverRefused(SubstrateConfigurationError):
@@ -173,6 +174,8 @@ class RootOfflineCutoverRequest:
     writer_freeze: RootWriterFreezeWitness
     operator_cutover_key: str
     geometry_disposition_plan: RootGeometryDispositionPlan | None = None
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload | None = None
+    writer_freeze_recheck: RootWriterFreezeRecheck | None = None
 
     def __post_init__(self) -> None:
         root = Path(self.data_root).expanduser().resolve()
@@ -198,6 +201,18 @@ class RootOfflineCutoverRequest:
             raise ValueError("root offline cutover writer freeze must be typed")
         if self.writer_freeze.data_root_identity != self.description.data_root_identity:
             raise ValueError("root writer freeze names another root")
+        if self.writer_freeze_evidence is None:
+            if self.writer_freeze_recheck is not None:
+                raise ValueError("root writer freeze recheck requires writer freeze evidence")
+        else:
+            if not isinstance(self.writer_freeze_evidence, RootWriterFreezeEvidencePayload):
+                raise ValueError("root writer freeze evidence must be typed")
+            if not isinstance(self.writer_freeze_recheck, RootWriterFreezeRecheck):
+                raise ValueError("root writer freeze evidence requires a fresh recheck")
+            if self.writer_freeze_evidence.data_root_identity != self.description.data_root_identity:
+                raise ValueError("root writer freeze evidence names another root")
+            if self.writer_freeze_evidence.external_owner_observation_digest != self.description.external_owner_observation_digest:
+                raise ValueError("root writer freeze evidence external owner digest disagrees")
         if not isinstance(self.operator_cutover_key, str) or not self.operator_cutover_key or len(self.operator_cutover_key) > 160:
             raise ValueError("root operator_cutover_key must be bounded non-empty text")
         if self.geometry_disposition_plan is not None and not isinstance(
@@ -870,6 +885,8 @@ class OfflineCutoverController:
                         item.scope_plan for item in request.normalization_request.scope_inputs
                     ),
                     connection=opened.connection,
+                    writer_freeze_evidence=request.writer_freeze_evidence,
+                    writer_freeze_recheck=request.writer_freeze_recheck,
                 )
         except RootBlocker5BindingRefused as exc:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ENVELOPE_REFUSED") from exc

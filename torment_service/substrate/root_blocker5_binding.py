@@ -34,6 +34,13 @@ from .migration.runtime_readiness import MigrationRuntimeScopePlan
 from .root_profile import RootProfileGenerationRef
 from .root_scope_membership import RootScopeMembershipRuntime
 from .runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
+from .writer_freeze_evidence import (
+    RootWriterFreezeEvidencePayload,
+    RootWriterFreezeEvidenceRefused,
+    RootWriterFreezeRecheck,
+    bind_root_writer_freeze_witness,
+    recheck_root_writer_freeze_evidence,
+)
 
 
 class RootBlocker5BindingRefused(DeploymentAuthorityError):
@@ -265,6 +272,8 @@ class RootAdmissionEnvelope:
     root_profile: RootProfileGenerationRef
     root_membership_closure_digest: str
     runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...]
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload | None = None
+    writer_freeze_recheck: RootWriterFreezeRecheck | None = None
 
     def __post_init__(self) -> None:
         _require_description(self.description)
@@ -272,6 +281,25 @@ class RootAdmissionEnvelope:
             raise RootBlocker5BindingRefused("root envelope requires writer freeze evidence")
         if self.writer_freeze.data_root_identity != self.description.data_root_identity:
             raise RootBlocker5BindingRefused("root writer freeze names another data root")
+        if self.writer_freeze_evidence is None:
+            if self.writer_freeze_recheck is not None:
+                raise RootBlocker5BindingRefused("root writer freeze recheck requires payload evidence")
+        else:
+            if not isinstance(self.writer_freeze_evidence, RootWriterFreezeEvidencePayload):
+                raise RootBlocker5BindingRefused("root envelope writer freeze payload must be typed")
+            if not isinstance(self.writer_freeze_recheck, RootWriterFreezeRecheck):
+                raise RootBlocker5BindingRefused("root envelope requires a fresh writer freeze recheck")
+            try:
+                bind_root_writer_freeze_witness(
+                    payload=self.writer_freeze_evidence, witness=self.writer_freeze,
+                )
+            except RootWriterFreezeEvidenceRefused as exc:
+                raise RootBlocker5BindingRefused("root writer freeze witness payload mismatch") from exc
+            if (
+                self.writer_freeze_evidence.external_owner_observation_digest
+                != self.description.external_owner_observation_digest
+            ):
+                raise RootBlocker5BindingRefused("root writer freeze external owner evidence disagrees")
         if not isinstance(self.discovered_census, RootDiscoveredCensus):
             raise RootBlocker5BindingRefused("root envelope requires discovered census evidence")
         require_discovered_declared_census_parity(
@@ -299,7 +327,7 @@ class RootAdmissionEnvelope:
         return digest_mapping(self.payload())
 
     def payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "data_root_identity": self.description.data_root_identity,
             "root_description_digest": self.description.identity_digest,
             "writer_freeze": self.writer_freeze.payload(),
@@ -317,6 +345,12 @@ class RootAdmissionEnvelope:
                 self.runtime_scope_plans, self.description.target_representation_lane,
             ),
         }
+        if self.writer_freeze_evidence is not None:
+            payload.update({
+                "writer_freeze_evidence_digest": self.writer_freeze_evidence.digest,
+                "frozen_workspaces_tree_digest": self.writer_freeze_evidence.source_tree_snapshot.tree_digest,
+            })
+        return payload
 
 
 @dataclass(frozen=True)
@@ -370,8 +404,18 @@ class RootAdmissionEnvelopeRecord:
             "qualified_deployment_profile_digest", "root_profile",
             "root_membership_closure_digest", "root_runtime_scope_plan_digest",
         }
-        if set(self.envelope_payload) != required_envelope_keys:
+        freeze_evidence_keys = {
+            "writer_freeze_evidence_digest", "frozen_workspaces_tree_digest",
+        }
+        actual_envelope_keys = set(self.envelope_payload)
+        if (
+            actual_envelope_keys != required_envelope_keys
+            and actual_envelope_keys != required_envelope_keys | freeze_evidence_keys
+        ):
             raise RootBlocker5BindingRefused("root envelope record envelope payload is noncanonical")
+        if freeze_evidence_keys <= actual_envelope_keys:
+            require_digest(self.envelope_payload["writer_freeze_evidence_digest"], "writer freeze evidence digest")
+            require_digest(self.envelope_payload["frozen_workspaces_tree_digest"], "frozen workspaces tree digest")
         if self.envelope_digest != digest_mapping(self.envelope_payload):
             raise RootBlocker5BindingRefused("root envelope record digest does not recompute")
         if self.envelope_payload.get("root_description_digest") != hashlib.sha256(
@@ -520,9 +564,18 @@ def build_root_admission_envelope(
     runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
     runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...],
     connection: sqlite3.Connection,
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload | None = None,
+    writer_freeze_recheck: RootWriterFreezeRecheck | None = None,
 ) -> RootAdmissionEnvelope:
     """Build P2 identity only after manifest, census and membership agreement."""
 
+    _verify_root_writer_freeze_evidence(
+        data_root=data_root,
+        description=description,
+        writer_freeze=writer_freeze,
+        payload=writer_freeze_evidence,
+        recheck=writer_freeze_recheck,
+    )
     _verify_manifest(data_root=data_root, description=description)
     discovered = discover_canonical_root_layout(data_root=data_root)
     require_discovered_declared_census_parity(description=description, discovered=discovered)
@@ -544,6 +597,8 @@ def build_root_admission_envelope(
         root_profile=root_profile,
         root_membership_closure_digest=closure,
         runtime_scope_plans=runtime_scope_plans,
+        writer_freeze_evidence=writer_freeze_evidence,
+        writer_freeze_recheck=writer_freeze_recheck,
     )
 
 
@@ -566,6 +621,13 @@ def verify_root_completion(
 
     if not isinstance(normalization, RootNormalizationResult):
         raise RootBlocker5BindingRefused("root completion requires a normalization result")
+    _verify_root_writer_freeze_evidence(
+        data_root=data_root,
+        description=envelope.description,
+        writer_freeze=envelope.writer_freeze,
+        payload=envelope.writer_freeze_evidence,
+        recheck=envelope.writer_freeze_recheck,
+    )
     _verify_manifest(data_root=data_root, description=envelope.description)
     current_discovered = discover_canonical_root_layout(data_root=data_root)
     require_discovered_declared_census_parity(
@@ -788,6 +850,39 @@ def _verify_manifest(*, data_root: str | Path, description: RootNativeProduction
         description.explicit_source_manifest.verify(data_root=data_root)
     except Exception as exc:
         raise RootBlocker5BindingRefused("ROOT_SOURCE_MANIFEST_DRIFT") from exc
+
+
+def _verify_root_writer_freeze_evidence(
+    *,
+    data_root: str | Path,
+    description: RootNativeProductionAdmissionDescription,
+    writer_freeze: RootWriterFreezeWitness,
+    payload: RootWriterFreezeEvidencePayload | None,
+    recheck: RootWriterFreezeRecheck | None,
+) -> None:
+    """Recheck an opted-in Class-B epoch; legacy witness-only callers remain valid.
+
+    This is deliberately a verifier, not a refresh or a process controller.  A
+    request that elects the new payload must supply a fresh injected recheck at
+    every P2/P4/pre-P6 envelope construction.
+    """
+
+    if payload is None:
+        if recheck is not None:
+            raise RootBlocker5BindingRefused("root writer freeze recheck has no payload")
+        return
+    if not isinstance(recheck, RootWriterFreezeRecheck):
+        raise RootBlocker5BindingRefused("root writer freeze fresh recheck is required")
+    try:
+        recheck_root_writer_freeze_evidence(
+            data_root=data_root,
+            payload=payload,
+            witness=writer_freeze,
+            recheck=recheck,
+            expected_external_owner_observation_digest=description.external_owner_observation_digest,
+        )
+    except RootWriterFreezeEvidenceRefused as exc:
+        raise RootBlocker5BindingRefused("ROOT_WRITER_FREEZE_EVIDENCE_STALE_OR_INVALID") from exc
 
 
 def _require_normalization_complete(

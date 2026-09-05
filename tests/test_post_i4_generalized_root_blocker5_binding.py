@@ -73,6 +73,15 @@ from torment_service.substrate.root_profile import (
 from torment_service.substrate.runtime_binding import NativeRepresentationLane
 from torment_service.substrate.errors import DeploymentAuthorityError, DeploymentIdempotencyConflict
 from torment_service.substrate.schema import create_schema
+from torment_service.substrate.writer_freeze_evidence import (
+    ListenerObservation,
+    ListenerObservationResult,
+    RootWriterClass,
+    RootWriterFreezeRecheck,
+    WriterObservationResult,
+    WriterProcessObservation,
+    capture_root_writer_freeze_evidence,
+)
 
 
 def _digest(value: str) -> str:
@@ -536,3 +545,77 @@ def test_root_pre_active_abort_restores_legacy_without_disposition_or_native_res
     assert inspection.ever_active is False
     assert controller.root_current_stage(request) is OfflineCutoverStage.PREPARED
     assert controller.safe_root_pending_abort(request).deployment_state.value == "LEGACY_ACTIVE"
+
+
+def _root_writer_freeze_evidence(request: RootOfflineCutoverRequest):
+    observations = tuple(
+        WriterProcessObservation(
+            writer_class=item,
+            observation_mechanism="SYNTHETIC_OPERATOR_CENSUS_V1",
+            result=WriterObservationResult.ABSENT,
+        )
+        for item in RootWriterClass
+    )
+    listener = ListenerObservation(
+        listener_identity="127.0.0.1:8787",
+        observation_mechanism="SYNTHETIC_LISTENER_CENSUS_V1",
+        result=ListenerObservationResult.ABSENT,
+    )
+    timestamps = iter((2_000_000_000_000_000_000, 2_000_000_000_000_000_100, 2_000_000_000_000_000_200))
+    captured = capture_root_writer_freeze_evidence(
+        data_root=request.root,
+        data_root_identity=request.description.data_root_identity,
+        writer_freeze_operation_identity="synthetic-root-freeze-evidence",
+        operator_identity="synthetic-root-operator",
+        covered_writer_classes=observations,
+        listener_observation=listener,
+        external_owner_observation_digest=request.description.external_owner_observation_digest,
+        expected_root_admission_description_contract="ROOT_ADMISSION_DESCRIPTION_V1",
+        invalidation_rule_version="ROOT_WRITER_FREEZE_INVALIDATION_V1",
+        minimum_delta_seconds=0,
+        clock_ns=lambda: next(timestamps),
+    )
+    recheck = RootWriterFreezeRecheck(
+        covered_writer_classes=observations,
+        listener_observation=listener,
+        job_observation=captured.payload.job_observation,
+        external_owner_observation_digest=request.description.external_owner_observation_digest,
+    )
+    return captured, recheck
+
+
+def test_f15_p2_refuses_tree_drift_against_frozen_writer_evidence(tmp_path: Path) -> None:
+    request, _normalization = _root_fixture(tmp_path)
+    captured, recheck = _root_writer_freeze_evidence(request)
+    frozen_request = replace(
+        request,
+        writer_freeze=captured.witness,
+        writer_freeze_evidence=captured.payload,
+        writer_freeze_recheck=recheck,
+    )
+    controller = OfflineCutoverController()
+    controller.prepare_root(frozen_request)
+    (frozen_request.root / "workspaces" / "ws-one" / "workspace_meta.json").write_bytes(b"tree-drift")
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
+        controller.enter_root_external_pending(frozen_request)
+
+
+def test_frozen_writer_evidence_is_rechecked_at_p4_and_immediately_pre_p6(tmp_path: Path) -> None:
+    request, normalization = _root_fixture(tmp_path)
+    captured, recheck = _root_writer_freeze_evidence(request)
+    frozen_request = replace(
+        request,
+        writer_freeze=captured.witness,
+        writer_freeze_evidence=captured.payload,
+        writer_freeze_recheck=recheck,
+    )
+    controller = OfflineCutoverController()
+    controller.prepare_root(frozen_request)
+    controller.enter_root_external_pending(frozen_request)
+    controller.verify_root_completion(frozen_request, normalization)
+    controller.enter_root_core_pending(frozen_request, normalization)
+    (frozen_request.root / "workspaces" / "ws-one" / "workspace_meta.json").write_bytes(b"tree-drift")
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
+        controller.activate_root_core(frozen_request, normalization)
