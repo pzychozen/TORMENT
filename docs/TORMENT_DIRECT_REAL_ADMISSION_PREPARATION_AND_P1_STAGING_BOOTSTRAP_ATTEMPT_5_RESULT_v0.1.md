@@ -1,8 +1,8 @@
 # TORMENT Direct Real Admission Preparation and P1 Staging Bootstrap — Attempt 5 Result
 
-**Date:** 2026-09-05  
-**Authorization:** `DIRECT_REAL_ADMISSION_PREPARATION_AND_P1_STAGING_BOOTSTRAP_ATTEMPT_5 = YES`  
-**Authoritative revision at start:** `85153b73898410ff327d3c00514720e58f9fd40e` (`HEAD == origin/main`)  
+**Date:** 2026-09-05
+**Authorization:** `DIRECT_REAL_ADMISSION_PREPARATION_AND_P1_STAGING_BOOTSTRAP_ATTEMPT_5 = YES`
+**Authoritative revision at start:** `85153b73898410ff327d3c00514720e58f9fd40e` (`HEAD == origin/main`)
 **Real root:** `C:\TORMENT\TORMENT_repo\TORMENT-fabric_v2\torment_fabric\data`
 
 ## Result
@@ -10,7 +10,7 @@
 `DIRECT_REAL_ADMISSION_PREPARATION_ATTEMPT_5 = INTERRUPTED_PRE_P1`
 
 The one intended qualified capture was started through the required
-`build_real_direct_admission_source_adapter(...)` / 
+`build_real_direct_admission_source_adapter(...)` /
 `capture_root_writer_freeze_evidence(...)` path after the initial command-prompt
 environment setup. Its 60-second stability interval outlived the command host's
 attached-output lifetime. The process then exited without returning its structured
