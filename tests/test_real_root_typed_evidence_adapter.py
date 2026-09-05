@@ -64,67 +64,90 @@ def _npy(path: Path, *, dimension: int = 384) -> None:
     _write(path, b"\x93NUMPY\x01\x00" + struct.pack("<H", len(raw)) + raw + (b"\x00" * (dimension * 4)))
 
 
-def _scope(root: Path, workspace: str, agent: str, representation: dict[str, object]) -> None:
+def _storage(path: Path, *, dimension: int = 384, total_rows: int = 1, next_row: int = 1) -> None:
+    _json(path / "embeddings" / "manifest.json", {
+        "version": 1, "embedding_dim": dimension, "dtype": "float32", "rows_per_shard": 4096,
+        "active_shard": 0, "next_row": next_row, "total_rows": total_rows,
+    })
+
+
+def _scope(root: Path, workspace: str, agent: str) -> None:
     private = root / "workspaces" / workspace / "agents" / agent / "private"
     _json(private.parent / "identity.json", {"agent": agent})
     _write(private / "nodes.jsonl", '{"node":1}\n')
-    _json(private / "embedding_manifest.json", {"representation": representation})
+    _storage(private)
 
 
-def _shared(root: Path, workspace: str, domain: str, representation: dict[str, object]) -> None:
+def _shared(root: Path, workspace: str, domain: str) -> None:
     shared = root / "workspaces" / workspace / "domains" / domain / "shared"
     _write(shared / "nodes.jsonl", '{"node":1}\n')
-    _json(shared / "embedding_manifest.json", {"representation": representation})
+    _storage(shared)
 
 
-def _target(*, motif_domain_id: str | None = None) -> dict[str, object]:
-    value: dict[str, object] = {
-        "disposition": "TARGET_COMPATIBLE",
-        "provider": "st",
-        "model": "BAAI/bge-small-en-v1.5",
-        "dimension": 384,
-    }
-    if motif_domain_id is not None:
-        value["motif_domain_id"] = motif_domain_id
-    return value
+def _target_lock() -> dict[str, object]:
+    return {"embed_provider": "st", "embed_model": "BAAI/bge-small-en-v1.5", "embed_dim": 384}
+
+
+def _hash_lock() -> dict[str, object]:
+    return {"embed_provider": "hash", "embed_model": "hash:384:torment", "embed_dim": 384}
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
     root = tmp_path / "production-shaped-disposable-source"
     empty = root / "workspaces" / "empty"
     multi = root / "workspaces" / "multi"
-    _json(empty / "workspace_meta.json", {"workspace": "empty"})
+    hashed = root / "workspaces" / "hash"
+    _json(empty / "workspace_meta.json", {"workspace": "empty", **_target_lock()})
     _json(empty / "domains.json", {"domains": ["declared"]})
-    _json(multi / "workspace_meta.json", {"workspace": "multi"})
+    _json(multi / "workspace_meta.json", {"workspace": "multi", **_target_lock()})
     _json(multi / "domains.json", {
         "domains": ["team", "motif", "missing"], "legacy_default_domain": "legacy",
     })
-    _json(multi / "external_owner_observations.json", {"observations": [{
-        "owner_kind": "IDENTITY", "observation_key": "multi-owner-identity", "locator": "owner_identity.json",
-    }]})
-    _json(multi / "owner_identity.json", {"owner": "synthetic"})
-    _scope(root, "multi", "target", _target(motif_domain_id="team"))
-    _scope(root, "multi", "rehash", {
-        "disposition": "REEMBED_REQUIRED", "legacy_hash": _digest("legacy-rehash"),
-    })
-    _scope(root, "multi", "opaque", {
-        "disposition": "UNKNOWN_IDENTITY",
-        "metadata_less_source_evidence": [{
+    _json(hashed / "workspace_meta.json", {"workspace": "hash", **_hash_lock()})
+    _json(hashed / "domains.json", {"domains": []})
+    _scope(root, "multi", "target")
+    _scope(root, "hash", "rehash")
+    _json(multi / "agents" / "target" / "roles.json", {"role": "synthetic"})
+    _json(multi / "agents" / "target" / "character_state.json", {"state": "retained"})
+    _json(multi / "seeds" / "seed-a" / "seed.json", {"seed": "retained"})
+    _json(multi / "bridges.json", {"bridges": []})
+    _write(multi / "bridge_events.jsonl", "")
+    _json(multi / "agents" / "target" / "affect_state.json", {"affect": "retained"})
+    _json(multi / "agents" / "target" / "anchors.json", {"anchors": []})
+    _json(multi / "agents" / "target" / "symbol_state.json", {"symbol": "retained"})
+    _write(multi / "agents" / "target" / "feedback_events.jsonl", "")
+    _write(multi / "agents" / "target" / "index" / "memory_index.sqlite", b"derived-index")
+    _write(multi / "agents" / "target" / "memory_archive" / "documents.jsonl", "retained")
+    _write(multi / "agents" / "target" / "warmup" / "state.json", "retained")
+    _write(multi / "agents" / "target" / "private" / "checkpoints" / "checkpoint.json", "retained")
+    _write(multi / "agents" / "target" / "private" / "logs" / "trajectories" / "daily.jsonl", "retained")
+    _shared(root, "multi", "team")
+    _json(multi / "domains" / "team" / "proposals.jsonl", {"proposal": "retained"})
+    _write(multi / "domains" / "team" / "proposal_events.jsonl", "")
+    _json(multi / "domains" / "team" / "conflicts.jsonl", {"conflict": "retained"})
+    _write(multi / "domains" / "team" / "conflict_events.jsonl", "")
+    motif = multi / "domains" / "motif"
+    (motif / "shared").mkdir(parents=True, exist_ok=True)
+    _json(motif / "motifs.json", {"motif": "synthetic"})
+    _write(motif / "motif_events.jsonl", "")
+    _json(motif / "motif_merges.json", {"merges": []})
+    for workspace in ("ws3", "ws4", "ws5"):
+        path = root / "workspaces" / workspace
+        _json(path / "workspace_meta.json", {"workspace": workspace})
+        _json(path / "domains.json", {"domains": []})
+        _scope(root, workspace, "a1")
+        private = path / "agents" / "a1" / "private"
+        _write(private / "nodes.jsonl", json.dumps({"metadata_less_source_evidence": [{
             "eid": 7,
             "vector_locator": "emb_7.npy",
             "canonical_text_locator": "canonical_text_7.json",
-            "metadata_less_source_evidence_identity": "opaque-eid-7",
-        }],
-    })
-    opaque = root / "workspaces" / "multi" / "agents" / "opaque" / "private"
-    _npy(opaque / "emb_7.npy")
-    _json(opaque / "canonical_text_7.json", {"text": "opaque legacy source"})
+            "metadata_less_source_evidence_identity": f"{workspace}-eid-7",
+        }]}) + "\n")
+        _npy(private / "emb_7.npy")
+        _json(private / "canonical_text_7.json", {"text": "qualified legacy source"})
     empty_private = root / "workspaces" / "multi" / "agents" / "empty-private" / "private"
     _json(empty_private.parent / "identity.json", {"agent": "empty-private"})
-    _json(empty_private / "embedding_manifest.json", {"total_rows": 0, "next_row": 0})
-    _shared(root, "multi", "team", _target())
-    motif = root / "workspaces" / "multi" / "domains" / "motif" / "shared"
-    _json(motif / "motifs.json", {"motif": "synthetic"})
+    _storage(empty_private, total_rows=0, next_row=0)
     _write(root / "unscoped_nodes.jsonl", "residual")
     _write(root / "unscoped_embeddings.bin", b"residual-vectors")
     _write(root / "lived_use" / "arbitrary_nested_basin" / "embedding_manifest.json", "not source JSON")
@@ -155,12 +178,12 @@ def test_discovers_direct_declarations_and_builds_all_source_plans(tmp_path: Pat
     root, adapter = _fixture(tmp_path)
     typed = _capture(root, adapter)
 
-    assert typed.discovered_census.workspace_ids == ("empty", "multi")
-    assert typed.description.expected_census.workspace_count == 2
-    assert typed.description.expected_census.total_materialized_scope_count == 6
+    assert typed.discovered_census.workspace_ids == ("empty", "hash", "multi", "ws3", "ws4", "ws5")
+    assert typed.description.expected_census.workspace_count == 6
+    assert typed.description.expected_census.total_materialized_scope_count == 8
     assert typed.description.expected_census.declared_empty_shared_scope_count == 3
     assert typed.description.expected_census.empty_private_identity_scope_count == 1
-    assert len(typed.source_scope_plans) == 9
+    assert len(typed.source_scope_plans) == 11
     assert {plan.representation_disposition for plan in typed.source_scope_plans} == {
         RootRepresentationDisposition.TARGET_COMPATIBLE,
         RootRepresentationDisposition.REEMBED_REQUIRED,
@@ -185,44 +208,120 @@ def test_unknown_metadata_less_reads_only_header_identity_and_hash(tmp_path: Pat
     typed = _capture(root, adapter)
 
     unknown = typed.unknown_identity_evidence
-    assert len(unknown) == 1
-    assert unknown[0].eid == 7
-    assert unknown[0].dtype == "float32"
-    assert unknown[0].shape == (384,)
-    assert unknown[0].metadata_less_source_evidence_identity == "opaque-eid-7"
+    assert len(unknown) == 3
+    assert {item.scope_key.workspace_id for item in unknown} == {"ws3", "ws4", "ws5"}
+    assert {item.eid for item in unknown} == {7}
+    assert {item.dtype for item in unknown} == {"float32"}
+    assert {item.shape for item in unknown} == {(384,)}
 
 
 def test_target_legacy_hash_and_unknown_classification_require_persisted_markers(tmp_path: Path) -> None:
     root, adapter = _fixture(tmp_path)
     typed = _capture(root, adapter)
-    plans = {plan.scope_key.agent_id or plan.scope_key.domain_id: plan for plan in typed.source_scope_plans}
+    plans = {plan.scope_key.canonical_key: plan for plan in typed.source_scope_plans}
 
-    assert plans["target"].representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE
-    assert plans["rehash"].representation_disposition is RootRepresentationDisposition.REEMBED_REQUIRED
-    assert plans["opaque"].representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY
+    assert plans[("multi", "PRIVATE", "target")].representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE
+    assert plans[("hash", "PRIVATE", "rehash")].representation_disposition is RootRepresentationDisposition.REEMBED_REQUIRED
+    assert plans[("ws3", "PRIVATE", "a1")].representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY
 
 
 def test_dimension_alone_never_infers_target_compatibility(tmp_path: Path) -> None:
     root, adapter = _fixture(tmp_path)
-    manifest = root / "workspaces" / "multi" / "agents" / "target" / "private" / "embedding_manifest.json"
-    _json(manifest, {"representation": {"dimension": 384}})
+    _json(root / "workspaces" / "multi" / "workspace_meta.json", {"workspace": "multi"})
 
-    with pytest.raises(CorrectiveFreezePacketRefused, match="disposition"):
+    with pytest.raises(CorrectiveFreezePacketRefused, match="lacks the frozen workspace representation lock"):
         _capture(root, adapter)
 
 
-def test_manifest_owner_observation_and_geometry_are_bound_to_the_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("lock", [
+    {"embed_provider": "st", "embed_dim": 384},
+    {"embed_provider": "", "embed_model": "BAAI/bge-small-en-v1.5", "embed_dim": 384},
+    {"embed_provider": "st", "embed_model": "BAAI/bge-small-en-v1.5", "embed_dim": 0},
+])
+def test_partial_or_empty_workspace_representation_lock_refuses(tmp_path: Path, lock: dict[str, object]) -> None:
+    root, adapter = _fixture(tmp_path)
+    _json(root / "workspaces" / "multi" / "workspace_meta.json", {"workspace": "multi", **lock})
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="workspace representation lock"):
+        _capture(root, adapter)
+
+
+def test_other_explicit_workspace_representation_lock_refuses(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    _json(root / "workspaces" / "multi" / "workspace_meta.json", {
+        "workspace": "multi", "embed_provider": "other", "embed_model": "other:384", "embed_dim": 384,
+    })
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="frozen census"):
+        _capture(root, adapter)
+
+
+def test_storage_and_node_stamps_only_detect_lock_contradictions(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    private = root / "workspaces" / "multi" / "agents" / "target" / "private"
+    _storage(private, dimension=768)
+    with pytest.raises(CorrectiveFreezePacketRefused, match="storage manifest dimension"):
+        _capture(root, adapter)
+
+    root, adapter = _fixture(tmp_path)
+    private = root / "workspaces" / "multi" / "agents" / "target" / "private"
+    _write(private / "nodes.jsonl", json.dumps({
+        "embedding_provider": "st", "embedding_model": "wrong", "embedding_dim": 384,
+    }) + "\n")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="node embedding stamp"):
+        _capture(root, adapter)
+
+
+def test_empty_scope_with_target_lock_remains_no_vector(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    typed = _capture(root, adapter)
+    empty = next(plan for plan in typed.source_scope_plans if plan.scope_key.agent_id == "empty-private")
+
+    assert empty.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    assert empty.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+
+
+def test_production_owner_observations_and_geometry_are_bound_to_the_source(tmp_path: Path) -> None:
     root, adapter = _fixture(tmp_path)
     typed = _capture(root, adapter)
 
     assert typed.description.explicit_source_manifest.entries
-    assert len(typed.description.external_owner_observations) == 1
-    assert typed.description.external_owner_observations[0].owner_kind.value == "IDENTITY"
+    assert {item.owner_kind.value for item in typed.description.external_owner_observations} >= {
+        "IDENTITY", "ROLE", "CHARACTER", "BRIDGE", "CONFLICT", "PROPOSAL_WORKFLOW",
+    }
     assert typed.geometry_disposition_plan.entries
     assert all(
         entry.source_observation_digest
         for entry in typed.geometry_disposition_plan.entries
     )
+
+
+def test_roles_character_seed_and_retained_side_stores_never_become_core_memory(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    typed = _capture(root, adapter)
+    external = typed.description.external_owner_observations
+    manifest = typed.description.explicit_source_manifest.entries
+
+    assert {(item.owner_kind.value, item.observation_key) for item in external} >= {
+        ("ROLE", "agent:target:roles.json"),
+        ("CHARACTER", "agent:target:character_state.json"),
+        ("CHARACTER", "seed:seed-a"),
+    }
+    assert all(item.scope_key is None for item in manifest if item.canonical_locator in {
+        "roles.json", "character_state.json", "seeds/seed-a/seed.json",
+    })
+    retained_locators = {item.canonical_locator for item in manifest}
+    assert "feedback_events.jsonl" not in retained_locators
+    assert "memory_archive/documents.jsonl" not in retained_locators
+    assert "index/memory_index.sqlite" not in retained_locators
+
+
+def test_synthetic_owner_registry_and_unknown_durable_artifacts_refuse(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    _json(root / "workspaces" / "multi" / "external_owner_observations.json", {"observations": []})
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable workspace owner"):
+        _capture(root, adapter)
 
 
 def test_unclassified_durable_workspace_owner_refuses(tmp_path: Path) -> None:
@@ -259,7 +358,6 @@ def test_adapter_leaves_disposable_source_tree_exactly_unchanged(tmp_path: Path)
     _capture(root, adapter)
 
     assert _source_snapshot(root) == before
-    assert not list(root.rglob("*.sqlite"))
     assert not list(root.rglob("*.sqlite-wal"))
     assert not list(root.rglob("*.db"))
 
@@ -298,7 +396,7 @@ def test_packet_round_trip_uses_actual_adapter_then_reloads_without_source(tmp_p
     )
 
     assert _source_snapshot(root) == before
-    assert packet.typed_evidence.description.expected_census.total_runtime_scope_count == 9
+    assert packet.typed_evidence.description.expected_census.total_runtime_scope_count == 11
     assert packet.excluded_alternate_roots == adapter.capture_excluded_alternate_roots(data_root=root)
     shutil.rmtree(root)
     reloaded = load_corrective_freeze_packet(packet.directory)
