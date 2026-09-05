@@ -566,6 +566,7 @@ def build_root_admission_envelope(
     connection: sqlite3.Connection,
     writer_freeze_evidence: RootWriterFreezeEvidencePayload | None = None,
     writer_freeze_recheck: RootWriterFreezeRecheck | None = None,
+    require_writer_freeze_evidence_payload: bool = False,
 ) -> RootAdmissionEnvelope:
     """Build P2 identity only after manifest, census and membership agreement."""
 
@@ -575,6 +576,7 @@ def build_root_admission_envelope(
         writer_freeze=writer_freeze,
         payload=writer_freeze_evidence,
         recheck=writer_freeze_recheck,
+        require_payload=require_writer_freeze_evidence_payload,
     )
     _verify_manifest(data_root=data_root, description=description)
     discovered = discover_canonical_root_layout(data_root=data_root)
@@ -599,6 +601,46 @@ def build_root_admission_envelope(
         runtime_scope_plans=runtime_scope_plans,
         writer_freeze_evidence=writer_freeze_evidence,
         writer_freeze_recheck=writer_freeze_recheck,
+    )
+
+
+def build_real_root_v2_admission_envelope(
+    *,
+    data_root: str | Path,
+    description: RootNativeProductionAdmissionDescription,
+    writer_freeze: RootWriterFreezeWitness,
+    geometry_disposition_plan: RootGeometryDispositionPlan,
+    effective_profile: QualifiedDeploymentProfile,
+    native_staging_core_id: UUID,
+    root_profile: RootProfileGenerationRef,
+    runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...],
+    connection: sqlite3.Connection,
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload | None,
+    writer_freeze_recheck: RootWriterFreezeRecheck | None,
+) -> RootAdmissionEnvelope:
+    """Build a real root-v2 envelope only from payload-bound freeze evidence.
+
+    The historical generic builder remains available for explicitly synthetic
+    and v1 compatibility rehearsals.  A future real P2 caller must enter
+    through this narrow entry point, which refuses witness-only evidence
+    before it reads the source root.
+    """
+
+    return build_root_admission_envelope(
+        data_root=data_root,
+        description=description,
+        writer_freeze=writer_freeze,
+        geometry_disposition_plan=geometry_disposition_plan,
+        effective_profile=effective_profile,
+        native_staging_core_id=native_staging_core_id,
+        root_profile=root_profile,
+        runtime_scopes=runtime_scopes,
+        runtime_scope_plans=runtime_scope_plans,
+        connection=connection,
+        writer_freeze_evidence=writer_freeze_evidence,
+        writer_freeze_recheck=writer_freeze_recheck,
+        require_writer_freeze_evidence_payload=True,
     )
 
 
@@ -859,6 +901,7 @@ def _verify_root_writer_freeze_evidence(
     writer_freeze: RootWriterFreezeWitness,
     payload: RootWriterFreezeEvidencePayload | None,
     recheck: RootWriterFreezeRecheck | None,
+    require_payload: bool = False,
 ) -> None:
     """Recheck an opted-in Class-B epoch; legacy witness-only callers remain valid.
 
@@ -867,7 +910,11 @@ def _verify_root_writer_freeze_evidence(
     every P2/P4/pre-P6 envelope construction.
     """
 
+    if not isinstance(require_payload, bool):
+        raise RootBlocker5BindingRefused("root writer freeze payload requirement must be boolean")
     if payload is None:
+        if require_payload:
+            raise RootBlocker5BindingRefused("ROOT_V2_WRITER_FREEZE_PAYLOAD_REQUIRED")
         if recheck is not None:
             raise RootBlocker5BindingRefused("root writer freeze recheck has no payload")
         return
@@ -1176,6 +1223,7 @@ __all__ = [
     "RootWriterFreezeWitness",
     "SyntheticRootDispositionAdapter",
     "build_root_admission_envelope",
+    "build_real_root_v2_admission_envelope",
     "declared_census_digest",
     "discover_canonical_root_layout",
     "execute_synthetic_root_disposition_plan",

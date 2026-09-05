@@ -415,24 +415,38 @@ def capture_root_writer_freeze_evidence(
     operator_identity: str,
     covered_writer_classes: tuple[WriterProcessObservation, ...],
     listener_observation: ListenerObservation,
-    external_owner_observation_digest: str,
+    external_owner_observation_digest: str | None,
     expected_root_admission_description_contract: str,
     invalidation_rule_version: str,
     minimum_delta_seconds: int,
     snapshotter: Callable[..., WorkspaceTreeSnapshot] = snapshot_root_workspaces,
     job_observer: Callable[..., RootJobObservation] = observe_root_clone_repair_jobs,
     clock_ns: Callable[[], int] = time.time_ns,
+    pre_capture_snapshot_validator: Callable[[WorkspaceTreeSnapshot], None] | None = None,
+    during_capture: Callable[[RootTreeStabilityObservation], None] | None = None,
+    post_capture: Callable[[RootWriterFreezeEvidencePayload], None] | None = None,
+    external_owner_observation_digest_supplier: Callable[[], str] | None = None,
 ) -> CapturedRootWriterFreezeEvidence:
     """Capture three direct snapshots without waiting, writing, or controlling hosts.
 
     The caller selects ``minimum_delta_seconds`` as part of its administration
     procedure.  A zero value is useful only for synthetic qualification; this
-    helper never substitutes an arbitrary production sleep.
+    helper never substitutes an arbitrary production sleep.  The optional
+    callbacks are deliberately observation-only seams for a higher-level
+    evidence procedure: a predecessor gate can inspect t0, source evidence
+    can be collected after stable t1, and a final source check can run after
+    t2.  They cannot control a writer, listener, or job.  A corrective
+    procedure may calculate its owner-observation aggregate after t1, and can
+    therefore provide a digest callback in place of a precomputed digest.
     """
 
     _real_root(data_root)
     t0_ns = _clock_value(clock_ns)
     snapshot_t0 = _snapshot(snapshotter, data_root)
+    if pre_capture_snapshot_validator is not None:
+        if not callable(pre_capture_snapshot_validator):
+            raise RootWriterFreezeEvidenceRefused("pre-capture snapshot validator must be callable")
+        pre_capture_snapshot_validator(snapshot_t0)
     t1_ns = _clock_value(clock_ns)
     snapshot_t1 = _snapshot(snapshotter, data_root)
     stability = RootTreeStabilityObservation(
@@ -443,8 +457,18 @@ def capture_root_writer_freeze_evidence(
         snapshot_t1=snapshot_t1,
     )
     jobs = _jobs(job_observer, data_root)
+    if during_capture is not None:
+        if not callable(during_capture):
+            raise RootWriterFreezeEvidenceRefused("during-capture callback must be callable")
+        during_capture(stability)
     t2_ns = _clock_value(clock_ns)
     snapshot_t2 = _snapshot(snapshotter, data_root)
+    if external_owner_observation_digest_supplier is not None:
+        if external_owner_observation_digest is not None or not callable(external_owner_observation_digest_supplier):
+            raise RootWriterFreezeEvidenceRefused("writer-freeze owner digest supplier is invalid")
+        external_owner_digest = external_owner_observation_digest_supplier()
+    else:
+        external_owner_digest = external_owner_observation_digest
     payload = RootWriterFreezeEvidencePayload(
         data_root_identity=data_root_identity,
         writer_freeze_operation_identity=writer_freeze_operation_identity,
@@ -454,10 +478,14 @@ def capture_root_writer_freeze_evidence(
         job_observation=jobs,
         stability_observation=stability,
         post_capture_stability=PostCaptureStabilityObservation(t2_ns=t2_ns, snapshot_t2=snapshot_t2),
-        external_owner_observation_digest=external_owner_observation_digest,
+        external_owner_observation_digest=external_owner_digest,
         expected_root_admission_description_contract=expected_root_admission_description_contract,
         invalidation_rule_version=invalidation_rule_version,
     )
+    if post_capture is not None:
+        if not callable(post_capture):
+            raise RootWriterFreezeEvidenceRefused("post-capture callback must be callable")
+        post_capture(payload)
     from .root_blocker5_binding import RootWriterFreezeWitness
 
     witness = RootWriterFreezeWitness(
