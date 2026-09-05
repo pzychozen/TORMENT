@@ -703,19 +703,36 @@ def _capture_shared_scope(
             _validate_empty_shared_residue(path, representation_lock)
         else:
             _validate_direct_children(path, set(), "empty shared scope")
-        motifs = _capture_present(
-            root, motifs_path, SourceOwnerClass.MOTIF_SOURCE, motif_boundary,
-            "motifs.json", EvidenceSemanticRole.MOTIFS, scope,
-        )
         nodes = _absent(
             SourceOwnerClass.SHARED_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
             scope, EvidenceAbsenceReason.EMPTY_GRAPH,
         )
+        if allow_known_empty_shared_residue and not motifs_path.exists() and not motifs_path.is_symlink():
+            motifs = _absent(
+                SourceOwnerClass.MOTIF_SOURCE, motif_boundary, "motifs.json", EvidenceSemanticRole.MOTIFS,
+                scope, EvidenceAbsenceReason.EMPTY_GRAPH,
+            )
+            return _ScopeCapture(
+                (nodes, motifs), MaterializedRootScopePlan(
+                    scope, RootRepresentationDisposition.NO_VECTOR,
+                    MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+                ), RootSourceScopePlan(
+                    scope, MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+                    RootRepresentationDisposition.NO_VECTOR, scope.domain_id, target_lane,
+                    SourceArtifactPresence.ABSENT,
+                ), (), None,
+            )
+        motifs = _capture_present(
+            root, motifs_path, SourceOwnerClass.MOTIF_SOURCE, motif_boundary,
+            "motifs.json", EvidenceSemanticRole.MOTIFS, scope,
+        )
         return _ScopeCapture(
             (nodes, motifs), MaterializedRootScopePlan(
-                scope, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+                scope, RootRepresentationDisposition.TARGET_COMPATIBLE,
+                MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
             ), RootSourceScopePlan(
-                scope, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF, RootRepresentationDisposition.NO_VECTOR,
+                scope, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+                RootRepresentationDisposition.TARGET_COMPATIBLE,
                 scope.domain_id, target_lane, SourceArtifactPresence.PRESENT,
             ), (), None,
         )

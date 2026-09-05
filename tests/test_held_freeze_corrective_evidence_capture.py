@@ -156,7 +156,7 @@ def _fixture(tmp_path: Path) -> _Fixture:
     alpha = root / "workspaces" / "alpha"
     beta = root / "workspaces" / "beta"
     _write(alpha / "workspace_meta.json", "{}")
-    _write(alpha / "domains.json", '{"domains":["team","ghost"]}')
+    _write(alpha / "domains.json", '{"domains":["team","quiet","ghost"]}')
     _write(beta / "workspace_meta.json", "{}")
     _write(beta / "domains.json", '{"domains":["project"]}')
     for workspace, agent in ((alpha, "alice"), (alpha, "bob"), (alpha, "cory"), (alpha, "aria"), (beta, "dana")):
@@ -169,6 +169,7 @@ def _fixture(tmp_path: Path) -> _Fixture:
     _write(alpha / "agents" / "aria" / "private" / "embedding_manifest.json", '{"total_rows":0,"next_row":0}')
     for workspace, domain in ((alpha, "team"), (beta, "project")):
         _write(workspace / "domains" / domain / "shared" / "nodes.jsonl", '{"node":1}\n')
+    (alpha / "domains" / "quiet" / "shared").mkdir(parents=True, exist_ok=True)
     _write(root / "unscoped_nodes.jsonl", "residual")
     _write(root / "unscoped_embeddings.bin", b"residual-vectors")
 
@@ -178,6 +179,7 @@ def _fixture(tmp_path: Path) -> _Fixture:
     aria = RootScopeKey("alpha", RootScopeKind.PRIVATE, agent_id="aria")
     dana = RootScopeKey("beta", RootScopeKind.PRIVATE, agent_id="dana")
     team = RootScopeKey("alpha", RootScopeKind.SHARED, domain_id="team")
+    quiet = RootScopeKey("alpha", RootScopeKind.SHARED, domain_id="quiet")
     ghost = RootScopeKey("alpha", RootScopeKind.SHARED, domain_id="ghost")
     project = RootScopeKey("beta", RootScopeKind.SHARED, domain_id="project")
     alpha_workspace = EvidenceOwnerBoundary("alpha", EvidenceOwnerBoundaryKind.WORKSPACE)
@@ -221,9 +223,21 @@ def _fixture(tmp_path: Path) -> _Fixture:
     ghost_nodes = _absent(owner_class=SourceOwnerClass.SHARED_GRAPH_SOURCE, boundary=ghost_boundary,
         locator="nodes.jsonl", role=EvidenceSemanticRole.NODES, scope=ghost,
         reason=EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION)
+    quiet_nodes = _absent(
+        owner_class=SourceOwnerClass.SHARED_GRAPH_SOURCE,
+        boundary=EvidenceOwnerBoundary("alpha", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="quiet"),
+        locator="nodes.jsonl", role=EvidenceSemanticRole.NODES, scope=quiet,
+        reason=EvidenceAbsenceReason.EMPTY_GRAPH,
+    )
+    quiet_motifs = _absent(
+        owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        boundary=EvidenceOwnerBoundary("alpha", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="quiet"),
+        locator="motifs.json", role=EvidenceSemanticRole.MOTIFS, scope=quiet,
+        reason=EvidenceAbsenceReason.EMPTY_GRAPH,
+    )
     aria_identity = _present(root, owner_class=SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION,
         boundary=alpha_aria_agent, locator="identity.json", role=EvidenceSemanticRole.EXTERNAL_OBSERVATION)
-    entries.extend((aria_nodes, aria_embedding, ghost_nodes, aria_identity))
+    entries.extend((aria_nodes, aria_embedding, ghost_nodes, quiet_nodes, quiet_motifs, aria_identity))
     manifest = RootEvidenceManifest(tuple(entries))
 
     external = (ExternalOwnerObservation(
@@ -238,6 +252,10 @@ def _fixture(tmp_path: Path) -> _Fixture:
     )
     alpha_shared = (
         MaterializedRootScopePlan(team, RootRepresentationDisposition.TARGET_COMPATIBLE),
+        MaterializedRootScopePlan(
+            quiet, RootRepresentationDisposition.NO_VECTOR,
+            MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+        ),
         MaterializedRootScopePlan(ghost, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED),
     )
     beta_private = (MaterializedRootScopePlan(dana, RootRepresentationDisposition.TARGET_COMPATIBLE),)
@@ -246,7 +264,7 @@ def _fixture(tmp_path: Path) -> _Fixture:
         RootRepresentationDisposition.TARGET_COMPATIBLE: 3,
         RootRepresentationDisposition.REEMBED_REQUIRED: 2,
         RootRepresentationDisposition.UNKNOWN_IDENTITY: 1,
-        RootRepresentationDisposition.NO_VECTOR: 2,
+        RootRepresentationDisposition.NO_VECTOR: 3,
         RootRepresentationDisposition.UNUSABLE_VECTOR: 0,
     }
     description = RootNativeProductionAdmissionDescription(
@@ -259,8 +277,8 @@ def _fixture(tmp_path: Path) -> _Fixture:
         ),
         target_representation_lane=_lane(),
         expected_census=ExpectedRootCensus(
-            workspace_count=2, materialized_private_scope_count=5, materialized_shared_scope_count=2,
-            total_materialized_scope_count=7, declared_empty_shared_scope_count=1,
+            workspace_count=2, materialized_private_scope_count=5, materialized_shared_scope_count=3,
+            total_materialized_scope_count=8, declared_empty_shared_scope_count=1,
             empty_private_identity_scope_count=1,
             representation_disposition_counts=tuple(RepresentationDispositionCount(key, value) for key, value in counts.items()),
             workspace_topology_counts=WorkspaceTopologyCounts(0, 1, 1, 0, 1, 1),
@@ -358,7 +376,7 @@ def test_complete_packet_reloads_after_disposable_source_is_absent(tmp_path: Pat
 
     assert packet.writer_freeze_witness.writer_evidence_digest == packet.writer_freeze_payload.digest
     assert packet.typed_evidence.discovered_census == discover_canonical_root_layout(data_root=fixture.root)
-    assert len(packet.typed_evidence.source_scope_plans) == 8
+    assert len(packet.typed_evidence.source_scope_plans) == 9
     assert len(packet.typed_evidence.unknown_identity_evidence) == 1
     assert len(packet.typed_evidence.empty_private_evidence) == 1
     assert len(packet.typed_evidence.declared_empty_shared_evidence) == 1
@@ -367,6 +385,8 @@ def test_complete_packet_reloads_after_disposable_source_is_absent(tmp_path: Pat
     reloaded = load_corrective_freeze_packet(packet.directory)
     assert reloaded.packet_digest == packet.packet_digest
     assert reloaded.typed_evidence.description.identity_digest == packet.typed_evidence.description.identity_digest
+    quiet = next(item for item in reloaded.typed_evidence.source_scope_plans if item.scope_key.domain_id == "quiet")
+    assert quiet.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF
     assert not fixture.root.exists()
 
 

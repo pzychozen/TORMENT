@@ -462,8 +462,21 @@ class RootSourceScopePlan:
         if self.materialization_posture in {
             MaterializedScopePosture.EMPTY_PRIVATE,
             MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+            MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
         } and self.representation_disposition is not RootRepresentationDisposition.NO_VECTOR:
             raise CorrectiveFreezePacketRefused("empty source scope must retain NO_VECTOR disposition")
+        if self.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF:
+            if self.scope_key.scope_kind is not RootScopeKind.SHARED:
+                raise CorrectiveFreezePacketRefused("empty shared motif source posture requires SHARED scope")
+            if self.representation_disposition is not RootRepresentationDisposition.TARGET_COMPATIBLE:
+                raise CorrectiveFreezePacketRefused("empty shared motif source posture requires TARGET_COMPATIBLE disposition")
+            if self.motif_domain_id != self.scope_key.domain_id or self.motif_presence is not SourceArtifactPresence.PRESENT:
+                raise CorrectiveFreezePacketRefused("empty shared motif source posture requires present domain motif evidence")
+        if self.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF:
+            if self.scope_key.scope_kind is not RootScopeKind.SHARED:
+                raise CorrectiveFreezePacketRefused("empty shared no-motif source posture requires SHARED scope")
+            if self.motif_domain_id != self.scope_key.domain_id or self.motif_presence is not SourceArtifactPresence.ABSENT:
+                raise CorrectiveFreezePacketRefused("empty shared no-motif source posture requires absent domain motif evidence")
 
     @property
     def canonical_key(self) -> tuple[str, str, str]:

@@ -701,6 +701,9 @@ def _validate_scope_dispatch(
                     raise ValueError("declared empty shared motif scope requires only B4C")
             elif input_item.all_motif_requests:
                 raise ValueError("declared empty shared without motif evidence cannot dispatch B4")
+        elif declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF:
+            if motif_source_declared or input_item.all_motif_requests:
+                raise ValueError("physical empty shared without motif cannot dispatch B4")
         elif input_item.all_motif_requests:
             raise ValueError("NO_VECTOR declared empty private scope cannot dispatch B4")
     elif not input_item.all_b3_requests:

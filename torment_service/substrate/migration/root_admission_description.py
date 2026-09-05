@@ -46,6 +46,7 @@ class RootRepresentationDisposition(StrEnum):
 class MaterializedScopePosture(StrEnum):
     MEMORY_GRAPH = "MEMORY_GRAPH"
     EMPTY_SHARED_WITH_MOTIF = "EMPTY_SHARED_WITH_MOTIF"
+    EMPTY_SHARED_WITHOUT_MOTIF = "EMPTY_SHARED_WITHOUT_MOTIF"
     EMPTY_PRIVATE = "EMPTY_PRIVATE"
     DECLARED_EMPTY_SHARED = "DECLARED_EMPTY_SHARED"
 
@@ -187,11 +188,11 @@ class MaterializedRootScopePlan:
             raise RootAdmissionDescriptionError("representation_disposition must be typed")
         if not isinstance(self.materialization_posture, MaterializedScopePosture):
             raise RootAdmissionDescriptionError("materialization_posture must be typed")
-        if (
-            self.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
-            and self.scope_key.scope_kind is not RootScopeKind.SHARED
-        ):
-            raise RootAdmissionDescriptionError("EMPTY_SHARED_WITH_MOTIF requires a SHARED scope")
+        if self.materialization_posture in {
+            MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+            MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+        } and self.scope_key.scope_kind is not RootScopeKind.SHARED:
+            raise RootAdmissionDescriptionError("empty shared posture requires a SHARED scope")
         if (
             self.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
             and self.scope_key.scope_kind is not RootScopeKind.PRIVATE
@@ -206,10 +207,16 @@ class MaterializedRootScopePlan:
             self.materialization_posture in (
                 MaterializedScopePosture.EMPTY_PRIVATE,
                 MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+                MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
             )
             and self.representation_disposition is not RootRepresentationDisposition.NO_VECTOR
         ):
             raise RootAdmissionDescriptionError("declared-empty scope requires NO_VECTOR disposition")
+        if (
+            self.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
+            and self.representation_disposition is not RootRepresentationDisposition.TARGET_COMPATIBLE
+        ):
+            raise RootAdmissionDescriptionError("EMPTY_SHARED_WITH_MOTIF requires TARGET_COMPATIBLE disposition")
 
     def identity_payload(self) -> dict[str, object]:
         return {
@@ -574,6 +581,26 @@ class RootNativeProductionAdmissionDescription:
                     for entry in entries
                 ):
                     raise RootAdmissionDescriptionError("empty shared motif scope lacks present motif evidence")
+            elif plan.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF:
+                if not any(
+                    entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
+                    and entry.absence_reason is EvidenceAbsenceReason.EMPTY_GRAPH
+                    for entry in nodes
+                ):
+                    raise RootAdmissionDescriptionError("empty shared no-motif scope lacks EMPTY_GRAPH nodes absence evidence")
+                if any(
+                    entry.semantic_role is EvidenceSemanticRole.MOTIFS
+                    and entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+                    for entry in entries
+                ):
+                    raise RootAdmissionDescriptionError("empty shared no-motif scope cannot declare motif evidence")
+                if not any(
+                    entry.semantic_role is EvidenceSemanticRole.MOTIFS
+                    and entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
+                    and entry.absence_reason is EvidenceAbsenceReason.EMPTY_GRAPH
+                    for entry in entries
+                ):
+                    raise RootAdmissionDescriptionError("empty shared no-motif scope lacks absent motif evidence")
             else:
                 if not any(
                     entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT

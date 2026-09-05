@@ -67,6 +67,7 @@ from torment_service.substrate.native_post_write_runtime import (
     NativePostWriteQualificationProfile,
 )
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope
+from torment_service.substrate.migration.root_normalization import _validate_scope_dispatch
 from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
 from torment_service.substrate.root_blocker5_binding import (
@@ -522,6 +523,33 @@ def _positive_fixture(tmp_path: Path) -> _Fixture:
     inputs.append(RootNormalizationScopeInput(empty_shared, fact_empty.plan, fact_empty.snapshot_id,
         b4c_requests=(_b4c(fact_empty, core_id, "empty-b4c"),)))
 
+    empty_shared_without_motif = RootScopeKey(
+        "ws-b", RootScopeKind.SHARED, domain_id="empty-without-motif",
+    )
+    fact_empty_without_motif = _stage_scope(
+        connection, tmp_path, core_id, workspace_id="ws-b", scope_key=empty_shared_without_motif,
+        source_label="ws-b-empty-without-motif", vector_provider="st",
+        vector_model="BAAI/bge-small-en-v1.5", has_memory=False, include_vector=False,
+    )
+    entries.extend(_write_root_scope_evidence(
+        root, empty_shared_without_motif, has_memory=False, has_motif=False,
+    ))
+    entries.append(ExplicitSourceEvidence(
+        SourceOwnerClass.MOTIF_SOURCE,
+        EvidenceOwnerBoundary("ws-b", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="empty-without-motif"),
+        "motifs.json", EvidenceSemanticRole.MOTIFS, EvidencePresenceExpectation.EXPECTED_ABSENT,
+        empty_shared_without_motif, absence_reason=EvidenceAbsenceReason.EMPTY_GRAPH,
+    ))
+    (root / "workspaces/ws-b/domains/empty-without-motif/shared").mkdir(parents=True, exist_ok=True)
+    shared_plans["ws-b"].append(MaterializedRootScopePlan(
+        empty_shared_without_motif, RootRepresentationDisposition.NO_VECTOR,
+        MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+    ))
+    inputs.append(RootNormalizationScopeInput(
+        empty_shared_without_motif, fact_empty_without_motif.plan,
+        fact_empty_without_motif.snapshot_id,
+    ))
+
     private_c = RootScopeKey("ws-c", RootScopeKind.PRIVATE, agent_id="agent-0")
     fact_private_c = _stage_scope(connection, tmp_path, core_id, workspace_id="ws-c", scope_key=private_c,
                                    source_label="ws-c-agent", vector_provider="unknown", vector_model="unknown",
@@ -671,7 +699,7 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
         assert result.root_normalization_complete and result.root_normalization_ready
         assert result.real_root_activation_ready is False and result.partial_activation is False
         assert result.expected_workspace_count == result.observed_workspace_closure == 6
-        assert result.expected_materialized_scope_count == result.observed_materialized_scope_closure == 14
+        assert result.expected_materialized_scope_count == result.observed_materialized_scope_closure == 15
         assert result.generalized_readiness_result is not None
         assert result.generalized_readiness_result.generalized_staging_runtime_ready
         assert {item.lineage.value for scope in result.scope_results for item in scope.motif_results} == {"B4A", "B4B", "B4C"}
@@ -691,6 +719,15 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
             assert empty_results[RootScopeKey("ws-d", RootScopeKind.PRIVATE, agent_id=agent_id)].motif_results == ()
         assert empty_results[RootScopeKey("ws-e", RootScopeKind.SHARED, domain_id="declared-no-motif")].representation_results == ()
         assert empty_results[RootScopeKey("ws-e", RootScopeKind.SHARED, domain_id="declared-no-motif")].motif_results == ()
+        physical_no_motif = empty_results[RootScopeKey(
+            "ws-b", RootScopeKind.SHARED, domain_id="empty-without-motif",
+        )]
+        assert physical_no_motif.representation_results == ()
+        assert physical_no_motif.motif_results == ()
+        readiness = next(item for item in result.generalized_readiness_result.scope_items if item.scope_key == physical_no_motif.scope_key)
+        assert readiness.memory_fact_count == readiness.motif_fact_count == 0
+        assert readiness.memory_closure_ready and readiness.motif_closure_ready
+        assert readiness.empty_topology_reason.value == "ZERO_MOTIFS_EXPECTED"
         assert [item.lineage.value for item in empty_results[
             RootScopeKey("ws-f", RootScopeKind.SHARED, domain_id="declared-with-motif")
         ].motif_results] == ["B4C"]
@@ -722,6 +759,57 @@ def test_declared_empty_shared_is_runtime_membership_but_not_discovered_material
             require_discovered_declared_census_parity(
                 description=description,
                 discovered=discover_canonical_root_layout(data_root=fixture.data_root),
+            )
+    finally:
+        fixture.close()
+
+
+def test_physical_empty_shared_without_motif_refuses_b3_and_b4_dispatches(tmp_path: Path) -> None:
+    fixture = _positive_fixture(tmp_path)
+    try:
+        key = RootScopeKey("ws-b", RootScopeKind.SHARED, domain_id="empty-without-motif")
+        declared = next(
+            scope
+            for workspace in fixture.request.description.workspace_plans
+            for scope in workspace.runtime_scopes
+            if scope.scope_key == key
+        )
+        request = SimpleNamespace(
+            expected_native_core_id=fixture.request.expected_native_core_id,
+            target_lane=fixture.request.description.target_representation_lane,
+        )
+        baseline = SimpleNamespace(
+            all_b3_requests=(), all_motif_requests=(),
+            b3a_requests=(), b3b_requests=(), metadata_less_b3b_dispatches=(),
+            b4a_requests=(), b4b_requests=(), b4c_requests=(),
+        )
+        _validate_scope_dispatch(
+            declared, baseline, fixture.request.description.target_representation_lane,
+            fixture.request.expected_native_core_id, fixture.request.description,
+        )
+        with pytest.raises(ValueError, match="cannot dispatch B3"):
+            _validate_scope_dispatch(
+                declared,
+                SimpleNamespace(
+                    all_b3_requests=(request,), all_motif_requests=(),
+                    b3a_requests=(request,), b3b_requests=(), metadata_less_b3b_dispatches=(),
+                    b4a_requests=(), b4b_requests=(), b4c_requests=(),
+                ),
+                fixture.request.description.target_representation_lane,
+                fixture.request.expected_native_core_id,
+                fixture.request.description,
+            )
+        with pytest.raises(ValueError, match="cannot dispatch B4"):
+            _validate_scope_dispatch(
+                declared,
+                SimpleNamespace(
+                    all_b3_requests=(), all_motif_requests=(request,),
+                    b3a_requests=(), b3b_requests=(), metadata_less_b3b_dispatches=(),
+                    b4a_requests=(), b4b_requests=(), b4c_requests=(request,),
+                ),
+                fixture.request.description.target_representation_lane,
+                fixture.request.expected_native_core_id,
+                fixture.request.description,
             )
     finally:
         fixture.close()

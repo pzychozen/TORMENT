@@ -188,6 +188,20 @@ def _capture(root: Path, adapter: RealRootTypedEvidenceAdapter):
     return adapter.capture_typed_evidence(data_root=root, discovered_census=discovered)
 
 
+def _orchard_empty_shared_fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
+    root, adapter = _fixture(tmp_path)
+    orchard = root / "workspaces" / "orchard"
+    domains = ("creative", "engineering", "personal", "research")
+    _json(orchard / "workspace_meta.json", {"workspace": "orchard", **_target_lock()})
+    _json(orchard / "domains.json", {"domains": list(domains)})
+    empty_private = orchard / "agents" / "empty-private" / "private"
+    _json(empty_private.parent / "identity.json", {"agent": "empty-private"})
+    _storage(empty_private, total_rows=0, next_row=0)
+    for domain_id in domains:
+        (orchard / "domains" / domain_id / "shared").mkdir(parents=True, exist_ok=True)
+    return root, adapter
+
+
 def _real_named_root_fixture(tmp_path: Path) -> Path:
     """Return the smallest root using the qualified production child names."""
 
@@ -482,7 +496,7 @@ def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_
     }
     motif = next(plan for plan in prepared.source_scope_plans if plan.scope_key.domain_id == "motif")
     assert motif.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
-    assert motif.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    assert motif.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE
     motif_entries = [
         item for item in prepared.description.explicit_source_manifest.entries
         if item.scope_key == motif.scope_key
@@ -496,6 +510,84 @@ def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_
 
     _write(shared / "unknown_canonical_source.json", "refuse")
     with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_preparation_admits_physical_empty_shared_scopes_without_motif_as_runtime_members(
+    tmp_path: Path,
+) -> None:
+    root, adapter = _orchard_empty_shared_fixture(tmp_path / "unknown-child")
+    before = _source_snapshot(root)
+
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+
+    expected = {
+        ("orchard", "SHARED", domain_id)
+        for domain_id in ("creative", "engineering", "personal", "research")
+    }
+    plans = {
+        item.scope_key.canonical_key: item
+        for item in prepared.source_scope_plans
+        if item.scope_key.workspace_id == "orchard" and item.scope_key.scope_kind.value == "SHARED"
+    }
+    workspace = next(item for item in prepared.description.workspace_plans if item.workspace_id == "orchard")
+    assert set(plans) == expected
+    assert len(workspace.private_materialized_scopes) == 1
+    assert len(workspace.shared_materialized_scopes) == 4
+    assert len(workspace.materialized_scopes) == len(workspace.runtime_scopes) == 5
+    assert all(item.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF for item in plans.values())
+    assert all(item.representation_disposition is RootRepresentationDisposition.NO_VECTOR for item in plans.values())
+    assert all(item.motif_presence is SourceArtifactPresence.ABSENT for item in plans.values())
+    assert {item.scope_key.canonical_key for item in workspace.materialized_scopes} >= expected
+    assert {item.scope_key.canonical_key for item in workspace.runtime_scopes} >= expected
+    assert workspace.no_memory_scope is False
+    private = workspace.private_materialized_scopes[0]
+    assert private.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+    assert private.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    with_motif = next(item for item in prepared.source_scope_plans if item.scope_key.canonical_key == ("multi", "SHARED", "motif"))
+    declared_empty = next(item for item in prepared.source_scope_plans if item.scope_key.canonical_key == ("multi", "SHARED", "missing"))
+    assert with_motif.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
+    assert with_motif.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE
+    assert declared_empty.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+    assert declared_empty.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    for scope_key in (item.scope_key for item in plans.values()):
+        entries = [
+            item for item in prepared.description.explicit_source_manifest.entries
+            if item.scope_key == scope_key
+        ]
+        assert {item.canonical_locator for item in entries} == {"nodes.jsonl", "motifs.json"}
+        assert next(item for item in entries if item.canonical_locator == "motifs.json").presence_expectation.value == "EXPECTED_ABSENT"
+    assert _source_snapshot(root) == before
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="non-symlink regular file"):
+        _capture(root, adapter)
+
+
+def test_direct_empty_shared_without_motif_refuses_unknown_children_and_nonregular_motif_paths(
+    tmp_path: Path,
+) -> None:
+    root, adapter = _orchard_empty_shared_fixture(tmp_path)
+    shared = root / "workspaces" / "orchard" / "domains" / "creative" / "shared"
+    unknown = shared / "unknown.json"
+    _write(unknown, "refuse")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+    unknown.unlink()
+    motifs = root / "workspaces" / "orchard" / "domains" / "creative" / "motifs.json"
+    motifs.mkdir()
+    with pytest.raises(CorrectiveFreezePacketRefused, match="non-symlink regular file"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+    motifs.rmdir()
+    target = tmp_path / "motif-target.json"
+    _write(target, "synthetic")
+    motifs = root / "workspaces" / "orchard" / "domains" / "creative" / "motifs.json"
+    try:
+        os.symlink(target, motifs)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows host")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="non-symlink regular file"):
         adapter.prepare_direct_admission_source(data_root=root)
 
 

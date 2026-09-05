@@ -238,6 +238,9 @@ def test_empty_scope_postures_require_explicit_identity_and_domain_declaration()
     declared_shared = MaterializedRootScopePlan(
         shared, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
     )
+    physical_no_motif_shared = MaterializedRootScopePlan(
+        shared, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+    )
 
     with pytest.raises(RootAdmissionDescriptionError, match="identity-only"):
         WorkspaceRootAdmissionPlan("ws-empty", private_materialized_scopes=(empty_private,))
@@ -246,6 +249,24 @@ def test_empty_scope_postures_require_explicit_identity_and_domain_declaration()
     with pytest.raises(RootAdmissionDescriptionError, match="NO_VECTOR"):
         MaterializedRootScopePlan(
             private, RootRepresentationDisposition.TARGET_COMPATIBLE, MaterializedScopePosture.EMPTY_PRIVATE,
+        )
+    with pytest.raises(RootAdmissionDescriptionError, match="SHARED"):
+        MaterializedRootScopePlan(
+            private, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+        )
+    with pytest.raises(RootAdmissionDescriptionError, match="NO_VECTOR"):
+        MaterializedRootScopePlan(
+            shared, RootRepresentationDisposition.TARGET_COMPATIBLE,
+            MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+        )
+    with pytest.raises(RootAdmissionDescriptionError, match="NO_VECTOR"):
+        MaterializedRootScopePlan(
+            shared, RootRepresentationDisposition.REEMBED_REQUIRED,
+            MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+        )
+    with pytest.raises(RootAdmissionDescriptionError, match="TARGET_COMPATIBLE"):
+        MaterializedRootScopePlan(
+            shared, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
         )
 
     plan = WorkspaceRootAdmissionPlan(
@@ -257,6 +278,66 @@ def test_empty_scope_postures_require_explicit_identity_and_domain_declaration()
     )
     assert plan.materialized_scopes == (empty_private,)
     assert plan.runtime_scopes == (empty_private, declared_shared)
+
+    physical_plan = WorkspaceRootAdmissionPlan(
+        "ws-empty", shared_materialized_scopes=(physical_no_motif_shared,),
+    )
+    assert physical_plan.materialized_scopes == (physical_no_motif_shared,)
+    assert physical_plan.runtime_scopes == (physical_no_motif_shared,)
+    assert physical_plan.no_memory_scope is False
+
+
+def test_empty_shared_postures_require_their_respective_motif_evidence(tmp_path: Path) -> None:
+    description, _root, _manifest = _fixture_description(tmp_path)
+    workspace = next(item for item in description.workspace_plans if item.workspace_id == "ws-one")
+    original_scope = workspace.shared_materialized_scopes[0]
+    no_motif_scope = MaterializedRootScopePlan(
+        original_scope.scope_key, RootRepresentationDisposition.NO_VECTOR,
+        MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF,
+    )
+    revised_workspace = replace(workspace, shared_materialized_scopes=(no_motif_scope,))
+    revised_counts = tuple(
+        RepresentationDispositionCount(
+            item.disposition,
+            item.scope_count - 1 if item.disposition is RootRepresentationDisposition.TARGET_COMPATIBLE
+            else item.scope_count + 1 if item.disposition is RootRepresentationDisposition.NO_VECTOR
+            else item.scope_count,
+        )
+        for item in description.expected_census.representation_disposition_counts
+    )
+    with pytest.raises(RootAdmissionDescriptionError, match="cannot declare motif evidence"):
+        replace(
+            description,
+            workspace_plans=tuple(
+                revised_workspace if item.workspace_id == "ws-one" else item
+                for item in description.workspace_plans
+            ),
+            expected_census=replace(
+                description.expected_census, representation_disposition_counts=revised_counts,
+            ),
+        )
+
+    without_motif = RootEvidenceManifest(tuple(
+        item for item in description.explicit_source_manifest.entries
+        if not (
+            item.scope_key == original_scope.scope_key
+            and item.semantic_role is EvidenceSemanticRole.MOTIFS
+        )
+    ))
+    with pytest.raises(RootAdmissionDescriptionError, match="lacks absent motif evidence"):
+        replace(
+            description,
+            workspace_plans=tuple(
+                revised_workspace if item.workspace_id == "ws-one" else item
+                for item in description.workspace_plans
+            ),
+            expected_census=replace(
+                description.expected_census, representation_disposition_counts=revised_counts,
+            ),
+            explicit_source_manifest=without_motif,
+        )
+    with pytest.raises(RootAdmissionDescriptionError, match="lacks present motif evidence"):
+        replace(description, explicit_source_manifest=without_motif)
 
 
 def test_census_refuses_arithmetic_and_topology_contradictions() -> None:
