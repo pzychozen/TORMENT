@@ -459,7 +459,7 @@ def _declared_scopes(
     return {
         scope.scope_key: scope
         for workspace in description.workspace_plans
-        for scope in workspace.materialized_scopes
+        for scope in workspace.runtime_scopes
     }
 
 
@@ -578,9 +578,9 @@ def _workspace_items(
     by_scope = {item.scope_key: item for item in scope_items}
     result: list[GeneralizedWorkspaceReadinessItem] = []
     for workspace in description.workspace_plans:
-        declared = workspace.materialized_scopes
+        declared = workspace.runtime_scopes
         reasons: list[str] = []
-        if workspace.no_memory_scope and declared:
+        if workspace.no_memory_scope and workspace.materialized_scopes:
             reasons.append(GeneralizedReadinessReason.NO_MEMORY_WORKSPACE_HAS_MATERIALIZED_SCOPE.value)
         if not declared:
             result.append(GeneralizedWorkspaceReadinessItem(
@@ -597,7 +597,7 @@ def _workspace_items(
             for scope in declared
         ) and not reasons
         result.append(GeneralizedWorkspaceReadinessItem(
-            workspace.workspace_id, len(declared), complete, False,
+            workspace.workspace_id, len(declared), complete, workspace.no_memory_scope,
             tuple(sorted(set(reasons))),
         ))
     return tuple(result)

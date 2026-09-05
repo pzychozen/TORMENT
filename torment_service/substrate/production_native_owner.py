@@ -780,14 +780,27 @@ def _root_scope_key_from_plan(plan: Any) -> RootScopeKey:
 
 def _require_root_v2_topology(plans: tuple[Any, ...]) -> None:
     by_workspace: dict[str, list[Any]] = {}
+    scope_keys: set[tuple[str, str, str]] = set()
     for plan in plans:
+        if plan.scope_kind not in {"PRIVATE_AGENT", "SHARED_DOMAIN"}:
+            raise NativeProductionResourceOwnerError("root-v2 runtime scope kind is unsupported")
+        qualifier = plan.agent_id if plan.scope_kind == "PRIVATE_AGENT" else plan.domain_id
+        if not isinstance(qualifier, str) or not qualifier:
+            raise NativeProductionResourceOwnerError("root-v2 runtime scope qualifier is invalid")
+        key = (plan.workspace_id, plan.scope_kind, qualifier)
+        if key in scope_keys:
+            raise NativeProductionResourceOwnerError("root-v2 runtime scopes contain duplicate scope identities")
+        scope_keys.add(key)
         by_workspace.setdefault(plan.workspace_id, []).append(plan)
     if not by_workspace:
         raise NativeProductionResourceOwnerError("root-v2 admission has no runtime workspaces")
     for workspace_id, workspace_plans in by_workspace.items():
         private_count = sum(plan.scope_kind == "PRIVATE_AGENT" for plan in workspace_plans)
         shared_count = sum(plan.scope_kind == "SHARED_DOMAIN" for plan in workspace_plans)
-        if private_count != 1 or shared_count < 1:
+        # A root-v2 workspace must expose at least one explicitly admitted
+        # shared lane.  It may have zero, one, or many private lanes; public
+        # agent access remains an exact lookup and never creates one.
+        if shared_count < 1:
             raise NativeProductionResourceOwnerError(
                 f"root-v2 workspace topology is unsupported for {workspace_id!r}"
             )

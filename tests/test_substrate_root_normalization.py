@@ -69,6 +69,11 @@ from torment_service.substrate.native_post_write_runtime import (
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope
 from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
+from torment_service.substrate.root_blocker5_binding import (
+    RootBlocker5BindingRefused,
+    discover_canonical_root_layout,
+    require_discovered_declared_census_parity,
+)
 
 
 def _id() -> UUID:
@@ -404,7 +409,8 @@ def _b4c(facts: _ScopeFacts, core_id: UUID, key: str) -> MigrationRuntimeZeroMem
 
 
 def _description(root: Path, entries: list[ExplicitSourceEvidence], plans: tuple[WorkspaceRootAdmissionPlan, ...]) -> RootNativeProductionAdmissionDescription:
-    scopes = [scope for workspace in plans for scope in workspace.materialized_scopes]
+    materialized_scopes = [scope for workspace in plans for scope in workspace.materialized_scopes]
+    scopes = [scope for workspace in plans for scope in workspace.runtime_scopes]
     counts = {
         disposition: sum(scope.representation_disposition is disposition for scope in scopes)
         for disposition in RootRepresentationDisposition
@@ -416,9 +422,13 @@ def _description(root: Path, entries: list[ExplicitSourceEvidence], plans: tuple
         workspace_plans=plans, target_representation_lane=_lane(),
         expected_census=ExpectedRootCensus(
             workspace_count=len(plans),
-            materialized_private_scope_count=sum(private_counts),
-            materialized_shared_scope_count=sum(shared_counts),
-            total_materialized_scope_count=len(scopes),
+            materialized_private_scope_count=sum(
+                scope.scope_key.scope_kind is RootScopeKind.PRIVATE for scope in materialized_scopes
+            ),
+            materialized_shared_scope_count=sum(
+                scope.scope_key.scope_kind is RootScopeKind.SHARED for scope in materialized_scopes
+            ),
+            total_materialized_scope_count=len(materialized_scopes),
             representation_disposition_counts=tuple(
                 RepresentationDispositionCount(disposition, counts[disposition])
                 for disposition in RootRepresentationDisposition
@@ -426,6 +436,14 @@ def _description(root: Path, entries: list[ExplicitSourceEvidence], plans: tuple
             workspace_topology_counts=WorkspaceTopologyCounts(
                 private_counts.count(0), private_counts.count(1), sum(item > 1 for item in private_counts),
                 shared_counts.count(0), shared_counts.count(1), sum(item > 1 for item in shared_counts),
+            ),
+            declared_empty_shared_scope_count=sum(
+                scope.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+                for scope in scopes
+            ),
+            empty_private_identity_scope_count=sum(
+                scope.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+                for scope in scopes
             ),
         ),
         explicit_source_manifest=RootEvidenceManifest(tuple(entries)), external_owner_observations=(),
@@ -454,8 +472,8 @@ def _positive_fixture(tmp_path: Path) -> _Fixture:
     entries: list[ExplicitSourceEvidence] = []
     facts: dict[str, _ScopeFacts] = {}
     inputs: list[RootNormalizationScopeInput] = []
-    private_plans: dict[str, list[MaterializedRootScopePlan]] = {"ws-a": [], "ws-b": [], "ws-c": []}
-    shared_plans: dict[str, list[MaterializedRootScopePlan]] = {"ws-a": [], "ws-b": [], "ws-c": []}
+    private_plans: dict[str, list[MaterializedRootScopePlan]] = {"ws-a": [], "ws-b": [], "ws-c": [], "ws-d": []}
+    shared_plans: dict[str, list[MaterializedRootScopePlan]] = {"ws-a": [], "ws-b": [], "ws-c": [], "ws-e": [], "ws-f": []}
 
     for index in range(5):
         key = RootScopeKey("ws-a", RootScopeKind.PRIVATE, agent_id=f"agent-{index}")
@@ -497,6 +515,7 @@ def _positive_fixture(tmp_path: Path) -> _Fixture:
                                source_label="ws-b-empty-domain", vector_provider="st", vector_model="BAAI/bge-small-en-v1.5",
                                has_memory=False, include_vector=False, motif_id="empty-motif", motif_members=[])
     entries.extend(_write_root_scope_evidence(root, empty_shared, has_memory=False, has_motif=True))
+    (root / "workspaces/ws-b/domains/empty-domain/shared").mkdir(parents=True, exist_ok=True)
     shared_plans["ws-b"].append(MaterializedRootScopePlan(
         empty_shared, RootRepresentationDisposition.TARGET_COMPATIBLE, MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
     ))
@@ -532,13 +551,99 @@ def _positive_fixture(tmp_path: Path) -> _Fixture:
         metadata_less_b3b_dispatches=(MetadataLessB3BDispatch(metadata_source, _b3b(fact_private_c, core_id, "private-c-b3b")),),
     ))
 
+    for agent_id, total_rows in (("agent-zero", 0), ("agent-residue", 1)):
+        empty_private = RootScopeKey("ws-d", RootScopeKind.PRIVATE, agent_id=agent_id)
+        fact_empty_private = _stage_scope(
+            connection, tmp_path, core_id, workspace_id="ws-d", scope_key=empty_private,
+            source_label=f"ws-d-empty-private-{agent_id}", vector_provider="st",
+            vector_model="BAAI/bge-small-en-v1.5", has_memory=False, include_vector=False,
+        )
+        private_root = root / "workspaces/ws-d/agents" / agent_id / "private"
+        embeddings = private_root / "embeddings"
+        embeddings.mkdir(parents=True, exist_ok=True)
+        (embeddings / "manifest.json").write_text(
+            json.dumps({"total_rows": total_rows}), encoding="utf-8",
+        )
+        if total_rows:
+            np.save(embeddings / "orphan.npy", np.asarray([[1.0] + [0.0] * 383], dtype=np.float32))
+        entries.extend(_write_root_scope_evidence(root, empty_private, has_memory=False, has_motif=False))
+        private_owner = EvidenceOwnerBoundary(
+            "ws-d", EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id=agent_id,
+        )
+        entries.append(_present(
+            root, SourceOwnerClass.EMBEDDING_MANIFEST, private_owner,
+            "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, empty_private,
+        ))
+        if total_rows:
+            entries.append(_present(
+                root, SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT, private_owner,
+                "embeddings/orphan.npy", EvidenceSemanticRole.LEGACY_REPRESENTATION, empty_private,
+            ))
+        private_plans["ws-d"].append(MaterializedRootScopePlan(
+            empty_private, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_PRIVATE,
+        ))
+        inputs.append(RootNormalizationScopeInput(
+            empty_private, fact_empty_private.plan, fact_empty_private.snapshot_id,
+        ))
+
+    for workspace_id, domain_id, with_motif in (
+        ("ws-e", "declared-no-motif", False),
+        ("ws-f", "declared-with-motif", True),
+    ):
+        declared = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
+        fact_declared = _stage_scope(
+            connection, tmp_path, core_id, workspace_id=workspace_id, scope_key=declared,
+            source_label=f"{workspace_id}-{domain_id}", vector_provider="st",
+            vector_model="BAAI/bge-small-en-v1.5", has_memory=False, include_vector=False,
+            motif_id="declared-empty-motif" if with_motif else None,
+            motif_members=[] if with_motif else None,
+        )
+        domain_root = root / "workspaces" / workspace_id
+        domain_root.mkdir(parents=True, exist_ok=True)
+        (domain_root / "domains.json").write_text("{}", encoding="utf-8")
+        entries.append(_present(
+            root, SourceOwnerClass.DOMAIN_DECLARATION,
+            EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE),
+            "domains.json", EvidenceSemanticRole.DOMAINS, None,
+        ))
+        shared_owner = EvidenceOwnerBoundary(
+            workspace_id, EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id=domain_id,
+        )
+        entries.append(ExplicitSourceEvidence(
+            SourceOwnerClass.SHARED_GRAPH_SOURCE, shared_owner, "nodes.jsonl", EvidenceSemanticRole.NODES,
+            EvidencePresenceExpectation.EXPECTED_ABSENT, declared,
+            absence_reason=EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION,
+        ))
+        if with_motif:
+            entries.extend(_write_root_scope_evidence(root, declared, has_memory=False, has_motif=True)[1:])
+        shared_plans[workspace_id].append(MaterializedRootScopePlan(
+            declared, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+        ))
+        inputs.append(RootNormalizationScopeInput(
+            declared, fact_declared.plan, fact_declared.snapshot_id,
+            b4c_requests=(_b4c(fact_declared, core_id, f"{workspace_id}-b4c"),) if with_motif else (),
+        ))
+
     plans = (
         WorkspaceRootAdmissionPlan("ws-a", tuple(private_plans["ws-a"]), tuple(shared_plans["ws-a"])),
         WorkspaceRootAdmissionPlan("ws-b", tuple(private_plans["ws-b"]), tuple(shared_plans["ws-b"])),
         WorkspaceRootAdmissionPlan("ws-c", tuple(private_plans["ws-c"]), tuple(shared_plans["ws-c"])),
         WorkspaceRootAdmissionPlan(
-            "ws-d", identity_only_agents=(IdentityOnlyAgentObservation("agent-0", "identity-only"),),
+            "ws-d", private_materialized_scopes=tuple(private_plans["ws-d"]),
+            identity_only_agents=(
+                IdentityOnlyAgentObservation("agent-residue", "identity-with-orphan-vector"),
+                IdentityOnlyAgentObservation("agent-zero", "identity-with-zero-row-manifest"),
+            ),
             declared_unmaterialized_domains=(DeclaredUnmaterializedDomain("future-domain", "declared-empty"),),
+        ),
+        WorkspaceRootAdmissionPlan(
+            "ws-e", shared_materialized_scopes=tuple(shared_plans["ws-e"]),
+            declared_unmaterialized_domains=(DeclaredUnmaterializedDomain("declared-no-motif", "declared-no-motif"),),
+            no_memory_scope=True,
+        ),
+        WorkspaceRootAdmissionPlan(
+            "ws-f", shared_materialized_scopes=tuple(shared_plans["ws-f"]),
+            declared_unmaterialized_domains=(DeclaredUnmaterializedDomain("declared-with-motif", "declared-with-motif"),),
             no_memory_scope=True,
         ),
     )
@@ -552,7 +657,7 @@ def _positive_fixture(tmp_path: Path) -> _Fixture:
         post_write_configurations=tuple(
             _post_write_configuration(input_item.scope_plan)
             for input_item in inputs
-            if input_item.scope_key.scope_kind is RootScopeKind.PRIVATE
+            if input_item.scope_key.scope_kind is RootScopeKind.PRIVATE and input_item.all_b3_requests
         ),
     )
     return _Fixture(qualified, request, embedder, root, root / "workspaces/ws-c/agents/agent-0/private/emb_7.npy")
@@ -565,8 +670,8 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
 
         assert result.root_normalization_complete and result.root_normalization_ready
         assert result.real_root_activation_ready is False and result.partial_activation is False
-        assert result.expected_workspace_count == result.observed_workspace_closure == 4
-        assert result.expected_materialized_scope_count == result.observed_materialized_scope_closure == 10
+        assert result.expected_workspace_count == result.observed_workspace_closure == 6
+        assert result.expected_materialized_scope_count == result.observed_materialized_scope_closure == 14
         assert result.generalized_readiness_result is not None
         assert result.generalized_readiness_result.generalized_staging_runtime_ready
         assert {item.lineage.value for scope in result.scope_results for item in scope.motif_results} == {"B4A", "B4B", "B4C"}
@@ -580,7 +685,44 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
         assert len(metadata_receipts) == 1 and metadata_receipts[0].state is RootChildCompletionState.COMPLETED
         assert len(fixture.embedder.calls) == 3
         assert "root-normalization memory ws-c-agent" in fixture.embedder.calls
+        empty_results = {item.scope_key: item for item in result.scope_results}
+        for agent_id in ("agent-zero", "agent-residue"):
+            assert empty_results[RootScopeKey("ws-d", RootScopeKind.PRIVATE, agent_id=agent_id)].representation_results == ()
+            assert empty_results[RootScopeKey("ws-d", RootScopeKind.PRIVATE, agent_id=agent_id)].motif_results == ()
+        assert empty_results[RootScopeKey("ws-e", RootScopeKind.SHARED, domain_id="declared-no-motif")].representation_results == ()
+        assert empty_results[RootScopeKey("ws-e", RootScopeKind.SHARED, domain_id="declared-no-motif")].motif_results == ()
+        assert [item.lineage.value for item in empty_results[
+            RootScopeKey("ws-f", RootScopeKind.SHARED, domain_id="declared-with-motif")
+        ].motif_results] == ["B4C"]
         assert all(item.completed for item in result.workspace_results)
+    finally:
+        fixture.close()
+
+
+def test_declared_empty_shared_is_runtime_membership_but_not_discovered_materialization(tmp_path: Path) -> None:
+    fixture = _positive_fixture(tmp_path)
+    try:
+        description = fixture.request.description
+        discovered = discover_canonical_root_layout(data_root=fixture.data_root)
+
+        require_discovered_declared_census_parity(description=description, discovered=discovered)
+        runtime_keys = {
+            scope.scope_key
+            for workspace in description.workspace_plans
+            for scope in workspace.runtime_scopes
+        }
+        materialized_keys = set(discovered.materialized_scope_keys)
+        no_motif = RootScopeKey("ws-e", RootScopeKind.SHARED, domain_id="declared-no-motif")
+        with_motif = RootScopeKey("ws-f", RootScopeKind.SHARED, domain_id="declared-with-motif")
+        assert {no_motif, with_motif} <= runtime_keys
+        assert not {no_motif, with_motif} & materialized_keys
+
+        (fixture.data_root / "workspaces/ws-e/domains/undeclared/shared").mkdir(parents=True)
+        with pytest.raises(RootBlocker5BindingRefused, match="ROOT_DISCOVERED_DECLARED_SCOPE_CENSUS_MISMATCH"):
+            require_discovered_declared_census_parity(
+                description=description,
+                discovered=discover_canonical_root_layout(data_root=fixture.data_root),
+            )
     finally:
         fixture.close()
 

@@ -229,6 +229,36 @@ def test_root_description_represents_multi_workspace_and_all_frozen_scope_shapes
     assert SEMANTIC_ADAPTER_OWNERSHIP_DOES_NOT_EQUAL_DURABLE_STORE_OWNERSHIP is True
 
 
+def test_empty_scope_postures_require_explicit_identity_and_domain_declaration() -> None:
+    private = RootScopeKey("ws-empty", RootScopeKind.PRIVATE, agent_id="aria")
+    shared = RootScopeKey("ws-empty", RootScopeKind.SHARED, domain_id="research")
+    empty_private = MaterializedRootScopePlan(
+        private, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.EMPTY_PRIVATE,
+    )
+    declared_shared = MaterializedRootScopePlan(
+        shared, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+    )
+
+    with pytest.raises(RootAdmissionDescriptionError, match="identity-only"):
+        WorkspaceRootAdmissionPlan("ws-empty", private_materialized_scopes=(empty_private,))
+    with pytest.raises(RootAdmissionDescriptionError, match="domain declaration"):
+        WorkspaceRootAdmissionPlan("ws-empty", shared_materialized_scopes=(declared_shared,), no_memory_scope=True)
+    with pytest.raises(RootAdmissionDescriptionError, match="NO_VECTOR"):
+        MaterializedRootScopePlan(
+            private, RootRepresentationDisposition.TARGET_COMPATIBLE, MaterializedScopePosture.EMPTY_PRIVATE,
+        )
+
+    plan = WorkspaceRootAdmissionPlan(
+        "ws-empty",
+        private_materialized_scopes=(empty_private,),
+        shared_materialized_scopes=(declared_shared,),
+        identity_only_agents=(IdentityOnlyAgentObservation("aria", "lawful-identity"),),
+        declared_unmaterialized_domains=(DeclaredUnmaterializedDomain("research", "lawful-domain"),),
+    )
+    assert plan.materialized_scopes == (empty_private,)
+    assert plan.runtime_scopes == (empty_private, declared_shared)
+
+
 def test_census_refuses_arithmetic_and_topology_contradictions() -> None:
     counts = tuple(RepresentationDispositionCount(disposition, 0) for disposition in RootRepresentationDisposition)
     with pytest.raises(RootAdmissionDescriptionError, match="private plus shared"):

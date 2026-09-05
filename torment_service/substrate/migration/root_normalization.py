@@ -263,7 +263,7 @@ class RootNormalizationRequest:
         declared = _declared_scopes(self.description)
         supplied = {item.scope_key: item for item in self.scope_inputs}
         if set(declared) != set(supplied):
-            raise ValueError("scope_inputs must exactly match declared materialized scopes")
+            raise ValueError("scope_inputs must exactly match declared runtime scopes")
         for key, plan in declared.items():
             _validate_scope_dispatch(
                 plan, supplied[key], self.description.target_representation_lane,
@@ -380,7 +380,7 @@ class NativeRootWideNormalizationService:
         by_scope = {item.scope_key: item for item in request.scope_inputs}
         for workspace in request.description.workspace_plans:
             workspace_scope_results: list[RootScopeNormalizationResult] = []
-            for declared in workspace.materialized_scopes:
+            for declared in workspace.runtime_scopes:
                 input_item = by_scope[declared.scope_key]
                 representation_results = self._dispatch_b3(input_item, request.b3b_embedder)
                 if (
@@ -568,13 +568,13 @@ def _aggregate_result(
     workspaces = tuple(
         RootWorkspaceNormalizationResult(
             workspace_id=workspace.workspace_id,
-            declared_materialized_scope_count=len(workspace.materialized_scopes),
+            declared_materialized_scope_count=len(workspace.runtime_scopes),
             observed_materialized_scope_count=sum(
-                item.scope_key in scope_by_key for item in workspace.materialized_scopes
+                item.scope_key in scope_by_key for item in workspace.runtime_scopes
             ),
             completed=all(
                 scope_by_key.get(item.scope_key) is not None and scope_by_key[item.scope_key].completed
-                for item in workspace.materialized_scopes
+                for item in workspace.runtime_scopes
             ),
         )
         for workspace in request.description.workspace_plans
@@ -598,7 +598,7 @@ def _aggregate_result(
         recovery_witness=witness,
         expected_workspace_count=expected.workspace_count,
         observed_workspace_closure=len(workspaces),
-        expected_materialized_scope_count=expected.total_materialized_scope_count,
+        expected_materialized_scope_count=expected.total_runtime_scope_count,
         observed_materialized_scope_closure=len(scope_results),
         workspace_results=workspaces,
         scope_results=tuple(sorted(scope_results, key=lambda item: item.scope_key.canonical_key)),
@@ -673,6 +673,13 @@ def _validate_scope_dispatch(
     has_b3b = bool(input_item.b3b_requests or input_item.metadata_less_b3b_dispatches)
     if has_b3a and has_b3b:
         raise ValueError("one declared scope cannot mix B3A and B3B dispositions")
+    motif_source_declared = any(
+        entry.scope_key == declared.scope_key
+        and entry.semantic_role.value == "MOTIFS"
+        and entry.presence_expectation.value == "EXPECTED_PRESENT"
+        for entry in description.explicit_source_manifest.entries
+    )
+    empty_scope = declared.materialization_posture is not MaterializedScopePosture.MEMORY_GRAPH
     if declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF:
         if input_item.all_b3_requests:
             raise ValueError("declared empty shared motif scope cannot dispatch B3")
@@ -683,9 +690,25 @@ def _validate_scope_dispatch(
             or not input_item.b4c_requests
         ):
             raise ValueError("declared empty shared motif scope requires only target-compatible B4C")
+    elif empty_scope:
+        if input_item.all_b3_requests:
+            raise ValueError("declared empty scope cannot dispatch B3")
+        if declared.representation_disposition is not RootRepresentationDisposition.NO_VECTOR:
+            raise ValueError("declared empty scope requires NO_VECTOR disposition")
+        if declared.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED:
+            if motif_source_declared:
+                if input_item.b4a_requests or input_item.b4b_requests or not input_item.b4c_requests:
+                    raise ValueError("declared empty shared motif scope requires only B4C")
+            elif input_item.all_motif_requests:
+                raise ValueError("declared empty shared without motif evidence cannot dispatch B4")
+        elif input_item.all_motif_requests:
+            raise ValueError("NO_VECTOR declared empty private scope cannot dispatch B4")
     elif not input_item.all_b3_requests:
         raise ValueError("declared MEMORY_GRAPH scope requires B3 completion requests")
-    if declared.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+    if empty_scope:
+        if declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF and not motif_source_declared:
+            raise ValueError("empty shared motif scope requires declared motif source evidence")
+    elif declared.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
         if declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH and not has_b3a:
             raise ValueError("TARGET_COMPATIBLE memory scope requires B3A")
         if has_b3b:
@@ -696,12 +719,6 @@ def _validate_scope_dispatch(
     else:
         if has_b3a or not input_item.b3b_requests or input_item.metadata_less_b3b_dispatches:
             raise ValueError("non-target vector disposition requires direct existing B3B")
-    motif_source_declared = any(
-        entry.scope_key == declared.scope_key
-        and entry.semantic_role.value == "MOTIFS"
-        and entry.presence_expectation.value == "EXPECTED_PRESENT"
-        for entry in description.explicit_source_manifest.entries
-    )
     if motif_source_declared != bool(input_item.all_motif_requests):
         raise ValueError("B4 dispatches must exactly correspond to declared motif source evidence")
 
@@ -712,7 +729,7 @@ def _declared_scopes(
     return {
         scope.scope_key: scope
         for workspace in description.workspace_plans
-        for scope in workspace.materialized_scopes
+        for scope in workspace.runtime_scopes
     }
 
 

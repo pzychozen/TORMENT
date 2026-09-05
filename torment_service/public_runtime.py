@@ -338,6 +338,8 @@ class NativePublicWorkspaceView:
     data_dir: str
     workspace_id: str
     embed_dim: int
+    private_scopes: Mapping[str, Any]
+    shared_scopes: Mapping[str, Any]
     domains: tuple[str, ...]
     private_motif_domains: tuple[str, ...]
     domain_policies: Mapping[str, Mapping[str, Any]]
@@ -752,30 +754,42 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         existing = self._workspace_views.get(workspace_id)
         if existing is not None:
             return existing
-        private_scopes = [
-            item for item in runtime.scopes
-            if item.memory_runtime_scope.scope_kind == "PRIVATE_AGENT"
-        ]
-        if (
-            len(private_scopes) != 1
-            or private_scopes[0].memory_runtime_scope.workspace_id != workspace_id
-        ):
-            raise NativePublicOperationRefused("native public workspace is not admitted")
-        domains = tuple(
-            item.memory_runtime_scope.domain_id or ""
-            for item in runtime.scopes
-            if item.memory_runtime_scope.scope_kind == "SHARED_DOMAIN"
-        )
-        if not domains or any(not item for item in domains):
+        private_scopes: dict[str, Any] = {}
+        shared_scopes: dict[str, Any] = {}
+        for item in runtime.scopes:
+            scope = item.memory_runtime_scope
+            if scope.workspace_id != workspace_id:
+                raise NativePublicOperationRefused("native public workspace is not admitted")
+            if scope.scope_kind == "PRIVATE_AGENT":
+                qualifier = scope.agent_id
+                target = private_scopes
+            elif scope.scope_kind == "SHARED_DOMAIN":
+                qualifier = scope.domain_id
+                target = shared_scopes
+            else:
+                raise NativePublicOperationRefused("native public workspace has an unsupported admitted scope")
+            if not isinstance(qualifier, str) or not qualifier or qualifier in target:
+                raise NativePublicOperationRefused("native public workspace has ambiguous admitted scopes")
+            target[qualifier] = item
+        domains = tuple(shared_scopes)
+        if not domains:
             raise NativePublicOperationRefused("native public workspace has no admitted shared domains")
-        try:
-            private_motif_domains = tuple(sorted(set(_private_motif_domains(runtime).values())))
-        except Exception as exc:
-            raise NativePublicOperationRefused("native private motif-domain evidence is not admitted") from exc
+        if private_scopes:
+            try:
+                private_motif_domain_map = _private_motif_domains(runtime)
+            except Exception as exc:
+                raise NativePublicOperationRefused("native private motif-domain evidence is not admitted") from exc
+            if set(private_motif_domain_map) != set(private_scopes):
+                raise NativePublicOperationRefused("native private motif-domain evidence does not match admitted private scopes")
+            private_motif_domains = tuple(sorted(set(private_motif_domain_map.values())))
+        else:
+            private_motif_domains = ()
         view = NativePublicWorkspaceView(
             data_dir=self.cognition_fabric.data_dir,
             workspace_id=workspace_id,
             embed_dim=int(runtime.representation_lane.dimension),
+            private_scopes=MappingProxyType(dict(private_scopes)),
+            shared_scopes=MappingProxyType(dict(shared_scopes)),
             domains=domains,
             private_motif_domains=private_motif_domains,
             domain_policies=_read_domain_policies(

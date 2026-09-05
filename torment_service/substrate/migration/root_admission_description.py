@@ -46,6 +46,8 @@ class RootRepresentationDisposition(StrEnum):
 class MaterializedScopePosture(StrEnum):
     MEMORY_GRAPH = "MEMORY_GRAPH"
     EMPTY_SHARED_WITH_MOTIF = "EMPTY_SHARED_WITH_MOTIF"
+    EMPTY_PRIVATE = "EMPTY_PRIVATE"
+    DECLARED_EMPTY_SHARED = "DECLARED_EMPTY_SHARED"
 
 
 class GeometryDerivedExternalStateDisposition(StrEnum):
@@ -118,6 +120,8 @@ class ExpectedRootCensus:
     total_materialized_scope_count: int
     representation_disposition_counts: tuple[RepresentationDispositionCount, ...]
     workspace_topology_counts: WorkspaceTopologyCounts
+    declared_empty_shared_scope_count: int = 0
+    empty_private_identity_scope_count: int = 0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -125,6 +129,8 @@ class ExpectedRootCensus:
             "materialized_private_scope_count",
             "materialized_shared_scope_count",
             "total_materialized_scope_count",
+            "declared_empty_shared_scope_count",
+            "empty_private_identity_scope_count",
         ):
             _nonnegative(getattr(self, field_name), field_name)
         if self.workspace_count < 1:
@@ -138,8 +144,8 @@ class ExpectedRootCensus:
         dispositions = tuple(item.disposition for item in self.representation_disposition_counts)
         if set(dispositions) != set(RootRepresentationDisposition) or len(dispositions) != len(set(dispositions)):
             raise RootAdmissionDescriptionError("census must state every representation disposition exactly once")
-        if sum(item.scope_count for item in self.representation_disposition_counts) != self.total_materialized_scope_count:
-            raise RootAdmissionDescriptionError("representation disposition counts must equal total materialized scopes")
+        if sum(item.scope_count for item in self.representation_disposition_counts) != self.total_runtime_scope_count:
+            raise RootAdmissionDescriptionError("representation disposition counts must equal total runtime scopes")
         if not isinstance(self.workspace_topology_counts, WorkspaceTopologyCounts):
             raise RootAdmissionDescriptionError("workspace_topology_counts must be typed")
         if self.workspace_topology_counts.private_total() != self.workspace_count:
@@ -155,9 +161,17 @@ class ExpectedRootCensus:
             "materialized_private_scope_count": self.materialized_private_scope_count,
             "materialized_shared_scope_count": self.materialized_shared_scope_count,
             "total_materialized_scope_count": self.total_materialized_scope_count,
+            "declared_empty_shared_scope_count": self.declared_empty_shared_scope_count,
+            "empty_private_identity_scope_count": self.empty_private_identity_scope_count,
             "representation_disposition_counts": [item.identity_payload() for item in self.representation_disposition_counts],
             "workspace_topology_counts": self.workspace_topology_counts.identity_payload(),
         }
+
+    @property
+    def total_runtime_scope_count(self) -> int:
+        """All admitted runtime scopes, including declared-empty shared domains."""
+
+        return self.total_materialized_scope_count + self.declared_empty_shared_scope_count
 
 
 @dataclass(frozen=True)
@@ -178,6 +192,24 @@ class MaterializedRootScopePlan:
             and self.scope_key.scope_kind is not RootScopeKind.SHARED
         ):
             raise RootAdmissionDescriptionError("EMPTY_SHARED_WITH_MOTIF requires a SHARED scope")
+        if (
+            self.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+            and self.scope_key.scope_kind is not RootScopeKind.PRIVATE
+        ):
+            raise RootAdmissionDescriptionError("EMPTY_PRIVATE requires a PRIVATE scope")
+        if (
+            self.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+            and self.scope_key.scope_kind is not RootScopeKind.SHARED
+        ):
+            raise RootAdmissionDescriptionError("DECLARED_EMPTY_SHARED requires a SHARED scope")
+        if (
+            self.materialization_posture in (
+                MaterializedScopePosture.EMPTY_PRIVATE,
+                MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+            )
+            and self.representation_disposition is not RootRepresentationDisposition.NO_VECTOR
+        ):
+            raise RootAdmissionDescriptionError("declared-empty scope requires NO_VECTOR disposition")
 
     def identity_payload(self) -> dict[str, object]:
         return {
@@ -240,11 +272,35 @@ class WorkspaceRootAdmissionPlan:
         _no_duplicates((item.scope_key.qualifier for item in shared), "shared materialized scope")
         _no_duplicates((item.agent_id for item in identities), "identity-only agent")
         _no_duplicates((item.domain_id for item in domains), "declared unmaterialized domain")
-        if {item.scope_key.agent_id for item in private} & {item.agent_id for item in identities}:
+        empty_private_agents = {
+            item.scope_key.agent_id
+            for item in private
+            if item.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+        }
+        material_private_agents = {
+            item.scope_key.agent_id
+            for item in private
+            if item.materialization_posture is not MaterializedScopePosture.EMPTY_PRIVATE
+        }
+        if material_private_agents & {item.agent_id for item in identities}:
             raise RootAdmissionDescriptionError("identity-only agent cannot also have a materialized private scope")
-        if {item.scope_key.domain_id for item in shared} & {item.domain_id for item in domains}:
+        if not empty_private_agents <= {item.agent_id for item in identities}:
+            raise RootAdmissionDescriptionError("EMPTY_PRIVATE scope requires an identity-only agent observation")
+        declared_empty_domains = {
+            item.scope_key.domain_id
+            for item in shared
+            if item.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        }
+        material_shared_domains = {
+            item.scope_key.domain_id
+            for item in shared
+            if item.materialization_posture is not MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        }
+        if material_shared_domains & {item.domain_id for item in domains}:
             raise RootAdmissionDescriptionError("unmaterialized domain cannot also have a materialized shared scope")
-        has_materialized = bool(private or shared)
+        if not declared_empty_domains <= {item.domain_id for item in domains}:
+            raise RootAdmissionDescriptionError("DECLARED_EMPTY_SHARED scope requires a domain declaration")
+        has_materialized = bool(self.materialized_scopes)
         if self.no_memory_scope == has_materialized:
             raise RootAdmissionDescriptionError("no_memory_scope must exactly describe the absence of materialized scopes")
         object.__setattr__(self, "private_materialized_scopes", private)
@@ -254,6 +310,22 @@ class WorkspaceRootAdmissionPlan:
 
     @property
     def materialized_scopes(self) -> tuple[MaterializedRootScopePlan, ...]:
+        """Physically discoverable source scopes only.
+
+        A DECLARED_EMPTY_SHARED scope is a runtime membership obligation, not a
+        directory that root discovery is allowed to invent or require.
+        """
+
+        return self.private_materialized_scopes + tuple(
+            item
+            for item in self.shared_materialized_scopes
+            if item.materialization_posture is not MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        )
+
+    @property
+    def runtime_scopes(self) -> tuple[MaterializedRootScopePlan, ...]:
+        """Every explicitly admitted runtime scope, including declared-empty shared."""
+
         return self.private_materialized_scopes + self.shared_materialized_scopes
 
     def identity_payload(self) -> dict[str, object]:
@@ -413,16 +485,29 @@ class RootNativeProductionAdmissionDescription:
         return False
 
     def _validate_census_against_plans(self) -> None:
-        plans = tuple(scope for workspace in self.workspace_plans for scope in workspace.materialized_scopes)
-        private_count = sum(scope.scope_key.scope_kind is RootScopeKind.PRIVATE for scope in plans)
-        shared_count = sum(scope.scope_key.scope_kind is RootScopeKind.SHARED for scope in plans)
+        materialized = tuple(scope for workspace in self.workspace_plans for scope in workspace.materialized_scopes)
+        plans = tuple(scope for workspace in self.workspace_plans for scope in workspace.runtime_scopes)
+        private_count = sum(scope.scope_key.scope_kind is RootScopeKind.PRIVATE for scope in materialized)
+        shared_count = sum(scope.scope_key.scope_kind is RootScopeKind.SHARED for scope in materialized)
+        declared_empty_shared_count = sum(
+            scope.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+            for scope in plans
+        )
+        empty_private_count = sum(
+            scope.materialization_posture is MaterializedScopePosture.EMPTY_PRIVATE
+            for scope in plans
+        )
         census = self.expected_census
         if len(self.workspace_plans) != census.workspace_count:
             raise RootAdmissionDescriptionError("workspace plans do not match expected census")
         if private_count != census.materialized_private_scope_count or shared_count != census.materialized_shared_scope_count:
             raise RootAdmissionDescriptionError("materialized scope plans do not match expected census")
-        if len(plans) != census.total_materialized_scope_count:
+        if len(materialized) != census.total_materialized_scope_count:
             raise RootAdmissionDescriptionError("total materialized scope plans do not match expected census")
+        if declared_empty_shared_count != census.declared_empty_shared_scope_count:
+            raise RootAdmissionDescriptionError("declared empty shared scope plans do not match expected census")
+        if empty_private_count != census.empty_private_identity_scope_count:
+            raise RootAdmissionDescriptionError("empty private identity scope plans do not match expected census")
         actual_dispositions = {disposition: 0 for disposition in RootRepresentationDisposition}
         for plan in plans:
             actual_dispositions[plan.representation_disposition] += 1
@@ -451,6 +536,12 @@ class RootNativeProductionAdmissionDescription:
             for workspace in self.workspace_plans
             for domain in workspace.declared_unmaterialized_domains
         }
+        declared_empty = {
+            scope.scope_key: scope
+            for workspace in self.workspace_plans
+            for scope in workspace.runtime_scopes
+            if scope.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        }
         for entry in self.explicit_source_manifest.entries:
             if entry.scope_key is not None and entry.scope_key not in materialized:
                 is_declared_unmaterialized_absence = (
@@ -461,6 +552,7 @@ class RootNativeProductionAdmissionDescription:
                 if (
                     entry.owner_class is not SourceOwnerClass.EXTERNAL_OWNER_OBSERVATION
                     and not is_declared_unmaterialized_absence
+                    and entry.scope_key not in declared_empty
                 ):
                     raise RootAdmissionDescriptionError("manifest evidence names an undeclared materialized scope")
         for scope_key, plan in materialized.items():
@@ -469,7 +561,7 @@ class RootNativeProductionAdmissionDescription:
             if plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
                 if not any(entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT for entry in nodes):
                     raise RootAdmissionDescriptionError("materialized memory scope lacks required present nodes evidence")
-            else:
+            elif plan.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF:
                 if not any(
                     entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
                     and entry.absence_reason is EvidenceAbsenceReason.EMPTY_GRAPH
@@ -482,6 +574,35 @@ class RootNativeProductionAdmissionDescription:
                     for entry in entries
                 ):
                     raise RootAdmissionDescriptionError("empty shared motif scope lacks present motif evidence")
+            else:
+                if not any(
+                    entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
+                    and entry.absence_reason is EvidenceAbsenceReason.EMPTY_GRAPH
+                    for entry in nodes
+                ):
+                    raise RootAdmissionDescriptionError("empty private scope lacks EMPTY_GRAPH nodes absence evidence")
+                if any(
+                    entry.semantic_role is EvidenceSemanticRole.MOTIFS
+                    and entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+                    for entry in entries
+                ):
+                    raise RootAdmissionDescriptionError("empty private scope cannot declare motif evidence")
+        for scope_key, plan in declared_empty.items():
+            entries = [entry for entry in self.explicit_source_manifest.entries if entry.scope_key == scope_key]
+            nodes = [entry for entry in entries if entry.semantic_role is EvidenceSemanticRole.NODES]
+            if not any(
+                entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
+                and entry.absence_reason is EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION
+                for entry in nodes
+            ):
+                raise RootAdmissionDescriptionError("declared empty shared scope lacks UNMATERIALIZED_DECLARATION nodes evidence")
+            if not any(
+                entry.owner_boundary.workspace_id == scope_key.workspace_id
+                and entry.semantic_role is EvidenceSemanticRole.DOMAINS
+                and entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+                for entry in self.explicit_source_manifest.entries
+            ):
+                raise RootAdmissionDescriptionError("declared empty shared scope lacks present domain declaration evidence")
 
 
 def representation_identity_matches_target(

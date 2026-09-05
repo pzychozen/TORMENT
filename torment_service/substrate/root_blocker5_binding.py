@@ -286,6 +286,7 @@ class RootAdmissionEnvelope:
         require_digest(self.root_membership_closure_digest, "root_membership_closure_digest")
         _require_profile_matches_description(self.effective_profile, self.description)
         ordered = _ordered_runtime_scope_plans(self.runtime_scope_plans)
+        _require_runtime_scope_plan_description_parity(ordered, self.description)
         if (
             self.effective_profile.admitted_scope_plan_digest
             != root_runtime_scope_plan_digest(ordered, self.description.target_representation_lane)
@@ -525,6 +526,7 @@ def build_root_admission_envelope(
     _verify_manifest(data_root=data_root, description=description)
     discovered = discover_canonical_root_layout(data_root=data_root)
     require_discovered_declared_census_parity(description=description, discovered=discovered)
+    _require_runtime_scope_plan_description_parity(runtime_scope_plans, description)
     closure = root_membership_closure_digest(
         connection=connection,
         profile=root_profile,
@@ -801,8 +803,8 @@ def _require_normalization_complete(
         or result.reason_codes
         or result.expected_workspace_count != expected.workspace_count
         or result.observed_workspace_closure != expected.workspace_count
-        or result.expected_materialized_scope_count != expected.total_materialized_scope_count
-        or result.observed_materialized_scope_closure != expected.total_materialized_scope_count
+        or result.expected_materialized_scope_count != expected.total_runtime_scope_count
+        or result.observed_materialized_scope_closure != expected.total_runtime_scope_count
     ):
         raise RootBlocker5BindingRefused("ROOT_NORMALIZATION_CLOSURE_INCOMPLETE")
 
@@ -1008,12 +1010,25 @@ def _require_runtime_scope_plan_bindings(
         raise RootBlocker5BindingRefused("root runtime scope plans disagree with membership bindings")
 
 
+def _require_runtime_scope_plan_description_parity(
+    plans: tuple[MigrationRuntimeScopePlan, ...],
+    description: RootNativeProductionAdmissionDescription,
+) -> None:
+    """Root membership may name exactly, and only, explicit runtime scopes."""
+
+    _require_description(description)
+    supplied = {_root_scope_key_from_plan(plan) for plan in _ordered_runtime_scope_plans(plans)}
+    declared = set(_declared_scope_keys(description))
+    if supplied != declared:
+        raise RootBlocker5BindingRefused("ROOT_RUNTIME_SCOPE_PLAN_DECLARATION_MISMATCH")
+
+
 def _declared_scope_keys(description: RootNativeProductionAdmissionDescription) -> tuple[RootScopeKey, ...]:
     return tuple(sorted(
         (
             scope.scope_key
             for workspace in description.workspace_plans
-            for scope in workspace.materialized_scopes
+            for scope in workspace.runtime_scopes
         ),
         key=lambda item: item.canonical_key,
     ))
