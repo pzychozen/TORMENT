@@ -2,7 +2,8 @@
 
 This module intentionally owns no admission, runtime, provider, or writer
 logic.  It reads only the small, explicit source-file contract below and
-turns those facts into the already-authoritative corrective packet types.
+turns those facts into already-authoritative direct admission types. The
+historical corrective adapter is a compatibility projection of the same facts.
 In particular, it never writes below ``data_root``, walks arbitrary trees,
 opens SQLite, or loads vector values.
 """
@@ -64,6 +65,7 @@ from .migration.root_admission_description import (
 from .migration.root_scope import RootScopeKey, RootScopeKind
 from .root_blocker5_binding import (
     RootDiscoveredCensus,
+    RootGeometryDispositionPlan,
     discover_canonical_root_layout,
     frozen_root_geometry_disposition_plan,
 )
@@ -139,13 +141,33 @@ class ExcludedAlternateRootLocator:
 
 
 @dataclass(frozen=True)
+class DirectAdmissionSourcePreparation:
+    """Read-only source facts consumed directly by root admission preparation.
+
+    This is deliberately not a corrective packet and has no serialization or
+    reload behavior. The contained types are the existing root-admission
+    authorities; the legacy packet adapter remains a compatibility consumer of
+    the same single source-reader implementation.
+    """
+
+    description: RootNativeProductionAdmissionDescription
+    discovered_census: RootDiscoveredCensus
+    source_scope_plans: tuple[RootSourceScopePlan, ...]
+    unknown_identity_evidence: tuple[MetadataLessPerEidEvidence, ...]
+    empty_private_evidence: tuple[EmptyPrivateSourceEvidence, ...]
+    declared_empty_shared_evidence: tuple[DeclaredEmptySharedSourceEvidence, ...]
+    geometry_disposition_plan: RootGeometryDispositionPlan
+
+
+@dataclass(frozen=True)
 class RealRootTypedEvidenceAdapter:
     """Strict read-only adapter for a source tree frozen by a future caller.
 
     The name identifies the production-shaped contract, not permission to
     contact a production root.  Qualification tests pass disposable roots.
-    A caller must separately provide any writer-freeze evidence to the packet
-    capture seam; this adapter performs no process or listener observation.
+    A caller must separately provide any writer-freeze evidence to the
+    admission-preparation seam; this adapter performs no process or listener
+    observation.
     """
 
     data_root_identity: str
@@ -222,11 +244,52 @@ class RealRootTypedEvidenceAdapter:
     def capture_typed_evidence(
         self, *, data_root: Path, discovered_census: RootDiscoveredCensus,
     ) -> CorrectiveFreezeTypedEvidence:
-        """Read the fixed source contract and create no source-side artifacts."""
+        """Compatibility projection for historical corrective packet tooling."""
 
         root = _source_root(data_root)
         if not isinstance(discovered_census, RootDiscoveredCensus):
             raise CorrectiveFreezePacketRefused("typed evidence requires a discovered root census")
+        prepared = self._prepare_source(
+            root=root,
+            discovered_census=discovered_census,
+            allow_known_empty_shared_residue=False,
+        )
+        return CorrectiveFreezeTypedEvidence(
+            description=prepared.description,
+            discovered_census=prepared.discovered_census,
+            source_scope_plans=prepared.source_scope_plans,
+            unknown_identity_evidence=prepared.unknown_identity_evidence,
+            empty_private_evidence=prepared.empty_private_evidence,
+            declared_empty_shared_evidence=prepared.declared_empty_shared_evidence,
+            geometry_disposition_plan=prepared.geometry_disposition_plan,
+        )
+
+    def prepare_direct_admission_source(
+        self, *, data_root: Path,
+    ) -> DirectAdmissionSourcePreparation:
+        """Prepare direct in-memory root-admission facts with no packet lane.
+
+        The direct seam accepts known retained or storage residue in an empty
+        shared scope. It still refuses unknown direct children and never treats
+        residue as canonical memory.
+        """
+
+        root = _source_root(data_root)
+        return self._prepare_source(
+            root=root,
+            discovered_census=discover_canonical_root_layout(data_root=root),
+            allow_known_empty_shared_residue=True,
+        )
+
+    def _prepare_source(
+        self,
+        *,
+        root: Path,
+        discovered_census: RootDiscoveredCensus,
+        allow_known_empty_shared_residue: bool,
+    ) -> DirectAdmissionSourcePreparation:
+        """Single source grammar shared by direct and compatibility callers."""
+
         direct_census = discover_canonical_root_layout(data_root=root)
         if direct_census != discovered_census:
             raise CorrectiveFreezePacketRefused("typed evidence discovered census does not match fixed layout")
@@ -244,7 +307,12 @@ class RealRootTypedEvidenceAdapter:
 
         for workspace_path in _direct_directories(workspaces_root, "workspace"):
             workspace_id = workspace_path.name
-            result = self._capture_workspace(root, workspace_path, workspace_id)
+            result = self._capture_workspace(
+                root,
+                workspace_path,
+                workspace_id,
+                allow_known_empty_shared_residue=allow_known_empty_shared_residue,
+            )
             entries.extend(result.entries)
             workspace_plans.append(result.workspace_plan)
             source_plans.extend(result.source_plans)
@@ -267,7 +335,7 @@ class RealRootTypedEvidenceAdapter:
             external_owner_observations=tuple(external_observations),
             feature_posture=RootFeaturePosture(self.profile_name, False, False),
         )
-        return CorrectiveFreezeTypedEvidence(
+        return DirectAdmissionSourcePreparation(
             description=description,
             discovered_census=discovered_census,
             source_scope_plans=tuple(source_plans),
@@ -297,7 +365,14 @@ class RealRootTypedEvidenceAdapter:
         for item in self.excluded_alternate_roots:
             _alternate_root_directory(root / item.canonical_locator)
 
-    def _capture_workspace(self, root: Path, path: Path, workspace_id: str) -> "_WorkspaceCapture":
+    def _capture_workspace(
+        self,
+        root: Path,
+        path: Path,
+        workspace_id: str,
+        *,
+        allow_known_empty_shared_residue: bool,
+    ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
         workspace_meta = _capture_present(
             root, path / "workspace_meta.json", SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
@@ -393,7 +468,13 @@ class RealRootTypedEvidenceAdapter:
                     raise CorrectiveFreezePacketRefused("materialized domain must contain shared or be absent")
                 scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
                 capture = _capture_shared_scope(
-                    root, shared_path, domain_path, scope, self.target_representation_lane, representation_lock,
+                    root,
+                    shared_path,
+                    domain_path,
+                    scope,
+                    self.target_representation_lane,
+                    representation_lock,
+                    allow_known_empty_shared_residue=allow_known_empty_shared_residue,
                 )
                 entries.extend(capture.entries)
                 shared_scopes.append(capture.scope_plan)
@@ -557,7 +638,7 @@ def _capture_private_scope(
 
 def _capture_shared_scope(
     root: Path, path: Path, domain_path: Path, scope: RootScopeKey, target_lane: NativeRepresentationLane,
-    representation_lock: tuple[str, str, int] | None,
+    representation_lock: tuple[str, str, int] | None, *, allow_known_empty_shared_residue: bool,
 ) -> _ScopeCapture:
     path = _real_directory(path, "shared scope")
     boundary = EvidenceOwnerBoundary(
@@ -569,7 +650,10 @@ def _capture_shared_scope(
         scope.workspace_id, EvidenceOwnerBoundaryKind.DOMAIN, domain_id=scope.domain_id,
     )
     if not nodes_path.exists():
-        _validate_direct_children(path, set(), "empty shared scope")
+        if allow_known_empty_shared_residue:
+            _validate_empty_shared_residue(path, representation_lock)
+        else:
+            _validate_direct_children(path, set(), "empty shared scope")
         motifs = _capture_present(
             root, motifs_path, SourceOwnerClass.MOTIF_SOURCE, motif_boundary,
             "motifs.json", EvidenceSemanticRole.MOTIFS, scope,
@@ -750,6 +834,31 @@ def _validate_memory_scope_side_stores(path: Path, scope: RootScopeKey) -> None:
         legacy_trajectory = path / "trajectories.jsonl"
         if legacy_trajectory.exists():
             _regular_file(legacy_trajectory)
+
+
+def _validate_empty_shared_residue(
+    path: Path,
+    representation_lock: tuple[str, str, int] | None,
+) -> None:
+    """Validate known non-memory residue without promoting it to memory."""
+
+    _validate_direct_children(
+        path,
+        {"embeddings", "memory_events.jsonl", "logs", "trajectories"},
+        "empty shared scope",
+    )
+    embeddings = path / "embeddings"
+    if embeddings.exists():
+        manifest_path = embeddings / "manifest.json"
+        _validate_storage_manifest(_read_json(manifest_path), representation_lock)
+        _validate_embedding_storage(embeddings)
+    memory_events = path / "memory_events.jsonl"
+    if memory_events.exists():
+        _regular_file(memory_events)
+    for name in ("logs", "trajectories"):
+        candidate = path / name
+        if candidate.exists():
+            _retained_directory(candidate, f"retained empty shared {name}")
 
 
 def _retained_directory(path: Path, label: str) -> Path:
@@ -1090,6 +1199,7 @@ def _top_level_locator(value: object) -> str:
 
 
 __all__ = [
+    "DirectAdmissionSourcePreparation",
     "ExcludedAlternateRootLocator",
     "ExcludedSourceArtifactLocator",
     "RealRootTypedEvidenceAdapter",

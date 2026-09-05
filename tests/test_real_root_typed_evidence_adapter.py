@@ -6,12 +6,14 @@ import os
 from pathlib import Path
 import shutil
 import struct
+from uuid import UUID
 
 import pytest
 
 from torment_service.substrate.corrective_freeze_packet import (
     CorrectiveCaptureObservations,
     CorrectiveFreezePacketRefused,
+    CorrectiveFreezeTypedEvidence,
     ExcludedAlternateRootRole,
     FrozenWorkspaceTreeTriple,
     PredecessorFreezeLineage,
@@ -19,23 +21,40 @@ from torment_service.substrate.corrective_freeze_packet import (
     capture_corrective_freeze_packet,
     load_corrective_freeze_packet,
 )
+from torment_service.substrate.connection import open_temporary_test_connection
+from torment_service.substrate.deployment_types import QualifiedDeploymentProfile
+from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration.root_admission_description import (
     MaterializedScopePosture,
     RootRepresentationDisposition,
 )
+from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.real_root_typed_evidence import (
+    DirectAdmissionSourcePreparation,
     ExcludedAlternateRootLocator,
     ExcludedSourceArtifactLocator,
     RealRootTypedEvidenceAdapter,
 )
-from torment_service.substrate.root_blocker5_binding import discover_canonical_root_layout
+from torment_service.substrate.root_blocker5_binding import (
+    build_real_root_v2_admission_envelope,
+    discover_canonical_root_layout,
+    root_runtime_scope_plan_digest,
+)
+from torment_service.substrate.root_profile import (
+    ROOT_NATIVE_PROFILE_GENERATION_KIND,
+    current_root_profile_generation,
+    root_profile_generation_payload,
+)
+from torment_service.substrate.schema import create_schema
 from torment_service.substrate.writer_freeze_evidence import (
     ListenerObservation,
     ListenerObservationResult,
     RootJobObservation,
     RootWriterClass,
+    RootWriterFreezeRecheck,
     WriterObservationResult,
     WriterProcessObservation,
+    capture_root_writer_freeze_evidence,
     snapshot_root_workspaces,
 )
 
@@ -360,6 +379,174 @@ def test_adapter_leaves_disposable_source_tree_exactly_unchanged(tmp_path: Path)
     assert _source_snapshot(root) == before
     assert not list(root.rglob("*.sqlite-wal"))
     assert not list(root.rglob("*.db"))
+
+
+def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_residue(
+    tmp_path: Path,
+) -> None:
+    root, adapter = _fixture(tmp_path)
+    shared = root / "workspaces" / "multi" / "domains" / "motif" / "shared"
+    _storage(shared, total_rows=7, next_row=7)
+    _write(shared / "memory_events.jsonl", "retained event")
+    _write(shared / "logs" / "retained.jsonl", "retained log")
+    _write(shared / "trajectories" / "retained.jsonl", "retained trajectory")
+    before = _source_snapshot(root)
+
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+
+    assert isinstance(prepared, DirectAdmissionSourcePreparation)
+    assert not isinstance(prepared, CorrectiveFreezeTypedEvidence)
+    assert prepared.description.expected_census.workspace_count == 6
+    assert {plan.representation_disposition for plan in prepared.source_scope_plans} == {
+        RootRepresentationDisposition.TARGET_COMPATIBLE,
+        RootRepresentationDisposition.REEMBED_REQUIRED,
+        RootRepresentationDisposition.UNKNOWN_IDENTITY,
+        RootRepresentationDisposition.NO_VECTOR,
+    }
+    motif = next(plan for plan in prepared.source_scope_plans if plan.scope_key.domain_id == "motif")
+    assert motif.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF
+    assert motif.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+    motif_entries = [
+        item for item in prepared.description.explicit_source_manifest.entries
+        if item.scope_key == motif.scope_key
+    ]
+    assert {item.canonical_locator for item in motif_entries} == {"nodes.jsonl", "motifs.json"}
+    assert all("lived_use" not in item.canonical_locator for item in motif_entries)
+    assert _source_snapshot(root) == before
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
+        _capture(root, adapter)
+
+    _write(shared / "unknown_canonical_source.json", "refuse")
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_preparation_feeds_writer_callback_and_root_envelope_without_packet(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "direct-preparation-root"
+    workspace = root / "workspaces" / "empty"
+    _json(workspace / "workspace_meta.json", {"workspace": "empty", **_target_lock()})
+    _json(workspace / "domains.json", {"domains": []})
+    adapter = RealRootTypedEvidenceAdapter(
+        data_root_identity="direct-preparation-synthetic-root",
+        operator_identity="direct-preparation-synthetic-operator",
+    )
+    before = _source_snapshot(root)
+    observations = tuple(
+        WriterProcessObservation(item, "SYNTHETIC", WriterObservationResult.ABSENT)
+        for item in RootWriterClass
+    )
+    listener = ListenerObservation(
+        "synthetic-listener", "SYNTHETIC", ListenerObservationResult.ABSENT,
+    )
+    prepared_box: dict[str, DirectAdmissionSourcePreparation] = {}
+
+    def _during_capture(_stability: object) -> None:
+        prepared_box["value"] = adapter.prepare_direct_admission_source(data_root=root)
+
+    captured = capture_root_writer_freeze_evidence(
+        data_root=root,
+        data_root_identity=adapter.data_root_identity,
+        writer_freeze_operation_identity="direct-preparation-freeze",
+        operator_identity=adapter.operator_identity,
+        covered_writer_classes=observations,
+        listener_observation=listener,
+        external_owner_observation_digest=None,
+        expected_root_admission_description_contract="ROOT_ADMISSION_DESCRIPTION_V1",
+        invalidation_rule_version="ROOT_WRITER_FREEZE_INVALIDATION_V1",
+        minimum_delta_seconds=60,
+        clock_ns=iter((2_000_000_000_000_000_000, 2_000_000_061_000_000_000, 2_000_000_062_000_000_000)).__next__,
+        external_owner_observation_digest_supplier=lambda: prepared_box[
+            "value"
+        ].description.external_owner_observation_digest,
+        during_capture=_during_capture,
+        job_observer=lambda **_kwargs: RootJobObservation(0, "SYNTHETIC"),
+    )
+    prepared = prepared_box["value"]
+
+    assert _source_snapshot(root) == before
+    assert not isinstance(prepared, CorrectiveFreezeTypedEvidence)
+    assert captured.payload.external_owner_observation_digest == prepared.description.external_owner_observation_digest
+    assert captured.witness.writer_evidence_digest == captured.payload.digest
+
+    core_path = root / "substrate" / "cores" / "direct-preparation.db"
+    core_path.parent.mkdir(parents=True)
+    qualified = open_temporary_test_connection(core_path)
+    try:
+        connection = qualified.connection
+        metadata = create_schema(connection)
+        profile_identity = generate_native_id()
+        profile_scope = generate_native_id()
+        profile_idempotency = generate_native_id()
+        connection.execute(
+            "INSERT INTO identity_namespaces VALUES (?,?,0)",
+            (native_id_to_bytes(profile_identity), "direct-preparation-profile"),
+        )
+        connection.execute(
+            "INSERT INTO semantic_scopes VALUES (?,?,0)",
+            (native_id_to_bytes(profile_scope), "direct-preparation-profile-scope"),
+        )
+        connection.execute(
+            "INSERT INTO idempotency_namespaces VALUES (?,?)",
+            (native_id_to_bytes(profile_idempotency), "direct-preparation-profile-operations"),
+        )
+        NativeObjectService(connection).create_object(
+            idempotency_namespace_id=profile_idempotency,
+            idempotency_key="direct-preparation-profile",
+            state=ObjectState(
+                profile_identity,
+                profile_scope,
+                ROOT_NATIVE_PROFILE_GENERATION_KIND,
+                "EXISTS",
+                "ACTIVE",
+                True,
+                "QUALIFIED",
+                authority_category="EVIDENCE",
+                payload=root_profile_generation_payload(1),
+                payload_format="JSON",
+            ),
+        )
+        root_profile = current_root_profile_generation(connection)
+        profile = QualifiedDeploymentProfile(
+            compression_enabled=False,
+            deep_memory_enabled=False,
+            representation_provider=prepared.description.target_representation_lane.provider,
+            representation_model=prepared.description.target_representation_lane.model,
+            representation_dimension=prepared.description.target_representation_lane.dimension,
+            admitted_scope_plan_digest=root_runtime_scope_plan_digest(
+                (), prepared.description.target_representation_lane,
+            ),
+            external_owner_digest=prepared.description.external_owner_observation_digest,
+        )
+        recheck = RootWriterFreezeRecheck(
+            covered_writer_classes=observations,
+            listener_observation=listener,
+            job_observation=RootJobObservation(0, "SYNTHETIC"),
+            external_owner_observation_digest=prepared.description.external_owner_observation_digest,
+        )
+        envelope = build_real_root_v2_admission_envelope(
+            data_root=root,
+            description=prepared.description,
+            writer_freeze=captured.witness,
+            geometry_disposition_plan=prepared.geometry_disposition_plan,
+            effective_profile=profile,
+            native_staging_core_id=UUID(bytes=metadata.core_id),
+            root_profile=root_profile,
+            runtime_scopes=(),
+            runtime_scope_plans=(),
+            connection=connection,
+            writer_freeze_evidence=captured.payload,
+            writer_freeze_recheck=recheck,
+        )
+    finally:
+        qualified.close()
+
+    assert envelope.description is prepared.description
+    assert envelope.writer_freeze == captured.witness
+    assert envelope.discovered_census == prepared.discovered_census
+    assert not (root / "corrective-packet").exists()
 
 
 def test_packet_round_trip_uses_actual_adapter_then_reloads_without_source(tmp_path: Path) -> None:
