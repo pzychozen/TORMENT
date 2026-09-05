@@ -259,6 +259,7 @@ class RealRootTypedEvidenceAdapter:
         prepared = self._prepare_source(
             root=root,
             discovered_census=discovered_census,
+            allow_missing_workspace_metadata=False,
             allow_known_empty_shared_residue=False,
             allow_known_empty_private_residue=False,
         )
@@ -286,6 +287,7 @@ class RealRootTypedEvidenceAdapter:
         return self._prepare_source(
             root=root,
             discovered_census=discover_canonical_root_layout(data_root=root),
+            allow_missing_workspace_metadata=True,
             allow_known_empty_shared_residue=True,
             allow_known_empty_private_residue=True,
         )
@@ -295,6 +297,7 @@ class RealRootTypedEvidenceAdapter:
         *,
         root: Path,
         discovered_census: RootDiscoveredCensus,
+        allow_missing_workspace_metadata: bool,
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
     ) -> DirectAdmissionSourcePreparation:
@@ -321,6 +324,7 @@ class RealRootTypedEvidenceAdapter:
                 root,
                 workspace_path,
                 workspace_id,
+                allow_missing_workspace_metadata=allow_missing_workspace_metadata,
                 allow_known_empty_shared_residue=allow_known_empty_shared_residue,
                 allow_known_empty_private_residue=allow_known_empty_private_residue,
             )
@@ -382,22 +386,35 @@ class RealRootTypedEvidenceAdapter:
         path: Path,
         workspace_id: str,
         *,
+        allow_missing_workspace_metadata: bool,
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
     ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
-        workspace_meta = _capture_present(
-            root, path / "workspace_meta.json", SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
-            workspace_boundary, "workspace_meta.json", EvidenceSemanticRole.WORKSPACE_META,
-        )
+        workspace_meta_path = path / "workspace_meta.json"
+        if allow_missing_workspace_metadata and not workspace_meta_path.exists() and not workspace_meta_path.is_symlink():
+            workspace_meta = _absent(
+                SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+                workspace_boundary,
+                "workspace_meta.json",
+                EvidenceSemanticRole.WORKSPACE_META,
+                None,
+                EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE,
+            )
+            representation_lock = None
+        else:
+            workspace_meta = _capture_present(
+                root, workspace_meta_path, SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+                workspace_boundary, "workspace_meta.json", EvidenceSemanticRole.WORKSPACE_META,
+            )
+            representation_lock = _workspace_representation_lock(
+                _read_json(workspace_meta_path), workspace_id,
+            )
         domains_evidence = _capture_present(
             root, path / "domains.json", SourceOwnerClass.DOMAIN_DECLARATION,
             workspace_boundary, "domains.json", EvidenceSemanticRole.DOMAINS,
         )
         declared_domains = _declared_domains(_read_json(path / "domains.json"))
-        representation_lock = _workspace_representation_lock(
-            _read_json(path / "workspace_meta.json"), workspace_id,
-        )
         entries = [workspace_meta, domains_evidence]
         policy_path = path / "domain_policies.json"
         if policy_path.exists():
@@ -411,7 +428,9 @@ class RealRootTypedEvidenceAdapter:
         )
         entries.extend(owner_entries)
         owner_observations = list(owner_observations)
-        self._validate_workspace_children(path)
+        self._validate_workspace_children(
+            path, allow_missing_workspace_metadata=allow_missing_workspace_metadata,
+        )
 
         private_scopes: list[MaterializedRootScopePlan] = []
         shared_scopes: list[MaterializedRootScopePlan] = []
@@ -463,22 +482,24 @@ class RealRootTypedEvidenceAdapter:
                 unknown_evidence.extend(capture.unknown_evidence)
 
         domains_path = path / "domains"
-        physical_domains: set[str] = set()
+        physical_shared_domains: set[str] = set()
+        declared_domain_paths: dict[str, Path] = {}
         if domains_path.exists():
             for domain_path in _direct_directories(_real_directory(domains_path, "domains directory"), "domain"):
                 domain_id = domain_path.name
-                physical_domains.add(domain_id)
                 if domain_id not in declared_domains:
                     raise CorrectiveFreezePacketRefused("materialized domain lacks a direct declaration")
                 self._validate_domain_children(domain_path)
+                declared_domain_paths[domain_id] = domain_path
                 domain_entries, domain_observations = _capture_domain_owner_state(
                     root=root, domain_path=domain_path, workspace_id=workspace_id, domain_id=domain_id,
                 )
                 entries.extend(domain_entries)
                 owner_observations.extend(domain_observations)
                 shared_path = domain_path / "shared"
-                if not shared_path.exists():
-                    raise CorrectiveFreezePacketRefused("materialized domain must contain shared or be absent")
+                if not shared_path.exists() and not shared_path.is_symlink():
+                    continue
+                physical_shared_domains.add(domain_id)
                 scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
                 capture = _capture_shared_scope(
                     root,
@@ -494,37 +515,19 @@ class RealRootTypedEvidenceAdapter:
                 source_plans.append(capture.source_plan)
                 unknown_evidence.extend(capture.unknown_evidence)
 
-        for domain_id in sorted(declared_domains - physical_domains):
-            scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
-            boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id=domain_id)
-            nodes = _absent(
-                SourceOwnerClass.SHARED_GRAPH_SOURCE, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES,
-                scope, EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION,
+        for domain_id in sorted(declared_domains - physical_shared_domains):
+            capture = _capture_declared_empty_shared_scope(
+                root=root,
+                workspace_id=workspace_id,
+                domain_id=domain_id,
+                domains_evidence=domains_evidence,
+                domain_path=declared_domain_paths.get(domain_id),
+                target_lane=self.target_representation_lane,
             )
-            entries.append(nodes)
-            shared_scopes.append(MaterializedRootScopePlan(
-                scope, RootRepresentationDisposition.NO_VECTOR, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-            ))
-            source_plans.append(RootSourceScopePlan(
-                scope, MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-                RootRepresentationDisposition.NO_VECTOR, domain_id, self.target_representation_lane,
-                SourceArtifactPresence.ABSENT,
-            ))
-            shared_directory = SourceArtifactObservation(
-                "shared", SourceArtifactPresence.ABSENT, "ABSENT", artifact_kind=SourceArtifactKind.DIRECTORY,
-            )
-            motif = SourceArtifactObservation("motifs.json", SourceArtifactPresence.ABSENT, "ABSENT")
-            key = f"declared-empty:{workspace_id}:{domain_id}"
-            unsigned = {
-                "workspace_id": workspace_id, "domain_id": domain_id,
-                "domains_declaration_evidence": domains_evidence.identity_payload(),
-                "shared_directory_observation": shared_directory.payload(),
-                "nodes_absence_evidence": nodes.identity_payload(),
-                "motif_observation": motif.payload(), "observation_key": key,
-            }
-            declared_evidence.append(DeclaredEmptySharedSourceEvidence(
-                workspace_id, domain_id, domains_evidence, shared_directory, nodes, motif, key, _digest(unsigned),
-            ))
+            entries.extend(capture.entries)
+            shared_scopes.append(capture.scope_plan)
+            source_plans.append(capture.source_plan)
+            declared_evidence.append(capture.evidence)
             unmaterialized.append(DeclaredUnmaterializedDomain(domain_id, f"domains:{workspace_id}:{domain_id}"))
 
         materialized = tuple(private_scopes) + tuple(
@@ -543,7 +546,7 @@ class RealRootTypedEvidenceAdapter:
         )
 
     @staticmethod
-    def _validate_workspace_children(path: Path) -> None:
+    def _validate_workspace_children(path: Path, *, allow_missing_workspace_metadata: bool) -> None:
         allowed = (
             set(_WORKSPACE_FILES) | set(_WORKSPACE_OWNER_FILES) | set(_WORKSPACE_RETAINED_FILES)
             | set(_WORKSPACE_RETAINED_DIRECTORIES) | {"agents", "domains", "seeds"}
@@ -551,7 +554,10 @@ class RealRootTypedEvidenceAdapter:
         observed = {item.name for item in path.iterdir()}
         if observed - allowed:
             raise CorrectiveFreezePacketRefused("unclassified durable workspace owner is not allowed")
-        if {"workspace_meta.json", "domains.json"} - observed:
+        required = {"domains.json"}
+        if not allow_missing_workspace_metadata:
+            required.add("workspace_meta.json")
+        if required - observed:
             raise CorrectiveFreezePacketRefused("workspace source is missing required declarations")
         for item in path.iterdir():
             if item.is_symlink():
@@ -620,6 +626,106 @@ class _ScopeCapture:
     source_plan: RootSourceScopePlan
     unknown_evidence: tuple[MetadataLessPerEidEvidence, ...]
     empty_evidence: EmptyPrivateSourceEvidence | None = None
+
+
+@dataclass(frozen=True)
+class _DeclaredEmptySharedScopeCapture:
+    entries: tuple[ExplicitSourceEvidence, ...]
+    scope_plan: MaterializedRootScopePlan
+    source_plan: RootSourceScopePlan
+    evidence: DeclaredEmptySharedSourceEvidence
+
+
+def _capture_declared_empty_shared_scope(
+    *,
+    root: Path,
+    workspace_id: str,
+    domain_id: str,
+    domains_evidence: ExplicitSourceEvidence,
+    domain_path: Path | None,
+    target_lane: NativeRepresentationLane,
+) -> _DeclaredEmptySharedScopeCapture:
+    """Capture a declared runtime lane whose ``shared/`` graph is absent.
+
+    A domain owner directory may still hold motif or owner state.  It never
+    turns the domain into a materialized shared MemoryGraph by itself.
+    """
+
+    scope = RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
+    boundary = EvidenceOwnerBoundary(
+        workspace_id, EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id=domain_id,
+    )
+    nodes = _absent(
+        SourceOwnerClass.SHARED_GRAPH_SOURCE,
+        boundary,
+        "nodes.jsonl",
+        EvidenceSemanticRole.NODES,
+        scope,
+        EvidenceAbsenceReason.UNMATERIALIZED_DECLARATION,
+    )
+    entries: tuple[ExplicitSourceEvidence, ...] = (nodes,)
+    shared_directory = SourceArtifactObservation(
+        "shared", SourceArtifactPresence.ABSENT, "ABSENT", artifact_kind=SourceArtifactKind.DIRECTORY,
+    )
+    motif_presence = SourceArtifactPresence.ABSENT
+    motif = SourceArtifactObservation("motifs.json", SourceArtifactPresence.ABSENT, "ABSENT")
+    if domain_path is not None:
+        motif_path = domain_path / "motifs.json"
+        if motif_path.exists() or motif_path.is_symlink():
+            motif_evidence = _capture_present(
+                root,
+                motif_path,
+                SourceOwnerClass.MOTIF_SOURCE,
+                EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.DOMAIN, domain_id=domain_id),
+                "motifs.json",
+                EvidenceSemanticRole.MOTIFS,
+                scope,
+            )
+            entries += (motif_evidence,)
+            motif_presence = SourceArtifactPresence.PRESENT
+            motif = SourceArtifactObservation(
+                "motifs.json",
+                SourceArtifactPresence.PRESENT,
+                "PRESENT",
+                motif_evidence.byte_length,
+                motif_evidence.sha256_hex,
+            )
+    key = f"declared-empty:{workspace_id}:{domain_id}"
+    unsigned = {
+        "workspace_id": workspace_id,
+        "domain_id": domain_id,
+        "domains_declaration_evidence": domains_evidence.identity_payload(),
+        "shared_directory_observation": shared_directory.payload(),
+        "nodes_absence_evidence": nodes.identity_payload(),
+        "motif_observation": motif.payload(),
+        "observation_key": key,
+    }
+    return _DeclaredEmptySharedScopeCapture(
+        entries=entries,
+        scope_plan=MaterializedRootScopePlan(
+            scope,
+            RootRepresentationDisposition.NO_VECTOR,
+            MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+        ),
+        source_plan=RootSourceScopePlan(
+            scope,
+            MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+            RootRepresentationDisposition.NO_VECTOR,
+            domain_id,
+            target_lane,
+            motif_presence,
+        ),
+        evidence=DeclaredEmptySharedSourceEvidence(
+            workspace_id,
+            domain_id,
+            domains_evidence,
+            shared_directory,
+            nodes,
+            motif,
+            key,
+            _digest(unsigned),
+        ),
+    )
 
 
 def _capture_private_scope(
@@ -1136,7 +1242,7 @@ def _capture_present(
 
 def _absent(
     owner_class: SourceOwnerClass, boundary: EvidenceOwnerBoundary, locator: str, role: EvidenceSemanticRole,
-    scope: RootScopeKey, reason: EvidenceAbsenceReason,
+    scope: RootScopeKey | None, reason: EvidenceAbsenceReason,
 ) -> ExplicitSourceEvidence:
     return ExplicitSourceEvidence(
         owner_class=owner_class, owner_boundary=boundary, canonical_locator=locator, semantic_role=role,

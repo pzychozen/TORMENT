@@ -26,6 +26,13 @@ from torment_service.substrate.corrective_freeze_packet import (
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.deployment_types import QualifiedDeploymentProfile
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
+from torment_service.substrate.migration.explicit_source_evidence import (
+    EvidenceAbsenceReason,
+    EvidencePresenceExpectation,
+    EvidenceSemanticRole,
+    ExplicitSourceEvidenceDrift,
+    SourceOwnerClass,
+)
 from torment_service.substrate.migration.root_admission_description import (
     MaterializedScopePosture,
     RootRepresentationDisposition,
@@ -45,6 +52,7 @@ from torment_service.substrate.real_root_typed_evidence import (
     build_real_direct_admission_source_adapter,
 )
 from torment_service.substrate.root_blocker5_binding import (
+    RootBlocker5BindingRefused,
     build_real_root_v2_admission_envelope,
     discover_canonical_root_layout,
     root_runtime_scope_plan_digest,
@@ -239,8 +247,18 @@ def test_regular_file_context_survives_direct_helper_wrappers(tmp_path: Path) ->
     directory = tmp_path / "directory-at-file-path"
     directory.mkdir()
 
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+    workspace_meta = next(
+        item
+        for item in prepared.description.explicit_source_manifest.entries
+        if item.owner_boundary.workspace_id == "empty"
+        and item.semantic_role is EvidenceSemanticRole.WORKSPACE_META
+    )
+    assert workspace_meta.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT
+    assert workspace_meta.absence_reason is EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE
+    assert workspace_meta.scope_key is None
     _assert_regular_file_refusal(
-        lambda: adapter.prepare_direct_admission_source(data_root=root), missing, "ABSENT",
+        lambda: _capture(root, adapter), missing, "ABSENT",
     )
     _assert_regular_file_refusal(
         lambda: _validate_regular_file(missing, "private nodes"), missing, "ABSENT",
@@ -251,6 +269,160 @@ def test_regular_file_context_survives_direct_helper_wrappers(tmp_path: Path) ->
         lambda: _file_observation(directory, "directory-at-file-path"), directory, "NON_FILE",
     )
     _assert_regular_file_refusal(lambda: _npy_header(missing), missing, "ABSENT")
+
+
+def _direct_metadata_less_six_workspace_fixture(
+    tmp_path: Path,
+) -> tuple[Path, RealRootTypedEvidenceAdapter]:
+    """The frozen six-workspace family, built only below pytest's disposable root."""
+
+    root = tmp_path / "direct-metadata-less-six-workspace-source"
+    domains = ("research", "engineering", "operations", "creative", "meta")
+    for workspace_id in ("sim-ws", "ws1", "ws2", "ws3", "ws4", "ws5"):
+        workspace = root / "workspaces" / workspace_id
+        _json(workspace / "domains.json", {"domains": list(domains)})
+        (workspace / "agents").mkdir(parents=True, exist_ok=True)
+
+    for workspace_id in ("ws3", "ws4", "ws5"):
+        _scope(root, workspace_id, "a1")
+        private = root / "workspaces" / workspace_id / "agents" / "a1" / "private"
+        _write(private / "nodes.jsonl", json.dumps({"metadata_less_source_evidence": [{
+            "eid": 7,
+            "vector_locator": "emb_7.npy",
+            "canonical_text_locator": "canonical_text_7.json",
+            "metadata_less_source_evidence_identity": f"{workspace_id}-eid-7",
+        }]}) + "\n")
+        _npy(private / "emb_7.npy")
+        _json(private / "canonical_text_7.json", {"text": "qualified legacy source"})
+        _json(
+            root / "workspaces" / workspace_id / "domains" / "research" / "motifs.json",
+            {"motif": "retained owner state"},
+        )
+
+    return root, RealRootTypedEvidenceAdapter(
+        data_root_identity="synthetic-metadata-less-six-workspace-root",
+        operator_identity="synthetic-metadata-less-six-workspace-operator",
+    )
+
+
+def test_direct_metadata_less_six_workspace_family_is_explicitly_bound_and_closed(
+    tmp_path: Path,
+) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    before = _source_snapshot(root)
+
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+    census = prepared.description.expected_census
+    manifest = prepared.description.explicit_source_manifest
+
+    assert census.workspace_count == 6
+    assert census.materialized_private_scope_count == 3
+    assert census.materialized_shared_scope_count == 0
+    assert census.total_materialized_scope_count == 3
+    assert census.declared_empty_shared_scope_count == 30
+    assert census.total_runtime_scope_count == 33
+    assert len(prepared.source_scope_plans) == 33
+    assert {item.representation_disposition for item in prepared.source_scope_plans} == {
+        RootRepresentationDisposition.UNKNOWN_IDENTITY,
+        RootRepresentationDisposition.NO_VECTOR,
+    }
+
+    workspace_meta = [
+        item for item in manifest.entries
+        if item.owner_class is SourceOwnerClass.WORKSPACE_IDENTITY_METADATA
+    ]
+    assert {item.owner_boundary.workspace_id for item in workspace_meta} == {
+        "sim-ws", "ws1", "ws2", "ws3", "ws4", "ws5",
+    }
+    assert all(item.owner_boundary.boundary_kind.value == "WORKSPACE" for item in workspace_meta)
+    assert all(item.canonical_locator == "workspace_meta.json" for item in workspace_meta)
+    assert all(item.semantic_role is EvidenceSemanticRole.WORKSPACE_META for item in workspace_meta)
+    assert all(item.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT for item in workspace_meta)
+    assert all(item.absence_reason is EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE for item in workspace_meta)
+    assert all(item.scope_key is None for item in workspace_meta)
+
+    plans = {item.scope_key.canonical_key: item for item in prepared.source_scope_plans}
+    for workspace_id in ("ws3", "ws4", "ws5"):
+        assert plans[(workspace_id, "PRIVATE", "a1")].representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY
+        research = plans[(workspace_id, "SHARED", "research")]
+        assert research.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+        assert research.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+        assert research.motif_presence is SourceArtifactPresence.PRESENT
+        for domain_id in ("engineering", "operations", "creative", "meta"):
+            plan = plans[(workspace_id, "SHARED", domain_id)]
+            assert plan.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
+            assert plan.representation_disposition is RootRepresentationDisposition.NO_VECTOR
+            assert plan.motif_presence is SourceArtifactPresence.ABSENT
+
+    declared = {item.scope_key.canonical_key: item for item in prepared.declared_empty_shared_evidence}
+    assert len(declared) == 30
+    assert all(item.shared_directory_observation.presence is SourceArtifactPresence.ABSENT for item in declared.values())
+    assert declared[("ws3", "SHARED", "research")].motif_observation.presence is SourceArtifactPresence.PRESENT
+    research_motif = next(
+        item
+        for item in manifest.entries
+        if item.scope_key is not None
+        and item.scope_key.canonical_key == ("ws3", "SHARED", "research")
+        and item.semantic_role is EvidenceSemanticRole.MOTIFS
+    )
+    assert research_motif.owner_class is SourceOwnerClass.MOTIF_SOURCE
+    assert research_motif.owner_boundary.boundary_kind.value == "DOMAIN"
+    assert research_motif.canonical_locator == "motifs.json"
+    assert research_motif.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+    assert {item.scope_key.canonical_key for item in prepared.unknown_identity_evidence} == {
+        ("ws3", "PRIVATE", "a1"),
+        ("ws4", "PRIVATE", "a1"),
+        ("ws5", "PRIVATE", "a1"),
+    }
+    assert manifest.verify(data_root=root).verified_absent_entries
+    assert _source_snapshot(root) == before
+
+
+def test_direct_metadata_less_workspace_manifest_refuses_created_metadata_drift(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    manifest = adapter.prepare_direct_admission_source(data_root=root).description.explicit_source_manifest
+    _json(root / "workspaces" / "sim-ws" / "workspace_meta.json", {"workspace": "sim-ws", **_target_lock()})
+
+    with pytest.raises(ExplicitSourceEvidenceDrift, match="expected-absent evidence was created: workspace_meta.json"):
+        manifest.verify(data_root=root)
+
+
+def test_direct_metadata_less_workspace_keeps_unqualified_memory_graph_refused(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    _scope(root, "sim-ws", "new-agent")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="lacks the frozen workspace representation lock"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_metadata_less_workspace_keeps_missing_metadata_strict_in_packet_capture(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    missing = root / "workspaces" / "sim-ws" / "workspace_meta.json"
+
+    _assert_regular_file_refusal(lambda: _capture(root, adapter), missing, "ABSENT")
+
+
+def test_declared_empty_domain_owner_directory_still_refuses_unsafe_children(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    research = root / "workspaces" / "ws3" / "domains" / "research"
+    motif = research / "motifs.json"
+    motif.unlink()
+    motif.mkdir()
+
+    _assert_regular_file_refusal(
+        lambda: adapter.prepare_direct_admission_source(data_root=root), motif, "NON_FILE",
+    )
+
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path / "shared-not-directory")
+    shared = root / "workspaces" / "ws3" / "domains" / "research" / "shared"
+    _write(shared, "not a directory")
+    with pytest.raises(RootBlocker5BindingRefused, match="shared scope must be a non-symlink directory"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path / "undeclared-domain")
+    _json(root / "workspaces" / "sim-ws" / "domains" / "not-declared" / "motifs.json", {"motif": "refuse"})
+    with pytest.raises(CorrectiveFreezePacketRefused, match="materialized domain lacks a direct declaration"):
+        adapter.prepare_direct_admission_source(data_root=root)
 
 
 def _orchard_empty_shared_fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:

@@ -493,6 +493,7 @@ def _validate_absence_reason(role: EvidenceSemanticRole, reason: EvidenceAbsence
     }:
         raise ExplicitSourceEvidenceError("EMPTY_GRAPH absence is not valid for this semantic role")
     if reason is EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE and role not in {
+        EvidenceSemanticRole.WORKSPACE_META,
         EvidenceSemanticRole.EMBEDDING_MANIFEST,
         EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP,
         EvidenceSemanticRole.LEGACY_REPRESENTATION,
