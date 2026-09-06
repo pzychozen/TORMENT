@@ -10,15 +10,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 import subprocess
 from typing import Sequence
-from uuid import uuid4
-
-
-_PROBE_CONTRACT = "TORMENT_DETACHED_REAL_ADMISSION_IMPORT_PROBE"
-_PROBE_VERSION = 1
+from torment_service.substrate.detached_real_admission_child_entrypoint import (
+    ENTRYPOINT_MODULE,
+    IMPORT_PROBE_CONTRACT,
+    IMPORT_PROBE_VERSION,
+)
 
 
 class DetachedRealAdmissionChildLaunchRefused(RuntimeError):
@@ -60,38 +59,83 @@ class DetachedRealAdmissionChildLaunchError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class DetachedRealAdmissionChildProcess:
-    """A launched process and the exact immutable context supplied to it."""
+class DetachedRealAdmissionChildInvocation:
+    """The exact, module-mode command context for a detached child."""
 
-    process: subprocess.Popen[bytes]
     executable: Path
     repository_root: Path
-    stdout_path: Path
-    stderr_path: Path
+    arguments: tuple[str, ...]
+    entrypoint_module: str
     creationflags: int
 
 
 @dataclass(frozen=True)
+class DetachedRealAdmissionChildProcess:
+    """A launched process and its immutable module-mode invocation."""
+
+    process: subprocess.Popen[bytes]
+    invocation: DetachedRealAdmissionChildInvocation
+    stdout_path: Path
+    stderr_path: Path
+
+    @property
+    def executable(self) -> Path:
+        return self.invocation.executable
+
+    @property
+    def repository_root(self) -> Path:
+        return self.invocation.repository_root
+
+    @property
+    def arguments(self) -> tuple[str, ...]:
+        return self.invocation.arguments
+
+    @property
+    def entrypoint_module(self) -> str:
+        return self.invocation.entrypoint_module
+
+    @property
+    def creationflags(self) -> int:
+        return self.invocation.creationflags
+
+
+@dataclass(frozen=True)
 class DetachedRealAdmissionImportProbeResult:
-    """The child's file-backed import-only result, independent of stdout."""
+    """The exact module-mode, file-backed import-only child result."""
 
     passed: bool
     cwd: str
     executable: str
+    sys_path_0: str
+    entry_invocation_mode: str
+    entrypoint_module: str
+    repository_module_identity: str | None
     exception_type: str | None
     exception_message: str | None
+    invocation: DetachedRealAdmissionChildInvocation
 
     def __post_init__(self) -> None:
         if not isinstance(self.passed, bool):
             raise DetachedRealAdmissionChildLaunchRefused("import probe passed must be boolean")
-        for label in ("cwd", "executable"):
+        for label in ("cwd", "executable", "entry_invocation_mode", "entrypoint_module"):
             value = getattr(self, label)
             if not isinstance(value, str) or not value:
                 raise DetachedRealAdmissionChildLaunchRefused(f"import probe {label} must be non-empty text")
+        if not isinstance(self.sys_path_0, str):
+            raise DetachedRealAdmissionChildLaunchRefused("import probe sys_path_0 must be text")
         if self.passed:
-            if self.exception_type is not None or self.exception_message is not None:
+            if (
+                self.exception_type is not None
+                or self.exception_message is not None
+                or not isinstance(self.repository_module_identity, str)
+                or not self.repository_module_identity
+            ):
                 raise DetachedRealAdmissionChildLaunchRefused("passing import probe cannot retain an exception")
-        elif not isinstance(self.exception_type, str) or not isinstance(self.exception_message, str):
+        elif (
+            not isinstance(self.exception_type, str)
+            or not isinstance(self.exception_message, str)
+            or self.repository_module_identity is not None
+        ):
             raise DetachedRealAdmissionChildLaunchRefused("failing import probe must retain its exact exception")
 
 
@@ -101,52 +145,80 @@ def detached_real_admission_creationflags() -> int:
     return getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
+def build_detached_real_admission_child_invocation(
+    *,
+    executable: str | Path,
+    repository_root: str | Path,
+    operational_arguments: Sequence[str],
+    entrypoint_module: str = ENTRYPOINT_MODULE,
+) -> DetachedRealAdmissionChildInvocation:
+    """Build one fail-closed, repository-owned ``python -m`` invocation."""
+
+    root = _validated_repository_root(repository_root)
+    interpreter = _validated_executable(executable, root)
+    module = _validated_entrypoint_module(entrypoint_module, root)
+    operation = _validated_operational_arguments(operational_arguments)
+    return DetachedRealAdmissionChildInvocation(
+        executable=interpreter,
+        repository_root=root,
+        arguments=("-m", module, *operation),
+        entrypoint_module=module,
+        creationflags=detached_real_admission_creationflags(),
+    )
+
+
 def launch_detached_real_admission_child(
     *,
     executable: str | Path,
     repository_root: str | Path,
-    arguments: Sequence[str],
+    operational_arguments: Sequence[str],
+    stdout_path: str | Path,
+    stderr_path: str | Path,
+    entrypoint_module: str = ENTRYPOINT_MODULE,
+) -> DetachedRealAdmissionChildProcess:
+    """Launch only the qualified repository module with explicit context.
+
+    This function never launches raw ``-c`` or external-script argument shapes.
+    The caller retains every source, writer, SQLite, and P1 authority.
+    """
+
+    invocation = build_detached_real_admission_child_invocation(
+        executable=executable,
+        repository_root=repository_root,
+        operational_arguments=operational_arguments,
+        entrypoint_module=entrypoint_module,
+    )
+    return _launch_detached_real_admission_invocation(
+        invocation,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+
+
+def launch_detached_real_admission_external_script_child(
+    *,
+    executable: str | Path,
+    repository_root: str | Path,
+    external_script: str | Path,
+    script_arguments: Sequence[str] = (),
     stdout_path: str | Path,
     stderr_path: str | Path,
 ) -> DetachedRealAdmissionChildProcess:
-    """Launch one child with explicit executable, repository CWD, and detached stdio.
-
-    The caller owns the child program and every administrative authority.  This
-    function never searches ``PATH``, changes environment variables, or reads
-    a data root.
-    """
+    """Launch a caller-supplied script only through the module entrypoint."""
 
     root = _validated_repository_root(repository_root)
     interpreter = _validated_executable(executable, root)
-    child_arguments = _validated_arguments(arguments)
-    stdout = _validated_output_path(stdout_path, "stdout_path")
-    stderr = _validated_output_path(stderr_path, "stderr_path")
-    if stdout == stderr:
-        raise DetachedRealAdmissionChildLaunchRefused("stdout_path and stderr_path must be distinct")
-    try:
-        stdout.parent.mkdir(parents=True, exist_ok=True)
-        stderr.parent.mkdir(parents=True, exist_ok=True)
-        with stdout.open("xb") as stdout_stream, stderr.open("xb") as stderr_stream:
-            process = subprocess.Popen(
-                [str(interpreter), *child_arguments],
-                executable=str(interpreter),
-                cwd=str(root),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_stream,
-                stderr=stderr_stream,
-                creationflags=detached_real_admission_creationflags(),
-            )
-    except OSError as exc:
-        raise DetachedRealAdmissionChildLaunchError(
-            _diagnostic(interpreter, root, exc)
-        ) from exc
-    return DetachedRealAdmissionChildProcess(
-        process=process,
+    script = _validated_external_script(external_script, interpreter, root)
+    arguments = _validated_arguments(script_arguments, "script_arguments")
+    invocation = build_detached_real_admission_child_invocation(
         executable=interpreter,
         repository_root=root,
-        stdout_path=stdout,
-        stderr_path=stderr,
-        creationflags=detached_real_admission_creationflags(),
+        operational_arguments=("--execute-external-script", str(script), *arguments),
+    )
+    return _launch_detached_real_admission_invocation(
+        invocation,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
     )
 
 
@@ -159,7 +231,7 @@ def run_detached_real_admission_import_probe(
     result_path: str | Path,
     timeout_seconds: float = 30.0,
 ) -> DetachedRealAdmissionImportProbeResult:
-    """Run and recover an import-only child using the real child's exact context."""
+    """Run the future child's exact ``python -m`` entrypoint in probe mode."""
 
     root = _validated_repository_root(repository_root)
     interpreter = _validated_executable(executable, root)
@@ -170,11 +242,13 @@ def run_detached_real_admission_import_probe(
         raise DetachedRealAdmissionChildLaunchRefused(
             "import probe result, stdout, and stderr paths must be distinct"
         )
-    probe_path.parent.mkdir(parents=True, exist_ok=True)
-    child = launch_detached_real_admission_child(
+    invocation = build_detached_real_admission_child_invocation(
         executable=interpreter,
         repository_root=root,
-        arguments=("-c", _import_probe_program(probe_path)),
+        operational_arguments=("--import-probe-only", "--result-path", str(probe_path)),
+    )
+    child = _launch_detached_real_admission_invocation(
+        invocation,
         stdout_path=stdout,
         stderr_path=stderr,
     )
@@ -184,11 +258,7 @@ def run_detached_real_admission_import_probe(
         raise DetachedRealAdmissionChildLaunchError(
             _diagnostic(child.executable, child.repository_root, exc)
         ) from exc
-    result = _read_import_probe_result(
-        probe_path,
-        executable=child.executable,
-        repository_root=child.repository_root,
-    )
+    result = _read_import_probe_result(probe_path, invocation=invocation)
     if not result.passed:
         raise DetachedRealAdmissionChildLaunchError(
             DetachedRealAdmissionChildLaunchDiagnostic(
@@ -228,12 +298,48 @@ def _validated_executable(value: str | Path, root: Path) -> Path:
     return executable
 
 
-def _validated_arguments(value: Sequence[str]) -> tuple[str, ...]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-        raise DetachedRealAdmissionChildLaunchRefused("child arguments must be a non-empty sequence of strings")
+def _validated_entrypoint_module(value: str, root: Path) -> str:
+    if not isinstance(value, str) or value != ENTRYPOINT_MODULE:
+        raise DetachedRealAdmissionChildLaunchRefused(
+            f"entrypoint_module must be the exact repository module {ENTRYPOINT_MODULE!r}"
+        )
+    module_path = root.joinpath(*value.split(".")).with_suffix(".py")
+    if not module_path.is_file():
+        raise DetachedRealAdmissionChildLaunchRefused(
+            f"exact repository entrypoint module does not exist: {module_path}"
+        )
+    return value
+
+
+def _validated_arguments(value: Sequence[str], label: str) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise DetachedRealAdmissionChildLaunchRefused(f"{label} must be a sequence of strings")
     if any(not isinstance(item, str) for item in value):
-        raise DetachedRealAdmissionChildLaunchRefused("child arguments must be strings")
+        raise DetachedRealAdmissionChildLaunchRefused(f"{label} must contain only strings")
     return tuple(value)
+
+
+def _validated_operational_arguments(value: Sequence[str]) -> tuple[str, ...]:
+    arguments = _validated_arguments(value, "operational_arguments")
+    if not arguments:
+        raise DetachedRealAdmissionChildLaunchRefused("operational_arguments must be non-empty")
+    if arguments[0] not in {"--import-probe-only", "--execute-external-script"}:
+        raise DetachedRealAdmissionChildLaunchRefused(
+            "operational_arguments must select the exact repository entrypoint mode"
+        )
+    return arguments
+
+
+def _validated_external_script(value: str | Path, executable: Path, root: Path) -> Path:
+    if not isinstance(value, (str, Path)) or not str(value).strip():
+        raise DetachedRealAdmissionChildLaunchRefused("external_script must be an explicit non-empty path")
+    script = Path(value).expanduser().resolve(strict=False)
+    if not script.is_file():
+        error = FileNotFoundError(f"explicit external administration script does not exist: {script}")
+        raise DetachedRealAdmissionChildLaunchError(_diagnostic(executable, root, error))
+    if script.suffix.lower() != ".py":
+        raise DetachedRealAdmissionChildLaunchRefused("external_script must name an explicit .py file")
+    return script
 
 
 def _validated_output_path(value: str | Path, label: str) -> Path:
@@ -246,6 +352,41 @@ def _validated_timeout(value: float) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
         raise DetachedRealAdmissionChildLaunchRefused("timeout_seconds must be positive")
     return float(value)
+
+
+def _launch_detached_real_admission_invocation(
+    invocation: DetachedRealAdmissionChildInvocation,
+    *,
+    stdout_path: str | Path,
+    stderr_path: str | Path,
+) -> DetachedRealAdmissionChildProcess:
+    stdout = _validated_output_path(stdout_path, "stdout_path")
+    stderr = _validated_output_path(stderr_path, "stderr_path")
+    if stdout == stderr:
+        raise DetachedRealAdmissionChildLaunchRefused("stdout_path and stderr_path must be distinct")
+    try:
+        stdout.parent.mkdir(parents=True, exist_ok=True)
+        stderr.parent.mkdir(parents=True, exist_ok=True)
+        with stdout.open("xb") as stdout_stream, stderr.open("xb") as stderr_stream:
+            process = subprocess.Popen(
+                [str(invocation.executable), *invocation.arguments],
+                executable=str(invocation.executable),
+                cwd=str(invocation.repository_root),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_stream,
+                stderr=stderr_stream,
+                creationflags=invocation.creationflags,
+            )
+    except OSError as exc:
+        raise DetachedRealAdmissionChildLaunchError(
+            _diagnostic(invocation.executable, invocation.repository_root, exc)
+        ) from exc
+    return DetachedRealAdmissionChildProcess(
+        process=process,
+        invocation=invocation,
+        stdout_path=stdout,
+        stderr_path=stderr,
+    )
 
 
 def _diagnostic(
@@ -261,87 +402,64 @@ def _diagnostic(
     )
 
 
-def _import_probe_program(result_path: Path) -> str:
-    """Return an import-only child program that atomically retains its result."""
-
-    encoded_result_path = json.dumps(str(result_path))
-    return f"""
-import json
-import os
-from pathlib import Path
-import sys
-from uuid import uuid4
-
-result_path = Path({encoded_result_path})
-result = {{
-    \"contract\": {_PROBE_CONTRACT!r},
-    \"version\": {_PROBE_VERSION},
-    \"passed\": False,
-    \"cwd\": str(Path.cwd().resolve()),
-    \"executable\": sys.executable,
-    \"exception_type\": None,
-    \"exception_message\": None,
-}}
-try:
-    import torment_service
-    import torment_service.substrate.real_root_typed_evidence
-    import torment_service.substrate.writer_freeze_evidence
-    import torment_service.substrate.file_backed_real_admission_administration_runner
-except BaseException as exc:
-    result[\"exception_type\"] = type(exc).__name__
-    result[\"exception_message\"] = str(exc)
-else:
-    result[\"passed\"] = True
-temporary = result_path.with_name(f\".{{result_path.name}}.{{uuid4().hex}}.tmp\")
-with temporary.open(\"x\", encoding=\"utf-8\", newline=\"\\n\") as stream:
-    stream.write(json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(\",\", \":\"), sort_keys=True) + \"\\n\")
-    stream.flush()
-    os.fsync(stream.fileno())
-os.replace(temporary, result_path)
-raise SystemExit(0 if result[\"passed\"] else 1)
-"""
-
-
 def _read_import_probe_result(
     path: Path,
     *,
-    executable: Path,
-    repository_root: Path,
+    invocation: DetachedRealAdmissionChildInvocation,
 ) -> DetachedRealAdmissionImportProbeResult:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise DetachedRealAdmissionChildLaunchError(
             DetachedRealAdmissionChildLaunchDiagnostic(
-                executable=str(executable),
-                cwd=str(repository_root),
+                executable=str(invocation.executable),
+                cwd=str(invocation.repository_root),
                 exception_type=type(exc).__name__,
                 exception_message=str(exc),
             )
         ) from exc
     required = {
-        "contract", "version", "passed", "cwd", "executable", "exception_type", "exception_message",
+        "contract", "version", "passed", "cwd", "executable", "sys_path_0",
+        "entry_invocation_mode", "entrypoint_module", "repository_module_identity",
+        "exception_type", "exception_message",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise DetachedRealAdmissionChildLaunchRefused("import probe result shape is invalid")
-    if value["contract"] != _PROBE_CONTRACT or value["version"] != _PROBE_VERSION:
+    if value["contract"] != IMPORT_PROBE_CONTRACT or value["version"] != IMPORT_PROBE_VERSION:
         raise DetachedRealAdmissionChildLaunchRefused("import probe result contract is unsupported")
-    return DetachedRealAdmissionImportProbeResult(
+    result = DetachedRealAdmissionImportProbeResult(
         passed=value["passed"],
         cwd=value["cwd"],
         executable=value["executable"],
+        sys_path_0=value["sys_path_0"],
+        entry_invocation_mode=value["entry_invocation_mode"],
+        entrypoint_module=value["entrypoint_module"],
+        repository_module_identity=value["repository_module_identity"],
         exception_type=value["exception_type"],
         exception_message=value["exception_message"],
+        invocation=invocation,
     )
+    if result.cwd != str(invocation.repository_root):
+        raise DetachedRealAdmissionChildLaunchRefused("import probe did not preserve the explicit repository cwd")
+    if result.executable != str(invocation.executable):
+        raise DetachedRealAdmissionChildLaunchRefused("import probe did not preserve the explicit executable")
+    if result.entry_invocation_mode != "PYTHON_MODULE":
+        raise DetachedRealAdmissionChildLaunchRefused("import probe did not use python module invocation mode")
+    if result.entrypoint_module != invocation.entrypoint_module:
+        raise DetachedRealAdmissionChildLaunchRefused("import probe entrypoint module does not match the real child")
+    return result
 
 
 __all__ = [
     "DetachedRealAdmissionChildLaunchDiagnostic",
     "DetachedRealAdmissionChildLaunchError",
     "DetachedRealAdmissionChildLaunchRefused",
+    "DetachedRealAdmissionChildInvocation",
     "DetachedRealAdmissionChildProcess",
     "DetachedRealAdmissionImportProbeResult",
+    "build_detached_real_admission_child_invocation",
     "detached_real_admission_creationflags",
     "launch_detached_real_admission_child",
+    "launch_detached_real_admission_external_script_child",
     "run_detached_real_admission_import_probe",
 ]
