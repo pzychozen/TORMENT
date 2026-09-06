@@ -142,12 +142,12 @@ def test_non_shell_administration_ancestor_remains_subject_to_existing_direct_wr
                 _record(200, 100, "pwsh.exe", "pwsh.exe"),
             ),
             100,
-            "PROCESS_TREE_CYCLE",
+                "ADMINISTRATION_ANCESTRY_CYCLE",
         ),
         (
             (_record(100, 999, "cmd.exe", "cmd.exe"),),
             100,
-            "MISSING_PARENT_PROCESS: pid=100; parent_pid=999",
+            "MISSING_ANCESTRY_PROCESS: pid=999",
         ),
         (
             (_record(100, 0, "cmd.exe", "cmd.exe"),),
@@ -155,7 +155,7 @@ def test_non_shell_administration_ancestor_remains_subject_to_existing_direct_wr
             "CURRENT_ADMINISTRATION_PID_NOT_FOUND: pid=999",
         ),
     ),
-    ids=("duplicate_pid", "cycle", "missing_parent", "missing_current_pid"),
+    ids=("duplicate_pid", "current_ancestry_cycle", "missing_current_ancestry_parent", "missing_current_pid"),
 )
 def test_malformed_process_trees_fail_closed_as_unresolved(
     records: tuple[WindowsProcessRecord, ...],
@@ -174,3 +174,20 @@ def test_malformed_process_trees_fail_closed_as_unresolved(
     assert result.unresolved_reason == reason
     assert result.direct_writer_observation.writer_class is RootWriterClass.DIRECT_TORMENT_TOOL_OR_SCRIPT
     assert result.direct_writer_observation.result is WriterObservationResult.UNRESOLVED
+
+
+def test_unrelated_missing_parent_is_classifiable_without_hiding_a_writer() -> None:
+    benign = census_direct_torment_tool_or_script(
+        records=_attempt_10_process_table(_record(400, 999, "python.exe", "python.exe benign")),
+        current_administration_pid=_CURRENT_ADMINISTRATION_PID,
+    )
+    writer = census_direct_torment_tool_or_script(
+        records=_attempt_10_process_table(_record(400, 999, "python.exe", "python.exe torment writer")),
+        current_administration_pid=_CURRENT_ADMINISTRATION_PID,
+    )
+
+    assert benign.resolved is True
+    assert benign.direct_writer_observation.result is WriterObservationResult.ABSENT
+    assert writer.resolved is True
+    assert writer.direct_writer_observation.result is WriterObservationResult.RUNNING
+    assert writer.direct_writer_pids == (400,)

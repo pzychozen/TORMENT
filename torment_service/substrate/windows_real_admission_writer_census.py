@@ -103,11 +103,12 @@ def census_direct_torment_tool_or_script(
 ) -> WindowsDirectWriterCensusResult:
     """Classify the existing direct-writer rule with bounded ancestry context.
 
-    The supplied table must contain every positive parent PID referenced by a
-    record.  Any malformed record, duplicate PID, absent current PID, missing
-    parent, or process-tree cycle produces a typed ``UNRESOLVED`` observation.
-    Only the exact supplied current PID and command-shell records in its
-    verified parent chain are excluded from the direct-writer predicate.
+    Every record is validated independently. Only the supplied current
+    administration PID must have a complete, acyclic parent chain through
+    ``parent_pid == 0``. Unrelated parent churn does not hide a readable
+    process's own direct-writer classification. The exact current PID and
+    command-shell records in its verified parent chain are the only exclusions
+    from the direct-writer predicate.
     """
 
     table, invalid_reason = _validated_process_table(records, current_administration_pid)
@@ -186,30 +187,7 @@ def _validated_process_table(
 
     if current_administration_pid not in table:
         return None, f"CURRENT_ADMINISTRATION_PID_NOT_FOUND: pid={current_administration_pid}"
-    for record in table.values():
-        if record.parent_pid and record.parent_pid not in table:
-            return None, f"MISSING_PARENT_PROCESS: pid={record.pid}; parent_pid={record.parent_pid}"
-    if _has_process_tree_cycle(table):
-        return None, "PROCESS_TREE_CYCLE"
     return table, None
-
-
-def _has_process_tree_cycle(table: dict[int, WindowsProcessRecord]) -> bool:
-    """Detect every cycle with at most one bounded parent walk per PID."""
-
-    for start_pid in sorted(table):
-        seen: set[int] = set()
-        pid = start_pid
-        for _ in range(len(table) + 1):
-            if pid == 0:
-                break
-            if pid in seen:
-                return True
-            seen.add(pid)
-            pid = table[pid].parent_pid
-        else:
-            return True
-    return False
 
 
 def _resolve_administration_ancestry(
@@ -217,6 +195,7 @@ def _resolve_administration_ancestry(
     current_administration_pid: int,
 ) -> tuple[tuple[int, ...] | None, str | None]:
     ancestry: list[int] = []
+    seen: set[int] = set()
     pid = current_administration_pid
     for _ in range(len(table) + 1):
         if pid == 0:
@@ -224,6 +203,9 @@ def _resolve_administration_ancestry(
         record = table.get(pid)
         if record is None:
             return None, f"MISSING_ANCESTRY_PROCESS: pid={pid}"
+        if pid in seen:
+            return None, "ADMINISTRATION_ANCESTRY_CYCLE"
+        seen.add(pid)
         ancestry.append(pid)
         pid = record.parent_pid
     return None, "ADMINISTRATION_ANCESTRY_EXCEEDED_BOUND"
