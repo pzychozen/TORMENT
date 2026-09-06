@@ -264,6 +264,7 @@ class RealRootTypedEvidenceAdapter:
         prepared = self._prepare_source(
             root=root,
             discovered_census=discovered_census,
+            allow_native_control_plane_root=False,
             allow_missing_workspace_metadata=False,
             allow_known_empty_shared_residue=False,
             allow_known_empty_private_residue=False,
@@ -293,6 +294,7 @@ class RealRootTypedEvidenceAdapter:
         return self._prepare_source(
             root=root,
             discovered_census=discover_canonical_root_layout(data_root=root),
+            allow_native_control_plane_root=True,
             allow_missing_workspace_metadata=True,
             allow_known_empty_shared_residue=True,
             allow_known_empty_private_residue=True,
@@ -304,6 +306,7 @@ class RealRootTypedEvidenceAdapter:
         *,
         root: Path,
         discovered_census: RootDiscoveredCensus,
+        allow_native_control_plane_root: bool,
         allow_missing_workspace_metadata: bool,
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
@@ -315,7 +318,9 @@ class RealRootTypedEvidenceAdapter:
         if direct_census != discovered_census:
             raise CorrectiveFreezePacketRefused("typed evidence discovered census does not match fixed layout")
         self._validate_excluded_alternate_roots(root)
-        self._validate_root_children(root)
+        self._validate_root_children(
+            root, allow_native_control_plane_root=allow_native_control_plane_root,
+        )
         workspaces_root = _real_directory(root / "workspaces", "workspaces root")
 
         entries: list[ExplicitSourceEvidence] = []
@@ -371,12 +376,15 @@ class RealRootTypedEvidenceAdapter:
             ),
         )
 
-    def _validate_root_children(self, root: Path) -> None:
+    def _validate_root_children(self, root: Path, *, allow_native_control_plane_root: bool) -> None:
         allowed = {
             "workspaces", *(item.canonical_locator for item in self.excluded_source_artifacts),
             *(item.canonical_locator for item in self.excluded_alternate_roots),
         }
         observed = {item.name for item in root.iterdir()}
+        if allow_native_control_plane_root and "substrate" in observed:
+            _native_control_plane_root_directory(root / "substrate")
+            allowed.add("substrate")
         if observed - allowed:
             raise CorrectiveFreezePacketRefused("unclassified durable root artifact is not allowed")
         if "workspaces" not in observed:
@@ -1355,6 +1363,32 @@ def _alternate_root_directory(path: Path) -> Path:
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     if stat.S_ISLNK(information.st_mode) or getattr(information, "st_file_attributes", 0) & reparse_flag or not path.is_dir():
         raise CorrectiveFreezePacketRefused("excluded alternate root must be a real top-level directory")
+    return path
+
+
+def _native_control_plane_root_directory(path: Path) -> Path:
+    """Validate only the direct-admission native control-plane root itself.
+
+    ``substrate/`` is never legacy source evidence: its contents remain under
+    their separately qualified core/deployment authorities.  This helper must
+    not enumerate or open any descendant.
+    """
+
+    try:
+        information = path.lstat()
+    except OSError as exc:
+        raise CorrectiveFreezePacketRefused(
+            "native control plane root cannot be inspected"
+        ) from exc
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if (
+        stat.S_ISLNK(information.st_mode)
+        or getattr(information, "st_file_attributes", 0) & reparse_flag
+        or not path.is_dir()
+    ):
+        raise CorrectiveFreezePacketRefused(
+            "native control plane root must be a real top-level directory"
+        )
     return path
 
 

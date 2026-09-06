@@ -852,6 +852,60 @@ def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_
         adapter.prepare_direct_admission_source(data_root=root)
 
 
+def test_direct_preparation_recognizes_only_top_level_native_control_plane_root(
+    tmp_path: Path,
+) -> None:
+    without_parent = tmp_path / "without-substrate"
+    with_parent = tmp_path / "with-substrate"
+    without_parent.mkdir()
+    with_parent.mkdir()
+    without_substrate, without_adapter = _fixture(without_parent)
+    with_substrate, with_adapter = _fixture(with_parent)
+    _write(with_substrate / "substrate" / "cores" / "opaque-control-plane.db", b"not-source")
+    _write(with_substrate / "substrate" / "cores" / "opaque-control-plane.db-wal", b"not-source")
+    _write(with_substrate / "substrate" / "other" / "unrelated.json", "not source JSON")
+
+    without = without_adapter.prepare_direct_admission_source(data_root=without_substrate)
+    with_control_plane = with_adapter.prepare_direct_admission_source(data_root=with_substrate)
+
+    # Direct admission recognizes the native control-plane directory but never
+    # descends into it or lets its descendants enter source-derived facts.
+    assert with_control_plane.discovered_census == without.discovered_census
+    assert with_control_plane.source_scope_plans == without.source_scope_plans
+    assert with_control_plane.description.explicit_source_manifest == without.description.explicit_source_manifest
+    assert with_control_plane.description.external_owner_observations == without.description.external_owner_observations
+    assert with_control_plane.description.external_owner_observation_digest == without.description.external_owner_observation_digest
+    assert with_control_plane.geometry_disposition_plan == without.geometry_disposition_plan
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        _capture(with_substrate, with_adapter)
+
+    _json(with_substrate / "mystery-control-plane" / "state.json", {"must": "refuse"})
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable root artifact"):
+        with_adapter.prepare_direct_admission_source(data_root=with_substrate)
+
+
+def test_direct_preparation_refuses_non_directory_native_control_plane_root(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    _write(root / "substrate", "not a directory")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="native control plane root must be a real top-level directory"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_preparation_refuses_linked_native_control_plane_root(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    target = tmp_path / "native-control-plane-target"
+    target.mkdir()
+    try:
+        os.symlink(target, root / "substrate", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows host")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="native control plane root must be a real top-level directory"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
 def test_direct_preparation_admits_physical_empty_shared_scopes_without_motif_as_runtime_members(
     tmp_path: Path,
 ) -> None:
