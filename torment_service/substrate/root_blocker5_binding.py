@@ -40,6 +40,7 @@ from .writer_freeze_evidence import (
     RootWriterFreezeRecheck,
     bind_root_writer_freeze_witness,
     recheck_root_writer_freeze_evidence,
+    root_writer_freeze_evidence_payload_from_payload,
 )
 
 
@@ -549,6 +550,160 @@ def require_persisted_root_admission_envelope(
     expected = RootAdmissionEnvelopeRecord.from_envelope(envelope)
     if record != expected:
         raise RootBlocker5BindingRefused("ROOT_ADMISSION_ENVELOPE_RECORD_MISMATCH")
+    return record
+
+
+@dataclass(frozen=True)
+class RootWriterFreezeEvidenceRecord:
+    """Subordinate durable payload evidence for one real-root-v2 envelope.
+
+    The record deliberately carries no deployment authority.  It is a
+    recovery copy of the exact P2 writer-freeze facts whose digest is already
+    part of the immutable envelope identity.
+    """
+
+    root_admission_envelope_record: RootAdmissionEnvelopeRecord
+    writer_freeze_evidence_payload: dict[str, object]
+    writer_freeze_witness_payload: dict[str, str]
+    writer_freeze_payload_digest: str
+    frozen_workspaces_tree_digest: str
+
+    CONTRACT = "TORMENT_ROOT_WRITER_FREEZE_EVIDENCE_RECORD"
+    VERSION = 1
+
+    def __post_init__(self) -> None:
+        envelope = self.root_admission_envelope_record
+        if not isinstance(envelope, RootAdmissionEnvelopeRecord):
+            raise RootBlocker5BindingRefused("writer freeze evidence record requires a valid envelope record")
+        if not isinstance(self.writer_freeze_evidence_payload, dict):
+            raise RootBlocker5BindingRefused("writer freeze evidence record payload must be a mapping")
+        if not isinstance(self.writer_freeze_witness_payload, dict):
+            raise RootBlocker5BindingRefused("writer freeze evidence record witness must be a mapping")
+        require_digest(self.writer_freeze_payload_digest, "writer freeze payload digest")
+        require_digest(self.frozen_workspaces_tree_digest, "frozen workspaces tree digest")
+        try:
+            payload = root_writer_freeze_evidence_payload_from_payload(
+                self.writer_freeze_evidence_payload,
+            )
+            witness = RootWriterFreezeWitness(**self.writer_freeze_witness_payload)
+            bind_root_writer_freeze_witness(payload=payload, witness=witness)
+        except (TypeError, ValueError, RootWriterFreezeEvidenceRefused) as exc:
+            raise RootBlocker5BindingRefused("writer freeze evidence record is malformed") from exc
+        if self.writer_freeze_payload_digest != payload.digest:
+            raise RootBlocker5BindingRefused("writer freeze evidence record payload digest disagrees")
+        if self.frozen_workspaces_tree_digest != payload.source_tree_snapshot.tree_digest:
+            raise RootBlocker5BindingRefused("writer freeze evidence record tree digest disagrees")
+        if envelope.writer_freeze_payload != witness.payload():
+            raise RootBlocker5BindingRefused("writer freeze evidence record witness disagrees with envelope")
+        if envelope.envelope_payload.get("writer_freeze_evidence_digest") != payload.digest:
+            raise RootBlocker5BindingRefused("writer freeze evidence record payload disagrees with envelope")
+        if (
+            envelope.envelope_payload.get("frozen_workspaces_tree_digest")
+            != payload.source_tree_snapshot.tree_digest
+        ):
+            raise RootBlocker5BindingRefused("writer freeze evidence record tree disagrees with envelope")
+        if (
+            envelope.root_description_payload.get("external_owner_observation_digest")
+            != payload.external_owner_observation_digest
+        ):
+            raise RootBlocker5BindingRefused("writer freeze evidence record owner disagrees with envelope")
+
+    @classmethod
+    def from_evidence(
+        cls,
+        *,
+        root_admission_envelope_record: RootAdmissionEnvelopeRecord,
+        writer_freeze_evidence: RootWriterFreezeEvidencePayload,
+        writer_freeze: RootWriterFreezeWitness,
+    ) -> "RootWriterFreezeEvidenceRecord":
+        if not isinstance(writer_freeze_evidence, RootWriterFreezeEvidencePayload):
+            raise RootBlocker5BindingRefused("writer freeze evidence record requires typed payload")
+        if not isinstance(writer_freeze, RootWriterFreezeWitness):
+            raise RootBlocker5BindingRefused("writer freeze evidence record requires typed witness")
+        return cls(
+            root_admission_envelope_record=root_admission_envelope_record,
+            writer_freeze_evidence_payload=writer_freeze_evidence.payload(),
+            writer_freeze_witness_payload=writer_freeze.payload(),
+            writer_freeze_payload_digest=writer_freeze_evidence.digest,
+            frozen_workspaces_tree_digest=writer_freeze_evidence.source_tree_snapshot.tree_digest,
+        )
+
+    @property
+    def root_admission_envelope_digest(self) -> str:
+        return self.root_admission_envelope_record.envelope_digest
+
+    @property
+    def writer_freeze_evidence(self) -> RootWriterFreezeEvidencePayload:
+        return root_writer_freeze_evidence_payload_from_payload(
+            self.writer_freeze_evidence_payload,
+        )
+
+    @property
+    def writer_freeze(self) -> RootWriterFreezeWitness:
+        return RootWriterFreezeWitness(**self.writer_freeze_witness_payload)
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "contract": self.CONTRACT,
+            "version": self.VERSION,
+            "root_admission_envelope_digest": self.root_admission_envelope_digest,
+            "writer_freeze_evidence_payload": self.writer_freeze_evidence_payload,
+            "writer_freeze_witness_payload": self.writer_freeze_witness_payload,
+            "writer_freeze_payload_digest": self.writer_freeze_payload_digest,
+            "frozen_workspaces_tree_digest": self.frozen_workspaces_tree_digest,
+        }
+
+
+def root_writer_freeze_evidence_record_from_payload(
+    value: object,
+    *,
+    root_admission_envelope_record: RootAdmissionEnvelopeRecord,
+) -> RootWriterFreezeEvidenceRecord:
+    """Decode one exact subordinate evidence record; unknown shapes refuse."""
+
+    if not isinstance(value, dict) or value.get("contract") != RootWriterFreezeEvidenceRecord.CONTRACT:
+        raise RootBlocker5BindingRefused("writer freeze evidence record contract is unsupported")
+    if value.get("version") != RootWriterFreezeEvidenceRecord.VERSION:
+        raise RootBlocker5BindingRefused("writer freeze evidence record version is unsupported")
+    required = {
+        "contract", "version", "root_admission_envelope_digest",
+        "writer_freeze_evidence_payload", "writer_freeze_witness_payload",
+        "writer_freeze_payload_digest", "frozen_workspaces_tree_digest",
+    }
+    if set(value) != required:
+        raise RootBlocker5BindingRefused("writer freeze evidence record shape is invalid")
+    if value["root_admission_envelope_digest"] != root_admission_envelope_record.envelope_digest:
+        raise RootBlocker5BindingRefused("writer freeze evidence record names another envelope")
+    record = RootWriterFreezeEvidenceRecord(
+        root_admission_envelope_record=root_admission_envelope_record,
+        writer_freeze_evidence_payload=value["writer_freeze_evidence_payload"],
+        writer_freeze_witness_payload=value["writer_freeze_witness_payload"],
+        writer_freeze_payload_digest=value["writer_freeze_payload_digest"],
+        frozen_workspaces_tree_digest=value["frozen_workspaces_tree_digest"],
+    )
+    if canonical_json(record.payload()) != canonical_json(value):
+        raise RootBlocker5BindingRefused("writer freeze evidence record is not canonical")
+    return record
+
+
+def require_persisted_root_writer_freeze_evidence(
+    *,
+    envelope: RootAdmissionEnvelope,
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload,
+    writer_freeze: RootWriterFreezeWitness,
+    record: RootWriterFreezeEvidenceRecord | None,
+) -> RootWriterFreezeEvidenceRecord:
+    """Require exact durable P2 payload evidence subordinate to ``envelope``."""
+
+    if record is None:
+        raise RootBlocker5BindingRefused("ROOT_WRITER_FREEZE_EVIDENCE_RECORD_REQUIRED")
+    expected = RootWriterFreezeEvidenceRecord.from_evidence(
+        root_admission_envelope_record=RootAdmissionEnvelopeRecord.from_envelope(envelope),
+        writer_freeze_evidence=writer_freeze_evidence,
+        writer_freeze=writer_freeze,
+    )
+    if record != expected:
+        raise RootBlocker5BindingRefused("ROOT_WRITER_FREEZE_EVIDENCE_RECORD_MISMATCH")
     return record
 
 
@@ -1215,6 +1370,7 @@ def _require_description(value: object) -> RootNativeProductionAdmissionDescript
 __all__ = [
     "RootAdmissionEnvelope",
     "RootAdmissionEnvelopeRecord",
+    "RootWriterFreezeEvidenceRecord",
     "RootBlocker5BindingRefused",
     "RootCompletionVerification",
     "RootDiscoveredCensus",
@@ -1233,6 +1389,8 @@ __all__ = [
     "require_discovered_declared_census_parity",
     "root_membership_closure_digest",
     "root_admission_envelope_record_from_payload",
+    "root_writer_freeze_evidence_record_from_payload",
+    "require_persisted_root_writer_freeze_evidence",
     "root_profile_ref_from_record_payload",
     "root_runtime_scope_plan_digest",
     "root_runtime_scope_plan_payloads",

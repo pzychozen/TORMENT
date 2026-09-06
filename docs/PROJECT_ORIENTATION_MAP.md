@@ -4,6 +4,8 @@
 
 ### Current repository state
 
+- **Real-root database convergence is fenced at P2.** P1 and P2 passed; the selector is `CUTOVER_PENDING`, public deployment is `MAINTENANCE_ONLY`, and the selected core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is blocked by the current P2 payload-recovery defect; the repository-only repair is qualified, but neither its new abort path nor any real P3 operation has run.
+
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **Blocker-5 is CLOSED.** The bounded Phase-7 native-memory substrate is qualified only for the compression/deep-disabled profile. The authoritative final record is [B5-A7 final closure](BLOCKER_5_A7_FINAL_CLOSURE.md), reconciling [7G5E4D write/lifecycle](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read cognition](7G5E4E_FINAL_CLOSURE.md), and B5-A1 through B5-A6.
 - TORMENT Memory Substrate Phases 0–6 remain frozen design/requirements lineage; their records remain historical design authority, not an active implementation frontier.
@@ -48,7 +50,17 @@ NATIVE_ACTIVE_RUNTIME_LEGACY_FALLBACK = NONE
 AUTOMATIC_POST_NATIVE_ROLLBACK_TO_LEGACY = NO
 
 REAL_PRODUCTION_CUTOVER_PERFORMED = NO
-REAL_USER_MEMORY_ROOT_TOUCHED = NO
+REAL_ROOT_P1 = PASS
+REAL_ROOT_P2 = PASS
+CURRENT_SELECTOR_STATE = CUTOVER_PENDING
+CURRENT_PUBLIC_DEPLOYMENT = MAINTENANCE_ONLY
+CURRENT_CORE_ROLE = STAGING
+CURRENT_CORE_DEPLOYMENT_STATE = LEGACY_ACTIVE
+CURRENT_CORE_EVER_ACTIVE = NO
+P3 = BLOCKED_BY_P2_PAYLOAD_RECOVERY_DEFECT
+P2_RECOVERY_REPAIR = QUALIFIED
+REAL_MEMORY_REEMBED_AUTHORIZED = NO
+P6_POINT_OF_NO_RETURN = PRESERVED
 REAL_PRODUCTION_CUTOVER_AUTHORIZED = NO
 ```
 
@@ -65,10 +77,12 @@ SQLite was not shown to make TORMENT more intelligent.
 
 ### Actual production state and next action
 
-The actual/default production data root remains legacy/pre-selector unless it
-was independently changed outside this work. B5-A7's read-only check found no
-selector-era marker, no `selector.sqlite`, and no controlled active/pending
-native-core evidence at that root. No real production cutover was performed.
+The actual/default production root has completed P1 and P2 only. Its selector
+is `CUTOVER_PENDING` (generation 1), so public deployment is
+`MAINTENANCE_ONLY`; its selected core remains inert `STAGING / LEGACY_ACTIVE`,
+with `ever_active = NO` and no deployment witness. P3 is blocked until the
+separately authorized real-root recovery action follows the qualified
+payload-durability repair. No normalization or core/native activation has run.
 
 ### P8-R6 architecture freeze, Phase 9A/9B, and Phase 9C-R3 qualification
 

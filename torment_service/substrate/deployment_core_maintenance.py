@@ -35,7 +35,13 @@ from .ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from .schema import SCHEMA_ID, SCHEMA_MAJOR, SCHEMA_MINOR, require_current_schema
 
 if TYPE_CHECKING:
-    from .root_blocker5_binding import RootAdmissionEnvelope, RootAdmissionEnvelopeRecord
+    from .root_blocker5_binding import (
+        RootAdmissionEnvelope,
+        RootAdmissionEnvelopeRecord,
+        RootWriterFreezeEvidenceRecord,
+        RootWriterFreezeWitness,
+    )
+    from .writer_freeze_evidence import RootWriterFreezeEvidencePayload
 
 
 _CONTRACT = "TORMENT_B5_A2_CORE_MAINTENANCE_V1"
@@ -50,6 +56,8 @@ _ROOT_DISPOSITION_MAINTENANCE_KIND = "CUTOVER"
 _ROOT_DISPOSITION_CONTRACT = "TORMENT_ROOT_DISPOSITION_EXECUTION_V1"
 _ROOT_ENVELOPE_MAINTENANCE_KIND = "CUTOVER"
 _ROOT_ENVELOPE_CONTRACT = "TORMENT_ROOT_ADMISSION_ENVELOPE_RECORD_V1"
+_ROOT_WRITER_FREEZE_EVIDENCE_MAINTENANCE_KIND = "CUTOVER"
+_ROOT_WRITER_FREEZE_EVIDENCE_CONTRACT = "TORMENT_ROOT_WRITER_FREEZE_EVIDENCE_RECORD_V1"
 
 
 @dataclass(frozen=True)
@@ -316,6 +324,148 @@ def read_root_admission_envelope_record(
         record = matches[0]
         if record.envelope_payload.get("native_staging_core_id") != str(inspection.core_id):
             raise DeploymentAuthorityError("root envelope record names another core")
+        return record
+    finally:
+        connection.close()
+
+
+def record_root_writer_freeze_evidence(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    envelope: RootAdmissionEnvelope,
+    writer_freeze_evidence: RootWriterFreezeEvidencePayload,
+    writer_freeze: RootWriterFreezeWitness,
+    operation_key: str,
+) -> RootWriterFreezeEvidenceRecord:
+    """Persist exact P2 writer-freeze recovery evidence after its envelope.
+
+    This uses the existing immutable core maintenance stream.  It is
+    subordinate evidence only and cannot alter selector or core authority.
+    """
+
+    from .root_blocker5_binding import (
+        RootAdmissionEnvelope,
+        RootWriterFreezeEvidenceRecord,
+        RootWriterFreezeWitness,
+    )
+    from .writer_freeze_evidence import RootWriterFreezeEvidencePayload
+
+    if not isinstance(envelope, RootAdmissionEnvelope):
+        raise DeploymentAuthorityError("writer freeze evidence record requires a typed envelope")
+    if not isinstance(writer_freeze_evidence, RootWriterFreezeEvidencePayload):
+        raise DeploymentAuthorityError("writer freeze evidence record requires typed payload evidence")
+    if not isinstance(writer_freeze, RootWriterFreezeWitness):
+        raise DeploymentAuthorityError("writer freeze evidence record requires a typed witness")
+    _require_operation_key(operation_key)
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True,
+    )
+    with open_existing_native_core_connection(path) as opened:
+        connection = opened.connection
+        inspection = _inspect_connection(connection)
+        if (
+            inspection.core_id != envelope.native_staging_core_id
+            or inspection.core_role != "STAGING"
+            or inspection.deployment_state is not DeploymentState.LEGACY_ACTIVE
+            or inspection.witness is not None
+            or inspection.ever_active
+        ):
+            raise DeploymentAuthorityError("writer freeze evidence record requires an inert staging core")
+        envelopes = [
+            item["record"] for item in _root_envelope_events(connection)
+            if item["record"].envelope_digest == envelope.digest
+        ]
+        if len(envelopes) != 1:
+            raise DeploymentAuthorityError("writer freeze evidence record requires one persisted envelope")
+        envelope_record = envelopes[0]
+        record = RootWriterFreezeEvidenceRecord.from_evidence(
+            root_admission_envelope_record=envelope_record,
+            writer_freeze_evidence=writer_freeze_evidence,
+            writer_freeze=writer_freeze,
+        )
+        record_digest = digest_mapping(record.payload())
+        intent = {
+            "contract": _ROOT_WRITER_FREEZE_EVIDENCE_CONTRACT,
+            "kind": "RECORD_ROOT_WRITER_FREEZE_EVIDENCE",
+            "operation_key": operation_key,
+            "root_admission_envelope_digest": envelope.digest,
+            "record_digest": record_digest,
+        }
+        existing = _root_writer_freeze_evidence_events(connection)
+        same_operation = next((item for item in existing if item["operation_key"] == operation_key), None)
+        if same_operation is not None:
+            if same_operation["canonical_intent"] != canonical_json(intent):
+                raise DeploymentIdempotencyConflict("writer freeze evidence operation key was reused with different intent")
+            return same_operation["record"]
+        same_envelope = [
+            item for item in existing
+            if item["record"].root_admission_envelope_digest == envelope.digest
+        ]
+        if same_envelope:
+            if len(same_envelope) != 1 or same_envelope[0]["record"] != record:
+                raise DeploymentAuthorityError("writer freeze evidence conflicts with immutable admission evidence")
+            return same_envelope[0]["record"]
+        now_ns = time.time_ns()
+        detail = {
+            "canonical_intent": intent,
+            "contract": _ROOT_WRITER_FREEZE_EVIDENCE_CONTRACT,
+            "core_id": str(inspection.core_id),
+            "operation_key": operation_key,
+            "record": record.payload(),
+            "record_digest": record_digest,
+            "recorded_at_ns": now_ns,
+            "version": 1,
+        }
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "INSERT INTO maintenance_events VALUES (?, ?, ?, ?, ?)",
+                (
+                    native_id_to_bytes(generate_native_id()),
+                    _ROOT_WRITER_FREEZE_EVIDENCE_MAINTENANCE_KIND,
+                    now_ns,
+                    now_ns,
+                    canonical_json(detail),
+                ),
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+    return record
+
+
+def read_root_writer_freeze_evidence_record(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    root_admission_envelope_digest: str,
+) -> RootWriterFreezeEvidenceRecord | None:
+    """Read one exact subordinate writer-freeze record without mutation."""
+
+    require_digest(root_admission_envelope_digest, "root_admission_envelope_digest")
+    path = contained_core_path(
+        data_root=data_root, core_relative_path=core_relative_path, require_exists=True,
+    )
+    connection = _open_readonly_core(path)
+    try:
+        inspection = _inspect_connection(connection)
+        matches = [
+            item["record"] for item in _root_writer_freeze_evidence_events(connection)
+            if item["record"].root_admission_envelope_digest == root_admission_envelope_digest
+        ]
+        if len(matches) > 1:
+            raise DeploymentAuthorityError("multiple writer freeze evidence records bind one admission identity")
+        if not matches:
+            return None
+        record = matches[0]
+        if (
+            record.root_admission_envelope_record.envelope_payload.get("native_staging_core_id")
+            != str(inspection.core_id)
+        ):
+            raise DeploymentAuthorityError("writer freeze evidence record names another core")
         return record
     finally:
         connection.close()
@@ -808,6 +958,75 @@ def _root_envelope_events(connection: sqlite3.Connection) -> list[dict[str, Any]
     return events
 
 
+def _root_writer_freeze_evidence_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Decode subordinate payload records against immutable envelope records."""
+
+    from .root_blocker5_binding import (
+        RootBlocker5BindingRefused,
+        root_writer_freeze_evidence_record_from_payload,
+    )
+
+    envelopes = {
+        item["record"].envelope_digest: item["record"]
+        for item in _root_envelope_events(connection)
+    }
+    rows = connection.execute(
+        "SELECT detail_json FROM maintenance_events WHERE maintenance_kind=? "
+        "ORDER BY completed_at_ns,maintenance_id",
+        (_ROOT_WRITER_FREEZE_EVIDENCE_MAINTENANCE_KIND,),
+    ).fetchall()
+    events: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    for (detail_raw,) in rows:
+        try:
+            detail = json.loads(detail_raw)
+            if not isinstance(detail, dict) or detail.get("contract") != _ROOT_WRITER_FREEZE_EVIDENCE_CONTRACT:
+                continue
+            if (
+                detail.get("version") != 1
+                or canonical_json(detail) != detail_raw
+                or not isinstance(detail.get("operation_key"), str)
+                or not detail["operation_key"]
+                or not isinstance(detail.get("canonical_intent"), dict)
+                or not isinstance(detail.get("record_digest"), str)
+                or not isinstance(detail.get("core_id"), str)
+            ):
+                raise ValueError("event shape")
+            raw_record = detail.get("record")
+            if not isinstance(raw_record, dict):
+                raise ValueError("record shape")
+            digest = raw_record.get("root_admission_envelope_digest")
+            if not isinstance(digest, str) or digest not in envelopes:
+                raise ValueError("missing envelope")
+            record = root_writer_freeze_evidence_record_from_payload(
+                raw_record,
+                root_admission_envelope_record=envelopes[digest],
+            )
+            record_digest = digest_mapping(record.payload())
+            if record_digest != detail["record_digest"]:
+                raise ValueError("record digest")
+            expected_intent = {
+                "contract": _ROOT_WRITER_FREEZE_EVIDENCE_CONTRACT,
+                "kind": "RECORD_ROOT_WRITER_FREEZE_EVIDENCE",
+                "operation_key": detail["operation_key"],
+                "root_admission_envelope_digest": record.root_admission_envelope_digest,
+                "record_digest": record_digest,
+            }
+            if detail["canonical_intent"] != expected_intent:
+                raise ValueError("intent")
+            if detail["operation_key"] in keys:
+                raise ValueError("duplicate operation key")
+            keys.add(detail["operation_key"])
+        except (TypeError, ValueError, json.JSONDecodeError, DeploymentAuthorityError, RootBlocker5BindingRefused) as exc:
+            raise DeploymentAuthorityError("root writer freeze evidence is malformed") from exc
+        events.append({
+            "operation_key": detail["operation_key"],
+            "canonical_intent": canonical_json(detail["canonical_intent"]),
+            "record": record,
+        })
+    return events
+
+
 def _require_root_receipt_matches_completion(
     receipt: RootDispositionExecutionReceipt,
     completion: RootAdmissionCompletionWitness,
@@ -1069,8 +1288,10 @@ __all__ = [
     "enter_cutover_pending",
     "inspect_contained_core_deployment",
     "read_root_admission_envelope_record",
+    "read_root_writer_freeze_evidence_record",
     "read_root_disposition_execution_receipt",
     "record_root_admission_envelope",
+    "record_root_writer_freeze_evidence",
     "record_root_disposition_execution",
     "staging_legacy_witness",
 ]

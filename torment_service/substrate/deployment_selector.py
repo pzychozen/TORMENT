@@ -465,6 +465,72 @@ def abort_selector_pending(
     )
 
 
+def abort_selector_pending_inert_core(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    descriptor_digest: str,
+    profile: QualifiedDeploymentProfile,
+    expected_generation: int,
+    operation_key: str,
+) -> SelectorState:
+    """Reduce an externally pending selector only when its core never moved.
+
+    Unlike :func:`abort_selector_pending`, this narrowly scoped transition
+    intentionally has no core-maintenance receipt: its caller must prove that
+    the selected core remains entirely inert.  It cannot activate authority.
+    """
+
+    require_relative_core_path(core_relative_path)
+    require_digest(descriptor_digest, "descriptor_digest")
+    if not isinstance(profile, QualifiedDeploymentProfile) or not profile.is_qualified:
+        raise DeploymentAuthorityError("inert-core selector abort requires a qualified profile")
+    _require_generation(expected_generation)
+    _require_operation_key(operation_key)
+    intent = {
+        "contract": _SELECTOR_CONTRACT,
+        "kind": "ABORT_ROOT_EXTERNAL_PENDING_INERT_CORE",
+        "operation_key": operation_key,
+        "expected_generation": expected_generation,
+        "expected_state": DeploymentState.CUTOVER_PENDING.value,
+        "core_relative_path": core_relative_path,
+        "descriptor_digest": descriptor_digest,
+        "profile_digest": profile.digest,
+    }
+    recovered = _recover_selector_operation(data_root, operation_key, intent)
+    if recovered is not None:
+        return recovered
+    state = read_selector_state(data_root=data_root)
+    if (
+        state.deployment_state is not DeploymentState.CUTOVER_PENDING
+        or state.generation != expected_generation
+        or state.core_relative_path != core_relative_path
+        or state.descriptor_digest != descriptor_digest
+        or state.profile_digest != profile.digest
+    ):
+        raise DeploymentAuthorityError("inert-core selector abort predecessor does not match")
+    result = SelectorState(
+        generation=expected_generation + 1,
+        deployment_state=DeploymentState.LEGACY_ACTIVE,
+        core_id=None,
+        core_relative_path=None,
+        descriptor_digest=None,
+        profile_digest=None,
+        core_witness_digest=None,
+        updated_at_ns=time.time_ns(),
+    )
+    return _transition_selector(
+        data_root=data_root,
+        expected_generation=expected_generation,
+        expected_state=DeploymentState.CUTOVER_PENDING,
+        result=result,
+        operation_key=operation_key,
+        intent=intent,
+        reason_kind="ABORT_ROOT_EXTERNAL_PENDING_INERT_CORE",
+        expected_selected_core_relative_path=core_relative_path,
+    )
+
+
 def resolve_deployment_agreement(
     *, data_root: str | Path, effective_profile: QualifiedDeploymentProfile
 ) -> DeploymentResolution:

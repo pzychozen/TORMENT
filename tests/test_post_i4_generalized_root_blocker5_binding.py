@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.deployment_core_maintenance import (
     inspect_contained_core_deployment,
     read_root_admission_envelope_record,
+    read_root_writer_freeze_evidence_record,
     record_root_admission_envelope,
     record_root_disposition_execution,
 )
@@ -62,6 +64,7 @@ from torment_service.substrate.offline_cutover_controller import (
     OfflineCutoverRefused,
     OfflineCutoverStage,
     RootAdmissionMode,
+    RootExternalPendingInertAbortRequest,
     RootOfflineCutoverRequest,
 )
 from torment_service.substrate.root_blocker5_binding import (
@@ -69,6 +72,7 @@ from torment_service.substrate.root_blocker5_binding import (
     RootWriterFreezeWitness,
     discover_canonical_root_layout,
     root_admission_envelope_record_from_payload,
+    root_writer_freeze_evidence_record_from_payload,
     root_runtime_scope_plan_digest,
 )
 from torment_service.substrate.root_profile import (
@@ -554,7 +558,11 @@ def test_root_pre_active_abort_restores_legacy_without_disposition_or_native_res
     assert controller.safe_root_pending_abort(request).deployment_state.value == "LEGACY_ACTIVE"
 
 
-def _root_writer_freeze_evidence(request: RootOfflineCutoverRequest):
+def _root_writer_freeze_evidence(
+    request: RootOfflineCutoverRequest,
+    *,
+    operation_identity: str = "synthetic-root-freeze-evidence",
+):
     observations = tuple(
         WriterProcessObservation(
             writer_class=item,
@@ -572,7 +580,7 @@ def _root_writer_freeze_evidence(request: RootOfflineCutoverRequest):
     captured = capture_root_writer_freeze_evidence(
         data_root=request.root,
         data_root_identity=request.description.data_root_identity,
-        writer_freeze_operation_identity="synthetic-root-freeze-evidence",
+        writer_freeze_operation_identity=operation_identity,
         operator_identity="synthetic-root-operator",
         covered_writer_classes=observations,
         listener_observation=listener,
@@ -628,8 +636,15 @@ def test_frozen_writer_evidence_is_rechecked_at_p4_and_immediately_pre_p6(tmp_pa
         controller.activate_root_core(frozen_request, normalization)
 
 
-def _real_request(request: RootOfflineCutoverRequest) -> RootOfflineCutoverRequest:
-    captured, recheck = _root_writer_freeze_evidence(request)
+def _real_request(
+    request: RootOfflineCutoverRequest,
+    *,
+    operation_identity: str = "synthetic-root-freeze-evidence",
+) -> RootOfflineCutoverRequest:
+    captured, recheck = _root_writer_freeze_evidence(
+        request,
+        operation_identity=operation_identity,
+    )
     return replace(
         request,
         admission_mode=RootAdmissionMode.REAL_ROOT_V2,
@@ -781,3 +796,259 @@ def test_real_root_p2_retains_record_when_selector_transition_fails_then_retries
     assert controller.enter_root_external_pending(
         real_request,
     ).selector_state.deployment_state is DeploymentState.CUTOVER_PENDING
+
+
+def _inert_abort_request(
+    request: RootOfflineCutoverRequest,
+    pending,
+    *,
+    operation_key: str = "synthetic-inert-external-abort",
+) -> RootExternalPendingInertAbortRequest:
+    assert pending.selector_state is not None
+    return RootExternalPendingInertAbortRequest(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+        expected_selector_generation=pending.selector_state.generation,
+        expected_root_admission_envelope_digest=pending.envelope.digest,
+        effective_profile=request.effective_profile,
+        operation_key=operation_key,
+    )
+
+
+def test_real_root_p2_durably_round_trips_exact_writer_freeze_payload(
+    tmp_path: Path,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    pending = OfflineCutoverController().enter_root_external_pending(real_request)
+
+    record = read_root_writer_freeze_evidence_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    )
+    assert record is not None
+    assert record.writer_freeze_evidence == real_request.writer_freeze_evidence
+    assert record.writer_freeze == real_request.writer_freeze
+    assert record.writer_freeze_payload_digest == real_request.writer_freeze_evidence.digest
+    assert (
+        record.frozen_workspaces_tree_digest
+        == real_request.writer_freeze_evidence.source_tree_snapshot.tree_digest
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda value: value["writer_freeze_evidence_payload"].__setitem__(
+            "writer_freeze_operation_identity", "tampered-operation",
+        ),
+        lambda value: value["writer_freeze_evidence_payload"]["covered_writer_classes"][0].__setitem__(
+            "result", "PRESENT",
+        ),
+        lambda value: value["writer_freeze_evidence_payload"]["listener_observation"].__setitem__(
+            "result", "PRESENT",
+        ),
+        lambda value: value["writer_freeze_evidence_payload"]["stability_observation"].__setitem__(
+            "t1_ns", 0,
+        ),
+        lambda value: value.__setitem__("frozen_workspaces_tree_digest", _digest("tampered-tree")),
+        lambda value: value["writer_freeze_evidence_payload"].__setitem__(
+            "external_owner_observation_digest", _digest("tampered-owner"),
+        ),
+    ),
+)
+def test_writer_freeze_evidence_record_tampering_refuses(
+    tmp_path: Path,
+    mutate,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    pending = OfflineCutoverController().enter_root_external_pending(real_request)
+    envelope_record = read_root_admission_envelope_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    )
+    evidence_record = read_root_writer_freeze_evidence_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    )
+    assert envelope_record is not None and evidence_record is not None
+    payload = copy.deepcopy(evidence_record.payload())
+    mutate(payload)
+    with pytest.raises(RootBlocker5BindingRefused):
+        root_writer_freeze_evidence_record_from_payload(
+            payload,
+            root_admission_envelope_record=envelope_record,
+        )
+
+
+def test_real_p2_refuses_selector_pending_when_payload_record_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    controller = OfflineCutoverController()
+    envelope = controller._root_envelope(real_request)
+    import torment_service.substrate.offline_cutover_controller as controller_module
+
+    def _refuse_evidence_record(**_kwargs):
+        raise DeploymentAuthorityError("synthetic evidence-record interruption")
+
+    monkeypatch.setattr(controller_module, "record_root_writer_freeze_evidence", _refuse_evidence_record)
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_OR_EVIDENCE_RECORD_REFUSED"):
+        controller.enter_root_external_pending(real_request)
+    assert read_root_admission_envelope_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=envelope.digest,
+    ) is not None
+    assert read_root_writer_freeze_evidence_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=envelope.digest,
+    ) is None
+    with pytest.raises(DeploymentAuthorityError, match="selector-era marker is missing"):
+        read_selector_state(data_root=real_request.root)
+
+
+def test_p2_only_inert_external_abort_retains_evidence_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    controller = OfflineCutoverController()
+    pending = controller.enter_root_external_pending(real_request)
+    abort_request = _inert_abort_request(real_request, pending)
+
+    result = controller.abort_root_external_pending_inert_core(abort_request)
+    assert result.deployment_state is DeploymentState.LEGACY_ACTIVE
+    assert result.generation == 2
+    assert controller.abort_root_external_pending_inert_core(abort_request) == result
+    inspection = inspect_contained_core_deployment(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+    )
+    assert inspection.core_role == "STAGING"
+    assert inspection.deployment_state is DeploymentState.LEGACY_ACTIVE
+    assert inspection.witness is None and not inspection.ever_active
+    assert read_root_admission_envelope_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    ) is not None
+    assert read_root_writer_freeze_evidence_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    ) is not None
+
+
+def test_p2_only_inert_abort_refuses_selector_profile_core_and_inertness_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    controller = OfflineCutoverController()
+    pending = controller.enter_root_external_pending(real_request)
+    abort_request = _inert_abort_request(real_request, pending)
+    for invalid in (
+        replace(abort_request, expected_selector_generation=0),
+        replace(abort_request, expected_root_admission_envelope_digest=_digest("wrong-envelope")),
+        replace(abort_request, core_relative_path="other.db"),
+        replace(
+            abort_request,
+            effective_profile=replace(
+                abort_request.effective_profile,
+                external_owner_digest=_digest("wrong-profile"),
+            ),
+        ),
+    ):
+        with pytest.raises(OfflineCutoverRefused):
+            controller.abort_root_external_pending_inert_core(invalid)
+
+    inspection = inspect_contained_core_deployment(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+    )
+    import torment_service.substrate.offline_cutover_controller as controller_module
+    for non_inert in (
+        replace(inspection, witness=object()),
+        replace(inspection, deployment_state=DeploymentState.CUTOVER_PENDING),
+        replace(inspection, ever_active=True),
+        replace(
+            inspection,
+            core_role="ACTIVE_CORE",
+            deployment_state=DeploymentState.NATIVE_ACTIVE,
+        ),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                controller_module,
+                "inspect_contained_core_deployment",
+                lambda **_kwargs: non_inert,
+            )
+            with pytest.raises(OfflineCutoverRefused, match="CORE_NOT_INERT"):
+                controller.abort_root_external_pending_inert_core(abort_request)
+
+
+def test_successor_p2_recovery_uses_exact_selector_linked_payload_after_abort(
+    tmp_path: Path,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    first = _real_request(compat_request, operation_identity="synthetic-freeze-a")
+    controller = OfflineCutoverController()
+    pending_a = controller.enter_root_external_pending(first)
+    controller.abort_root_external_pending_inert_core(_inert_abort_request(first, pending_a))
+
+    successor_base = replace(compat_request, operator_cutover_key="synthetic-root-cutover-b")
+    second = _real_request(successor_base, operation_identity="synthetic-freeze-b")
+    pending_b = controller.enter_root_external_pending(second)
+    assert pending_a.envelope.digest != pending_b.envelope.digest
+    assert read_root_writer_freeze_evidence_record(
+        data_root=second.root,
+        core_relative_path=second.core_relative_path,
+        root_admission_envelope_digest=pending_a.envelope.digest,
+    ) is not None
+    evidence_b = read_root_writer_freeze_evidence_record(
+        data_root=second.root,
+        core_relative_path=second.core_relative_path,
+        root_admission_envelope_digest=pending_b.envelope.digest,
+    )
+    assert evidence_b is not None
+    assert read_selector_state(data_root=second.root).descriptor_digest == pending_b.envelope.digest
+    envelope_b = read_root_admission_envelope_record(
+        data_root=second.root,
+        core_relative_path=second.core_relative_path,
+        root_admission_envelope_digest=pending_b.envelope.digest,
+    )
+    evidence_a = read_root_writer_freeze_evidence_record(
+        data_root=second.root,
+        core_relative_path=second.core_relative_path,
+        root_admission_envelope_digest=pending_a.envelope.digest,
+    )
+    assert envelope_b is not None and evidence_a is not None
+    with pytest.raises(RootBlocker5BindingRefused):
+        root_writer_freeze_evidence_record_from_payload(
+            evidence_a.payload(),
+            root_admission_envelope_record=envelope_b,
+        )
+
+    recovered_payload = evidence_b.writer_freeze_evidence
+    fresh_recheck = RootWriterFreezeRecheck(
+        covered_writer_classes=recovered_payload.covered_writer_classes,
+        listener_observation=recovered_payload.listener_observation,
+        job_observation=recovered_payload.job_observation,
+        external_owner_observation_digest=recovered_payload.external_owner_observation_digest,
+    )
+    recovered = replace(
+        second,
+        writer_freeze=evidence_b.writer_freeze,
+        writer_freeze_evidence=recovered_payload,
+        writer_freeze_recheck=fresh_recheck,
+    )
+    assert controller._root_envelope(recovered).digest == pending_b.envelope.digest

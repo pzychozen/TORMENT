@@ -24,14 +24,17 @@ from .deployment_core_maintenance import (
     enter_cutover_pending,
     inspect_contained_core_deployment,
     read_root_admission_envelope_record,
+    read_root_writer_freeze_evidence_record,
     read_root_disposition_execution_receipt,
     record_root_admission_envelope,
+    record_root_writer_freeze_evidence,
     record_root_disposition_execution,
     staging_legacy_witness,
 )
 from .deployment_selector import (
     activate_selector_native,
     abort_selector_pending,
+    abort_selector_pending_inert_core,
     begin_cutover_pending,
     establish_selector_era,
     initialize_selector,
@@ -45,6 +48,8 @@ from .deployment_types import (
     QualifiedDeploymentProfile,
     RootAdmissionCompletionWitness,
     SelectorState,
+    require_digest,
+    require_relative_core_path,
 )
 from .errors import DeploymentAuthorityError, SubstrateConfigurationError
 from .migration.root_admission_description import RootNativeProductionAdmissionDescription
@@ -75,6 +80,7 @@ from .root_blocker5_binding import (
     execute_synthetic_root_disposition_plan,
     frozen_root_geometry_disposition_plan,
     require_persisted_root_admission_envelope,
+    require_persisted_root_writer_freeze_evidence,
     verify_root_completion,
 )
 from .root_profile import RootProfileGenerationRef
@@ -266,6 +272,42 @@ class RootOfflineCutoverRequest:
         return self.geometry_disposition_plan or frozen_root_geometry_disposition_plan(
             external_owner_observation_digest=self.description.external_owner_observation_digest,
         )
+
+
+@dataclass(frozen=True)
+class RootExternalPendingInertAbortRequest:
+    """Exact P2-only selector recovery input; it grants no P3/P5 authority."""
+
+    data_root: Path
+    core_relative_path: str
+    expected_selector_generation: int
+    expected_root_admission_envelope_digest: str
+    effective_profile: QualifiedDeploymentProfile
+    operation_key: str
+
+    def __post_init__(self) -> None:
+        root = Path(self.data_root).expanduser().resolve()
+        if not root.is_dir():
+            raise ValueError("inert-core abort data_root must already exist")
+        require_relative_core_path(self.core_relative_path)
+        if (
+            not isinstance(self.expected_selector_generation, int)
+            or isinstance(self.expected_selector_generation, bool)
+            or self.expected_selector_generation < 0
+        ):
+            raise ValueError("inert-core abort expected selector generation must be non-negative")
+        require_digest(
+            self.expected_root_admission_envelope_digest,
+            "inert-core abort root admission envelope digest",
+        )
+        if not isinstance(self.effective_profile, QualifiedDeploymentProfile) or not self.effective_profile.is_qualified:
+            raise ValueError("inert-core abort requires a qualified deployment profile")
+        if not isinstance(self.operation_key, str) or not self.operation_key or len(self.operation_key) > 160:
+            raise ValueError("inert-core abort operation_key must be bounded non-empty text")
+
+    @property
+    def root(self) -> Path:
+        return Path(self.data_root).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -542,8 +584,30 @@ class OfflineCutoverController:
                 root_admission_envelope_digest=envelope.digest,
             )
             require_persisted_root_admission_envelope(envelope=envelope, record=record)
+            if request.admission_mode is RootAdmissionMode.REAL_ROOT_V2:
+                if request.writer_freeze_evidence is None:
+                    raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_REAL_P2_PAYLOAD_REQUIRED")
+                record_root_writer_freeze_evidence(
+                    data_root=request.root,
+                    core_relative_path=request.core_relative_path,
+                    envelope=envelope,
+                    writer_freeze_evidence=request.writer_freeze_evidence,
+                    writer_freeze=request.writer_freeze,
+                    operation_key=self._key(request, "root-writer-freeze-evidence-record"),
+                )
+                evidence_record = read_root_writer_freeze_evidence_record(
+                    data_root=request.root,
+                    core_relative_path=request.core_relative_path,
+                    root_admission_envelope_digest=envelope.digest,
+                )
+                require_persisted_root_writer_freeze_evidence(
+                    envelope=envelope,
+                    writer_freeze_evidence=request.writer_freeze_evidence,
+                    writer_freeze=request.writer_freeze,
+                    record=evidence_record,
+                )
         except (DeploymentAuthorityError, RootBlocker5BindingRefused) as exc:
-            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ENVELOPE_RECORD_REFUSED") from exc
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ENVELOPE_OR_EVIDENCE_RECORD_REFUSED") from exc
         state = self._ensure_selector(request)
         if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
             state = begin_cutover_pending(
@@ -563,6 +627,79 @@ class OfflineCutoverController:
             state,
             self._inspection(request),
         )
+
+    def abort_root_external_pending_inert_core(
+        self,
+        request: RootExternalPendingInertAbortRequest,
+    ) -> SelectorState:
+        """P2-only recovery: clear external pending after proving core inertia.
+
+        This is intentionally independent of ``RootOfflineCutoverRequest`` so
+        recovery never needs to reconstruct a P3-capable normalization request
+        or mint replacement writer-freeze evidence.
+        """
+
+        if not isinstance(request, RootExternalPendingInertAbortRequest):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_REQUEST_REQUIRED")
+        state = read_selector_state(data_root=request.root)
+        if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
+            return abort_selector_pending_inert_core(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                descriptor_digest=request.expected_root_admission_envelope_digest,
+                profile=request.effective_profile,
+                expected_generation=request.expected_selector_generation,
+                operation_key=request.operation_key,
+            )
+        if (
+            state.deployment_state is not DeploymentState.CUTOVER_PENDING
+            or state.generation != request.expected_selector_generation
+            or state.core_relative_path != request.core_relative_path
+            or state.descriptor_digest != request.expected_root_admission_envelope_digest
+            or state.profile_digest != request.effective_profile.digest
+            or state.core_id is None
+        ):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_SELECTOR_MISMATCH")
+        record = read_root_admission_envelope_record(
+            data_root=request.root,
+            core_relative_path=request.core_relative_path,
+            root_admission_envelope_digest=request.expected_root_admission_envelope_digest,
+        )
+        if record is None:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_ENVELOPE_REQUIRED")
+        if (
+            record.envelope_digest != state.descriptor_digest
+            or record.envelope_payload.get("native_staging_core_id") != str(state.core_id)
+            or record.envelope_payload.get("qualified_deployment_profile_digest")
+            != request.effective_profile.digest
+        ):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_ENVELOPE_MISMATCH")
+        inspection = inspect_contained_core_deployment(
+            data_root=request.root,
+            core_relative_path=request.core_relative_path,
+        )
+        if (
+            inspection.core_id != state.core_id
+            or inspection.core_role != "STAGING"
+            or inspection.deployment_state is not DeploymentState.LEGACY_ACTIVE
+            or inspection.witness is not None
+            or inspection.ever_active
+        ):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_CORE_NOT_INERT")
+        try:
+            result = abort_selector_pending_inert_core(
+                data_root=request.root,
+                core_relative_path=request.core_relative_path,
+                descriptor_digest=request.expected_root_admission_envelope_digest,
+                profile=request.effective_profile,
+                expected_generation=request.expected_selector_generation,
+                operation_key=request.operation_key,
+            )
+        except DeploymentAuthorityError as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_REFUSED") from exc
+        if result.deployment_state is not DeploymentState.LEGACY_ACTIVE:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_DID_NOT_RESTORE_LEGACY")
+        return result
 
     def normalize_root_under_external_fence(
         self,
@@ -1235,5 +1372,6 @@ __all__ = [
     "OfflineWriterDrainWitness",
     "RootOfflineCutoverEvidence",
     "RootAdmissionMode",
+    "RootExternalPendingInertAbortRequest",
     "RootOfflineCutoverRequest",
 ]
