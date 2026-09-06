@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 from uuid import UUID
@@ -35,6 +36,7 @@ from torment_service.substrate.migration import (
     RootP3ScopeBinding,
     RootP3SourceAdmissionInterrupted,
     RootP3SourceAdmissionInterruptionPoint,
+    RootP3SourceAdmissionRefused,
     RootP3SourceAdmissionRequest,
     RootRepresentationDisposition,
     RootScopeKey,
@@ -247,6 +249,7 @@ def carrier_fixture(tmp_path: Path):
     _insert(connection, "semantic_scopes", target_scope, "target", reserved=True)
     _insert(connection, "semantic_scopes", unknown_scope, "unknown", reserved=True)
     _insert(connection, "legacy_source_namespaces", motif_alias, "motif-alias", reserved=True)
+    _insert(connection, "legacy_source_namespaces", source_namespace, "p1:fixture:ws:shared:domain", reserved=True)
     _insert(connection, "idempotency_namespaces", idempotency, "idempotency")
     _insert(connection, "identity_namespaces", empty_target_identity, "empty-target", reserved=True)
     _insert(connection, "identity_namespaces", empty_motif_identity, "empty-motif", reserved=True)
@@ -254,6 +257,7 @@ def carrier_fixture(tmp_path: Path):
     _insert(connection, "semantic_scopes", empty_target_scope, "empty-target", reserved=True)
     _insert(connection, "semantic_scopes", empty_unknown_scope, "empty-unknown", reserved=True)
     _insert(connection, "legacy_source_namespaces", empty_motif_alias, "empty-motif-alias", reserved=True)
+    _insert(connection, "legacy_source_namespaces", empty_source_namespace, "p1:fixture:ws:private:empty-agent", reserved=True)
     _insert(connection, "idempotency_namespaces", empty_idempotency, "empty-idempotency")
     _insert(connection, "identity_namespaces", motif_target_identity, "motif-target", reserved=True)
     _insert(connection, "identity_namespaces", motif_motif_identity, "motif-motif", reserved=True)
@@ -261,6 +265,7 @@ def carrier_fixture(tmp_path: Path):
     _insert(connection, "semantic_scopes", motif_target_scope, "motif-target", reserved=True)
     _insert(connection, "semantic_scopes", motif_unknown_scope, "motif-unknown", reserved=True)
     _insert(connection, "legacy_source_namespaces", motif_motif_alias, "motif-motif-alias", reserved=True)
+    _insert(connection, "legacy_source_namespaces", motif_source_namespace, "p1:fixture:ws:shared:empty-domain", reserved=True)
     _insert(connection, "idempotency_namespaces", motif_idempotency, "motif-idempotency")
     plan = MigrationRuntimeScopePlan(
         legacy_source_namespace_id=source_namespace, workspace_id="ws", scope_kind="SHARED_DOMAIN",
@@ -337,6 +342,20 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
         )
     assert after_snapshot.value.point is RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION
     scopes = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]["scopes"]
+    expected_p1_keys = {
+        ("PRIVATE", "empty-agent"): "p1:fixture:ws:private:empty-agent",
+        ("SHARED", "domain"): "p1:fixture:ws:shared:domain",
+        ("SHARED", "empty-domain"): "p1:fixture:ws:shared:empty-domain",
+    }
+    for entry in scopes:
+        scope = entry["scope_key"]
+        qualifier = scope["agent_id"] or scope["domain_id"]
+        manifest = load_snapshot_manifest(Path(entry["manifest_path"]))
+        assert manifest.legacy_source_namespace_key == expected_p1_keys[(scope["scope_kind"], qualifier)]
+        assert entry["legacy_source_namespace_key"] == manifest.legacy_source_namespace_key
+    assert connection.execute(
+        "SELECT count(*) FROM legacy_source_namespaces WHERE source_key LIKE 'p1:fixture:%'"
+    ).fetchone()[0] == 3
     selected = next(item for item in scopes if item["scope_key"].get("domain_id") == "domain")
     selected_snapshot_id = selected["legacy_snapshot_id"]
     assert all(item["b1"] is None and item["b2"]["memories"] == [] for item in scopes)
@@ -385,6 +404,48 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     }
     result = NativeRootWideNormalizationService(connection).normalize(recovered.normalization_request)
     assert result.root_normalization_complete and result.root_normalization_ready
+
+
+def test_missing_p1_namespace_refuses_before_carrier_or_b1_mutation(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    binding = request.scope_bindings[0]
+    missing_plan = replace(
+        binding.scope_plan,
+        legacy_source_namespace_id=generate_native_id(),
+    )
+    missing_request = replace(
+        request,
+        scope_bindings=(
+            replace(binding, scope_plan=missing_plan),
+            *request.scope_bindings[1:],
+        ),
+        carrier_directory=request.carrier_root.parent / "missing-p1-namespace",
+    )
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_P1_SOURCE_NAMESPACE_MISSING"):
+        NativeRootP3SourceAdmissionService(connection).admit(missing_request)
+    assert not missing_request.carrier_root.exists()
+    assert connection.execute("SELECT count(*) FROM legacy_snapshots").fetchone()[0] == 0
+
+
+def test_recovery_refuses_manifest_key_that_contradicts_p1(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(
+            request,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    entry = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]["scopes"][0]
+    manifest_path = Path(entry["manifest_path"])
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_data["legacy_source_namespace"]["source_key"] = "contradictory-p1-namespace-key"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    with pytest.raises(
+        RootP3SourceAdmissionRefused,
+        match="P3_CARRIER_P1_SOURCE_NAMESPACE_BINDING_MISMATCH",
+    ):
+        service.admit(request)
+    assert connection.execute("SELECT count(*) FROM legacy_snapshots").fetchone()[0] == 0
 
 
 def test_frozen_real_p3_child_shape_counts_remain_closed() -> None:

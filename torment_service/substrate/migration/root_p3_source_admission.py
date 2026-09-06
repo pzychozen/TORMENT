@@ -272,7 +272,7 @@ class NativeRootP3SourceAdmissionService:
         # This recheck is deliberately immediately before any carrier selection
         # or B1 write.  It reads only the P2-bound explicit source proposition.
         _verify_p2_bound_source(request)
-        record = _select_or_recover_record(request)
+        record = _select_or_recover_record(self._connection, request)
         if _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION:
             raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
 
@@ -430,12 +430,21 @@ def _verify_p2_bound_source(request: RootP3SourceAdmissionRequest) -> None:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_SOURCE_MANIFEST_DRIFT") from exc
 
 
-def _select_or_recover_record(request: RootP3SourceAdmissionRequest) -> dict[str, Any]:
+def _select_or_recover_record(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+) -> dict[str, Any]:
     path = request.record_path
     if path.exists():
         record = _load_record(path, request)
-        _verify_record_snapshots(record, request)
+        _verify_record_snapshots(connection, record, request)
         return record
+    p1_namespace_keys = {
+        binding.scope_key: _p1_legacy_source_namespace_key(
+            connection, binding.scope_plan.legacy_source_namespace_id,
+        )
+        for binding in request.scope_bindings
+    }
     carrier = request.carrier_root
     if carrier.exists():
         if not carrier.is_dir() or carrier.is_symlink() or any(carrier.iterdir()):
@@ -450,13 +459,21 @@ def _select_or_recover_record(request: RootP3SourceAdmissionRequest) -> dict[str
         token = f"{index:03d}-{_scope_token(binding.scope_key)}"
         snapshot_root = carrier / "snapshots" / token
         manifest_path = carrier / "manifests" / f"{token}.json"
-        _create_scope_snapshot(request, source_by_key[binding.scope_key], binding, snapshot_root, manifest_path)
+        _create_scope_snapshot(
+            request,
+            source_by_key[binding.scope_key],
+            binding,
+            p1_namespace_keys[binding.scope_key],
+            snapshot_root,
+            manifest_path,
+        )
         manifest = load_snapshot_manifest(manifest_path)
         scopes.append({
             "scope_key": binding.scope_key.identity_payload(),
             "scope_plan": binding.scope_plan.intent(),
             "unknown_semantic_scope_id": str(binding.unknown_semantic_scope_id),
             "legacy_source_namespace_id": str(binding.scope_plan.legacy_source_namespace_id),
+            "legacy_source_namespace_key": manifest.legacy_source_namespace_key,
             "snapshot_root": str(snapshot_root),
             "manifest_path": str(manifest_path),
             "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
@@ -479,6 +496,7 @@ def _create_scope_snapshot(
     request: RootP3SourceAdmissionRequest,
     source_plan: RootSourceScopePlan,
     binding: RootP3ScopeBinding,
+    legacy_source_namespace_key: str,
     destination: Path,
     manifest_path: Path,
 ) -> None:
@@ -503,7 +521,7 @@ def _create_scope_snapshot(
             snapshot_root=temporary,
             manifest_path=temporary_manifest,
             legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
-            legacy_source_namespace_key=_snapshot_source_key(request, binding.scope_key),
+            legacy_source_namespace_key=legacy_source_namespace_key,
             capture_label=f"root P3 source admission {binding.scope_key.canonical_key}",
         )
         verify_snapshot(snapshot_root=temporary, manifest=manifest)
@@ -824,9 +842,21 @@ def _load_record(path: Path, request: RootP3SourceAdmissionRequest) -> dict[str,
     return payload
 
 
-def _verify_record_snapshots(record: dict[str, Any], request: RootP3SourceAdmissionRequest) -> None:
+def _verify_record_snapshots(
+    connection: sqlite3.Connection,
+    record: dict[str, Any],
+    request: RootP3SourceAdmissionRequest,
+) -> None:
     carrier = request.carrier_root
     for entry in _ordered_scope_entries(record):
+        binding = request_binding(request, entry)
+        expected_namespace_id = binding.scope_plan.legacy_source_namespace_id
+        expected_namespace_key = _p1_legacy_source_namespace_key(connection, expected_namespace_id)
+        if (
+            entry.get("legacy_source_namespace_id") != str(expected_namespace_id)
+            or entry.get("legacy_source_namespace_key") != expected_namespace_key
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_BINDING_MISMATCH")
         root = Path(entry.get("snapshot_root", "")).expanduser().resolve()
         manifest_path = Path(entry.get("manifest_path", "")).expanduser().resolve()
         if carrier not in root.parents or carrier not in manifest_path.parents:
@@ -837,9 +867,13 @@ def _verify_record_snapshots(record: dict[str, Any], request: RootP3SourceAdmiss
         except (SubstrateConfigurationError, OSError, ValueError) as exc:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_SNAPSHOT_RECOVERY_REFUSED") from exc
         if (
+            manifest.legacy_source_namespace_id != expected_namespace_id
+            or manifest.legacy_source_namespace_key != expected_namespace_key
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_BINDING_MISMATCH")
+        if (
             str(manifest.legacy_snapshot_id) != entry.get("legacy_snapshot_id")
             or _file_digest(manifest_path) != entry.get("manifest_digest")
-            or manifest.legacy_source_namespace_id != UUID(entry.get("legacy_source_namespace_id", ""))
         ):
             raise RootP3SourceAdmissionRefused("P3_CARRIER_SNAPSHOT_IDENTITY_MISMATCH")
 
@@ -904,8 +938,28 @@ def _scope_token(scope: RootScopeKey) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
-def _snapshot_source_key(request: RootP3SourceAdmissionRequest, scope: RootScopeKey) -> str:
-    return f"{request.operation_key}:p3-source:{'|'.join(scope.canonical_key)}"
+def _p1_legacy_source_namespace_key(
+    connection: sqlite3.Connection,
+    namespace_id: UUID,
+) -> str:
+    """Recover the exact P1 namespace pair without creating or repairing it."""
+
+    rows = connection.execute(
+        "SELECT source_key FROM legacy_source_namespaces WHERE legacy_source_namespace_id=?",
+        (namespace_id.bytes,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_MISSING")
+    source_key = rows[0][0]
+    if not isinstance(source_key, str) or not source_key.strip():
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_KEY_INVALID")
+    reverse_rows = connection.execute(
+        "SELECT legacy_source_namespace_id FROM legacy_source_namespaces WHERE source_key=?",
+        (source_key,),
+    ).fetchall()
+    if len(reverse_rows) != 1 or reverse_rows[0][0] != namespace_id.bytes:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_BINDING_MISMATCH")
+    return source_key
 
 
 def _stage_key(request: RootP3SourceAdmissionRequest, entry: dict[str, Any], stage: str, suffix: str) -> str:
