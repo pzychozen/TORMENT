@@ -23,17 +23,18 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from ..canonical_intent import canonical_intent_text
 from ..errors import SubstrateConfigurationError
 from ..runtime_binding import NativeRepresentationLane
-from ..corrective_freeze_packet import (
-    MetadataLessPerEidEvidence,
-    RootSourceScopePlan,
-    SourceArtifactPresence,
-)
+if TYPE_CHECKING:
+    from ..corrective_freeze_packet import (
+        MetadataLessPerEidEvidence,
+        RootSourceScopePlan,
+        SourceArtifactPresence,
+    )
 from .explicit_source_evidence import (
     EvidencePresenceExpectation,
     EvidenceSemanticRole,
@@ -78,6 +79,17 @@ from .workspace_runtime_readiness import (
 _RECORD_NAME = "p3_source_admission_carrier.json"
 _RECORD_SCHEMA = "TORMENT_ROOT_P3_SOURCE_ADMISSION_CARRIER"
 _RECORD_VERSION = 1
+
+
+def _corrective_freeze_types():
+    """Load the corrective-freeze-owned runtime classes only after import init."""
+
+    from ..corrective_freeze_packet import (
+        MetadataLessPerEidEvidence,
+        RootSourceScopePlan,
+        SourceArtifactPresence,
+    )
+    return MetadataLessPerEidEvidence, RootSourceScopePlan, SourceArtifactPresence
 
 
 class RootP3SourceAdmissionRefused(SubstrateConfigurationError):
@@ -140,6 +152,7 @@ class RootP3SourceAdmissionRequest:
     post_write_configurations: tuple[NativePostWriteQualificationConfiguration, ...] = ()
 
     def __post_init__(self) -> None:
+        MetadataLessPerEidEvidence, RootSourceScopePlan, _SourceArtifactPresence = _corrective_freeze_types()
         root = _directory(self.data_root, "data_root")
         core = Path(self.native_core_database_path).expanduser().resolve()
         if not core.is_file():
@@ -353,6 +366,7 @@ def planned_p3_child_request_counts(
 ) -> dict[str, int]:
     """Return the frozen child-shape count without creating source evidence."""
 
+    MetadataLessPerEidEvidence, RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     if not isinstance(source_scope_plans, tuple) or any(
         not isinstance(item, RootSourceScopePlan) for item in source_scope_plans
     ):
@@ -537,6 +551,7 @@ def _snapshot_sources_for_scope(
     request: RootP3SourceAdmissionRequest,
     source_plan: RootSourceScopePlan,
 ) -> tuple[tuple[ExplicitSourceEvidence, Path], ...]:
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     scope = source_plan.scope_key
     manifest = request.description.explicit_source_manifest
     selected: list[tuple[ExplicitSourceEvidence, Path]] = []
@@ -623,6 +638,7 @@ def _read_b1_evidence(
     request: RootP3SourceAdmissionRequest,
     entry: dict[str, Any],
 ) -> dict[str, Any]:
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     binding = request_binding(request, entry)
     source_plan = _source_plan_for_key(request, binding.scope_key)
     report = NativeMigrationRuntimeReadinessPreflight(connection).run(
@@ -669,6 +685,7 @@ def _read_b1_evidence(
 def _build_normalization_request(
     request: RootP3SourceAdmissionRequest, record: dict[str, Any],
 ) -> RootNormalizationRequest:
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     inputs: list[RootNormalizationScopeInput] = []
     unknown_by_scope = {item.scope_key: item for item in request.unknown_identity_evidence}
     for entry in _ordered_scope_entries(record):
