@@ -4,7 +4,7 @@
 
 ### Current repository state
 
-- **Real-root database convergence has completed the P2-only recovery abort.** The historical P2 envelope remains durable, but its predecessor payload record is intentionally absent; the selector is now `LEGACY_ACTIVE` at generation 2, public deployment is `LEGACY_PUBLIC`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. The durability repair is qualified; a successor real P2 is the next separately authorized operation.
+- **Real-root database convergence has completed successor P2 under the repaired durability contract.** The historical P2 envelope remains immutable with its predecessor payload record intentionally absent; a distinct successor envelope and its full writer-freeze evidence are durably present. The selector is `CUTOVER_PENDING` at generation 3, public deployment is `MAINTENANCE_ONLY`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is the next separately authorized phase.
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **Blocker-5 is CLOSED.** The bounded Phase-7 native-memory substrate is qualified only for the compression/deep-disabled profile. The authoritative final record is [B5-A7 final closure](BLOCKER_5_A7_FINAL_CLOSURE.md), reconciling [7G5E4D write/lifecycle](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read cognition](7G5E4E_FINAL_CLOSURE.md), and B5-A1 through B5-A6.
@@ -52,15 +52,17 @@ AUTOMATIC_POST_NATIVE_ROLLBACK_TO_LEGACY = NO
 REAL_PRODUCTION_CUTOVER_PERFORMED = NO
 REAL_ROOT_P1 = PASS
 REAL_ROOT_P2 = PASS
-CURRENT_SELECTOR_GENERATION = 2
-CURRENT_SELECTOR_STATE = LEGACY_ACTIVE
-CURRENT_PUBLIC_DEPLOYMENT = LEGACY_PUBLIC
+SUCCESSOR_REAL_ROOT_P2 = PASS
+CURRENT_SELECTOR_GENERATION = 3
+CURRENT_SELECTOR_STATE = CUTOVER_PENDING
+CURRENT_PUBLIC_DEPLOYMENT = MAINTENANCE_ONLY
 CURRENT_CORE_ROLE = STAGING
 CURRENT_CORE_DEPLOYMENT_STATE = LEGACY_ACTIVE
 CURRENT_CORE_EVER_ACTIVE = NO
 REAL_ROOT_P2_HISTORICAL_ATTEMPT = PASS_THEN_RECOVERY_ABORTED
 P2_RECOVERY_DURABILITY_REPAIR = QUALIFIED
-SUCCESSOR_REAL_ROOT_P2 = NEXT_SEPARATELY_AUTHORIZED_OPERATION
+P2_PROCESS_LOSS_RECOVERY = QUALIFIED_AND_DURABLY_PRESENT
+P3 = NEXT_SEPARATELY_AUTHORIZED_PHASE
 REAL_MEMORY_REEMBED_AUTHORIZED = NO
 P6_POINT_OF_NO_RETURN = PRESERVED
 REAL_PRODUCTION_CUTOVER_AUTHORIZED = NO
@@ -79,12 +81,13 @@ SQLite was not shown to make TORMENT more intelligent.
 
 ### Actual production state and next action
 
-The actual/default production root completed P1 and historical P2, then the
-qualified P2-only recovery abort. Its selector is `LEGACY_ACTIVE` (generation
-2), so public deployment is `LEGACY_PUBLIC`; its core remains inert `STAGING /
-LEGACY_ACTIVE`, with `ever_active = NO` and no deployment witness. A successor
-real P2 is separately authorized work; no normalization or core/native
-activation has run.
+The actual/default production root completed P1, historical P2, the qualified
+P2-only recovery abort, and successor P2. Its selector is `CUTOVER_PENDING`
+(generation 3), so public deployment is `MAINTENANCE_ONLY`; its core remains
+inert `STAGING / LEGACY_ACTIVE`, with `ever_active = NO` and no deployment
+witness. The successor envelope and its writer-freeze evidence have both been
+durably reread after simulated process loss. P3 is separately authorized work;
+no normalization or core/native activation has run.
 
 ### P8-R6 architecture freeze, Phase 9A/9B, and Phase 9C-R3 qualification
 
