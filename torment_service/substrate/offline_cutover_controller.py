@@ -10,7 +10,7 @@ pretend to do so or try to terminate them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from uuid import UUID
@@ -57,6 +57,11 @@ from .migration.root_normalization import (
     NativeRootWideNormalizationService,
     RootNormalizationRequest,
     RootNormalizationResult,
+)
+from .migration.root_p3_source_admission import (
+    NativeRootP3SourceAdmissionService,
+    RootP3SourceAdmissionRequest,
+    RootP3SourceAdmissionResult,
 )
 from .migration.existing_workspace_multi_scope_admission import (
     ExistingWorkspaceMultiScopeAdmissionRefused,
@@ -320,6 +325,18 @@ class RootOfflineCutoverEvidence:
     core: CoreDeploymentInspection
     normalization: RootNormalizationResult | None = None
     completion_verification: RootCompletionVerification | None = None
+
+
+@dataclass(frozen=True)
+class RootP3NormalizationEvidence:
+    """P3A source-admission evidence paired with the existing P3B result.
+
+    This result deliberately has no P4 completion witness and does not alter
+    selector or core deployment authority.
+    """
+
+    source_admission: RootP3SourceAdmissionResult
+    normalization: RootNormalizationResult
 
 
 @dataclass(frozen=True)
@@ -726,6 +743,88 @@ class OfflineCutoverController:
             raise
         except Exception as exc:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_NORMALIZATION_REFUSED") from exc
+
+    def admit_and_normalize_root_under_external_fence(
+        self,
+        request: RootOfflineCutoverRequest,
+        source_admission: RootP3SourceAdmissionRequest,
+        *,
+        _test_source_interrupt_after: object | None = None,
+        _test_source_lose_response_after_b2: bool = False,
+        _test_interrupt_after: object | None = None,
+    ) -> RootP3NormalizationEvidence:
+        """P3A then P3B under the already-persisted maintenance fence.
+
+        ``request.normalization_request`` remains the P2-bound scope-plan
+        carrier.  It is never dispatched by this method.  P3A creates the
+        only executable B3/B4 request after exact snapshots and B1/B2 facts
+        exist, so an external administrator cannot bypass lifecycle checks by
+        writing B1/B2 itself.
+        """
+
+        if not isinstance(source_admission, RootP3SourceAdmissionRequest):
+            raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_REQUEST_REQUIRED")
+        if (
+            source_admission.root != request.root
+            or Path(source_admission.native_core_database_path).expanduser().resolve()
+            != Path(request.normalization_request.native_core_database_path).expanduser().resolve()
+            or source_admission.expected_native_core_id != request.native_staging_core_id
+            or source_admission.description != request.description
+        ):
+            raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_BINDING_MISMATCH")
+        p2_scope_plans = tuple(
+            sorted(
+                (item.scope_plan for item in request.normalization_request.scope_inputs),
+                key=lambda item: _root_scope_plan_key(item),
+            )
+        )
+        source_scope_plans = tuple(
+            sorted(
+                (item.scope_plan for item in source_admission.scope_bindings),
+                key=lambda item: _root_scope_plan_key(item),
+            )
+        )
+        if p2_scope_plans != source_scope_plans:
+            raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_SCOPE_PLAN_MISMATCH")
+        envelope = self._root_envelope(request)
+        state = self._selector_state(request)
+        self._require_root_pending(
+            request, envelope, state, core_state=DeploymentState.LEGACY_ACTIVE,
+        )
+        try:
+            with open_existing_native_core_connection(
+                request.normalization_request.native_core_database_path,
+            ) as opened:
+                source_result = NativeRootP3SourceAdmissionService(opened.connection).admit(
+                    source_admission,
+                    _test_interrupt_after=_test_source_interrupt_after,  # type: ignore[arg-type]
+                    _test_lose_response_after_b2=_test_source_lose_response_after_b2,
+                )
+                bound_request = replace(
+                    request, normalization_request=source_result.normalization_request,
+                )
+                rebound_envelope = self._root_envelope(bound_request)
+                if rebound_envelope.digest != envelope.digest:
+                    raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_ENVELOPE_DRIFT")
+                rebound_state = self._selector_state(bound_request)
+                self._require_root_pending(
+                    bound_request, rebound_envelope, rebound_state,
+                    core_state=DeploymentState.LEGACY_ACTIVE,
+                )
+                normalization = NativeRootWideNormalizationService(opened.connection).normalize(
+                    source_result.normalization_request,
+                    _test_interrupt_after=_test_interrupt_after,  # type: ignore[arg-type]
+                )
+                return RootP3NormalizationEvidence(source_result, normalization)
+        except (RootBlocker5BindingRefused, SubstrateConfigurationError):
+            raise
+        except Exception as exc:
+            raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_OR_NORMALIZATION_REFUSED") from exc
+        finally:
+            current = self._selector_state(request)
+            self._require_root_pending(
+                request, envelope, current, core_state=DeploymentState.LEGACY_ACTIVE,
+            )
 
     def verify_root_completion(
         self,
@@ -1363,6 +1462,22 @@ class OfflineCutoverController:
         return f"B5-A5:{request.operator_cutover_key}:{phase}"
 
 
+def _root_scope_plan_key(plan: object) -> tuple[str, str, str]:
+    scope_kind = getattr(plan, "scope_kind", None)
+    if scope_kind == "PRIVATE_AGENT":
+        qualifier = getattr(plan, "agent_id", None)
+        kind = "PRIVATE"
+    elif scope_kind == "SHARED_DOMAIN":
+        qualifier = getattr(plan, "domain_id", None)
+        kind = "SHARED"
+    else:
+        raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_SCOPE_PLAN_INVALID")
+    workspace_id = getattr(plan, "workspace_id", None)
+    if not isinstance(workspace_id, str) or not isinstance(qualifier, str):
+        raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_SCOPE_PLAN_INVALID")
+    return workspace_id, kind, qualifier
+
+
 __all__ = [
     "OfflineCutoverController",
     "OfflineCutoverEvidence",
@@ -1371,6 +1486,7 @@ __all__ = [
     "OfflineCutoverStage",
     "OfflineWriterDrainWitness",
     "RootOfflineCutoverEvidence",
+    "RootP3NormalizationEvidence",
     "RootAdmissionMode",
     "RootExternalPendingInertAbortRequest",
     "RootOfflineCutoverRequest",

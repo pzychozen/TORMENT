@@ -181,6 +181,17 @@ from .root_normalization import (
     RootScopeNormalizationResult,
     RootWorkspaceNormalizationResult,
 )
+from .root_p3_source_admission import (
+    NativeRootP3SourceAdmissionService,
+    RootP3ScopeBinding,
+    RootP3SourceAdmissionInterrupted,
+    RootP3SourceAdmissionInterruptionPoint,
+    RootP3SourceAdmissionRefused,
+    RootP3SourceAdmissionRequest,
+    RootP3SourceAdmissionResult,
+    p3_child_request_counts,
+    planned_p3_child_request_counts,
+)
 from .existing_workspace_admission import (
     ExistingWorkspaceAdmissionDescriptor,
     ExistingWorkspaceAdmissionRefused,
@@ -401,6 +412,15 @@ __all__ = [
     "RootRepresentationNormalizationResult",
     "RootScopeNormalizationResult",
     "RootWorkspaceNormalizationResult",
+    "NativeRootP3SourceAdmissionService",
+    "RootP3ScopeBinding",
+    "RootP3SourceAdmissionInterrupted",
+    "RootP3SourceAdmissionInterruptionPoint",
+    "RootP3SourceAdmissionRefused",
+    "RootP3SourceAdmissionRequest",
+    "RootP3SourceAdmissionResult",
+    "p3_child_request_counts",
+    "planned_p3_child_request_counts",
     "ExistingWorkspaceAdmissionDescriptor",
     "ExistingWorkspaceAdmissionRefused",
     "ExistingWorkspaceAdmissionState",
