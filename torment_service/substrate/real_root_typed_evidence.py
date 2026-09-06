@@ -19,6 +19,7 @@ import re
 import stat
 import struct
 from typing import Final
+from uuid import UUID
 
 from .canonical_intent import canonical_intent_text
 from .corrective_freeze_packet import (
@@ -46,6 +47,10 @@ from .migration.explicit_source_evidence import (
     ExplicitSourceEvidence,
     RootEvidenceManifest,
     SourceOwnerClass,
+)
+from .migration.metadata_less_per_eid_legacy_source import (
+    MetadataLessPerEidLegacySourceRefused,
+    qualify_metadata_less_per_eid_legacy_source,
 )
 from .migration.root_admission_description import (
     DeclaredUnmaterializedDomain,
@@ -172,6 +177,40 @@ class DirectAdmissionSourcePreparation:
 
 
 @dataclass(frozen=True)
+class DirectPhase9BNamespaceBinding:
+    """Frozen P1 namespaces required by the direct Phase-9B source bridge.
+
+    This is an explicit caller-supplied binding, never a source-derived or
+    newly allocated identity.  It carries no source, writer, or admission
+    authority by itself.
+    """
+
+    scope_key: RootScopeKey
+    legacy_source_namespace_id: UUID
+    target_identity_namespace_id: UUID
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope_key, RootScopeKey)
+            or self.scope_key.scope_kind is not RootScopeKind.PRIVATE
+            or self.scope_key.canonical_key not in _DIRECT_UNKNOWN_IDENTITY_ABSENT_MANIFEST_SCOPES
+        ):
+            raise CorrectiveFreezePacketRefused(
+                "direct Phase-9B namespace binding must name one qualified private scope"
+            )
+        if not isinstance(self.legacy_source_namespace_id, UUID) or not isinstance(
+            self.target_identity_namespace_id, UUID
+        ):
+            raise CorrectiveFreezePacketRefused(
+                "direct Phase-9B namespace bindings must be frozen UUIDs"
+            )
+        if self.legacy_source_namespace_id == self.target_identity_namespace_id:
+            raise CorrectiveFreezePacketRefused(
+                "direct Phase-9B source and target namespaces must remain distinct"
+            )
+
+
+@dataclass(frozen=True)
 class RealRootTypedEvidenceAdapter:
     """Strict read-only adapter for a source tree frozen by a future caller.
 
@@ -188,6 +227,7 @@ class RealRootTypedEvidenceAdapter:
     target_representation_lane: NativeRepresentationLane = _TARGET_LANE
     excluded_source_artifacts: tuple[ExcludedSourceArtifactLocator, ...] = ()
     excluded_alternate_roots: tuple[ExcludedAlternateRootLocator, ...] = ()
+    direct_phase9b_namespace_bindings: tuple[DirectPhase9BNamespaceBinding, ...] = ()
 
     def __post_init__(self) -> None:
         for value, label in (
@@ -215,6 +255,15 @@ class RealRootTypedEvidenceAdapter:
             item.canonical_locator for item in self.excluded_alternate_roots
         }:
             raise CorrectiveFreezePacketRefused("file artifacts and alternate roots cannot share a locator")
+        if not isinstance(self.direct_phase9b_namespace_bindings, tuple) or any(
+            not isinstance(item, DirectPhase9BNamespaceBinding)
+            for item in self.direct_phase9b_namespace_bindings
+        ):
+            raise CorrectiveFreezePacketRefused("direct Phase-9B namespace bindings must be typed")
+        if len({item.scope_key.canonical_key for item in self.direct_phase9b_namespace_bindings}) != len(
+            self.direct_phase9b_namespace_bindings
+        ):
+            raise CorrectiveFreezePacketRefused("direct Phase-9B namespace bindings must be unique by scope")
 
     def excluded_artifact_expectations(self, *, data_root: Path) -> tuple[ExcludedSourceArtifactExpectation, ...]:
         """Hash configured top-level excluded artifacts without changing them."""
@@ -330,6 +379,14 @@ class RealRootTypedEvidenceAdapter:
         empty_private_evidence: list[EmptyPrivateSourceEvidence] = []
         declared_empty_evidence: list[DeclaredEmptySharedSourceEvidence] = []
         external_observations: list[ExternalOwnerObservation] = []
+        direct_phase9b_bindings = (
+            {
+                item.scope_key.canonical_key: item
+                for item in self.direct_phase9b_namespace_bindings
+            }
+            if allow_known_unknown_identity_absent_manifest
+            else None
+        )
 
         for workspace_path in _direct_directories(workspaces_root, "workspace"):
             workspace_id = workspace_path.name
@@ -341,6 +398,7 @@ class RealRootTypedEvidenceAdapter:
                 allow_known_empty_shared_residue=allow_known_empty_shared_residue,
                 allow_known_empty_private_residue=allow_known_empty_private_residue,
                 allow_known_unknown_identity_absent_manifest=allow_known_unknown_identity_absent_manifest,
+                direct_phase9b_bindings=direct_phase9b_bindings,
             )
             entries.extend(result.entries)
             workspace_plans.append(result.workspace_plan)
@@ -407,6 +465,7 @@ class RealRootTypedEvidenceAdapter:
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
         allow_known_unknown_identity_absent_manifest: bool,
+        direct_phase9b_bindings: dict[tuple[str, str, str], DirectPhase9BNamespaceBinding] | None,
     ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
         workspace_meta_path = path / "workspace_meta.json"
@@ -495,6 +554,7 @@ class RealRootTypedEvidenceAdapter:
                     allow_known_unknown_identity_absent_manifest=(
                         allow_known_unknown_identity_absent_manifest and metadata_less_workspace_source_shape
                     ),
+                    direct_phase9b_bindings=direct_phase9b_bindings,
                 )
                 entries.extend(capture.entries)
                 private_scopes.append(capture.scope_plan)
@@ -608,6 +668,7 @@ def build_real_direct_admission_source_adapter(
     data_root_identity: str,
     operator_identity: str,
     profile_name: str = "held-freeze-typed-evidence",
+    direct_phase9b_namespace_bindings: tuple[DirectPhase9BNamespaceBinding, ...] = (),
 ) -> RealRootTypedEvidenceAdapter:
     """Build the explicit adapter for the qualified real production root.
 
@@ -628,6 +689,7 @@ def build_real_direct_admission_source_adapter(
         excluded_alternate_roots=(
             ExcludedAlternateRootLocator(_REAL_DIRECT_ADMISSION_EXCLUDED_ALTERNATE_ROOT),
         ),
+        direct_phase9b_namespace_bindings=direct_phase9b_namespace_bindings,
     )
 
 
@@ -757,6 +819,7 @@ def _capture_private_scope(
     *,
     allow_known_empty_private_residue: bool,
     allow_known_unknown_identity_absent_manifest: bool,
+    direct_phase9b_bindings: dict[tuple[str, str, str], DirectPhase9BNamespaceBinding] | None,
 ) -> _ScopeCapture:
     path = _real_directory(path, "private scope")
     boundary = EvidenceOwnerBoundary(
@@ -822,6 +885,7 @@ def _capture_private_scope(
         target_lane,
         representation_lock,
         allow_known_unknown_identity_absent_manifest=allow_known_unknown_identity_absent_manifest,
+        direct_phase9b_bindings=direct_phase9b_bindings,
     )
 
 
@@ -899,6 +963,7 @@ def _capture_memory_scope(
     representation_lock: tuple[str, str, int] | None,
     *,
     allow_known_unknown_identity_absent_manifest: bool,
+    direct_phase9b_bindings: dict[tuple[str, str, str], DirectPhase9BNamespaceBinding] | None = None,
 ) -> _ScopeCapture:
     embedding_path = path / "embeddings" / "manifest.json"
     _validate_memory_scope_side_stores(path, scope)
@@ -935,7 +1000,21 @@ def _capture_memory_scope(
     unknown: tuple[MetadataLessPerEidEvidence, ...] = ()
     allowed = _memory_scope_direct_children(scope)
     if disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
-        unknown, extra_entries, allowed_unknown = _metadata_less_evidence_from_nodes(root, path, scope, boundary)
+        if (
+            direct_phase9b_bindings is not None
+            and scope.canonical_key in direct_phase9b_bindings
+        ):
+            unknown, extra_entries, allowed_unknown = _direct_phase9b_metadata_less_evidence(
+                root,
+                path,
+                scope,
+                boundary,
+                direct_phase9b_bindings.get(scope.canonical_key),
+            )
+        else:
+            unknown, extra_entries, allowed_unknown = _metadata_less_evidence_from_nodes(
+                root, path, scope, boundary,
+            )
         entries.extend(extra_entries)
         allowed |= allowed_unknown
     _validate_direct_children(path, allowed, "memory scope")
@@ -1183,6 +1262,129 @@ def _validate_node_embedding_stamps(path: Path, lock: tuple[str, str, int] | Non
             continue
         if not all(present) or tuple(row[field] for field in fields) != lock:
             raise CorrectiveFreezePacketRefused("node embedding stamp contradicts workspace representation lock")
+
+
+def _direct_phase9b_metadata_less_evidence(
+    root: Path,
+    path: Path,
+    scope: RootScopeKey,
+    boundary: EvidenceOwnerBoundary,
+    binding: DirectPhase9BNamespaceBinding | None,
+) -> tuple[tuple[MetadataLessPerEidEvidence, ...], tuple[ExplicitSourceEvidence, ...], set[str]]:
+    """Project the existing Phase-9B qualification into the direct carrier.
+
+    The direct source grammar owns only production-shaped source discovery.
+    Phase-9B remains the authority for payload selection, NPY structural
+    inspection, retained-vector identity, and the UNKNOWN/REEMBED posture.
+    """
+
+    if binding is None:
+        raise CorrectiveFreezePacketRefused(
+            "qualified direct Phase-9B scope requires frozen P1 namespace bindings"
+        )
+    eid = _single_direct_phase9b_eid(path / "nodes.jsonl")
+    nodes = _capture_present(
+        root,
+        path / "nodes.jsonl",
+        SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+        boundary,
+        "nodes.jsonl",
+        EvidenceSemanticRole.NODES,
+        scope,
+    )
+    edges_path = path / "edges.jsonl"
+    if edges_path.exists() or edges_path.is_symlink():
+        edges = _capture_present(
+            root,
+            edges_path,
+            SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+            boundary,
+            "edges.jsonl",
+            EvidenceSemanticRole.EDGES,
+            scope,
+        )
+    else:
+        edges = _absent(
+            SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+            boundary,
+            "edges.jsonl",
+            EvidenceSemanticRole.EDGES,
+            scope,
+            EvidenceAbsenceReason.OPTIONAL_EDGE_SOURCE,
+        )
+    vector_locator = f"emb_{eid}.npy"
+    representation = _capture_present(
+        root,
+        path / vector_locator,
+        SourceOwnerClass.METADATA_LESS_PER_EID_LEGACY_REPRESENTATION,
+        boundary,
+        vector_locator,
+        EvidenceSemanticRole.LEGACY_REPRESENTATION,
+        scope,
+    )
+    try:
+        qualified = qualify_metadata_less_per_eid_legacy_source(
+            data_root=root,
+            scope_key=scope,
+            legacy_eid=eid,
+            legacy_source_namespace_id=binding.legacy_source_namespace_id,
+            target_identity_namespace_id=binding.target_identity_namespace_id,
+            nodes_source=nodes,
+            optional_edges_source=edges,
+            legacy_representation_source=representation,
+        )
+    except MetadataLessPerEidLegacySourceRefused as exc:
+        raise CorrectiveFreezePacketRefused(
+            f"direct Phase-9B metadata-less qualification refused: {exc}"
+        ) from exc
+    projected = MetadataLessPerEidEvidence(
+        scope_key=qualified.scope_key,
+        eid=qualified.legacy_eid,
+        vector_evidence=qualified.legacy_representation_source,
+        canonical_text_evidence=qualified.nodes_source,
+        dtype=qualified.retained_legacy_vector.array_dtype,
+        shape=qualified.retained_legacy_vector.array_shape,
+        metadata_less_source_evidence_identity=qualified.source_evidence_identity,
+    )
+    return (projected,), (qualified.optional_edges_source, qualified.legacy_representation_source), {vector_locator}
+
+
+def _single_direct_phase9b_eid(nodes_path: Path) -> int:
+    """Require the frozen direct production posture of one canonical EID."""
+
+    try:
+        lines = _regular_file(nodes_path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CorrectiveFreezePacketRefused("direct Phase-9B nodes source is invalid") from exc
+    eids: list[int] = []
+    for ordinal, line in enumerate(lines, start=1):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise CorrectiveFreezePacketRefused(
+                f"direct Phase-9B nodes record {ordinal} is malformed"
+            ) from exc
+        if not isinstance(record, dict):
+            raise CorrectiveFreezePacketRefused(
+                f"direct Phase-9B nodes record {ordinal} is not an object"
+            )
+        eid = record.get("eid")
+        payload = record.get("payload")
+        if (
+            not isinstance(eid, int)
+            or isinstance(eid, bool)
+            or eid < 0
+            or not isinstance(payload, dict)
+        ):
+            raise CorrectiveFreezePacketRefused(
+                f"direct Phase-9B nodes record {ordinal} lacks a canonical EID payload"
+            )
+        eids.append(eid)
+    if len(eids) != 1 or len(set(eids)) != 1:
+        raise CorrectiveFreezePacketRefused(
+            "qualified direct Phase-9B source requires exactly one unique canonical EID"
+        )
+    return eids[0]
 
 
 def _metadata_less_evidence_from_nodes(
@@ -1470,6 +1672,7 @@ def _top_level_locator(value: object) -> str:
 
 __all__ = [
     "build_real_direct_admission_source_adapter",
+    "DirectPhase9BNamespaceBinding",
     "DirectAdmissionSourcePreparation",
     "ExcludedAlternateRootLocator",
     "ExcludedSourceArtifactLocator",

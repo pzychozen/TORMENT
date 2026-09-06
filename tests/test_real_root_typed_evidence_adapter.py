@@ -44,9 +44,11 @@ from torment_service.substrate.migration.root_admission_description import (
     MaterializedScopePosture,
     RootRepresentationDisposition,
 )
+from torment_service.substrate.migration.root_scope import RootScopeKey, RootScopeKind
 from torment_service.substrate.migration.runtime_readiness import LegacyVectorStrategy
 from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.real_root_typed_evidence import (
+    DirectPhase9BNamespaceBinding,
     DirectAdmissionSourcePreparation,
     ExcludedAlternateRootLocator,
     ExcludedSourceArtifactLocator,
@@ -147,6 +149,23 @@ def _target_lock() -> dict[str, object]:
 
 def _hash_lock() -> dict[str, object]:
     return {"embed_provider": "hash", "embed_model": "hash:384:torment", "embed_dim": 384}
+
+
+def _direct_phase9b_bindings() -> tuple[DirectPhase9BNamespaceBinding, ...]:
+    """Fixed test-only stand-ins for caller-supplied frozen P1 identities."""
+
+    return tuple(
+        DirectPhase9BNamespaceBinding(
+            RootScopeKey(workspace_id, RootScopeKind.PRIVATE, agent_id="a1"),
+            UUID(legacy_namespace_id),
+            UUID(target_namespace_id),
+        )
+        for workspace_id, legacy_namespace_id, target_namespace_id in (
+            ("ws3", "10000000-0000-0000-0000-000000000003", "20000000-0000-0000-0000-000000000003"),
+            ("ws4", "10000000-0000-0000-0000-000000000004", "20000000-0000-0000-0000-000000000004"),
+            ("ws5", "10000000-0000-0000-0000-000000000005", "20000000-0000-0000-0000-000000000005"),
+        )
+    )
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, RealRootTypedEvidenceAdapter]:
@@ -295,14 +314,11 @@ def _direct_metadata_less_six_workspace_fixture(
         _scope(root, workspace_id, "a1")
         private = root / "workspaces" / workspace_id / "agents" / "a1" / "private"
         (private / "embeddings" / "manifest.json").unlink()
-        _write(private / "nodes.jsonl", json.dumps({"metadata_less_source_evidence": [{
-            "eid": 7,
-            "vector_locator": "emb_7.npy",
-            "canonical_text_locator": "canonical_text_7.json",
-            "metadata_less_source_evidence_identity": f"{workspace_id}-eid-7",
-        }], "eid": 7, "payload": {"summary": "qualified legacy source"}}) + "\n")
-        _npy(private / "emb_7.npy")
-        _json(private / "canonical_text_7.json", {"text": "qualified legacy source"})
+        _write(
+            private / "nodes.jsonl",
+            json.dumps({"eid": 1, "payload": {"summary": f"{workspace_id} canonical source"}}) + "\n",
+        )
+        _npy(private / "emb_1.npy")
         _json(
             root / "workspaces" / workspace_id / "domains" / "research" / "motifs.json",
             {"motif": "retained owner state"},
@@ -311,6 +327,7 @@ def _direct_metadata_less_six_workspace_fixture(
     return root, RealRootTypedEvidenceAdapter(
         data_root_identity="synthetic-metadata-less-six-workspace-root",
         operator_identity="synthetic-metadata-less-six-workspace-operator",
+        direct_phase9b_namespace_bindings=_direct_phase9b_bindings(),
     )
 
 
@@ -383,6 +400,16 @@ def test_direct_metadata_less_six_workspace_family_is_explicitly_bound_and_close
         ("ws4", "PRIVATE", "a1"),
         ("ws5", "PRIVATE", "a1"),
     }
+    assert {item.eid for item in prepared.unknown_identity_evidence} == {1}
+    assert not list(root.rglob("canonical_text_*.json"))
+    assert all(
+        "metadata_less_source_evidence" not in json.loads(
+            (root / "workspaces" / workspace_id / "agents" / "a1" / "private" / "nodes.jsonl").read_text(
+                encoding="utf-8"
+            )
+        )
+        for workspace_id in ("ws3", "ws4", "ws5")
+    )
     assert manifest.verify(data_root=root).verified_absent_entries
     assert _source_snapshot(root) == before
 
@@ -428,56 +455,110 @@ def test_direct_unknown_identity_manifest_alignment_keeps_ordinary_missing_manif
     )
 
 
-def test_direct_unknown_identity_manifest_alignment_keeps_partial_per_eid_source_strict(tmp_path: Path) -> None:
+def test_direct_phase9b_production_shape_refuses_missing_matching_vector(tmp_path: Path) -> None:
     root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
-    nodes = root / "workspaces" / "ws4" / "agents" / "a1" / "private" / "nodes.jsonl"
-    _write(nodes, json.dumps({"metadata_less_source_evidence": [{"eid": 7}]}) + "\n")
+    vector = root / "workspaces" / "ws4" / "agents" / "a1" / "private" / "emb_1.npy"
+    vector.unlink()
 
-    with pytest.raises(CorrectiveFreezePacketRefused, match="metadata-less per-EID evidence shape is invalid"):
+    with pytest.raises(CorrectiveFreezePacketRefused, match="non-symlink regular file"):
         adapter.prepare_direct_admission_source(data_root=root)
 
 
-def test_direct_unknown_identity_manifest_alignment_preserves_canonical_reembed_source(tmp_path: Path) -> None:
+def test_direct_phase9b_production_shape_projects_existing_qualified_source(tmp_path: Path) -> None:
     root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    before = _source_snapshot(root)
     prepared = adapter.prepare_direct_admission_source(data_root=root)
-    scope = next(item.scope_key for item in prepared.unknown_identity_evidence if item.scope_key.workspace_id == "ws3")
     entries = prepared.description.explicit_source_manifest.entries
-    nodes = next(
+    bindings = {item.scope_key: item for item in adapter.direct_phase9b_namespace_bindings}
+
+    assert not list(root.rglob("canonical_text_*.json"))
+    assert len([
         item for item in entries
-        if item.scope_key == scope
-        and item.semantic_role is EvidenceSemanticRole.NODES
-        and item.canonical_locator == "nodes.jsonl"
-    )
-    representation = next(
-        item for item in entries
-        if item.scope_key == scope and item.semantic_role is EvidenceSemanticRole.LEGACY_REPRESENTATION
-    )
-    optional_edges = ExplicitSourceEvidence(
-        SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
-        EvidenceOwnerBoundary("ws3", EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id="a1"),
-        "edges.jsonl",
-        EvidenceSemanticRole.EDGES,
-        EvidencePresenceExpectation.EXPECTED_ABSENT,
-        scope,
-        absence_reason=EvidenceAbsenceReason.OPTIONAL_EDGE_SOURCE,
-    )
-    qualified = qualify_metadata_less_per_eid_legacy_source(
-        data_root=root,
-        scope_key=scope,
-        legacy_eid=7,
-        legacy_source_namespace_id=uuid4(),
-        target_identity_namespace_id=uuid4(),
-        nodes_source=nodes,
-        optional_edges_source=optional_edges,
-        legacy_representation_source=representation,
+        if item.scope_key in bindings and item.semantic_role is EvidenceSemanticRole.NODES
+    ]) == 3
+    for direct in prepared.unknown_identity_evidence:
+        nodes = next(
+            item for item in entries
+            if item.scope_key == direct.scope_key and item.semantic_role is EvidenceSemanticRole.NODES
+        )
+        representation = next(
+            item for item in entries
+            if item.scope_key == direct.scope_key
+            and item.semantic_role is EvidenceSemanticRole.LEGACY_REPRESENTATION
+        )
+        optional_edges = next(
+            item for item in entries
+            if item.scope_key == direct.scope_key
+            and item.semantic_role is EvidenceSemanticRole.EDGES
+        )
+        binding = bindings[direct.scope_key]
+        qualified = qualify_metadata_less_per_eid_legacy_source(
+            data_root=root,
+            scope_key=direct.scope_key,
+            legacy_eid=1,
+            legacy_source_namespace_id=binding.legacy_source_namespace_id,
+            target_identity_namespace_id=binding.target_identity_namespace_id,
+            nodes_source=nodes,
+            optional_edges_source=optional_edges,
+            legacy_representation_source=representation,
+        )
+
+        assert qualified.provider_identity is None
+        assert qualified.model_identity is None
+        assert qualified.representation_identity is MetadataLessRepresentationIdentity.UNKNOWN
+        assert qualified.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
+        assert qualified.b3b_input.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
+        assert qualified.canonical_embedding_input.field == "summary"
+        assert direct.scope_key == qualified.scope_key
+        assert direct.eid == qualified.legacy_eid
+        assert direct.vector_evidence == qualified.legacy_representation_source
+        assert direct.canonical_text_evidence == qualified.nodes_source
+        assert direct.dtype == qualified.retained_legacy_vector.array_dtype
+        assert direct.shape == qualified.retained_legacy_vector.array_shape
+        assert direct.metadata_less_source_evidence_identity == qualified.source_evidence_identity
+    assert _source_snapshot(root) == before
+
+
+def test_direct_phase9b_production_shape_refuses_malformed_vector(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    vector = root / "workspaces" / "ws3" / "agents" / "a1" / "private" / "emb_1.npy"
+    _write(vector, b"not-a-valid-npy")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="structurally valid NPY array"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_phase9b_production_shape_refuses_eid_vector_mismatch(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    private = root / "workspaces" / "ws3" / "agents" / "a1" / "private"
+    (private / "emb_1.npy").replace(private / "emb_2.npy")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="non-symlink regular file"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_phase9b_production_shape_refuses_ambiguous_canonical_eid(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    nodes = root / "workspaces" / "ws3" / "agents" / "a1" / "private" / "nodes.jsonl"
+    _write(
+        nodes,
+        "\n".join((
+            json.dumps({"eid": 1, "payload": {"summary": "first"}}),
+            json.dumps({"eid": 1, "payload": {"summary": "second"}}),
+        )) + "\n",
     )
 
-    assert qualified.provider_identity is None
-    assert qualified.model_identity is None
-    assert qualified.representation_identity is MetadataLessRepresentationIdentity.UNKNOWN
-    assert qualified.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
-    assert qualified.b3b_input.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
-    assert qualified.b3b_input.canonical_embedding_input.field
+    with pytest.raises(CorrectiveFreezePacketRefused, match="exactly one unique canonical EID"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_phase9b_production_shape_refuses_missing_canonical_input(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    nodes = root / "workspaces" / "ws3" / "agents" / "a1" / "private" / "nodes.jsonl"
+    _write(nodes, json.dumps({"eid": 1, "payload": {"opaque": "not canonical input"}}) + "\n")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="canonical embedding input is unavailable"):
+        adapter.prepare_direct_admission_source(data_root=root)
 
 
 def test_direct_metadata_less_workspace_manifest_refuses_created_metadata_drift(tmp_path: Path) -> None:
