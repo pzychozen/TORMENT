@@ -118,6 +118,11 @@ _REAL_DIRECT_ADMISSION_EXCLUDED_SOURCE_ARTIFACTS: Final[
     ("emb_1.npy", "TOP_LEVEL_UNSCOPED_EMBEDDINGS"),
 )
 _REAL_DIRECT_ADMISSION_EXCLUDED_ALTERNATE_ROOT: Final[str] = "lived_use"
+_DIRECT_UNKNOWN_IDENTITY_ABSENT_MANIFEST_SCOPES: Final[frozenset[tuple[str, str, str]]] = frozenset({
+    ("ws3", "PRIVATE", "a1"),
+    ("ws4", "PRIVATE", "a1"),
+    ("ws5", "PRIVATE", "a1"),
+})
 
 
 @dataclass(frozen=True)
@@ -262,6 +267,7 @@ class RealRootTypedEvidenceAdapter:
             allow_missing_workspace_metadata=False,
             allow_known_empty_shared_residue=False,
             allow_known_empty_private_residue=False,
+            allow_known_unknown_identity_absent_manifest=False,
         )
         return CorrectiveFreezeTypedEvidence(
             description=prepared.description,
@@ -290,6 +296,7 @@ class RealRootTypedEvidenceAdapter:
             allow_missing_workspace_metadata=True,
             allow_known_empty_shared_residue=True,
             allow_known_empty_private_residue=True,
+            allow_known_unknown_identity_absent_manifest=True,
         )
 
     def _prepare_source(
@@ -300,6 +307,7 @@ class RealRootTypedEvidenceAdapter:
         allow_missing_workspace_metadata: bool,
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
+        allow_known_unknown_identity_absent_manifest: bool,
     ) -> DirectAdmissionSourcePreparation:
         """Single source grammar shared by direct and compatibility callers."""
 
@@ -327,6 +335,7 @@ class RealRootTypedEvidenceAdapter:
                 allow_missing_workspace_metadata=allow_missing_workspace_metadata,
                 allow_known_empty_shared_residue=allow_known_empty_shared_residue,
                 allow_known_empty_private_residue=allow_known_empty_private_residue,
+                allow_known_unknown_identity_absent_manifest=allow_known_unknown_identity_absent_manifest,
             )
             entries.extend(result.entries)
             workspace_plans.append(result.workspace_plan)
@@ -389,9 +398,11 @@ class RealRootTypedEvidenceAdapter:
         allow_missing_workspace_metadata: bool,
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
+        allow_known_unknown_identity_absent_manifest: bool,
     ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
         workspace_meta_path = path / "workspace_meta.json"
+        metadata_less_workspace_source_shape = False
         if allow_missing_workspace_metadata and not workspace_meta_path.exists() and not workspace_meta_path.is_symlink():
             workspace_meta = _absent(
                 SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
@@ -402,6 +413,7 @@ class RealRootTypedEvidenceAdapter:
                 EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE,
             )
             representation_lock = None
+            metadata_less_workspace_source_shape = True
         else:
             workspace_meta = _capture_present(
                 root, workspace_meta_path, SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
@@ -472,6 +484,9 @@ class RealRootTypedEvidenceAdapter:
                     root, private_path, scope, identity, self.target_representation_lane,
                     representation_lock,
                     allow_known_empty_private_residue=allow_known_empty_private_residue,
+                    allow_known_unknown_identity_absent_manifest=(
+                        allow_known_unknown_identity_absent_manifest and metadata_less_workspace_source_shape
+                    ),
                 )
                 entries.extend(capture.entries)
                 private_scopes.append(capture.scope_plan)
@@ -731,7 +746,9 @@ def _capture_declared_empty_shared_scope(
 def _capture_private_scope(
     root: Path, path: Path, scope: RootScopeKey, identity: ExplicitSourceEvidence,
     target_lane: NativeRepresentationLane, representation_lock: tuple[str, str, int] | None,
-    *, allow_known_empty_private_residue: bool,
+    *,
+    allow_known_empty_private_residue: bool,
+    allow_known_unknown_identity_absent_manifest: bool,
 ) -> _ScopeCapture:
     path = _real_directory(path, "private scope")
     boundary = EvidenceOwnerBoundary(
@@ -788,7 +805,16 @@ def _capture_private_scope(
         )
 
     _validate_regular_file(nodes_path, "private nodes")
-    return _capture_memory_scope(root, path, scope, boundary, SourceOwnerClass.PRIVATE_GRAPH_SOURCE, target_lane, representation_lock)
+    return _capture_memory_scope(
+        root,
+        path,
+        scope,
+        boundary,
+        SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+        target_lane,
+        representation_lock,
+        allow_known_unknown_identity_absent_manifest=allow_known_unknown_identity_absent_manifest,
+    )
 
 
 def _capture_shared_scope(
@@ -845,6 +871,7 @@ def _capture_shared_scope(
     _validate_regular_file(nodes_path, "shared nodes")
     capture = _capture_memory_scope(
         root, path, scope, boundary, SourceOwnerClass.SHARED_GRAPH_SOURCE, target_lane, representation_lock,
+        allow_known_unknown_identity_absent_manifest=False,
     )
     if not motifs_path.exists():
         return capture
@@ -862,19 +889,39 @@ def _capture_memory_scope(
     root: Path, path: Path, scope: RootScopeKey, boundary: EvidenceOwnerBoundary,
     graph_owner: SourceOwnerClass, target_lane: NativeRepresentationLane,
     representation_lock: tuple[str, str, int] | None,
+    *,
+    allow_known_unknown_identity_absent_manifest: bool,
 ) -> _ScopeCapture:
     embedding_path = path / "embeddings" / "manifest.json"
     _validate_memory_scope_side_stores(path, scope)
     nodes = _capture_present(root, path / "nodes.jsonl", graph_owner, boundary, "nodes.jsonl", EvidenceSemanticRole.NODES, scope)
-    embedding = _capture_present(
-        root, embedding_path, SourceOwnerClass.EMBEDDING_MANIFEST, boundary,
-        "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, scope,
-    )
-    metadata = _read_json(embedding_path)
-    _validate_storage_manifest(metadata, representation_lock)
-    _validate_embedding_storage(path / "embeddings")
-    _validate_node_embedding_stamps(path / "nodes.jsonl", representation_lock)
     disposition = _representation_disposition_from_workspace_lock(scope, representation_lock, target_lane)
+    if (
+        allow_known_unknown_identity_absent_manifest
+        and disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY
+        and scope.canonical_key in _DIRECT_UNKNOWN_IDENTITY_ABSENT_MANIFEST_SCOPES
+    ):
+        if embedding_path.exists() or embedding_path.is_symlink():
+            raise CorrectiveFreezePacketRefused(
+                "qualified UNKNOWN_IDENTITY scope requires embeddings/manifest.json to remain expected absent"
+            )
+        embedding = _absent(
+            SourceOwnerClass.EMBEDDING_MANIFEST,
+            boundary,
+            "embeddings/manifest.json",
+            EvidenceSemanticRole.EMBEDDING_MANIFEST,
+            scope,
+            EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE,
+        )
+    else:
+        embedding = _capture_present(
+            root, embedding_path, SourceOwnerClass.EMBEDDING_MANIFEST, boundary,
+            "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST, scope,
+        )
+        metadata = _read_json(embedding_path)
+        _validate_storage_manifest(metadata, representation_lock)
+        _validate_embedding_storage(path / "embeddings")
+    _validate_node_embedding_stamps(path / "nodes.jsonl", representation_lock)
     motif_domain_id = scope.domain_id
     entries = [nodes, embedding]
     unknown: tuple[MetadataLessPerEidEvidence, ...] = ()

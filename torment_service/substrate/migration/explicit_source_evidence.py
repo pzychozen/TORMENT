@@ -310,7 +310,7 @@ def verify_explicit_source_manifest(
     for entry in manifest.entries:
         path = _resolve_evidence_path(root, entry.owner_boundary, entry.canonical_locator)
         if entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT:
-            if path.exists():
+            if path.exists() or path.is_symlink():
                 raise ExplicitSourceEvidenceDrift(
                     f"expected-absent evidence was created: {entry.canonical_locator}"
                 )

@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import struct
 from dataclasses import replace
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -28,15 +28,23 @@ from torment_service.substrate.deployment_types import QualifiedDeploymentProfil
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration.explicit_source_evidence import (
     EvidenceAbsenceReason,
+    EvidenceOwnerBoundary,
+    EvidenceOwnerBoundaryKind,
     EvidencePresenceExpectation,
     EvidenceSemanticRole,
+    ExplicitSourceEvidence,
     ExplicitSourceEvidenceDrift,
     SourceOwnerClass,
+)
+from torment_service.substrate.migration.metadata_less_per_eid_legacy_source import (
+    MetadataLessRepresentationIdentity,
+    qualify_metadata_less_per_eid_legacy_source,
 )
 from torment_service.substrate.migration.root_admission_description import (
     MaterializedScopePosture,
     RootRepresentationDisposition,
 )
+from torment_service.substrate.migration.runtime_readiness import LegacyVectorStrategy
 from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.real_root_typed_evidence import (
     DirectAdmissionSourcePreparation,
@@ -286,12 +294,13 @@ def _direct_metadata_less_six_workspace_fixture(
     for workspace_id in ("ws3", "ws4", "ws5"):
         _scope(root, workspace_id, "a1")
         private = root / "workspaces" / workspace_id / "agents" / "a1" / "private"
+        (private / "embeddings" / "manifest.json").unlink()
         _write(private / "nodes.jsonl", json.dumps({"metadata_less_source_evidence": [{
             "eid": 7,
             "vector_locator": "emb_7.npy",
             "canonical_text_locator": "canonical_text_7.json",
             "metadata_less_source_evidence_identity": f"{workspace_id}-eid-7",
-        }]}) + "\n")
+        }], "eid": 7, "payload": {"summary": "qualified legacy source"}}) + "\n")
         _npy(private / "emb_7.npy")
         _json(private / "canonical_text_7.json", {"text": "qualified legacy source"})
         _json(
@@ -376,6 +385,99 @@ def test_direct_metadata_less_six_workspace_family_is_explicitly_bound_and_close
     }
     assert manifest.verify(data_root=root).verified_absent_entries
     assert _source_snapshot(root) == before
+
+
+def test_direct_unknown_identity_manifest_absence_is_explicit_and_drift_refuses(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+    manifest = prepared.description.explicit_source_manifest
+
+    absent_manifest_entries = [
+        item
+        for item in manifest.entries
+        if item.owner_class is SourceOwnerClass.EMBEDDING_MANIFEST
+        and item.semantic_role is EvidenceSemanticRole.EMBEDDING_MANIFEST
+    ]
+    assert {
+        item.scope_key.canonical_key for item in absent_manifest_entries if item.scope_key is not None
+    } == {
+        ("ws3", "PRIVATE", "a1"),
+        ("ws4", "PRIVATE", "a1"),
+        ("ws5", "PRIVATE", "a1"),
+    }
+    assert all(item.presence_expectation is EvidencePresenceExpectation.EXPECTED_ABSENT for item in absent_manifest_entries)
+    assert all(item.absence_reason is EvidenceAbsenceReason.METADATA_LESS_SOURCE_SHAPE for item in absent_manifest_entries)
+    verification = manifest.verify(data_root=root)
+    assert set(absent_manifest_entries).issubset(verification.verified_absent_entries)
+
+    created = root / "workspaces" / "ws3" / "agents" / "a1" / "private" / "embeddings" / "manifest.json"
+    _write(created, "{malformed manifest remains an unexpected changed shape")
+    with pytest.raises(ExplicitSourceEvidenceDrift, match="expected-absent evidence was created: embeddings/manifest.json"):
+        manifest.verify(data_root=root)
+    with pytest.raises(CorrectiveFreezePacketRefused, match="requires embeddings/manifest.json to remain expected absent"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_unknown_identity_manifest_alignment_keeps_ordinary_missing_manifest_strict(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    ordinary_manifest = root / "workspaces" / "multi" / "agents" / "target" / "private" / "embeddings" / "manifest.json"
+    ordinary_manifest.unlink()
+
+    _assert_regular_file_refusal(
+        lambda: adapter.prepare_direct_admission_source(data_root=root), ordinary_manifest, "ABSENT",
+    )
+
+
+def test_direct_unknown_identity_manifest_alignment_keeps_partial_per_eid_source_strict(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    nodes = root / "workspaces" / "ws4" / "agents" / "a1" / "private" / "nodes.jsonl"
+    _write(nodes, json.dumps({"metadata_less_source_evidence": [{"eid": 7}]}) + "\n")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="metadata-less per-EID evidence shape is invalid"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_unknown_identity_manifest_alignment_preserves_canonical_reembed_source(tmp_path: Path) -> None:
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path)
+    prepared = adapter.prepare_direct_admission_source(data_root=root)
+    scope = next(item.scope_key for item in prepared.unknown_identity_evidence if item.scope_key.workspace_id == "ws3")
+    entries = prepared.description.explicit_source_manifest.entries
+    nodes = next(
+        item for item in entries
+        if item.scope_key == scope
+        and item.semantic_role is EvidenceSemanticRole.NODES
+        and item.canonical_locator == "nodes.jsonl"
+    )
+    representation = next(
+        item for item in entries
+        if item.scope_key == scope and item.semantic_role is EvidenceSemanticRole.LEGACY_REPRESENTATION
+    )
+    optional_edges = ExplicitSourceEvidence(
+        SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+        EvidenceOwnerBoundary("ws3", EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id="a1"),
+        "edges.jsonl",
+        EvidenceSemanticRole.EDGES,
+        EvidencePresenceExpectation.EXPECTED_ABSENT,
+        scope,
+        absence_reason=EvidenceAbsenceReason.OPTIONAL_EDGE_SOURCE,
+    )
+    qualified = qualify_metadata_less_per_eid_legacy_source(
+        data_root=root,
+        scope_key=scope,
+        legacy_eid=7,
+        legacy_source_namespace_id=uuid4(),
+        target_identity_namespace_id=uuid4(),
+        nodes_source=nodes,
+        optional_edges_source=optional_edges,
+        legacy_representation_source=representation,
+    )
+
+    assert qualified.provider_identity is None
+    assert qualified.model_identity is None
+    assert qualified.representation_identity is MetadataLessRepresentationIdentity.UNKNOWN
+    assert qualified.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
+    assert qualified.b3b_input.legacy_vector_strategy is LegacyVectorStrategy.REEMBED_REQUIRED
+    assert qualified.b3b_input.canonical_embedding_input.field
 
 
 def test_direct_metadata_less_workspace_manifest_refuses_created_metadata_drift(tmp_path: Path) -> None:
