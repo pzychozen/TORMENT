@@ -128,6 +128,9 @@ _DIRECT_UNKNOWN_IDENTITY_ABSENT_MANIFEST_SCOPES: Final[frozenset[tuple[str, str,
     ("ws4", "PRIVATE", "a1"),
     ("ws5", "PRIVATE", "a1"),
 })
+_DIRECT_OPAQUE_WORKSPACE_RESIDUE_DIRECTORIES: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("ws5", "exports"),
+})
 
 
 @dataclass(frozen=True)
@@ -318,6 +321,7 @@ class RealRootTypedEvidenceAdapter:
             allow_known_empty_shared_residue=False,
             allow_known_empty_private_residue=False,
             allow_known_unknown_identity_absent_manifest=False,
+            allow_direct_opaque_workspace_residue=False,
         )
         return CorrectiveFreezeTypedEvidence(
             description=prepared.description,
@@ -348,6 +352,7 @@ class RealRootTypedEvidenceAdapter:
             allow_known_empty_shared_residue=True,
             allow_known_empty_private_residue=True,
             allow_known_unknown_identity_absent_manifest=True,
+            allow_direct_opaque_workspace_residue=True,
         )
 
     def _prepare_source(
@@ -360,6 +365,7 @@ class RealRootTypedEvidenceAdapter:
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
         allow_known_unknown_identity_absent_manifest: bool,
+        allow_direct_opaque_workspace_residue: bool,
     ) -> DirectAdmissionSourcePreparation:
         """Single source grammar shared by direct and compatibility callers."""
 
@@ -398,6 +404,7 @@ class RealRootTypedEvidenceAdapter:
                 allow_known_empty_shared_residue=allow_known_empty_shared_residue,
                 allow_known_empty_private_residue=allow_known_empty_private_residue,
                 allow_known_unknown_identity_absent_manifest=allow_known_unknown_identity_absent_manifest,
+                allow_direct_opaque_workspace_residue=allow_direct_opaque_workspace_residue,
                 direct_phase9b_bindings=direct_phase9b_bindings,
             )
             entries.extend(result.entries)
@@ -465,6 +472,7 @@ class RealRootTypedEvidenceAdapter:
         allow_known_empty_shared_residue: bool,
         allow_known_empty_private_residue: bool,
         allow_known_unknown_identity_absent_manifest: bool,
+        allow_direct_opaque_workspace_residue: bool,
         direct_phase9b_bindings: dict[tuple[str, str, str], DirectPhase9BNamespaceBinding] | None,
     ) -> "_WorkspaceCapture":
         workspace_boundary = EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.WORKSPACE)
@@ -508,7 +516,10 @@ class RealRootTypedEvidenceAdapter:
         entries.extend(owner_entries)
         owner_observations = list(owner_observations)
         self._validate_workspace_children(
-            path, allow_missing_workspace_metadata=allow_missing_workspace_metadata,
+            path,
+            workspace_id=workspace_id,
+            allow_missing_workspace_metadata=allow_missing_workspace_metadata,
+            allow_direct_opaque_workspace_residue=allow_direct_opaque_workspace_residue,
         )
 
         private_scopes: list[MaterializedRootScopePlan] = []
@@ -629,12 +640,26 @@ class RealRootTypedEvidenceAdapter:
         )
 
     @staticmethod
-    def _validate_workspace_children(path: Path, *, allow_missing_workspace_metadata: bool) -> None:
+    def _validate_workspace_children(
+        path: Path,
+        *,
+        workspace_id: str,
+        allow_missing_workspace_metadata: bool,
+        allow_direct_opaque_workspace_residue: bool,
+    ) -> None:
         allowed = (
             set(_WORKSPACE_FILES) | set(_WORKSPACE_OWNER_FILES) | set(_WORKSPACE_RETAINED_FILES)
             | set(_WORKSPACE_RETAINED_DIRECTORIES) | {"agents", "domains", "seeds"}
         )
         observed = {item.name for item in path.iterdir()}
+        residue_key = (workspace_id, "exports")
+        if (
+            allow_direct_opaque_workspace_residue
+            and residue_key in _DIRECT_OPAQUE_WORKSPACE_RESIDUE_DIRECTORIES
+            and "exports" in observed
+        ):
+            _direct_opaque_workspace_residue_directory(path / "exports")
+            allowed.add("exports")
         if observed - allowed:
             raise CorrectiveFreezePacketRefused("unclassified durable workspace owner is not allowed")
         required = {"domains.json"}
@@ -1590,6 +1615,31 @@ def _native_control_plane_root_directory(path: Path) -> Path:
     ):
         raise CorrectiveFreezePacketRefused(
             "native control plane root must be a real top-level directory"
+        )
+    return path
+
+
+def _direct_opaque_workspace_residue_directory(path: Path) -> Path:
+    """Validate the qualified direct-only opaque ``ws5/exports`` boundary.
+
+    The directory is presence-only residue: this helper intentionally performs
+    no descendant enumeration, reads, hashing, parsing, or source projection.
+    """
+
+    try:
+        information = path.lstat()
+    except OSError as exc:
+        raise CorrectiveFreezePacketRefused(
+            "direct opaque workspace residue cannot be inspected"
+        ) from exc
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if (
+        stat.S_ISLNK(information.st_mode)
+        or getattr(information, "st_file_attributes", 0) & reparse_flag
+        or not path.is_dir()
+    ):
+        raise CorrectiveFreezePacketRefused(
+            "direct opaque workspace residue must be a real directory"
         )
     return path
 

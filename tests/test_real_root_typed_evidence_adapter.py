@@ -1126,6 +1126,121 @@ def test_direct_empty_private_residue_does_not_relax_compatibility_capture(tmp_p
         _capture(root, adapter)
 
 
+def _opaque_ws5_exports(root: Path) -> Path:
+    exports = root / "workspaces" / "ws5" / "exports"
+    _write(exports / "bundle_1_operations" / "opaque-child.bin", b"opaque")
+    _write(exports / "trace_1_operations.dot", "opaque graph residue")
+    _write(exports / "trace_1_operations.json", "{not source JSON")
+    return exports
+
+
+def test_direct_ws5_exports_residue_is_presence_only_and_never_reads_descendants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    without_root, without_adapter = _fixture(tmp_path / "without-exports")
+    with_root, with_adapter = _fixture(tmp_path / "with-exports")
+    exports = _opaque_ws5_exports(with_root)
+    before = _source_snapshot(with_root)
+
+    without = without_adapter.prepare_direct_admission_source(data_root=without_root)
+    original_iterdir = Path.iterdir
+    original_open = Path.open
+    original_read_bytes = Path.read_bytes
+    original_read_text = Path.read_text
+
+    def _opaque_descendant(path: Path) -> bool:
+        return path == exports or exports in path.parents
+
+    def _no_opaque_descendant_iteration(path: Path):
+        if _opaque_descendant(path):
+            raise AssertionError("direct source preparation must not enumerate ws5/exports")
+        return original_iterdir(path)
+
+    def _no_opaque_descendant_open(path: Path, *args: object, **kwargs: object):
+        if _opaque_descendant(path):
+            raise AssertionError("direct source preparation must not open ws5/exports descendants")
+        return original_open(path, *args, **kwargs)
+
+    def _no_opaque_descendant_read_bytes(path: Path) -> bytes:
+        if _opaque_descendant(path):
+            raise AssertionError("direct source preparation must not read ws5/exports descendants")
+        return original_read_bytes(path)
+
+    def _no_opaque_descendant_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if _opaque_descendant(path):
+            raise AssertionError("direct source preparation must not read ws5/exports descendants")
+        return original_read_text(path, *args, **kwargs)
+
+    with monkeypatch.context() as guarded_paths:
+        guarded_paths.setattr(Path, "iterdir", _no_opaque_descendant_iteration)
+        guarded_paths.setattr(Path, "open", _no_opaque_descendant_open)
+        guarded_paths.setattr(Path, "read_bytes", _no_opaque_descendant_read_bytes)
+        guarded_paths.setattr(Path, "read_text", _no_opaque_descendant_read_text)
+        with_exports = with_adapter.prepare_direct_admission_source(data_root=with_root)
+
+    # The exact direct-only residue is presence-only: it has no source,
+    # manifest, external-owner, geometry, census, or representation authority.
+    assert with_exports.discovered_census == without.discovered_census
+    assert with_exports.source_scope_plans == without.source_scope_plans
+    assert with_exports.description.explicit_source_manifest == without.description.explicit_source_manifest
+    assert with_exports.description.external_owner_observations == without.description.external_owner_observations
+    assert with_exports.description.external_owner_observation_digest == without.description.external_owner_observation_digest
+    assert with_exports.geometry_disposition_plan == without.geometry_disposition_plan
+    assert [item.representation_disposition for item in with_exports.source_scope_plans] == [
+        item.representation_disposition for item in without.source_scope_plans
+    ]
+    assert not any(
+        item.owner_boundary.workspace_id == "ws5" and item.canonical_locator == "exports"
+        for item in with_exports.description.explicit_source_manifest.entries
+    )
+    assert _source_snapshot(with_root) == before
+
+
+def test_direct_ws5_exports_residue_does_not_relax_other_workspace_children(
+    tmp_path: Path,
+) -> None:
+    other_workspace_root, other_workspace_adapter = _fixture(tmp_path / "other-workspace")
+    (other_workspace_root / "workspaces" / "ws4" / "exports").mkdir()
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable workspace owner"):
+        other_workspace_adapter.prepare_direct_admission_source(data_root=other_workspace_root)
+
+    unknown_child_root, unknown_child_adapter = _fixture(tmp_path / "unknown-ws5-child")
+    (unknown_child_root / "workspaces" / "ws5" / "mystery").mkdir()
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable workspace owner"):
+        unknown_child_adapter.prepare_direct_admission_source(data_root=unknown_child_root)
+
+
+def test_direct_ws5_exports_residue_requires_a_real_directory(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    _write(root / "workspaces" / "ws5" / "exports", "not a directory")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="direct opaque workspace residue must be a real directory"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_direct_ws5_exports_residue_refuses_links_when_supported(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    exports = root / "workspaces" / "ws5" / "exports"
+    target = tmp_path / "opaque-exports-target"
+    target.mkdir()
+    try:
+        os.symlink(target, exports, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is not available on this Windows host")
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="direct opaque workspace residue must be a real directory"):
+        adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_ws5_exports_residue_remains_strict_for_historical_capture(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    _opaque_ws5_exports(root)
+
+    with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable workspace owner"):
+        _capture(root, adapter)
+
+
 def test_direct_preparation_feeds_writer_callback_and_root_envelope_without_packet(
     tmp_path: Path,
 ) -> None:
