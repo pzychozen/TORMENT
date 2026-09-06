@@ -802,6 +802,37 @@ def test_storage_and_node_stamps_only_detect_lock_contradictions(tmp_path: Path)
         _capture(root, adapter)
 
 
+def test_normal_compact_embedding_storage_leaves_are_explicit_source_evidence(tmp_path: Path) -> None:
+    root, adapter = _fixture(tmp_path)
+    private = root / "workspaces" / "multi" / "agents" / "target" / "private"
+    _write(private / "embeddings" / "shard_0.map.jsonl", '{"eid":1,"row":0}\n')
+    _npy(private / "embeddings" / "shard_0.npy")
+
+    typed = _capture(root, adapter)
+    scope = RootScopeKey("multi", RootScopeKind.PRIVATE, agent_id="target")
+    leaves = [
+        item for item in typed.description.explicit_source_manifest.entries
+        if item.scope_key == scope and item.canonical_locator.startswith("embeddings/shard_0")
+    ]
+
+    assert {
+        (item.canonical_locator, item.owner_class, item.semantic_role)
+        for item in leaves
+    } == {
+        (
+            "embeddings/shard_0.map.jsonl",
+            SourceOwnerClass.EMBEDDING_SHARD_OR_MAP,
+            EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP,
+        ),
+        (
+            "embeddings/shard_0.npy",
+            SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT,
+            EvidenceSemanticRole.LEGACY_REPRESENTATION,
+        ),
+    }
+    assert all(item.byte_length > 0 and len(item.sha256_hex) == 64 for item in leaves)
+
+
 def test_empty_scope_with_target_lock_remains_no_vector(tmp_path: Path) -> None:
     root, adapter = _fixture(tmp_path)
     typed = _capture(root, adapter)

@@ -34,12 +34,12 @@ from .deployment_core_maintenance import (
 from .deployment_selector import (
     activate_selector_native,
     abort_selector_pending,
-    abort_selector_pending_inert_core,
     begin_cutover_pending,
     establish_selector_era,
     initialize_selector,
     read_selector_state,
     resolve_deployment_agreement,
+    supersede_selector_pending_pre_p5_inert_core,
 )
 from .deployment_types import (
     AdmissionCompletionWitness,
@@ -281,7 +281,7 @@ class RootOfflineCutoverRequest:
 
 @dataclass(frozen=True)
 class RootExternalPendingInertAbortRequest:
-    """Exact P2-only selector recovery input; it grants no P3/P5 authority."""
+    """Exact pre-P5 pending-supersession input; it grants no P3/P5 authority."""
 
     data_root: Path
     core_relative_path: str
@@ -645,22 +645,24 @@ class OfflineCutoverController:
             self._inspection(request),
         )
 
-    def abort_root_external_pending_inert_core(
+    def supersede_root_external_pending_pre_p5(
         self,
         request: RootExternalPendingInertAbortRequest,
     ) -> SelectorState:
-        """P2-only recovery: clear external pending after proving core inertia.
+        """Clear pre-P5 pending authority after proving the core never moved.
 
         This is intentionally independent of ``RootOfflineCutoverRequest`` so
         recovery never needs to reconstruct a P3-capable normalization request
-        or mint replacement writer-freeze evidence.
+        or mint replacement writer-freeze evidence.  It preserves the core,
+        P1/P3 artifacts, and predecessor P2 envelope; it deletes nothing and
+        must never be described as a P6 rollback.
         """
 
         if not isinstance(request, RootExternalPendingInertAbortRequest):
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_REQUEST_REQUIRED")
         state = read_selector_state(data_root=request.root)
         if state.deployment_state is DeploymentState.LEGACY_ACTIVE:
-            return abort_selector_pending_inert_core(
+            return supersede_selector_pending_pre_p5_inert_core(
                 data_root=request.root,
                 core_relative_path=request.core_relative_path,
                 descriptor_digest=request.expected_root_admission_envelope_digest,
@@ -704,7 +706,7 @@ class OfflineCutoverController:
         ):
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_CORE_NOT_INERT")
         try:
-            result = abort_selector_pending_inert_core(
+            result = supersede_selector_pending_pre_p5_inert_core(
                 data_root=request.root,
                 core_relative_path=request.core_relative_path,
                 descriptor_digest=request.expected_root_admission_envelope_digest,
@@ -717,6 +719,19 @@ class OfflineCutoverController:
         if result.deployment_state is not DeploymentState.LEGACY_ACTIVE:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_INERT_ABORT_DID_NOT_RESTORE_LEGACY")
         return result
+
+    def abort_root_external_pending_inert_core(
+        self,
+        request: RootExternalPendingInertAbortRequest,
+    ) -> SelectorState:
+        """Compatibility spelling for pre-P5 pending supersession.
+
+        New root-recovery callers should use
+        :meth:`supersede_root_external_pending_pre_p5` to make clear that no
+        native activation ever occurred and nothing is rolled back.
+        """
+
+        return self.supersede_root_external_pending_pre_p5(request)
 
     def normalize_root_under_external_fence(
         self,

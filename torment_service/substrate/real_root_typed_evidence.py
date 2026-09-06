@@ -1022,6 +1022,13 @@ def _capture_memory_scope(
     _validate_node_embedding_stamps(path / "nodes.jsonl", representation_lock)
     motif_domain_id = scope.domain_id
     entries = [nodes, embedding]
+    # The seven-key manifest describes the compact store; it is not itself
+    # the retained vector evidence.  Every recognised leaf that was just
+    # validated must therefore be named in the immutable root proposition.
+    # The metadata-less Phase-9B shape takes the expected-absent branch above
+    # and continues to own its separately qualified per-EID vector evidence.
+    if embedding.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT:
+        entries.extend(_capture_embedding_storage_leaves(root, path / "embeddings", boundary, scope))
     unknown: tuple[MetadataLessPerEidEvidence, ...] = ()
     allowed = _memory_scope_direct_children(scope)
     if disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
@@ -1267,6 +1274,44 @@ def _validate_embedding_storage(path: Path) -> None:
             continue
         if not re.fullmatch(r"shard_[0-9]+\.(?:npy|map\.jsonl)", item.name):
             raise CorrectiveFreezePacketRefused("embedding storage contains an unclassified durable artifact")
+
+
+def _capture_embedding_storage_leaves(
+    root: Path,
+    path: Path,
+    boundary: EvidenceOwnerBoundary,
+    scope: RootScopeKey,
+) -> tuple[ExplicitSourceEvidence, ...]:
+    """Capture every already-recognised compact-store leaf as source evidence.
+
+    This intentionally consumes no vector values.  Validation above remains
+    the grammar authority; this helper makes its accepted leaves durable in
+    the proposition so a later snapshot cannot lose map or shard evidence.
+    """
+
+    _validate_embedding_storage(path)
+    entries: list[ExplicitSourceEvidence] = []
+    for item in sorted(path.iterdir(), key=lambda candidate: candidate.name):
+        if item.name == "manifest.json":
+            continue
+        if item.name.endswith(".map.jsonl"):
+            owner_class = SourceOwnerClass.EMBEDDING_SHARD_OR_MAP
+            role = EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP
+        elif item.name.endswith(".npy"):
+            owner_class = SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT
+            role = EvidenceSemanticRole.LEGACY_REPRESENTATION
+        else:  # _validate_embedding_storage above makes this unreachable.
+            raise CorrectiveFreezePacketRefused("embedding storage contains an unclassified durable artifact")
+        entries.append(_capture_present(
+            root,
+            item,
+            owner_class,
+            boundary,
+            f"embeddings/{item.name}",
+            role,
+            scope,
+        ))
+    return tuple(entries)
 
 
 def _validate_node_embedding_stamps(path: Path, lock: tuple[str, str, int] | None) -> None:

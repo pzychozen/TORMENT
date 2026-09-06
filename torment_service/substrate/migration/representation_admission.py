@@ -631,7 +631,12 @@ def _node_embedding_references(
     path = (root / artifact.observed_relative_locator).resolve()
     if root not in path.parents:
         raise SubstrateInvariantViolation("node evidence locator escapes snapshot root")
-    references: list[LegacyEmbeddingReference] = []
+    # MemoryGraph's append log has one canonical logical memory per EID: the
+    # last successfully parsed record wins.  Retained-vector admission must
+    # use that same current-record selection.  Earlier physical rows remain
+    # frozen evidence in the snapshot, but cannot become duplicate vector
+    # admission work (nor survive when a later current row has no vector).
+    latest: dict[int, LegacyEmbeddingReference | None] = {}
     with path.open("rb") as stream:
         for line_ordinal, raw_row in enumerate(stream, start=1):
             try:
@@ -661,9 +666,11 @@ def _node_embedding_references(
                     )
                     if isinstance(reference, dict) else None
                 )
-            if parsed is not None:
-                references.append(parsed)
-    return tuple(references)
+            latest[raw_eid] = parsed
+    return tuple(
+        reference for _eid, reference in sorted(latest.items())
+        if reference is not None
+    )
 
 
 def _parse_node_reference(

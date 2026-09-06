@@ -122,30 +122,31 @@ def carrier_fixture(tmp_path: Path):
     embeddings.mkdir()
     (source / "nodes.jsonl").write_bytes(b"".join(
         _line({
-            "eid": eid, "born_step": index + 1, "channel": 1, "payload": _payload(),
-            "embedding_ref": {
-                "map": "embeddings/shard.map.jsonl", "shard": "embeddings/vectors.npy",
-                "row": index, "dimension": 384, "dtype": "float32",
+            "eid": eid,
+            "born_step": index + 1,
+            "channel": 1,
+            "payload": {
+                **_payload(),
+                "embedding_ref": {"shard": 0, "row": index, "dim": 384},
             },
         })
         for index, eid in enumerate(_MULTI_MEMORY_EIDS)
     ))
     np.save(
-        embeddings / "vectors.npy",
+        embeddings / "shard_000000.npy",
         np.asarray(
             [[float(index + 1)] + [0.0] * 383 for index in range(len(_MULTI_MEMORY_EIDS))],
             dtype=np.float32,
         ),
     )
     (embeddings / "manifest.json").write_bytes(_line({
-        "encoding_id": "NUMPY_NPY", "dtype": "float32", "dimension": 384,
-        "derivation_contract_version": "fixture-v1", "provider": "st",
-        "model": "BAAI/bge-small-en-v1.5",
-        "shards": [{"path": "embeddings/vectors.npy", "map": "embeddings/shard.map.jsonl"}],
+        "version": 1, "embedding_dim": 384, "dtype": "float32",
+        "rows_per_shard": len(_MULTI_MEMORY_EIDS), "active_shard": 0,
+        "next_row": len(_MULTI_MEMORY_EIDS), "total_rows": len(_MULTI_MEMORY_EIDS),
     }))
-    (embeddings / "shard.map.jsonl").write_bytes(b"".join(
+    (embeddings / "shard_000000.map.jsonl").write_bytes(b"".join(
         _line({
-            "eid": eid, "shard": "embeddings/vectors.npy", "row": index, "dimension": 384,
+            "eid": eid, "row": index, "dimension": 384,
         })
         for index, eid in enumerate(_MULTI_MEMORY_EIDS)
     ))
@@ -176,8 +177,8 @@ def carrier_fixture(tmp_path: Path):
         for owner_class, locator, role in (
             (SourceOwnerClass.SHARED_GRAPH_SOURCE, "nodes.jsonl", EvidenceSemanticRole.NODES),
             (SourceOwnerClass.EMBEDDING_MANIFEST, "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST),
-            (SourceOwnerClass.EMBEDDING_SHARD_OR_MAP, "embeddings/shard.map.jsonl", EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP),
-            (SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT, "embeddings/vectors.npy", EvidenceSemanticRole.LEGACY_REPRESENTATION),
+            (SourceOwnerClass.EMBEDDING_SHARD_OR_MAP, "embeddings/shard_000000.map.jsonl", EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP),
+            (SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT, "embeddings/shard_000000.npy", EvidenceSemanticRole.LEGACY_REPRESENTATION),
         )
     ) + (ExplicitSourceEvidence(
         SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
@@ -378,6 +379,14 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     ).fetchone()[0] == 3
     selected = next(item for item in scopes if item["scope_key"].get("domain_id") == "domain")
     selected_snapshot_id = selected["legacy_snapshot_id"]
+    selected_manifest = load_snapshot_manifest(Path(selected["manifest_path"]))
+    assert {item.observed_relative_locator for item in selected_manifest.artifacts} >= {
+        "nodes.jsonl",
+        "embeddings/manifest.json",
+        "embeddings/shard_000000.map.jsonl",
+        "embeddings/shard_000000.npy",
+        "workspaces/ws/workspace_meta.json",
+    }
     assert all(item["b1"] is None and item["b2"]["memories"] == [] for item in scopes)
     with pytest.raises(RootP3SourceAdmissionInterrupted) as after_b1:
         service.admit(
@@ -400,6 +409,9 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     motif = next(item for item in scopes if item["scope_key"].get("domain_id") == "empty-domain")
     assert current["legacy_snapshot_id"] == selected_snapshot_id
     assert [item["eid"] for item in current["b1"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert {
+        item["legacy_vector_strategy"] for item in current["b1"]["memories"]
+    } == {"BYTE_DERIVATION_POSSIBLE"}
     assert [item["eid"] for item in current["b2"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
     assert empty["b1"] == {"memories": [], "motifs": []}
     assert empty["b2"] == {"memories": []}
@@ -492,6 +504,166 @@ def test_multi_object_recovery_replays_admitted_b1_without_new_snapshot_or_objec
     assert len({item.idempotency_key for item in current_input.b3a_requests}) == len(_MULTI_MEMORY_EIDS)
 
 
+def test_per_eid_legacy_vector_strategy_routes_mixed_b3a_and_b3b(carrier_fixture) -> None:
+    """A workspace lock is not a shortcut around per-object B1 evidence."""
+
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    service.admit(request)
+    record = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+    selected = next(item for item in record["scopes"] if item["scope_key"].get("domain_id") == "domain")
+    strategies = {
+        2: "BYTE_DERIVATION_POSSIBLE",
+        5: "BYTE_DERIVATION_POSSIBLE",
+        17: "NO_VECTOR_PRESENT",
+        29: "REEMBED_REQUIRED",
+    }
+    for item in selected["b1"]["memories"]:
+        item["legacy_vector_strategy"] = strategies[item["eid"]]
+    p3_source_admission._write_record(request.record_path, record)
+
+    routed = service.admit(request)
+    scope = next(item for item in routed.normalization_request.scope_inputs if item.scope_key.domain_id == "domain")
+    assert [item.eid for item in scope.b3a_requests] == [2, 5]
+    assert [item.eid for item in scope.b3b_requests] == [17, 29]
+    assert p3_child_request_counts(routed.normalization_request.scope_inputs) == {
+        "b3a": 2, "ordinary_b3b": 2, "metadata_less_b3b": 0,
+        "total_b3b": 2, "b4a": 0, "b4b": 0, "b4c": 3,
+    }
+
+
+def test_last_jsonl_record_per_eid_preserves_history_without_admitting_an_extra_memory(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    source = request.root / "workspaces" / "ws" / "domains" / "domain" / "shared"
+    with (source / "nodes.jsonl").open("ab") as stream:
+        stream.write(_line({
+            "eid": 2,
+            "born_step": 99,
+            "channel": 1,
+            "payload": {
+                **_payload(),
+                "summary": "latest logical EID 2 record",
+            },
+        }))
+    scope = request.source_scope_plans[0].scope_key
+    current_nodes = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.SHARED_GRAPH_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="domain"),
+        canonical_locator="nodes.jsonl",
+        semantic_role=EvidenceSemanticRole.NODES,
+        scope_key=scope,
+    )
+    history_description = replace(
+        request.description,
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            item for item in request.description.explicit_source_manifest.entries
+            if not (item.scope_key == scope and item.semantic_role is EvidenceSemanticRole.NODES)
+        ) + (current_nodes,)),
+    )
+    history_request = replace(
+        request,
+        description=history_description,
+        carrier_directory=request.carrier_root.parent / "history-carrier",
+        operation_key="p3-source-carrier-history",
+    )
+
+    result = NativeRootP3SourceAdmissionService(connection).admit(history_request)
+    record = json.loads(history_request.record_path.read_text(encoding="utf-8"))["payload"]
+    entry = next(item for item in record["scopes"] if item["scope_key"].get("domain_id") == "domain")
+    manifest = load_snapshot_manifest(Path(entry["manifest_path"]))
+    snapshot = Path(entry["snapshot_root"]) / "nodes.jsonl"
+
+    assert [item["eid"] for item in entry["b1"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert next(item for item in entry["b1"]["memories"] if item["eid"] == 2)[
+        "legacy_vector_strategy"
+    ] == "NO_VECTOR_PRESENT"
+    assert len(snapshot.read_bytes().splitlines()) == len(_MULTI_MEMORY_EIDS) + 1
+    assert any(item.observed_relative_locator == "nodes.jsonl" for item in manifest.artifacts)
+    assert result.b1_memory_count == len(_MULTI_MEMORY_EIDS)
+    assert connection.execute(
+        "SELECT count(*) FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='EID'",
+        (native_id_to_bytes(UUID(entry["legacy_source_namespace_id"])),),
+    ).fetchone()[0] == len(_MULTI_MEMORY_EIDS)
+
+
+def test_completed_carrier_reuses_snapshot_id_and_recovers_partial_b1_with_added_evidence(carrier_fixture) -> None:
+    """Complete old snapshots separately; never rewrite their carrier record."""
+
+    connection, request = carrier_fixture
+    old_manifest = RootEvidenceManifest(tuple(
+        item for item in request.description.explicit_source_manifest.entries
+        if item.semantic_role not in {
+            EvidenceSemanticRole.WORKSPACE_META,
+            EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP,
+            EvidenceSemanticRole.LEGACY_REPRESENTATION,
+        }
+    ))
+    predecessor = replace(
+        request,
+        description=replace(request.description, explicit_source_manifest=old_manifest),
+        carrier_directory=request.carrier_root.parent / "predecessor-carrier",
+        operation_key="p3-source-carrier-predecessor",
+    )
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(
+            predecessor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    predecessor_payload = json.loads(predecessor.record_path.read_text(encoding="utf-8"))["payload"]
+    predecessor_entry = next(
+        item for item in predecessor_payload["scopes"] if item["scope_key"].get("domain_id") == "domain"
+    )
+    predecessor_record_bytes = predecessor.record_path.read_bytes()
+    predecessor_manifest_bytes = Path(predecessor_entry["manifest_path"]).read_bytes()
+    predecessor_snapshot_id = predecessor_entry["legacy_snapshot_id"]
+    p3_source_admission._run_b1(connection, predecessor, predecessor_entry)
+    first_object_count = connection.execute("SELECT count(*) FROM objects").fetchone()[0]
+    first_aliases = connection.execute(
+        "SELECT alias_value,object_id FROM legacy_object_aliases "
+        "WHERE legacy_source_namespace_id=? AND alias_kind='EID' ORDER BY alias_value",
+        (native_id_to_bytes(UUID(predecessor_entry["legacy_source_namespace_id"])),),
+    ).fetchall()
+    assert predecessor_entry["b1"] is None
+
+    completed_request = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "carrier-completion",
+        operation_key="p3-source-carrier-completion",
+        predecessor_carrier_record_path=predecessor.record_path,
+    )
+    recovered = service.admit(completed_request)
+    completed_record = json.loads(completed_request.record_path.read_text(encoding="utf-8"))["payload"]
+    completed_entry = next(
+        item for item in completed_record["scopes"] if item["scope_key"].get("domain_id") == "domain"
+    )
+    completed_manifest = load_snapshot_manifest(Path(completed_entry["manifest_path"]))
+
+    assert predecessor.record_path.read_bytes() == predecessor_record_bytes
+    assert Path(predecessor_entry["manifest_path"]).read_bytes() == predecessor_manifest_bytes
+    assert completed_entry["legacy_snapshot_id"] == predecessor_snapshot_id
+    assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] >= first_object_count
+    assert connection.execute(
+        "SELECT alias_value,object_id FROM legacy_object_aliases "
+        "WHERE legacy_source_namespace_id=? AND alias_kind='EID' ORDER BY alias_value",
+        (native_id_to_bytes(UUID(predecessor_entry["legacy_source_namespace_id"])),),
+    ).fetchall() == first_aliases
+    assert [item["eid"] for item in completed_entry["b1"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert {
+        item["legacy_vector_strategy"] for item in completed_entry["b1"]["memories"]
+    } == {"BYTE_DERIVATION_POSSIBLE"}
+    assert {item.observed_relative_locator for item in completed_manifest.artifacts} >= {
+        "workspaces/ws/workspace_meta.json",
+        "embeddings/shard_000000.map.jsonl",
+        "embeddings/shard_000000.npy",
+    }
+    completion = completed_record["carrier_completion"]
+    assert completion["predecessor_record_path"] == str(predecessor.record_path)
+    assert any(item["legacy_snapshot_id"] == predecessor_snapshot_id for item in completion["completed_snapshots"])
+    assert recovered.b1_memory_count == recovered.b2_memory_count == len(_MULTI_MEMORY_EIDS)
+
+
 def test_multi_motif_carrier_evidence_composes_one_b4c_per_motif(carrier_fixture) -> None:
     connection, request = carrier_fixture
     result = NativeRootP3SourceAdmissionService(connection).admit(request)
@@ -504,6 +676,97 @@ def test_multi_motif_carrier_evidence_composes_one_b4c_per_motif(carrier_fixture
     )
     assert len(motif_input.b4c_requests) == len(_MULTI_MOTIF_IDS)
     assert len({item.idempotency_key for item in motif_input.b4c_requests}) == len(_MULTI_MOTIF_IDS)
+
+
+def test_hash_source_geometry_composes_b4b_from_each_admitted_motif(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    workspace = request.root / "workspaces" / "ws"
+    (workspace / "workspace_meta.json").write_text(json.dumps({
+        "embed_provider": "hash", "embed_model": "hash:384:torment", "embed_dim": 384,
+    }), encoding="utf-8")
+    motifs_path = workspace / "domains" / "domain" / "motifs.json"
+    motifs_path.parent.mkdir(parents=True, exist_ok=True)
+    motifs_path.write_text(json.dumps({"motifs": {
+        motif_id: {
+            "motif_id": motif_id, "domain_id": "domain", "label": motif_id,
+            "centroid": [1.0] + [0.0] * 383, "strength": 0.8, "stability_score": 0.8,
+            "contributing_agents": [], "created_ts": 1, "last_active_ts": 2, "members": [],
+        }
+        for motif_id in ("hash-motif-a", "hash-motif-b", "hash-motif-c")
+    }}), encoding="utf-8")
+    main_scope = request.source_scope_plans[0].scope_key
+    current_meta = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.WORKSPACE),
+        canonical_locator="workspace_meta.json",
+        semantic_role=EvidenceSemanticRole.WORKSPACE_META,
+    )
+    motif_evidence = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="domain"),
+        canonical_locator="motifs.json",
+        semantic_role=EvidenceSemanticRole.MOTIFS,
+        scope_key=main_scope,
+    )
+    corrected_manifest = RootEvidenceManifest(tuple(
+        item for item in request.description.explicit_source_manifest.entries
+        if item.semantic_role is not EvidenceSemanticRole.WORKSPACE_META
+    ) + (current_meta, motif_evidence))
+    workspace_plan = request.description.workspace_plans[0]
+    corrected_workspace = replace(
+        workspace_plan,
+        shared_materialized_scopes=(
+            replace(
+                workspace_plan.shared_materialized_scopes[0],
+                representation_disposition=RootRepresentationDisposition.REEMBED_REQUIRED,
+            ),
+            *workspace_plan.shared_materialized_scopes[1:],
+        ),
+    )
+    corrected_description = replace(
+        request.description,
+        workspace_plans=(corrected_workspace,),
+        expected_census=replace(
+            request.description.expected_census,
+            representation_disposition_counts=tuple(
+                RepresentationDispositionCount(
+                    disposition,
+                    1 if disposition in {
+                        RootRepresentationDisposition.TARGET_COMPATIBLE,
+                        RootRepresentationDisposition.REEMBED_REQUIRED,
+                        RootRepresentationDisposition.NO_VECTOR,
+                    } else 0,
+                )
+                for disposition in RootRepresentationDisposition
+            ),
+        ),
+        explicit_source_manifest=corrected_manifest,
+    )
+    hash_request = replace(
+        request,
+        description=corrected_description,
+        source_scope_plans=(
+            replace(
+                request.source_scope_plans[0],
+                representation_disposition=RootRepresentationDisposition.REEMBED_REQUIRED,
+                motif_presence=SourceArtifactPresence.PRESENT,
+            ),
+            *request.source_scope_plans[1:],
+        ),
+        carrier_directory=request.carrier_root.parent / "hash-regeometry-carrier",
+        operation_key="p3-source-carrier-hash-regeometry",
+    )
+
+    result = NativeRootP3SourceAdmissionService(connection).admit(hash_request)
+    scope = next(item for item in result.normalization_request.scope_inputs if item.scope_key == main_scope)
+    assert not scope.b3a_requests
+    assert len(scope.b3b_requests) == len(_MULTI_MEMORY_EIDS)
+    assert not scope.b4a_requests
+    assert [item.runtime_motif_id for item in scope.b4b_requests] == [
+        "hash-motif-a", "hash-motif-b", "hash-motif-c",
+    ]
 
 
 def test_unknown_identity_carrier_requires_exact_b1_eid_evidence_set(carrier_fixture) -> None:

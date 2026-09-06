@@ -671,8 +671,6 @@ def _validate_scope_dispatch(
             raise ValueError("every B4 request must use the one root core and target lane")
     has_b3a = bool(input_item.b3a_requests)
     has_b3b = bool(input_item.b3b_requests or input_item.metadata_less_b3b_dispatches)
-    if has_b3a and has_b3b:
-        raise ValueError("one declared scope cannot mix B3A and B3B dispositions")
     motif_source_declared = any(
         entry.scope_key == declared.scope_key
         and entry.semantic_role.value == "MOTIFS"
@@ -712,16 +710,28 @@ def _validate_scope_dispatch(
         if declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF and not motif_source_declared:
             raise ValueError("empty shared motif scope requires declared motif source evidence")
     elif declared.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
-        if declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH and not has_b3a:
-            raise ValueError("TARGET_COMPATIBLE memory scope requires B3A")
-        if has_b3b:
-            raise ValueError("TARGET_COMPATIBLE scope cannot dispatch B3B")
+        # The workspace lock describes the source lane, while B3 is decided
+        # per admitted EID from its qualified retained-vector evidence.  A
+        # target-compatible scope can therefore lawfully contain both exact
+        # byte derivations and B3B re-embeds/no-vector work.
+        if input_item.metadata_less_b3b_dispatches:
+            raise ValueError("TARGET_COMPATIBLE scope cannot dispatch metadata-less B3B")
+        if (
+            declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH
+            and not (has_b3a or input_item.b3b_requests)
+        ):
+            raise ValueError("MEMORY_GRAPH scope requires at least one ordinary B3 request")
     elif declared.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
         if has_b3a or input_item.b3b_requests or not input_item.metadata_less_b3b_dispatches:
             raise ValueError("UNKNOWN_IDENTITY scope requires Phase 9B metadata-less B3B dispatch")
     else:
-        if has_b3a or not input_item.b3b_requests or input_item.metadata_less_b3b_dispatches:
-            raise ValueError("non-target vector disposition requires direct existing B3B")
+        if input_item.metadata_less_b3b_dispatches:
+            raise ValueError("ordinary vector disposition cannot dispatch metadata-less B3B")
+        if (
+            declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH
+            and not (has_b3a or input_item.b3b_requests)
+        ):
+            raise ValueError("MEMORY_GRAPH scope requires at least one ordinary B3 request")
     if motif_source_declared != bool(input_item.all_motif_requests):
         raise ValueError("B4 dispatches must exactly correspond to declared motif source evidence")
 

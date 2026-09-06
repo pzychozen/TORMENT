@@ -109,6 +109,78 @@ def create_snapshot_manifest(
     return manifest
 
 
+def complete_snapshot_manifest(
+    *,
+    predecessor: LegacySnapshotManifest,
+    snapshot_root: str | Path,
+    manifest_path: str | Path,
+    allowed_additional_locators: tuple[str, ...],
+) -> LegacySnapshotManifest:
+    """Write a strict, identity-preserving evidence completion manifest.
+
+    Snapshot identity describes the frozen source selection, not a particular
+    physical manifest file.  A successor manifest may therefore retain that
+    identity only when each predecessor artifact is byte-for-byte identical
+    and the sole difference is an approved non-empty set of added evidence.
+    The predecessor object is never changed.
+    """
+
+    if not isinstance(predecessor, LegacySnapshotManifest):
+        raise SubstrateConfigurationError("snapshot completion requires a typed predecessor manifest")
+    root = _snapshot_root(snapshot_root)
+    destination = _external_manifest_path(manifest_path, root)
+    if destination.exists():
+        raise SubstrateConfigurationError("snapshot completion manifest destination already exists")
+    if not isinstance(allowed_additional_locators, tuple) or not allowed_additional_locators:
+        raise SubstrateConfigurationError("snapshot completion requires approved additional locators")
+    allowed = set()
+    for locator in allowed_additional_locators:
+        allowed.add(_relative_locator(locator).as_posix())
+    if len(allowed) != len(allowed_additional_locators):
+        raise SubstrateConfigurationError("snapshot completion locators must be unique")
+    _validate_manifest(predecessor)
+    predecessor_by_locator = {
+        artifact.observed_relative_locator: artifact for artifact in predecessor.artifacts
+    }
+    captured = _capture_files(root)
+    captured_by_locator = {locator: (length, digest) for locator, length, digest in captured}
+    if not set(predecessor_by_locator).issubset(captured_by_locator):
+        raise SubstrateEvidenceIntegrityMismatch("snapshot completion is missing predecessor evidence")
+    for locator, artifact in predecessor_by_locator.items():
+        length, digest = captured_by_locator[locator]
+        if (
+            length != artifact.byte_length
+            or artifact.digest_algorithm != EVIDENCE_DIGEST_ALGORITHM
+            or digest != artifact.digest_hex
+        ):
+            raise SubstrateEvidenceIntegrityMismatch("snapshot completion predecessor evidence changed")
+    additions = sorted(set(captured_by_locator) - set(predecessor_by_locator))
+    if not additions or set(additions) != allowed:
+        raise SubstrateConfigurationError("snapshot completion must be an exact strict approved evidence superset")
+    manifest = LegacySnapshotManifest(
+        legacy_snapshot_id=predecessor.legacy_snapshot_id,
+        legacy_source_namespace_id=predecessor.legacy_source_namespace_id,
+        legacy_source_namespace_key=predecessor.legacy_source_namespace_key,
+        captured_at_ns=predecessor.captured_at_ns,
+        artifacts=tuple(predecessor.artifacts) + tuple(
+            LegacyArtifact(
+                artifact_id=generate_native_id(),
+                artifact_class=classify_artifact(locator),
+                observed_relative_locator=locator,
+                byte_length=captured_by_locator[locator][0],
+                digest_algorithm=EVIDENCE_DIGEST_ALGORITHM,
+                digest_hex=captured_by_locator[locator][1],
+            )
+            for locator in additions
+        ),
+        capture_label=predecessor.capture_label,
+    )
+    _validate_manifest(manifest)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(_manifest_text(manifest), encoding="utf-8", newline="\n")
+    return manifest
+
+
 def load_snapshot_manifest(manifest_path: str | Path) -> LegacySnapshotManifest:
     """Load and validate a manifest without reading any source artifact bytes."""
     path = Path(manifest_path).expanduser().resolve()

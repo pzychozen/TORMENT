@@ -1052,3 +1052,73 @@ def test_successor_p2_recovery_uses_exact_selector_linked_payload_after_abort(
         writer_freeze_recheck=fresh_recheck,
     )
     assert controller._root_envelope(recovered).digest == pending_b.envelope.digest
+
+
+def test_pre_p5_pending_supersession_allows_a_corrected_manifest_successor_on_same_core(
+    tmp_path: Path,
+) -> None:
+    """A new P2 identity needs a new envelope, never a mutation of the old one."""
+
+    compat_request, _normalization = _root_fixture(tmp_path)
+    predecessor = _real_request(compat_request, operation_identity="predecessor-freeze")
+    controller = OfflineCutoverController()
+    pending_a = controller.enter_root_external_pending(predecessor)
+    assert pending_a.selector_state is not None
+    predecessor_record = read_root_admission_envelope_record(
+        data_root=predecessor.root,
+        core_relative_path=predecessor.core_relative_path,
+        root_admission_envelope_digest=pending_a.envelope.digest,
+    )
+    assert predecessor_record is not None
+    predecessor_payload = copy.deepcopy(predecessor_record.payload())
+
+    cleared = controller.supersede_root_external_pending_pre_p5(
+        _inert_abort_request(predecessor, pending_a, operation_key="pre-p5-supersession"),
+    )
+    assert cleared.deployment_state is DeploymentState.LEGACY_ACTIVE
+    inspection = inspect_contained_core_deployment(
+        data_root=predecessor.root,
+        core_relative_path=predecessor.core_relative_path,
+    )
+    assert inspection.core_role == "STAGING"
+    assert inspection.deployment_state is DeploymentState.LEGACY_ACTIVE
+    assert inspection.witness is None and not inspection.ever_active
+
+    workspace_meta = predecessor.root / "workspaces" / "ws-one" / "workspace_meta.json"
+    workspace_meta.write_bytes(b'{"corrected_source_evidence":true}')
+    corrected_manifest = RootEvidenceManifest((capture_present_source_evidence(
+        data_root=predecessor.root,
+        owner_class=SourceOwnerClass.WORKSPACE_IDENTITY_METADATA,
+        owner_boundary=EvidenceOwnerBoundary("ws-one", EvidenceOwnerBoundaryKind.WORKSPACE),
+        canonical_locator="workspace_meta.json",
+        semantic_role=EvidenceSemanticRole.WORKSPACE_META,
+    ),))
+    assert corrected_manifest.digest != predecessor.description.explicit_source_manifest.digest
+    corrected_description = replace(
+        predecessor.description,
+        explicit_source_manifest=corrected_manifest,
+    )
+    corrected_normalization = replace(
+        predecessor.normalization_request,
+        description=corrected_description,
+    )
+    corrected = _real_request(
+        replace(
+            compat_request,
+            description=corrected_description,
+            normalization_request=corrected_normalization,
+            operator_cutover_key="corrected-source-manifest-successor",
+        ),
+        operation_identity="corrected-freeze",
+    )
+    pending_b = controller.enter_root_external_pending(corrected)
+
+    assert pending_b.envelope.digest != pending_a.envelope.digest
+    assert pending_b.selector_state is not None
+    assert pending_b.selector_state.deployment_state is DeploymentState.CUTOVER_PENDING
+    assert pending_b.selector_state.core_id == inspection.core_id
+    assert read_root_admission_envelope_record(
+        data_root=corrected.root,
+        core_relative_path=corrected.core_relative_path,
+        root_admission_envelope_digest=pending_a.envelope.digest,
+    ).payload() == predecessor_payload

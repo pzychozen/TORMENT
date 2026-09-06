@@ -465,7 +465,7 @@ def abort_selector_pending(
     )
 
 
-def abort_selector_pending_inert_core(
+def supersede_selector_pending_pre_p5_inert_core(
     *,
     data_root: str | Path,
     core_relative_path: str,
@@ -474,11 +474,12 @@ def abort_selector_pending_inert_core(
     expected_generation: int,
     operation_key: str,
 ) -> SelectorState:
-    """Reduce an externally pending selector only when its core never moved.
+    """Supersede a pre-P5 pending selector while the selected core is inert.
 
-    Unlike :func:`abort_selector_pending`, this narrowly scoped transition
-    intentionally has no core-maintenance receipt: its caller must prove that
-    the selected core remains entirely inert.  It cannot activate authority.
+    This is a selector-only correction boundary, not a P6 activation rollback:
+    there is no core-maintenance receipt and no core mutation.  Its controller
+    caller must prove STAGING/LEGACY_ACTIVE, no core witness, and never-active
+    history before this function can reduce external authority.
     """
 
     require_relative_core_path(core_relative_path)
@@ -489,7 +490,7 @@ def abort_selector_pending_inert_core(
     _require_operation_key(operation_key)
     intent = {
         "contract": _SELECTOR_CONTRACT,
-        "kind": "ABORT_ROOT_EXTERNAL_PENDING_INERT_CORE",
+        "kind": "SUPERSEDE_ROOT_PRE_P5_PENDING_INERT_CORE",
         "operation_key": operation_key,
         "expected_generation": expected_generation,
         "expected_state": DeploymentState.CUTOVER_PENDING.value,
@@ -526,8 +527,29 @@ def abort_selector_pending_inert_core(
         result=result,
         operation_key=operation_key,
         intent=intent,
-        reason_kind="ABORT_ROOT_EXTERNAL_PENDING_INERT_CORE",
+        reason_kind="SUPERSEDE_ROOT_PRE_P5_PENDING_INERT_CORE",
         expected_selected_core_relative_path=core_relative_path,
+    )
+
+
+def abort_selector_pending_inert_core(
+    *,
+    data_root: str | Path,
+    core_relative_path: str,
+    descriptor_digest: str,
+    profile: QualifiedDeploymentProfile,
+    expected_generation: int,
+    operation_key: str,
+) -> SelectorState:
+    """Compatibility spelling for the explicit pre-P5 supersession boundary."""
+
+    return supersede_selector_pending_pre_p5_inert_core(
+        data_root=data_root,
+        core_relative_path=core_relative_path,
+        descriptor_digest=descriptor_digest,
+        profile=profile,
+        expected_generation=expected_generation,
+        operation_key=operation_key,
     )
 
 
@@ -1175,4 +1197,5 @@ __all__ = [
     "read_selector_state",
     "resolve_deployment_agreement",
     "selector_paths",
+    "supersede_selector_pending_pre_p5_inert_core",
 ]

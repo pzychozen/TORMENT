@@ -56,6 +56,7 @@ from .root_normalization import (
 )
 from .root_scope import RootScopeKey, RootScopeKind
 from .runtime_motif_projection import MigrationRuntimeMotifProjectionRequest
+from .runtime_motif_regeometry_projection import MigrationRuntimeMotifRegeometryProjectionRequest
 from .runtime_normalization import (
     MigrationRuntimeNormalizationRequest,
     NativeMigrationRuntimeNormalizationService,
@@ -63,13 +64,19 @@ from .runtime_normalization import (
 from .runtime_readiness import (
     MigrationRuntimeReadinessRequest,
     MigrationRuntimeScopePlan,
+    LegacyVectorStrategy,
     NativeMigrationRuntimeReadinessPreflight,
     ObjectRuntimeReadiness,
 )
 from .runtime_reembedding_bootstrap import MigrationRuntimeReembeddingBootstrapRequest
 from .runtime_representation_bootstrap import MigrationRuntimeRepresentationBootstrapRequest
 from .runtime_zero_member_motif_projection import MigrationRuntimeZeroMemberMotifProjectionRequest
-from .snapshot import create_snapshot_manifest, load_snapshot_manifest, verify_snapshot
+from .snapshot import (
+    complete_snapshot_manifest,
+    create_snapshot_manifest,
+    load_snapshot_manifest,
+    verify_snapshot,
+)
 from .workspace_runtime_readiness import (
     NativePostWriteQualificationConfiguration,
     WorkspaceNativeEmbedderIdentity,
@@ -79,6 +86,11 @@ from .workspace_runtime_readiness import (
 _RECORD_NAME = "p3_source_admission_carrier.json"
 _RECORD_SCHEMA = "TORMENT_ROOT_P3_SOURCE_ADMISSION_CARRIER"
 _RECORD_VERSION = 1
+_COMPLETION_ALLOWED_ROLES = frozenset({
+    EvidenceSemanticRole.WORKSPACE_META,
+    EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP,
+    EvidenceSemanticRole.LEGACY_REPRESENTATION,
+})
 
 
 def _corrective_freeze_types():
@@ -150,6 +162,7 @@ class RootP3SourceAdmissionRequest:
     qualification_embedder_identity: WorkspaceNativeEmbedderIdentity
     b3b_embedder: object
     post_write_configurations: tuple[NativePostWriteQualificationConfiguration, ...] = ()
+    predecessor_carrier_record_path: str | Path | None = None
 
     def __post_init__(self) -> None:
         MetadataLessPerEidEvidence, RootSourceScopePlan, _SourceArtifactPresence = _corrective_freeze_types()
@@ -189,6 +202,15 @@ class RootP3SourceAdmissionRequest:
             raise ValueError("carrier_directory must resolve outside data_root")
         if not carrier.parent.is_dir():
             raise ValueError("carrier_directory parent must already exist")
+        predecessor = self.predecessor_carrier_record_path
+        if predecessor is not None:
+            if not isinstance(predecessor, (str, Path)) or not str(predecessor).strip():
+                raise ValueError("predecessor_carrier_record_path must be an explicit path when supplied")
+            predecessor_path = Path(predecessor).expanduser().resolve()
+            if not predecessor_path.is_file() or predecessor_path.is_symlink():
+                raise ValueError("predecessor_carrier_record_path must name an existing regular record")
+            if carrier in predecessor_path.parents:
+                raise ValueError("completion carrier must be separate from its predecessor carrier")
         source_by_key = {item.scope_key: item for item in self.source_scope_plans}
         bindings_by_key = {item.scope_key: item for item in self.scope_bindings}
         declared = {
@@ -236,6 +258,12 @@ class RootP3SourceAdmissionRequest:
     @property
     def record_path(self) -> Path:
         return self.carrier_root / _RECORD_NAME
+
+    @property
+    def predecessor_record_path(self) -> Path | None:
+        if self.predecessor_carrier_record_path is None:
+            return None
+        return Path(self.predecessor_carrier_record_path).expanduser().resolve()
 
     @property
     def qualification_embedder_identity_to_lane(self) -> NativeRepresentationLane:
@@ -447,6 +475,8 @@ def _select_or_recover_record(
         record = _load_record(path, request)
         _verify_record_snapshots(connection, record, request)
         return record
+    if request.predecessor_record_path is not None:
+        return _complete_predecessor_record(connection, request)
     p1_namespace_keys = {
         binding.scope_key: _p1_legacy_source_namespace_key(
             connection, binding.scope_plan.legacy_source_namespace_id,
@@ -498,6 +528,216 @@ def _select_or_recover_record(
     }
     _write_record(path, record)
     return record
+
+
+def _complete_predecessor_record(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+) -> dict[str, Any]:
+    """Create a separate carrier that only completes omitted source evidence.
+
+    The first carrier, its snapshots, manifests, and B1 facts stay immutable.
+    A successor carrier can share a snapshot identity only through the strict
+    snapshot completion law, which retains every predecessor artifact exactly.
+    Scopes without an omission continue to reference their predecessor
+    snapshots rather than manufacturing a non-strict "completion" manifest.
+    """
+
+    predecessor_path = request.predecessor_record_path
+    assert predecessor_path is not None
+    predecessor, predecessor_digest = _load_predecessor_record(predecessor_path)
+    _verify_predecessor_record(connection, predecessor, request)
+    carrier = request.carrier_root
+    if carrier.exists():
+        if not carrier.is_dir() or carrier.is_symlink() or any(carrier.iterdir()):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_DESTINATION_NOT_EMPTY")
+    else:
+        carrier.mkdir()
+    (carrier / "completed_snapshots").mkdir()
+    (carrier / "completed_manifests").mkdir()
+    predecessor_by_key = {
+        _scope_key_from_payload(item.get("scope_key")): item
+        for item in _require_list(predecessor.get("scopes"), "P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
+    }
+    p1_namespace_keys = {
+        binding.scope_key: _p1_legacy_source_namespace_key(
+            connection, binding.scope_plan.legacy_source_namespace_id,
+        )
+        for binding in request.scope_bindings
+    }
+    source_by_key = {item.scope_key: item for item in request.source_scope_plans}
+    scopes: list[dict[str, Any]] = []
+    completed: list[dict[str, Any]] = []
+    inherited: list[dict[str, Any]] = []
+    for index, binding in enumerate(sorted(request.scope_bindings, key=lambda item: item.scope_key.canonical_key)):
+        predecessor_entry = predecessor_by_key.get(binding.scope_key)
+        if predecessor_entry is None:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
+        token = f"{index:03d}-{_scope_token(binding.scope_key)}"
+        snapshot_root, manifest_path, completion = _complete_scope_snapshot(
+            request=request,
+            source_plan=source_by_key[binding.scope_key],
+            predecessor_entry=predecessor_entry,
+            destination=carrier / "completed_snapshots" / token,
+            manifest_destination=carrier / "completed_manifests" / f"{token}.json",
+        )
+        manifest = load_snapshot_manifest(manifest_path)
+        scope = {
+            "scope_key": binding.scope_key.identity_payload(),
+            "scope_plan": binding.scope_plan.intent(),
+            "unknown_semantic_scope_id": str(binding.unknown_semantic_scope_id),
+            "legacy_source_namespace_id": str(binding.scope_plan.legacy_source_namespace_id),
+            "legacy_source_namespace_key": p1_namespace_keys[binding.scope_key],
+            "snapshot_root": str(snapshot_root),
+            "manifest_path": str(manifest_path),
+            "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
+            "manifest_digest": _file_digest(manifest_path),
+            # Re-read B1 under the completed evidence.  Native admission is
+            # idempotent on the preserved snapshot/EID identity, so this
+            # recovers rather than duplicates R1 objects.
+            "b1": None,
+            "b2": {"memories": []},
+        }
+        scopes.append(scope)
+        (completed if completion else inherited).append({
+            "scope_key": binding.scope_key.identity_payload(),
+            "snapshot_root": str(snapshot_root),
+            "manifest_path": str(manifest_path),
+            "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
+        })
+    record: dict[str, Any] = {
+        "root_description_digest": request.description.identity_digest,
+        "explicit_source_manifest_digest": request.description.explicit_source_manifest.digest,
+        "expected_native_core_id": str(request.expected_native_core_id),
+        "operation_key": request.operation_key,
+        "scopes": scopes,
+        "carrier_completion": {
+            "predecessor_record_path": str(predecessor_path),
+            "predecessor_record_digest": predecessor_digest,
+            "completed_snapshots": completed,
+            "completed_manifests": [item["manifest_path"] for item in completed],
+            "inherited_snapshots": inherited,
+        },
+    }
+    _write_record(request.record_path, record)
+    return record
+
+
+def _load_predecessor_record(path: Path) -> tuple[dict[str, Any], str]:
+    try:
+        outer = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_RECORD_UNREADABLE") from exc
+    if not isinstance(outer, dict) or set(outer) != {"schema", "version", "payload", "digest"}:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_RECORD_SHAPE_INVALID")
+    payload = outer.get("payload")
+    if (
+        outer.get("schema") != _RECORD_SCHEMA
+        or outer.get("version") != _RECORD_VERSION
+        or not isinstance(payload, dict)
+        or outer.get("digest") != _digest(payload)
+    ):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_RECORD_INTEGRITY_INVALID")
+    return payload, str(outer["digest"])
+
+
+def _verify_predecessor_record(
+    connection: sqlite3.Connection,
+    predecessor: dict[str, Any],
+    request: RootP3SourceAdmissionRequest,
+) -> None:
+    if predecessor.get("expected_native_core_id") != str(request.expected_native_core_id):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_CORE_MISMATCH")
+    scopes = _require_list(predecessor.get("scopes"), "P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
+    keys = {
+        _scope_key_from_payload(item.get("scope_key"))
+        for item in scopes
+        if isinstance(item, dict)
+    }
+    if len(keys) != len(scopes) or keys != {item.scope_key for item in request.scope_bindings}:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
+    for entry in scopes:
+        if not isinstance(entry, dict):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
+        binding = request_binding(request, entry)
+        expected_key = _p1_legacy_source_namespace_key(
+            connection, binding.scope_plan.legacy_source_namespace_id,
+        )
+        root = Path(entry.get("snapshot_root", "")).expanduser().resolve()
+        manifest_path = Path(entry.get("manifest_path", "")).expanduser().resolve()
+        try:
+            manifest = load_snapshot_manifest(manifest_path)
+            verify_snapshot(snapshot_root=root, manifest=manifest)
+        except (SubstrateConfigurationError, OSError, ValueError) as exc:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SNAPSHOT_INVALID") from exc
+        if (
+            manifest.legacy_source_namespace_id != binding.scope_plan.legacy_source_namespace_id
+            or manifest.legacy_source_namespace_key != expected_key
+            or entry.get("legacy_snapshot_id") != str(manifest.legacy_snapshot_id)
+            or entry.get("manifest_digest") != _file_digest(manifest_path)
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SNAPSHOT_BINDING_MISMATCH")
+
+
+def _complete_scope_snapshot(
+    *,
+    request: RootP3SourceAdmissionRequest,
+    source_plan: RootSourceScopePlan,
+    predecessor_entry: dict[str, Any],
+    destination: Path,
+    manifest_destination: Path,
+) -> tuple[Path, Path, bool]:
+    predecessor_root = Path(predecessor_entry.get("snapshot_root", "")).expanduser().resolve()
+    predecessor_manifest_path = Path(predecessor_entry.get("manifest_path", "")).expanduser().resolve()
+    predecessor_manifest = load_snapshot_manifest(predecessor_manifest_path)
+    selected = _snapshot_sources_for_scope(request, source_plan)
+    predecessor_locators = {item.observed_relative_locator for item in predecessor_manifest.artifacts}
+    additions: list[tuple[ExplicitSourceEvidence, Path]] = []
+    for evidence, relative in selected:
+        if relative.as_posix() in predecessor_locators:
+            continue
+        if evidence.semantic_role not in _COMPLETION_ALLOWED_ROLES:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_UNAPPROVED_ADDITION")
+        additions.append((evidence, relative))
+    if not additions:
+        return predecessor_root, predecessor_manifest_path, False
+    if destination.exists() or manifest_destination.exists():
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_DESTINATION_EXISTS")
+    temporary = destination.parent / f".{destination.name}.pending"
+    if temporary.exists():
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_INCOMPLETE_CAPTURE")
+    temporary.mkdir()
+    try:
+        for artifact in predecessor_manifest.artifacts:
+            source = predecessor_root / artifact.observed_relative_locator
+            _require_regular_source_inside_root(predecessor_root, source)
+            target = temporary / artifact.observed_relative_locator
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+        for evidence, relative in selected:
+            source = resolve_explicit_source_evidence_path(data_root=request.root, evidence=evidence)
+            _require_regular_source_inside_root(request.root, source)
+            payload = source.read_bytes()
+            if len(payload) != evidence.byte_length or hashlib.sha256(payload).hexdigest() != evidence.sha256_hex:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SOURCE_EVIDENCE_DRIFT")
+            target = temporary / relative
+            if target.exists():
+                if target.read_bytes() != payload:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_DRIFT")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+        completed = complete_snapshot_manifest(
+            predecessor=predecessor_manifest,
+            snapshot_root=temporary,
+            manifest_path=manifest_destination,
+            allowed_additional_locators=tuple(relative.as_posix() for _, relative in additions),
+        )
+        verify_snapshot(snapshot_root=temporary, manifest=completed)
+        os.replace(temporary, destination)
+    except Exception:
+        raise
+    return destination, manifest_destination, True
 
 
 def _create_scope_snapshot(
@@ -566,7 +806,14 @@ def _snapshot_sources_for_scope(
             item.scope_key is None
             and item.owner_boundary.workspace_id == scope.workspace_id
             and item.semantic_role is EvidenceSemanticRole.WORKSPACE_META
-            and source_plan.motif_presence is SourceArtifactPresence.PRESENT
+            and (
+                source_plan.motif_presence is SourceArtifactPresence.PRESENT
+                or (
+                    source_plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH
+                    and source_plan.representation_disposition
+                    is not RootRepresentationDisposition.UNKNOWN_IDENTITY
+                )
+            )
         ):
             include = True
         if not include:
@@ -645,8 +892,6 @@ def _read_b1_evidence(
     )
     memories: list[dict[str, Any]] = []
     if source_plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
-        if not report.object_items:
-            raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
         allowed = {
             ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
             ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED,
@@ -654,6 +899,15 @@ def _read_b1_evidence(
         seen_eids: set[int] = set()
         for item in report.object_items:
             if item.eid is None:
+                # Motifs are independently represented in the same frozen
+                # snapshot but are not logical memories.  They are explicitly
+                # marked evidence-only by the existing readiness owner and
+                # are closed below through ``report.motif_items``.
+                if (
+                    item.readiness is ObjectRuntimeReadiness.EVIDENCE_ONLY_NOT_RUNTIME_OBJECT
+                    and "OBJECT_KIND_NOT_CORE_RUNTIME_PROFILE" in item.reason_codes
+                ):
+                    continue
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_EID_INVALID")
             eid = _require_nonnegative_int(item.eid, "P3_CARRIER_MEMORY_B1_EID_INVALID")
             if eid in seen_eids:
@@ -663,9 +917,15 @@ def _read_b1_evidence(
             if item.readiness not in allowed:
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
             seen_eids.add(eid)
-            memories.append({"eid": eid, "r1_revision_id": str(item.current_revision_id)})
+            if not isinstance(item.legacy_vector_strategy, LegacyVectorStrategy):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_STRATEGY_INVALID")
+            memories.append({
+                "eid": eid,
+                "r1_revision_id": str(item.current_revision_id),
+                "legacy_vector_strategy": item.legacy_vector_strategy.value,
+            })
         memories.sort(key=lambda item: item["eid"])
-        if len(memories) != len(report.object_items):
+        if not memories:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
     elif any(item.eid is not None for item in report.object_items):
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
@@ -729,8 +989,16 @@ def _carrier_b1_memory_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...
         if eid in seen_eids:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_EID_DUPLICATE")
         revision = _require_uuid(memory.get("r1_revision_id"), "P3_CARRIER_B1_MEMORY_REVISION_INVALID")
+        try:
+            strategy = LegacyVectorStrategy(memory.get("legacy_vector_strategy"))
+        except (TypeError, ValueError) as exc:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_STRATEGY_INVALID") from exc
         seen_eids.add(eid)
-        result.append({"eid": eid, "r1_revision_id": str(revision)})
+        result.append({
+            "eid": eid,
+            "r1_revision_id": str(revision),
+            "legacy_vector_strategy": strategy.value,
+        })
     return tuple(sorted(result, key=lambda item: item["eid"]))
 
 
@@ -814,7 +1082,8 @@ def _build_normalization_request(
                     target_lane=request.description.target_representation_lane,
                     idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
                 )
-                if source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+                strategy = LegacyVectorStrategy(memory["legacy_vector_strategy"])
+                if strategy is LegacyVectorStrategy.BYTE_DERIVATION_POSSIBLE:
                     b3a.append(MigrationRuntimeRepresentationBootstrapRequest(
                         **common,
                         idempotency_key=_stage_key(request, entry, "B3A", str(eid)),
@@ -848,6 +1117,7 @@ def _build_normalization_request(
                     ))
 
         b4a: list[MigrationRuntimeMotifProjectionRequest] = []
+        b4b: list[MigrationRuntimeMotifRegeometryProjectionRequest] = []
         b4c: list[MigrationRuntimeZeroMemberMotifProjectionRequest] = []
         if source.motif_presence is SourceArtifactPresence.PRESENT:
             for motif in motifs:
@@ -872,10 +1142,15 @@ def _build_normalization_request(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4C", str(motif["runtime_motif_id"])),
                     ))
-                else:
+                elif source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
                     b4a.append(MigrationRuntimeMotifProjectionRequest(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4A", str(motif["runtime_motif_id"])),
+                    ))
+                else:
+                    b4b.append(MigrationRuntimeMotifRegeometryProjectionRequest(
+                        **common_motif,
+                        idempotency_key=_stage_key(request, entry, "B4B", str(motif["runtime_motif_id"])),
                     ))
         inputs.append(RootNormalizationScopeInput(
             scope_key=binding.scope_key,
@@ -885,6 +1160,7 @@ def _build_normalization_request(
             b3b_requests=tuple(b3b),
             metadata_less_b3b_dispatches=tuple(metadata_dispatches),
             b4a_requests=tuple(b4a),
+            b4b_requests=tuple(b4b),
             b4c_requests=tuple(b4c),
         ))
     return RootNormalizationRequest(
@@ -943,21 +1219,26 @@ def _carrier_evidence_child_request_counts(
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
         _require_b2_closure(memories, _carrier_b2_memory_evidence(b2))
         if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
-            if source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
-                result["b3a"] += len(memories)
-            elif source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+            if source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
                 _require_unknown_eid_closure(scope_key, memories, unknown_by_scope_eid)
                 result["metadata_less_b3b"] += len(memories)
             else:
-                result["ordinary_b3b"] += len(memories)
+                for memory in memories:
+                    strategy = LegacyVectorStrategy(memory["legacy_vector_strategy"])
+                    if strategy is LegacyVectorStrategy.BYTE_DERIVATION_POSSIBLE:
+                        result["b3a"] += 1
+                    else:
+                        result["ordinary_b3b"] += 1
         if source.motif_presence is SourceArtifactPresence.PRESENT:
             if source.materialization_posture in {
                 MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
                 MaterializedScopePosture.DECLARED_EMPTY_SHARED,
             }:
                 result["b4c"] += len(motifs)
-            else:
+            elif source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
                 result["b4a"] += len(motifs)
+            else:
+                result["b4b"] += len(motifs)
     result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
     return result
 
@@ -1003,6 +1284,9 @@ def _load_record(path: Path, request: RootP3SourceAdmissionRequest) -> dict[str,
     keys = {_scope_key_from_payload(item.get("scope_key")) for item in scopes if isinstance(item, dict)}
     if keys != {item.scope_key for item in request.scope_bindings}:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_RECORD_SCOPE_SET_INVALID")
+    completion = payload.get("carrier_completion")
+    if completion is not None:
+        _completion_snapshot_pairs(completion, request)
     return payload
 
 
@@ -1012,6 +1296,11 @@ def _verify_record_snapshots(
     request: RootP3SourceAdmissionRequest,
 ) -> None:
     carrier = request.carrier_root
+    completion = record.get("carrier_completion")
+    inherited_pairs = (
+        _completion_snapshot_pairs(completion, request)
+        if completion is not None else set()
+    )
     for entry in _ordered_scope_entries(record):
         binding = request_binding(request, entry)
         expected_namespace_id = binding.scope_plan.legacy_source_namespace_id
@@ -1023,7 +1312,11 @@ def _verify_record_snapshots(
             raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_SOURCE_NAMESPACE_BINDING_MISMATCH")
         root = Path(entry.get("snapshot_root", "")).expanduser().resolve()
         manifest_path = Path(entry.get("manifest_path", "")).expanduser().resolve()
-        if carrier not in root.parents or carrier not in manifest_path.parents:
+        pair = (str(root), str(manifest_path))
+        if (
+            (carrier not in root.parents or carrier not in manifest_path.parents)
+            and pair not in inherited_pairs
+        ):
             raise RootP3SourceAdmissionRefused("P3_CARRIER_SNAPSHOT_PATH_ESCAPES_RECORD")
         try:
             manifest = load_snapshot_manifest(manifest_path)
@@ -1040,6 +1333,70 @@ def _verify_record_snapshots(
             or _file_digest(manifest_path) != entry.get("manifest_digest")
         ):
             raise RootP3SourceAdmissionRefused("P3_CARRIER_SNAPSHOT_IDENTITY_MISMATCH")
+
+
+def _completion_snapshot_pairs(
+    completion: object,
+    request: RootP3SourceAdmissionRequest,
+) -> set[tuple[str, str]]:
+    """Validate the immutable predecessor cross-binding for a completion carrier."""
+
+    data = _require_mapping(completion, "P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    expected = {
+        "predecessor_record_path",
+        "predecessor_record_digest",
+        "completed_snapshots",
+        "completed_manifests",
+        "inherited_snapshots",
+    }
+    if set(data) != expected:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    predecessor_path_raw = data.get("predecessor_record_path")
+    predecessor_digest = data.get("predecessor_record_digest")
+    if not isinstance(predecessor_path_raw, str) or not isinstance(predecessor_digest, str):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    predecessor_path = Path(predecessor_path_raw).expanduser().resolve()
+    requested_predecessor = request.predecessor_record_path
+    if requested_predecessor is not None and predecessor_path != requested_predecessor:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_MISMATCH")
+    predecessor, observed_digest = _load_predecessor_record(predecessor_path)
+    if observed_digest != predecessor_digest:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_DRIFT")
+    predecessor_pairs = {
+        (
+            str(Path(item.get("snapshot_root", "")).expanduser().resolve()),
+            str(Path(item.get("manifest_path", "")).expanduser().resolve()),
+        )
+        for item in _require_list(
+            predecessor.get("scopes"),
+            "P3_CARRIER_COMPLETION_PREDECESSOR_SCOPE_SET_INVALID",
+        )
+        if isinstance(item, dict)
+    }
+    completed = _require_list(data.get("completed_snapshots"), "P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    if any(not isinstance(item, dict) for item in completed):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    manifests = data.get("completed_manifests")
+    if not isinstance(manifests, list) or any(not isinstance(item, str) for item in manifests):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    if sorted(manifests) != sorted(
+        item.get("manifest_path") for item in completed
+    ):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    inherited = _require_list(data.get("inherited_snapshots"), "P3_CARRIER_COMPLETION_SHAPE_INVALID")
+    pairs: set[tuple[str, str]] = set()
+    for item in inherited:
+        if not isinstance(item, dict):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+        root = item.get("snapshot_root")
+        manifest = item.get("manifest_path")
+        if not isinstance(root, str) or not isinstance(manifest, str):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+        pair = (str(Path(root).expanduser().resolve()), str(Path(manifest).expanduser().resolve()))
+        if pair in pairs or pair not in predecessor_pairs:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+        pairs.add(pair)
+    return pairs
 
 
 def _write_record(path: Path, payload: dict[str, Any]) -> None:

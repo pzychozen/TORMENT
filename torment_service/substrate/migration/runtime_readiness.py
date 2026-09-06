@@ -527,9 +527,18 @@ class NativeMigrationRuntimeReadinessPreflight:
             """, (namespace,)
         ).fetchall()
         observed = {row[0]: row[1] for row in order_rows}
-        expected_order = tuple(key for key, _ in sorted(expected.items(), key=lambda item: item[1]))
+        # The object-admission owner assigns immutable runtime order from the
+        # first surviving appearance of each logical EID.  A later append row
+        # may be the canonical *content* record without moving that logical
+        # memory in runtime order, so the last physical line ordinal is not a
+        # valid ordering oracle here.
         observed_order = tuple(row[0] for row in order_rows if row[0] in expected)
-        whole_order_matches = set(observed) == set(expected) and observed_order == expected_order
+        observed_ordinals = tuple(row[1] for row in order_rows if row[0] in expected)
+        whole_order_matches = (
+            set(observed) == set(expected)
+            and len(observed_order) == len(expected)
+            and observed_ordinals == tuple(range(len(expected)))
+        )
         result: dict[bytes, tuple[int | None, tuple[str, ...]]] = {}
         for object_id in expected:
             reasons: list[str] = []
