@@ -305,11 +305,16 @@ class NativeRootP3SourceAdmissionService:
 
         lose_response = _test_lose_response_after_b2
         for entry in ordered:
-            b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+            source = _source_plan_for_key(request, _scope_key_from_payload(entry.get("scope_key")))
+            memories, _motifs = _carrier_b1_evidence(entry, source)
             b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
-            for memory in _require_list(b1.get("memories"), "P3_CARRIER_B1_MEMORY_EVIDENCE_REQUIRED"):
-                eid = _require_nonnegative_int(memory.get("eid"), "P3_CARRIER_B1_MEMORY_EID_INVALID")
-                if any(item.get("eid") == eid for item in b2.get("memories", [])):
+            b2_by_eid = _carrier_b2_memory_evidence(b2)
+            memory_eids = {item["eid"] for item in memories}
+            if not set(b2_by_eid).issubset(memory_eids):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_EID_SET_MISMATCH")
+            for memory in memories:
+                eid = memory["eid"]
+                if eid in b2_by_eid:
                     continue
                 result = NativeMigrationRuntimeNormalizationService(
                     self._connection
@@ -334,13 +339,13 @@ class NativeRootP3SourceAdmissionService:
                     "r2_revision_id": str(result.revision_id),
                 })
                 b2["memories"] = sorted(b2["memories"], key=lambda item: item["eid"])
+                b2_by_eid = _carrier_b2_memory_evidence(b2)
                 _write_record(request.record_path, record)
+            _require_b2_closure(memories, b2_by_eid)
 
         normalization_request = _build_normalization_request(request, record)
         actual = p3_child_request_counts(normalization_request.scope_inputs)
-        expected = planned_p3_child_request_counts(
-            request.source_scope_plans, request.unknown_identity_evidence,
-        )
+        expected = _carrier_evidence_child_request_counts(request, record)
         if actual != expected:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_CHILD_COUNT_DRIFT")
         memory_count = sum(
@@ -360,11 +365,11 @@ class NativeRootP3SourceAdmissionService:
         )
 
 
-def planned_p3_child_request_counts(
+def pre_b1_p3_scope_shape_counts(
     source_scope_plans: tuple[RootSourceScopePlan, ...],
     unknown_identity_evidence: tuple[MetadataLessPerEidEvidence, ...],
 ) -> dict[str, int]:
-    """Return the frozen child-shape count without creating source evidence."""
+    """Return pre-B1 structural facts, never executable child-operation counts."""
 
     MetadataLessPerEidEvidence, RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     if not isinstance(source_scope_plans, tuple) or any(
@@ -375,33 +380,22 @@ def planned_p3_child_request_counts(
         not isinstance(item, MetadataLessPerEidEvidence) for item in unknown_identity_evidence
     ):
         raise ValueError("unknown_identity_evidence must be typed")
-    unknown_by_scope: dict[RootScopeKey, int] = {}
-    for item in unknown_identity_evidence:
-        unknown_by_scope[item.scope_key] = unknown_by_scope.get(item.scope_key, 0) + 1
     result = {
-        "b3a": 0, "ordinary_b3b": 0, "metadata_less_b3b": 0,
-        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0,
+        "target_compatible_memory_scope_count": 0,
+        "ordinary_reembed_memory_scope_count": 0,
+        "unknown_identity_evidence_count": len(unknown_identity_evidence),
+        "motif_present_scope_count": 0,
     }
     for plan in source_scope_plans:
         if plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
             if plan.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
-                result["b3a"] += 1
+                result["target_compatible_memory_scope_count"] += 1
             elif plan.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
-                count = unknown_by_scope.get(plan.scope_key, 0)
-                if count < 1:
-                    raise RootP3SourceAdmissionRefused("P3_CARRIER_UNKNOWN_IDENTITY_EVIDENCE_MISSING")
-                result["metadata_less_b3b"] += count
+                continue
             else:
-                result["ordinary_b3b"] += 1
+                result["ordinary_reembed_memory_scope_count"] += 1
         if plan.motif_presence is SourceArtifactPresence.PRESENT:
-            if plan.materialization_posture in {
-                MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
-                MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-            }:
-                result["b4c"] += 1
-            else:
-                result["b4a"] += 1
-    result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
+            result["motif_present_scope_count"] += 1
     return result
 
 
@@ -649,37 +643,139 @@ def _read_b1_evidence(
             target_lane=request.description.target_representation_lane,
         )
     )
-    memories = [
-        {"eid": item.eid, "r1_revision_id": str(item.current_revision_id)}
-        for item in report.object_items
-        if item.eid is not None
-    ]
-    memories.sort(key=lambda item: item["eid"])
+    memories: list[dict[str, Any]] = []
     if source_plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
-        if len(memories) != 1:
+        if not report.object_items:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
         allowed = {
             ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
             ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED,
         }
-        if report.object_items[0].readiness not in allowed:
-            raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
+        seen_eids: set[int] = set()
+        for item in report.object_items:
+            if item.eid is None:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_EID_INVALID")
+            eid = _require_nonnegative_int(item.eid, "P3_CARRIER_MEMORY_B1_EID_INVALID")
+            if eid in seen_eids:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_EID_DUPLICATE")
+            if not isinstance(item.current_revision_id, UUID):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_REVISION_INVALID")
+            if item.readiness not in allowed:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
+            seen_eids.add(eid)
+            memories.append({"eid": eid, "r1_revision_id": str(item.current_revision_id)})
+        memories.sort(key=lambda item: item["eid"])
+        if len(memories) != len(report.object_items):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
+    elif any(item.eid is not None for item in report.object_items):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
+    motifs: list[dict[str, Any]] = []
+    if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
+        if not report.motif_items:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
+        seen_runtime_motif_ids: set[str] = set()
+        for item in report.motif_items:
+            runtime_motif_id = item.runtime_motif_id
+            if not isinstance(runtime_motif_id, str) or not runtime_motif_id:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_RUNTIME_ID_INVALID")
+            if runtime_motif_id in seen_runtime_motif_ids:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_RUNTIME_ID_DUPLICATE")
+            if not isinstance(item.motif_object_id, UUID):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_SOURCE_OBJECT_INVALID")
+            if not isinstance(item.current_revision_id, UUID):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_REVISION_INVALID")
+            seen_runtime_motif_ids.add(runtime_motif_id)
+            motifs.append({
+                "runtime_motif_id": runtime_motif_id,
+                "source_object_id": str(item.motif_object_id),
+                "r1_revision_id": str(item.current_revision_id),
+            })
+        motifs.sort(key=lambda item: item["runtime_motif_id"])
+        if len(motifs) != len(report.motif_items):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
+    elif report.motif_items:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_UNDECLARED_MOTIF_ADMITTED")
+    return {"memories": memories, "motifs": motifs}
+
+
+def _carrier_b1_evidence(
+    entry: dict[str, Any], source_plan: RootSourceScopePlan,
+) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+    """Validate recovered B1 evidence before it can drive B2/B3/B4 work."""
+
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
+    b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+    memories = _carrier_b1_memory_evidence(b1)
+    motifs = _carrier_b1_motif_evidence(b1)
+    if source_plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
+        if not memories:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
     elif memories:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
-    motifs = [
-        {
-            "runtime_motif_id": item.runtime_motif_id,
-            "source_object_id": str(item.motif_object_id),
-            "r1_revision_id": str(item.current_revision_id),
-        }
-        for item in report.motif_items
-    ]
     if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
-        if len(motifs) != 1 or not isinstance(motifs[0]["runtime_motif_id"], str):
+        if not motifs:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
     elif motifs:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_UNDECLARED_MOTIF_ADMITTED")
-    return {"memories": memories, "motifs": motifs}
+    return memories, motifs
+
+
+def _carrier_b1_memory_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    memories = _require_list(b1.get("memories"), "P3_CARRIER_B1_MEMORY_EVIDENCE_REQUIRED")
+    result: list[dict[str, Any]] = []
+    seen_eids: set[int] = set()
+    for memory in memories:
+        eid = _require_nonnegative_int(memory.get("eid"), "P3_CARRIER_B1_MEMORY_EID_INVALID")
+        if eid in seen_eids:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_EID_DUPLICATE")
+        revision = _require_uuid(memory.get("r1_revision_id"), "P3_CARRIER_B1_MEMORY_REVISION_INVALID")
+        seen_eids.add(eid)
+        result.append({"eid": eid, "r1_revision_id": str(revision)})
+    return tuple(sorted(result, key=lambda item: item["eid"]))
+
+
+def _carrier_b1_motif_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    motifs = _require_list(b1.get("motifs"), "P3_CARRIER_B1_MOTIF_EVIDENCE_REQUIRED")
+    result: list[dict[str, Any]] = []
+    seen_runtime_motif_ids: set[str] = set()
+    for motif in motifs:
+        runtime_motif_id = motif.get("runtime_motif_id")
+        if not isinstance(runtime_motif_id, str) or not runtime_motif_id:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MOTIF_RUNTIME_ID_INVALID")
+        if runtime_motif_id in seen_runtime_motif_ids:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MOTIF_RUNTIME_ID_DUPLICATE")
+        source_object_id = _require_uuid(
+            motif.get("source_object_id"), "P3_CARRIER_B1_MOTIF_SOURCE_OBJECT_INVALID",
+        )
+        revision = _require_uuid(
+            motif.get("r1_revision_id"), "P3_CARRIER_B1_MOTIF_REVISION_INVALID",
+        )
+        seen_runtime_motif_ids.add(runtime_motif_id)
+        result.append({
+            "runtime_motif_id": runtime_motif_id,
+            "source_object_id": str(source_object_id),
+            "r1_revision_id": str(revision),
+        })
+    return tuple(sorted(result, key=lambda item: item["runtime_motif_id"]))
+
+
+def _carrier_b2_memory_evidence(b2: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    memories = _require_list(b2.get("memories"), "P3_CARRIER_B2_MEMORY_EVIDENCE_REQUIRED")
+    result: dict[int, dict[str, Any]] = {}
+    for memory in memories:
+        eid = _require_nonnegative_int(memory.get("eid"), "P3_CARRIER_B2_MEMORY_EID_INVALID")
+        if eid in result:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_MEMORY_EID_DUPLICATE")
+        revision = _require_uuid(memory.get("r2_revision_id"), "P3_CARRIER_B2_MEMORY_REVISION_INVALID")
+        result[eid] = {"eid": eid, "r2_revision_id": str(revision)}
+    return result
+
+
+def _require_b2_closure(
+    memories: tuple[dict[str, Any], ...], b2_by_eid: dict[int, dict[str, Any]],
+) -> None:
+    if {item["eid"] for item in memories} != set(b2_by_eid):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_EID_SET_MISMATCH")
 
 
 def _build_normalization_request(
@@ -687,121 +783,109 @@ def _build_normalization_request(
 ) -> RootNormalizationRequest:
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     inputs: list[RootNormalizationScopeInput] = []
-    unknown_by_scope = {item.scope_key: item for item in request.unknown_identity_evidence}
+    unknown_by_scope_eid = _unknown_evidence_by_scope_eid(request)
     for entry in _ordered_scope_entries(record):
         binding = request_binding(request, entry)
         source = _source_plan_for_key(request, binding.scope_key)
-        b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        memories, motifs = _carrier_b1_evidence(entry, source)
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
-        memories = _require_list(b1.get("memories"), "P3_CARRIER_B1_MEMORY_EVIDENCE_REQUIRED")
-        b2_by_eid = {
-            _require_nonnegative_int(item.get("eid"), "P3_CARRIER_B2_MEMORY_EID_INVALID"): item
-            for item in _require_list(b2.get("memories"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
-        }
-        b3a: tuple[MigrationRuntimeRepresentationBootstrapRequest, ...] = ()
-        b3b: tuple[MigrationRuntimeReembeddingBootstrapRequest, ...] = ()
-        metadata_dispatches: tuple[MetadataLessB3BDispatch, ...] = ()
+        b2_by_eid = _carrier_b2_memory_evidence(b2)
+        _require_b2_closure(memories, b2_by_eid)
+        b3a: list[MigrationRuntimeRepresentationBootstrapRequest] = []
+        b3b: list[MigrationRuntimeReembeddingBootstrapRequest] = []
+        metadata_dispatches: list[MetadataLessB3BDispatch] = []
         if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
-            if len(memories) != 1:
-                raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
-            memory = memories[0]
-            eid = _require_nonnegative_int(memory.get("eid"), "P3_CARRIER_B1_MEMORY_EID_INVALID")
-            b2_memory = b2_by_eid.get(eid)
-            if b2_memory is None:
-                raise RootP3SourceAdmissionRefused("P3_CARRIER_B3_REQUIRES_B2_FACT")
-            common = dict(
-                snapshot_root=Path(entry["snapshot_root"]),
-                manifest_path=Path(entry["manifest_path"]),
-                legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
-                legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
-                expected_native_core_id=request.expected_native_core_id,
-                eid=eid,
-                expected_r1_revision_id=UUID(memory["r1_revision_id"]),
-                expected_r2_revision_id=UUID(b2_memory["r2_revision_id"]),
-                target_lane=request.description.target_representation_lane,
-                idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
-            )
-            if source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
-                b3a = (MigrationRuntimeRepresentationBootstrapRequest(
-                    **common,
-                    idempotency_key=_stage_key(request, entry, "B3A", str(eid)),
-                ),)
-            elif source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
-                evidence = unknown_by_scope.get(binding.scope_key)
-                if evidence is None or evidence.eid != eid:
-                    raise RootP3SourceAdmissionRefused("P3_CARRIER_UNKNOWN_IDENTITY_EID_MISMATCH")
-                try:
-                    qualified = qualify_metadata_less_per_eid_legacy_source(
-                        data_root=request.root,
-                        scope_key=binding.scope_key,
-                        legacy_eid=eid,
-                        legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
-                        target_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
-                        nodes_source=evidence.canonical_text_evidence,
-                        optional_edges_source=_optional_edges_source(request, binding.scope_key),
-                        legacy_representation_source=evidence.vector_evidence,
-                    )
-                except (SubstrateConfigurationError, OSError, ValueError) as exc:
-                    raise RootP3SourceAdmissionRefused("P3_CARRIER_METADATA_LESS_SOURCE_REFUSED") from exc
-                b3b_request = MigrationRuntimeReembeddingBootstrapRequest(
-                    **common,
-                    scope_plans=(binding.scope_plan,),
-                    idempotency_key=_stage_key(request, entry, "B3B_METADATA_LESS", str(eid)),
+            if source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+                _require_unknown_eid_closure(binding.scope_key, memories, unknown_by_scope_eid)
+            for memory in memories:
+                eid = memory["eid"]
+                b2_memory = b2_by_eid.get(eid)
+                if b2_memory is None:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_B3_REQUIRES_B2_FACT")
+                common = dict(
+                    snapshot_root=Path(entry["snapshot_root"]),
+                    manifest_path=Path(entry["manifest_path"]),
+                    legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
+                    legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
+                    expected_native_core_id=request.expected_native_core_id,
+                    eid=eid,
+                    expected_r1_revision_id=UUID(memory["r1_revision_id"]),
+                    expected_r2_revision_id=UUID(b2_memory["r2_revision_id"]),
+                    target_lane=request.description.target_representation_lane,
+                    idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
                 )
-                metadata_dispatches = (MetadataLessB3BDispatch(qualified, b3b_request),)
-            else:
-                b3b = (MigrationRuntimeReembeddingBootstrapRequest(
-                    **common,
-                    scope_plans=(binding.scope_plan,),
-                    idempotency_key=_stage_key(request, entry, "B3B", str(eid)),
-                ),)
-        elif memories:
-            raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
+                if source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+                    b3a.append(MigrationRuntimeRepresentationBootstrapRequest(
+                        **common,
+                        idempotency_key=_stage_key(request, entry, "B3A", str(eid)),
+                    ))
+                elif source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+                    evidence = unknown_by_scope_eid[(binding.scope_key, eid)]
+                    try:
+                        qualified = qualify_metadata_less_per_eid_legacy_source(
+                            data_root=request.root,
+                            scope_key=binding.scope_key,
+                            legacy_eid=eid,
+                            legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
+                            target_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
+                            nodes_source=evidence.canonical_text_evidence,
+                            optional_edges_source=_optional_edges_source(request, binding.scope_key),
+                            legacy_representation_source=evidence.vector_evidence,
+                        )
+                    except (SubstrateConfigurationError, OSError, ValueError) as exc:
+                        raise RootP3SourceAdmissionRefused("P3_CARRIER_METADATA_LESS_SOURCE_REFUSED") from exc
+                    b3b_request = MigrationRuntimeReembeddingBootstrapRequest(
+                        **common,
+                        scope_plans=(binding.scope_plan,),
+                        idempotency_key=_stage_key(request, entry, "B3B_METADATA_LESS", str(eid)),
+                    )
+                    metadata_dispatches.append(MetadataLessB3BDispatch(qualified, b3b_request))
+                else:
+                    b3b.append(MigrationRuntimeReembeddingBootstrapRequest(
+                        **common,
+                        scope_plans=(binding.scope_plan,),
+                        idempotency_key=_stage_key(request, entry, "B3B", str(eid)),
+                    ))
 
-        b4a: tuple[MigrationRuntimeMotifProjectionRequest, ...] = ()
-        b4c: tuple[MigrationRuntimeZeroMemberMotifProjectionRequest, ...] = ()
-        motifs = _require_list(b1.get("motifs"), "P3_CARRIER_B1_MOTIF_EVIDENCE_REQUIRED")
+        b4a: list[MigrationRuntimeMotifProjectionRequest] = []
+        b4c: list[MigrationRuntimeZeroMemberMotifProjectionRequest] = []
         if source.motif_presence is SourceArtifactPresence.PRESENT:
-            if len(motifs) != 1:
-                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
-            motif = motifs[0]
-            common_motif = dict(
-                snapshot_root=Path(entry["snapshot_root"]),
-                manifest_path=Path(entry["manifest_path"]),
-                legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
-                legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
-                expected_native_core_id=request.expected_native_core_id,
-                runtime_motif_id=motif["runtime_motif_id"],
-                expected_source_motif_object_id=UUID(motif["source_object_id"]),
-                expected_source_motif_revision_id=UUID(motif["r1_revision_id"]),
-                scope_plans=(binding.scope_plan,),
-                target_lane=request.description.target_representation_lane,
-                idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
-            )
-            if source.materialization_posture in {
-                MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
-                MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-            }:
-                b4c = (MigrationRuntimeZeroMemberMotifProjectionRequest(
-                    **common_motif,
-                    idempotency_key=_stage_key(request, entry, "B4C", str(motif["runtime_motif_id"])),
-                ),)
-            else:
-                b4a = (MigrationRuntimeMotifProjectionRequest(
-                    **common_motif,
-                    idempotency_key=_stage_key(request, entry, "B4A", str(motif["runtime_motif_id"])),
-                ),)
-        elif motifs:
-            raise RootP3SourceAdmissionRefused("P3_CARRIER_UNDECLARED_MOTIF_ADMITTED")
+            for motif in motifs:
+                common_motif = dict(
+                    snapshot_root=Path(entry["snapshot_root"]),
+                    manifest_path=Path(entry["manifest_path"]),
+                    legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
+                    legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
+                    expected_native_core_id=request.expected_native_core_id,
+                    runtime_motif_id=motif["runtime_motif_id"],
+                    expected_source_motif_object_id=UUID(motif["source_object_id"]),
+                    expected_source_motif_revision_id=UUID(motif["r1_revision_id"]),
+                    scope_plans=(binding.scope_plan,),
+                    target_lane=request.description.target_representation_lane,
+                    idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
+                )
+                if source.materialization_posture in {
+                    MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+                    MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+                }:
+                    b4c.append(MigrationRuntimeZeroMemberMotifProjectionRequest(
+                        **common_motif,
+                        idempotency_key=_stage_key(request, entry, "B4C", str(motif["runtime_motif_id"])),
+                    ))
+                else:
+                    b4a.append(MigrationRuntimeMotifProjectionRequest(
+                        **common_motif,
+                        idempotency_key=_stage_key(request, entry, "B4A", str(motif["runtime_motif_id"])),
+                    ))
         inputs.append(RootNormalizationScopeInput(
             scope_key=binding.scope_key,
             scope_plan=binding.scope_plan,
             legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
-            b3a_requests=b3a,
-            b3b_requests=b3b,
-            metadata_less_b3b_dispatches=metadata_dispatches,
-            b4a_requests=b4a,
-            b4c_requests=b4c,
+            b3a_requests=tuple(b3a),
+            b3b_requests=tuple(b3b),
+            metadata_less_b3b_dispatches=tuple(metadata_dispatches),
+            b4a_requests=tuple(b4a),
+            b4c_requests=tuple(b4c),
         ))
     return RootNormalizationRequest(
         description=request.description,
@@ -813,6 +897,69 @@ def _build_normalization_request(
         b3b_embedder=request.b3b_embedder,
         post_write_configurations=request.post_write_configurations,
     )
+
+
+def _unknown_evidence_by_scope_eid(
+    request: RootP3SourceAdmissionRequest,
+) -> dict[tuple[RootScopeKey, int], MetadataLessPerEidEvidence]:
+    result: dict[tuple[RootScopeKey, int], MetadataLessPerEidEvidence] = {}
+    for evidence in request.unknown_identity_evidence:
+        key = (evidence.scope_key, evidence.eid)
+        if key in result:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_UNKNOWN_IDENTITY_EID_DUPLICATE")
+        result[key] = evidence
+    return result
+
+
+def _require_unknown_eid_closure(
+    scope_key: RootScopeKey,
+    memories: tuple[dict[str, Any], ...],
+    unknown_by_scope_eid: dict[tuple[RootScopeKey, int], MetadataLessPerEidEvidence],
+) -> None:
+    memory_eids = {item["eid"] for item in memories}
+    evidence_eids = {
+        eid for candidate_scope, eid in unknown_by_scope_eid
+        if candidate_scope == scope_key
+    }
+    if memory_eids != evidence_eids:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_UNKNOWN_IDENTITY_EID_SET_MISMATCH")
+
+
+def _carrier_evidence_child_request_counts(
+    request: RootP3SourceAdmissionRequest, record: dict[str, Any],
+) -> dict[str, int]:
+    """Derive executable B3/B4 counts only from completed carrier evidence."""
+
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
+    unknown_by_scope_eid = _unknown_evidence_by_scope_eid(request)
+    result = {
+        "b3a": 0, "ordinary_b3b": 0, "metadata_less_b3b": 0,
+        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0,
+    }
+    for entry in _ordered_scope_entries(record):
+        scope_key = _scope_key_from_payload(entry.get("scope_key"))
+        source = _source_plan_for_key(request, scope_key)
+        memories, motifs = _carrier_b1_evidence(entry, source)
+        b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
+        _require_b2_closure(memories, _carrier_b2_memory_evidence(b2))
+        if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
+            if source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+                result["b3a"] += len(memories)
+            elif source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
+                _require_unknown_eid_closure(scope_key, memories, unknown_by_scope_eid)
+                result["metadata_less_b3b"] += len(memories)
+            else:
+                result["ordinary_b3b"] += len(memories)
+        if source.motif_presence is SourceArtifactPresence.PRESENT:
+            if source.materialization_posture in {
+                MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
+                MaterializedScopePosture.DECLARED_EMPTY_SHARED,
+            }:
+                result["b4c"] += len(motifs)
+            else:
+                result["b4a"] += len(motifs)
+    result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
+    return result
 
 
 def _optional_edges_source(
@@ -1039,6 +1186,17 @@ def _require_nonnegative_int(value: object, code: str) -> int:
     return value
 
 
+def _require_uuid(value: object, code: str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str) or not value:
+        raise RootP3SourceAdmissionRefused(code)
+    try:
+        return UUID(value)
+    except (TypeError, ValueError) as exc:
+        raise RootP3SourceAdmissionRefused(code) from exc
+
+
 __all__ = [
     "NativeRootP3SourceAdmissionService",
     "RootP3ScopeBinding",
@@ -1048,5 +1206,5 @@ __all__ = [
     "RootP3SourceAdmissionRequest",
     "RootP3SourceAdmissionResult",
     "p3_child_request_counts",
-    "planned_p3_child_request_counts",
+    "pre_b1_p3_scope_shape_counts",
 ]

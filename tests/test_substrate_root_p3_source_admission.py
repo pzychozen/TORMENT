@@ -10,6 +10,7 @@ from uuid import UUID
 import numpy as np
 import pytest
 
+import torment_service.substrate.migration.root_p3_source_admission as p3_source_admission
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
@@ -48,7 +49,7 @@ from torment_service.substrate.migration import (
     capture_present_source_evidence,
     load_snapshot_manifest,
     p3_child_request_counts,
-    planned_p3_child_request_counts,
+    pre_b1_p3_scope_shape_counts,
 )
 from torment_service.substrate.errors import SubstrateSnapshotManifestError
 from torment_service.substrate.runtime_binding import NativeRepresentationLane
@@ -78,6 +79,10 @@ class _Embedder:
 
 def _line(value: dict[str, object]) -> bytes:
     return json.dumps(value, separators=(",", ":")).encode("utf-8") + b"\n"
+
+
+_MULTI_MEMORY_EIDS = (17, 2, 29, 5)
+_MULTI_MOTIF_IDS = ("empty-motif-z", "empty-motif-a", "empty-motif-k")
 
 
 def _payload() -> dict[str, object]:
@@ -115,23 +120,35 @@ def carrier_fixture(tmp_path: Path):
     source.mkdir(parents=True)
     embeddings = source / "embeddings"
     embeddings.mkdir()
-    (source / "nodes.jsonl").write_bytes(_line({
-        "eid": 0, "born_step": 1, "channel": 1, "payload": _payload(),
-        "embedding_ref": {
-            "map": "embeddings/shard.map.jsonl", "shard": "embeddings/vectors.npy",
-            "row": 0, "dimension": 384, "dtype": "float32",
-        },
-    }))
-    np.save(embeddings / "vectors.npy", np.asarray([[1.0] + [0.0] * 383], dtype=np.float32))
+    (source / "nodes.jsonl").write_bytes(b"".join(
+        _line({
+            "eid": eid, "born_step": index + 1, "channel": 1, "payload": _payload(),
+            "embedding_ref": {
+                "map": "embeddings/shard.map.jsonl", "shard": "embeddings/vectors.npy",
+                "row": index, "dimension": 384, "dtype": "float32",
+            },
+        })
+        for index, eid in enumerate(_MULTI_MEMORY_EIDS)
+    ))
+    np.save(
+        embeddings / "vectors.npy",
+        np.asarray(
+            [[float(index + 1)] + [0.0] * 383 for index in range(len(_MULTI_MEMORY_EIDS))],
+            dtype=np.float32,
+        ),
+    )
     (embeddings / "manifest.json").write_bytes(_line({
         "encoding_id": "NUMPY_NPY", "dtype": "float32", "dimension": 384,
         "derivation_contract_version": "fixture-v1", "provider": "st",
         "model": "BAAI/bge-small-en-v1.5",
         "shards": [{"path": "embeddings/vectors.npy", "map": "embeddings/shard.map.jsonl"}],
     }))
-    (embeddings / "shard.map.jsonl").write_bytes(_line({
-        "eid": 0, "shard": "embeddings/vectors.npy", "row": 0, "dimension": 384,
-    }))
+    (embeddings / "shard.map.jsonl").write_bytes(b"".join(
+        _line({
+            "eid": eid, "shard": "embeddings/vectors.npy", "row": index, "dimension": 384,
+        })
+        for index, eid in enumerate(_MULTI_MEMORY_EIDS)
+    ))
 
     key = RootScopeKey("ws", RootScopeKind.SHARED, domain_id="domain")
     empty_key = RootScopeKey("ws", RootScopeKind.PRIVATE, agent_id="empty-agent")
@@ -142,11 +159,14 @@ def carrier_fixture(tmp_path: Path):
     }), encoding="utf-8")
     motif_path = workspace / "domains" / "empty-domain" / "motifs.json"
     motif_path.parent.mkdir(parents=True)
-    motif_path.write_text(json.dumps({"motifs": {"empty-motif": {
-        "motif_id": "empty-motif", "domain_id": "empty-domain", "label": "empty motif",
-        "centroid": [1.0] + [0.0] * 383, "strength": 0.8, "stability_score": 0.8,
-        "contributing_agents": [], "created_ts": 1, "last_active_ts": 2, "members": [],
-    }}}), encoding="utf-8")
+    motif_path.write_text(json.dumps({"motifs": {
+        motif_id: {
+            "motif_id": motif_id, "domain_id": "empty-domain", "label": motif_id,
+            "centroid": [1.0] + [0.0] * 383, "strength": 0.8, "stability_score": 0.8,
+            "contributing_agents": [], "created_ts": 1, "last_active_ts": 2, "members": [],
+        }
+        for motif_id in _MULTI_MOTIF_IDS
+    }}), encoding="utf-8")
     owner = EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="domain")
     entries = tuple(
         capture_present_source_evidence(
@@ -379,14 +399,27 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     empty = next(item for item in scopes if item["scope_key"]["scope_kind"] == "PRIVATE")
     motif = next(item for item in scopes if item["scope_key"].get("domain_id") == "empty-domain")
     assert current["legacy_snapshot_id"] == selected_snapshot_id
-    assert current["b1"]["memories"][0]["eid"] == 0
-    assert current["b2"]["memories"][0]["eid"] == 0
+    assert [item["eid"] for item in current["b1"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert [item["eid"] for item in current["b2"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
     assert empty["b1"] == {"memories": [], "motifs": []}
     assert empty["b2"] == {"memories": []}
-    assert motif["b1"]["memories"] == [] and len(motif["b1"]["motifs"]) == 1
+    assert motif["b1"]["memories"] == []
+    assert [item["runtime_motif_id"] for item in motif["b1"]["motifs"]] == sorted(_MULTI_MOTIF_IDS)
     assert motif["b2"] == {"memories": []}
     assert recovered.snapshot_scope_count == 3
-    assert recovered.b1_memory_count == recovered.b2_memory_count == 1
+    assert recovered.b1_memory_count == recovered.b2_memory_count == len(_MULTI_MEMORY_EIDS)
+    current_input = next(
+        item for item in recovered.normalization_request.scope_inputs
+        if item.scope_key.domain_id == "domain"
+    )
+    assert [item.eid for item in current_input.b3a_requests] == sorted(_MULTI_MEMORY_EIDS)
+    assert len({item.idempotency_key for item in current_input.b3a_requests}) == len(_MULTI_MEMORY_EIDS)
+    motif_input = next(
+        item for item in recovered.normalization_request.scope_inputs
+        if item.scope_key.domain_id == "empty-domain"
+    )
+    assert [item.runtime_motif_id for item in motif_input.b4c_requests] == sorted(_MULTI_MOTIF_IDS)
+    assert len({item.idempotency_key for item in motif_input.b4c_requests}) == len(_MULTI_MOTIF_IDS)
     empty_input = next(
         item for item in recovered.normalization_request.scope_inputs
         if item.scope_key.scope_kind is RootScopeKind.PRIVATE
@@ -399,11 +432,150 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
         or empty_input.b4c_requests
     )
     assert p3_child_request_counts(recovered.normalization_request.scope_inputs) == {
-        "b3a": 1, "ordinary_b3b": 0, "metadata_less_b3b": 0,
-        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 1,
+        "b3a": 4, "ordinary_b3b": 0, "metadata_less_b3b": 0,
+        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 3,
     }
     result = NativeRootWideNormalizationService(connection).normalize(recovered.normalization_request)
     assert result.root_normalization_complete and result.root_normalization_ready
+
+
+def test_multi_object_recovery_replays_admitted_b1_without_new_snapshot_or_objects(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(
+            request,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    selected_record = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+    selected = next(
+        item for item in selected_record["scopes"]
+        if item["scope_key"].get("domain_id") == "domain"
+    )
+    selected_snapshot_id = selected["legacy_snapshot_id"]
+    selected_manifest_digest = selected["manifest_digest"]
+    selected_namespace_id = selected["legacy_source_namespace_id"]
+    selected_namespace_key = selected["legacy_source_namespace_key"]
+
+    # This is the real partial-recovery shape: B1 has committed, but no B1
+    # carrier payload has been written yet.
+    p3_source_admission._run_b1(connection, request, selected)
+    object_count_after_first_b1 = connection.execute("SELECT count(*) FROM objects").fetchone()[0]
+    p3_source_admission._run_b1(connection, request, selected)
+    assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == object_count_after_first_b1
+    persisted_before_recovery = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+    selected_before_recovery = next(
+        item for item in persisted_before_recovery["scopes"]
+        if item["scope_key"].get("domain_id") == "domain"
+    )
+    assert selected_before_recovery["b1"] is None
+    assert selected_before_recovery["b2"] == {"memories": []}
+
+    recovered = service.admit(request)
+    persisted_after_recovery = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+    selected_after_recovery = next(
+        item for item in persisted_after_recovery["scopes"]
+        if item["scope_key"].get("domain_id") == "domain"
+    )
+    assert selected_after_recovery["legacy_snapshot_id"] == selected_snapshot_id
+    assert selected_after_recovery["manifest_digest"] == selected_manifest_digest
+    assert selected_after_recovery["legacy_source_namespace_id"] == selected_namespace_id
+    assert selected_after_recovery["legacy_source_namespace_key"] == selected_namespace_key
+    assert [item["eid"] for item in selected_after_recovery["b1"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert [item["eid"] for item in selected_after_recovery["b2"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
+    assert recovered.b1_memory_count == recovered.b2_memory_count == len(_MULTI_MEMORY_EIDS)
+    current_input = next(
+        item for item in recovered.normalization_request.scope_inputs
+        if item.scope_key.domain_id == "domain"
+    )
+    assert [item.eid for item in current_input.b3a_requests] == sorted(_MULTI_MEMORY_EIDS)
+    assert len({item.idempotency_key for item in current_input.b3a_requests}) == len(_MULTI_MEMORY_EIDS)
+
+
+def test_multi_motif_carrier_evidence_composes_one_b4c_per_motif(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    result = NativeRootP3SourceAdmissionService(connection).admit(request)
+    scopes = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]["scopes"]
+    motif = next(item for item in scopes if item["scope_key"].get("domain_id") == "empty-domain")
+    assert [item["runtime_motif_id"] for item in motif["b1"]["motifs"]] == sorted(_MULTI_MOTIF_IDS)
+    motif_input = next(
+        item for item in result.normalization_request.scope_inputs
+        if item.scope_key.domain_id == "empty-domain"
+    )
+    assert len(motif_input.b4c_requests) == len(_MULTI_MOTIF_IDS)
+    assert len({item.idempotency_key for item in motif_input.b4c_requests}) == len(_MULTI_MOTIF_IDS)
+
+
+def test_unknown_identity_carrier_requires_exact_b1_eid_evidence_set(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    source_plan = request.source_scope_plans[0]
+    workspace_plan = request.description.workspace_plans[0]
+    unknown_description = replace(
+        request.description,
+        workspace_plans=(replace(
+            workspace_plan,
+            shared_materialized_scopes=(
+                replace(
+                    workspace_plan.shared_materialized_scopes[0],
+                    representation_disposition=RootRepresentationDisposition.UNKNOWN_IDENTITY,
+                ),
+                *workspace_plan.shared_materialized_scopes[1:],
+            ),
+        ),),
+        expected_census=replace(
+            request.description.expected_census,
+            representation_disposition_counts=tuple(
+                RepresentationDispositionCount(
+                    disposition,
+                    1 if disposition in {
+                        RootRepresentationDisposition.TARGET_COMPATIBLE,
+                        RootRepresentationDisposition.UNKNOWN_IDENTITY,
+                        RootRepresentationDisposition.NO_VECTOR,
+                    } else 0,
+                )
+                for disposition in RootRepresentationDisposition
+            ),
+        ),
+    )
+    nodes = next(
+        item for item in request.description.explicit_source_manifest.entries
+        if item.scope_key == source_plan.scope_key and item.semantic_role is EvidenceSemanticRole.NODES
+    )
+    vectors = next(
+        item for item in request.description.explicit_source_manifest.entries
+        if item.scope_key == source_plan.scope_key
+        and item.semantic_role is EvidenceSemanticRole.LEGACY_REPRESENTATION
+    )
+    incomplete_evidence = tuple(
+        MetadataLessPerEidEvidence(
+            scope_key=source_plan.scope_key,
+            eid=eid,
+            vector_evidence=vectors,
+            canonical_text_evidence=nodes,
+            dtype="float32",
+            shape=(384,),
+            metadata_less_source_evidence_identity=f"fixture-eid-{eid}",
+        )
+        for eid in sorted(_MULTI_MEMORY_EIDS)[:-1]
+    )
+    unknown_request = replace(
+        request,
+        description=unknown_description,
+        source_scope_plans=(
+            replace(
+                source_plan,
+                representation_disposition=RootRepresentationDisposition.UNKNOWN_IDENTITY,
+            ),
+            *request.source_scope_plans[1:],
+        ),
+        unknown_identity_evidence=incomplete_evidence,
+        carrier_directory=request.carrier_root.parent / "unknown-eid-mismatch",
+    )
+    with pytest.raises(
+        RootP3SourceAdmissionRefused,
+        match="P3_CARRIER_UNKNOWN_IDENTITY_EID_SET_MISMATCH",
+    ):
+        NativeRootP3SourceAdmissionService(connection).admit(unknown_request)
 
 
 def test_missing_p1_namespace_refuses_before_carrier_or_b1_mutation(carrier_fixture) -> None:
@@ -448,7 +620,7 @@ def test_recovery_refuses_manifest_key_that_contradicts_p1(carrier_fixture) -> N
     assert connection.execute("SELECT count(*) FROM legacy_snapshots").fetchone()[0] == 0
 
 
-def test_frozen_real_p3_child_shape_counts_remain_closed() -> None:
+def test_frozen_real_p3_pre_b1_scope_shape_counts_remain_closed() -> None:
     lane = _lane()
     plans: list[RootSourceScopePlan] = []
     unknown: list[MetadataLessPerEidEvidence] = []
@@ -500,9 +672,11 @@ def test_frozen_real_p3_child_shape_counts_remain_closed() -> None:
             RootRepresentationDisposition.NO_VECTOR, "d", lane,
         ))
     assert len(plans) == 154
-    assert planned_p3_child_request_counts(tuple(plans), tuple(unknown)) == {
-        "b3a": 47, "ordinary_b3b": 25, "metadata_less_b3b": 3,
-        "total_b3b": 28, "b4a": 0, "b4b": 0, "b4c": 47,
+    assert pre_b1_p3_scope_shape_counts(tuple(plans), tuple(unknown)) == {
+        "target_compatible_memory_scope_count": 47,
+        "ordinary_reembed_memory_scope_count": 25,
+        "unknown_identity_evidence_count": 3,
+        "motif_present_scope_count": 47,
     }
 
 

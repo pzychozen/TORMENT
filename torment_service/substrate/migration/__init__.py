@@ -190,7 +190,7 @@ from .root_p3_source_admission import (
     RootP3SourceAdmissionRequest,
     RootP3SourceAdmissionResult,
     p3_child_request_counts,
-    planned_p3_child_request_counts,
+    pre_b1_p3_scope_shape_counts,
 )
 from .existing_workspace_admission import (
     ExistingWorkspaceAdmissionDescriptor,
@@ -420,7 +420,7 @@ __all__ = [
     "RootP3SourceAdmissionRequest",
     "RootP3SourceAdmissionResult",
     "p3_child_request_counts",
-    "planned_p3_child_request_counts",
+    "pre_b1_p3_scope_shape_counts",
     "ExistingWorkspaceAdmissionDescriptor",
     "ExistingWorkspaceAdmissionRefused",
     "ExistingWorkspaceAdmissionState",

@@ -4,7 +4,7 @@
 
 ### Current repository state
 
-- **Real-root database convergence has completed successor P2 under the repaired durability contract.** The historical P2 envelope remains immutable with its predecessor payload record intentionally absent; a distinct successor envelope and its full writer-freeze evidence are durably present. The selector is `CUTOVER_PENDING` at generation 3, public deployment is `MAINTENANCE_ONLY`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is the next separately authorized phase.
+- **Real-root database convergence has completed successor P2 under the repaired durability contract.** The historical P2 envelope remains immutable with its predecessor payload record intentionally absent; a distinct successor envelope and its full writer-freeze evidence are durably present. The selector is `CUTOVER_PENDING` at generation 3, public deployment is `MAINTENANCE_ONLY`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is stopped partial after its first B1 transaction; preserved-carrier recovery is the next separately authorized operation.
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - **Blocker-5 is CLOSED.** The bounded Phase-7 native-memory substrate is qualified only for the compression/deep-disabled profile. The authoritative final record is [B5-A7 final closure](BLOCKER_5_A7_FINAL_CLOSURE.md), reconciling [7G5E4D write/lifecycle](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read cognition](7G5E4E_FINAL_CLOSURE.md), and B5-A1 through B5-A6.
@@ -62,15 +62,19 @@ CURRENT_CORE_EVER_ACTIVE = NO
 REAL_ROOT_P2_HISTORICAL_ATTEMPT = PASS_THEN_RECOVERY_ABORTED
 P2_RECOVERY_DURABILITY_REPAIR = QUALIFIED
 P2_PROCESS_LOSS_RECOVERY = QUALIFIED_AND_DURABLY_PRESENT
-REAL_ROOT_P3 = STOPPED_PREEXECUTION
-P3_B1_B2_CARRIER_GAP = CONFIRMED
+REAL_ROOT_P3 = STOPPED_PARTIAL
+P3A_SNAPSHOTS_SELECTED = 154
+P3_FIRST_B1_TRANSACTION = DURABLY_COMMITTED
+P3_SINGLE_CARDINALITY_CARRIER_DEFECT = CONFIRMED
 P3_B1_B2_CARRIER_REPAIR = QUALIFIED
 P3_P1_SOURCE_NAMESPACE_KEY_COLLISION = CONFIRMED
 P3_P1_SOURCE_NAMESPACE_KEY_BINDING_REPAIR = QUALIFIED
 P3_MODULE_IMPORT_CYCLE = CONFIRMED
 P3_MODULE_IMPORT_CYCLE_REPAIR = QUALIFIED
-REAL_ROOT_P3_RETRY = NEXT_SEPARATELY_AUTHORIZED_OPERATION
-P3 = RETRY_SEPARATELY_AUTHORIZED
+P3_MULTI_OBJECT_MULTI_MOTIF_CARRIER_REPAIR = QUALIFIED
+P3_PRESERVED_CARRIER_RECOVERY = NEXT_SEPARATELY_AUTHORIZED_OPERATION
+REAL_ROOT_P3_RETRY_EXECUTED = NO
+P3 = PRESERVED_CARRIER_RECOVERY_SEPARATELY_AUTHORIZED
 REAL_MEMORY_REEMBED_AUTHORIZED = NO
 P6_POINT_OF_NO_RETURN = PRESERVED
 REAL_PRODUCTION_CUTOVER_AUTHORIZED = NO
@@ -94,8 +98,10 @@ P2-only recovery abort, and successor P2. Its selector is `CUTOVER_PENDING`
 (generation 3), so public deployment is `MAINTENANCE_ONLY`; its core remains
 inert `STAGING / LEGACY_ACTIVE`, with `ever_active = NO` and no deployment
 witness. The successor envelope and its writer-freeze evidence have both been
-durably reread after simulated process loss. P3 is separately authorized work;
-no normalization or core/native activation has run.
+durably reread after simulated process loss. P3A selected 154 snapshots and
+its first B1 transaction committed before a carrier cardinality refusal; P3B,
+B3/B4 dispatch, normalization completion, and core/native activation did not
+run. The preserved-carrier recovery remains separately authorized.
 
 ### P8-R6 architecture freeze, Phase 9A/9B, and Phase 9C-R3 qualification
 
