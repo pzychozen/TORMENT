@@ -49,6 +49,7 @@ from torment_service.substrate.offline_cutover_controller import (
     OfflineCutoverController,
     OfflineCutoverRefused,
     OfflineCutoverStage,
+    RootAdmissionMode,
     RootOfflineCutoverRequest,
 )
 from torment_service.substrate.production_native_owner import (
@@ -328,6 +329,7 @@ def _build_disposable_root(
                 writer_evidence_digest=_digest(f"r1-writers-drained:{name}"),
             ),
             operator_cutover_key=f"post-i4-r1:{name}",
+            admission_mode=RootAdmissionMode.SYNTHETIC_V1_COMPAT,
         )
     finally:
         qualified.close()
@@ -425,7 +427,7 @@ def _activate_root_to_p7(
     controller = OfflineCutoverController()
     prepared = controller.prepare_root(request)
     assert prepared.stage is OfflineCutoverStage.PREPARED
-    pending = controller.enter_root_external_pending(request)
+    pending = controller.enter_compat_root_external_pending(request)
     assert pending.stage is OfflineCutoverStage.EXTERNAL_PENDING
     normalization = controller.normalize_root_under_external_fence(request)
     assert normalization.root_normalization_complete and normalization.root_normalization_ready
@@ -602,7 +604,7 @@ def test_r1_preactive_abort_census_and_manifest_refusal_arms(tmp_path: Path) -> 
     abort_request, abort_profile = _build_disposable_root(tmp_path, "r1-preactive-abort")
     abort_controller = OfflineCutoverController()
     abort_controller.prepare_root(abort_request)
-    abort_controller.enter_root_external_pending(abort_request)
+    abort_controller.enter_compat_root_external_pending(abort_request)
     abort_normalization = abort_controller.normalize_root_under_external_fence(abort_request)
     abort_controller.verify_root_completion(abort_request, abort_normalization)
     abort_controller.enter_root_core_pending(abort_request, abort_normalization)
@@ -635,7 +637,7 @@ def test_r1_preactive_abort_census_and_manifest_refusal_arms(tmp_path: Path) -> 
     drift_request, _drift_profile = _build_disposable_root(tmp_path, "r1-manifest-drift")
     drift_controller = OfflineCutoverController()
     drift_controller.prepare_root(drift_request)
-    drift_controller.enter_root_external_pending(drift_request)
+    drift_controller.enter_compat_root_external_pending(drift_request)
     drift_normalization = drift_controller.normalize_root_under_external_fence(drift_request)
     drift_controller.verify_root_completion(drift_request, drift_normalization)
     drift_controller.enter_root_core_pending(drift_request, drift_normalization)
@@ -649,13 +651,16 @@ def test_r1_preactive_abort_census_and_manifest_refusal_arms(tmp_path: Path) -> 
     assert drift_core.ever_active is False
 
 
-def test_r1_negative_root_public_topology_refuses_whole_root(tmp_path: Path) -> None:
+def test_r1_extra_private_lane_is_lawful_when_shared_lane_remains_admitted(tmp_path: Path) -> None:
     request, profile = _build_disposable_root(
         tmp_path, "r1-negative-public-topology", extra_private_in_north=True,
     )
     _controller, _normalization, _verified = _activate_root_to_p7(request)
     agreement = resolve_deployment_agreement(data_root=request.root, effective_profile=profile)
-    with pytest.raises(NativeProductionResourceOwnerError, match="topology"):
-        NativeProductionResourceOwner.from_native_agreement(
-            data_root=request.root, effective_profile=profile, agreement=agreement,
-        )
+    owner = NativeProductionResourceOwner.from_native_agreement(
+        data_root=request.root, effective_profile=profile, agreement=agreement,
+    )
+    try:
+        assert owner.authority_facts.core_id == request.native_staging_core_id
+    finally:
+        owner.close()

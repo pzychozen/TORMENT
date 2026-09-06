@@ -70,6 +70,7 @@ from .root_blocker5_binding import (
     RootGeometryDispositionPlan,
     RootWriterFreezeWitness,
     SyntheticRootDispositionAdapter,
+    build_real_root_v2_admission_envelope,
     build_root_admission_envelope,
     execute_synthetic_root_disposition_plan,
     frozen_root_geometry_disposition_plan,
@@ -93,6 +94,19 @@ class OfflineCutoverStage(str, Enum):
     CORE_PENDING = "CORE_PENDING"
     CORE_ACTIVE_EXTERNAL_PENDING = "CORE_ACTIVE_EXTERNAL_PENDING"
     NATIVE_ACTIVE = "NATIVE_ACTIVE"
+
+
+class RootAdmissionMode(str, Enum):
+    """The only controller-visible root P2 entry intents.
+
+    The ordinary root lifecycle is real-root-v2 and therefore always builds a
+    payload-bound writer-freeze envelope.  Historical generic envelopes remain
+    available only when a caller explicitly opts into synthetic/v1
+    compatibility.
+    """
+
+    REAL_ROOT_V2 = "REAL_ROOT_V2"
+    SYNTHETIC_V1_COMPAT = "SYNTHETIC_V1_COMPAT"
 
 
 @dataclass(frozen=True)
@@ -163,7 +177,7 @@ class OfflineCutoverRequest:
 
 @dataclass(frozen=True)
 class RootOfflineCutoverRequest:
-    """Synthetic root-wide form using the existing offline controller authority."""
+    """Typed root lifecycle request with an explicit real/compat P2 intent."""
 
     data_root: Path
     description: RootNativeProductionAdmissionDescription
@@ -176,6 +190,7 @@ class RootOfflineCutoverRequest:
     geometry_disposition_plan: RootGeometryDispositionPlan | None = None
     writer_freeze_evidence: RootWriterFreezeEvidencePayload | None = None
     writer_freeze_recheck: RootWriterFreezeRecheck | None = None
+    admission_mode: RootAdmissionMode = RootAdmissionMode.REAL_ROOT_V2
 
     def __post_init__(self) -> None:
         root = Path(self.data_root).expanduser().resolve()
@@ -199,6 +214,8 @@ class RootOfflineCutoverRequest:
             raise ValueError("root offline cutover runtime scopes must be typed")
         if not isinstance(self.writer_freeze, RootWriterFreezeWitness):
             raise ValueError("root offline cutover writer freeze must be typed")
+        if not isinstance(self.admission_mode, RootAdmissionMode):
+            raise ValueError("root offline cutover admission mode must be typed")
         if self.writer_freeze.data_root_identity != self.description.data_root_identity:
             raise ValueError("root writer freeze names another root")
         if self.writer_freeze_evidence is None:
@@ -207,8 +224,10 @@ class RootOfflineCutoverRequest:
         else:
             if not isinstance(self.writer_freeze_evidence, RootWriterFreezeEvidencePayload):
                 raise ValueError("root writer freeze evidence must be typed")
-            if not isinstance(self.writer_freeze_recheck, RootWriterFreezeRecheck):
-                raise ValueError("root writer freeze evidence requires a fresh recheck")
+            if self.writer_freeze_recheck is not None and not isinstance(
+                self.writer_freeze_recheck, RootWriterFreezeRecheck,
+            ):
+                raise ValueError("root writer freeze recheck must be typed")
             if self.writer_freeze_evidence.data_root_identity != self.description.data_root_identity:
                 raise ValueError("root writer freeze evidence names another root")
             if self.writer_freeze_evidence.external_owner_observation_digest != self.description.external_owner_observation_digest:
@@ -488,7 +507,25 @@ class OfflineCutoverController:
     def enter_root_external_pending(
         self, request: RootOfflineCutoverRequest,
     ) -> RootOfflineCutoverEvidence:
-        """P2: bind the root envelope in the existing selector pending state."""
+        """P2_REAL_ROOT: persist only a payload-bound real-root-v2 envelope."""
+
+        if request.admission_mode is not RootAdmissionMode.REAL_ROOT_V2:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_REAL_P2_MODE_REQUIRED")
+        return self._enter_root_external_pending(request)
+
+    def enter_compat_root_external_pending(
+        self, request: RootOfflineCutoverRequest,
+    ) -> RootOfflineCutoverEvidence:
+        """P2_COMPAT: explicit synthetic/v1 compatibility-only envelope path."""
+
+        if request.admission_mode is not RootAdmissionMode.SYNTHETIC_V1_COMPAT:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_COMPAT_P2_MODE_REQUIRED")
+        return self._enter_root_external_pending(request)
+
+    def _enter_root_external_pending(
+        self, request: RootOfflineCutoverRequest,
+    ) -> RootOfflineCutoverEvidence:
+        """Persist a prevalidated mode-specific envelope before selector change."""
 
         envelope = self._root_envelope(request)
         self._root_inert_core(request)
@@ -872,22 +909,27 @@ class OfflineCutoverController:
             with open_existing_native_core_connection(
                 request.normalization_request.native_core_database_path,
             ) as opened:
-                return build_root_admission_envelope(
-                    data_root=request.root,
-                    description=request.description,
-                    writer_freeze=request.writer_freeze,
-                    geometry_disposition_plan=request.resolved_geometry_disposition_plan,
-                    effective_profile=request.effective_profile,
-                    native_staging_core_id=request.native_staging_core_id,
-                    root_profile=request.root_profile,
-                    runtime_scopes=request.runtime_scopes,
-                    runtime_scope_plans=tuple(
+                arguments = {
+                    "data_root": request.root,
+                    "description": request.description,
+                    "writer_freeze": request.writer_freeze,
+                    "geometry_disposition_plan": request.resolved_geometry_disposition_plan,
+                    "effective_profile": request.effective_profile,
+                    "native_staging_core_id": request.native_staging_core_id,
+                    "root_profile": request.root_profile,
+                    "runtime_scopes": request.runtime_scopes,
+                    "runtime_scope_plans": tuple(
                         item.scope_plan for item in request.normalization_request.scope_inputs
                     ),
-                    connection=opened.connection,
-                    writer_freeze_evidence=request.writer_freeze_evidence,
-                    writer_freeze_recheck=request.writer_freeze_recheck,
-                )
+                    "connection": opened.connection,
+                    "writer_freeze_evidence": request.writer_freeze_evidence,
+                    "writer_freeze_recheck": request.writer_freeze_recheck,
+                }
+                if request.admission_mode is RootAdmissionMode.REAL_ROOT_V2:
+                    return build_real_root_v2_admission_envelope(**arguments)
+                if request.admission_mode is RootAdmissionMode.SYNTHETIC_V1_COMPAT:
+                    return build_root_admission_envelope(**arguments)
+                raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ADMISSION_MODE_UNKNOWN")
         except RootBlocker5BindingRefused as exc:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_ENVELOPE_REFUSED") from exc
         except Exception as exc:
@@ -1192,5 +1234,6 @@ __all__ = [
     "OfflineCutoverStage",
     "OfflineWriterDrainWitness",
     "RootOfflineCutoverEvidence",
+    "RootAdmissionMode",
     "RootOfflineCutoverRequest",
 ]

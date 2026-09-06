@@ -10,13 +10,18 @@ import pytest
 
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.deployment_core_maintenance import (
+    inspect_contained_core_deployment,
     read_root_admission_envelope_record,
     record_root_admission_envelope,
     record_root_disposition_execution,
 )
-from torment_service.substrate.deployment_selector import activate_selector_native
+from torment_service.substrate.deployment_selector import (
+    activate_selector_native,
+    read_selector_state,
+)
 from torment_service.substrate.deployment_types import (
     AdmissionCompletionWitness,
+    DeploymentState,
     QualifiedDeploymentProfile,
     completion_witness_from_payload,
 )
@@ -56,6 +61,7 @@ from torment_service.substrate.offline_cutover_controller import (
     OfflineCutoverController,
     OfflineCutoverRefused,
     OfflineCutoverStage,
+    RootAdmissionMode,
     RootOfflineCutoverRequest,
 )
 from torment_service.substrate.root_blocker5_binding import (
@@ -237,6 +243,7 @@ def _root_fixture(tmp_path: Path):
             writer_evidence_digest=_digest("writers-drained"),
         ),
         operator_cutover_key="post-i4-root-binding",
+        admission_mode=RootAdmissionMode.SYNTHETIC_V1_COMPAT,
     )
     normalization = RootNormalizationResult(
         recovery_witness=RootNormalizationRecoveryWitness(
@@ -270,7 +277,7 @@ def test_v1_decoder_remains_historical_and_v2_root_has_explicit_contract(tmp_pat
     request, normalization = _root_fixture(tmp_path)
     controller = OfflineCutoverController()
     controller.prepare_root(request)
-    controller.enter_root_external_pending(request)
+    controller.enter_compat_root_external_pending(request)
     verification = controller.verify_root_completion(request, normalization)
     assert verification.completion_verification is not None
     root_witness = verification.completion_verification.completion_witness
@@ -306,7 +313,7 @@ def test_synthetic_root_bridge_requires_post_p6_receipt_then_recovers_idempotent
     assert discovered.workspace_ids == ("ws-one",)
     assert discovered.materialized_scope_keys == ()
     prepared = controller.prepare_root(request)
-    pending = controller.enter_root_external_pending(request)
+    pending = controller.enter_compat_root_external_pending(request)
     assert prepared.stage is OfflineCutoverStage.PREPARED
     assert pending.stage is OfflineCutoverStage.EXTERNAL_PENDING
     monkeypatch.setattr(
@@ -510,7 +517,7 @@ def test_p4_and_immediately_pre_p6_refuse_missing_or_mismatched_envelope_record(
     request, normalization = _root_fixture(tmp_path)
     controller = OfflineCutoverController()
     controller.prepare_root(request)
-    controller.enter_root_external_pending(request)
+    controller.enter_compat_root_external_pending(request)
 
     import torment_service.substrate.offline_cutover_controller as controller_module
 
@@ -532,7 +539,7 @@ def test_root_pre_active_abort_restores_legacy_without_disposition_or_native_res
     request, normalization = _root_fixture(tmp_path)
     controller = OfflineCutoverController()
     controller.prepare_root(request)
-    controller.enter_root_external_pending(request)
+    controller.enter_compat_root_external_pending(request)
     controller.verify_root_completion(request, normalization)
     controller.enter_root_core_pending(request, normalization)
 
@@ -598,7 +605,7 @@ def test_f15_p2_refuses_tree_drift_against_frozen_writer_evidence(tmp_path: Path
     (frozen_request.root / "workspaces" / "ws-one" / "workspace_meta.json").write_bytes(b"tree-drift")
 
     with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
-        controller.enter_root_external_pending(frozen_request)
+        controller.enter_compat_root_external_pending(frozen_request)
 
 
 def test_frozen_writer_evidence_is_rechecked_at_p4_and_immediately_pre_p6(tmp_path: Path) -> None:
@@ -612,10 +619,165 @@ def test_frozen_writer_evidence_is_rechecked_at_p4_and_immediately_pre_p6(tmp_pa
     )
     controller = OfflineCutoverController()
     controller.prepare_root(frozen_request)
-    controller.enter_root_external_pending(frozen_request)
+    controller.enter_compat_root_external_pending(frozen_request)
     controller.verify_root_completion(frozen_request, normalization)
     controller.enter_root_core_pending(frozen_request, normalization)
     (frozen_request.root / "workspaces" / "ws-one" / "workspace_meta.json").write_bytes(b"tree-drift")
 
     with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
         controller.activate_root_core(frozen_request, normalization)
+
+
+def _real_request(request: RootOfflineCutoverRequest) -> RootOfflineCutoverRequest:
+    captured, recheck = _root_writer_freeze_evidence(request)
+    return replace(
+        request,
+        admission_mode=RootAdmissionMode.REAL_ROOT_V2,
+        writer_freeze=captured.witness,
+        writer_freeze_evidence=captured.payload,
+        writer_freeze_recheck=recheck,
+    )
+
+
+def _assert_no_real_p2_durable_effect(request: RootOfflineCutoverRequest) -> None:
+    inspection = inspect_contained_core_deployment(
+        data_root=request.root,
+        core_relative_path=request.core_relative_path,
+    )
+    assert inspection.core_role == "STAGING"
+    assert inspection.deployment_state is DeploymentState.LEGACY_ACTIVE
+    assert inspection.witness is None
+    assert inspection.latest_maintenance_id is None
+    assert not inspection.ever_active
+    with pytest.raises(DeploymentAuthorityError):
+        read_selector_state(data_root=request.root)
+
+
+def test_real_root_p2_refuses_witness_only_before_all_durable_effects(tmp_path: Path) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = replace(compat_request, admission_mode=RootAdmissionMode.REAL_ROOT_V2)
+    controller = OfflineCutoverController()
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
+        controller.enter_root_external_pending(real_request)
+
+    _assert_no_real_p2_durable_effect(real_request)
+    with pytest.raises(OfflineCutoverRefused, match="REAL_P2_MODE_REQUIRED"):
+        controller.enter_root_external_pending(compat_request)
+
+
+def test_real_root_p2_refuses_payload_without_recheck_before_all_durable_effects(tmp_path: Path) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    captured, _recheck = _root_writer_freeze_evidence(compat_request)
+    real_request = replace(
+        compat_request,
+        admission_mode=RootAdmissionMode.REAL_ROOT_V2,
+        writer_freeze=captured.witness,
+        writer_freeze_evidence=captured.payload,
+        writer_freeze_recheck=None,
+    )
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_REFUSED"):
+        OfflineCutoverController().enter_root_external_pending(real_request)
+
+    _assert_no_real_p2_durable_effect(real_request)
+
+
+def test_real_root_p2_refuses_stale_recheck_before_all_durable_effects(tmp_path: Path) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    assert real_request.writer_freeze_recheck is not None
+    stale_request = replace(
+        real_request,
+        writer_freeze_recheck=replace(
+            real_request.writer_freeze_recheck,
+            external_owner_observation_digest=_digest("stale-owner-observation"),
+        ),
+    )
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_(REFUSED|UNAVAILABLE)"):
+        OfflineCutoverController().enter_root_external_pending(stale_request)
+
+    _assert_no_real_p2_durable_effect(stale_request)
+
+
+def test_real_root_p2_refuses_stale_profile_prerequisite_before_all_durable_effects(
+    tmp_path: Path,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    stale_request = replace(
+        real_request,
+        root_profile=replace(real_request.root_profile, profile_generation=2),
+    )
+
+    with pytest.raises(OfflineCutoverRefused, match="ENVELOPE_(REFUSED|UNAVAILABLE)"):
+        OfflineCutoverController().enter_root_external_pending(stale_request)
+
+    _assert_no_real_p2_durable_effect(stale_request)
+
+
+def test_real_root_p2_records_strong_envelope_before_pending_and_refuses_downgrade(
+    tmp_path: Path,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    controller = OfflineCutoverController()
+
+    pending = controller.enter_root_external_pending(real_request)
+
+    assert pending.selector_state is not None
+    assert pending.selector_state.deployment_state is DeploymentState.CUTOVER_PENDING
+    record = read_root_admission_envelope_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=pending.envelope.digest,
+    )
+    assert record is not None
+    inspection = inspect_contained_core_deployment(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+    )
+    assert inspection.core_role == "STAGING"
+    assert inspection.deployment_state is DeploymentState.LEGACY_ACTIVE
+    assert inspection.witness is None
+    assert not inspection.ever_active
+
+    downgraded = replace(
+        real_request,
+        admission_mode=RootAdmissionMode.SYNTHETIC_V1_COMPAT,
+        writer_freeze_evidence=None,
+        writer_freeze_recheck=None,
+    )
+    with pytest.raises(OfflineCutoverRefused, match="PENDING_BINDING_MISMATCH"):
+        controller.normalize_root_under_external_fence(downgraded)
+
+
+def test_real_root_p2_retains_record_when_selector_transition_fails_then_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compat_request, _normalization = _root_fixture(tmp_path)
+    real_request = _real_request(compat_request)
+    controller = OfflineCutoverController()
+    expected = controller._root_envelope(real_request)
+
+    import torment_service.substrate.offline_cutover_controller as controller_module
+
+    def _interrupt_pending(**_kwargs):
+        raise DeploymentAuthorityError("synthetic selector interruption")
+
+    monkeypatch.setattr(controller_module, "begin_cutover_pending", _interrupt_pending)
+    with pytest.raises(DeploymentAuthorityError, match="selector interruption"):
+        controller.enter_root_external_pending(real_request)
+
+    assert read_root_admission_envelope_record(
+        data_root=real_request.root,
+        core_relative_path=real_request.core_relative_path,
+        root_admission_envelope_digest=expected.digest,
+    ) is not None
+    assert read_selector_state(data_root=real_request.root).deployment_state is DeploymentState.LEGACY_ACTIVE
+    monkeypatch.undo()
+    assert controller.enter_root_external_pending(
+        real_request,
+    ).selector_state.deployment_state is DeploymentState.CUTOVER_PENDING

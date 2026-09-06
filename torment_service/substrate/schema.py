@@ -11,6 +11,7 @@ import json
 import sqlite3
 import time
 from typing import Final
+from uuid import UUID
 
 from .errors import SubstrateConfigurationError, SubstrateSchemaCompatibilityError
 from .ids import generate_native_id, native_id_to_bytes
@@ -296,9 +297,25 @@ _V1_1_TO_V1_2_MAINTENANCE_DETAIL: Final[str] = json.dumps(
 )
 
 
-def create_schema(connection: sqlite3.Connection) -> SchemaMetadata:
-    """Create the current v1.2 schema, never upgrading an existing core."""
-    return _create_schema(connection, target_version=_CURRENT_SCHEMA_VERSION)
+def create_schema(
+    connection: sqlite3.Connection,
+    *,
+    core_id: UUID | None = None,
+) -> SchemaMetadata:
+    """Create the current v1.2 schema, never upgrading an existing core.
+
+    ``core_id`` is optional for historical callers.  A bounded bootstrap may
+    supply it to make the new inert core's identity explicit; an existing core
+    must then already have that exact identity.
+    """
+
+    if core_id is not None and not isinstance(core_id, UUID):
+        raise ValueError("core_id must be a UUID when supplied")
+    return _create_schema(
+        connection,
+        target_version=_CURRENT_SCHEMA_VERSION,
+        requested_core_id=core_id,
+    )
 
 
 def create_schema_v1(connection: sqlite3.Connection) -> SchemaMetadata:
@@ -311,7 +328,12 @@ def create_schema_v1_1(connection: sqlite3.Connection) -> SchemaMetadata:
     return _create_schema(connection, target_version=_SCHEMA_V1_1_VERSION)
 
 
-def _create_schema(connection: sqlite3.Connection, *, target_version: tuple[int, int]) -> SchemaMetadata:
+def _create_schema(
+    connection: sqlite3.Connection,
+    *,
+    target_version: tuple[int, int],
+    requested_core_id: UUID | None = None,
+) -> SchemaMetadata:
     if target_version not in {_SCHEMA_V1_VERSION, _SCHEMA_V1_1_VERSION, _CURRENT_SCHEMA_VERSION}:
         raise ValueError("target schema version is unsupported")
     _require_qualified_connection(connection)
@@ -324,9 +346,11 @@ def _create_schema(connection: sqlite3.Connection, *, target_version: tuple[int,
             raise SubstrateSchemaCompatibilityError(
                 "schema bootstrap requires an explicit versioned schema upgrade"
             )
+        if requested_core_id is not None and metadata.core_id != native_id_to_bytes(requested_core_id):
+            raise SubstrateSchemaCompatibilityError("existing core identity disagrees with bootstrap request")
         return metadata
 
-    core_id = native_id_to_bytes(generate_native_id())
+    core_id = native_id_to_bytes(requested_core_id or generate_native_id())
     now_ns = time.time_ns()
     connection.execute("BEGIN IMMEDIATE")
     try:
