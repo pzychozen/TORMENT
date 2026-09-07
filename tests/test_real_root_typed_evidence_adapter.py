@@ -44,6 +44,9 @@ from torment_service.substrate.migration.root_admission_description import (
     MaterializedScopePosture,
     RootRepresentationDisposition,
 )
+from torment_service.substrate.migration.root_p2_source_plan_recovery import (
+    recover_root_source_scope_plans,
+)
 from torment_service.substrate.migration.root_scope import RootScopeKey, RootScopeKind
 from torment_service.substrate.migration.runtime_readiness import LegacyVectorStrategy
 from torment_service.substrate.objects import NativeObjectService, ObjectState
@@ -373,7 +376,7 @@ def test_direct_metadata_less_six_workspace_family_is_explicitly_bound_and_close
         research = plans[(workspace_id, "SHARED", "research")]
         assert research.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
         assert research.representation_disposition is RootRepresentationDisposition.NO_VECTOR
-        assert research.motif_presence is SourceArtifactPresence.PRESENT
+        assert research.motif_presence is SourceArtifactPresence.ABSENT
         for domain_id in ("engineering", "operations", "creative", "meta"):
             plan = plans[(workspace_id, "SHARED", domain_id)]
             assert plan.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED
@@ -383,18 +386,14 @@ def test_direct_metadata_less_six_workspace_family_is_explicitly_bound_and_close
     declared = {item.scope_key.canonical_key: item for item in prepared.declared_empty_shared_evidence}
     assert len(declared) == 30
     assert all(item.shared_directory_observation.presence is SourceArtifactPresence.ABSENT for item in declared.values())
-    assert declared[("ws3", "SHARED", "research")].motif_observation.presence is SourceArtifactPresence.PRESENT
-    research_motif = next(
+    assert declared[("ws3", "SHARED", "research")].motif_observation.presence is SourceArtifactPresence.ABSENT
+    assert not [
         item
         for item in manifest.entries
         if item.scope_key is not None
         and item.scope_key.canonical_key == ("ws3", "SHARED", "research")
         and item.semantic_role is EvidenceSemanticRole.MOTIFS
-    )
-    assert research_motif.owner_class is SourceOwnerClass.MOTIF_SOURCE
-    assert research_motif.owner_boundary.boundary_kind.value == "DOMAIN"
-    assert research_motif.canonical_locator == "motifs.json"
-    assert research_motif.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+    ]
     assert {item.scope_key.canonical_key for item in prepared.unknown_identity_evidence} == {
         ("ws3", "PRIVATE", "a1"),
         ("ws4", "PRIVATE", "a1"),
@@ -962,6 +961,22 @@ def test_direct_preparation_reuses_source_grammar_and_allows_known_empty_shared_
     _write(shared / "unknown_canonical_source.json", "refuse")
     with pytest.raises(CorrectiveFreezePacketRefused, match="unclassified durable artifact"):
         adapter.prepare_direct_admission_source(data_root=root)
+
+
+def test_p2_source_plan_recovery_matches_disposable_adapter_output(tmp_path: Path) -> None:
+    """Recovery is a pure projection of the adapter's frozen P2 proposition."""
+
+    root, adapter = _fixture(tmp_path / "ordinary")
+    ordinary = adapter.prepare_direct_admission_source(data_root=root)
+    assert recover_root_source_scope_plans(ordinary.description) == ordinary.source_scope_plans
+
+    root, adapter = _orchard_empty_shared_fixture(tmp_path / "empty-shared")
+    empty_shared = adapter.prepare_direct_admission_source(data_root=root)
+    assert recover_root_source_scope_plans(empty_shared.description) == empty_shared.source_scope_plans
+
+    root, adapter = _direct_metadata_less_six_workspace_fixture(tmp_path / "metadata-less")
+    metadata_less = adapter.prepare_direct_admission_source(data_root=root)
+    assert recover_root_source_scope_plans(metadata_less.description) == metadata_less.source_scope_plans
 
 
 def test_direct_preparation_recognizes_only_top_level_native_control_plane_root(

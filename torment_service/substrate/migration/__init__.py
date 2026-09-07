@@ -292,6 +292,10 @@ from .root_admission_description import (
     WriterFreezeEvidenceState,
     representation_identity_matches_target,
 )
+from .root_p2_source_plan_recovery import (
+    RootP2SourcePlanRecoveryRefused,
+    recover_root_source_scope_plans,
+)
 
 __all__ = [
     "InventoryArtifact",
@@ -518,4 +522,6 @@ __all__ = [
     "WorkspaceTopologyCounts",
     "WriterFreezeEvidenceState",
     "representation_identity_matches_target",
+    "RootP2SourcePlanRecoveryRefused",
+    "recover_root_source_scope_plans",
 ]

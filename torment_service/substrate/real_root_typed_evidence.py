@@ -777,29 +777,13 @@ def _capture_declared_empty_shared_scope(
     shared_directory = SourceArtifactObservation(
         "shared", SourceArtifactPresence.ABSENT, "ABSENT", artifact_kind=SourceArtifactKind.DIRECTORY,
     )
-    motif_presence = SourceArtifactPresence.ABSENT
-    motif = SourceArtifactObservation("motifs.json", SourceArtifactPresence.ABSENT, "ABSENT")
+    # A declared-empty domain never projects a motif into the runtime plan,
+    # but an extant retained motif path must still be a regular file.
     if domain_path is not None:
         motif_path = domain_path / "motifs.json"
         if motif_path.exists() or motif_path.is_symlink():
-            motif_evidence = _capture_present(
-                root,
-                motif_path,
-                SourceOwnerClass.MOTIF_SOURCE,
-                EvidenceOwnerBoundary(workspace_id, EvidenceOwnerBoundaryKind.DOMAIN, domain_id=domain_id),
-                "motifs.json",
-                EvidenceSemanticRole.MOTIFS,
-                scope,
-            )
-            entries += (motif_evidence,)
-            motif_presence = SourceArtifactPresence.PRESENT
-            motif = SourceArtifactObservation(
-                "motifs.json",
-                SourceArtifactPresence.PRESENT,
-                "PRESENT",
-                motif_evidence.byte_length,
-                motif_evidence.sha256_hex,
-            )
+            _validate_regular_file(motif_path, "declared-empty shared motif")
+    motif = SourceArtifactObservation("motifs.json", SourceArtifactPresence.ABSENT, "ABSENT")
     key = f"declared-empty:{workspace_id}:{domain_id}"
     unsigned = {
         "workspace_id": workspace_id,
@@ -823,7 +807,7 @@ def _capture_declared_empty_shared_scope(
             RootRepresentationDisposition.NO_VECTOR,
             domain_id,
             target_lane,
-            motif_presence,
+            SourceArtifactPresence.ABSENT,
         ),
         evidence=DeclaredEmptySharedSourceEvidence(
             workspace_id,
