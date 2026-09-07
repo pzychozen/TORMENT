@@ -36,6 +36,7 @@ from ..errors import (
     SubstrateEvidenceIntegrityMismatch,
     SubstrateSnapshotManifestError,
 )
+from ..ids import native_id_from_bytes, native_id_to_bytes
 from ..runtime_binding import NativeRepresentationLane
 if TYPE_CHECKING:
     from ..corrective_freeze_packet import (
@@ -51,7 +52,20 @@ from .explicit_source_evidence import (
     resolve_explicit_source_evidence_path,
 )
 from .metadata_less_per_eid_legacy_source import qualify_metadata_less_per_eid_legacy_source
+from .admission import NativeLegacyObjectAdmissionService
+from .motif_admission import NativeLegacyMotifAdmissionService
 from .rehearsal import MigrationRehearsalConfig, NativeLegacyMigrationRehearsal
+from .partial_motif_authority import (
+    MotifSemanticDisposition,
+    NativePartialMotifAuthorityRetentionService,
+    PartialMotifAuthorityCertification,
+    PartialMotifAuthorityRefused,
+    PartialMotifRetentionRequest,
+    certify_partial_motif,
+    classify_frozen_motifs,
+    continuation_summary,
+    write_or_reload_continuation,
+)
 from .root_admission_description import (
     MaterializedScopePosture,
     RootNativeProductionAdmissionDescription,
@@ -187,6 +201,7 @@ class RootP3SourceAdmissionRequest:
     character_observation_authority: RootP3ExternalOwnerObservationAuthority | None = None
     character_witness_inputs: tuple[RootP3CharacterWitnessInput, ...] = ()
     character_continuation_carrier_directory: str | Path | None = None
+    partial_authority_continuation_directory: str | Path | None = None
     recovered_p2_explicit_source_manifest_digest: str | None = None
 
     def __post_init__(self) -> None:
@@ -271,6 +286,18 @@ class RootP3SourceAdmissionRequest:
             raise ValueError("Character witness inputs require a separate continuation carrier")
         if self.character_observation_authority is not None and self.character_continuation_carrier_directory is None:
             raise ValueError("Character authority requires a separate continuation carrier")
+        partial_carrier = self.partial_authority_continuation_directory
+        if partial_carrier is not None:
+            if not isinstance(partial_carrier, (str, Path)) or not str(partial_carrier).strip():
+                raise ValueError("partial_authority_continuation_directory must be an explicit path")
+            partial_path = Path(partial_carrier).expanduser().resolve()
+            if (
+                partial_path == root or root in partial_path.parents or partial_path == carrier
+                or partial_path in carrier.parents or carrier in partial_path.parents
+            ):
+                raise ValueError("partial authority continuation must be outside and separate from P3 carrier")
+            if not partial_path.parent.is_dir():
+                raise ValueError("partial authority continuation parent must already exist")
         source_by_key = {item.scope_key: item for item in self.source_scope_plans}
         bindings_by_key = {item.scope_key: item for item in self.scope_bindings}
         declared = {
@@ -332,6 +359,12 @@ class RootP3SourceAdmissionRequest:
         return Path(self.character_continuation_carrier_directory).expanduser().resolve()
 
     @property
+    def partial_authority_continuation_root(self) -> Path | None:
+        if self.partial_authority_continuation_directory is None:
+            return None
+        return Path(self.partial_authority_continuation_directory).expanduser().resolve()
+
+    @property
     def qualification_embedder_identity_to_lane(self) -> NativeRepresentationLane:
         identity = self.qualification_embedder_identity
         lane = self.description.target_representation_lane
@@ -352,6 +385,12 @@ class RootP3SourceAdmissionResult:
     b1_memory_count: int
     b2_memory_count: int
     child_request_counts: tuple[tuple[str, int], ...]
+    b1m_identity_universe_digest: str | None = None
+    b1f_total_motif_count: int = 0
+    b1f_exact_motif_count: int = 0
+    b1f_partial_motif_count: int = 0
+    b1f_zero_member_motif_count: int = 0
+    partial_authority_continuation_path: Path | None = None
 
 
 class NativeRootP3SourceAdmissionService:
@@ -385,20 +424,82 @@ class NativeRootP3SourceAdmissionService:
             raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
 
         ordered = _ordered_scope_entries(record)
-        b1_interrupted = False
+        # B1M is deliberately root-wide and object-only.  Motif files are
+        # present in frozen snapshots, but this pass never calls a motif owner.
         for entry in ordered:
-            if entry.get("b1") is None:
-                _run_b1(self._connection, request, entry)
-                entry["b1"] = _read_b1_evidence(
-                    self._connection, request, entry, character_bindings,
+            _run_b1m(self._connection, request, entry)
+        b1m = _seal_b1m_identity_universe(self._connection, request, record)
+        record["b1m"] = b1m
+        _write_record(request.record_path, record)
+        if _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_B1:
+            raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
+
+        # B1F is only legal after the complete B1M identity universe is
+        # sealed.  It yields an exact runtime motif or an external partial
+        # authority certificate, never a mixed motif.
+        _revalidate_b1m_identity_universe(self._connection, request, record)
+        b1f, partial_certifications = _run_b1f(
+            self._connection, request, record, b1m["identity_universe_digest"],
+        )
+        record["b1f"] = b1f
+        if b1f["blocking_motif_count"]:
+            _write_record(request.record_path, record)
+            raise RootP3SourceAdmissionRefused("P3_B1F_BLOCKING_QUARANTINE")
+        # Ordinary B1 evidence (representations, identity, and relationships)
+        # is resumed only after B1F.  Motif derivation remains excluded: B1F
+        # already owns the complete exact/partial terminal disposition.
+        refresh_b1_scopes = {
+            _scope_key_from_payload(entry.get("scope_key"))
+            for entry in ordered
+            if _b1_evidence_refresh_required(entry.get("b1"), record)
+        }
+        for entry in ordered:
+            if _scope_key_from_payload(entry.get("scope_key")) in refresh_b1_scopes:
+                _run_b1_nonmotif_evidence(self._connection, request, entry)
+        for entry in ordered:
+            if _scope_key_from_payload(entry.get("scope_key")) not in refresh_b1_scopes:
+                continue
+            previous_b1 = entry.get("b1")
+            memories = _read_b1_memory_evidence(
+                self._connection, request, entry, character_bindings,
+            )
+            completion = record.get("carrier_completion")
+            if isinstance(completion, dict) and completion.get("predecessor_b1_revalidation_pending"):
+                _revalidate_preexisting_b1_memory(previous_b1, memories)
+            scope_dispositions = _scope_b1f_dispositions(entry, b1f)
+            entry["b1"] = {
+                "memories": memories,
+                "motifs": [
+                    item["exact_motif"] for item in scope_dispositions
+                    if item.get("exact_motif") is not None
+                ],
+                "motif_dispositions": scope_dispositions,
+            }
+        completion = record.get("carrier_completion")
+        if isinstance(completion, dict) and completion.get("previous_b1_scope_reuse_candidate_count", 0):
+            completion["previous_b1_scope_reuse"] = "QUALIFIED"
+            completion["predecessor_b1_revalidation_pending"] = False
+        _write_record(request.record_path, record)
+
+        partial_continuation: Path | None = None
+        if partial_certifications:
+            if request.partial_authority_continuation_root is None:
+                raise RootP3SourceAdmissionRefused("P3_PARTIAL_AUTHORITY_CONTINUATION_REQUIRED")
+            predecessor_digest = (
+                _file_digest(request.predecessor_record_path)
+                if request.predecessor_record_path is not None
+                else _digest({"law": "P3_INITIAL_PARTIAL_CONTINUATION_V1", "record": record["root_description_digest"]})
+            )
+            try:
+                partial_continuation = write_or_reload_continuation(
+                    directory=request.partial_authority_continuation_root,
+                    predecessor_carrier_sha256=predecessor_digest,
+                    b1m_identity_universe_digest=b1m["identity_universe_digest"],
+                    b1f_disposition_digest=b1f["disposition_digest"],
+                    certifications=partial_certifications,
                 )
-                _write_record(request.record_path, record)
-                if (
-                    _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_B1
-                    and not b1_interrupted
-                ):
-                    raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
-                b1_interrupted = True
+            except PartialMotifAuthorityRefused as exc:
+                raise RootP3SourceAdmissionRefused(exc.code) from exc
 
         if character_bindings:
             for entry in ordered:
@@ -423,6 +524,7 @@ class NativeRootP3SourceAdmissionService:
 
         lose_response = _test_lose_response_after_b2
         for entry in ordered:
+            _revalidate_b1m_identity_universe(self._connection, request, record)
             source = _source_plan_for_key(request, _scope_key_from_payload(entry.get("scope_key")))
             memories, _motifs = _carrier_b1_evidence(entry, source, character_witnesses)
             b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
@@ -465,7 +567,10 @@ class NativeRootP3SourceAdmissionService:
                 _write_record(request.record_path, record)
             _require_b2_closure(memories, b2_by_eid)
 
-        normalization_request = _build_normalization_request(request, record, character_witnesses)
+        _revalidate_b1m_identity_universe(self._connection, request, record)
+        normalization_request = _build_normalization_request(
+            request, record, character_witnesses, partial_continuation,
+        )
         actual = p3_child_request_counts(normalization_request.scope_inputs)
         expected = _carrier_evidence_child_request_counts(request, record, character_witnesses)
         if actual != expected:
@@ -484,6 +589,12 @@ class NativeRootP3SourceAdmissionService:
                 for item in ordered
             ),
             child_request_counts=tuple(sorted(actual.items())),
+            b1m_identity_universe_digest=b1m["identity_universe_digest"],
+            b1f_total_motif_count=b1f["total_motif_count"],
+            b1f_exact_motif_count=b1f["exact_motif_count"],
+            b1f_partial_motif_count=b1f["partial_motif_count"],
+            b1f_zero_member_motif_count=b1f["zero_member_motif_count"],
+            partial_authority_continuation_path=partial_continuation,
         )
 
 
@@ -532,7 +643,7 @@ def p3_child_request_counts(
         raise ValueError("scope_inputs must be typed")
     result = {
         "b3a": 0, "ordinary_b3b": 0, "metadata_less_b3b": 0,
-        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0,
+        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0, "b4p": 0,
     }
     for item in scope_inputs:
         result["b3a"] += len(item.b3a_requests)
@@ -541,6 +652,7 @@ def p3_child_request_counts(
         result["b4a"] += len(item.b4a_requests)
         result["b4b"] += len(item.b4b_requests)
         result["b4c"] += len(item.b4c_requests)
+        result["b4p"] += len(item.b4p_requests)
     result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
     return result
 
@@ -697,10 +809,10 @@ def _complete_predecessor_record(
             "manifest_path": str(manifest_path),
             "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
             "manifest_digest": _file_digest(manifest_path),
-            # Re-read B1 under the completed evidence.  Native admission is
-            # idempotent on the preserved snapshot/EID identity, so this
-            # recovers rather than duplicates R1 objects.
-            "b1": None,
+            # Preserve the predecessor's B1 evidence only as a candidate for
+            # strict B1M revalidation.  The successor never treats the old
+            # motif-presence closure as authoritative; B1F replaces it.
+            "b1": predecessor_entry.get("b1"),
             "b2": {"memories": []},
         }
         scopes.append(scope)
@@ -722,6 +834,12 @@ def _complete_predecessor_record(
             "completed_snapshots": completed,
             "completed_manifests": [item["manifest_path"] for item in completed],
             "inherited_snapshots": inherited,
+            "previous_b1_scope_reuse_candidate_count": sum(
+                item.get("b1") is not None for item in predecessor_by_key.values()
+            ),
+            "predecessor_b1_revalidation_pending": any(
+                item.get("b1") is not None for item in predecessor_by_key.values()
+            ),
         },
     }
     _write_record(request.record_path, record)
@@ -964,7 +1082,25 @@ def _snapshot_relative_path(evidence: ExplicitSourceEvidence, scope: RootScopeKe
     raise RootP3SourceAdmissionRefused("P3_CARRIER_SOURCE_ROLE_UNSUPPORTED")
 
 
+def _run_b1m(connection: sqlite3.Connection, request: RootP3SourceAdmissionRequest, entry: dict[str, Any]) -> None:
+    """Run only current-state legacy node admission for one B1M scope."""
+
+    binding = request_binding(request, entry)
+    source = _source_plan_for_key(request, binding.scope_key)
+    if source.materialization_posture is not MaterializedScopePosture.MEMORY_GRAPH:
+        return
+    NativeLegacyObjectAdmissionService(connection).admit_nodes_current_state(
+        snapshot_root=Path(entry["snapshot_root"]),
+        manifest_path=Path(entry["manifest_path"]),
+        idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
+        object_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
+        unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
+    )
+
+
 def _run_b1(connection: sqlite3.Connection, request: RootP3SourceAdmissionRequest, entry: dict[str, Any]) -> None:
+    """Compatibility seam for older focused tests; production uses B1M/B1F."""
+
     binding = request_binding(request, entry)
     NativeLegacyMigrationRehearsal(connection).run(
         snapshot_root=Path(entry["snapshot_root"]),
@@ -975,11 +1111,252 @@ def _run_b1(connection: sqlite3.Connection, request: RootP3SourceAdmissionReques
             object_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
             relationship_identity_namespace_id=binding.scope_plan.membership_identity_namespace_id,
             unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
-            eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(
-                request, binding
-            ),
+            eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(request, binding),
         ),
     )
+
+
+def _run_b1_nonmotif_evidence(
+    connection: sqlite3.Connection, request: RootP3SourceAdmissionRequest, entry: dict[str, Any],
+) -> None:
+    """Resume established non-motif B1 evidence after root B1F."""
+
+    binding = request_binding(request, entry)
+    NativeLegacyMigrationRehearsal(connection).run(
+        snapshot_root=Path(entry["snapshot_root"]),
+        manifest_path=Path(entry["manifest_path"]),
+        config=MigrationRehearsalConfig(
+            native_core_id=request.expected_native_core_id,
+            idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
+            object_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
+            relationship_identity_namespace_id=binding.scope_plan.membership_identity_namespace_id,
+            unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
+            eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(request, binding),
+            include_motif_derivation=False,
+        ),
+    )
+
+
+def _seal_b1m_identity_universe(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    rows = _b1m_identity_universe_rows(connection, request, record)
+    evidence = {
+        "law": "P3_B1M_IDENTITY_UNIVERSE_DIGEST_V1",
+        "scope_closure": len(_ordered_scope_entries(record)),
+        "legacy_core_node_count": len(rows),
+        "eid_alias_count": len(rows),
+        "identity_universe_digest": _digest(rows),
+    }
+    prior = record.get("b1m")
+    if prior is not None and prior != evidence:
+        raise RootP3SourceAdmissionRefused("P3_B1M_IDENTITY_UNIVERSE_DRIFT")
+    return evidence
+
+
+def _revalidate_b1m_identity_universe(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+) -> None:
+    prior = _require_mapping(record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED")
+    current = _seal_b1m_identity_universe(connection, request, record)
+    if current != prior:
+        raise RootP3SourceAdmissionRefused("P3_B1M_IDENTITY_UNIVERSE_DRIFT")
+
+
+def _b1m_identity_universe_rows(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+) -> list[dict[str, Any]]:
+    source_by_key = {item.scope_key: item for item in request.source_scope_plans}
+    result: list[dict[str, Any]] = []
+    for entry in _ordered_scope_entries(record):
+        key = _scope_key_from_payload(entry.get("scope_key"))
+        if source_by_key[key].materialization_posture is not MaterializedScopePosture.MEMORY_GRAPH:
+            continue
+        binding = request_binding(request, entry)
+        rows = connection.execute(
+            """SELECT a.alias_value,a.object_id,o.object_kind,o.identity_namespace_id
+                 FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id
+                WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID'
+                  AND o.object_kind='LEGACY_CORE_NODE'
+                ORDER BY CAST(a.alias_value AS INTEGER),a.alias_value""",
+            (native_id_to_bytes(binding.scope_plan.legacy_source_namespace_id),),
+        ).fetchall()
+        if not rows:
+            raise RootP3SourceAdmissionRefused("P3_B1M_MEMORY_ALIAS_CLOSURE_MISMATCH")
+        for alias_value, object_id, object_kind, identity_namespace_id in rows:
+            try:
+                eid = int(alias_value)
+            except (TypeError, ValueError) as exc:
+                raise RootP3SourceAdmissionRefused("P3_B1M_MEMORY_ALIAS_INVALID") from exc
+            if str(eid) != alias_value or eid < 0:
+                raise RootP3SourceAdmissionRefused("P3_B1M_MEMORY_ALIAS_INVALID")
+            result.append({
+                "scope_key": key.identity_payload(),
+                "legacy_snapshot_id": entry["legacy_snapshot_id"],
+                "legacy_source_namespace_id": str(binding.scope_plan.legacy_source_namespace_id),
+                "eid": eid,
+                "object_id": str(native_id_from_bytes(object_id)),
+                "object_kind": object_kind,
+                "identity_namespace_id": str(native_id_from_bytes(identity_namespace_id)),
+            })
+    result.sort(key=lambda item: (
+        canonical_intent_text(item["scope_key"]), item["legacy_source_namespace_id"], item["eid"],
+    ))
+    if len({(item["legacy_source_namespace_id"], item["eid"]) for item in result}) != len(result):
+        raise RootP3SourceAdmissionRefused("P3_B1M_MEMORY_ALIAS_DUPLICATE")
+    return result
+
+
+def _run_b1f(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+    identity_universe_digest: str,
+) -> tuple[dict[str, Any], tuple[PartialMotifAuthorityCertification, ...]]:
+    """Classify every source motif against the sealed root alias universe."""
+
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
+    per_scope: list[dict[str, Any]] = []
+    certifications: list[PartialMotifAuthorityCertification] = []
+    counts = {item.value: 0 for item in MotifSemanticDisposition}
+    for entry in _ordered_scope_entries(record):
+        binding = request_binding(request, entry)
+        source_plan = _source_plan_for_key(request, binding.scope_key)
+        dispositions: list[dict[str, Any]] = []
+        if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
+            eligible = _eligible_member_source_namespace_ids(request, binding)
+            try:
+                classified = classify_frozen_motifs(
+                    connection,
+                    snapshot_root=Path(entry["snapshot_root"]),
+                    manifest_path=Path(entry["manifest_path"]),
+                    scope_key=binding.scope_key.identity_payload(),
+                    eligible_member_source_namespace_ids=eligible,
+                )
+            except PartialMotifAuthorityRefused as exc:
+                raise RootP3SourceAdmissionRefused(exc.code) from exc
+            normal = NativeLegacyMotifAdmissionService(connection).admit_motifs_current_state(
+                snapshot_root=Path(entry["snapshot_root"]),
+                manifest_path=Path(entry["manifest_path"]),
+                idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
+                motif_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
+                membership_identity_namespace_id=binding.scope_plan.membership_identity_namespace_id,
+                unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids=eligible,
+            )
+            normal_by_id: dict[str, Any] = {}
+            for item in normal.results:
+                if item.motif_id is not None:
+                    if item.motif_id in normal_by_id:
+                        raise RootP3SourceAdmissionRefused("P3_B1F_NORMAL_ADMISSION_DUPLICATE")
+                    normal_by_id[item.motif_id] = item
+            for classified_item in classified:
+                if classified_item.source is None:
+                    counts[MotifSemanticDisposition.BLOCKING_QUARANTINE.value] += 1
+                    dispositions.append({
+                        "motif_id": None,
+                        "domain_id": None,
+                        "disposition": MotifSemanticDisposition.BLOCKING_QUARANTINE.value,
+                        "blocking_code": classified_item.blocking_code,
+                    })
+                    continue
+                frozen = classified_item.source
+                normal_item = normal_by_id.get(frozen.motif_id)
+                if normal_item is None:
+                    raise RootP3SourceAdmissionRefused("P3_B1F_NORMAL_ADMISSION_MISSING")
+                item: dict[str, Any] = {
+                    "motif_id": frozen.motif_id,
+                    "domain_id": frozen.domain_id,
+                    "disposition": classified_item.disposition.value,
+                    "source_motif_payload_digest": frozen.source_motif_payload_digest,
+                }
+                counts[classified_item.disposition.value] += 1
+                if classified_item.disposition in {
+                    MotifSemanticDisposition.EXACT_ADMITTED,
+                    MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED,
+                }:
+                    if normal_item.admission_status != "ADMITTED" or normal_item.motif_object_id is None or normal_item.motif_revision_id is None:
+                        raise RootP3SourceAdmissionRefused("P3_B1F_EXACT_ADMISSION_MISMATCH")
+                    if len(normal_item.memberships) != len(frozen.ordered_occurrences):
+                        raise RootP3SourceAdmissionRefused("P3_B1F_EXACT_MEMBERSHIP_MISMATCH")
+                    item["exact_motif"] = {
+                        "runtime_motif_id": frozen.motif_id,
+                        "source_object_id": str(normal_item.motif_object_id),
+                        "r1_revision_id": str(normal_item.motif_revision_id),
+                    }
+                elif classified_item.disposition is MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED:
+                    if normal_item.admission_status == "ADMITTED" or normal_item.motif_object_id is not None or normal_item.memberships:
+                        raise RootP3SourceAdmissionRefused("P3_PARTIAL_MIXED_NATIVE_MEMBERSHIP")
+                    quarantine = connection.execute(
+                        "SELECT quarantine_record_id FROM legacy_quarantine_records WHERE admission_record_id=?",
+                        (native_id_to_bytes(normal_item.admission_record_id),),
+                    ).fetchone()
+                    certificate = certify_partial_motif(
+                        classified_item,
+                        b1m_identity_universe_digest=identity_universe_digest,
+                        normal_admission_record_id=normal_item.admission_record_id,
+                        normal_quarantine_record_id=None if quarantine is None else native_id_from_bytes(quarantine[0]),
+                    )
+                    certifications.append(certificate)
+                    item["partial_reason"] = classified_item.partial_reason.value if classified_item.partial_reason else None
+                    item["partial_certification_digest"] = certificate.digest
+                else:
+                    item["blocking_code"] = classified_item.blocking_code
+                dispositions.append(item)
+        per_scope.append({
+            "scope_key": binding.scope_key.identity_payload(),
+            "motif_dispositions": sorted(dispositions, key=lambda item: (str(item["motif_id"]), str(item["domain_id"]))),
+        })
+    ordered_scopes = sorted(per_scope, key=lambda item: canonical_intent_text(item["scope_key"]))
+    payload = {
+        "law": "P3_B1F_TERMINAL_MOTIF_DISPOSITION_V1",
+        "scope_dispositions": ordered_scopes,
+        "total_motif_count": sum(counts.values()),
+        "exact_motif_count": counts[MotifSemanticDisposition.EXACT_ADMITTED.value],
+        "partial_motif_count": counts[MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value],
+        "zero_member_motif_count": counts[MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value],
+        "blocking_motif_count": counts[MotifSemanticDisposition.BLOCKING_QUARANTINE.value],
+    }
+    payload["disposition_digest"] = _digest(payload)
+    return payload, tuple(sorted(certifications, key=lambda item: item.digest))
+
+
+def _scope_b1f_dispositions(entry: dict[str, Any], b1f: dict[str, Any]) -> list[dict[str, Any]]:
+    key = entry.get("scope_key")
+    matches = [item for item in _require_list(b1f.get("scope_dispositions"), "P3_B1F_SCOPE_DISPOSITIONS_REQUIRED") if item.get("scope_key") == key]
+    if len(matches) != 1:
+        raise RootP3SourceAdmissionRefused("P3_B1F_SCOPE_DISPOSITION_MISSING")
+    values = _require_list(matches[0].get("motif_dispositions"), "P3_B1F_MOTIF_DISPOSITIONS_REQUIRED")
+    return [dict(item) for item in values]
+
+
+def _revalidate_preexisting_b1_memory(
+    previous: object,
+    current: list[dict[str, Any]],
+) -> None:
+    """Reuse old scope evidence only when its memory facts remain exact."""
+
+    if previous is None:
+        return
+    prior = _require_mapping(previous, "P3_CARRIER_PREVIOUS_B1_EVIDENCE_INVALID")
+    prior_memories = list(_carrier_b1_memory_evidence(prior))
+    if prior_memories != current:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREVIOUS_B1_MEMORY_REVALIDATION_FAILED")
+
+
+def _b1_evidence_refresh_required(previous: object, record: dict[str, Any]) -> bool:
+    """A recovered successor preserves already-written current B1 evidence."""
+
+    completion = record.get("carrier_completion")
+    if isinstance(completion, dict) and completion.get("predecessor_b1_revalidation_pending"):
+        return True
+    return not isinstance(previous, dict) or "motif_dispositions" not in previous
 
 
 def _validated_character_bindings(
@@ -1266,12 +1643,14 @@ def _eligible_member_source_namespace_ids(
     return tuple(sorted(eligible, key=str))
 
 
-def _read_b1_evidence(
+def _read_b1_memory_evidence(
     connection: sqlite3.Connection,
     request: RootP3SourceAdmissionRequest,
     entry: dict[str, Any],
     character_bindings: dict[RootScopeKey, Any],
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
+    """Read B1 memory evidence only; motif disposition belongs to B1F."""
+
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     binding = request_binding(request, entry)
     source_plan = _source_plan_for_key(request, binding.scope_key)
@@ -1335,6 +1714,29 @@ def _read_b1_evidence(
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
     elif any(item.eid is not None for item in report.object_items):
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
+    return memories
+
+
+def _read_b1_evidence(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any],
+    character_bindings: dict[RootScopeKey, Any],
+) -> dict[str, Any]:
+    """Legacy compatibility reader; new production closure uses B1F records."""
+
+    _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
+    binding = request_binding(request, entry)
+    source_plan = _source_plan_for_key(request, binding.scope_key)
+    memories = _read_b1_memory_evidence(connection, request, entry, character_bindings)
+    report = NativeMigrationRuntimeReadinessPreflight(connection).run(
+        MigrationRuntimeReadinessRequest(
+            legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
+            expected_native_core_id=request.expected_native_core_id,
+            scope_plans=(binding.scope_plan,),
+            target_lane=request.description.target_representation_lane,
+        )
+    )
     motifs: list[dict[str, Any]] = []
     if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
         if not report.motif_items:
@@ -1381,9 +1783,21 @@ def _carrier_b1_evidence(
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
     _validate_character_b1_eid_agreement(entry, character_witnesses)
     if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
-        if not motifs:
+        dispositions = _carrier_b1_motif_dispositions(b1)
+        if not dispositions:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
-    elif motifs:
+        if any(item["disposition"] == MotifSemanticDisposition.BLOCKING_QUARANTINE.value for item in dispositions):
+            raise RootP3SourceAdmissionRefused("P3_B1F_BLOCKING_QUARANTINE")
+        exact_ids = {
+            item["motif_id"] for item in dispositions
+            if item["disposition"] in {
+                MotifSemanticDisposition.EXACT_ADMITTED.value,
+                MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value,
+            }
+        }
+        if exact_ids != {item["runtime_motif_id"] for item in motifs}:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_DISPOSITION_MISMATCH")
+    elif motifs or _carrier_b1_motif_dispositions(b1):
         raise RootP3SourceAdmissionRefused("P3_CARRIER_UNDECLARED_MOTIF_ADMITTED")
     return memories, motifs
 
@@ -1457,6 +1871,36 @@ def _carrier_b1_motif_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...]
     return tuple(sorted(result, key=lambda item: item["runtime_motif_id"]))
 
 
+def _carrier_b1_motif_dispositions(b1: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    values = _require_list(b1.get("motif_dispositions"), "P3_CARRIER_B1_MOTIF_DISPOSITIONS_REQUIRED")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    allowed = {item.value for item in MotifSemanticDisposition}
+    for value in values:
+        motif_id = value.get("motif_id")
+        disposition = value.get("disposition")
+        if not isinstance(motif_id, str) or not motif_id or disposition not in allowed or motif_id in seen:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MOTIF_DISPOSITION_INVALID")
+        if disposition == MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value:
+            if (
+                value.get("partial_reason") not in {"IDENTITY_AMBIGUOUS", "MULTIPLICITY_INCOMPATIBLE", "BOTH"}
+                or not isinstance(value.get("partial_certification_digest"), str)
+                or value.get("exact_motif") is not None
+            ):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_PARTIAL_DISPOSITION_INVALID")
+        elif disposition in {
+            MotifSemanticDisposition.EXACT_ADMITTED.value,
+            MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value,
+        }:
+            if not isinstance(value.get("exact_motif"), dict):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_EXACT_DISPOSITION_INVALID")
+        elif not isinstance(value.get("blocking_code"), str):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_BLOCKING_DISPOSITION_INVALID")
+        seen.add(motif_id)
+        result.append(dict(value))
+    return tuple(sorted(result, key=lambda item: item["motif_id"]))
+
+
 def _carrier_b2_memory_evidence(b2: dict[str, Any]) -> dict[int, dict[str, Any]]:
     memories = _require_list(b2.get("memories"), "P3_CARRIER_B2_MEMORY_EVIDENCE_REQUIRED")
     result: dict[int, dict[str, Any]] = {}
@@ -1479,6 +1923,7 @@ def _require_b2_closure(
 def _build_normalization_request(
     request: RootP3SourceAdmissionRequest, record: dict[str, Any],
     character_witnesses: dict[RootScopeKey, Any],
+    partial_continuation: Path | None,
 ) -> RootNormalizationRequest:
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     inputs: list[RootNormalizationScopeInput] = []
@@ -1487,6 +1932,9 @@ def _build_normalization_request(
         binding = request_binding(request, entry)
         source = _source_plan_for_key(request, binding.scope_key)
         memories, motifs = _carrier_b1_evidence(entry, source, character_witnesses)
+        motif_dispositions = _carrier_b1_motif_dispositions(
+            _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        )
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
         b2_by_eid = _carrier_b2_memory_evidence(b2)
         _require_b2_closure(memories, b2_by_eid)
@@ -1550,6 +1998,7 @@ def _build_normalization_request(
         b4a: list[MigrationRuntimeMotifProjectionRequest] = []
         b4b: list[MigrationRuntimeMotifRegeometryProjectionRequest] = []
         b4c: list[MigrationRuntimeZeroMemberMotifProjectionRequest] = []
+        b4p: list[PartialMotifRetentionRequest] = []
         if source.motif_presence is SourceArtifactPresence.PRESENT:
             for motif in motifs:
                 common_motif = dict(
@@ -1583,6 +2032,25 @@ def _build_normalization_request(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4B", str(motif["runtime_motif_id"])),
                     ))
+            for motif in motif_dispositions:
+                if motif["disposition"] != MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value:
+                    continue
+                if partial_continuation is None:
+                    raise RootP3SourceAdmissionRefused("P3_PARTIAL_AUTHORITY_CONTINUATION_REQUIRED")
+                digest = motif.get("partial_certification_digest")
+                if not isinstance(digest, str) or len(digest) != 64:
+                    raise RootP3SourceAdmissionRefused("P3_PARTIAL_CERTIFICATION_DIGEST_INVALID")
+                b4p.append(PartialMotifRetentionRequest(
+                    continuation_record_path=partial_continuation,
+                    certification_digest=digest,
+                    snapshot_root=Path(entry["snapshot_root"]),
+                    manifest_path=Path(entry["manifest_path"]),
+                    expected_native_core_id=request.expected_native_core_id,
+                    eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(request, binding),
+                    b1m_identity_universe_digest=_require_mapping(
+                        record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED",
+                    )["identity_universe_digest"],
+                ))
         inputs.append(RootNormalizationScopeInput(
             scope_key=binding.scope_key,
             scope_plan=binding.scope_plan,
@@ -1593,6 +2061,7 @@ def _build_normalization_request(
             b4a_requests=tuple(b4a),
             b4b_requests=tuple(b4b),
             b4c_requests=tuple(b4c),
+            b4p_requests=tuple(b4p),
         ))
     return RootNormalizationRequest(
         description=request.description,
@@ -1603,6 +2072,9 @@ def _build_normalization_request(
         qualification_embedder_identity=request.qualification_embedder_identity,
         b3b_embedder=request.b3b_embedder,
         post_write_configurations=request.post_write_configurations,
+        b1m_identity_universe_digest=_require_mapping(
+            record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED",
+        )["identity_universe_digest"],
     )
 
 
@@ -1642,7 +2114,7 @@ def _carrier_evidence_child_request_counts(
     unknown_by_scope_eid = _unknown_evidence_by_scope_eid(request)
     result = {
         "b3a": 0, "ordinary_b3b": 0, "metadata_less_b3b": 0,
-        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0,
+        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0, "b4p": 0,
     }
     for entry in _ordered_scope_entries(record):
         scope_key = _scope_key_from_payload(entry.get("scope_key"))
@@ -1671,6 +2143,12 @@ def _carrier_evidence_child_request_counts(
                 result["b4a"] += len(motifs)
             else:
                 result["b4b"] += len(motifs)
+            result["b4p"] += sum(
+                item["disposition"] == MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value
+                for item in _carrier_b1_motif_dispositions(
+                    _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+                )
+            )
     result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
     return result
 

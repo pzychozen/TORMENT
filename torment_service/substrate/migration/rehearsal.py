@@ -50,6 +50,7 @@ class MigrationRehearsalConfig:
     relationship_identity_namespace_id: UUID
     unknown_semantic_scope_id: UUID
     eligible_member_source_namespace_ids: tuple[UUID, ...] | None = None
+    include_motif_derivation: bool = True
 
     def __post_init__(self) -> None:
         values = self.eligible_member_source_namespace_ids
@@ -60,6 +61,8 @@ class MigrationRehearsalConfig:
             or len(set(values)) != len(values)
         ):
             raise ValueError("eligible_member_source_namespace_ids must be a non-empty unique UUID tuple")
+        if not isinstance(self.include_motif_derivation, bool):
+            raise ValueError("include_motif_derivation must be bool")
 
 
 @dataclass(frozen=True)
@@ -170,7 +173,7 @@ class NativeLegacyMigrationRehearsal:
             )
             family_counts.append(_count_results("CORE_EMBEDDING_REPRESENTATION", embeddings.results))
 
-        if any(PurePosixPath(locator).name == "motifs.json" for locator in locators):
+        if config.include_motif_derivation and any(PurePosixPath(locator).name == "motifs.json" for locator in locators):
             motifs = NativeLegacyMotifAdmissionService(self._connection).admit_motifs_current_state(
                 snapshot_root=snapshot_root,
                 manifest_path=manifest_path,

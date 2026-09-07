@@ -356,6 +356,112 @@ def carrier_fixture(tmp_path: Path):
         qualified.close()
 
 
+def test_p3_partial_motif_uses_b1f_certificate_and_b4p_null_projection(carrier_fixture) -> None:
+    """A duplicate source occurrence is retained, never partially admitted."""
+
+    connection, request = carrier_fixture
+    key = next(item.scope_key for item in request.scope_bindings if item.scope_key.domain_id == "domain")
+    motif_path = request.root / "workspaces" / "ws" / "domains" / "domain" / "motifs.json"
+    motif_path.parent.mkdir(parents=True, exist_ok=True)
+    motif_path.write_text(json.dumps({"motifs": {
+        "partial": {
+            "motif_id": "partial", "domain_id": "domain", "label": "partial",
+            "centroid": [1.0] + [0.0] * 383, "strength": .8, "stability_score": .7,
+            "contributing_agents": ["not-an-identity-proof"], "created_ts": 1,
+            "last_active_ts": 2, "members": [2, 2, 5],
+        },
+    }}), encoding="utf-8")
+    motif_evidence = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="domain"),
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS,
+        scope_key=key,
+    )
+    partial_request = replace(
+        request,
+        description=replace(
+            request.description,
+            explicit_source_manifest=RootEvidenceManifest(
+                (*request.description.explicit_source_manifest.entries, motif_evidence),
+            ),
+        ),
+        source_scope_plans=tuple(
+            replace(item, motif_presence=SourceArtifactPresence.PRESENT)
+            if item.scope_key == key else item
+            for item in request.source_scope_plans
+        ),
+        carrier_directory=request.carrier_root.parent / "partial-source-carrier",
+        partial_authority_continuation_directory=request.carrier_root.parent / "partial-continuation",
+        operation_key="p3-partial-authority-fixture",
+    )
+    result = NativeRootP3SourceAdmissionService(connection).admit(partial_request)
+    assert (
+        result.b1f_total_motif_count,
+        result.b1f_exact_motif_count,
+        result.b1f_partial_motif_count,
+        result.b1f_zero_member_motif_count,
+    ) == (4, 0, 1, 3)
+    assert result.partial_authority_continuation_path is not None
+    continuation = json.loads(result.partial_authority_continuation_path.read_text(encoding="utf-8"))["payload"]
+    certificate = continuation["partial_certifications"][0]["payload"]
+    assert certificate["authority"] == "PARTIAL_LEGACY_OCCURRENCE_AUTHORITY"
+    assert certificate["reason"] == "MULTIPLICITY_INCOMPATIBLE"
+    assert certificate["raw_occurrence_count"] == 3
+    assert certificate["ordered_occurrences"] == [
+        {"ordinal": 0, "raw_eid": 2}, {"ordinal": 1, "raw_eid": 2}, {"ordinal": 2, "raw_eid": 5},
+    ]
+    assert not {
+        "native_object_id", "candidate_object_ids", "candidate_namespace_ids",
+        "chosen_candidate", "resolution_status",
+    }.intersection(certificate)
+    source_namespace = next(
+        item.scope_plan.legacy_source_namespace_id
+        for item in partial_request.scope_bindings if item.scope_key == key
+    )
+    assert connection.execute(
+        "SELECT count(*) FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND alias_value='partial'",
+        (native_id_to_bytes(source_namespace),),
+    ).fetchone()[0] == 0
+    assert connection.execute("SELECT count(*) FROM relationships WHERE relationship_kind='MOTIF_MEMBERSHIP'").fetchone()[0] == 0
+
+    normalized = NativeRootWideNormalizationService(connection).normalize(result.normalization_request)
+    assert normalized.root_normalization_complete is True
+    assert normalized.root_normalization_ready is False
+    assert normalized.partial_motif_authority_closure is True
+    assert normalized.p3_completion_class == "PARTIAL_MOTIF_AUTHORITY_READY"
+    continuation = json.loads(result.partial_authority_continuation_path.read_text(encoding="utf-8"))["payload"]
+    assert continuation["b4p_proofs"] == [{
+        "partial_certification_digest": continuation["partial_certifications"][0]["digest"],
+        "source_motif_payload_digest": certificate["source_motif_payload_digest"],
+        "b1m_identity_universe_digest": certificate["b1m_identity_universe_digest"],
+        "derived_motif_count": 0,
+        "motif_id_alias_count": 0,
+        "membership_count": 0,
+    }]
+
+
+def test_b1m_never_calls_motif_admission(carrier_fixture, monkeypatch) -> None:
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(request, _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION)
+    record = json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+    entry = next(item for item in record["scopes"] if item["scope_key"].get("domain_id") == "domain")
+
+    class _ForbiddenMotifAdmission:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise AssertionError("B1M must not instantiate motif admission")
+
+    monkeypatch.setattr(p3_source_admission, "NativeLegacyMotifAdmissionService", _ForbiddenMotifAdmission)
+    p3_source_admission._run_b1m(connection, request, entry)
+    namespace = UUID(entry["legacy_source_namespace_id"])
+    assert connection.execute(
+        "SELECT count(*) FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='EID'",
+        (native_id_to_bytes(namespace),),
+    ).fetchone()[0] == len(_MULTI_MEMORY_EIDS)
+
+
 def test_wrong_p1_plan_shape_remains_an_invalid_snapshot_manifest(tmp_path: Path) -> None:
     plan = tmp_path / "p1-bootstrap-plan.json"
     plan.write_text('{"runtime_scopes": []}\n', encoding="utf-8")
@@ -516,7 +622,7 @@ def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fall
     assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
     assert p3_child_request_counts(result.normalization_request.scope_inputs) == {
         "b3a": 4, "ordinary_b3b": 2, "metadata_less_b3b": 0, "total_b3b": 2,
-        "b4a": 1, "b4b": 0, "b4c": len(_MULTI_MOTIF_IDS),
+        "b4a": 1, "b4b": 0, "b4c": len(_MULTI_MOTIF_IDS), "b4p": 0,
     }
     dispatched_eids = [
         item.eid for scope_input in result.normalization_request.scope_inputs
@@ -771,16 +877,13 @@ def test_p3_character_witness_preserves_raw_occurrences_without_rewriting_generi
     )
 
     # The Character predicate accepts the raw occurrence sequence.  The
-    # existing generic motif reader independently refuses it for ordinary
-    # motif routing, so P3 stops at that distinct later blocker instead of
-    # rewriting either generic motif-domain authority or the witness evidence.
-    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH"):
+    # The B1F predicate independently finds a zero candidate, so P3 stops at
+    # terminal blocking quarantine without rewriting Character witness bytes.
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_B1F_BLOCKING_QUARANTINE"):
         NativeRootP3SourceAdmissionService(connection).admit(character_request)
     record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
     private = next(item for item in record["scopes"] if item["scope_key"].get("agent_id") == "empty-agent")
-    assert [(item["eid"], item["normalization_kind"]) for item in private["b1"]["memories"]] == [
-        (101, "CHARACTER_SEED"), (102, "CHARACTER_SEED"),
-    ]
+    assert private["b1"] is None
     private_binding = next(item for item in character_request.scope_bindings if item.scope_key == character_request.character_witness_inputs[0].scope_key)
     assert private_binding.scope_plan.motif_domain_id is None
 
@@ -946,7 +1049,7 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     empty = next(item for item in scopes if item["scope_key"]["scope_kind"] == "PRIVATE")
     assert selected["legacy_snapshot_id"] == selected_snapshot_id
     assert selected["b1"] is None and selected["b2"]["memories"] == []
-    assert empty["b1"] == {"memories": [], "motifs": []}
+    assert empty["b1"] is None
     with pytest.raises(RuntimeError, match="forced response loss after committed normalization"):
         service.admit(request, _test_lose_response_after_b2=True)
     recovered = service.admit(request)
@@ -960,7 +1063,7 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
         item["legacy_vector_strategy"] for item in current["b1"]["memories"]
     } == {"BYTE_DERIVATION_POSSIBLE"}
     assert [item["eid"] for item in current["b2"]["memories"]] == sorted(_MULTI_MEMORY_EIDS)
-    assert empty["b1"] == {"memories": [], "motifs": []}
+    assert empty["b1"] == {"memories": [], "motifs": [], "motif_dispositions": []}
     assert empty["b2"] == {"memories": []}
     assert motif["b1"]["memories"] == []
     assert [item["runtime_motif_id"] for item in motif["b1"]["motifs"]] == sorted(_MULTI_MOTIF_IDS)
@@ -992,7 +1095,7 @@ def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_f
     )
     assert p3_child_request_counts(recovered.normalization_request.scope_inputs) == {
         "b3a": 4, "ordinary_b3b": 0, "metadata_less_b3b": 0,
-        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 3,
+        "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 3, "b4p": 0,
     }
     result = NativeRootWideNormalizationService(connection).normalize(recovered.normalization_request)
     assert result.root_normalization_complete and result.root_normalization_ready
@@ -1075,7 +1178,7 @@ def test_per_eid_legacy_vector_strategy_routes_mixed_b3a_and_b3b(carrier_fixture
     assert [item.eid for item in scope.b3b_requests] == [17, 29]
     assert p3_child_request_counts(routed.normalization_request.scope_inputs) == {
         "b3a": 2, "ordinary_b3b": 2, "metadata_less_b3b": 0,
-        "total_b3b": 2, "b4a": 0, "b4b": 0, "b4c": 3,
+        "total_b3b": 2, "b4a": 0, "b4b": 0, "b4c": 3, "b4p": 0,
     }
 
 
