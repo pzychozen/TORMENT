@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from uuid import UUID
@@ -12,6 +13,8 @@ import pytest
 
 import torment_service.substrate.migration.root_p3_source_admission as p3_source_admission
 from torment_service.provenance_v1 import ProvenanceV1
+from torment_service.character import CharacterSeed, CharacterStore, _split_seed_text
+from torment_service.substrate.character_seed_witness import read_legacy_character_seed_witness
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration import (
@@ -21,6 +24,8 @@ from torment_service.substrate.migration import (
     EvidencePresenceExpectation,
     EvidenceSemanticRole,
     ExpectedRootCensus,
+    ExternalOwnerObservation,
+    ExternalOwnerObservationKind,
     ExplicitSourceEvidence,
     IdentityOnlyAgentObservation,
     MaterializedRootScopePlan,
@@ -35,6 +40,8 @@ from torment_service.substrate.migration import (
     RootNativeProductionAdmissionDescription,
     RootNormalizationScopeInput,
     RootP3ScopeBinding,
+    RootP3CharacterWitnessInput,
+    RootP3ExternalOwnerObservationAuthority,
     RootP3SourceAdmissionInterrupted,
     RootP3SourceAdmissionInterruptionPoint,
     RootP3SourceAdmissionRefused,
@@ -351,6 +358,290 @@ def test_wrong_p1_plan_shape_remains_an_invalid_snapshot_manifest(tmp_path: Path
     plan.write_text('{"runtime_scopes": []}\n', encoding="utf-8")
     with pytest.raises(SubstrateSnapshotManifestError, match="schema version is incompatible"):
         load_snapshot_manifest(plan)
+
+
+def _character_p3_request(
+    connection, request: RootP3SourceAdmissionRequest, *, motif_members: list[int] | None = None,
+) -> tuple[RootP3SourceAdmissionRequest, bytes]:
+    """Turn the disposable private-empty scope into a frozen Character source."""
+
+    scope = next(item.scope_key for item in request.scope_bindings if item.scope_key.agent_id == "empty-agent")
+    private = request.root / "workspaces" / "ws" / "agents" / "empty-agent" / "private"
+    private.mkdir(parents=True)
+    seed = CharacterSeed(
+        "p3-character-seed-v1", "P3 Character",
+        "A first P3 Character concept. A second P3 Character concept.", owner_agent_id="empty-agent",
+    )
+    concepts = _split_seed_text(seed.seed_text)
+    seed.seed_eids = [101, 102]
+    seed.seed_motif_id = "p3-character-motif"
+    seed.created_ts = 1
+    CharacterStore(str(request.root)).save_seed("ws", seed)
+    seed_bytes = (request.root / "workspaces" / "ws" / "seeds" / seed.seed_id / "seed.json").read_bytes()
+    payloads = [
+        {
+            "summary": concept, "type": "seed_canon", "mtype": "seed_canon", "memory_class": "core",
+            "strength": .95, "confidence": .95, "half_life": seed.core_half_life, "canon": True,
+            "user_id": "empty-agent", "created_at": 1, "created_ts": 1, "last_reinforced": 1,
+            "seed_id": seed.seed_id, "character_name": seed.character_name, "tier": "core_identity",
+            "seed_concept_index": index,
+            "lifecycle_status": {"state": "protected", "is_authoritative_on_row": True, "requires_join": None,
+                                 "set_by": {"actor": "system", "via": "canon_set", "at": 1}, "history_ref": None},
+        }
+        for index, concept in enumerate(concepts)
+    ]
+    (private / "nodes.jsonl").write_bytes(b"".join(
+        _line({"eid": eid, "born_step": index + 1, "channel": 1, "payload": payload,
+               "embedding_ref": {"shard": 0, "row": index, "dim": 384}})
+        for index, (eid, payload) in enumerate(zip(seed.seed_eids, payloads, strict=True))
+    ))
+    embeddings = private / "embeddings"
+    embeddings.mkdir()
+    np.save(embeddings / "shard_000000.npy", np.asarray(
+        [[1.0] + [0.0] * 383, [0.0, 1.0] + [0.0] * 382], dtype=np.float32,
+    ))
+    (embeddings / "manifest.json").write_bytes(_line({
+        "version": 1, "embedding_dim": 384, "dtype": "float32", "rows_per_shard": 2,
+        "active_shard": 0, "next_row": 2, "total_rows": 2,
+    }))
+    (embeddings / "shard_000000.map.jsonl").write_bytes(b"".join(
+        _line({"eid": eid, "row": index, "dimension": 384})
+        for index, eid in enumerate(seed.seed_eids)
+    ))
+    motifs = request.root / "workspaces" / "ws" / "domains" / "domain" / "motifs.json"
+    motifs.parent.mkdir(parents=True, exist_ok=True)
+    motifs.write_text(json.dumps({"motifs": {
+        seed.seed_motif_id: {
+            "motif_id": seed.seed_motif_id, "domain_id": "domain", "label": "P3 Character",
+            "centroid": [1.0] + [0.0] * 383, "strength": .8, "stability_score": .8,
+            "contributing_agents": ["empty-agent"], "created_ts": 1, "last_active_ts": 1,
+            "members": seed.seed_eids if motif_members is None else motif_members,
+        },
+    }}), encoding="utf-8")
+    witness = read_legacy_character_seed_witness(
+        workspace_root=request.root / "workspaces" / "ws", workspace_id="ws", agent_id="empty-agent",
+        domain_id="domain", requested_seed_id=seed.seed_id,
+    )
+    private_owner = EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id="empty-agent")
+    shared_key = next(item.scope_key for item in request.scope_bindings if item.scope_key.domain_id == "domain")
+    motif_owner = EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="domain")
+    private_evidence = tuple(
+        capture_present_source_evidence(
+            data_root=request.root, owner_class=owner_class, owner_boundary=private_owner,
+            canonical_locator=locator, semantic_role=role, scope_key=scope,
+        )
+        for owner_class, locator, role in (
+            (SourceOwnerClass.PRIVATE_GRAPH_SOURCE, "nodes.jsonl", EvidenceSemanticRole.NODES),
+            (SourceOwnerClass.EMBEDDING_MANIFEST, "embeddings/manifest.json", EvidenceSemanticRole.EMBEDDING_MANIFEST),
+            (SourceOwnerClass.EMBEDDING_SHARD_OR_MAP, "embeddings/shard_000000.map.jsonl", EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP),
+            (SourceOwnerClass.LEGACY_REPRESENTATION_ARTIFACT, "embeddings/shard_000000.npy", EvidenceSemanticRole.LEGACY_REPRESENTATION),
+        )
+    )
+    motif_evidence = capture_present_source_evidence(
+        data_root=request.root, owner_class=SourceOwnerClass.MOTIF_SOURCE, owner_boundary=motif_owner,
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS, scope_key=shared_key,
+    )
+    observation = ExternalOwnerObservation(
+        "ws", ExternalOwnerObservationKind.CHARACTER, f"seed:{seed.seed_id}",
+        hashlib.sha256(seed_bytes).hexdigest(),
+    )
+    workspace = request.description.workspace_plans[0]
+    description = replace(
+        request.description,
+        workspace_plans=(replace(
+            workspace,
+            private_materialized_scopes=(MaterializedRootScopePlan(
+                scope, RootRepresentationDisposition.TARGET_COMPATIBLE,
+            ),),
+            identity_only_agents=(),
+        ),),
+        expected_census=replace(
+            request.description.expected_census,
+            empty_private_identity_scope_count=0,
+            representation_disposition_counts=tuple(
+                RepresentationDispositionCount(
+                    disposition, 3 if disposition is RootRepresentationDisposition.TARGET_COMPATIBLE else 0,
+                ) for disposition in RootRepresentationDisposition
+            ),
+        ),
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            item for item in request.description.explicit_source_manifest.entries
+            if item.scope_key != scope and not (
+                item.scope_key == shared_key and item.semantic_role is EvidenceSemanticRole.MOTIFS
+            )
+        ) + private_evidence + (motif_evidence,)),
+        external_owner_observations=(observation,),
+    )
+    binding = next(item for item in request.scope_bindings if item.scope_key == scope)
+    private_plan = replace(binding.scope_plan, motif_domain_id="domain")
+    authority = RootP3ExternalOwnerObservationAuthority(
+        "0" * 64, description.external_owner_observation_digest, (observation,),
+    )
+    return replace(
+        request,
+        description=description,
+        source_scope_plans=tuple(
+            replace(item, materialization_posture=MaterializedScopePosture.MEMORY_GRAPH,
+                    representation_disposition=RootRepresentationDisposition.TARGET_COMPATIBLE,
+                    motif_domain_id="domain") if item.scope_key == scope else
+            replace(item, motif_presence=SourceArtifactPresence.PRESENT) if item.scope_key == shared_key else item
+            for item in request.source_scope_plans
+        ),
+        scope_bindings=tuple(
+            replace(item, scope_plan=private_plan) if item.scope_key == scope else item
+            for item in request.scope_bindings
+        ),
+        carrier_directory=request.carrier_root.parent / "character-source-carrier",
+        operation_key="p3-character-source-carrier",
+        character_observation_authority=authority,
+        character_witness_inputs=(RootP3CharacterWitnessInput(
+            scope, private_plan.legacy_source_namespace_id, seed_bytes, witness.descriptor_payload(),
+        ),),
+        character_continuation_carrier_directory=request.carrier_root.parent / "character-continuation",
+    ), seed_bytes
+
+
+def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fallback(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    result = NativeRootP3SourceAdmissionService(connection).admit(character_request)
+    record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
+    entry = next(item for item in record["scopes"] if item["scope_key"].get("agent_id") == "empty-agent")
+    assert [(item["eid"], item["normalization_kind"]) for item in entry["b1"]["memories"]] == [
+        (101, "CHARACTER_SEED"), (102, "CHARACTER_SEED"),
+    ]
+    assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+    assert p3_child_request_counts(result.normalization_request.scope_inputs) == {
+        "b3a": 4, "ordinary_b3b": 2, "metadata_less_b3b": 0, "total_b3b": 2,
+        "b4a": 1, "b4b": 0, "b4c": len(_MULTI_MOTIF_IDS),
+    }
+    dispatched_eids = [
+        item.eid for scope_input in result.normalization_request.scope_inputs
+        for item in (*scope_input.b3a_requests, *scope_input.b3b_requests)
+    ]
+    assert len(dispatched_eids) == len(set(dispatched_eids)) == len(_MULTI_MEMORY_EIDS) + 2
+    provenance = connection.execute(
+        """SELECT a.alias_value,p.origin_kind FROM legacy_object_aliases a
+               JOIN objects o ON o.object_id=a.object_id
+               JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+               JOIN provenance_records p ON p.provenance_id=r.provenance_id
+             WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' ORDER BY a.alias_value""",
+        (native_id_to_bytes(next(item.scope_plan.legacy_source_namespace_id for item in character_request.scope_bindings if item.scope_key.agent_id == "empty-agent")),),
+    ).fetchall()
+    assert provenance == [("101", "CHARACTER_SEED_PLANT"), ("102", "CHARACTER_SEED_PLANT")]
+    continuation = character_request.character_continuation_carrier_root / "p3_character_seed_witness_continuation.json"
+    assert continuation.is_file()
+    counts = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
+        "objects", "object_revisions", "provenance_records", "operations",
+    ))
+    descriptor_recovery = replace(character_request, character_witness_inputs=())
+    assert NativeRootP3SourceAdmissionService(connection).admit(descriptor_recovery).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+    assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
+        "objects", "object_revisions", "provenance_records", "operations",
+    )) == counts
+    entry["b1"]["memories"][0]["normalization_kind"] = "ORDINARY"
+    p3_source_admission._write_record(character_request.record_path, record)
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
+        NativeRootP3SourceAdmissionService(connection).admit(character_request)
+
+
+def test_p3_character_witness_motif_occurrences_do_not_multiply_b2(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    raw_members = [101, 55, 101, 102, 55, 102]
+    character_request, _seed_bytes = _character_p3_request(
+        connection, request, motif_members=raw_members,
+    )
+
+    # This qualification isolates the P3 Character B2 routing law.  The
+    # witness retains the legacy occurrence sequence, while the independent
+    # legacy motif-projection path continues to receive its established,
+    # unique-member source shape.
+    motif_path = character_request.root / "workspaces" / "ws" / "domains" / "domain" / "motifs.json"
+    motif_payload = json.loads(motif_path.read_text(encoding="utf-8"))
+    motif_payload["motifs"]["p3-character-motif"]["members"] = [101, 102]
+    motif_path.write_text(json.dumps(motif_payload), encoding="utf-8")
+    shared_key = next(
+        item.scope_key for item in character_request.scope_bindings if item.scope_key.domain_id == "domain"
+    )
+    motif_evidence = capture_present_source_evidence(
+        data_root=character_request.root, owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="domain"),
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS, scope_key=shared_key,
+    )
+    description = replace(
+        character_request.description,
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            item for item in character_request.description.explicit_source_manifest.entries
+            if not (item.scope_key == shared_key and item.semantic_role is EvidenceSemanticRole.MOTIFS)
+        ) + (motif_evidence,)),
+    )
+    character_request = replace(character_request, description=description)
+
+    result = NativeRootP3SourceAdmissionService(connection).admit(character_request)
+
+    record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
+    entry = next(item for item in record["scopes"] if item["scope_key"].get("agent_id") == "empty-agent")
+    assert [(item["eid"], item["normalization_kind"]) for item in entry["b1"]["memories"]] == [
+        (101, "CHARACTER_SEED"), (102, "CHARACTER_SEED"),
+    ]
+    assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+    continuation = character_request.character_continuation_carrier_root / "p3_character_seed_witness_continuation.json"
+    descriptor = json.loads(continuation.read_text(encoding="utf-8"))["payload"]["witnesses"][0]["character_witness"]
+    assert descriptor["seed_eids"] == [101, 102]
+    assert descriptor["seed_motif_member_eids"] == raw_members
+    assert descriptor["seed_motif_seed_eids"] == [101, 101, 102, 102]
+    dispatched_eids = [
+        item.eid for scope_input in result.normalization_request.scope_inputs
+        for item in (*scope_input.b3a_requests, *scope_input.b3b_requests)
+    ]
+    assert dispatched_eids.count(101) == dispatched_eids.count(102) == 1
+
+
+@pytest.mark.parametrize("case,code", (
+    ("seed_bytes", "P3_CHARACTER_P2_OBSERVATION_DIGEST_MISMATCH"),
+    ("descriptor", "CHARACTER_DESCRIPTOR_WITNESS_DIGEST_MISMATCH"),
+    ("observation_key", "P3_CHARACTER_P2_OBSERVATION_MISSING"),
+))
+def test_p3_character_witness_requires_exact_p2_anchor_before_b1(
+    carrier_fixture, case: str, code: str,
+) -> None:
+    connection, request = carrier_fixture
+    character_request, seed_bytes = _character_p3_request(connection, request)
+    input_value = character_request.character_witness_inputs[0]
+    if case == "seed_bytes":
+        character_request = replace(
+            character_request,
+            character_witness_inputs=(replace(input_value, seed_definition_bytes=b"\n" + seed_bytes),),
+            carrier_directory=character_request.carrier_root.parent / "bad-seed-bytes-carrier",
+            character_continuation_carrier_directory=character_request.carrier_root.parent / "bad-seed-bytes-continuation",
+        )
+    elif case == "descriptor":
+        descriptor = dict(input_value.descriptor_payload)
+        descriptor["witness_digest"] = "0" * 64
+        character_request = replace(
+            character_request,
+            character_witness_inputs=(replace(input_value, descriptor_payload=descriptor),),
+            carrier_directory=character_request.carrier_root.parent / "bad-descriptor-carrier",
+            character_continuation_carrier_directory=character_request.carrier_root.parent / "bad-descriptor-continuation",
+        )
+    else:
+        observation = character_request.character_observation_authority.opened_character_observations[0]
+        changed = ExternalOwnerObservation(
+            observation.workspace_id, observation.owner_kind, "seed:not-the-witness-seed", observation.observation_digest,
+        )
+        description = replace(character_request.description, external_owner_observations=(changed,))
+        authority = RootP3ExternalOwnerObservationAuthority(
+            character_request.character_observation_authority.envelope_c_digest,
+            description.external_owner_observation_digest, (changed,),
+        )
+        character_request = replace(
+            character_request, description=description, character_observation_authority=authority,
+            carrier_directory=character_request.carrier_root.parent / "bad-observation-key-carrier",
+            character_continuation_carrier_directory=character_request.carrier_root.parent / "bad-observation-key-continuation",
+        )
+    with pytest.raises(RootP3SourceAdmissionRefused, match=code):
+        NativeRootP3SourceAdmissionService(connection).admit(character_request)
+    assert not character_request.carrier_root.exists()
 
 
 def test_p3_carrier_accepts_cross_scope_members_when_the_root_topology_has_one_candidate(carrier_fixture) -> None:

@@ -61,6 +61,17 @@ from .runtime_normalization import (
     MigrationRuntimeNormalizationRequest,
     NativeMigrationRuntimeNormalizationService,
 )
+from .character_seed_normalization import (
+    MigrationCharacterSeedNormalizationRequest,
+    NativeMigrationCharacterSeedNormalizationService,
+)
+from .root_p3_character_witness_continuation import (
+    RootP3CharacterWitnessContinuationRefused,
+    RootP3CharacterWitnessInput,
+    RootP3ExternalOwnerObservationAuthority,
+    select_or_recover_character_continuation,
+    validate_character_witness_inputs,
+)
 from .runtime_readiness import (
     MigrationRuntimeReadinessRequest,
     MigrationRuntimeScopePlan,
@@ -163,6 +174,9 @@ class RootP3SourceAdmissionRequest:
     b3b_embedder: object
     post_write_configurations: tuple[NativePostWriteQualificationConfiguration, ...] = ()
     predecessor_carrier_record_path: str | Path | None = None
+    character_observation_authority: RootP3ExternalOwnerObservationAuthority | None = None
+    character_witness_inputs: tuple[RootP3CharacterWitnessInput, ...] = ()
+    character_continuation_carrier_directory: str | Path | None = None
 
     def __post_init__(self) -> None:
         MetadataLessPerEidEvidence, RootSourceScopePlan, _SourceArtifactPresence = _corrective_freeze_types()
@@ -197,6 +211,14 @@ class RootP3SourceAdmissionRequest:
             for item in self.post_write_configurations
         ):
             raise ValueError("post_write_configurations must be typed")
+        if not isinstance(self.character_witness_inputs, tuple) or any(
+            not isinstance(item, RootP3CharacterWitnessInput) for item in self.character_witness_inputs
+        ):
+            raise ValueError("character_witness_inputs must be typed")
+        if self.character_observation_authority is not None and not isinstance(
+            self.character_observation_authority, RootP3ExternalOwnerObservationAuthority,
+        ):
+            raise ValueError("character_observation_authority must be typed")
         carrier = Path(self.carrier_directory).expanduser().resolve()
         if carrier == root or root in carrier.parents:
             raise ValueError("carrier_directory must resolve outside data_root")
@@ -211,6 +233,21 @@ class RootP3SourceAdmissionRequest:
                 raise ValueError("predecessor_carrier_record_path must name an existing regular record")
             if carrier in predecessor_path.parents:
                 raise ValueError("completion carrier must be separate from its predecessor carrier")
+        character_carrier = self.character_continuation_carrier_directory
+        if character_carrier is not None:
+            if not isinstance(character_carrier, (str, Path)) or not str(character_carrier).strip():
+                raise ValueError("character_continuation_carrier_directory must be an explicit path")
+            character_path = Path(character_carrier).expanduser().resolve()
+            if character_path == root or root in character_path.parents or character_path == carrier or (
+                character_path in carrier.parents or carrier in character_path.parents
+            ):
+                raise ValueError("Character continuation carrier must be separate from P3 source evidence")
+            if not character_path.parent.is_dir():
+                raise ValueError("character_continuation_carrier_directory parent must already exist")
+        if self.character_witness_inputs and self.character_continuation_carrier_directory is None:
+            raise ValueError("Character witness inputs require a separate continuation carrier")
+        if self.character_observation_authority is not None and self.character_continuation_carrier_directory is None:
+            raise ValueError("Character authority requires a separate continuation carrier")
         source_by_key = {item.scope_key: item for item in self.source_scope_plans}
         bindings_by_key = {item.scope_key: item for item in self.scope_bindings}
         declared = {
@@ -266,6 +303,12 @@ class RootP3SourceAdmissionRequest:
         return Path(self.predecessor_carrier_record_path).expanduser().resolve()
 
     @property
+    def character_continuation_carrier_root(self) -> Path | None:
+        if self.character_continuation_carrier_directory is None:
+            return None
+        return Path(self.character_continuation_carrier_directory).expanduser().resolve()
+
+    @property
     def qualification_embedder_identity_to_lane(self) -> NativeRepresentationLane:
         identity = self.qualification_embedder_identity
         lane = self.description.target_representation_lane
@@ -313,6 +356,7 @@ class NativeRootP3SourceAdmissionService:
         # This recheck is deliberately immediately before any carrier selection
         # or B1 write.  It reads only the P2-bound explicit source proposition.
         _verify_p2_bound_source(request)
+        character_bindings = _validated_character_bindings(request)
         record = _select_or_recover_record(self._connection, request)
         if _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION:
             raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
@@ -322,7 +366,9 @@ class NativeRootP3SourceAdmissionService:
         for entry in ordered:
             if entry.get("b1") is None:
                 _run_b1(self._connection, request, entry)
-                entry["b1"] = _read_b1_evidence(self._connection, request, entry)
+                entry["b1"] = _read_b1_evidence(
+                    self._connection, request, entry, character_bindings,
+                )
                 _write_record(request.record_path, record)
                 if (
                     _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_B1
@@ -331,10 +377,27 @@ class NativeRootP3SourceAdmissionService:
                     raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
                 b1_interrupted = True
 
+        if character_bindings:
+            for entry in ordered:
+                _validate_character_b1_eid_agreement(entry, character_bindings)
+        try:
+            character_witnesses = select_or_recover_character_continuation(
+                directory=request.character_continuation_carrier_root,
+                predecessor_record_path=request.record_path,
+                predecessor_identity_digest=_character_predecessor_identity_digest(record),
+                snapshot_scope_count=len(_ordered_scope_entries(record)),
+                snapshot_identity_digest=_snapshot_identity_digest(record),
+                authority=request.character_observation_authority,
+                bindings=character_bindings,
+                scope_facts=_character_scope_facts(request),
+            )
+        except RootP3CharacterWitnessContinuationRefused as exc:
+            raise RootP3SourceAdmissionRefused(exc.code) from exc
+
         lose_response = _test_lose_response_after_b2
         for entry in ordered:
             source = _source_plan_for_key(request, _scope_key_from_payload(entry.get("scope_key")))
-            memories, _motifs = _carrier_b1_evidence(entry, source)
+            memories, _motifs = _carrier_b1_evidence(entry, source, character_witnesses)
             b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
             b2_by_eid = _carrier_b2_memory_evidence(b2)
             memory_eids = {item["eid"] for item in memories}
@@ -344,23 +407,27 @@ class NativeRootP3SourceAdmissionService:
                 eid = memory["eid"]
                 if eid in b2_by_eid:
                     continue
-                result = NativeMigrationRuntimeNormalizationService(
-                    self._connection
-                ).normalize_legacy_core_memory(
-                    MigrationRuntimeNormalizationRequest(
-                        snapshot_root=Path(entry["snapshot_root"]),
-                        manifest_path=Path(entry["manifest_path"]),
-                        legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
-                        legacy_source_namespace_id=UUID(entry["legacy_source_namespace_id"]),
-                        expected_native_core_id=request.expected_native_core_id,
-                        eid=eid,
-                        expected_revision_id=UUID(memory["r1_revision_id"]),
-                        scope_plans=(request_binding(request, entry).scope_plan,),
-                        idempotency_namespace_id=request_binding(request, entry).scope_plan.idempotency_namespace_id,
-                        idempotency_key=_stage_key(request, entry, "B2", str(eid)),
-                    ),
-                    _test_lose_response_after_commit=lose_response,
-                )
+                base = _b2_normalization_request(request, entry, memory)
+                if memory["normalization_kind"] == "CHARACTER_SEED":
+                    witness = character_witnesses.get(
+                        _scope_key_from_payload(entry.get("scope_key")),
+                    )
+                    if witness is None or eid not in witness.seed_eids:
+                        raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_WITNESS_REQUIRED")
+                    result = NativeMigrationCharacterSeedNormalizationService(
+                        self._connection
+                    ).normalize_character_seed(
+                        MigrationCharacterSeedNormalizationRequest(base, witness),
+                        _test_lose_response_after_commit=lose_response,
+                    )
+                elif memory["normalization_kind"] == "ORDINARY":
+                    result = NativeMigrationRuntimeNormalizationService(
+                        self._connection
+                    ).normalize_legacy_core_memory(
+                        base, _test_lose_response_after_commit=lose_response,
+                    )
+                else:  # _carrier_b1_memory_evidence has already made this unreachable.
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_KIND_INVALID")
                 lose_response = False
                 b2.setdefault("memories", []).append({
                     "eid": eid,
@@ -371,9 +438,9 @@ class NativeRootP3SourceAdmissionService:
                 _write_record(request.record_path, record)
             _require_b2_closure(memories, b2_by_eid)
 
-        normalization_request = _build_normalization_request(request, record)
+        normalization_request = _build_normalization_request(request, record, character_witnesses)
         actual = p3_child_request_counts(normalization_request.scope_inputs)
-        expected = _carrier_evidence_child_request_counts(request, record)
+        expected = _carrier_evidence_child_request_counts(request, record, character_witnesses)
         if actual != expected:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_CHILD_COUNT_DRIFT")
         memory_count = sum(
@@ -877,6 +944,86 @@ def _run_b1(connection: sqlite3.Connection, request: RootP3SourceAdmissionReques
     )
 
 
+def _validated_character_bindings(request: RootP3SourceAdmissionRequest):
+    """Compose only P2-anchored descriptors against frozen private P3 facts."""
+
+    try:
+        return validate_character_witness_inputs(
+            authority=request.character_observation_authority,
+            inputs=request.character_witness_inputs,
+            scope_facts=_character_scope_facts(request),
+        )
+    except RootP3CharacterWitnessContinuationRefused as exc:
+        raise RootP3SourceAdmissionRefused(exc.code) from exc
+
+
+def _character_scope_facts(
+    request: RootP3SourceAdmissionRequest,
+) -> dict[RootScopeKey, tuple[UUID, str | None]]:
+    """The frozen P3 scope topology is the only source for descriptor context."""
+
+    return {
+        binding.scope_key: (
+            binding.scope_plan.legacy_source_namespace_id,
+            _source_plan_for_key(request, binding.scope_key).motif_domain_id,
+        )
+        for binding in request.scope_bindings
+    }
+
+
+def _character_predecessor_identity_digest(record: dict[str, Any]) -> str:
+    """Stable predecessor identity: snapshots and B1, intentionally never B2."""
+
+    scopes: list[dict[str, Any]] = []
+    for entry in _ordered_scope_entries(record):
+        scopes.append({
+            key: entry.get(key) for key in (
+                "scope_key", "scope_plan", "unknown_semantic_scope_id",
+                "legacy_source_namespace_id", "legacy_source_namespace_key",
+                "snapshot_root", "manifest_path", "legacy_snapshot_id", "manifest_digest", "b1",
+            )
+        })
+    return _digest({
+        "root_description_digest": record.get("root_description_digest"),
+        "explicit_source_manifest_digest": record.get("explicit_source_manifest_digest"),
+        "expected_native_core_id": record.get("expected_native_core_id"),
+        "operation_key": record.get("operation_key"),
+        "carrier_completion": record.get("carrier_completion"),
+        "scopes": scopes,
+    })
+
+
+def _snapshot_identity_digest(record: dict[str, Any]) -> str:
+    return _digest([
+        {
+            "scope_key": entry.get("scope_key"),
+            "legacy_source_namespace_id": entry.get("legacy_source_namespace_id"),
+            "legacy_snapshot_id": entry.get("legacy_snapshot_id"),
+            "manifest_digest": entry.get("manifest_digest"),
+        }
+        for entry in _ordered_scope_entries(record)
+    ])
+
+
+def _b2_normalization_request(
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any], memory: dict[str, Any],
+) -> MigrationRuntimeNormalizationRequest:
+    binding = request_binding(request, entry)
+    return MigrationRuntimeNormalizationRequest(
+        snapshot_root=Path(entry["snapshot_root"]),
+        manifest_path=Path(entry["manifest_path"]),
+        legacy_snapshot_id=UUID(entry["legacy_snapshot_id"]),
+        legacy_source_namespace_id=UUID(entry["legacy_source_namespace_id"]),
+        expected_native_core_id=request.expected_native_core_id,
+        eid=memory["eid"],
+        expected_revision_id=UUID(memory["r1_revision_id"]),
+        scope_plans=(binding.scope_plan,),
+        idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
+        idempotency_key=_stage_key(request, entry, "B2", str(memory["eid"])),
+    )
+
+
 def _eligible_member_source_namespace_ids(
     request: RootP3SourceAdmissionRequest,
     motif_binding: RootP3ScopeBinding,
@@ -905,6 +1052,7 @@ def _read_b1_evidence(
     connection: sqlite3.Connection,
     request: RootP3SourceAdmissionRequest,
     entry: dict[str, Any],
+    character_bindings: dict[RootScopeKey, Any],
 ) -> dict[str, Any]:
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     binding = request_binding(request, entry)
@@ -942,7 +1090,18 @@ def _read_b1_evidence(
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_EID_DUPLICATE")
             if not isinstance(item.current_revision_id, UUID):
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_REVISION_INVALID")
-            if item.readiness not in allowed:
+            character_required = "CHARACTER_NORMALIZATION_WITNESS_REQUIRED" in item.reason_codes
+            character_witness = character_bindings.get(binding.scope_key)
+            if character_required:
+                # Character precedence is deliberate: a seed-shaped row with
+                # absent legacy provenance cannot enter the ordinary structural
+                # unknown lane, even if some later readiness owner adds it.
+                if character_witness is None or eid not in character_witness.witness.seed_eids:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
+                normalization_kind = "CHARACTER_SEED"
+            elif item.readiness in allowed:
+                normalization_kind = "ORDINARY"
+            else:
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
             seen_eids.add(eid)
             if not isinstance(item.legacy_vector_strategy, LegacyVectorStrategy):
@@ -951,6 +1110,7 @@ def _read_b1_evidence(
                 "eid": eid,
                 "r1_revision_id": str(item.current_revision_id),
                 "legacy_vector_strategy": item.legacy_vector_strategy.value,
+                "normalization_kind": normalization_kind,
             })
         memories.sort(key=lambda item: item["eid"])
         if not memories:
@@ -988,6 +1148,7 @@ def _read_b1_evidence(
 
 def _carrier_b1_evidence(
     entry: dict[str, Any], source_plan: RootSourceScopePlan,
+    character_witnesses: dict[RootScopeKey, Any],
 ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
     """Validate recovered B1 evidence before it can drive B2/B3/B4 work."""
 
@@ -1000,12 +1161,31 @@ def _carrier_b1_evidence(
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
     elif memories:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
+    _validate_character_b1_eid_agreement(entry, character_witnesses)
     if source_plan.motif_presence is SourceArtifactPresence.PRESENT:
         if not motifs:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH")
     elif motifs:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_UNDECLARED_MOTIF_ADMITTED")
     return memories, motifs
+
+
+def _validate_character_b1_eid_agreement(
+    entry: dict[str, Any], character_witnesses: dict[RootScopeKey, Any],
+) -> None:
+    """A continuation can bind only the exact seed EID set admitted at B1."""
+
+    b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+    memories = _carrier_b1_memory_evidence(b1)
+    scope = _scope_key_from_payload(entry.get("scope_key"))
+    candidate = character_witnesses.get(scope)
+    witness = candidate.witness if candidate is not None and hasattr(candidate, "witness") else candidate
+    character_eids = {item["eid"] for item in memories if item["normalization_kind"] == "CHARACTER_SEED"}
+    if witness is None:
+        if character_eids:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_WITNESS_REQUIRED")
+    elif character_eids != set(witness.seed_eids):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_B1_EID_MISMATCH")
 
 
 def _carrier_b1_memory_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -1021,11 +1201,15 @@ def _carrier_b1_memory_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...
             strategy = LegacyVectorStrategy(memory.get("legacy_vector_strategy"))
         except (TypeError, ValueError) as exc:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_STRATEGY_INVALID") from exc
+        normalization_kind = memory.get("normalization_kind", "ORDINARY")
+        if normalization_kind not in {"ORDINARY", "CHARACTER_SEED"}:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_KIND_INVALID")
         seen_eids.add(eid)
         result.append({
             "eid": eid,
             "r1_revision_id": str(revision),
             "legacy_vector_strategy": strategy.value,
+            "normalization_kind": normalization_kind,
         })
     return tuple(sorted(result, key=lambda item: item["eid"]))
 
@@ -1076,6 +1260,7 @@ def _require_b2_closure(
 
 def _build_normalization_request(
     request: RootP3SourceAdmissionRequest, record: dict[str, Any],
+    character_witnesses: dict[RootScopeKey, Any],
 ) -> RootNormalizationRequest:
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     inputs: list[RootNormalizationScopeInput] = []
@@ -1083,7 +1268,7 @@ def _build_normalization_request(
     for entry in _ordered_scope_entries(record):
         binding = request_binding(request, entry)
         source = _source_plan_for_key(request, binding.scope_key)
-        memories, motifs = _carrier_b1_evidence(entry, source)
+        memories, motifs = _carrier_b1_evidence(entry, source, character_witnesses)
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
         b2_by_eid = _carrier_b2_memory_evidence(b2)
         _require_b2_closure(memories, b2_by_eid)
@@ -1231,6 +1416,7 @@ def _require_unknown_eid_closure(
 
 def _carrier_evidence_child_request_counts(
     request: RootP3SourceAdmissionRequest, record: dict[str, Any],
+    character_witnesses: dict[RootScopeKey, Any],
 ) -> dict[str, int]:
     """Derive executable B3/B4 counts only from completed carrier evidence."""
 
@@ -1243,7 +1429,7 @@ def _carrier_evidence_child_request_counts(
     for entry in _ordered_scope_entries(record):
         scope_key = _scope_key_from_payload(entry.get("scope_key"))
         source = _source_plan_for_key(request, scope_key)
-        memories, motifs = _carrier_b1_evidence(entry, source)
+        memories, motifs = _carrier_b1_evidence(entry, source, character_witnesses)
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
         _require_b2_closure(memories, _carrier_b2_memory_evidence(b2))
         if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:

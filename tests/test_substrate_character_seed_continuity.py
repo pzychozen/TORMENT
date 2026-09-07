@@ -25,7 +25,7 @@ from torment_service.memory_graph import MemoryGraph
 from torment_service.motifs import MotifRegistry
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.character_seed_witness import (
-    CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
+    CharacterSeedWitness, CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
 )
 from torment_service.substrate.connection import open_existing_native_core_connection, open_temporary_test_connection
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope, NativeMotifProcessOrder
@@ -258,6 +258,90 @@ def test_legacy_character_seed_witness_refuses_incomplete_or_mismatching_evidenc
         read_legacy_character_seed_witness(
             workspace_root=root, workspace_id="orchard", agent_id="aria", domain_id="personal", requested_seed_id=seed.seed_id,
         )
+
+
+def _replace_seed_motif_members(root: Path, seed: CharacterSeed, members: object) -> None:
+    path = root / "domains" / "personal" / "motifs.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["motifs"][seed.seed_motif_id]["members"] = members
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _read_character_witness(root: Path, seed: CharacterSeed):
+    return read_legacy_character_seed_witness(
+        workspace_root=root, workspace_id="orchard", agent_id="aria", domain_id="personal",
+        requested_seed_id=seed.seed_id,
+    )
+
+
+def test_legacy_character_witness_preserves_raw_motif_member_occurrences(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    raw_members = [7, 9, 7, 8, 9, 8]
+    _replace_seed_motif_members(root, seed, raw_members)
+
+    witness = _read_character_witness(root, seed)
+
+    assert witness.seed_eids == (7, 8)
+    assert witness.seed_motif_member_eids == tuple(raw_members)
+    assert witness.seed_motif_seed_eids == (7, 7, 8, 8)
+    assert CharacterSeedWitness.from_descriptor_payload(
+        workspace_id="orchard", agent_id="aria", domain_id="personal",
+        value=witness.descriptor_payload(),
+    ) == witness
+
+    _replace_seed_motif_members(root, seed, [7, 9, 8, 7, 9, 8])
+    reordered = _read_character_witness(root, seed)
+    assert reordered.seed_motif_member_eids == (7, 9, 8, 7, 9, 8)
+    assert reordered.seed_motif_seed_eids == (7, 8, 7, 8)
+    assert reordered.witness_digest != witness.witness_digest
+
+    for changed_members in ([7, 9, 8, 9, 8], [7, 9, 7, 8, 9, 8, 7]):
+        _replace_seed_motif_members(root, seed, changed_members)
+        assert _read_character_witness(root, seed).witness_digest != witness.witness_digest
+
+    tampered = witness.descriptor_payload()
+    tampered["seed_motif_member_eids"] = [7, 9, 8, 7, 9, 8]
+    with pytest.raises(CharacterSeedWitnessRefused, match="CHARACTER_DESCRIPTOR_MOTIF_MEMBERS_MISMATCH"):
+        CharacterSeedWitness.from_descriptor_payload(
+            workspace_id="orchard", agent_id="aria", domain_id="personal", value=tampered,
+        )
+
+
+def test_legacy_character_witness_allows_repeated_non_seed_motif_members(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    _replace_seed_motif_members(root, seed, [7, 9, 9, 8])
+
+    witness = _read_character_witness(root, seed)
+
+    assert witness.seed_motif_member_eids == (7, 9, 9, 8)
+    assert witness.seed_motif_seed_eids == (7, 8)
+
+
+def test_legacy_character_witness_keeps_logical_seed_eids_unique(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    _rewrite_seed_json(root, seed.seed_id, lambda value: value.__setitem__("seed_eids", [7, 7]))
+
+    with pytest.raises(CharacterSeedWitnessRefused, match="CHARACTER_SEED_EIDS_INVALID"):
+        _read_character_witness(root, seed)
+
+
+@pytest.mark.parametrize("members", ([-1], [True], ["7"], {"eid": 7}))
+def test_legacy_character_witness_refuses_malformed_motif_member_occurrences(
+    tmp_path: Path, members: object,
+):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    _replace_seed_motif_members(root, seed, members)
+
+    with pytest.raises(CharacterSeedWitnessRefused, match="CHARACTER_SEED_MOTIF_MEMBERS_INVALID"):
+        _read_character_witness(root, seed)
+
+
+def test_legacy_character_witness_refuses_motif_with_no_seed_member(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    _replace_seed_motif_members(root, seed, [9, 9])
+
+    with pytest.raises(CharacterSeedWitnessRefused, match="CHARACTER_SEED_MOTIF_HAS_NO_SEED_MEMBER"):
+        _read_character_witness(root, seed)
 
 
 def test_existing_character_seed_admission_normalizes_only_witnessed_seed_rows(tmp_path: Path):

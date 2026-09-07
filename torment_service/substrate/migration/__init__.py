@@ -193,6 +193,12 @@ from .root_p3_source_admission import (
     p3_child_request_counts,
     pre_b1_p3_scope_shape_counts,
 )
+from .root_p3_character_witness_continuation import (
+    RootP3CharacterWitnessContinuationRefused,
+    RootP3CharacterWitnessInput,
+    RootP3CharacterWitnessBinding,
+    RootP3ExternalOwnerObservationAuthority,
+)
 from .existing_workspace_admission import (
     ExistingWorkspaceAdmissionDescriptor,
     ExistingWorkspaceAdmissionRefused,
@@ -423,6 +429,10 @@ __all__ = [
     "RootP3SourceAdmissionResult",
     "p3_child_request_counts",
     "pre_b1_p3_scope_shape_counts",
+    "RootP3CharacterWitnessContinuationRefused",
+    "RootP3CharacterWitnessInput",
+    "RootP3CharacterWitnessBinding",
+    "RootP3ExternalOwnerObservationAuthority",
     "ExistingWorkspaceAdmissionDescriptor",
     "ExistingWorkspaceAdmissionRefused",
     "ExistingWorkspaceAdmissionState",

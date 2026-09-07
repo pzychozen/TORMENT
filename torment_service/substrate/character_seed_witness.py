@@ -97,8 +97,8 @@ class CharacterSeedWitness:
                 _text(value, "seed_definition_digest"), _text(value, "seed_id"),
                 _text(value, "character_name"), _text(value, "seed_text"),
                 _integer_tuple(value, "seed_eids", unique=True), _text(value, "seed_motif_id"),
-                _integer_tuple(value, "seed_motif_member_eids", unique=True),
-                _integer_tuple(value, "seed_motif_seed_eids", unique=True),
+                _integer_tuple(value, "seed_motif_member_eids", unique=False, nonempty=True),
+                _integer_tuple(value, "seed_motif_seed_eids", unique=False, nonempty=True),
                 _text_tuple(value, "concept_summaries"), _text(value, "witness_digest"),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -130,11 +130,12 @@ def read_legacy_character_seed_witness(
     concepts = tuple(_split_seed_text(seed.seed_text))
     if not concepts or len(seed.seed_eids) != len(concepts):
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_CONCEPT_CARDINALITY_MISMATCH")
-    seed_eids = _validate_eids(seed.seed_eids, "CHARACTER_SEED_EIDS_INVALID")
+    seed_eids = _validate_eids(seed.seed_eids, "CHARACTER_SEED_EIDS_INVALID", unique=True)
     rows = _current_node_payloads(root / "agents" / agent_id / "private" / "nodes.jsonl")
     _validate_seed_rows(rows, seed, concepts, seed_eids)
     member_eids = _read_selected_motif_members(root, domain_id, seed.seed_motif_id)
-    seed_members = tuple(eid for eid in member_eids if eid in set(seed_eids))
+    seed_eid_membership = set(seed_eids)
+    seed_members = tuple(eid for eid in member_eids if eid in seed_eid_membership)
     if not seed_members:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_MOTIF_HAS_NO_SEED_MEMBER")
     definition = seed.to_dict()
@@ -242,14 +243,19 @@ def _read_selected_motif_members(root: Path, domain_id: str, seed_motif_id: str)
         members = motif["members"]
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_MOTIF_REQUIRED") from exc
-    return _validate_eids(members, "CHARACTER_SEED_MOTIF_MEMBERS_INVALID")
+    # MotifRegistry preserves the source's append sequence.  Unlike logical
+    # Character seed EIDs, this is occurrence evidence: duplicates and order
+    # are therefore both part of the witness and its digest.
+    return _validate_eids(members, "CHARACTER_SEED_MOTIF_MEMBERS_INVALID", unique=False)
 
 
-def _validate_eids(value: Any, code: str) -> tuple[int, ...]:
+def _validate_eids(value: Any, code: str, *, unique: bool) -> tuple[int, ...]:
     if not isinstance(value, list) or not value:
         raise CharacterSeedWitnessRefused(code)
     result = tuple(value)
-    if any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in result) or len(set(result)) != len(result):
+    if any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in result):
+        raise CharacterSeedWitnessRefused(code)
+    if unique and len(set(result)) != len(result):
         raise CharacterSeedWitnessRefused(code)
     return result
 
@@ -272,11 +278,15 @@ def _text_tuple(value: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(items)
 
 
-def _integer_tuple(value: Mapping[str, Any], key: str, *, unique: bool) -> tuple[int, ...]:
+def _integer_tuple(
+    value: Mapping[str, Any], key: str, *, unique: bool, nonempty: bool = False,
+) -> tuple[int, ...]:
     items = value[key]
     if not isinstance(items, list) or any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in items):
         raise ValueError(key)
     result = tuple(items)
+    if nonempty and not result:
+        raise ValueError(key)
     if unique and len(set(result)) != len(result):
         raise ValueError(key)
     return result
@@ -304,7 +314,10 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_CONCEPTS_MISMATCH")
     if len(witness.seed_eids) != len(witness.concept_summaries):
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_EIDS_MISMATCH")
-    if not set(witness.seed_motif_seed_eids).issubset(set(witness.seed_eids)):
+    expected_seed_occurrences = tuple(
+        eid for eid in witness.seed_motif_member_eids if eid in set(witness.seed_eids)
+    )
+    if witness.seed_motif_seed_eids != expected_seed_occurrences:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_MOTIF_MEMBERS_MISMATCH")
     expected = _digest({
         "workspace_id": witness.workspace_id, "agent_id": witness.agent_id, "domain_id": witness.domain_id,
