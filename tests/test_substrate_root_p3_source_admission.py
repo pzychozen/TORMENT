@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import numpy as np
@@ -473,7 +474,10 @@ def _character_p3_request(
         external_owner_observations=(observation,),
     )
     binding = next(item for item in request.scope_bindings if item.scope_key == scope)
-    private_plan = replace(binding.scope_plan, motif_domain_id="domain")
+    # The private plan intentionally carries no generic motif-domain hint.
+    # Character derives its own bounded witness domain from the frozen P2/P3
+    # evidence below; that result must not leak back into this generic plan.
+    private_plan = binding.scope_plan
     authority = RootP3ExternalOwnerObservationAuthority(
         "0" * 64, description.external_owner_observation_digest, (observation,),
     )
@@ -483,14 +487,11 @@ def _character_p3_request(
         source_scope_plans=tuple(
             replace(item, materialization_posture=MaterializedScopePosture.MEMORY_GRAPH,
                     representation_disposition=RootRepresentationDisposition.TARGET_COMPATIBLE,
-                    motif_domain_id="domain") if item.scope_key == scope else
+                    motif_domain_id=None) if item.scope_key == scope else
             replace(item, motif_presence=SourceArtifactPresence.PRESENT) if item.scope_key == shared_key else item
             for item in request.source_scope_plans
         ),
-        scope_bindings=tuple(
-            replace(item, scope_plan=private_plan) if item.scope_key == scope else item
-            for item in request.scope_bindings
-        ),
+        scope_bindings=request.scope_bindings,
         carrier_directory=request.carrier_root.parent / "character-source-carrier",
         operation_key="p3-character-source-carrier",
         character_observation_authority=authority,
@@ -529,72 +530,213 @@ def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fall
         (native_id_to_bytes(next(item.scope_plan.legacy_source_namespace_id for item in character_request.scope_bindings if item.scope_key.agent_id == "empty-agent")),),
     ).fetchall()
     assert provenance == [("101", "CHARACTER_SEED_PLANT"), ("102", "CHARACTER_SEED_PLANT")]
-    continuation = character_request.character_continuation_carrier_root / "p3_character_seed_witness_continuation.json"
+    continuation = character_request.character_continuation_carrier_root / "p3_character_seed_witness_domain_derivation_continuation.json"
     assert continuation.is_file()
+    continuation_witness = json.loads(continuation.read_text(encoding="utf-8"))["payload"]["witnesses"][0]
+    assert continuation_witness["character_domain_id"] == "domain"
+    assert continuation_witness["character_domain_derivation_law"] == "UNIQUE_BOUNDED_CHARACTER_WITNESS_DOMAIN_V1"
+    assert len(continuation_witness["character_domain_candidate_evidence"]) == 2
+    assert continuation_witness["character_domain_candidate_evidence_digest"]
+    assert next(
+        item for item in character_request.scope_bindings
+        if item.scope_key == character_request.character_witness_inputs[0].scope_key
+    ).scope_plan.motif_domain_id is None
     counts = tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
         "objects", "object_revisions", "provenance_records", "operations",
     ))
-    descriptor_recovery = replace(character_request, character_witness_inputs=())
-    assert NativeRootP3SourceAdmissionService(connection).admit(descriptor_recovery).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+    assert NativeRootP3SourceAdmissionService(connection).admit(character_request).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
     assert tuple(connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in (
         "objects", "object_revisions", "provenance_records", "operations",
     )) == counts
+    frozen_only_root = character_request.carrier_root.parent / "frozen-p2-opened-root"
+    frozen_only_root.mkdir()
+    frozen_recovery = replace(
+        character_request,
+        data_root=frozen_only_root,
+        recovered_p2_explicit_source_manifest_digest=character_request.description.explicit_source_manifest.digest,
+    )
+    assert NativeRootP3SourceAdmissionService(connection).admit(frozen_recovery).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
     entry["b1"]["memories"][0]["normalization_kind"] = "ORDINARY"
     p3_source_admission._write_record(character_request.record_path, record)
     with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
         NativeRootP3SourceAdmissionService(connection).admit(character_request)
 
 
-def test_p3_character_witness_motif_occurrences_do_not_multiply_b2(carrier_fixture) -> None:
+def _replace_character_motif_evidence(
+    request: RootP3SourceAdmissionRequest, *, domain_id: str, motifs: dict[str, object], suffix: str,
+) -> RootP3SourceAdmissionRequest:
+    """Refresh only the test fixture's declared P2 motif source before P3 capture."""
+
+    scope = next(item.scope_key for item in request.scope_bindings if item.scope_key.domain_id == domain_id)
+    path = request.root / "workspaces" / "ws" / "domains" / domain_id / "motifs.json"
+    path.write_text(json.dumps({"motifs": motifs}), encoding="utf-8")
+    evidence = capture_present_source_evidence(
+        data_root=request.root, owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id=domain_id),
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS, scope_key=scope,
+    )
+    description = replace(
+        request.description,
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            item for item in request.description.explicit_source_manifest.entries
+            if not (item.scope_key == scope and item.semantic_role is EvidenceSemanticRole.MOTIFS)
+        ) + (evidence,)),
+    )
+    return replace(
+        request, description=description,
+        carrier_directory=request.carrier_root.parent / f"character-{suffix}-carrier",
+        character_continuation_carrier_directory=request.carrier_root.parent / f"character-{suffix}-continuation",
+        operation_key=f"p3-character-{suffix}",
+    )
+
+
+def test_p3_character_domain_refuses_when_no_candidate_passes_complete_witness(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    wrong_members = _replace_character_motif_evidence(
+        character_request,
+        domain_id="domain",
+        motifs={
+            "p3-character-motif": {
+                "motif_id": "p3-character-motif", "domain_id": "domain", "label": "wrong members",
+                "centroid": [1.0] + [0.0] * 383, "strength": .8, "stability_score": .8,
+                "contributing_agents": ["empty-agent"], "created_ts": 1, "last_active_ts": 1,
+                "members": [55],
+            },
+        },
+        suffix="no-domain",
+    )
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CHARACTER_WITNESS_DOMAIN_UNRESOLVED"):
+        NativeRootP3SourceAdmissionService(connection).admit(wrong_members)
+
+
+def test_p3_character_domain_refuses_when_two_frozen_domains_pass_complete_witness(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    two_domains = _replace_character_motif_evidence(
+        character_request,
+        domain_id="empty-domain",
+        motifs={
+            "p3-character-motif": {
+                "motif_id": "p3-character-motif", "domain_id": "empty-domain", "label": "second candidate",
+                "centroid": [1.0] + [0.0] * 383, "strength": .8, "stability_score": .8,
+                "contributing_agents": ["empty-agent"], "created_ts": 1, "last_active_ts": 1,
+                "members": [101, 102],
+            },
+        },
+        suffix="two-domains",
+    )
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CHARACTER_WITNESS_DOMAIN_AMBIGUOUS"):
+        NativeRootP3SourceAdmissionService(connection).admit(two_domains)
+    record = json.loads(two_domains.record_path.read_text(encoding="utf-8"))["payload"]
+    assert all(entry["b1"] is None for entry in record["scopes"])
+
+
+def test_p3_character_domain_rejects_same_seed_eids_under_the_wrong_motif_id(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    wrong_motif = _replace_character_motif_evidence(
+        character_request,
+        domain_id="domain",
+        motifs={
+            "not-the-character-motif": {
+                "motif_id": "not-the-character-motif", "domain_id": "domain", "label": "wrong motif id",
+                "centroid": [1.0] + [0.0] * 383, "strength": .8, "stability_score": .8,
+                "contributing_agents": ["empty-agent"], "created_ts": 1, "last_active_ts": 1,
+                "members": [101, 102],
+            },
+        },
+        suffix="wrong-motif-id",
+    )
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CHARACTER_WITNESS_DOMAIN_UNRESOLVED"):
+        NativeRootP3SourceAdmissionService(connection).admit(wrong_motif)
+
+
+def test_p3_character_candidate_intersection_excludes_unmanifested_unfrozen_and_other_workspace_domains(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    NativeRootP3SourceAdmissionService(connection).admit(character_request)
+    record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
+    entries_by_scope = {
+        p3_source_admission._scope_key_from_payload(entry["scope_key"]): entry
+        for entry in record["scopes"]
+    }
+    domain_scope = RootScopeKey("ws", RootScopeKind.SHARED, domain_id="domain")
+    domain_evidence = next(
+        item for item in character_request.description.explicit_source_manifest.entries
+        if item.scope_key == domain_scope and item.semantic_role is EvidenceSemanticRole.MOTIFS
+    )
+    without_domain = replace(
+        character_request.description,
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            item for item in character_request.description.explicit_source_manifest.entries if item != domain_evidence
+        )),
+    )
+    assert "domain" not in {
+        item[0].domain_id for item in p3_source_admission._character_domain_candidates(
+            request=replace(character_request, description=without_domain),
+            entries_by_scope=entries_by_scope, workspace_id="ws",
+        )
+    }
+    unrepresented = replace(
+        domain_evidence,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="unrepresented"),
+        scope_key=RootScopeKey("ws", RootScopeKind.SHARED, domain_id="unrepresented"),
+    )
+    other_workspace = replace(
+        domain_evidence,
+        owner_boundary=EvidenceOwnerBoundary("other", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="other-domain"),
+        scope_key=RootScopeKey("other", RootScopeKind.SHARED, domain_id="other-domain"),
+    )
+    # The candidate builder is bounded before root-description topology is
+    # consulted: even an otherwise well-formed foreign-workspace P2 entry is
+    # ignored for the target workspace rather than becoming search authority.
+    extended = SimpleNamespace(description=SimpleNamespace(
+        explicit_source_manifest=RootEvidenceManifest(
+            character_request.description.explicit_source_manifest.entries + (unrepresented, other_workspace),
+        ),
+    ))
+    candidates = p3_source_admission._character_domain_candidates(
+        request=extended,
+        entries_by_scope=entries_by_scope, workspace_id="ws",
+    )
+    assert {item[0].domain_id for item in candidates} == {"domain", "empty-domain"}
+
+
+def test_p3_character_domain_refuses_changed_frozen_motif_bytes_on_recovery(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, _seed_bytes = _character_p3_request(connection, request)
+    NativeRootP3SourceAdmissionService(connection).admit(character_request)
+    record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
+    domain_entry = next(item for item in record["scopes"] if item["scope_key"].get("domain_id") == "domain")
+    manifest = load_snapshot_manifest(domain_entry["manifest_path"])
+    motif = next(item for item in manifest.artifacts if item.observed_relative_locator.endswith("motifs.json"))
+    path = Path(domain_entry["snapshot_root"]) / motif.observed_relative_locator
+    path.write_bytes(path.read_bytes() + b"\n")
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_SNAPSHOT_RECOVERY_REFUSED"):
+        NativeRootP3SourceAdmissionService(connection).admit(character_request)
+
+
+def test_p3_character_witness_preserves_raw_occurrences_without_rewriting_generic_motif_routing(carrier_fixture) -> None:
     connection, request = carrier_fixture
     raw_members = [101, 55, 101, 102, 55, 102]
     character_request, _seed_bytes = _character_p3_request(
         connection, request, motif_members=raw_members,
     )
 
-    # This qualification isolates the P3 Character B2 routing law.  The
-    # witness retains the legacy occurrence sequence, while the independent
-    # legacy motif-projection path continues to receive its established,
-    # unique-member source shape.
-    motif_path = character_request.root / "workspaces" / "ws" / "domains" / "domain" / "motifs.json"
-    motif_payload = json.loads(motif_path.read_text(encoding="utf-8"))
-    motif_payload["motifs"]["p3-character-motif"]["members"] = [101, 102]
-    motif_path.write_text(json.dumps(motif_payload), encoding="utf-8")
-    shared_key = next(
-        item.scope_key for item in character_request.scope_bindings if item.scope_key.domain_id == "domain"
-    )
-    motif_evidence = capture_present_source_evidence(
-        data_root=character_request.root, owner_class=SourceOwnerClass.MOTIF_SOURCE,
-        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="domain"),
-        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS, scope_key=shared_key,
-    )
-    description = replace(
-        character_request.description,
-        explicit_source_manifest=RootEvidenceManifest(tuple(
-            item for item in character_request.description.explicit_source_manifest.entries
-            if not (item.scope_key == shared_key and item.semantic_role is EvidenceSemanticRole.MOTIFS)
-        ) + (motif_evidence,)),
-    )
-    character_request = replace(character_request, description=description)
-
-    result = NativeRootP3SourceAdmissionService(connection).admit(character_request)
-
+    # The Character predicate accepts the raw occurrence sequence.  The
+    # existing generic motif reader independently refuses it for ordinary
+    # motif routing, so P3 stops at that distinct later blocker instead of
+    # rewriting either generic motif-domain authority or the witness evidence.
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH"):
+        NativeRootP3SourceAdmissionService(connection).admit(character_request)
     record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
-    entry = next(item for item in record["scopes"] if item["scope_key"].get("agent_id") == "empty-agent")
-    assert [(item["eid"], item["normalization_kind"]) for item in entry["b1"]["memories"]] == [
+    private = next(item for item in record["scopes"] if item["scope_key"].get("agent_id") == "empty-agent")
+    assert [(item["eid"], item["normalization_kind"]) for item in private["b1"]["memories"]] == [
         (101, "CHARACTER_SEED"), (102, "CHARACTER_SEED"),
     ]
-    assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
-    continuation = character_request.character_continuation_carrier_root / "p3_character_seed_witness_continuation.json"
-    descriptor = json.loads(continuation.read_text(encoding="utf-8"))["payload"]["witnesses"][0]["character_witness"]
-    assert descriptor["seed_eids"] == [101, 102]
-    assert descriptor["seed_motif_member_eids"] == raw_members
-    assert descriptor["seed_motif_seed_eids"] == [101, 101, 102, 102]
-    dispatched_eids = [
-        item.eid for scope_input in result.normalization_request.scope_inputs
-        for item in (*scope_input.b3a_requests, *scope_input.b3b_requests)
-    ]
-    assert dispatched_eids.count(101) == dispatched_eids.count(102) == 1
+    private_binding = next(item for item in character_request.scope_bindings if item.scope_key == character_request.character_witness_inputs[0].scope_key)
+    assert private_binding.scope_plan.motif_domain_id is None
 
 
 @pytest.mark.parametrize("case,code", (
@@ -641,7 +783,10 @@ def test_p3_character_witness_requires_exact_p2_anchor_before_b1(
         )
     with pytest.raises(RootP3SourceAdmissionRefused, match=code):
         NativeRootP3SourceAdmissionService(connection).admit(character_request)
-    assert not character_request.carrier_root.exists()
+    # Candidate-domain evidence is frozen before the existing Character
+    # descriptor/P2 checks, but those checks still stop before every B1 write.
+    record = json.loads(character_request.record_path.read_text(encoding="utf-8"))["payload"]
+    assert all(entry["b1"] is None for entry in record["scopes"])
 
 
 def test_p3_carrier_accepts_cross_scope_members_when_the_root_topology_has_one_candidate(carrier_fixture) -> None:

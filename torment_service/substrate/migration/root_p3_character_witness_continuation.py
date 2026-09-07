@@ -22,10 +22,12 @@ from .root_admission_description import ExternalOwnerObservation, ExternalOwnerO
 from .root_scope import RootScopeKey, RootScopeKind
 
 
-_RECORD_NAME = "p3_character_seed_witness_continuation.json"
-_SCHEMA = "TORMENT_ROOT_P3_CHARACTER_SEED_WITNESS_CONTINUATION"
+_RECORD_NAME = "p3_character_seed_witness_domain_derivation_continuation.json"
+_LEGACY_RECORD_NAME = "p3_character_seed_witness_continuation.json"
+_SCHEMA = "TORMENT_ROOT_P3_CHARACTER_SEED_WITNESS_DOMAIN_DERIVATION_CONTINUATION"
 _VERSION = 1
 _AGGREGATE_COMMITMENT_OPENING = "AGGREGATE_COMMITMENT_OPENING"
+_CHARACTER_DOMAIN_DERIVATION_LAW = "UNIQUE_BOUNDED_CHARACTER_WITNESS_DOMAIN_V1"
 
 
 class RootP3CharacterWitnessContinuationRefused(ValueError):
@@ -114,6 +116,90 @@ class RootP3CharacterWitnessInput:
 
 
 @dataclass(frozen=True)
+class RootP3CharacterDomainCandidateEvidence:
+    """One P2-authorized, P3-frozen motif domain considered for Character only."""
+
+    domain_id: str
+    p2_manifest_evidence_identity_digest: str
+    p3_snapshot_id: UUID
+    p3_motif_artifact_id: UUID
+    p3_motif_artifact_digest: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.domain_id, str) or not self.domain_id:
+            raise ValueError("Character candidate domain_id must be non-empty text")
+        _sha256_text(
+            self.p2_manifest_evidence_identity_digest,
+            "P3_CHARACTER_DOMAIN_CANDIDATE_P2_IDENTITY_INVALID",
+        )
+        if not isinstance(self.p3_snapshot_id, UUID) or not isinstance(self.p3_motif_artifact_id, UUID):
+            raise ValueError("Character candidate snapshot and artifact identities must be UUID")
+        _sha256_text(
+            self.p3_motif_artifact_digest,
+            "P3_CHARACTER_DOMAIN_CANDIDATE_MOTIF_DIGEST_INVALID",
+        )
+
+    def identity_payload(self) -> dict[str, str]:
+        return {
+            "domain_id": self.domain_id,
+            "p2_manifest_evidence_identity_digest": self.p2_manifest_evidence_identity_digest,
+            "p3_snapshot_id": str(self.p3_snapshot_id),
+            "p3_motif_artifact_id": str(self.p3_motif_artifact_id),
+            "p3_motif_artifact_digest": self.p3_motif_artifact_digest,
+        }
+
+
+@dataclass(frozen=True)
+class RootP3CharacterDomainDerivation:
+    """The unique frozen candidate proved by the existing Character witness."""
+
+    scope_key: RootScopeKey
+    domain_id: str
+    candidate_evidence: tuple[RootP3CharacterDomainCandidateEvidence, ...]
+    candidate_evidence_digest: str
+    witness_digest: str
+    law: str = _CHARACTER_DOMAIN_DERIVATION_LAW
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope_key, RootScopeKey) or self.scope_key.scope_kind is not RootScopeKind.PRIVATE:
+            raise ValueError("Character domain derivation requires a private RootScopeKey")
+        if not isinstance(self.domain_id, str) or not self.domain_id:
+            raise ValueError("Character domain derivation requires non-empty domain_id")
+        if self.law != _CHARACTER_DOMAIN_DERIVATION_LAW:
+            raise ValueError("Character domain derivation law is invalid")
+        if not isinstance(self.candidate_evidence, tuple) or not self.candidate_evidence or any(
+            not isinstance(item, RootP3CharacterDomainCandidateEvidence)
+            for item in self.candidate_evidence
+        ):
+            raise ValueError("Character domain derivation requires candidate evidence")
+        if tuple(sorted(item.domain_id for item in self.candidate_evidence)) != tuple(
+            item.domain_id for item in self.candidate_evidence
+        ) or len({item.domain_id for item in self.candidate_evidence}) != len(self.candidate_evidence):
+            raise ValueError("Character domain candidate evidence must be unique and ordered")
+        _sha256_text(self.candidate_evidence_digest, "P3_CHARACTER_DOMAIN_CANDIDATE_EVIDENCE_INVALID")
+        _sha256_text(self.witness_digest, "P3_CHARACTER_DOMAIN_WITNESS_DIGEST_INVALID")
+        expected = _sha256_value({
+            "law": self.law,
+            "scope_key": self.scope_key.identity_payload(),
+            "candidate_evidence": [item.identity_payload() for item in self.candidate_evidence],
+        })
+        if self.candidate_evidence_digest != expected:
+            raise ValueError("Character domain candidate evidence digest disagrees with candidates")
+        if self.domain_id not in {item.domain_id for item in self.candidate_evidence}:
+            raise ValueError("Character domain must be one of its frozen candidates")
+
+    def carrier_payload(self) -> dict[str, Any]:
+        return {
+            "character_domain_id": self.domain_id,
+            "character_domain_derivation_law": self.law,
+            "character_domain_candidate_evidence": [
+                item.identity_payload() for item in self.candidate_evidence
+            ],
+            "character_domain_candidate_evidence_digest": self.candidate_evidence_digest,
+        }
+
+
+@dataclass(frozen=True)
 class RootP3CharacterWitnessBinding:
     """Validated P2 anchor plus the existing immutable Character descriptor."""
 
@@ -122,15 +208,18 @@ class RootP3CharacterWitnessBinding:
     seed_observation_key: str
     seed_observation_digest: str
     witness: CharacterSeedWitness
+    domain_derivation: RootP3CharacterDomainDerivation
 
     def carrier_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "scope_key": self.scope_key.identity_payload(),
             "legacy_source_namespace_id": str(self.legacy_source_namespace_id),
             "seed_observation_key": self.seed_observation_key,
             "seed_observation_digest": self.seed_observation_digest,
             "character_witness": self.witness.descriptor_payload(),
         }
+        payload.update(self.domain_derivation.carrier_payload())
+        return payload
 
 
 def validate_character_witness_inputs(
@@ -138,6 +227,7 @@ def validate_character_witness_inputs(
     authority: RootP3ExternalOwnerObservationAuthority | None,
     inputs: tuple[RootP3CharacterWitnessInput, ...],
     scope_facts: Mapping[RootScopeKey, tuple[UUID, str | None]],
+    domain_derivations: Mapping[RootScopeKey, RootP3CharacterDomainDerivation],
 ) -> dict[RootScopeKey, RootP3CharacterWitnessBinding]:
     """Validate P2 bytes, existing descriptor, and frozen private P3 topology."""
 
@@ -152,11 +242,13 @@ def validate_character_witness_inputs(
         facts = scope_facts.get(item.scope_key)
         if facts is None:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_WITNESS_SCOPE_MISSING")
-        namespace_id, domain_id = facts
+        namespace_id, _generic_domain_hint = facts
         if namespace_id != item.legacy_source_namespace_id:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_WITNESS_NAMESPACE_MISMATCH")
-        if not domain_id:
-            raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_WITNESS_DOMAIN_MISSING")
+        derivation = domain_derivations.get(item.scope_key)
+        if derivation is None:
+            raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_WITNESS_DOMAIN_UNRESOLVED")
+        domain_id = derivation.domain_id
         try:
             raw_definition = json.loads(item.seed_definition_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -177,9 +269,11 @@ def validate_character_witness_inputs(
         )
         if _sha256_bytes(item.seed_definition_bytes) != observation.observation_digest:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_P2_OBSERVATION_DIGEST_MISMATCH")
+        if witness.witness_digest != derivation.witness_digest:
+            raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_DOMAIN_WITNESS_MISMATCH")
         result[item.scope_key] = RootP3CharacterWitnessBinding(
             item.scope_key, item.legacy_source_namespace_id, observation.observation_key,
-            observation.observation_digest, witness,
+            observation.observation_digest, witness, derivation,
         )
     return result
 
@@ -194,6 +288,7 @@ def select_or_recover_character_continuation(
     authority: RootP3ExternalOwnerObservationAuthority | None,
     bindings: Mapping[RootScopeKey, RootP3CharacterWitnessBinding],
     scope_facts: Mapping[RootScopeKey, tuple[UUID, str | None]],
+    domain_derivations: Mapping[RootScopeKey, RootP3CharacterDomainDerivation],
 ) -> dict[RootScopeKey, CharacterSeedWitness]:
     """Persist or reload an additive descriptor-only continuation carrier."""
 
@@ -214,7 +309,10 @@ def select_or_recover_character_continuation(
             snapshot_scope_count=snapshot_scope_count,
             snapshot_identity_digest=snapshot_identity_digest,
         )
-        witnesses = _validate_payload(observed, authority=authority, scope_facts=scope_facts)
+        witnesses = _validate_payload(
+            observed, authority=authority, scope_facts=scope_facts,
+            domain_derivations=domain_derivations,
+        )
         if bindings:
             expected = _payload(
                 predecessor_record_path=predecessor_record_path,
@@ -237,11 +335,18 @@ def select_or_recover_character_continuation(
         authority=authority,
         bindings=bindings,
     )
-    if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
-        raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_DESTINATION_NOT_EMPTY")
+    if directory.exists():
+        if not directory.is_dir() or any(
+            child.name not in {_LEGACY_RECORD_NAME, _RECORD_NAME}
+            for child in directory.iterdir()
+        ):
+            raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_DESTINATION_NOT_EMPTY")
     directory.mkdir(exist_ok=True)
     _write(path, payload)
-    return _validate_payload(payload, authority=authority, scope_facts=scope_facts)
+    return _validate_payload(
+        payload, authority=authority, scope_facts=scope_facts,
+        domain_derivations=domain_derivations,
+    )
 
 
 def _validate_predecessor(
@@ -287,6 +392,7 @@ def _payload(
 def _validate_payload(
     payload: Mapping[str, Any], *, authority: RootP3ExternalOwnerObservationAuthority,
     scope_facts: Mapping[RootScopeKey, tuple[UUID, str | None]],
+    domain_derivations: Mapping[RootScopeKey, RootP3CharacterDomainDerivation],
 ) -> dict[RootScopeKey, CharacterSeedWitness]:
     required = {
         "predecessor_carrier_record_path", "predecessor_carrier_identity_digest",
@@ -308,7 +414,9 @@ def _validate_payload(
     for entry in witnesses:
         if not isinstance(entry, dict) or set(entry) != {
             "scope_key", "legacy_source_namespace_id", "seed_observation_key",
-            "seed_observation_digest", "character_witness",
+            "seed_observation_digest", "character_witness", "character_domain_id",
+            "character_domain_derivation_law", "character_domain_candidate_evidence",
+            "character_domain_candidate_evidence_digest",
         }:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_WITNESS_INVALID")
         try:
@@ -317,12 +425,16 @@ def _validate_payload(
         except (TypeError, ValueError) as exc:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_WITNESS_INVALID") from exc
         facts = scope_facts.get(scope)
-        if facts is None or facts[0] != namespace or not facts[1]:
+        derivation = domain_derivations.get(scope)
+        if facts is None or facts[0] != namespace or derivation is None:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_SCOPE_MISMATCH")
+        expected_domain = derivation.carrier_payload()
+        if any(entry.get(key) != value for key, value in expected_domain.items()):
+            raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_DOMAIN_MISMATCH")
         try:
             witness = CharacterSeedWitness.from_descriptor_payload(
                 workspace_id=scope.workspace_id, agent_id=scope.agent_id or "",
-                domain_id=facts[1], value=entry["character_witness"],
+                domain_id=derivation.domain_id, value=entry["character_witness"],
             )
         except CharacterSeedWitnessRefused as exc:
             raise RootP3CharacterWitnessContinuationRefused(exc.code) from exc
@@ -330,6 +442,7 @@ def _validate_payload(
         if (
             entry["seed_observation_key"] != observation.observation_key
             or entry["seed_observation_digest"] != observation.observation_digest
+            or witness.witness_digest != derivation.witness_digest
             or scope in result
         ):
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_WITNESS_MISMATCH")
@@ -374,6 +487,7 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
 
 __all__ = [
     "RootP3CharacterWitnessContinuationRefused", "RootP3CharacterWitnessInput",
-    "RootP3CharacterWitnessBinding", "RootP3ExternalOwnerObservationAuthority",
+    "RootP3CharacterWitnessBinding", "RootP3CharacterDomainCandidateEvidence",
+    "RootP3CharacterDomainDerivation", "RootP3ExternalOwnerObservationAuthority",
     "select_or_recover_character_continuation", "validate_character_witness_inputs",
 ]

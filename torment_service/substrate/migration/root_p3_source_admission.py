@@ -27,7 +27,15 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from ..canonical_intent import canonical_intent_text
-from ..errors import SubstrateConfigurationError
+from ..character_seed_witness import (
+    CharacterSeedWitnessRefused,
+    read_legacy_character_seed_witness_from_frozen_bytes,
+)
+from ..errors import (
+    SubstrateConfigurationError,
+    SubstrateEvidenceIntegrityMismatch,
+    SubstrateSnapshotManifestError,
+)
 from ..runtime_binding import NativeRepresentationLane
 if TYPE_CHECKING:
     from ..corrective_freeze_packet import (
@@ -66,6 +74,8 @@ from .character_seed_normalization import (
     NativeMigrationCharacterSeedNormalizationService,
 )
 from .root_p3_character_witness_continuation import (
+    RootP3CharacterDomainCandidateEvidence,
+    RootP3CharacterDomainDerivation,
     RootP3CharacterWitnessContinuationRefused,
     RootP3CharacterWitnessInput,
     RootP3ExternalOwnerObservationAuthority,
@@ -177,6 +187,7 @@ class RootP3SourceAdmissionRequest:
     character_observation_authority: RootP3ExternalOwnerObservationAuthority | None = None
     character_witness_inputs: tuple[RootP3CharacterWitnessInput, ...] = ()
     character_continuation_carrier_directory: str | Path | None = None
+    recovered_p2_explicit_source_manifest_digest: str | None = None
 
     def __post_init__(self) -> None:
         MetadataLessPerEidEvidence, RootSourceScopePlan, _SourceArtifactPresence = _corrective_freeze_types()
@@ -219,6 +230,18 @@ class RootP3SourceAdmissionRequest:
             self.character_observation_authority, RootP3ExternalOwnerObservationAuthority,
         ):
             raise ValueError("character_observation_authority must be typed")
+        recovered_manifest_digest = self.recovered_p2_explicit_source_manifest_digest
+        if recovered_manifest_digest is not None:
+            if (
+                not isinstance(recovered_manifest_digest, str)
+                or len(recovered_manifest_digest) != 64
+                or recovered_manifest_digest != self.description.explicit_source_manifest.digest
+            ):
+                raise ValueError("recovered P2 manifest digest must exactly bind the description manifest")
+            try:
+                int(recovered_manifest_digest, 16)
+            except ValueError as exc:
+                raise ValueError("recovered P2 manifest digest must be SHA-256 hex") from exc
         carrier = Path(self.carrier_directory).expanduser().resolve()
         if carrier == root or root in carrier.parents:
             raise ValueError("carrier_directory must resolve outside data_root")
@@ -356,8 +379,8 @@ class NativeRootP3SourceAdmissionService:
         # This recheck is deliberately immediately before any carrier selection
         # or B1 write.  It reads only the P2-bound explicit source proposition.
         _verify_p2_bound_source(request)
-        character_bindings = _validated_character_bindings(request)
         record = _select_or_recover_record(self._connection, request)
+        character_bindings = _validated_character_bindings(request, record)
         if _test_interrupt_after is RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION:
             raise RootP3SourceAdmissionInterrupted(_test_interrupt_after)
 
@@ -390,6 +413,10 @@ class NativeRootP3SourceAdmissionService:
                 authority=request.character_observation_authority,
                 bindings=character_bindings,
                 scope_facts=_character_scope_facts(request),
+                domain_derivations={
+                    key: binding.domain_derivation
+                    for key, binding in character_bindings.items()
+                },
             )
         except RootP3CharacterWitnessContinuationRefused as exc:
             raise RootP3SourceAdmissionRefused(exc.code) from exc
@@ -527,6 +554,17 @@ def request_binding(request: RootP3SourceAdmissionRequest, entry: dict[str, Any]
 
 
 def _verify_p2_bound_source(request: RootP3SourceAdmissionRequest) -> None:
+    # A copied P3 recovery can be run after an earlier, separately recorded
+    # Envelope-C opening.  Its recovered digest binds exactly the description
+    # manifest and deliberately avoids a second contact with the live root;
+    # all subsequent source bytes still come from the immutable P3 snapshots.
+    if request.recovered_p2_explicit_source_manifest_digest is not None:
+        if (
+            request.recovered_p2_explicit_source_manifest_digest
+            != request.description.explicit_source_manifest.digest
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_RECOVERED_MANIFEST_BINDING_MISMATCH")
+        return
     try:
         request.description.explicit_source_manifest.verify(data_root=request.root)
     except (ExplicitSourceEvidenceDrift, OSError, ValueError) as exc:
@@ -944,7 +982,9 @@ def _run_b1(connection: sqlite3.Connection, request: RootP3SourceAdmissionReques
     )
 
 
-def _validated_character_bindings(request: RootP3SourceAdmissionRequest):
+def _validated_character_bindings(
+    request: RootP3SourceAdmissionRequest, record: dict[str, Any],
+):
     """Compose only P2-anchored descriptors against frozen private P3 facts."""
 
     try:
@@ -952,9 +992,187 @@ def _validated_character_bindings(request: RootP3SourceAdmissionRequest):
             authority=request.character_observation_authority,
             inputs=request.character_witness_inputs,
             scope_facts=_character_scope_facts(request),
+            domain_derivations=_derive_character_domain_derivations(request, record),
         )
     except RootP3CharacterWitnessContinuationRefused as exc:
         raise RootP3SourceAdmissionRefused(exc.code) from exc
+
+
+def _derive_character_domain_derivations(
+    request: RootP3SourceAdmissionRequest, record: dict[str, Any],
+) -> dict[RootScopeKey, RootP3CharacterDomainDerivation]:
+    """Derive Character-only motif domains from P2 and already-frozen P3 bytes.
+
+    A private scope's ordinary ``motif_domain_id`` is deliberately not an input
+    to this law.  The candidate universe is the intersection of the
+    Envelope-C manifest and the selected P3 snapshot carrier, then the
+    existing complete Character witness is the sole predicate.
+    """
+
+    if not request.character_witness_inputs:
+        return {}
+    entries = _ordered_scope_entries(record)
+    by_scope = {
+        _scope_key_from_payload(entry.get("scope_key")): entry
+        for entry in entries
+    }
+    result: dict[RootScopeKey, RootP3CharacterDomainDerivation] = {}
+    for item in request.character_witness_inputs:
+        if item.scope_key in result:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_WITNESS_SCOPE_DUPLICATE")
+        private_entry = by_scope.get(item.scope_key)
+        if private_entry is None:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_WITNESS_SCOPE_MISSING")
+        private_manifest, private_root = _character_snapshot_manifest(private_entry)
+        if private_manifest.legacy_source_namespace_id != item.legacy_source_namespace_id:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_WITNESS_NAMESPACE_MISMATCH")
+        private_nodes = _character_snapshot_artifact_bytes(
+            manifest=private_manifest,
+            snapshot_root=private_root,
+            locator="nodes.jsonl",
+            code="P3_CHARACTER_WITNESS_PRIVATE_NODES_MISSING",
+        )
+        candidates = _character_domain_candidates(
+            request=request, entries_by_scope=by_scope, workspace_id=item.scope_key.workspace_id,
+        )
+        successful: list[tuple[RootP3CharacterDomainCandidateEvidence, Any]] = []
+        for candidate, motif_bytes in candidates:
+            try:
+                witness = read_legacy_character_seed_witness_from_frozen_bytes(
+                    seed_definition_bytes=item.seed_definition_bytes,
+                    private_nodes_bytes=private_nodes,
+                    motif_bytes=motif_bytes,
+                    workspace_id=item.scope_key.workspace_id,
+                    agent_id=item.scope_key.agent_id or "",
+                    domain_id=candidate.domain_id,
+                    requested_seed_id=_character_seed_id_from_descriptor(item.descriptor_payload),
+                )
+            except CharacterSeedWitnessRefused:
+                # A P2/P3-authorized motif source is only a candidate.  The
+                # existing Character witness, rather than motif-id coincidence,
+                # decides whether that candidate proves the full relationship.
+                continue
+            successful.append((candidate, witness))
+        if not successful:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_WITNESS_DOMAIN_UNRESOLVED")
+        if len(successful) != 1:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_WITNESS_DOMAIN_AMBIGUOUS")
+        selected, witness = successful[0]
+        candidate_evidence = tuple(item[0] for item in candidates)
+        result[item.scope_key] = RootP3CharacterDomainDerivation(
+            scope_key=item.scope_key,
+            domain_id=selected.domain_id,
+            candidate_evidence=candidate_evidence,
+            candidate_evidence_digest=_digest({
+                "law": "UNIQUE_BOUNDED_CHARACTER_WITNESS_DOMAIN_V1",
+                "scope_key": item.scope_key.identity_payload(),
+                "candidate_evidence": [candidate.identity_payload() for candidate in candidate_evidence],
+            }),
+            witness_digest=witness.witness_digest,
+        )
+    return result
+
+
+def _character_domain_candidates(
+    *, request: RootP3SourceAdmissionRequest, entries_by_scope: dict[RootScopeKey, dict[str, Any]],
+    workspace_id: str,
+) -> tuple[tuple[RootP3CharacterDomainCandidateEvidence, bytes], ...]:
+    """Return exactly the P2∩P3 frozen motif candidates for one workspace."""
+
+    candidates: list[tuple[RootP3CharacterDomainCandidateEvidence, bytes]] = []
+    seen_domains: set[str] = set()
+    for evidence in request.description.explicit_source_manifest.entries:
+        if (
+            evidence.semantic_role is not EvidenceSemanticRole.MOTIFS
+            or evidence.presence_expectation is not EvidencePresenceExpectation.EXPECTED_PRESENT
+            or evidence.owner_boundary.workspace_id != workspace_id
+        ):
+            continue
+        domain_id = evidence.owner_boundary.domain_id
+        expected_scope = (
+            RootScopeKey(workspace_id, RootScopeKind.SHARED, domain_id=domain_id)
+            if domain_id is not None else None
+        )
+        if (
+            domain_id is None
+            or evidence.scope_key != expected_scope
+            or expected_scope not in entries_by_scope
+        ):
+            continue
+        if domain_id in seen_domains:
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_DOMAIN_CANDIDATE_DUPLICATE")
+        snapshot_entry = entries_by_scope[expected_scope]
+        manifest, root = _character_snapshot_manifest(snapshot_entry)
+        expected_locator = _snapshot_relative_path(evidence, expected_scope).as_posix()
+        motif_bytes, artifact = _character_snapshot_artifact_bytes_with_identity(
+            manifest=manifest,
+            snapshot_root=root,
+            locator=expected_locator,
+            code="P3_CHARACTER_DOMAIN_CANDIDATE_MOTIF_MISSING",
+        )
+        if (
+            artifact.byte_length != evidence.byte_length
+            or artifact.digest_hex != evidence.sha256_hex
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CHARACTER_DOMAIN_CANDIDATE_EVIDENCE_MISMATCH")
+        candidates.append((RootP3CharacterDomainCandidateEvidence(
+            domain_id=domain_id,
+            p2_manifest_evidence_identity_digest=_digest(evidence.identity_payload()),
+            p3_snapshot_id=manifest.legacy_snapshot_id,
+            p3_motif_artifact_id=artifact.artifact_id,
+            p3_motif_artifact_digest=artifact.digest_hex,
+        ), motif_bytes))
+        seen_domains.add(domain_id)
+    return tuple(sorted(candidates, key=lambda item: item[0].domain_id))
+
+
+def _character_snapshot_manifest(entry: dict[str, Any]):
+    try:
+        root = Path(entry.get("snapshot_root", "")).expanduser().resolve()
+        manifest = load_snapshot_manifest(Path(entry.get("manifest_path", "")).expanduser().resolve())
+        verify_snapshot(snapshot_root=root, manifest=manifest)
+    except (
+        OSError, SubstrateConfigurationError, SubstrateEvidenceIntegrityMismatch,
+        SubstrateSnapshotManifestError, ValueError,
+    ) as exc:
+        raise RootP3SourceAdmissionRefused("P3_CHARACTER_DOMAIN_SNAPSHOT_INVALID") from exc
+    if entry.get("legacy_snapshot_id") != str(manifest.legacy_snapshot_id):
+        raise RootP3SourceAdmissionRefused("P3_CHARACTER_DOMAIN_SNAPSHOT_IDENTITY_MISMATCH")
+    return manifest, root
+
+
+def _character_snapshot_artifact_bytes(
+    *, manifest, snapshot_root: Path, locator: str, code: str,
+) -> bytes:
+    value, _artifact = _character_snapshot_artifact_bytes_with_identity(
+        manifest=manifest, snapshot_root=snapshot_root, locator=locator, code=code,
+    )
+    return value
+
+
+def _character_snapshot_artifact_bytes_with_identity(
+    *, manifest, snapshot_root: Path, locator: str, code: str,
+):
+    matches = [item for item in manifest.artifacts if item.observed_relative_locator == locator]
+    if len(matches) != 1:
+        raise RootP3SourceAdmissionRefused(code)
+    artifact = matches[0]
+    try:
+        value = (snapshot_root / artifact.observed_relative_locator).read_bytes()
+    except OSError as exc:
+        raise RootP3SourceAdmissionRefused(code) from exc
+    if len(value) != artifact.byte_length or hashlib.sha256(value).hexdigest() != artifact.digest_hex:
+        raise RootP3SourceAdmissionRefused("P3_CHARACTER_DOMAIN_CANDIDATE_EVIDENCE_MISMATCH")
+    return value, artifact
+
+
+def _character_seed_id_from_descriptor(value: Any) -> str:
+    if not isinstance(value, dict) and not hasattr(value, "get"):
+        raise RootP3SourceAdmissionRefused("P3_CHARACTER_DESCRIPTOR_SEED_ID_INVALID")
+    seed_id = value.get("seed_id")
+    if not isinstance(seed_id, str) or not seed_id:
+        raise RootP3SourceAdmissionRefused("P3_CHARACTER_DESCRIPTOR_SEED_ID_INVALID")
+    return seed_id
 
 
 def _character_scope_facts(
@@ -1535,7 +1753,10 @@ def _verify_record_snapshots(
         try:
             manifest = load_snapshot_manifest(manifest_path)
             verify_snapshot(snapshot_root=root, manifest=manifest)
-        except (SubstrateConfigurationError, OSError, ValueError) as exc:
+        except (
+            SubstrateConfigurationError, SubstrateEvidenceIntegrityMismatch,
+            SubstrateSnapshotManifestError, OSError, ValueError,
+        ) as exc:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_SNAPSHOT_RECOVERY_REFUSED") from exc
         if (
             manifest.legacy_source_namespace_id != expected_namespace_id

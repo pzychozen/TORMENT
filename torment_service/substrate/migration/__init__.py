@@ -197,6 +197,8 @@ from .root_p3_character_witness_continuation import (
     RootP3CharacterWitnessContinuationRefused,
     RootP3CharacterWitnessInput,
     RootP3CharacterWitnessBinding,
+    RootP3CharacterDomainCandidateEvidence,
+    RootP3CharacterDomainDerivation,
     RootP3ExternalOwnerObservationAuthority,
 )
 from .existing_workspace_admission import (
@@ -432,6 +434,8 @@ __all__ = [
     "RootP3CharacterWitnessContinuationRefused",
     "RootP3CharacterWitnessInput",
     "RootP3CharacterWitnessBinding",
+    "RootP3CharacterDomainCandidateEvidence",
+    "RootP3CharacterDomainDerivation",
     "RootP3ExternalOwnerObservationAuthority",
     "ExistingWorkspaceAdmissionDescriptor",
     "ExistingWorkspaceAdmissionRefused",

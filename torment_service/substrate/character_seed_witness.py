@@ -112,14 +112,47 @@ def read_legacy_character_seed_witness(
     domain_id: str, requested_seed_id: str,
 ) -> CharacterSeedWitness:
     """Read and validate one real writer witness without loading MemoryGraph."""
+    root = Path(workspace_root).expanduser().resolve()
+    try:
+        seed_definition_bytes = (root / "seeds" / requested_seed_id / "seed.json").read_bytes()
+    except OSError as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_REQUIRED") from exc
+    try:
+        private_nodes_bytes = (root / "agents" / agent_id / "private" / "nodes.jsonl").read_bytes()
+    except OSError as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_PRIVATE_NODES_REQUIRED") from exc
+    try:
+        motif_bytes = (root / "domains" / domain_id / "motifs.json").read_bytes()
+    except OSError as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_MOTIF_REQUIRED") from exc
+    return read_legacy_character_seed_witness_from_frozen_bytes(
+        seed_definition_bytes=seed_definition_bytes,
+        private_nodes_bytes=private_nodes_bytes,
+        motif_bytes=motif_bytes,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        domain_id=domain_id,
+        requested_seed_id=requested_seed_id,
+    )
+
+
+def read_legacy_character_seed_witness_from_frozen_bytes(
+    *, seed_definition_bytes: bytes, private_nodes_bytes: bytes, motif_bytes: bytes,
+    workspace_id: str, agent_id: str, domain_id: str, requested_seed_id: str,
+) -> CharacterSeedWitness:
+    """Apply the established Character witness law to already-frozen bytes.
+
+    P3's source carrier owns immutable snapshots, not a live workspace root.
+    This byte-oriented entry point deliberately shares every semantic rule with
+    :func:`read_legacy_character_seed_witness`; it changes only where the three
+    already-authorized source artifacts are obtained.
+    """
     if not isinstance(requested_seed_id, str) or not requested_seed_id:
         raise ValueError("requested_seed_id must be non-empty")
-    root = Path(workspace_root).expanduser().resolve()
-    seed_path = root / "seeds" / requested_seed_id / "seed.json"
     try:
-        raw_seed = json.loads(seed_path.read_text(encoding="utf-8"))
+        raw_seed = json.loads(seed_definition_bytes.decode("utf-8"))
         seed = CharacterSeed.from_dict(raw_seed)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_REQUIRED") from exc
     if not isinstance(raw_seed, dict) or seed.to_dict() != raw_seed:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_NONCANONICAL")
@@ -131,9 +164,9 @@ def read_legacy_character_seed_witness(
     if not concepts or len(seed.seed_eids) != len(concepts):
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_CONCEPT_CARDINALITY_MISMATCH")
     seed_eids = _validate_eids(seed.seed_eids, "CHARACTER_SEED_EIDS_INVALID", unique=True)
-    rows = _current_node_payloads(root / "agents" / agent_id / "private" / "nodes.jsonl")
+    rows = _current_node_payloads_from_bytes(private_nodes_bytes)
     _validate_seed_rows(rows, seed, concepts, seed_eids)
-    member_eids = _read_selected_motif_members(root, domain_id, seed.seed_motif_id)
+    member_eids = _read_selected_motif_members_from_bytes(motif_bytes, seed.seed_motif_id)
     seed_eid_membership = set(seed_eids)
     seed_members = tuple(eid for eid in member_eids if eid in seed_eid_membership)
     if not seed_members:
@@ -212,11 +245,11 @@ def _validate_seed_rows(
             raise CharacterSeedWitnessRefused("CHARACTER_SEED_FOREIGN_SEED_CANON_EID")
 
 
-def _current_node_payloads(path: Path) -> dict[int, Mapping[str, Any]]:
+def _current_node_payloads_from_bytes(value: bytes) -> dict[int, Mapping[str, Any]]:
     try:
-        raw_lines = path.read_bytes().splitlines()
-    except OSError as exc:
-        raise CharacterSeedWitnessRefused("CHARACTER_SEED_PRIVATE_NODES_REQUIRED") from exc
+        raw_lines = value.splitlines()
+    except AttributeError as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_PRIVATE_NODES_MALFORMED") from exc
     rows: dict[int, Mapping[str, Any]] = {}
     for raw in raw_lines:
         if not raw.strip():
@@ -233,15 +266,14 @@ def _current_node_payloads(path: Path) -> dict[int, Mapping[str, Any]]:
     return rows
 
 
-def _read_selected_motif_members(root: Path, domain_id: str, seed_motif_id: str) -> tuple[int, ...]:
+def _read_selected_motif_members_from_bytes(motif_bytes: bytes, seed_motif_id: str) -> tuple[int, ...]:
     if not isinstance(seed_motif_id, str) or not seed_motif_id:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_MOTIF_ID_REQUIRED")
-    path = root / "domains" / domain_id / "motifs.json"
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(motif_bytes.decode("utf-8"))
         motif = raw["motifs"][seed_motif_id]
         members = motif["members"]
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_MOTIF_REQUIRED") from exc
     # MotifRegistry preserves the source's append sequence.  Unlike logical
     # Character seed EIDs, this is occurrence evidence: duplicates and order
@@ -337,5 +369,5 @@ def _digest(value: Any) -> str:
 
 __all__ = [
     "CharacterSeedWitness", "CharacterSeedWitnessRefused", "character_seed_definition_digest",
-    "read_legacy_character_seed_witness",
+    "read_legacy_character_seed_witness", "read_legacy_character_seed_witness_from_frozen_bytes",
 ]
