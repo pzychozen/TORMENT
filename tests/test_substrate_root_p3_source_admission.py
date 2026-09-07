@@ -462,6 +462,71 @@ def test_b1m_never_calls_motif_admission(carrier_fixture, monkeypatch) -> None:
     ).fetchone()[0] == len(_MULTI_MEMORY_EIDS)
 
 
+def test_nonmotif_b1_does_not_require_or_admit_a_motif_member_universe(carrier_fixture, monkeypatch) -> None:
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(request, _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION)
+    record = _completion_payload(request)
+    motif_entry = next(item for item in record["scopes"] if item["scope_key"].get("domain_id") == "empty-domain")
+    main_scope = RootScopeKey("ws", RootScopeKind.SHARED, domain_id="domain")
+    no_member_universe = SimpleNamespace(
+        expected_native_core_id=request.expected_native_core_id,
+        source_scope_plans=tuple(item for item in request.source_scope_plans if item.scope_key != main_scope),
+        scope_bindings=tuple(item for item in request.scope_bindings if item.scope_key != main_scope),
+    )
+
+    observed_configs = []
+    original_run = p3_source_admission.NativeLegacyMigrationRehearsal.run
+
+    def _observe_run(self, *args, **kwargs):
+        observed_configs.append(kwargs["config"])
+        return original_run(self, *args, **kwargs)
+
+    def _forbidden_member_universe(*_args, **_kwargs):
+        raise AssertionError("non-motif B1 must not ask for a motif member universe")
+
+    monkeypatch.setattr(p3_source_admission.NativeLegacyMigrationRehearsal, "run", _observe_run)
+    monkeypatch.setattr(p3_source_admission, "_eligible_member_source_namespace_ids", _forbidden_member_universe)
+    before = (
+        connection.execute("SELECT count(*) FROM objects WHERE object_kind='LEGACY_DERIVED_MOTIF'").fetchone()[0],
+        connection.execute("SELECT count(*) FROM relationships WHERE relationship_kind='MOTIF_MEMBERSHIP'").fetchone()[0],
+    )
+    p3_source_admission._run_b1_nonmotif_evidence(connection, no_member_universe, motif_entry)
+    after = (
+        connection.execute("SELECT count(*) FROM objects WHERE object_kind='LEGACY_DERIVED_MOTIF'").fetchone()[0],
+        connection.execute("SELECT count(*) FROM relationships WHERE relationship_kind='MOTIF_MEMBERSHIP'").fetchone()[0],
+    )
+
+    assert len(observed_configs) == 1
+    assert observed_configs[0].include_motif_derivation is False
+    assert observed_configs[0].eligible_member_source_namespace_ids is None
+    assert after == before
+
+
+def test_b1f_motif_path_keeps_empty_member_universe_fail_closed(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    service = NativeRootP3SourceAdmissionService(connection)
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        service.admit(request, _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION)
+    record = _completion_payload(request)
+    main_scope = RootScopeKey("ws", RootScopeKind.SHARED, domain_id="domain")
+    no_member_universe = SimpleNamespace(
+        expected_native_core_id=request.expected_native_core_id,
+        source_scope_plans=tuple(item for item in request.source_scope_plans if item.scope_key != main_scope),
+        scope_bindings=tuple(item for item in request.scope_bindings if item.scope_key != main_scope),
+    )
+    reduced_record = {
+        **record,
+        "scopes": [
+            item for item in record["scopes"]
+            if item["scope_key"].get("domain_id") != "domain"
+        ],
+    }
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_MOTIF_MEMBER_SCOPE_UNIVERSE_EMPTY"):
+        p3_source_admission._run_b1f(connection, no_member_universe, reduced_record, "sealed-universe")
+
+
 def test_wrong_p1_plan_shape_remains_an_invalid_snapshot_manifest(tmp_path: Path) -> None:
     plan = tmp_path / "p1-bootstrap-plan.json"
     plan.write_text('{"runtime_scopes": []}\n', encoding="utf-8")

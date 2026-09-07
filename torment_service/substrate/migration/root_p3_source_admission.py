@@ -1130,7 +1130,7 @@ def _run_b1_nonmotif_evidence(
             object_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
             relationship_identity_namespace_id=binding.scope_plan.membership_identity_namespace_id,
             unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
-            eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(request, binding),
+            eligible_member_source_namespace_ids=None,
             include_motif_derivation=False,
         ),
     )
