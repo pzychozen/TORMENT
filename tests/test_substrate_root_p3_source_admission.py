@@ -1314,6 +1314,212 @@ def test_completed_carrier_reuses_snapshot_id_and_recovers_partial_b1_with_added
     assert recovered.b1_memory_count == recovered.b2_memory_count == len(_MULTI_MEMORY_EIDS)
 
 
+def _completion_payload(request: RootP3SourceAdmissionRequest) -> dict[str, object]:
+    return json.loads(request.record_path.read_text(encoding="utf-8"))["payload"]
+
+
+def _persisted_b1_predecessor(
+    connection, request: RootP3SourceAdmissionRequest,
+) -> RootP3SourceAdmissionRequest:
+    predecessor = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "completion-reload-predecessor",
+        operation_key="p3-completion-reload-predecessor",
+    )
+    NativeRootP3SourceAdmissionService(connection).admit(predecessor)
+    assert all(entry["b1"] is not None for entry in _completion_payload(predecessor)["scopes"])
+    return predecessor
+
+
+def _pending_completion_successor(
+    connection, request: RootP3SourceAdmissionRequest, predecessor: RootP3SourceAdmissionRequest,
+) -> RootP3SourceAdmissionRequest:
+    successor = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "completion-reload-successor",
+        predecessor_carrier_record_path=predecessor.record_path,
+        operation_key="p3-completion-reload-successor",
+    )
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            successor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    return successor
+
+
+def _align_pending_successor_b1_evidence(
+    connection, successor: RootP3SourceAdmissionRequest,
+) -> None:
+    """Stage the fixture's inherited records at the current frozen B1 evidence.
+
+    The small fixture's predecessor and successor use distinct admission
+    passes, so its persisted revision IDs need this explicit stable replay
+    before the test can exercise the *carrier* revalidation transition.
+    """
+
+    record = _completion_payload(successor)
+    ordered = p3_source_admission._ordered_scope_entries(record)
+    for entry in ordered:
+        p3_source_admission._run_b1m(connection, successor, entry)
+    b1m = p3_source_admission._seal_b1m_identity_universe(connection, successor, record)
+    p3_source_admission._run_b1f(connection, successor, record, b1m["identity_universe_digest"])
+    for entry in ordered:
+        p3_source_admission._run_b1_nonmotif_evidence(connection, successor, entry)
+        entry["b1"]["memories"] = p3_source_admission._read_b1_memory_evidence(
+            connection, successor, entry, {},
+        )
+    p3_source_admission._write_record(successor.record_path, record)
+
+
+def test_completion_carrier_cold_reload_preserves_pending_and_qualified_reuse_states(
+    carrier_fixture, monkeypatch,
+) -> None:
+    """A successor survives reload before and after inherited-B1 qualification."""
+
+    connection, request = carrier_fixture
+    predecessor = _persisted_b1_predecessor(connection, request)
+    successor = _pending_completion_successor(connection, request, predecessor)
+    pending = _completion_payload(successor)["carrier_completion"]
+    assert set(pending) == {
+        "predecessor_record_path", "predecessor_record_digest", "completed_snapshots",
+        "completed_manifests", "inherited_snapshots",
+        "previous_b1_scope_reuse_candidate_count", "predecessor_b1_revalidation_pending",
+    }
+    assert pending["previous_b1_scope_reuse_candidate_count"] == 3
+    assert pending["predecessor_b1_revalidation_pending"] is True
+
+    # The first cold reload must accept the pending shape before any B1 write.
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            successor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    assert _completion_payload(successor)["carrier_completion"] == pending
+
+    _align_pending_successor_b1_evidence(connection, successor)
+
+    def _stop_after_b1_revalidation(*_args, **_kwargs):
+        raise RootP3SourceAdmissionRefused("TEST_STOP_AFTER_B1_REVALIDATION")
+
+    monkeypatch.setattr(p3_source_admission, "_b2_normalization_request", _stop_after_b1_revalidation)
+    with pytest.raises(RootP3SourceAdmissionRefused, match="TEST_STOP_AFTER_B1_REVALIDATION"):
+        NativeRootP3SourceAdmissionService(connection).admit(successor)
+    qualified = _completion_payload(successor)["carrier_completion"]
+    assert set(qualified) == set(pending) | {"previous_b1_scope_reuse"}
+    assert qualified["previous_b1_scope_reuse_candidate_count"] == 3
+    assert qualified["predecessor_b1_revalidation_pending"] is False
+    assert qualified["previous_b1_scope_reuse"] == "QUALIFIED"
+
+    # A second cold reload must accept the persisted qualified state before
+    # B1M; the interruption is the test boundary, not a reload failure.
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            successor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    assert _completion_payload(successor)["carrier_completion"] == qualified
+
+
+def test_legacy_completion_derives_pending_revalidation_and_refuses_bad_inherited_b1(carrier_fixture) -> None:
+    """Five-field legacy metadata stays readable but cannot bypass B1 revalidation."""
+
+    connection, request = carrier_fixture
+    predecessor = _persisted_b1_predecessor(connection, request)
+    successor = _pending_completion_successor(connection, request, predecessor)
+    legacy = _completion_payload(successor)
+    completion = legacy["carrier_completion"]
+    completion.pop("previous_b1_scope_reuse_candidate_count")
+    completion.pop("predecessor_b1_revalidation_pending")
+    p3_source_admission._write_record(successor.record_path, legacy)
+
+    loaded = p3_source_admission._load_record(successor.record_path, successor)
+    derived = loaded["carrier_completion"]
+    assert derived["previous_b1_scope_reuse_candidate_count"] == 3
+    assert derived["predecessor_b1_revalidation_pending"] is True
+    assert set(_completion_payload(successor)["carrier_completion"]) == {
+        "predecessor_record_path", "predecessor_record_digest", "completed_snapshots",
+        "completed_manifests", "inherited_snapshots",
+    }
+
+    _align_pending_successor_b1_evidence(connection, successor)
+    # A tampered inherited B1 record must reach and fail strict revalidation,
+    # rather than being silently reused by the legacy completion shape.
+    tampered = _completion_payload(successor)
+    scope = next(item for item in tampered["scopes"] if item["scope_key"].get("domain_id") == "domain")
+    scope["b1"]["memories"][0]["r1_revision_id"] = str(UUID(int=0))
+    p3_source_admission._write_record(successor.record_path, tampered)
+    with pytest.raises(
+        RootP3SourceAdmissionRefused,
+        match="P3_CARRIER_PREVIOUS_B1_MEMORY_REVALIDATION_FAILED",
+    ):
+        NativeRootP3SourceAdmissionService(connection).admit(successor)
+
+
+def test_completion_carrier_no_reuse_candidate_cold_reloads_as_nonpending(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    predecessor = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "completion-no-reuse-predecessor",
+        operation_key="p3-completion-no-reuse-predecessor",
+    )
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            predecessor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    successor = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "completion-no-reuse-successor",
+        predecessor_carrier_record_path=predecessor.record_path,
+        operation_key="p3-completion-no-reuse-successor",
+    )
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            successor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+    completion = _completion_payload(successor)["carrier_completion"]
+    assert completion["previous_b1_scope_reuse_candidate_count"] == 0
+    assert completion["predecessor_b1_revalidation_pending"] is False
+    assert "previous_b1_scope_reuse" not in completion
+    with pytest.raises(RootP3SourceAdmissionInterrupted):
+        NativeRootP3SourceAdmissionService(connection).admit(
+            successor,
+            _test_interrupt_after=RootP3SourceAdmissionInterruptionPoint.AFTER_SNAPSHOT_SELECTION,
+        )
+
+
+@pytest.mark.parametrize("change", (
+    lambda completion: completion.update({"unrecognized": "value"}),
+    lambda completion: completion.pop("inherited_snapshots"),
+    lambda completion: completion.update({"previous_b1_scope_reuse_candidate_count": -1}),
+    lambda completion: completion.update({"previous_b1_scope_reuse_candidate_count": True}),
+    lambda completion: completion.update({"predecessor_b1_revalidation_pending": "true"}),
+    lambda completion: completion.update({"predecessor_b1_revalidation_pending": False}),
+    lambda completion: completion.update({"previous_b1_scope_reuse_candidate_count": 0}),
+    lambda completion: completion.update({"previous_b1_scope_reuse": "UNQUALIFIED"}),
+    lambda completion: completion.update({
+        "previous_b1_scope_reuse": "QUALIFIED",
+        "predecessor_b1_revalidation_pending": True,
+    }),
+    lambda completion: completion.update({
+        "previous_b1_scope_reuse_candidate_count": 0,
+        "predecessor_b1_revalidation_pending": False,
+        "previous_b1_scope_reuse": "QUALIFIED",
+    }),
+))
+def test_completion_carrier_rejects_invalid_reuse_metadata(carrier_fixture, change) -> None:
+    connection, request = carrier_fixture
+    predecessor = _persisted_b1_predecessor(connection, request)
+    successor = _pending_completion_successor(connection, request, predecessor)
+    invalid = _completion_payload(successor)
+    change(invalid["carrier_completion"])
+    p3_source_admission._write_record(successor.record_path, invalid)
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_COMPLETION_SHAPE_INVALID"):
+        p3_source_admission._load_record(successor.record_path, successor)
+
+
 def test_multi_motif_carrier_evidence_composes_one_b4c_per_motif(carrier_fixture) -> None:
     connection, request = carrier_fixture
     result = NativeRootP3SourceAdmissionService(connection).admit(request)

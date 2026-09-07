@@ -786,6 +786,7 @@ def _complete_predecessor_record(
     scopes: list[dict[str, Any]] = []
     completed: list[dict[str, Any]] = []
     inherited: list[dict[str, Any]] = []
+    inherited_b1_reuse_candidate_count = 0
     for index, binding in enumerate(sorted(request.scope_bindings, key=lambda item: item.scope_key.canonical_key)):
         predecessor_entry = predecessor_by_key.get(binding.scope_key)
         if predecessor_entry is None:
@@ -822,6 +823,8 @@ def _complete_predecessor_record(
             "manifest_path": str(manifest_path),
             "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
         })
+        if not completion and predecessor_entry.get("b1") is not None:
+            inherited_b1_reuse_candidate_count += 1
     record: dict[str, Any] = {
         "root_description_digest": request.description.identity_digest,
         "explicit_source_manifest_digest": request.description.explicit_source_manifest.digest,
@@ -834,12 +837,8 @@ def _complete_predecessor_record(
             "completed_snapshots": completed,
             "completed_manifests": [item["manifest_path"] for item in completed],
             "inherited_snapshots": inherited,
-            "previous_b1_scope_reuse_candidate_count": sum(
-                item.get("b1") is not None for item in predecessor_by_key.values()
-            ),
-            "predecessor_b1_revalidation_pending": any(
-                item.get("b1") is not None for item in predecessor_by_key.values()
-            ),
+            "previous_b1_scope_reuse_candidate_count": inherited_b1_reuse_candidate_count,
+            "predecessor_b1_revalidation_pending": inherited_b1_reuse_candidate_count > 0,
         },
     }
     _write_record(request.record_path, record)
@@ -2255,14 +2254,19 @@ def _completion_snapshot_pairs(
     """Validate the immutable predecessor cross-binding for a completion carrier."""
 
     data = _require_mapping(completion, "P3_CARRIER_COMPLETION_SHAPE_INVALID")
-    expected = {
+    base_keys = {
         "predecessor_record_path",
         "predecessor_record_digest",
         "completed_snapshots",
         "completed_manifests",
         "inherited_snapshots",
     }
-    if set(data) != expected:
+    pending_keys = base_keys | {
+        "previous_b1_scope_reuse_candidate_count",
+        "predecessor_b1_revalidation_pending",
+    }
+    qualified_keys = pending_keys | {"previous_b1_scope_reuse"}
+    if set(data) not in (base_keys, pending_keys, qualified_keys):
         raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
     predecessor_path_raw = data.get("predecessor_record_path")
     predecessor_digest = data.get("predecessor_record_digest")
@@ -2309,7 +2313,73 @@ def _completion_snapshot_pairs(
         if pair in pairs or pair not in predecessor_pairs:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
         pairs.add(pair)
+    _validate_completion_reuse_metadata(
+        completion=data,
+        predecessor=predecessor,
+        inherited_snapshot_pairs=pairs,
+        base_keys=base_keys,
+        pending_keys=pending_keys,
+        qualified_keys=qualified_keys,
+    )
     return pairs
+
+
+def _validate_completion_reuse_metadata(
+    *,
+    completion: dict[str, Any],
+    predecessor: dict[str, Any],
+    inherited_snapshot_pairs: set[tuple[str, str]],
+    base_keys: set[str],
+    pending_keys: set[str],
+    qualified_keys: set[str],
+) -> None:
+    """Accept only the legacy, pending, or qualified B1-reuse completion state."""
+
+    predecessor_scopes = _require_list(
+        predecessor.get("scopes"),
+        "P3_CARRIER_COMPLETION_PREDECESSOR_SCOPE_SET_INVALID",
+    )
+    derived_candidate_count = 0
+    for entry in predecessor_scopes:
+        if not isinstance(entry, dict):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_SCOPE_SET_INVALID")
+        pair = (
+            str(Path(entry.get("snapshot_root", "")).expanduser().resolve()),
+            str(Path(entry.get("manifest_path", "")).expanduser().resolve()),
+        )
+        if pair in inherited_snapshot_pairs and entry.get("b1") is not None:
+            derived_candidate_count += 1
+
+    keys = set(completion)
+    if keys == base_keys:
+        # Historical completions had no explicit reuse state.  Derive the
+        # pending in-memory state so their inherited B1 evidence is never
+        # silently reused; a subsequent normal carrier write upgrades it.
+        completion["previous_b1_scope_reuse_candidate_count"] = derived_candidate_count
+        completion["predecessor_b1_revalidation_pending"] = derived_candidate_count > 0
+        return
+
+    candidate_count = completion.get("previous_b1_scope_reuse_candidate_count")
+    pending = completion.get("predecessor_b1_revalidation_pending")
+    if (
+        type(candidate_count) is not int
+        or candidate_count < 0
+        or not isinstance(pending, bool)
+        or candidate_count != derived_candidate_count
+    ):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+
+    if keys == pending_keys:
+        if pending is not (candidate_count > 0):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+        return
+
+    if keys != qualified_keys or (
+        candidate_count <= 0
+        or pending
+        or completion.get("previous_b1_scope_reuse") != "QUALIFIED"
+    ):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
 
 
 def _write_record(path: Path, payload: dict[str, Any]) -> None:
