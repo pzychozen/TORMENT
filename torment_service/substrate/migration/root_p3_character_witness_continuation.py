@@ -262,7 +262,7 @@ def validate_character_witness_inputs(
             )
         except CharacterSeedWitnessRefused as exc:
             raise RootP3CharacterWitnessContinuationRefused(exc.code) from exc
-        if raw_definition != dict(witness.seed_definition):
+        if not witness.matches_raw_seed_definition(raw_definition):
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_DESCRIPTOR_SEED_BYTES_MISMATCH")
         observation = authority.observation_for(
             workspace_id=item.scope_key.workspace_id, seed_id=witness.seed_id,

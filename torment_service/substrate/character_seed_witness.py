@@ -22,6 +22,8 @@ from .provenance import NativeProvenanceRecord
 
 
 _ORIGIN_KIND = "CHARACTER_SEED_PLANT"
+_CURRENT_CANONICAL = "CURRENT_CANONICAL"
+_LEGACY_MISSING_OWNER_AGENT_ID_V1 = "LEGACY_MISSING_OWNER_AGENT_ID_V1"
 
 
 class CharacterSeedWitnessRefused(SubstrateInvariantViolation):
@@ -40,6 +42,8 @@ class CharacterSeedWitness:
     agent_id: str
     domain_id: str
     seed_definition: Mapping[str, Any]
+    seed_definition_compatibility: str
+    derived_owner_agent_id: str | None
     seed_definition_digest: str
     seed_id: str
     character_name: str
@@ -55,6 +59,8 @@ class CharacterSeedWitness:
         return {
             "compatibility_status": "CHARACTER_SEED_WITNESS_QUALIFIED",
             "seed_definition": dict(self.seed_definition),
+            "seed_definition_compatibility": self.seed_definition_compatibility,
+            "derived_owner_agent_id": self.derived_owner_agent_id,
             "seed_definition_digest": self.seed_definition_digest,
             "seed_id": self.seed_id,
             "character_name": self.character_name,
@@ -84,6 +90,24 @@ class CharacterSeedWitness:
             None, None, "seed_canon", notes,
         )
 
+    def matches_raw_seed_definition(self, raw_definition: Any) -> bool:
+        """Return whether P2's untouched object has this witness's exact shape."""
+        if not isinstance(raw_definition, dict):
+            return False
+        definition = dict(self.seed_definition)
+        if self.seed_definition_compatibility == _CURRENT_CANONICAL:
+            return raw_definition == definition
+        if self.seed_definition_compatibility == _LEGACY_MISSING_OWNER_AGENT_ID_V1:
+            if (
+                self.derived_owner_agent_id != self.agent_id
+                or definition.get("owner_agent_id") != self.derived_owner_agent_id
+            ):
+                return False
+            expected = dict(definition)
+            expected.pop("owner_agent_id", None)
+            return raw_definition == expected
+        return False
+
     @classmethod
     def from_descriptor_payload(
         cls, *, workspace_id: str, agent_id: str, domain_id: str, value: Mapping[str, Any],
@@ -94,6 +118,8 @@ class CharacterSeedWitness:
             seed_definition = value["seed_definition"]
             witness = cls(
                 workspace_id, agent_id, domain_id, seed_definition,
+                value.get("seed_definition_compatibility", _CURRENT_CANONICAL),
+                value.get("derived_owner_agent_id"),
                 _text(value, "seed_definition_digest"), _text(value, "seed_id"),
                 _text(value, "character_name"), _text(value, "seed_text"),
                 _integer_tuple(value, "seed_eids", unique=True), _text(value, "seed_motif_id"),
@@ -151,11 +177,11 @@ def read_legacy_character_seed_witness_from_frozen_bytes(
         raise ValueError("requested_seed_id must be non-empty")
     try:
         raw_seed = json.loads(seed_definition_bytes.decode("utf-8"))
-        seed = CharacterSeed.from_dict(raw_seed)
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_REQUIRED") from exc
-    if not isinstance(raw_seed, dict) or seed.to_dict() != raw_seed:
-        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_NONCANONICAL")
+    seed, definition_compatibility, derived_owner_agent_id = _qualified_seed_from_raw_definition(
+        raw_seed, agent_id,
+    )
     if seed.seed_id != requested_seed_id or not seed.character_name or not seed.seed_text:
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_IDENTITY_MISMATCH")
     if seed.owner_agent_id != agent_id:
@@ -175,16 +201,51 @@ def read_legacy_character_seed_witness_from_frozen_bytes(
     definition_digest = _digest(definition)
     witness_payload = {
         "workspace_id": workspace_id, "agent_id": agent_id, "domain_id": domain_id,
+        "seed_definition_compatibility": definition_compatibility,
+        "derived_owner_agent_id": derived_owner_agent_id,
         "seed_definition_digest": definition_digest, "seed_id": seed.seed_id,
         "character_name": seed.character_name, "seed_eids": list(seed_eids),
         "seed_motif_id": seed.seed_motif_id, "seed_motif_member_eids": list(member_eids),
         "seed_motif_seed_eids": list(seed_members), "concept_summaries": list(concepts),
     }
     return CharacterSeedWitness(
-        workspace_id, agent_id, domain_id, definition, definition_digest, seed.seed_id,
+        workspace_id, agent_id, domain_id, definition, definition_compatibility,
+        derived_owner_agent_id, definition_digest, seed.seed_id,
         seed.character_name, seed.seed_text, seed_eids, seed.seed_motif_id, member_eids,
         seed_members, concepts, _digest(witness_payload),
     )
+
+
+def _qualified_seed_from_raw_definition(
+    raw_definition: Any, agent_id: str,
+) -> tuple[CharacterSeed, str, str | None]:
+    """Recognize current seed JSON or one exact migration-only historic class."""
+    if not isinstance(raw_definition, dict):
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_NONCANONICAL")
+    try:
+        seed = CharacterSeed.from_dict(raw_definition)
+    except (TypeError, ValueError) as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_REQUIRED") from exc
+    current_definition = seed.to_dict()
+    if raw_definition == current_definition:
+        return seed, _CURRENT_CANONICAL, None
+
+    # This historic file omitted precisely the field added later.  Projecting
+    # that owner enables the existing writer-row witness; P2 still owns and
+    # later rechecks the untouched raw object and its bytes.
+    legacy_definition = dict(current_definition)
+    legacy_definition.pop("owner_agent_id")
+    if raw_definition != legacy_definition:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_NONCANONICAL")
+    projected_definition = dict(raw_definition)
+    projected_definition["owner_agent_id"] = agent_id
+    try:
+        projected_seed = CharacterSeed.from_dict(projected_definition)
+    except (TypeError, ValueError) as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_REQUIRED") from exc
+    if projected_seed.to_dict() != projected_definition:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_DEFINITION_NONCANONICAL")
+    return projected_seed, _LEGACY_MISSING_OWNER_AGENT_ID_V1, agent_id
 
 
 def character_seed_definition_digest(seed: CharacterSeed) -> str:
@@ -342,6 +403,14 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
         or seed.seed_motif_id != witness.seed_motif_id
     ):
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
+    if witness.seed_definition_compatibility == _CURRENT_CANONICAL:
+        if witness.derived_owner_agent_id is not None:
+            raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
+    elif witness.seed_definition_compatibility == _LEGACY_MISSING_OWNER_AGENT_ID_V1:
+        if witness.derived_owner_agent_id != witness.agent_id:
+            raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
+    else:
+        raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
     if tuple(_split_seed_text(witness.seed_text)) != witness.concept_summaries:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_CONCEPTS_MISMATCH")
     if len(witness.seed_eids) != len(witness.concept_summaries):
@@ -351,15 +420,29 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
     )
     if witness.seed_motif_seed_eids != expected_seed_occurrences:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_MOTIF_MEMBERS_MISMATCH")
-    expected = _digest({
+    expected_payload = {
         "workspace_id": witness.workspace_id, "agent_id": witness.agent_id, "domain_id": witness.domain_id,
+        "seed_definition_compatibility": witness.seed_definition_compatibility,
+        "derived_owner_agent_id": witness.derived_owner_agent_id,
         "seed_definition_digest": witness.seed_definition_digest, "seed_id": witness.seed_id,
         "character_name": witness.character_name, "seed_eids": list(witness.seed_eids),
         "seed_motif_id": witness.seed_motif_id, "seed_motif_member_eids": list(witness.seed_motif_member_eids),
         "seed_motif_seed_eids": list(witness.seed_motif_seed_eids),
         "concept_summaries": list(witness.concept_summaries),
-    })
-    if expected != witness.witness_digest:
+    }
+    if _digest(expected_payload) == witness.witness_digest:
+        return
+    # Historical current-canonical descriptors predate these two fields.  They
+    # cannot describe the new raw compatibility class, so retain only this
+    # narrow old form for recovery of existing current-canonical carriers.
+    legacy_descriptor_payload = dict(expected_payload)
+    legacy_descriptor_payload.pop("seed_definition_compatibility")
+    legacy_descriptor_payload.pop("derived_owner_agent_id")
+    if not (
+        witness.seed_definition_compatibility == _CURRENT_CANONICAL
+        and witness.derived_owner_agent_id is None
+        and _digest(legacy_descriptor_payload) == witness.witness_digest
+    ):
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_WITNESS_DIGEST_MISMATCH")
 
 

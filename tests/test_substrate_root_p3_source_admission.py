@@ -15,7 +15,9 @@ import pytest
 import torment_service.substrate.migration.root_p3_source_admission as p3_source_admission
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.character import CharacterSeed, CharacterStore, _split_seed_text
-from torment_service.substrate.character_seed_witness import read_legacy_character_seed_witness
+from torment_service.substrate.character_seed_witness import (
+    read_legacy_character_seed_witness, read_legacy_character_seed_witness_from_frozen_bytes,
+)
 from torment_service.substrate.connection import open_temporary_test_connection
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
 from torment_service.substrate.migration import (
@@ -520,6 +522,7 @@ def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fall
         item.eid for scope_input in result.normalization_request.scope_inputs
         for item in (*scope_input.b3a_requests, *scope_input.b3b_requests)
     ]
+
     assert len(dispatched_eids) == len(set(dispatched_eids)) == len(_MULTI_MEMORY_EIDS) + 2
     provenance = connection.execute(
         """SELECT a.alias_value,p.origin_kind FROM legacy_object_aliases a
@@ -560,6 +563,49 @@ def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fall
     p3_source_admission._write_record(character_request.record_path, record)
     with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
         NativeRootP3SourceAdmissionService(connection).admit(character_request)
+
+
+def test_p3_character_witness_accepts_only_the_exact_legacy_missing_owner_raw_shape(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    character_request, seed_bytes = _character_p3_request(connection, request)
+    input_value = character_request.character_witness_inputs[0]
+    raw_seed = json.loads(seed_bytes.decode("utf-8"))
+    raw_seed.pop("owner_agent_id")
+    legacy_seed_bytes = json.dumps(raw_seed, separators=(",", ":")).encode("utf-8")
+    private = request.root / "workspaces" / "ws" / "agents" / "empty-agent" / "private"
+    motif = request.root / "workspaces" / "ws" / "domains" / "domain" / "motifs.json"
+    witness = read_legacy_character_seed_witness_from_frozen_bytes(
+        seed_definition_bytes=legacy_seed_bytes, private_nodes_bytes=(private / "nodes.jsonl").read_bytes(),
+        motif_bytes=motif.read_bytes(), workspace_id="ws", agent_id="empty-agent",
+        domain_id="domain", requested_seed_id="p3-character-seed-v1",
+    )
+    assert witness.seed_definition_compatibility == "LEGACY_MISSING_OWNER_AGENT_ID_V1"
+    assert witness.derived_owner_agent_id == "empty-agent"
+    observation = character_request.character_observation_authority.opened_character_observations[0]
+    changed_observation = ExternalOwnerObservation(
+        observation.workspace_id, observation.owner_kind, observation.observation_key,
+        hashlib.sha256(legacy_seed_bytes).hexdigest(),
+    )
+    description = replace(
+        character_request.description, external_owner_observations=(changed_observation,),
+    )
+    authority = RootP3ExternalOwnerObservationAuthority(
+        character_request.character_observation_authority.envelope_c_digest,
+        description.external_owner_observation_digest, (changed_observation,),
+    )
+    legacy_request = replace(
+        character_request, description=description, character_observation_authority=authority,
+        character_witness_inputs=(replace(
+            input_value, seed_definition_bytes=legacy_seed_bytes,
+            descriptor_payload=witness.descriptor_payload(),
+        ),),
+        carrier_directory=character_request.carrier_root.parent / "legacy-owner-source-carrier",
+        character_continuation_carrier_directory=character_request.carrier_root.parent / "legacy-owner-continuation",
+    )
+
+    result = NativeRootP3SourceAdmissionService(connection).admit(legacy_request)
+
+    assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
 
 
 def _replace_character_motif_evidence(

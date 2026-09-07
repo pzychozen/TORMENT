@@ -26,6 +26,7 @@ from torment_service.motifs import MotifRegistry
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.character_seed_witness import (
     CharacterSeedWitness, CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
+    read_legacy_character_seed_witness_from_frozen_bytes,
 )
 from torment_service.substrate.connection import open_existing_native_core_connection, open_temporary_test_connection
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope, NativeMotifProcessOrder
@@ -272,6 +273,83 @@ def _read_character_witness(root: Path, seed: CharacterSeed):
         workspace_root=root, workspace_id="orchard", agent_id="aria", domain_id="personal",
         requested_seed_id=seed.seed_id,
     )
+
+
+def test_legacy_missing_owner_seed_projects_only_the_qualified_raw_shape(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    current = _read_character_witness(root, seed)
+    assert current.seed_definition_compatibility == "CURRENT_CANONICAL"
+    assert current.derived_owner_agent_id is None
+    assert current.matches_raw_seed_definition(
+        json.loads((root / "seeds" / seed.seed_id / "seed.json").read_text(encoding="utf-8")),
+    )
+    assert CharacterSeedWitness.from_descriptor_payload(
+        workspace_id="orchard", agent_id="aria", domain_id="personal",
+        value=current.descriptor_payload(),
+    ) == current
+
+    _rewrite_seed_json(root, seed.seed_id, lambda value: value.pop("owner_agent_id"))
+    raw_definition = json.loads((root / "seeds" / seed.seed_id / "seed.json").read_text(encoding="utf-8"))
+    witness = _read_character_witness(root, seed)
+
+    assert witness.seed_definition_compatibility == "LEGACY_MISSING_OWNER_AGENT_ID_V1"
+    assert witness.derived_owner_agent_id == "aria"
+    assert witness.seed_definition["owner_agent_id"] == "aria"
+    assert witness.matches_raw_seed_definition(raw_definition)
+    assert CharacterSeedWitness.from_descriptor_payload(
+        workspace_id="orchard", agent_id="aria", domain_id="personal",
+        value=witness.descriptor_payload(),
+    ) == witness
+    changed = dict(raw_definition)
+    changed["character_name"] = "Altered raw Character"
+    assert not witness.matches_raw_seed_definition(changed)
+
+
+@pytest.mark.parametrize("kind,code", (
+    ("missing_owner_with_extra", "CHARACTER_SEED_DEFINITION_NONCANONICAL"),
+    ("missing_two_fields", "CHARACTER_SEED_DEFINITION_NONCANONICAL"),
+    ("explicit_other_owner", "CHARACTER_SEED_OWNER_AGENT_MISMATCH"),
+    ("wrong_requested_seed", "CHARACTER_SEED_IDENTITY_MISMATCH"),
+    ("user_disagrees", "CHARACTER_SEED_TIER_OR_OWNER_MISMATCH"),
+    ("mixed_users", "CHARACTER_SEED_TIER_OR_OWNER_MISMATCH"),
+))
+def test_legacy_missing_owner_projection_refuses_every_other_owner_claim(
+    tmp_path: Path, kind: str, code: str,
+):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    if kind == "missing_owner_with_extra":
+        def mutate(value):
+            value.pop("owner_agent_id")
+            value["unknown_legacy_field"] = True
+        _rewrite_seed_json(root, seed.seed_id, mutate)
+    elif kind == "missing_two_fields":
+        def mutate(value):
+            value.pop("owner_agent_id")
+            value.pop("derived_weight")
+        _rewrite_seed_json(root, seed.seed_id, mutate)
+    elif kind == "explicit_other_owner":
+        _rewrite_seed_json(root, seed.seed_id, lambda value: value.__setitem__("owner_agent_id", "other"))
+    else:
+        _rewrite_seed_json(root, seed.seed_id, lambda value: value.pop("owner_agent_id"))
+        if kind == "user_disagrees":
+            _rewrite_node_payload(root, 7, lambda value: value.__setitem__("user_id", "other"))
+        elif kind == "mixed_users":
+            _rewrite_node_payload(root, 8, lambda value: value.__setitem__("user_id", "other"))
+
+    with pytest.raises(CharacterSeedWitnessRefused, match=code):
+        if kind == "wrong_requested_seed":
+            read_legacy_character_seed_witness_from_frozen_bytes(
+                seed_definition_bytes=(root / "seeds" / seed.seed_id / "seed.json").read_bytes(),
+                private_nodes_bytes=(root / "agents" / "aria" / "private" / "nodes.jsonl").read_bytes(),
+                motif_bytes=(root / "domains" / "personal" / "motifs.json").read_bytes(),
+                workspace_id="orchard", agent_id="aria", domain_id="personal",
+                requested_seed_id="not-the-requested-seed",
+            )
+        else:
+            read_legacy_character_seed_witness(
+                workspace_root=root, workspace_id="orchard", agent_id="aria", domain_id="personal",
+                requested_seed_id=seed.seed_id,
+            )
 
 
 def test_legacy_character_witness_preserves_raw_motif_member_occurrences(tmp_path: Path):
