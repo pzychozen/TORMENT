@@ -36,7 +36,12 @@ from ..object_revision_governance import (
     _insert_published_governance_for_qualification,
 )
 from ..objects import SubstrateTx, execute_semantic
-from ..provenance import NativeProvenanceRecord
+from ..provenance import (
+    NativeProvenanceRecord,
+    is_ordinary_unknown_original_provenance_candidate,
+    requires_character_provenance_witness,
+    unknown_original_provenance_record,
+)
 from ..schema import CORE_ROLE_STAGING, SCHEMA_MAJOR, SCHEMA_MINOR, require_current_schema
 from .admission import _extract_nodes, _nodes_artifact
 from .legacy_governance import derivable_absent_governance_values, exact_governance_values
@@ -267,7 +272,7 @@ class NativeMigrationRuntimeNormalizationService:
         _reject_conflicting_outer_evidence(raw_row, payload)
         lifecycle = _lifecycle_from_payload(payload)
         governance = _governance_from_payload(payload, raw_row)
-        provenance = _provenance_from_payload(payload)
+        provenance = _provenance_from_evidence(raw_row, payload)
         payload_json = canonical_intent_text(payload)
         return PreparedLegacyMemoryNormalization(
             legacy_snapshot_id=request.legacy_snapshot_id,
@@ -658,7 +663,17 @@ def _governance_from_payload(
         raise MigrationRuntimeNormalizationRefused("B2_EXPLICIT_GOVERNANCE_REQUIRED") from exc
 
 
-def _provenance_from_payload(payload: dict[str, Any]) -> NativeProvenanceRecord:
+def _provenance_from_evidence(
+    raw_row: dict[str, Any], payload: dict[str, Any],
+) -> NativeProvenanceRecord:
+    if is_ordinary_unknown_original_provenance_candidate(raw_row, payload):
+        return unknown_original_provenance_record()
+    if (
+        requires_character_provenance_witness(payload)
+        and "provenance" not in raw_row
+        and "provenance" not in payload
+    ):
+        raise MigrationRuntimeNormalizationRefused("B2_CHARACTER_PROVENANCE_WITNESS_REQUIRED")
     raw = payload.get("provenance")
     if not isinstance(raw, dict):
         raise MigrationRuntimeNormalizationRefused("B2_EXACT_PROVENANCE_V1_REQUIRED")

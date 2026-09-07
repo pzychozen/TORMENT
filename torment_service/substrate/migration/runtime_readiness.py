@@ -34,6 +34,11 @@ from ..errors import SubstrateInvariantViolation
 from ..ids import native_id_to_bytes
 from ..motif_runtime_reader import NativeMotifRuntimeReader
 from ..motifs import DERIVED_MOTIF_OBJECT_KIND
+from ..provenance import (
+    is_ordinary_unknown_original_provenance_candidate,
+    is_unknown_original_provenance_values,
+    requires_character_provenance_witness,
+)
 from ..runtime_binding import NativeRepresentationLane
 from ..schema import SCHEMA_MAJOR, SCHEMA_MINOR, open_schema
 from .legacy_governance import (
@@ -53,6 +58,7 @@ _RUNTIME_LANE = ("COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR", "fl
 class ObjectRuntimeReadiness(StrEnum):
     RUNTIME_READY_AS_IS = "RUNTIME_READY_AS_IS"
     DETERMINISTIC_NORMALIZATION_REQUIRED = "DETERMINISTIC_NORMALIZATION_REQUIRED"
+    UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED = "UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED"
     REPRESENTATION_BOOTSTRAP_REQUIRED = "REPRESENTATION_BOOTSTRAP_REQUIRED"
     SEMANTIC_FACTS_UNRESOLVED = "SEMANTIC_FACTS_UNRESOLVED"
     QUARANTINED_OR_UNSUPPORTED = "QUARANTINED_OR_UNSUPPORTED"
@@ -68,6 +74,7 @@ class GovernanceEvidenceReadiness(StrEnum):
 
 class ProvenanceEvidenceReadiness(StrEnum):
     EXPLICIT_PROVENANCE_V1 = "EXPLICIT_PROVENANCE_V1"
+    STRUCTURAL_UNKNOWN_ORIGINAL_PROVENANCE = "STRUCTURAL_UNKNOWN_ORIGINAL_PROVENANCE"
     DETERMINISTIC_LEGACY_PROVENANCE_TRANSLATION = "DETERMINISTIC_LEGACY_PROVENANCE_TRANSLATION"
     DESCRIPTIVE_EVIDENCE_ONLY = "DESCRIPTIVE_EVIDENCE_ONLY"
     UNKNOWN_PROVENANCE = "UNKNOWN_PROVENANCE"
@@ -422,7 +429,10 @@ class NativeMigrationRuntimeReadinessPreflight:
                 item.readiness is ObjectRuntimeReadiness.RUNTIME_READY_AS_IS for item in object_items
             ),
             normalization_required_count=sum(
-                item.readiness is ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED
+                item.readiness in {
+                    ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
+                    ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED,
+                }
                 for item in object_items
             ),
             representation_bootstrap_required_count=sum(
@@ -614,7 +624,10 @@ class NativeMigrationRuntimeReadinessPreflight:
             ProvenanceEvidenceReadiness.DESCRIPTIVE_EVIDENCE_ONLY,
             ProvenanceEvidenceReadiness.CONFLICTING_PROVENANCE,
         }:
-            reasons.append(provenance.value)
+            if provenance is ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE and requires_character_provenance_witness(payload):
+                reasons.append("CHARACTER_NORMALIZATION_WITNESS_REQUIRED")
+            else:
+                reasons.append(provenance.value)
         if lifecycle in {
             LifecycleEvidenceReadiness.UNKNOWN_LIFECYCLE,
             LifecycleEvidenceReadiness.CONFLICTING_LIFECYCLE_EVIDENCE,
@@ -641,7 +654,15 @@ class NativeMigrationRuntimeReadinessPreflight:
         elif captures and not qualified_representation_id:
             reasons.append("NO_CURRENT_QUALIFIED_COMPAT_EMBEDDING")
         readiness = _object_readiness(
-            reasons, plan_state, qualified_representation_id is not None,
+            reasons,
+            plan_state,
+            qualified_representation_id is not None,
+            unknown_original_provenance_candidate=(
+                revision_ordinal == 1
+                and payload_format == "TEXT"
+                and provenance is ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE
+                and is_ordinary_unknown_original_provenance_candidate(raw_row, payload)
+            ),
         )
         return ObjectRuntimeReadinessItem(
             object_id=object_id,
@@ -710,12 +731,15 @@ class NativeMigrationRuntimeReadinessPreflight:
             )
         rows = self._connection.execute(
             """SELECT origin_kind,source_channel,source_role,derivation_status,
-                      uncertainty_state FROM provenance_records WHERE provenance_id=?""",
+                      uncertainty_state,source_time_ns,capture_time_ns,memory_role,descriptive_notes
+                 FROM provenance_records WHERE provenance_id=?""",
             (provenance_blob,),
         ).fetchall()
         if len(rows) != 1:
             return ProvenanceEvidenceReadiness.CONFLICTING_PROVENANCE
-        origin, channel, role, derivation, uncertainty = rows[0]
+        if is_unknown_original_provenance_values(*rows[0]):
+            return ProvenanceEvidenceReadiness.STRUCTURAL_UNKNOWN_ORIGINAL_PROVENANCE
+        origin, channel, role, derivation, uncertainty, *_ = rows[0]
         # ProvenanceV1 legitimately permits source_role to be absent for
         # direct user/tool/memory sources.  Requiring a role here would make
         # a correctly translated native provenance child look contradictory.
@@ -1213,7 +1237,11 @@ def _valid_capture_payload(dtype: object, dimension: object, expected_length: ob
 
 
 def _object_readiness(
-    reasons: list[str], scope: ScopePlanReadiness, qualified: bool,
+    reasons: list[str],
+    scope: ScopePlanReadiness,
+    qualified: bool,
+    *,
+    unknown_original_provenance_candidate: bool = False,
 ) -> ObjectRuntimeReadiness:
     critical = set(reasons)
     if any(item in critical for item in (
@@ -1224,9 +1252,24 @@ def _object_readiness(
         return ObjectRuntimeReadiness.QUARANTINED_OR_UNSUPPORTED
     if scope in {ScopePlanReadiness.NO_MATCHING_SCOPE_PLAN, ScopePlanReadiness.AMBIGUOUS_SCOPE_PLAN}:
         return ObjectRuntimeReadiness.SEMANTIC_FACTS_UNRESOLVED
+    if (
+        unknown_original_provenance_candidate
+        and scope in {
+            ScopePlanReadiness.CURRENT_SCOPE_MATCHES_PLAN,
+            ScopePlanReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
+        }
+        and ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE.value in critical
+        and critical <= {
+            ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE.value,
+            "NO_LEGACY_VECTOR_EVIDENCE",
+            "NO_CURRENT_QUALIFIED_COMPAT_EMBEDDING",
+        }
+    ):
+        return ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED
     if any(item in critical for item in (
         "MISSING_GOVERNANCE", "CONFLICTING_GOVERNANCE_EVIDENCE",
         "RUNTIME_SCOPE_PLAN_REFERENCES_UNAVAILABLE_FACTS",
+        "CHARACTER_NORMALIZATION_WITNESS_REQUIRED",
         ProvenanceEvidenceReadiness.UNKNOWN_PROVENANCE.value,
         ProvenanceEvidenceReadiness.DESCRIPTIVE_EVIDENCE_ONLY.value,
         ProvenanceEvidenceReadiness.CONFLICTING_PROVENANCE.value,
@@ -1314,6 +1357,8 @@ def _b2_recommendation(items: tuple[ObjectRuntimeReadinessItem, ...]) -> str:
         return "B2_SCOPE_GOVERNANCE_PROVENANCE_LIFECYCLE_NORMALIZATION_FIRST"
     if ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED in categories:
         return "B2_NORMALIZE_CURRENT_RUNTIME_FACTS_BEFORE_REPRESENTATIONS"
+    if ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED in categories:
+        return "B2_NORMALIZE_QUALIFIED_UNKNOWN_ORIGINAL_PROVENANCE"
     if ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED in categories:
         return "B2_REPRESENTATION_BOOTSTRAP_AFTER_SEMANTIC_NORMALIZATION"
     return "NO_B2_ACTION_REQUIRED_FOR_CORE_OBJECTS"

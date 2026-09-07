@@ -75,6 +75,12 @@ def _absent_governance_payload(**overrides: object) -> dict[str, object]:
     return value
 
 
+def _unknown_original_provenance_payload(**overrides: object) -> dict[str, object]:
+    value = _payload(**overrides)
+    value.pop("provenance")
+    return value
+
+
 def _fixture(tmp_path: Path, rows: list[dict[str, object]] | None = None):
     qualified = open_temporary_test_connection(tmp_path / "b2-normalization.db")
     connection = qualified.connection
@@ -235,6 +241,77 @@ def test_absent_legacy_governance_uses_only_the_frozen_production_default_rule(t
             (native_id_to_bytes(result.revision_id),),
         ).fetchone()[0])
         assert "governance" not in r2_payload
+    finally:
+        qualified.close()
+
+
+def test_ordinary_absent_original_provenance_derives_one_structural_witness(tmp_path: Path):
+    """The only new B2 route carries no invented legacy source semantics."""
+    row = {"eid": 7, "born_step": 12, "channel": 4, "payload": _unknown_original_provenance_payload()}
+    qualified, facts = _fixture(tmp_path, [row])
+    try:
+        connection = qualified.connection
+        _add_r1_ids(connection, facts)
+        before = NativeMigrationRuntimeReadinessPreflight(connection).run(_readiness_request(facts))
+        assert before.object_items[0].readiness is ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED
+        result = NativeMigrationRuntimeNormalizationService(connection).normalize_legacy_core_memory(_request(facts))
+        assert connection.execute(
+            """SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,
+                      source_time_ns,capture_time_ns,memory_role,descriptive_notes
+                 FROM provenance_records WHERE provenance_id=?""",
+            (native_id_to_bytes(result.provenance_id),),
+        ).fetchone() == (
+            "MIGRATION_LEGACY_ORIGINAL_PROVENANCE_UNKNOWN", None, None,
+            "structural_witness", "UNKNOWN", None, None, None, None,
+        )
+        view = NativePostWriteMemoryAccess(
+            connection, legacy_source_namespace_id=facts["source_namespace"], expected_dimension=3,
+        ).get_current(7)
+        assert view is not None
+        assert view.provenance == type(view.provenance)(None, None, None, False, False)
+        assert connection.execute("SELECT count(*) FROM representations").fetchone()[0] == 0
+        assert NativeMigrationRuntimeNormalizationService(connection).normalize_legacy_core_memory(
+            _request(facts)
+        ) == result
+        after = NativeMigrationRuntimeReadinessPreflight(connection).run(_readiness_request(facts))
+        assert after.object_items[0].readiness is ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED
+    finally:
+        qualified.close()
+
+
+def test_character_seed_shape_remains_outside_ordinary_unknown_provenance_path(tmp_path: Path):
+    row = {"eid": 7, "payload": _unknown_original_provenance_payload(
+        type="seed_canon", character_name="Soren", seed_id="hivemind_n5_contrarian_fluid_v1",
+    )}
+    qualified, facts = _fixture(tmp_path, [row])
+    try:
+        connection = qualified.connection
+        _add_r1_ids(connection, facts)
+        item = NativeMigrationRuntimeReadinessPreflight(connection).run(_readiness_request(facts)).object_items[0]
+        assert item.readiness is ObjectRuntimeReadiness.SEMANTIC_FACTS_UNRESOLVED
+        assert "CHARACTER_NORMALIZATION_WITNESS_REQUIRED" in item.reason_codes
+        before = _counts(connection)
+        with pytest.raises(MigrationRuntimeNormalizationRefused, match="B2_CHARACTER_PROVENANCE_WITNESS_REQUIRED"):
+            NativeMigrationRuntimeNormalizationService(connection).normalize_legacy_core_memory(_request(facts))
+        assert _counts(connection) == before
+    finally:
+        qualified.close()
+
+
+def test_known_provenance_v1_seed_shape_remains_on_its_existing_route(tmp_path: Path):
+    qualified, facts = _fixture(tmp_path, [{"eid": 7, "payload": _payload(
+        type="seed_canon", character_name="Soren", seed_id="hivemind_n5_contrarian_fluid_v1",
+    )}])
+    try:
+        _add_r1_ids(qualified.connection, facts)
+        result = NativeMigrationRuntimeNormalizationService(qualified.connection).normalize_legacy_core_memory(
+            _request(facts)
+        )
+        assert result.revision_ordinal == 2
+        assert qualified.connection.execute(
+            "SELECT origin_kind FROM provenance_records WHERE provenance_id=?",
+            (native_id_to_bytes(result.provenance_id),),
+        ).fetchone() == ("RUNTIME_PROVENANCE_V1",)
     finally:
         qualified.close()
 

@@ -29,6 +29,7 @@ from .compat_embedding_reader import NativeCompatEmbeddingReader
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .ids import native_id_to_bytes
 from .object_revision_governance import NativeObjectRevisionGovernanceService
+from .provenance import is_unknown_original_provenance_values
 from .schema import require_current_schema
 
 
@@ -244,7 +245,8 @@ class NativePostWriteMemoryAccess:
             raise SubstrateInvariantViolation("native current memory has no structural provenance")
         rows = self._connection.execute(
             """
-            SELECT origin_kind,source_channel,derivation_status
+            SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,
+                   source_time_ns,capture_time_ns,memory_role,descriptive_notes
               FROM provenance_records
              WHERE provenance_id=?
             """,
@@ -252,7 +254,15 @@ class NativePostWriteMemoryAccess:
         ).fetchall()
         if len(rows) != 1:
             raise SubstrateInvariantViolation("native current memory provenance is missing or ambiguous")
-        origin_kind, source_channel, derivation_status = rows[0]
+        if is_unknown_original_provenance_values(*rows[0]):
+            return RuntimeMemoryProvenanceView(
+                source_type=None,
+                source_channel=None,
+                write_path=None,
+                collective_echo=False,
+                structurally_explicit=False,
+            )
+        origin_kind, source_channel, _source_role, derivation_status, _uncertainty, *_ = rows[0]
         if not isinstance(origin_kind, str) or not origin_kind:
             raise SubstrateInvariantViolation("native structural provenance has invalid origin kind")
         if source_channel is not None and not isinstance(source_channel, str):

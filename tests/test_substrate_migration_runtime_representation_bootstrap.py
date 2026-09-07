@@ -66,6 +66,12 @@ def _payload(*, summary: str = "evidence-complete legacy memory") -> dict[str, o
     }
 
 
+def _unknown_original_provenance_payload() -> dict[str, object]:
+    value = _payload()
+    value.pop("provenance")
+    return value
+
+
 def _fixture(
     tmp_path: Path,
     *,
@@ -236,6 +242,30 @@ def test_b3a_exact_bytes_complete_b1_b2_b3a_chain(tmp_path: Path):
         after = NativeMigrationRuntimeReadinessPreflight(connection).run(_b1_request(facts))
         assert after.object_items[0].readiness is ObjectRuntimeReadiness.RUNTIME_READY_AS_IS
         assert connection.execute("SELECT count(*) FROM object_revisions").fetchone()[0] == 2
+    finally:
+        qualified.close()
+
+
+def test_b3a_accepts_only_the_exact_structural_unknown_original_witness_after_b2(tmp_path: Path):
+    qualified, facts = _fixture(tmp_path, payload=_unknown_original_provenance_payload())
+    facts["connection"] = qualified.connection
+    try:
+        connection = qualified.connection
+        initial = NativeMigrationRuntimeReadinessPreflight(connection).run(_b1_request(facts))
+        assert initial.object_items[0].readiness is ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED
+        with pytest.raises(MigrationRuntimeRepresentationBootstrapRefused, match="B3A_B2_R2_WITNESS_INVALID"):
+            NativeMigrationRuntimeRepresentationBootstrapService(connection).bootstrap_from_legacy_capture(
+                _bootstrap_request(facts, facts["r1"])
+            )
+        r2 = _normalize(facts)
+        assert connection.execute(
+            "SELECT count(*) FROM representations WHERE representation_class='COMPAT_EMBEDDING'"
+        ).fetchone()[0] == 0
+        result = NativeMigrationRuntimeRepresentationBootstrapService(connection).bootstrap_from_legacy_capture(
+            _bootstrap_request(facts, r2.revision_id)
+        )
+        assert result.r2_revision_id == r2.revision_id
+        assert NativeMigrationRuntimeReadinessPreflight(connection).run(_b1_request(facts)).object_items[0].readiness is ObjectRuntimeReadiness.RUNTIME_READY_AS_IS
     finally:
         qualified.close()
 

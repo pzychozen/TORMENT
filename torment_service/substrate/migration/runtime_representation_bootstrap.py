@@ -32,6 +32,7 @@ from ..errors import (
     SubstrateObjectNotFound,
 )
 from ..ids import native_id_from_bytes, native_id_to_bytes
+from ..provenance import is_unknown_original_provenance_values
 from ..representations import (
     INTEGRITY_ALGORITHM_SHA256,
     INTEGRITY_VALUE_ENCODING_RAW,
@@ -478,15 +479,22 @@ class NativeMigrationRuntimeRepresentationBootstrapService:
         if len(governance) != 1 or any(value not in (0, 1) for value in governance[0]):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_GOVERNANCE_INVALID")
         provenance = self._connection.execute(
-            """SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,memory_role
+            """SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,
+                      source_time_ns,capture_time_ns,memory_role,descriptive_notes
                  FROM provenance_records WHERE provenance_id=?""", (row[13],)
         ).fetchall()
-        if len(provenance) != 1 or not _nonempty(provenance[0][0], provenance[0][1], provenance[0][3], provenance[0][4]) or (
-            provenance[0][2] is not None and not _nonempty(provenance[0][2])
+        structural_unknown = len(provenance) == 1 and is_unknown_original_provenance_values(*provenance[0])
+        if len(provenance) != 1 or (
+            not structural_unknown
+            and (
+                not _nonempty(provenance[0][0], provenance[0][1], provenance[0][3], provenance[0][4])
+                or (provenance[0][2] is not None and not _nonempty(provenance[0][2]))
+            )
         ):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_B2_PROVENANCE_INVALID")
-        if actual == character and provenance[0] != (
-            "CHARACTER_SEED_PLANT", "character_runtime", "seed_canon", "seed_plant", "KNOWN", "seed_canon",
+        if actual == character and tuple(provenance[0][index] for index in (0, 1, 2, 3, 4, 7)) != (
+            "CHARACTER_SEED_PLANT", "character_runtime", "seed_canon", "seed_plant", "KNOWN",
+            "seed_canon",
         ):
             raise MigrationRuntimeRepresentationBootstrapRefused("B3A_CHARACTER_SEED_PROVENANCE_INVALID")
         try:

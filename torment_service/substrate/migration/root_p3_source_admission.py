@@ -921,6 +921,7 @@ def _read_b1_evidence(
     if source_plan.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
         allowed = {
             ObjectRuntimeReadiness.DETERMINISTIC_NORMALIZATION_REQUIRED,
+            ObjectRuntimeReadiness.UNKNOWN_ORIGINAL_PROVENANCE_NORMALIZATION_REQUIRED,
             ObjectRuntimeReadiness.REPRESENTATION_BOOTSTRAP_REQUIRED,
         }
         seen_eids: set[int] = set()
