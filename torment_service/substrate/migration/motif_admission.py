@@ -9,6 +9,7 @@ commit.  ``motif_events.jsonl`` is intentionally never read for semantics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from pathlib import Path, PurePosixPath
@@ -37,6 +38,10 @@ LEGACY_DERIVED_MOTIF_OBJECT_KIND: Final[str] = "LEGACY_DERIVED_MOTIF"
 MOTIF_MEMBERSHIP_RELATIONSHIP_KIND: Final[str] = "MOTIF_MEMBERSHIP"
 LEGACY_MOTIF_ALIAS_KIND: Final[str] = "MOTIF_ID"
 _ADMISSION_BATCH_IDENTITY: Final[str] = "TMS-LEGACY-MOTIF-ADMISSION-7F3D"
+_MEMBER_NAMESPACE_RECONCILIATION_BATCH_IDENTITY: Final[str] = (
+    "TMS-LEGACY-MOTIF-MEMBER-NAMESPACE-RECONCILIATION-V1"
+)
+_MEMBER_BINDING_LAW: Final[str] = "UNIQUE_BOUNDED_CANDIDATE_V1"
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,14 @@ class LegacyMotifAdmissionRun:
     results: tuple[LegacyMotifAdmissionResult, ...]
 
 
+@dataclass(frozen=True)
+class _MemberResolutionFailure:
+    """One fail-closed result from the bounded per-member candidate law."""
+
+    condition_code: str
+    reason: str
+
+
 class NativeLegacyMotifAdmissionService:
     """Admit verified motif registry entries, never motif history or replay."""
 
@@ -114,8 +127,14 @@ class NativeLegacyMotifAdmissionService:
         motif_identity_namespace_id: UUID,
         membership_identity_namespace_id: UUID,
         unknown_semantic_scope_id: UUID,
+        eligible_member_source_namespace_ids: tuple[UUID, ...] | None = None,
     ) -> LegacyMotifAdmissionRun:
-        """Admit only complete current-state motifs with every member resolved."""
+        """Admit only complete motifs with every member uniquely resolved.
+
+        The candidate namespace tuple is an explicit caller-owned topology
+        boundary.  This service never discovers candidate namespaces by
+        scanning the core; omitted retains the historical local-only boundary.
+        """
         self._require_admission_namespaces(
             idempotency_namespace_id,
             motif_identity_namespace_id,
@@ -123,6 +142,9 @@ class NativeLegacyMotifAdmissionService:
             unknown_semantic_scope_id,
         )
         manifest = load_snapshot_manifest(manifest_path)
+        eligible_member_namespaces = _eligible_member_namespaces(
+            manifest, eligible_member_source_namespace_ids
+        )
         inventory_snapshot(
             self._connection, snapshot_root=snapshot_root, manifest_path=manifest_path
         )
@@ -138,6 +160,7 @@ class NativeLegacyMotifAdmissionService:
                         motif_identity_namespace_id,
                         membership_identity_namespace_id,
                         unknown_semantic_scope_id,
+                        eligible_member_namespaces,
                     )
                 )
             else:
@@ -172,7 +195,26 @@ class NativeLegacyMotifAdmissionService:
         motif_identity_namespace_id: UUID,
         membership_identity_namespace_id: UUID,
         unknown_semantic_scope_id: UUID,
+        eligible_member_source_namespace_ids: tuple[UUID, ...],
     ) -> LegacyMotifAdmissionResult:
+        # A successful original admission remains its durable result.  A prior
+        # local-only quarantine can instead be requalified under a distinct,
+        # explicit P3 topology context without rewriting historical evidence.
+        base_status = self._admission_status(
+            manifest, candidate, _ADMISSION_BATCH_IDENTITY, candidate.record_identity
+        )
+        if base_status == "QUARANTINED" and eligible_member_source_namespace_ids != (
+            manifest.legacy_source_namespace_id,
+        ):
+            return self._reconcile_candidate(
+                manifest,
+                candidate,
+                idempotency_namespace_id,
+                motif_identity_namespace_id,
+                membership_identity_namespace_id,
+                unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids,
+            )
         intent = _candidate_intent(candidate)
         return execute_semantic(
             self._connection,
@@ -180,7 +222,9 @@ class NativeLegacyMotifAdmissionService:
             _evidence_idempotency_key(intent),
             "ADMIT_LEGACY_MOTIF_CURRENT",
             intent,
-            lambda operation_id: self._recorded_result(operation_id, manifest, candidate),
+            lambda operation_id: self._recorded_result(
+                operation_id, manifest, candidate, _ADMISSION_BATCH_IDENTITY, candidate.record_identity
+            ),
             lambda tx: self._publish_candidate(
                 tx,
                 manifest,
@@ -188,6 +232,52 @@ class NativeLegacyMotifAdmissionService:
                 motif_identity_namespace_id,
                 membership_identity_namespace_id,
                 unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids,
+                _ADMISSION_BATCH_IDENTITY,
+                candidate.record_identity,
+                candidate.record_locator,
+            ),
+        )
+
+    def _reconcile_candidate(
+        self,
+        manifest: LegacySnapshotManifest,
+        candidate: LegacyMotifCandidate,
+        idempotency_namespace_id: UUID,
+        motif_identity_namespace_id: UUID,
+        membership_identity_namespace_id: UUID,
+        unknown_semantic_scope_id: UUID,
+        eligible_member_source_namespace_ids: tuple[UUID, ...],
+    ) -> LegacyMotifAdmissionResult:
+        """Preserve an old refusal while qualifying a new bounded context."""
+        context = _member_namespace_context(eligible_member_source_namespace_ids)
+        record_identity = f"{candidate.record_identity}|{context}"
+        record_locator = f"{candidate.record_locator}|{context}"
+        intent = _reconciliation_candidate_intent(candidate, context)
+        return execute_semantic(
+            self._connection,
+            idempotency_namespace_id,
+            _evidence_idempotency_key(intent),
+            "RECONCILE_LEGACY_MOTIF_MEMBER_NAMESPACE",
+            intent,
+            lambda operation_id: self._recorded_result(
+                operation_id,
+                manifest,
+                candidate,
+                _MEMBER_NAMESPACE_RECONCILIATION_BATCH_IDENTITY,
+                record_identity,
+            ),
+            lambda tx: self._publish_candidate(
+                tx,
+                manifest,
+                candidate,
+                motif_identity_namespace_id,
+                membership_identity_namespace_id,
+                unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids,
+                _MEMBER_NAMESPACE_RECONCILIATION_BATCH_IDENTITY,
+                record_identity,
+                record_locator,
             ),
         )
 
@@ -216,27 +306,34 @@ class NativeLegacyMotifAdmissionService:
         motif_identity_namespace_id: UUID,
         membership_identity_namespace_id: UUID,
         unknown_semantic_scope_id: UUID,
+        eligible_member_source_namespace_ids: tuple[UUID, ...],
+        admission_batch_identity: str,
+        admission_record_identity: str,
+        admission_record_locator: str,
     ) -> LegacyMotifAdmissionResult:
         snapshot_id = native_id_to_bytes(manifest.legacy_snapshot_id)
         source_namespace_id = native_id_to_bytes(manifest.legacy_source_namespace_id)
         artifact_id = native_id_to_bytes(candidate.legacy_artifact_id)
-        batch_id = _ensure_admission_batch(tx, snapshot_id, _ADMISSION_BATCH_IDENTITY)
+        batch_id = _ensure_admission_batch(tx, snapshot_id, admission_batch_identity)
         artifact_record_id = _ensure_artifact_record(
-            tx, artifact_id, candidate.record_identity, candidate.record_locator
+            tx, artifact_id, admission_record_identity, admission_record_locator
         )
         if _admission_record_for_artifact_record(tx, batch_id, artifact_record_id) is not None:
             raise SubstrateRevisionConflict("legacy motif evidence record already has an admission result")
-        members, unresolved_reason = self._resolve_members(
-            tx, source_namespace_id, candidate.member_eids
+        members, resolution_failure = self._resolve_members(
+            tx, eligible_member_source_namespace_ids, candidate.member_eids
         )
-        if unresolved_reason is not None:
+        if resolution_failure is not None:
             return self._publish_candidate_quarantine(
                 tx,
                 manifest,
                 candidate,
                 batch_id,
                 artifact_record_id,
-                unresolved_reason,
+                resolution_failure,
+                eligible_member_source_namespace_ids,
+                admission_batch_identity,
+                admission_record_identity,
             )
         if tx.execute(
             """
@@ -359,6 +456,14 @@ class NativeLegacyMotifAdmissionService:
                         "native_representation_created": False,
                         "original_provenance": "UNKNOWN",
                         "authority_category": "NOT_APPLICABLE",
+                        "member_binding_law": _MEMBER_BINDING_LAW,
+                        "eligible_member_source_namespace_ids": [
+                            str(value) for value in eligible_member_source_namespace_ids
+                        ],
+                        "member_candidate_counts": [
+                            {"member_eid": eid, "candidate_count": 1}
+                            for eid in candidate.member_eids
+                        ],
                     }
                 ),
             ),
@@ -430,12 +535,19 @@ class NativeLegacyMotifAdmissionService:
                         member[0],
                         member[1],
                         str(member[2]),
+                        member[3],
                     )
                     for relationship_id, relationship_revision_id, member in membership_rows
                 ),
             )
         )
-        result = self._recorded_result(tx.operation_id, manifest, candidate)
+        result = self._recorded_result(
+            tx.operation_id,
+            manifest,
+            candidate,
+            admission_batch_identity,
+            admission_record_identity,
+        )
         if result is None:
             raise SubstrateInvariantViolation("legacy motif admission result was not durably published")
         return result
@@ -447,7 +559,10 @@ class NativeLegacyMotifAdmissionService:
         candidate: LegacyMotifCandidate,
         batch_id: bytes,
         artifact_record_id: bytes,
-        reason: str,
+        failure: _MemberResolutionFailure,
+        eligible_member_source_namespace_ids: tuple[UUID, ...],
+        admission_batch_identity: str,
+        admission_record_identity: str,
     ) -> LegacyMotifAdmissionResult:
         admission_record_id = _new()
         tx.execute(
@@ -463,9 +578,14 @@ class NativeLegacyMotifAdmissionService:
                 artifact_record_id,
                 canonical_intent_text(
                     {
-                        "reason": reason,
+                        "reason": failure.reason,
                         "motif_id": candidate.motif_id,
                         "motif_reconstructability": "NOT_PROVEN",
+                        "member_binding_law": _MEMBER_BINDING_LAW,
+                        "eligible_member_source_namespace_ids": [
+                            str(value) for value in eligible_member_source_namespace_ids
+                        ],
+                        "member_resolution_failure": failure.condition_code,
                     }
                 ),
             ),
@@ -480,12 +600,18 @@ class NativeLegacyMotifAdmissionService:
             (
                 _new(),
                 admission_record_id,
-                "UNRESOLVED_LEGACY_MOTIF_MEMBER_ALIAS",
-                reason,
+                failure.condition_code,
+                failure.reason,
                 native_id_to_bytes(candidate.legacy_artifact_id),
             ),
         )
-        result = self._recorded_result(tx.operation_id, manifest, candidate)
+        result = self._recorded_result(
+            tx.operation_id,
+            manifest,
+            candidate,
+            admission_batch_identity,
+            admission_record_identity,
+        )
         if result is None:
             raise SubstrateInvariantViolation("quarantined motif admission result was not durable")
         return result
@@ -553,26 +679,43 @@ class NativeLegacyMotifAdmissionService:
         return result
 
     def _resolve_members(
-        self, tx: SubstrateTx, source_namespace_id: bytes, member_eids: tuple[int, ...]
-    ) -> tuple[tuple[tuple[bytes, bytes, int], ...], str | None]:
-        resolved: list[tuple[bytes, bytes, int]] = []
+        self,
+        tx: SubstrateTx,
+        eligible_member_source_namespace_ids: tuple[UUID, ...],
+        member_eids: tuple[int, ...],
+    ) -> tuple[tuple[tuple[bytes, bytes, int, bytes], ...], _MemberResolutionFailure | None]:
+        resolved: list[tuple[bytes, bytes, int, bytes]] = []
+        placeholders = ",".join("?" for _ in eligible_member_source_namespace_ids)
+        namespace_values = tuple(
+            native_id_to_bytes(value) for value in eligible_member_source_namespace_ids
+        )
         for eid in member_eids:
             rows = tx.execute(
-                """
-                SELECT a.object_id,r.effective_semantic_scope_id
+                f"""
+                SELECT a.object_id,r.effective_semantic_scope_id,a.legacy_source_namespace_id
                 FROM legacy_object_aliases a
                 JOIN objects o ON o.object_id=a.object_id
                 JOIN object_revisions r ON r.object_revision_id=o.current_revision_id
                 JOIN semantic_transitions t ON t.transition_id=o.creating_transition_id
-                WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?
+                WHERE a.legacy_source_namespace_id IN ({placeholders})
+                  AND a.alias_kind='EID' AND a.alias_value=?
                   AND o.object_kind='LEGACY_CORE_NODE'
                   AND t.transition_kind='LEGACY_OBJECT_ADMISSION' AND t.origin_kind='LEGACY_ADMISSION'
+                ORDER BY a.legacy_source_namespace_id,a.object_id
                 """,
-                (source_namespace_id, str(eid)),
+                (*namespace_values, str(eid)),
             ).fetchall()
-            if len(rows) != 1:
-                return (), f"member EID {eid} does not resolve to exactly one imported source object"
-            resolved.append((rows[0][0], rows[0][1], eid))
+            if not rows:
+                return (), _MemberResolutionFailure(
+                    "UNRESOLVED_LEGACY_MOTIF_MEMBER_ALIAS",
+                    f"member EID {eid} has 0 bounded eligible imported source candidates",
+                )
+            if len(rows) > 1:
+                return (), _MemberResolutionFailure(
+                    "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS",
+                    f"member EID {eid} has {len(rows)} bounded eligible imported source candidates",
+                )
+            resolved.append((rows[0][0], rows[0][1], eid, rows[0][2]))
         return tuple(resolved), None
 
     def _recorded_result(
@@ -580,8 +723,10 @@ class NativeLegacyMotifAdmissionService:
         operation_id: bytes,
         manifest: LegacySnapshotManifest,
         item: LegacyMotifCandidate | LegacyMotifAdmissionRecord,
+        admission_batch_identity: str = _ADMISSION_BATCH_IDENTITY,
+        admission_record_identity: str | None = None,
     ) -> LegacyMotifAdmissionResult | None:
-        record_identity = item.record_identity
+        record_identity = item.record_identity if admission_record_identity is None else admission_record_identity
         record = self._connection.execute(
             """
             SELECT a.admission_record_id,a.admission_status
@@ -593,7 +738,7 @@ class NativeLegacyMotifAdmissionService:
             """,
             (
                 native_id_to_bytes(manifest.legacy_snapshot_id),
-                _ADMISSION_BATCH_IDENTITY,
+                admission_batch_identity,
                 native_id_to_bytes(item.legacy_artifact_id),
                 record_identity,
             ),
@@ -670,6 +815,31 @@ class NativeLegacyMotifAdmissionService:
             native_id_from_bytes(object_row[2]),
             memberships,
         )
+
+    def _admission_status(
+        self,
+        manifest: LegacySnapshotManifest,
+        candidate: LegacyMotifCandidate,
+        admission_batch_identity: str,
+        admission_record_identity: str,
+    ) -> str | None:
+        row = self._connection.execute(
+            """
+            SELECT admission.admission_status
+            FROM legacy_admission_records admission
+            JOIN legacy_admission_batches batch USING(admission_batch_id)
+            JOIN legacy_artifact_records artifact_record USING(legacy_artifact_record_id)
+            WHERE batch.legacy_snapshot_id=? AND batch.batch_identity=?
+              AND artifact_record.legacy_artifact_id=? AND artifact_record.record_identity=?
+            """,
+            (
+                native_id_to_bytes(manifest.legacy_snapshot_id),
+                admission_batch_identity,
+                native_id_to_bytes(candidate.legacy_artifact_id),
+                admission_record_identity,
+            ),
+        ).fetchone()
+        return None if row is None else str(row[0])
 
     def _require_admission_namespaces(
         self,
@@ -838,6 +1008,44 @@ def _candidate_intent(candidate: LegacyMotifCandidate) -> str:
             "motif_id": candidate.motif_id,
         }
     )
+
+
+def _reconciliation_candidate_intent(
+    candidate: LegacyMotifCandidate, context: str
+) -> str:
+    return canonical_intent_text(
+        {
+            "kind": "RECONCILE_LEGACY_MOTIF_MEMBER_NAMESPACE",
+            "legacy_snapshot_id": str(candidate.legacy_snapshot_id),
+            "legacy_artifact_id": str(candidate.legacy_artifact_id),
+            "record_identity": candidate.record_identity,
+            "motif_id": candidate.motif_id,
+            "member_namespace_context": context,
+        }
+    )
+
+
+def _eligible_member_namespaces(
+    manifest: LegacySnapshotManifest,
+    values: tuple[UUID, ...] | None,
+) -> tuple[UUID, ...]:
+    """Validate the caller's finite candidate universe without discovering one."""
+    if values is None:
+        return (manifest.legacy_source_namespace_id,)
+    if not isinstance(values, tuple) or not values:
+        raise ValueError("eligible_member_source_namespace_ids must be a non-empty UUID tuple")
+    if any(not isinstance(value, UUID) for value in values):
+        raise ValueError("eligible_member_source_namespace_ids must contain UUID values")
+    if len(set(values)) != len(values):
+        raise ValueError("eligible_member_source_namespace_ids must not repeat namespaces")
+    return tuple(sorted(values, key=str))
+
+
+def _member_namespace_context(values: tuple[UUID, ...]) -> str:
+    digest = hashlib.sha256(
+        canonical_intent_text([str(value) for value in values]).encode("utf-8")
+    ).hexdigest()
+    return f"MEMBER_NAMESPACE_SET_V1:{digest}"
 
 
 def _record_intent(record: LegacyMotifAdmissionRecord) -> str:

@@ -870,8 +870,35 @@ def _run_b1(connection: sqlite3.Connection, request: RootP3SourceAdmissionReques
             object_identity_namespace_id=binding.scope_plan.target_identity_namespace_id,
             relationship_identity_namespace_id=binding.scope_plan.membership_identity_namespace_id,
             unknown_semantic_scope_id=binding.unknown_semantic_scope_id,
+            eligible_member_source_namespace_ids=_eligible_member_source_namespace_ids(
+                request, binding
+            ),
         ),
     )
+
+
+def _eligible_member_source_namespace_ids(
+    request: RootP3SourceAdmissionRequest,
+    motif_binding: RootP3ScopeBinding,
+) -> tuple[UUID, ...]:
+    """Return the P3-declared memory-owner universe for one motif workspace.
+
+    Only the frozen request topology is consulted.  No database alias scan can
+    discover another workspace or a non-materialized source namespace.
+    """
+    source_by_key = {item.scope_key: item for item in request.source_scope_plans}
+    eligible = [
+        binding.scope_plan.legacy_source_namespace_id
+        for binding in request.scope_bindings
+        if binding.scope_key.workspace_id == motif_binding.scope_key.workspace_id
+        and source_by_key[binding.scope_key].materialization_posture
+        is MaterializedScopePosture.MEMORY_GRAPH
+    ]
+    if not eligible:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_MEMBER_SCOPE_UNIVERSE_EMPTY")
+    if len(set(eligible)) != len(eligible):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_MEMBER_SCOPE_UNIVERSE_AMBIGUOUS")
+    return tuple(sorted(eligible, key=str))
 
 
 def _read_b1_evidence(

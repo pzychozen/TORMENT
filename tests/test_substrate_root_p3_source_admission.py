@@ -353,6 +353,71 @@ def test_wrong_p1_plan_shape_remains_an_invalid_snapshot_manifest(tmp_path: Path
         load_snapshot_manifest(plan)
 
 
+def test_p3_carrier_accepts_cross_scope_members_when_the_root_topology_has_one_candidate(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    motif_key = RootScopeKey("ws", RootScopeKind.SHARED, domain_id="empty-domain")
+    motif_path = request.root / "workspaces" / "ws" / "domains" / "empty-domain" / "motifs.json"
+    motif_path.write_text(json.dumps({"motifs": {
+        "cross-scope-carrier-motif": {
+            "motif_id": "cross-scope-carrier-motif", "domain_id": "empty-domain",
+            "label": "cross scope carrier", "centroid": [1.0] + [0.0] * 383,
+            "strength": 0.8, "stability_score": 0.8, "contributing_agents": ["smoke_runner"],
+            "created_ts": 1, "last_active_ts": 2, "members": list(sorted(_MULTI_MEMORY_EIDS)),
+        },
+    }}), encoding="utf-8")
+    refreshed_motif_evidence = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="empty-domain"),
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS, scope_key=motif_key,
+    )
+    description = replace(
+        request.description,
+        explicit_source_manifest=RootEvidenceManifest(tuple(
+            refreshed_motif_evidence if item.semantic_role is EvidenceSemanticRole.MOTIFS else item
+            for item in request.description.explicit_source_manifest.entries
+        )),
+    )
+    cross_scope_request = replace(
+        request,
+        description=description,
+        carrier_directory=request.carrier_root.parent / "cross-scope-member-carrier",
+        operation_key="p3-source-carrier-cross-scope-members",
+    )
+    result = NativeRootP3SourceAdmissionService(connection).admit(cross_scope_request)
+    assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS)
+    record = json.loads(result.carrier_record_path.read_text(encoding="utf-8"))
+    motif_entry = next(item for item in record["payload"]["scopes"] if item["scope_key"]["domain_id"] == "empty-domain")
+    assert [item["runtime_motif_id"] for item in motif_entry["b1"]["motifs"]] == ["cross-scope-carrier-motif"]
+    source_binding = next(item for item in cross_scope_request.scope_bindings if item.scope_key.domain_id == "domain")
+    motif_binding = next(item for item in cross_scope_request.scope_bindings if item.scope_key == motif_key)
+    expected = dict(connection.execute(
+        "SELECT alias_value,object_id FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='EID'",
+        (native_id_to_bytes(source_binding.scope_plan.legacy_source_namespace_id),),
+    ).fetchall())
+    motif_object_id = connection.execute(
+        "SELECT object_id FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID' AND alias_value=?",
+        (native_id_to_bytes(motif_binding.scope_plan.legacy_source_namespace_id), "cross-scope-carrier-motif"),
+    ).fetchone()[0]
+    endpoints = connection.execute(
+        """
+        SELECT member.object_id,member.endpoint_semantic_scope_id
+        FROM relationships relationship
+        JOIN relationship_revision_endpoints motif
+          ON motif.relationship_revision_id=relationship.current_revision_id
+         AND motif.endpoint_ordinal=0 AND motif.endpoint_role='MOTIF'
+        JOIN relationship_revision_endpoints member
+          ON member.relationship_revision_id=relationship.current_revision_id
+         AND member.endpoint_ordinal=1 AND member.endpoint_role='MEMBER'
+        WHERE relationship.relationship_kind='MOTIF_MEMBERSHIP' AND motif.object_id=?
+        """,
+        (motif_object_id,),
+    ).fetchall()
+    assert {row[0] for row in endpoints} == {expected[str(eid)] for eid in _MULTI_MEMORY_EIDS}
+    assert {row[1] for row in endpoints} == {native_id_to_bytes(source_binding.unknown_semantic_scope_id)}
+    assert {row[1] for row in endpoints} != {native_id_to_bytes(motif_binding.unknown_semantic_scope_id)}
+
+
 def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_fixture) -> None:
     connection, request = carrier_fixture
     service = NativeRootP3SourceAdmissionService(connection)

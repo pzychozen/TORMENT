@@ -4,10 +4,11 @@
 
 ### Current repository state
 
-- **Real-root database convergence has completed successor P2 under the repaired durability contract.** The historical P2 envelope remains immutable with its predecessor payload record intentionally absent; a distinct successor envelope and its full writer-freeze evidence are durably present. The selector is `CUTOVER_PENDING` at generation 3, public deployment is `MAINTENANCE_ONLY`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is stopped partial after its first B1 transaction. The source-evidence fidelity and monotonic partial-recovery repair is now qualified on disposable production-shaped fixtures; any real preserved-carrier completion, selector supersession, corrected P2, or P3 resumption remains separately authorized.
+- **Real-root database convergence completed corrected P2 envelope C under the repaired durability contract.** Historical envelopes and both carriers remain immutable. The selector is `CUTOVER_PENDING` at generation 5, public deployment is `MAINTENANCE_ONLY`, and the core remains inert `STAGING / LEGACY_ACTIVE / never active / no witness`. P3 is stopped partial at `P3_CARRIER_MOTIF_B1_CLOSURE_MISMATCH`; its bounded per-member namespace reconciliation is qualified only on disposable fixtures and copied carrier evidence. Real P3 resumption remains separately authorized.
 
 - This map’s §0 is the live orientation and work-order authority. Material below §0 is historical evidence, not current scheduling authority.
 - [P3 source-evidence fidelity and partial-recovery closure](TORMENT_DATABASE_CONVERGENCE_P3_SOURCE_EVIDENCE_FIDELITY_PARTIAL_RECOVERY_CLOSURE_v0.1.md) records the disposable-fixture qualification and its hard stop: no real selector supersession, corrected P2, or P3 resumption was performed.
+- [P3 motif-member namespace reconciliation](TORMENT_DATABASE_CONVERGENCE_P3_MOTIF_MEMBER_NAMESPACE_RECONCILIATION_QUALIFICATION_v0.1.md) records the bounded-candidate qualification, copied-carrier reproduction, and continuing no-resume boundary.
 - **Blocker-5 is CLOSED.** The bounded Phase-7 native-memory substrate is qualified only for the compression/deep-disabled profile. The authoritative final record is [B5-A7 final closure](BLOCKER_5_A7_FINAL_CLOSURE.md), reconciling [7G5E4D write/lifecycle](7G5E4D_FINAL_CLOSURE.md), [7G5E4E query/read cognition](7G5E4E_FINAL_CLOSURE.md), and B5-A1 through B5-A6.
 - TORMENT Memory Substrate Phases 0–6 remain frozen design/requirements lineage; their records remain historical design authority, not an active implementation frontier.
 
@@ -54,7 +55,7 @@ REAL_PRODUCTION_CUTOVER_PERFORMED = NO
 REAL_ROOT_P1 = PASS
 REAL_ROOT_P2 = PASS
 SUCCESSOR_REAL_ROOT_P2 = PASS
-CURRENT_SELECTOR_GENERATION = 3
+CURRENT_SELECTOR_GENERATION = 5
 CURRENT_SELECTOR_STATE = CUTOVER_PENDING
 CURRENT_PUBLIC_DEPLOYMENT = MAINTENANCE_ONLY
 CURRENT_CORE_ROLE = STAGING
@@ -79,6 +80,7 @@ P3_MONOTONIC_SNAPSHOT_EVIDENCE_COMPLETION = QUALIFIED
 PRE_P5_PENDING_SUPERSESSION = QUALIFIED
 SAME_CORE_CORRECTED_P2_SUCCESSOR = QUALIFIED
 P3_PRESERVED_CARRIER_RECOVERY = NEXT_SEPARATELY_AUTHORIZED_OPERATION
+P3_MOTIF_MEMBER_NAMESPACE_RECONCILIATION = QUALIFIED
 REAL_ROOT_P3_RETRY_EXECUTED = NO
 P3 = PRESERVED_CARRIER_RECOVERY_SEPARATELY_AUTHORIZED
 REAL_MEMORY_REEMBED_AUTHORIZED = NO
@@ -99,16 +101,15 @@ SQLite was not shown to make TORMENT more intelligent.
 
 ### Actual production state and next action
 
-The actual/default production root completed P1, historical P2, the qualified
-P2-only recovery abort, and successor P2. Its selector is `CUTOVER_PENDING`
-(generation 3), so public deployment is `MAINTENANCE_ONLY`; its core remains
-inert `STAGING / LEGACY_ACTIVE`, with `ever_active = NO` and no deployment
-witness. The successor envelope and its writer-freeze evidence have both been
-durably reread after simulated process loss. P3A selected 154 snapshots and
-its first B1 transaction committed before a carrier cardinality refusal; P3B,
-B3/B4 dispatch, normalization completion, and core/native activation did not
-run. The production-shaped source-evidence and partial-recovery closure is
-qualified, but the preserved-carrier recovery remains separately authorized.
+The actual/default production root completed P1, historical P2, its qualified
+P2-only recovery abort, and corrected successor P2 envelope C. Its selector is
+`CUTOVER_PENDING` (generation 5), so public deployment is `MAINTENANCE_ONLY`;
+its core remains inert `STAGING / LEGACY_ACTIVE`, with `ever_active = NO` and
+no deployment witness. P3A selected 154 snapshots and stopped after the
+shared audit-smoke motif registry could not resolve four private member EIDs.
+The bounded per-member namespace law is qualified on disposable fixtures and a
+copied carrier only. P3B/B3/B4, activation, and real preserved-carrier recovery
+remain separately authorized.
 
 ### P8-R6 architecture freeze, Phase 9A/9B, and Phase 9C-R3 qualification
 

@@ -49,6 +49,17 @@ class MigrationRehearsalConfig:
     object_identity_namespace_id: UUID
     relationship_identity_namespace_id: UUID
     unknown_semantic_scope_id: UUID
+    eligible_member_source_namespace_ids: tuple[UUID, ...] | None = None
+
+    def __post_init__(self) -> None:
+        values = self.eligible_member_source_namespace_ids
+        if values is not None and (
+            not isinstance(values, tuple)
+            or not values
+            or any(not isinstance(value, UUID) for value in values)
+            or len(set(values)) != len(values)
+        ):
+            raise ValueError("eligible_member_source_namespace_ids must be a non-empty unique UUID tuple")
 
 
 @dataclass(frozen=True)
@@ -167,6 +178,7 @@ class NativeLegacyMigrationRehearsal:
                 motif_identity_namespace_id=config.object_identity_namespace_id,
                 membership_identity_namespace_id=config.relationship_identity_namespace_id,
                 unknown_semantic_scope_id=config.unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids=config.eligible_member_source_namespace_ids,
             )
             family_counts.append(_count_results("MOTIF_DERIVATION", motifs.results))
 

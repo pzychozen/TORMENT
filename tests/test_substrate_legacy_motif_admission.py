@@ -84,6 +84,7 @@ def _snapshot(
     motifs: dict[str, object] | None = None,
     node_eids: tuple[int, ...] = (1, 2, 3),
     include_events: bool = True,
+    event_record: dict[str, object] | None = None,
 ):
     capture = tmp_path / source_key
     root = capture / "legacy-snapshot"
@@ -108,7 +109,10 @@ def _snapshot(
     if include_events:
         event_path = motif_path.with_name("motif_events.jsonl")
         event_path.write_bytes(
-            b'{"event":"MOTIF_CREATED","motif_id":"event-only","members":[999]}\n'
+            json.dumps(
+                event_record or {"event": "MOTIF_CREATED", "motif_id": "event-only", "members": [999]},
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
         )
     manifest_path = capture / "snapshot-manifest.json"
     manifest = create_snapshot_manifest(
@@ -139,6 +143,7 @@ def _admit_motifs(
     object_namespace,
     relationship_namespace,
     scope,
+    eligible_member_source_namespace_ids=None,
 ):
     return service.admit_motifs_current_state(
         snapshot_root=root,
@@ -147,7 +152,96 @@ def _admit_motifs(
         motif_identity_namespace_id=object_namespace,
         membership_identity_namespace_id=relationship_namespace,
         unknown_semantic_scope_id=scope,
+        eligible_member_source_namespace_ids=eligible_member_source_namespace_ids,
     )
+
+
+def _additional_scope(connection, label: str):
+    value = _id()
+    connection.execute(
+        "INSERT INTO semantic_scopes VALUES (?,?,0)",
+        (native_id_to_bytes(value), label),
+    )
+    return value
+
+
+def _admitted_node_source(
+    connection,
+    tmp_path: Path,
+    source_key: str,
+    node_eids: tuple[int, ...],
+    idempotency_namespace,
+    object_namespace,
+    scope,
+):
+    root, manifest_path, manifest = _snapshot(
+        tmp_path, source_key, motifs={}, node_eids=node_eids
+    )
+    run = _admit_nodes(
+        NativeLegacyObjectAdmissionService(connection),
+        root,
+        manifest_path,
+        idempotency_namespace,
+        object_namespace,
+        scope,
+    )
+    return root, manifest_path, manifest, {item.raw_eid: item for item in run.results}
+
+
+def _motif_result(
+    connection,
+    tmp_path: Path,
+    source_key: str,
+    motif_state: dict[str, object],
+    idempotency_namespace,
+    object_namespace,
+    relationship_namespace,
+    scope,
+    eligible_member_source_namespace_ids,
+    event_record: dict[str, object] | None = None,
+):
+    root, manifest_path, manifest = _snapshot(
+        tmp_path,
+        source_key,
+        motifs={str(motif_state["motif_id"]): motif_state},
+        node_eids=(),
+        event_record=event_record,
+    )
+    result = _admit_motifs(
+        NativeLegacyMotifAdmissionService(connection),
+        root,
+        manifest_path,
+        idempotency_namespace,
+        object_namespace,
+        relationship_namespace,
+        scope,
+        eligible_member_source_namespace_ids,
+    ).results[0]
+    return manifest, result
+
+
+def _membership_endpoint_rows(connection, result):
+    return {
+        membership.member_eid: connection.execute(
+            """
+            SELECT object_id,endpoint_semantic_scope_id
+            FROM relationship_revision_endpoints
+            WHERE relationship_revision_id=? AND endpoint_ordinal=1 AND endpoint_role='MEMBER'
+            """,
+            (native_id_to_bytes(membership.revision_id),),
+        ).fetchone()
+        for membership in result.memberships
+    }
+
+
+def _quarantine_condition(connection, result) -> str:
+    return connection.execute(
+        """
+        SELECT condition_code FROM legacy_quarantine_records
+        WHERE admission_record_id=?
+        """,
+        (native_id_to_bytes(result.admission_record_id),),
+    ).fetchone()[0]
 
 
 def test_valid_motif_admission_is_atomic_derived_and_leaves_events_as_evidence(tmp_path: Path):
@@ -345,6 +439,315 @@ def test_cross_scope_member_endpoint_preserves_current_member_scope_without_muta
         qualified.close()
 
 
+def test_q1_local_namespace_remains_admitted_under_an_explicit_singleton_boundary(tmp_path: Path):
+    qualified, object_ns, relationship_ns, scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        root, manifest_path, manifest = _snapshot(
+            tmp_path,
+            "q1-local",
+            motifs={"q1": _motif(motif_id="q1", members=[1, 2, 3])},
+            node_eids=(1, 2, 3),
+        )
+        run = _admit_nodes(
+            NativeLegacyObjectAdmissionService(connection), root, manifest_path,
+            idempotency, object_ns, scope,
+        )
+        source = {item.raw_eid: item for item in run.results}
+        result = _admit_motifs(
+            NativeLegacyMotifAdmissionService(connection), root, manifest_path,
+            idempotency, object_ns, relationship_ns, scope,
+            (manifest.legacy_source_namespace_id,),
+        ).results[0]
+        assert result.admission_status == "ADMITTED"
+        endpoints = _membership_endpoint_rows(connection, result)
+        assert {eid: row[0] for eid, row in endpoints.items()} == {
+            eid: native_id_to_bytes(item.object_id) for eid, item in source.items()
+        }
+    finally:
+        qualified.close()
+
+
+def test_q2_shared_registry_binds_unique_private_members_without_duplicate_objects_or_aliases(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        private_scope = _additional_scope(connection, "q2-private")
+        _root, _path, private_manifest, private = _admitted_node_source(
+            connection, tmp_path, "q2-private", (1, 2, 3, 4), idempotency, object_ns, private_scope
+        )
+        before_objects = connection.execute("SELECT count(*) FROM objects").fetchone()[0]
+        before_aliases = connection.execute("SELECT count(*) FROM legacy_object_aliases").fetchone()[0]
+        shared_manifest, result = _motif_result(
+            connection, tmp_path, "q2-shared", _motif(motif_id="q2", members=[1, 2, 3, 4]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (private_manifest.legacy_source_namespace_id,),
+        )
+        assert result.admission_status == "ADMITTED"
+        assert len(result.memberships) == 4
+        endpoints = _membership_endpoint_rows(connection, result)
+        assert {eid: row[0] for eid, row in endpoints.items()} == {
+            eid: native_id_to_bytes(item.object_id) for eid, item in private.items()
+        }
+        assert {row[1] for row in endpoints.values()} == {native_id_to_bytes(private_scope)}
+        assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == before_objects + 1
+        assert connection.execute("SELECT count(*) FROM legacy_object_aliases").fetchone()[0] == before_aliases + 1
+        assert shared_manifest.legacy_source_namespace_id != private_manifest.legacy_source_namespace_id
+    finally:
+        qualified.close()
+
+
+def test_q3_one_motif_resolves_each_member_against_its_own_unique_scope(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        private_a_scope = _additional_scope(connection, "q3-private-a")
+        private_b_scope = _additional_scope(connection, "q3-private-b")
+        _root, _path, private_a_manifest, private_a = _admitted_node_source(
+            connection, tmp_path, "q3-private-a", (1,), idempotency, object_ns, private_a_scope
+        )
+        _root, _path, private_b_manifest, private_b = _admitted_node_source(
+            connection, tmp_path, "q3-private-b", (3,), idempotency, object_ns, private_b_scope
+        )
+        _root, _path, shared_manifest, shared = _admitted_node_source(
+            connection, tmp_path, "q3-shared", (2,), idempotency, object_ns, shared_scope
+        )
+        # The source manifest has already frozen the registry, so use a separate
+        # motif registry source while retaining the shared namespace as candidate.
+        motif_manifest, result = _motif_result(
+            connection, tmp_path, "q3-registry", _motif(motif_id="q3", members=[1, 2, 3]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (
+                private_a_manifest.legacy_source_namespace_id,
+                shared_manifest.legacy_source_namespace_id,
+                private_b_manifest.legacy_source_namespace_id,
+            ),
+        )
+        endpoints = _membership_endpoint_rows(connection, result)
+        assert result.admission_status == "ADMITTED"
+        assert endpoints[1] == (native_id_to_bytes(private_a[1].object_id), native_id_to_bytes(private_a_scope))
+        assert endpoints[2] == (native_id_to_bytes(shared[2].object_id), native_id_to_bytes(shared_scope))
+        assert endpoints[3] == (native_id_to_bytes(private_b[3].object_id), native_id_to_bytes(private_b_scope))
+        assert motif_manifest.legacy_source_namespace_id not in {
+            private_a_manifest.legacy_source_namespace_id,
+            shared_manifest.legacy_source_namespace_id,
+            private_b_manifest.legacy_source_namespace_id,
+        }
+    finally:
+        qualified.close()
+
+
+def test_q4_private_shared_numeric_collision_is_ambiguous_and_has_no_partial_motif(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        private_scope = _additional_scope(connection, "q4-private")
+        _root, _path, private_manifest, _private = _admitted_node_source(
+            connection, tmp_path, "q4-private", (1,), idempotency, object_ns, private_scope
+        )
+        _root, _path, shared_manifest, _shared = _admitted_node_source(
+            connection, tmp_path, "q4-shared-memory", (1,), idempotency, object_ns, shared_scope
+        )
+        _motif_manifest, result = _motif_result(
+            connection, tmp_path, "q4-registry", _motif(motif_id="q4", members=[1]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (private_manifest.legacy_source_namespace_id, shared_manifest.legacy_source_namespace_id),
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert result.motif_object_id is None and result.memberships == ()
+        assert _quarantine_condition(connection, result) == "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS"
+        assert connection.execute("SELECT count(*) FROM relationships").fetchone()[0] == 0
+        metadata = json.loads(connection.execute(
+            "SELECT unknown_fields_json FROM legacy_admission_records WHERE admission_record_id=?",
+            (native_id_to_bytes(result.admission_record_id),),
+        ).fetchone()[0])
+        assert metadata["member_resolution_failure"] == "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS"
+    finally:
+        qualified.close()
+
+
+def test_q5_two_private_numeric_collision_does_not_use_contributing_agents_as_tie_break(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        scope_a = _additional_scope(connection, "q5-private-a")
+        scope_b = _additional_scope(connection, "q5-private-b")
+        _root, _path, manifest_a, _items_a = _admitted_node_source(
+            connection, tmp_path, "q5-private-a", (1,), idempotency, object_ns, scope_a
+        )
+        _root, _path, manifest_b, _items_b = _admitted_node_source(
+            connection, tmp_path, "q5-private-b", (1,), idempotency, object_ns, scope_b
+        )
+        _motif_manifest, result = _motif_result(
+            connection, tmp_path, "q5-registry",
+            _motif(motif_id="q5", members=[1], contributing_agents=["private-a"]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (manifest_a.legacy_source_namespace_id, manifest_b.legacy_source_namespace_id),
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert _quarantine_condition(connection, result) == "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS"
+    finally:
+        qualified.close()
+
+
+def test_q6_no_bounded_candidate_is_unresolved_without_a_placeholder(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        _manifest, result = _motif_result(
+            connection, tmp_path, "q6-registry", _motif(motif_id="q6", members=[404]),
+            idempotency, object_ns, relationship_ns, shared_scope, (_id(),),
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert result.motif_object_id is None and result.memberships == ()
+        assert _quarantine_condition(connection, result) == "UNRESOLVED_LEGACY_MOTIF_MEMBER_ALIAS"
+        assert connection.execute("SELECT count(*) FROM objects").fetchone()[0] == 0
+    finally:
+        qualified.close()
+
+
+def test_q7_unrelated_workspace_alias_is_never_a_candidate_without_topology_membership(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        foreign_scope = _additional_scope(connection, "workspace-b-private")
+        _root, _path, _foreign_manifest, _foreign = _admitted_node_source(
+            connection, tmp_path, "workspace-b-private", (7,), idempotency, object_ns, foreign_scope
+        )
+        local_namespace = _id()
+        _manifest, result = _motif_result(
+            connection, tmp_path, "workspace-a-registry", _motif(motif_id="q7", members=[7]),
+            idempotency, object_ns, relationship_ns, shared_scope, (local_namespace,),
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert _quarantine_condition(connection, result) == "UNRESOLVED_LEGACY_MOTIF_MEMBER_ALIAS"
+    finally:
+        qualified.close()
+
+
+def test_q8_motif_events_are_diagnostic_only_and_cannot_resolve_an_ambiguous_member(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        scope_a = _additional_scope(connection, "q8-private-a")
+        scope_b = _additional_scope(connection, "q8-private-b")
+        _root, _path, manifest_a, _items_a = _admitted_node_source(
+            connection, tmp_path, "q8-private-a", (1,), idempotency, object_ns, scope_a
+        )
+        _root, _path, manifest_b, _items_b = _admitted_node_source(
+            connection, tmp_path, "q8-private-b", (1,), idempotency, object_ns, scope_b
+        )
+        _manifest, result = _motif_result(
+            connection, tmp_path, "q8-registry",
+            _motif(motif_id="q8", members=[1], contributing_agents=["private-a"]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (manifest_a.legacy_source_namespace_id, manifest_b.legacy_source_namespace_id),
+            {"event": "MOTIF_MEMBER_ADDED", "motif_id": "q8", "member_eid": 1, "agent_id": "private-a"},
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert _quarantine_condition(connection, result) == "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS"
+        assert connection.execute(
+            "SELECT count(*) FROM semantic_transitions WHERE transition_kind LIKE '%MOTIF_EVENT%'"
+        ).fetchone()[0] == 0
+    finally:
+        qualified.close()
+
+
+def test_q9_contributing_agents_remain_motif_aggregate_evidence_not_member_identity(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        scope_a = _additional_scope(connection, "q9-private-a")
+        scope_b = _additional_scope(connection, "q9-private-b")
+        _root, _path, manifest_a, _items_a = _admitted_node_source(
+            connection, tmp_path, "q9-private-a", (9,), idempotency, object_ns, scope_a
+        )
+        _root, _path, manifest_b, _items_b = _admitted_node_source(
+            connection, tmp_path, "q9-private-b", (9,), idempotency, object_ns, scope_b
+        )
+        _manifest, result = _motif_result(
+            connection, tmp_path, "q9-registry",
+            _motif(motif_id="q9", members=[9], contributing_agents=["q9-private-a"]),
+            idempotency, object_ns, relationship_ns, shared_scope,
+            (manifest_a.legacy_source_namespace_id, manifest_b.legacy_source_namespace_id),
+        )
+        assert result.admission_status == "QUARANTINED"
+        assert _quarantine_condition(connection, result) == "AMBIGUOUS_LEGACY_MOTIF_MEMBER_ALIAS"
+    finally:
+        qualified.close()
+
+
+def test_q10_unique_cross_scope_retry_reuses_one_motif_and_membership_set(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        private_scope = _additional_scope(connection, "q10-private")
+        _root, _path, private_manifest, _private = _admitted_node_source(
+            connection, tmp_path, "q10-private", (1, 2), idempotency, object_ns, private_scope
+        )
+        root, manifest_path, _manifest = _snapshot(
+            tmp_path, "q10-registry", motifs={"q10": _motif(motif_id="q10", members=[1, 2])}, node_eids=()
+        )
+        service = NativeLegacyMotifAdmissionService(connection)
+        kwargs = (
+            service, root, manifest_path, idempotency, object_ns, relationship_ns,
+            shared_scope, (private_manifest.legacy_source_namespace_id,),
+        )
+        first = _admit_motifs(*kwargs)
+        second = _admit_motifs(*kwargs)
+        assert first == second
+        assert first.results[0].admission_status == "ADMITTED"
+        assert connection.execute("SELECT count(*) FROM objects WHERE object_kind=?", (LEGACY_DERIVED_MOTIF_OBJECT_KIND,)).fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM relationships WHERE relationship_kind=?", (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,)).fetchone()[0] == 2
+    finally:
+        qualified.close()
+
+
+def test_local_only_quarantine_is_preserved_before_bounded_requalification(tmp_path: Path):
+    qualified, object_ns, relationship_ns, shared_scope, _alternate, idempotency = _database(tmp_path)
+    try:
+        connection = qualified.connection
+        private_scope = _additional_scope(connection, "requalification-private")
+        _root, _path, private_manifest, _private = _admitted_node_source(
+            connection, tmp_path, "requalification-private", (1, 2), idempotency, object_ns, private_scope
+        )
+        root, manifest_path, registry_manifest = _snapshot(
+            tmp_path,
+            "requalification-registry",
+            motifs={"requalification": _motif(motif_id="requalification", members=[1, 2])},
+            node_eids=(),
+        )
+        service = NativeLegacyMotifAdmissionService(connection)
+        local_only = _admit_motifs(
+            service, root, manifest_path, idempotency, object_ns, relationship_ns, shared_scope,
+            (registry_manifest.legacy_source_namespace_id,),
+        ).results[0]
+        recovered = _admit_motifs(
+            service, root, manifest_path, idempotency, object_ns, relationship_ns, shared_scope,
+            (private_manifest.legacy_source_namespace_id, registry_manifest.legacy_source_namespace_id),
+        ).results[0]
+        retry = _admit_motifs(
+            service, root, manifest_path, idempotency, object_ns, relationship_ns, shared_scope,
+            (private_manifest.legacy_source_namespace_id, registry_manifest.legacy_source_namespace_id),
+        ).results[0]
+        assert local_only.admission_status == "QUARANTINED"
+        assert _quarantine_condition(connection, local_only) == "UNRESOLVED_LEGACY_MOTIF_MEMBER_ALIAS"
+        assert recovered.admission_status == "ADMITTED"
+        assert retry == recovered
+        assert local_only.admission_record_id != recovered.admission_record_id
+        assert connection.execute(
+            "SELECT count(*) FROM legacy_admission_records WHERE admission_status='QUARANTINED'"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT count(*) FROM objects WHERE object_kind=?", (LEGACY_DERIVED_MOTIF_OBJECT_KIND,)
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT count(*) FROM relationships WHERE relationship_kind=?", (MOTIF_MEMBERSHIP_RELATIONSHIP_KIND,)
+        ).fetchone()[0] == 2
+    finally:
+        qualified.close()
+
+
 def _manual_motif_admission(
     connection: sqlite3.Connection,
     *,
@@ -397,7 +800,7 @@ def _manual_motif_admission(
         tx.transitions.append(native_id_to_bytes(transition_id))
         tx.published.append((native_id_to_bytes(motif_id), native_id_to_bytes(motif_revision_id), 1))
         tx.relationship_published.extend((native_id_to_bytes(relationship_id), native_id_to_bytes(revision_id), 1) for relationship_id, revision_id, _ in memberships)
-        tx.legacy_motif_admitted.append((native_id_to_bytes(motif_id), native_id_to_bytes(motif_revision_id), 1, native_id_to_bytes(admission_id), native_id_to_bytes(transition_id), snapshot_id, artifact_id, native_id_to_bytes(artifact_record_id), alias_value, native_id_to_bytes(scope), tuple((native_id_to_bytes(relationship_id), native_id_to_bytes(revision_id), 1, native_id_to_bytes(sources[eid].object_id), native_id_to_bytes(scope), str(eid)) for relationship_id, revision_id, eid in memberships)))
+        tx.legacy_motif_admitted.append((native_id_to_bytes(motif_id), native_id_to_bytes(motif_revision_id), 1, native_id_to_bytes(admission_id), native_id_to_bytes(transition_id), snapshot_id, artifact_id, native_id_to_bytes(artifact_record_id), alias_value, native_id_to_bytes(scope), tuple((native_id_to_bytes(relationship_id), native_id_to_bytes(revision_id), 1, native_id_to_bytes(sources[eid].object_id), native_id_to_bytes(scope), str(eid), source_namespace_id) for relationship_id, revision_id, eid in memberships)))
         return tx
     except Exception:
         connection.execute("ROLLBACK")

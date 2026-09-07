@@ -370,6 +370,7 @@ class ExistingWorkspaceNativeAdmissionService:
                 object_identity_namespace_id=request.target_identity_namespace_id,
                 relationship_identity_namespace_id=request.membership_identity_namespace_id,
                 unknown_semantic_scope_id=request.unknown_semantic_scope_id,
+                eligible_member_source_namespace_ids=(request.legacy_source_namespace_id,),
             )
             rehearsal = NativeLegacyMigrationRehearsal(connection).run(
                 snapshot_root=paths.snapshot_root, manifest_path=paths.snapshot_manifest_path, config=config,

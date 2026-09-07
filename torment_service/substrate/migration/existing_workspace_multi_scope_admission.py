@@ -588,6 +588,7 @@ class ExistingWorkspaceNativeMultiScopeAdmissionService:
                     config=MigrationRehearsalConfig(
                         core_id, plan.idempotency_namespace_id, plan.target_identity_namespace_id,
                         plan.membership_identity_namespace_id, request.unknown_semantic_scope_id,
+                        (plan.legacy_source_namespace_id,),
                     ),
                 )
                 witness = _character_witness_from_lane(lane, plan)
