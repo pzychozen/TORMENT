@@ -25,6 +25,7 @@ from torment_service.memory_graph import MemoryGraph
 from torment_service.motifs import MotifRegistry
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.substrate.character_seed_witness import (
+    EXPLICIT_CHARACTER_LIFECYCLE, LEGACY_PRE_Q2_PROTECTED_CANON_V1,
     CharacterSeedWitness, CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
     read_legacy_character_seed_witness_from_frozen_bytes,
 )
@@ -280,6 +281,7 @@ def test_legacy_missing_owner_seed_projects_only_the_qualified_raw_shape(tmp_pat
     current = _read_character_witness(root, seed)
     assert current.seed_definition_compatibility == "CURRENT_CANONICAL"
     assert current.derived_owner_agent_id is None
+    assert current.lifecycle_compatibility == EXPLICIT_CHARACTER_LIFECYCLE
     assert current.matches_raw_seed_definition(
         json.loads((root / "seeds" / seed.seed_id / "seed.json").read_text(encoding="utf-8")),
     )
@@ -303,6 +305,46 @@ def test_legacy_missing_owner_seed_projects_only_the_qualified_raw_shape(tmp_pat
     changed = dict(raw_definition)
     changed["character_name"] = "Altered raw Character"
     assert not witness.matches_raw_seed_definition(changed)
+
+
+def test_pre_q2_character_lifecycle_witness_is_descriptor_bound(tmp_path: Path):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    for eid in seed.seed_eids:
+        _rewrite_node_payload(root, eid, lambda value: value.pop("lifecycle_status"))
+
+    witness = _read_character_witness(root, seed)
+
+    assert witness.lifecycle_compatibility == LEGACY_PRE_Q2_PROTECTED_CANON_V1
+    assert CharacterSeedWitness.from_descriptor_payload(
+        workspace_id="orchard", agent_id="aria", domain_id="personal",
+        value=witness.descriptor_payload(),
+    ) == witness
+    tampered = witness.descriptor_payload()
+    tampered["lifecycle_compatibility"] = EXPLICIT_CHARACTER_LIFECYCLE
+    with pytest.raises(CharacterSeedWitnessRefused, match="CHARACTER_DESCRIPTOR_WITNESS_DIGEST_MISMATCH"):
+        CharacterSeedWitness.from_descriptor_payload(
+            workspace_id="orchard", agent_id="aria", domain_id="personal", value=tampered,
+        )
+
+
+@pytest.mark.parametrize("kind", ("canon_false", "null_envelope", "malformed_envelope", "mixed_modes", "explicit_conflict"))
+def test_pre_q2_character_lifecycle_witness_refuses_every_other_shape(tmp_path: Path, kind: str):
+    _data, root, seed, _plan = _legacy_character_workspace(tmp_path)
+    if kind == "canon_false":
+        _rewrite_node_payload(root, 7, lambda value: (value.pop("lifecycle_status"), value.__setitem__("canon", False)))
+    elif kind == "null_envelope":
+        _rewrite_node_payload(root, 7, lambda value: value.__setitem__("lifecycle_status", None))
+    elif kind == "malformed_envelope":
+        _rewrite_node_payload(root, 7, lambda value: value.__setitem__("lifecycle_status", {"state": "protected"}))
+    elif kind == "mixed_modes":
+        _rewrite_node_payload(root, 7, lambda value: value.pop("lifecycle_status"))
+    elif kind == "explicit_conflict":
+        _rewrite_node_payload(root, 7, lambda value: value.__setitem__(
+            "lifecycle_status", {"state": "active", "is_authoritative_on_row": True, "requires_join": None,
+                                 "set_by": {"actor": "system", "via": "canon_set", "at": 0}, "history_ref": None},
+        ))
+    with pytest.raises(CharacterSeedWitnessRefused):
+        _read_character_witness(root, seed)
 
 
 @pytest.mark.parametrize("kind,code", (
@@ -467,6 +509,43 @@ def test_existing_character_seed_admission_normalizes_only_witnessed_seed_rows(t
             for eid in seed.seed_eids
         }
         assert {member.member_object_id for member in members} == seed_object_ids
+
+
+def test_pre_q2_character_lifecycle_b2_uses_snapshot_time_and_recovers_response_loss(tmp_path: Path):
+    _data, root, seed, plan = _legacy_character_workspace(tmp_path)
+    for eid in seed.seed_eids:
+        _rewrite_node_payload(root, eid, lambda value: value.pop("lifecycle_status"))
+    request = _character_admission_request(tmp_path, root, plan, seed)
+    service = ExistingWorkspaceNativeAdmissionService()
+
+    with pytest.raises(RuntimeError, match="response loss"):
+        service.admit(request, _test_lose_response_after_stage="B2")
+    completed = service.admit(request)
+    assert service.admit(request).descriptor.digest == completed.descriptor.digest
+    manifest = json.loads(request.snapshot_manifest_path.read_text(encoding="utf-8"))
+    captured_at_ns = manifest["capture_metadata"]["captured_at_ns"]
+    expected_set_at_ns = (captured_at_ns // 1_000_000_000) * 1_000_000_000
+    with open_existing_native_core_connection(request.native_core_database_path) as qualified:
+        rows = qualified.connection.execute(
+            """SELECT a.alias_value,r.lifecycle_state,r.lifecycle_authoritative,r.lifecycle_actor,
+                      r.lifecycle_via,r.lifecycle_set_at_ns,r.payload_text
+                 FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id
+                 JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+                WHERE a.legacy_source_namespace_id=? AND a.alias_value IN ('7','8')
+                ORDER BY CAST(a.alias_value AS INTEGER)""",
+            (native_id_to_bytes(plan["source"]),),
+        ).fetchall()
+        revision_count = qualified.connection.execute(
+            """SELECT count(*) FROM object_revisions r JOIN legacy_object_aliases a ON a.object_id=r.object_id
+                 WHERE a.legacy_source_namespace_id=? AND a.alias_value IN ('7','8')""",
+            (native_id_to_bytes(plan["source"]),),
+        ).fetchone()[0]
+    assert [row[:6] for row in rows] == [
+        ("7", "PROTECTED", 1, "migration", "canon_set", expected_set_at_ns),
+        ("8", "PROTECTED", 1, "migration", "canon_set", expected_set_at_ns),
+    ]
+    assert all("lifecycle_status" not in json.loads(row[6]) for row in rows)
+    assert revision_count == 4
 
 
 def test_existing_character_cold_recovery_preserves_native_c1a_and_c1b_without_graph(tmp_path: Path):

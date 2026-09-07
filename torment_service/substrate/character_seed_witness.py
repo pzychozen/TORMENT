@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from torment_service.character import CharacterSeed, _split_seed_text
-from torment_service.lifecycle import validate_lifecycle_envelope
+from torment_service.lifecycle import read_lifecycle_envelope, validate_lifecycle_envelope
 
 from .canonical_intent import canonical_intent_text
 from .errors import SubstrateInvariantViolation
@@ -24,6 +24,8 @@ from .provenance import NativeProvenanceRecord
 _ORIGIN_KIND = "CHARACTER_SEED_PLANT"
 _CURRENT_CANONICAL = "CURRENT_CANONICAL"
 _LEGACY_MISSING_OWNER_AGENT_ID_V1 = "LEGACY_MISSING_OWNER_AGENT_ID_V1"
+EXPLICIT_CHARACTER_LIFECYCLE = "EXPLICIT_CHARACTER_LIFECYCLE"
+LEGACY_PRE_Q2_PROTECTED_CANON_V1 = "LEGACY_PRE_Q2_PROTECTED_CANON_V1"
 
 
 class CharacterSeedWitnessRefused(SubstrateInvariantViolation):
@@ -44,6 +46,7 @@ class CharacterSeedWitness:
     seed_definition: Mapping[str, Any]
     seed_definition_compatibility: str
     derived_owner_agent_id: str | None
+    lifecycle_compatibility: str
     seed_definition_digest: str
     seed_id: str
     character_name: str
@@ -61,6 +64,7 @@ class CharacterSeedWitness:
             "seed_definition": dict(self.seed_definition),
             "seed_definition_compatibility": self.seed_definition_compatibility,
             "derived_owner_agent_id": self.derived_owner_agent_id,
+            "lifecycle_compatibility": self.lifecycle_compatibility,
             "seed_definition_digest": self.seed_definition_digest,
             "seed_id": self.seed_id,
             "character_name": self.character_name,
@@ -120,6 +124,7 @@ class CharacterSeedWitness:
                 workspace_id, agent_id, domain_id, seed_definition,
                 value.get("seed_definition_compatibility", _CURRENT_CANONICAL),
                 value.get("derived_owner_agent_id"),
+                value.get("lifecycle_compatibility", EXPLICIT_CHARACTER_LIFECYCLE),
                 _text(value, "seed_definition_digest"), _text(value, "seed_id"),
                 _text(value, "character_name"), _text(value, "seed_text"),
                 _integer_tuple(value, "seed_eids", unique=True), _text(value, "seed_motif_id"),
@@ -191,7 +196,7 @@ def read_legacy_character_seed_witness_from_frozen_bytes(
         raise CharacterSeedWitnessRefused("CHARACTER_SEED_CONCEPT_CARDINALITY_MISMATCH")
     seed_eids = _validate_eids(seed.seed_eids, "CHARACTER_SEED_EIDS_INVALID", unique=True)
     rows = _current_node_payloads_from_bytes(private_nodes_bytes)
-    _validate_seed_rows(rows, seed, concepts, seed_eids)
+    lifecycle_compatibility = _validate_seed_rows(rows, seed, concepts, seed_eids)
     member_eids = _read_selected_motif_members_from_bytes(motif_bytes, seed.seed_motif_id)
     seed_eid_membership = set(seed_eids)
     seed_members = tuple(eid for eid in member_eids if eid in seed_eid_membership)
@@ -203,6 +208,7 @@ def read_legacy_character_seed_witness_from_frozen_bytes(
         "workspace_id": workspace_id, "agent_id": agent_id, "domain_id": domain_id,
         "seed_definition_compatibility": definition_compatibility,
         "derived_owner_agent_id": derived_owner_agent_id,
+        "lifecycle_compatibility": lifecycle_compatibility,
         "seed_definition_digest": definition_digest, "seed_id": seed.seed_id,
         "character_name": seed.character_name, "seed_eids": list(seed_eids),
         "seed_motif_id": seed.seed_motif_id, "seed_motif_member_eids": list(member_eids),
@@ -210,7 +216,7 @@ def read_legacy_character_seed_witness_from_frozen_bytes(
     }
     return CharacterSeedWitness(
         workspace_id, agent_id, domain_id, definition, definition_compatibility,
-        derived_owner_agent_id, definition_digest, seed.seed_id,
+        derived_owner_agent_id, lifecycle_compatibility, definition_digest, seed.seed_id,
         seed.character_name, seed.seed_text, seed_eids, seed.seed_motif_id, member_eids,
         seed_members, concepts, _digest(witness_payload),
     )
@@ -265,7 +271,8 @@ def character_seed_definition_digest(seed: CharacterSeed) -> str:
 def _validate_seed_rows(
     rows: Mapping[int, Mapping[str, Any]], seed: CharacterSeed,
     concepts: tuple[str, ...], seed_eids: tuple[int, ...],
-) -> None:
+) -> str:
+    lifecycle_modes: set[str] = set()
     for index, eid in enumerate(seed_eids):
         payload = rows.get(eid)
         if payload is None:
@@ -288,9 +295,22 @@ def _validate_seed_rows(
             raise CharacterSeedWitnessRefused("CHARACTER_SEED_WRITER_STEP_MISMATCH")
         if "provenance" in payload:
             raise CharacterSeedWitnessRefused("CHARACTER_SEED_UNEXPECTED_PROVENANCE")
+        lifecycle_modes.add(_character_seed_lifecycle_compatibility(payload))
+
+    for eid, payload in rows.items():
+        if payload.get("type") == "seed_canon" and eid not in seed_eids:
+            raise CharacterSeedWitnessRefused("CHARACTER_SEED_FOREIGN_SEED_CANON_EID")
+    if len(lifecycle_modes) != 1:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_LIFECYCLE_INVALID")
+    return lifecycle_modes.pop()
+
+
+def _character_seed_lifecycle_compatibility(payload: Mapping[str, Any]) -> str:
+    """Recognize the two exact lifecycle evidence classes for a seed row."""
+    if "lifecycle_status" in payload:
         try:
             lifecycle = validate_lifecycle_envelope(payload["lifecycle_status"])
-        except (KeyError, TypeError, ValueError) as exc:
+        except (TypeError, ValueError) as exc:
             raise CharacterSeedWitnessRefused("CHARACTER_SEED_LIFECYCLE_INVALID") from exc
         if (
             lifecycle.to_dict() != payload["lifecycle_status"]
@@ -300,10 +320,24 @@ def _validate_seed_rows(
             or lifecycle.set_by.via.value != "canon_set"
         ):
             raise CharacterSeedWitnessRefused("CHARACTER_SEED_LIFECYCLE_INVALID")
+        return EXPLICIT_CHARACTER_LIFECYCLE
 
-    for eid, payload in rows.items():
-        if payload.get("type") == "seed_canon" and eid not in seed_eids:
-            raise CharacterSeedWitnessRefused("CHARACTER_SEED_FOREIGN_SEED_CANON_EID")
+    # Pre-Q2 seed rows have no envelope at all.  This qualification is only
+    # about the old read-side law; B2 supplies its frozen observation time.
+    try:
+        lifecycle = read_lifecycle_envelope(dict(payload), now=0)
+    except (TypeError, ValueError) as exc:
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_LIFECYCLE_INVALID") from exc
+    if (
+        lifecycle.state.value != "protected"
+        or not lifecycle.is_authoritative_on_row
+        or lifecycle.requires_join is not None
+        or lifecycle.set_by.actor.value != "migration"
+        or lifecycle.set_by.via.value != "canon_set"
+        or lifecycle.history_ref is not None
+    ):
+        raise CharacterSeedWitnessRefused("CHARACTER_SEED_LIFECYCLE_INVALID")
+    return LEGACY_PRE_Q2_PROTECTED_CANON_V1
 
 
 def _current_node_payloads_from_bytes(value: bytes) -> dict[int, Mapping[str, Any]]:
@@ -411,6 +445,10 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
             raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
     else:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_SEED_DEFINITION_INVALID")
+    if witness.lifecycle_compatibility not in {
+        EXPLICIT_CHARACTER_LIFECYCLE, LEGACY_PRE_Q2_PROTECTED_CANON_V1,
+    }:
+        raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_LIFECYCLE_INVALID")
     if tuple(_split_seed_text(witness.seed_text)) != witness.concept_summaries:
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_CONCEPTS_MISMATCH")
     if len(witness.seed_eids) != len(witness.concept_summaries):
@@ -424,6 +462,7 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
         "workspace_id": witness.workspace_id, "agent_id": witness.agent_id, "domain_id": witness.domain_id,
         "seed_definition_compatibility": witness.seed_definition_compatibility,
         "derived_owner_agent_id": witness.derived_owner_agent_id,
+        "lifecycle_compatibility": witness.lifecycle_compatibility,
         "seed_definition_digest": witness.seed_definition_digest, "seed_id": witness.seed_id,
         "character_name": witness.character_name, "seed_eids": list(witness.seed_eids),
         "seed_motif_id": witness.seed_motif_id, "seed_motif_member_eids": list(witness.seed_motif_member_eids),
@@ -432,15 +471,24 @@ def _validate_descriptor_witness(witness: CharacterSeedWitness) -> None:
     }
     if _digest(expected_payload) == witness.witness_digest:
         return
-    # Historical current-canonical descriptors predate these two fields.  They
-    # cannot describe the new raw compatibility class, so retain only this
-    # narrow old form for recovery of existing current-canonical carriers.
-    legacy_descriptor_payload = dict(expected_payload)
+    # The owner-projection descriptor predates the separately evidenced
+    # lifecycle mode.  It can only recover the explicit lifecycle class.
+    prior_lifecycle_payload = dict(expected_payload)
+    prior_lifecycle_payload.pop("lifecycle_compatibility")
+    if (
+        witness.lifecycle_compatibility == EXPLICIT_CHARACTER_LIFECYCLE
+        and _digest(prior_lifecycle_payload) == witness.witness_digest
+    ):
+        return
+    # Current-canonical descriptors prior to owner projection likewise only
+    # recover explicit lifecycle evidence.
+    legacy_descriptor_payload = dict(prior_lifecycle_payload)
     legacy_descriptor_payload.pop("seed_definition_compatibility")
     legacy_descriptor_payload.pop("derived_owner_agent_id")
     if not (
         witness.seed_definition_compatibility == _CURRENT_CANONICAL
         and witness.derived_owner_agent_id is None
+        and witness.lifecycle_compatibility == EXPLICIT_CHARACTER_LIFECYCLE
         and _digest(legacy_descriptor_payload) == witness.witness_digest
     ):
         raise CharacterSeedWitnessRefused("CHARACTER_DESCRIPTOR_WITNESS_DIGEST_MISMATCH")
@@ -452,5 +500,6 @@ def _digest(value: Any) -> str:
 
 __all__ = [
     "CharacterSeedWitness", "CharacterSeedWitnessRefused", "character_seed_definition_digest",
+    "EXPLICIT_CHARACTER_LIFECYCLE", "LEGACY_PRE_Q2_PROTECTED_CANON_V1",
     "read_legacy_character_seed_witness", "read_legacy_character_seed_witness_from_frozen_bytes",
 ]

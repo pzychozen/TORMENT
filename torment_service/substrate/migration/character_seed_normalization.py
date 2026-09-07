@@ -14,10 +14,13 @@ import sqlite3
 from typing import Any
 from uuid import UUID
 
-from torment_service.lifecycle import LifecycleStatus
+from torment_service.lifecycle import LifecycleStatus, read_lifecycle_envelope
 
 from ..canonical_intent import canonical_intent_text
-from ..character_seed_witness import CharacterSeedWitness
+from ..character_seed_witness import (
+    EXPLICIT_CHARACTER_LIFECYCLE, LEGACY_PRE_Q2_PROTECTED_CANON_V1,
+    CharacterSeedWitness,
+)
 from ..errors import SubstrateIdempotencyConflict, SubstrateInvariantViolation
 from ..ids import generate_native_id, native_id_to_bytes
 from ..object_revision_governance import NativeMemoryGovernanceFacts, _insert_published_governance_for_qualification
@@ -129,7 +132,9 @@ class NativeMigrationCharacterSeedNormalizationService:
         raw = self._ordinary._verified_snapshot_row(base, manifest, source)
         payload = _normalised_runtime_payload(raw)
         index = _validate_seed_payload(payload, witness, base.eid)
-        lifecycle = _lifecycle_from_payload(payload)
+        lifecycle = _character_seed_lifecycle_from_payload(
+            payload, witness, captured_at_ns=manifest.captured_at_ns,
+        )
         governance = _governance_from_payload(payload, raw)
         payload_json = canonical_intent_text(payload)
         return PreparedCharacterSeedNormalization(
@@ -261,6 +266,43 @@ def _validate_seed_payload(payload: dict[str, Any], witness: CharacterSeedWitnes
     return index
 
 
+def _character_seed_lifecycle_from_payload(
+    payload: dict[str, Any], witness: CharacterSeedWitness, *, captured_at_ns: int,
+) -> LifecycleStatus:
+    """Apply lifecycle evidence carried by the qualified Character witness.
+
+    Ordinary B2 remains the owner of explicit-envelope enforcement.  The
+    only additional branch is the frozen pre-Q2 Character class, whose
+    migration observation time is the snapshot manifest timestamp.
+    """
+    if witness.lifecycle_compatibility == EXPLICIT_CHARACTER_LIFECYCLE:
+        return _lifecycle_from_payload(payload)
+    if witness.lifecycle_compatibility != LEGACY_PRE_Q2_PROTECTED_CANON_V1:
+        raise MigrationCharacterSeedNormalizationRefused("CHARACTER_SEED_LIFECYCLE_COMPATIBILITY_INVALID")
+    if (
+        "lifecycle_status" in payload
+        or payload.get("canon") is not True
+        or not isinstance(captured_at_ns, int)
+        or isinstance(captured_at_ns, bool)
+        or captured_at_ns < 0
+    ):
+        raise MigrationCharacterSeedNormalizationRefused("CHARACTER_SEED_LEGACY_LIFECYCLE_INVALID")
+    try:
+        lifecycle = read_lifecycle_envelope(payload, now=captured_at_ns // 1_000_000_000)
+    except (TypeError, ValueError) as exc:
+        raise MigrationCharacterSeedNormalizationRefused("CHARACTER_SEED_LEGACY_LIFECYCLE_INVALID") from exc
+    if (
+        lifecycle.state.value != "protected"
+        or not lifecycle.is_authoritative_on_row
+        or lifecycle.requires_join is not None
+        or lifecycle.set_by.actor.value != "migration"
+        or lifecycle.set_by.via.value != "canon_set"
+        or lifecycle.history_ref is not None
+    ):
+        raise MigrationCharacterSeedNormalizationRefused("CHARACTER_SEED_LEGACY_LIFECYCLE_INVALID")
+    return lifecycle
+
+
 def _retry_contract(request: MigrationCharacterSeedNormalizationRequest) -> dict[str, Any]:
     base, witness = request.ordinary_request, request.witness
     return {
@@ -270,6 +312,7 @@ def _retry_contract(request: MigrationCharacterSeedNormalizationRequest) -> dict
         "expected_revision_id": str(base.expected_revision_id),
         "idempotency_namespace_id": str(base.idempotency_namespace_id),
         "seed_id": witness.seed_id, "seed_definition_digest": witness.seed_definition_digest,
+        "lifecycle_compatibility": witness.lifecycle_compatibility,
         "seed_witness_digest": witness.witness_digest,
     }
 
