@@ -276,6 +276,8 @@ def _root_fixture(tmp_path: Path):
         real_root_activation_ready=False,
         partial_activation=False,
         reason_codes=(),
+        root_memory_disposition_closed=True,
+        root_motif_disposition_closed=True,
     )
     return request, normalization
 
@@ -307,6 +309,81 @@ def test_v1_decoder_remains_historical_and_v2_root_has_explicit_contract(tmp_pat
         profile_digest=_digest("legacy-profile"),
     )
     assert completion_witness_from_payload(legacy.payload()) == legacy
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_pass"),
+    (
+        ("A_FULL_NORMALIZATION", True),
+        ("B_CERTIFIED_EXCEPTION_CLOSURE", True),
+        ("C_INCOMPLETE_CLOSURE", False),
+        ("D_RUNTIME_LEAK", False),
+        ("E_UNACCOUNTED_MEMORY", False),
+        ("F_MOTIF_CLOSURE_FAILURE", False),
+        ("G_AUTHORITY_VIOLATION", False),
+    ),
+)
+def test_p4_completion_distinguishes_runtime_readiness_from_lawful_disposition_closure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    expected_pass: bool,
+) -> None:
+    """P4 admits only full runtime or certified-exception closure, never a blanket false-ready state."""
+
+    request, fully_normalized = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    controller.prepare_root(request)
+    controller.enter_compat_root_external_pending(request)
+
+    certified_exception_closure = replace(
+        fully_normalized,
+        root_normalization_ready=False,
+        partial_activation=True,
+        partial_motif_authority_closure=True,
+        p3_completion_class="P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS",
+        b2_certified_refused_memory_count=1,
+        b4_certified_refused_motif_count=1,
+    )
+    normalization = {
+        "A_FULL_NORMALIZATION": fully_normalized,
+        "B_CERTIFIED_EXCEPTION_CLOSURE": certified_exception_closure,
+        "C_INCOMPLETE_CLOSURE": replace(
+            certified_exception_closure,
+            root_normalization_complete=False,
+            root_memory_disposition_closed=False,
+        ),
+        "D_RUNTIME_LEAK": replace(
+            certified_exception_closure,
+            reason_codes=("P3_B2_REFUSAL_RUNTIME_LEAK",),
+        ),
+        "E_UNACCOUNTED_MEMORY": replace(
+            certified_exception_closure,
+            root_memory_disposition_closed=False,
+        ),
+        "F_MOTIF_CLOSURE_FAILURE": replace(
+            certified_exception_closure,
+            root_motif_disposition_closed=False,
+            partial_motif_authority_closure=False,
+        ),
+        "G_AUTHORITY_VIOLATION": certified_exception_closure,
+    }[case]
+
+    if case == "G_AUTHORITY_VIOLATION":
+        selector = read_selector_state(data_root=request.root)
+        monkeypatch.setattr(
+            controller,
+            "_selector_state",
+            lambda _request: replace(selector, deployment_state=DeploymentState.NATIVE_ACTIVE),
+        )
+
+    if expected_pass:
+        evidence = controller.verify_root_completion(request, normalization)
+        assert evidence.completion_verification is not None
+        assert evidence.completion_verification.completion_witness.normalization_closure_digest
+    else:
+        with pytest.raises(OfflineCutoverRefused):
+            controller.verify_root_completion(request, normalization)
 
 
 def test_synthetic_root_bridge_requires_post_p6_receipt_then_recovers_idempotently(

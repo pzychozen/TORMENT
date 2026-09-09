@@ -1091,18 +1091,46 @@ def _require_normalization_complete(
     result: RootNormalizationResult,
     description: RootNativeProductionAdmissionDescription,
 ) -> None:
+    """Require P4-eligible P3 closure without redefining staging readiness.
+
+    ``root_normalization_ready`` deliberately means that the generalized
+    staging runtime is fully usable.  P4 instead needs a complete, auditable
+    disposition of the frozen root source universe.  A P3 result with
+    certified B2/B4 exceptions is therefore eligible only when its dedicated
+    closure proof is present; it must not turn every false-ready result into a
+    P4 pass.
+    """
+
     expected = description.expected_census
     if (
         not result.source_manifest_recheck_passed
         or not result.root_normalization_complete
-        or not result.root_normalization_ready
-        or result.partial_activation
         or result.reason_codes
         or result.expected_workspace_count != expected.workspace_count
         or result.observed_workspace_closure != expected.workspace_count
         or result.expected_materialized_scope_count != expected.total_runtime_scope_count
         or result.observed_materialized_scope_closure != expected.total_runtime_scope_count
+        or not result.root_memory_disposition_closed
+        or not result.root_motif_disposition_closed
     ):
+        raise RootBlocker5BindingRefused("ROOT_NORMALIZATION_CLOSURE_INCOMPLETE")
+
+    if result.root_normalization_ready and not result.partial_activation:
+        return
+
+    has_certified_exception = bool(
+        result.b2_certified_refused_memory_count
+        or result.b4_certified_refused_motif_count
+    )
+    lawful_certified_exception_closure = bool(
+        result.p3_completion_class == "P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS"
+        and has_certified_exception
+        and (
+            not result.partial_activation
+            or result.partial_motif_authority_closure
+        )
+    )
+    if not lawful_certified_exception_closure:
         raise RootBlocker5BindingRefused("ROOT_NORMALIZATION_CLOSURE_INCOMPLETE")
 
 

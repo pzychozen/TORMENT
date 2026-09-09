@@ -30,6 +30,7 @@ from torment_service.substrate.migration.certified_refusal_runtime_proof import 
     CertifiedRefusalRuntimeSource,
     prove_certified_refusal_runtime_negative,
 )
+from torment_service.substrate.root_blocker5_binding import _require_normalization_complete
 from torment_service.substrate.relationships import Endpoint, NativeRelationshipService, RelationshipState
 from torment_service.substrate.representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -443,6 +444,9 @@ def test_p3_certifies_source_semantic_gap_without_creating_b2_or_runtime_access(
     assert root_result.b3_completed_memory_count == len(_MULTI_MEMORY_EIDS) - 1
     assert root_result.root_memory_disposition_closed
     assert not root_result.root_normalization_ready
+    # P4 consumes P3's complete source disposition, which is intentionally
+    # distinct from generalized staging-runtime readiness in this B2 refusal.
+    _require_normalization_complete(root_result, refused_request.description)
 
     carrier = json.loads(refused_request.record_path.read_text(encoding="utf-8"))["payload"]
     certification = carrier["b2_refusal_certification"]
@@ -713,6 +717,7 @@ def test_p3_refuses_dependent_exact_motifs_with_only_frozen_b2_gap_members(
     assert normalized.b4_certified_refused_motif_count == 2
     assert normalized.p3_completion_class == "P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS"
     assert not normalized.root_normalization_ready
+    _require_normalization_complete(normalized, refused_request.description)
 
     carrier = json.loads(refused_request.record_path.read_text(encoding="utf-8"))["payload"]
     terminal = json.loads(Path(carrier["terminal_disposition_evidence"]["path"]).read_text(encoding="utf-8"))
