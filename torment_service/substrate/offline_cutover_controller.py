@@ -917,6 +917,35 @@ class OfflineCutoverController:
             operation_key=self._key(request, "root-core-pending"),
         )
 
+    def verify_root_core_activation_precondition(
+        self,
+        request: RootOfflineCutoverRequest,
+        normalization: RootNormalizationResult,
+    ) -> RootOfflineCutoverEvidence:
+        """Perform the exact read-only P4/P5 gate used immediately before P6.
+
+        The caller supplies the P3 normalization evidence; this method never
+        re-dispatches B3/B4 normalization.  Re-dispatch is a mutation-capable
+        P3 operation, even when its child operations recover idempotently, and
+        is therefore not a substitute for the P4 verifier on a read-only
+        preflight path.
+        """
+
+        evidence = self.verify_root_completion(request, normalization)
+        inspection = evidence.core
+        if (
+            inspection.core_role == "ACTIVE_CORE"
+            and inspection.deployment_state is DeploymentState.NATIVE_ACTIVE
+        ):
+            return evidence
+        if (
+            inspection.core_role != "STAGING"
+            or inspection.deployment_state is not DeploymentState.CUTOVER_PENDING
+            or inspection.witness is None
+        ):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_CORE_PENDING_REQUIRED")
+        return evidence
+
     def activate_root_core(
         self,
         request: RootOfflineCutoverRequest,
@@ -926,7 +955,7 @@ class OfflineCutoverController:
 
         # This second verification is the required immediately-pre-P6 manifest
         # recheck.  It also rejects census or membership drift after P4.
-        evidence = self.verify_root_completion(request, normalization)
+        evidence = self.verify_root_core_activation_precondition(request, normalization)
         assert evidence.completion_verification is not None and evidence.selector_state is not None
         completion = evidence.completion_verification.completion_witness
         state = evidence.selector_state

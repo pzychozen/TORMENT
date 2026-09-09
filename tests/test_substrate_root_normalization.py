@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -734,6 +735,36 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
         assert all(item.completed for item in result.workspace_results)
     finally:
         fixture.close()
+
+
+def test_root_normalizer_is_not_a_read_only_completion_verifier(tmp_path: Path) -> None:
+    """The idempotent B3/B4 dispatcher still needs a writable core handle.
+
+    P4 verifies a previously produced ``RootNormalizationResult`` through
+    read-only queries.  Re-running the normalizer on an immutable handle is a
+    different operation: it sends each child through the mutation-capable
+    bootstrap/projector services and must not be used as a read-only P4/P6
+    reconstruction substitute.
+    """
+
+    fixture = _positive_fixture(tmp_path)
+    core_path = fixture.qualified.database_path
+    try:
+        writable = NativeRootWideNormalizationService(fixture.qualified.connection).normalize(
+            fixture.request,
+        )
+        assert writable.root_normalization_complete
+    finally:
+        fixture.close()
+
+    connection = sqlite3.connect(f"file:{core_path.as_posix()}?mode=ro&immutable=1", uri=True)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA query_only=ON")
+        with pytest.raises(sqlite3.OperationalError, match="readonly database"):
+            NativeRootWideNormalizationService(connection).normalize(fixture.request)
+    finally:
+        connection.close()
 
 
 def test_root_memory_disposition_closure_requires_an_exact_b1_b2_partition(

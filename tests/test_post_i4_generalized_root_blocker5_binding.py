@@ -386,6 +386,87 @@ def test_p4_completion_distinguishes_runtime_readiness_from_lawful_disposition_c
             controller.verify_root_completion(request, normalization)
 
 
+@pytest.mark.parametrize(
+    "case",
+    (
+        "A_VALID_P4_AND_P5",
+        "B_CORRUPTED_P4_PROPOSITION",
+        "C_WRONG_CORRECTED_CORE",
+        "D_ALTERED_ENVELOPE_D_BINDING",
+        "E_INCOMPLETE_DISPOSITION_CLOSURE",
+        "F_CERTIFIED_EXCEPTION_CLOSURE_NOT_READY",
+        "G_P5_ABSENT",
+    ),
+)
+def test_read_only_p6_precondition_reuses_the_reconciled_p4_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """The P6 preflight consumes P4 evidence; it never re-runs the normalizer.
+
+    ``RootAdmissionCompletionWitness`` is created by the P4 verifier and is
+    only durably recorded by P6's activation event.  Before P6, the typed P3
+    normalization proposition is therefore the exact input that P4 and the
+    read-only P6 precondition must both verify.
+    """
+
+    request, full = _root_fixture(tmp_path)
+    controller = OfflineCutoverController()
+    controller.prepare_root(request)
+    controller.enter_compat_root_external_pending(request)
+    certified = replace(
+        full,
+        root_normalization_ready=False,
+        partial_activation=True,
+        partial_motif_authority_closure=True,
+        p3_completion_class="P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS",
+        b2_certified_refused_memory_count=1,
+        b4_certified_refused_motif_count=1,
+    )
+    normalization = certified if case == "F_CERTIFIED_EXCEPTION_CLOSURE_NOT_READY" else full
+
+    if case in {"A_VALID_P4_AND_P5", "F_CERTIFIED_EXCEPTION_CLOSURE_NOT_READY"}:
+        controller.enter_root_core_pending(request, normalization)
+        evidence = controller.verify_root_core_activation_precondition(request, normalization)
+        assert evidence.completion_verification is not None
+        assert evidence.completion_verification.completion_witness.normalization_closure_digest
+        assert normalization.root_normalization_ready is (case != "F_CERTIFIED_EXCEPTION_CLOSURE_NOT_READY")
+        return
+
+    if case == "B_CORRUPTED_P4_PROPOSITION":
+        controller.enter_root_core_pending(request, full)
+        normalization = replace(full, root_memory_disposition_closed=False)
+    elif case == "C_WRONG_CORRECTED_CORE":
+        controller.enter_root_core_pending(request, full)
+        actual = controller._inspection(request)
+        monkeypatch.setattr(controller, "_inspection", lambda _request: replace(
+            actual, core_id=generate_native_id(),
+        ))
+    elif case == "D_ALTERED_ENVELOPE_D_BINDING":
+        controller.enter_root_core_pending(request, full)
+        altered_description = replace(
+            request.description, operator_identity="altered-envelope-binding",
+        )
+        request = replace(
+            request,
+            description=altered_description,
+            normalization_request=replace(
+                request.normalization_request, description=altered_description,
+            ),
+        )
+    elif case == "E_INCOMPLETE_DISPOSITION_CLOSURE":
+        controller.enter_root_core_pending(request, full)
+        normalization = replace(full, root_normalization_complete=False)
+    elif case == "G_P5_ABSENT":
+        pass
+    else:
+        raise AssertionError(f"unhandled case: {case}")
+
+    with pytest.raises(OfflineCutoverRefused):
+        controller.verify_root_core_activation_precondition(request, normalization)
+
+
 def test_synthetic_root_bridge_requires_post_p6_receipt_then_recovers_idempotently(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
