@@ -2,6 +2,9 @@
 
 Starting HEAD and `origin/main` were `ce2fac96ddaa84d7a788a2133a9be706199b30b4`; the tracked worktree was clean.
 
+`FINAL_HEAD = commit containing this record`, `ORIGIN_MAIN = FINAL_HEAD`, and the final
+tracked worktree is clean (the exact immutable SHA is supplied by the final Git verification).
+
 ## Finding and dependency map
 
 `RootNormalizationResult.root_normalization_ready` is produced by
