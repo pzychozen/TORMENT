@@ -156,11 +156,12 @@ class NativePrivateBridgeGeometryAdapter:
     """Read one private motif lane together with qualified shared lanes.
 
     This is deliberately distinct from :class:`NativeMotifGeometryAdapter`.
-    A private bridge decision historically consumes the ordered workspace motif
-    map, which includes its own private motif domain as well as each shared
-    domain.  The caller supplies that already-authorized workspace order; this
-    adapter only composes the one named private lane with the named shared
-    readers and never derives a domain from a label or directory.
+    A legacy explicit private-domain descriptor composes its private domain
+    with shared readers.  Root P2 plans deliberately omit that field: in this
+    mode every ordered, admitted shared domain is read through the already
+    qualified private namespace and semantic scope.  The caller supplies the
+    complete authorized order; this adapter never derives a domain from a
+    label or directory.
     """
 
     def __init__(
@@ -169,7 +170,7 @@ class NativePrivateBridgeGeometryAdapter:
         *,
         domain_ids: tuple[str, ...],
         private_agent_id: str,
-        private_domain_id: str,
+        private_domain_id: str | None,
         expected_dimension: int,
     ) -> None:
         if not isinstance(domain_ids, tuple) or not domain_ids or any(
@@ -178,9 +179,11 @@ class NativePrivateBridgeGeometryAdapter:
             raise ValueError("private bridge geometry requires distinct explicit domain IDs")
         if not isinstance(private_agent_id, str) or not private_agent_id:
             raise ValueError("private bridge geometry requires a private agent ID")
-        if not isinstance(private_domain_id, str) or not private_domain_id:
-            raise ValueError("private bridge geometry requires a private motif domain ID")
-        if domain_ids.count(private_domain_id) != 1:
+        if private_domain_id is not None and (
+            not isinstance(private_domain_id, str) or not private_domain_id
+        ):
+            raise ValueError("private bridge geometry private motif domain must be text or absent")
+        if private_domain_id is not None and domain_ids.count(private_domain_id) != 1:
             raise ValueError("private bridge geometry must include its private motif domain exactly once")
         if not isinstance(expected_dimension, int) or isinstance(expected_dimension, bool) or expected_dimension < 1:
             raise ValueError("private bridge geometry expected_dimension must be positive")
@@ -223,7 +226,7 @@ class NativePrivateBridgeGeometryAdapter:
         return self._private_agent_id
 
     @property
-    def private_domain_id(self) -> str:
+    def private_domain_id(self) -> str | None:
         return self._private_domain_id
 
     def domain_ids(self) -> tuple[str, ...]:
@@ -232,7 +235,12 @@ class NativePrivateBridgeGeometryAdapter:
     def list_motifs(self, domain_id: str) -> tuple[RuntimeMotifGeometry, ...]:
         scope = self._scope(domain_id)
         with scope.open_readers() as readers:
-            motifs = readers.motifs.list_runtime_motifs(
+            reader = (
+                readers.motifs.list_runtime_motifs_for_domain
+                if self._private_domain_id is None
+                else readers.motifs.list_runtime_motifs
+            )
+            motifs = reader(
                 motif_alias_namespace_id=scope.fabric_routing_scope.motif_alias_namespace_id,
                 domain_id=domain_id,
                 semantic_scope_id=scope.memory_runtime_scope.semantic_scope_id,
@@ -257,7 +265,12 @@ class NativePrivateBridgeGeometryAdapter:
             raise ValueError("private bridge geometry dimension differs from its qualified lane")
         scope = self._scope(domain_id)
         with scope.open_readers() as readers:
-            return readers.motifs.domain_centroid(
+            centroid = (
+                readers.motifs.domain_centroid_for_domain
+                if self._private_domain_id is None
+                else readers.motifs.domain_centroid
+            )
+            return centroid(
                 motif_alias_namespace_id=scope.fabric_routing_scope.motif_alias_namespace_id,
                 domain_id=domain_id,
                 dimension=expected_dimension,
@@ -265,6 +278,10 @@ class NativePrivateBridgeGeometryAdapter:
             )
 
     def _scope(self, domain_id: str) -> Any:
+        if domain_id not in self._domain_ids:
+            raise KeyError(f"geometry is not available for unadmitted private bridge domain {domain_id!r}")
+        if self._private_domain_id is None:
+            return self._private_scope
         if domain_id == self._private_domain_id:
             return self._private_scope
         try:

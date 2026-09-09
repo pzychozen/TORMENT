@@ -2017,7 +2017,9 @@ def _require_private_bridge_geometry(
         for scope in capability.routing_scopes
         if scope.runtime_scope.scope_kind == "SHARED_DOMAIN"
     }
-    expected_domains = admitted_shared_domains | {geometry.private_domain_id}
+    expected_domains = set(admitted_shared_domains)
+    if geometry.private_domain_id is not None:
+        expected_domains.add(geometry.private_domain_id)
     if set(geometry.domain_ids()) != expected_domains:
         raise SubstrateConfigurationError(
             "private bridge geometry does not cover exactly the admitted private and shared domains"

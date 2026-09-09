@@ -5,10 +5,18 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
+import numpy as np
 import pytest
 
+from torment_service import public_runtime as public_runtime_module
+from torment_service.fabric import TormentFabric
+from torment_service.memory_graph import MemoryGraph
 from torment_service.substrate.connection import open_temporary_test_connection
-from torment_service.public_runtime import PublicRuntimeConfiguration
+from torment_service.public_runtime import (
+    PublicRuntimeConfiguration,
+    close_public_runtime,
+    create_public_runtime,
+)
 from torment_service.substrate.deployment_core_maintenance import (
     activate_core,
     enter_cutover_pending,
@@ -124,7 +132,13 @@ def _insert_idempotency(connection, namespace_id: UUID, label: str) -> None:
     )
 
 
-def _plan(connection, *, workspace_id: str, scope_key: RootScopeKey, motif_domain_id: str) -> MigrationRuntimeScopePlan:
+def _plan(
+    connection,
+    *,
+    workspace_id: str,
+    scope_key: RootScopeKey,
+    motif_domain_id: str | None,
+) -> MigrationRuntimeScopePlan:
     target_identity = generate_native_id()
     target_scope = generate_native_id()
     legacy_source = generate_native_id()
@@ -196,12 +210,14 @@ def _active_root_fixture(tmp_path: Path, *, shared: bool = True):
     workspace = root / "workspaces" / "ws-one"
     private = workspace / "agents" / "agent-one" / "private"
     private.mkdir(parents=True)
-    (workspace / "workspace_meta.json").write_text("{}", encoding="utf-8")
-    (private / "nodes.jsonl").write_text("{}\n", encoding="utf-8")
+    (workspace / "workspace_meta.json").write_text(
+        '{"workspace_id":"ws-one"}', encoding="utf-8",
+    )
+    (private / "nodes.jsonl").write_text("", encoding="utf-8")
     shared_path = workspace / "domains" / "domain-one" / "shared"
     if shared:
         shared_path.mkdir(parents=True)
-        (shared_path / "nodes.jsonl").write_text("{}\n", encoding="utf-8")
+        (shared_path / "nodes.jsonl").write_text("", encoding="utf-8")
     core_path = root / "substrate" / "cores" / "root.db"
     core_path.parent.mkdir(parents=True)
     qualified = open_temporary_test_connection(core_path)
@@ -233,7 +249,7 @@ def _active_root_fixture(tmp_path: Path, *, shared: bool = True):
         )
         root_profile = current_root_profile_generation(connection)
         private_key = RootScopeKey("ws-one", RootScopeKind.PRIVATE, agent_id="agent-one")
-        plans = [_plan(connection, workspace_id="ws-one", scope_key=private_key, motif_domain_id="domain-one")]
+        plans = [_plan(connection, workspace_id="ws-one", scope_key=private_key, motif_domain_id=None)]
         if shared:
             shared_key = RootScopeKey("ws-one", RootScopeKind.SHARED, domain_id="domain-one")
             plans.append(_plan(connection, workspace_id="ws-one", scope_key=shared_key, motif_domain_id="domain-one"))
@@ -421,6 +437,21 @@ def test_root_v2_owner_recovers_from_native_evidence_after_legacy_layout_is_unav
         assert first is second
         assert first.lookup_private("agent-one").memory_runtime_scope.workspace_id == "ws-one"
         assert first.lookup_shared("domain-one").memory_runtime_scope.workspace_id == "ws-one"
+        # Root P2 deliberately persisted no private motif-domain identity.
+        # Native query remains available because its private namespace and
+        # semantic scope are sufficient to return an empty lawful lane here.
+        class _RootEmbedder:
+            provider = "st"
+            model = "BAAI/bge-small-en-v1.5"
+            dim = 384
+
+            def embed(self, _text: str) -> np.ndarray:
+                return np.zeros(384, dtype=np.float32)
+
+        with owner.open_query_context(
+            embedder=_RootEmbedder(), workspace_id="ws-one",
+        ) as query:
+            assert query.private_lane("ws-one", "agent-one").search("root-v2") == ()
         diagnostic = inspect_deployment_diagnostic(
             DeploymentDiagnosticRequest(root, effective_profile=profile),
         )
@@ -429,6 +460,84 @@ def test_root_v2_owner_recovers_from_native_evidence_after_legacy_layout_is_unav
         assert diagnostic.completion_witness_valid is True
     finally:
         owner.close()
+
+
+def test_root_v2_private_plan_without_motif_domain_supports_native_public_write_query_and_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the root P2 private-plan law through the selected public owner."""
+    root, profile, _agreement = _active_root_fixture(tmp_path)
+    private_nodes = root / "workspaces" / "ws-one" / "agents" / "agent-one" / "private" / "nodes.jsonl"
+    private_nodes.write_text("", encoding="utf-8")
+
+    class _RootEmbedder:
+        provider = "st"
+        model = "BAAI/bge-small-en-v1.5"
+        dim = 384
+
+        def embed(self, _text: str) -> np.ndarray:
+            return np.zeros(384, dtype=np.float32)
+
+    class _RootFabric(TormentFabric):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self.kernel.embedder = _RootEmbedder()
+
+    # Pre-existing external identity/configuration is established before the
+    # native owner starts; it is not a fallback reader or writer.
+    setup = _RootFabric(data_dir=str(root))
+    try:
+        workspace = setup.get_workspace("ws-one", domains=["domain-one"])
+        workspace.domain_policies["domain-one"]["auto_merge_motifs"] = False
+        Path(workspace.domain_policies_path).write_text(
+            '{"policies":{"domain-one":{"auto_merge_motifs":false}}}',
+            encoding="utf-8",
+        )
+        setup.create_agent("ws-one", "agent-one")
+        legacy_before = private_nodes.read_bytes()
+    finally:
+        setup.close()
+
+    def refuse_legacy_memory(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("root-v2 native route touched a legacy MemoryGraph authority")
+
+    for method in ("search", "search_by_embedding", "spawn_memory", "update_payload", "flush_node"):
+        monkeypatch.setattr(MemoryGraph, method, refuse_legacy_memory)
+    monkeypatch.setattr(public_runtime_module, "TormentFabric", _RootFabric)
+    configuration = PublicRuntimeConfiguration(effective_profile=profile)
+    runtime = create_public_runtime(root, configuration)
+    vector = [1.0, *([0.0] * 383)]
+    try:
+        created = runtime.ingest(
+            "ws-one", "agent-one", "root-v2 private native memory", step=1,
+            supplied_embedding=vector, public_mutation_key="root-v2-private-create",
+        )
+        reinforced = runtime.ingest(
+            "ws-one", "agent-one", "root-v2 private native memory", step=2,
+            supplied_embedding=vector, public_mutation_key="root-v2-private-reinforce",
+        )
+        shared = runtime.ingest(
+            "ws-one", "agent-one", "root-v2 shared native memory", step=3,
+            scope="shared", domain_id="domain-one", supplied_embedding=vector,
+            public_mutation_key="root-v2-shared-create",
+        )
+        queried = runtime.query("ws-one", "agent-one", "root-v2 private native memory", top_k=4)
+
+        assert created["stored"] is True and created["domain_chosen"] == "domain-one"
+        assert reinforced["stored"] is True and reinforced["reinforced"] is True
+        assert shared["stored"] is True and shared["domain_chosen"] == "domain-one"
+        assert any(item.get("scope") == "private" for item in queried["results"])
+        assert private_nodes.read_bytes() == legacy_before
+    finally:
+        close_public_runtime(root)
+
+    restarted = create_public_runtime(root, configuration)
+    try:
+        queried = restarted.query("ws-one", "agent-one", "root-v2 private native memory", top_k=4)
+        assert any(item.get("scope") == "private" for item in queried["results"])
+    finally:
+        close_public_runtime(root)
 
 
 def test_root_v2_owner_refuses_missing_record_receipt_intent_and_unsupported_topology(

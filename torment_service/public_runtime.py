@@ -637,14 +637,18 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         domain_id = kwargs.pop("domain_id", None)
         if scope == "private":
             admitted_domain = self._private_motif_domain(workspace_id, agent_id)
-            if domain_id is None:
-                # B5-A3's recovered private lane has one explicit motif
-                # domain.  Allowing generic shared-domain routing to select a
-                # different tag would make the native lane unreadable.
+            if admitted_domain is not None and domain_id is None:
+                # Retain the older explicit private-domain descriptor shape.
                 domain_id = admitted_domain
-            elif domain_id != admitted_domain:
+            elif admitted_domain is not None and domain_id != admitted_domain:
                 raise NativePublicOperationRefused(
                     "native private ingest domain differs from the admitted private motif domain"
+                )
+            elif admitted_domain is None and domain_id is not None and (
+                not isinstance(domain_id, str) or not domain_id
+            ):
+                raise NativePublicOperationRefused(
+                    "native private ingest domain must be an admitted shared domain"
                 )
         elif scope == "shared":
             if not isinstance(domain_id, str) or not domain_id:
@@ -655,6 +659,28 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         else:
             raise NativePublicOperationRefused("native public ingest scope is not admitted")
         view = self._workspace_view(workspace_id)
+        if scope == "private" and admitted_domain is None:
+            if domain_id is None:
+                supplied_embedding = kwargs.get("supplied_embedding")
+                if supplied_embedding is None:
+                    supplied_embedding = self.cognition_fabric.kernel.embedder.embed(text)
+                    # Preparation consumes this same preflight vector; routing
+                    # does not trigger a second embedding call before cognition.
+                    kwargs["supplied_embedding"] = np.asarray(
+                        supplied_embedding, dtype=np.float32,
+                    ).reshape(-1).tolist()
+                routing_embedding = np.asarray(supplied_embedding, dtype=np.float32).reshape(-1)
+                if routing_embedding.size != view.embed_dim:
+                    raise NativePublicOperationRefused(
+                        "native private ingest routing embedding has the wrong admitted dimension"
+                    )
+                ranked = view.router.rank_domains(routing_embedding, top_k=1)
+                if not ranked:
+                    raise NativePublicOperationRefused(
+                        "native private ingest has no admitted shared-domain route"
+                    )
+                domain_id = ranked[0].domain_id
+            self._require_shared_scope(workspace_id, domain_id)
         if bool(view.domain_policies.get(domain_id, {}).get("auto_merge_motifs", False)):
             raise NativePublicOperationRefused(
                 "native public ingest refuses an unqualified auto-merge motif policy before cognition"
@@ -727,13 +753,13 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             raise NativePublicOperationRefused("native public workspace is not admitted")
         return self.cognition_fabric.prepare_native_cognition_agent(workspace_id, agent_id)
 
-    def _private_motif_domain(self, workspace_id: str, agent_id: str) -> str:
+    def _private_motif_domain(self, workspace_id: str, agent_id: str) -> str | None:
         runtime = self._active_runtime(workspace_id)
         try:
             scope = runtime.lookup_private(agent_id).memory_runtime_scope
             domain = _private_motif_domains(runtime)[agent_id]
         except Exception as exc:
-            raise NativePublicOperationRefused("native private motif domain is not admitted") from exc
+            raise NativePublicOperationRefused("native private routing evidence is not admitted") from exc
         if scope.workspace_id != workspace_id:
             raise NativePublicOperationRefused("native public workspace is not admitted")
         return domain
@@ -781,7 +807,11 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
                 raise NativePublicOperationRefused("native private motif-domain evidence is not admitted") from exc
             if set(private_motif_domain_map) != set(private_scopes):
                 raise NativePublicOperationRefused("native private motif-domain evidence does not match admitted private scopes")
-            private_motif_domains = tuple(sorted(set(private_motif_domain_map.values())))
+            private_motif_domains = tuple(sorted({
+                domain_id
+                for domain_id in private_motif_domain_map.values()
+                if domain_id is not None
+            }))
         else:
             private_motif_domains = ()
         view = NativePublicWorkspaceView(
@@ -924,11 +954,26 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             self.cognition_fabric.data_dir,
             prepared.workspace_id,
         )
-        admitted_bridge_domains = set(view.domains) | {private_domain}
-        if set(legacy_bridge_domain_order) != admitted_bridge_domains:
-            raise NativePublicOperationRefused(
-                "native private bridge geometry does not cover the authoritative workspace domains"
-            )
+        if private_domain is None:
+            # Root P2 gives a private plan no stable motif domain.  Its
+            # post-write motif work is instead bound to the operation's
+            # admitted shared domain; the retained bridge map therefore must
+            # be exactly the shared-domain order, not a union with invented
+            # private identity.
+            if prepared.domain_id not in view.domains or legacy_bridge_domain_order != view.domains:
+                raise NativePublicOperationRefused(
+                    "native private bridge geometry does not cover the authoritative shared-domain order"
+                )
+            private_conflict_domains = (prepared.domain_id,)
+            private_proposal_domains = view.domains
+        else:
+            admitted_bridge_domains = set(view.domains) | {private_domain}
+            if set(legacy_bridge_domain_order) != admitted_bridge_domains:
+                raise NativePublicOperationRefused(
+                    "native private bridge geometry does not cover the authoritative workspace domains"
+                )
+            private_conflict_domains = (private_domain,)
+            private_proposal_domains = tuple(dict.fromkeys((*view.domains, *view.private_motif_domains)))
         # I4F restores only the two established private external post-write
         # owners and I4C's existing external conflict owner.  It does not
         # materialize a legacy workspace or grant a legacy graph/motif writer:
@@ -941,16 +986,16 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             conflicts=_NativePrivateConflictRegistryMap(
                 data_dir=self.cognition_fabric.data_dir,
                 workspace_id=prepared.workspace_id,
-                # The broad-private route owns only its admitted private
+                # The broad-private route owns only its operation's admitted
                 # conflict domain; shared/reference lanes remain read-only.
-                domain_ids=(private_domain,),
+                domain_ids=private_conflict_domains,
             ),
             proposals=_NativePrivateProposalRegistryMap(
                 data_dir=self.cognition_fabric.data_dir,
                 workspace_id=prepared.workspace_id,
-                # Private proposals use the prepared private motif domain;
-                # it is separately admitted from the shared geometry domains.
-                domain_ids=tuple(dict.fromkeys((*view.domains, *view.private_motif_domains))),
+                # Proposals remain bounded to the workspace's admitted
+                # domains; a root private plan contributes no synthetic one.
+                domain_ids=private_proposal_domains,
             ),
             bridges=_NativePrivateBridgeWriter(
                 data_dir=self.cognition_fabric.data_dir,

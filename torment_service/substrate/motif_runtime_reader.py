@@ -125,7 +125,50 @@ class NativeMotifRuntimeReader:
         domain_id: str,
         semantic_scope_id: UUID,
     ) -> tuple[NativeRuntimeMotif, ...]:
-        """Seed runtime order from sorted scoped ``MOTIF_ID`` aliases."""
+        """Read one strict runtime motif domain from one scoped namespace.
+
+        Shared lanes own one domain identity, so observing a different domain
+        in that lane remains an invariant violation.  Private root lanes use
+        :meth:`list_runtime_motifs_for_domain` instead: their durable plan
+        identifies the private memory scope, while a motif is associated with
+        the admitted shared domain selected for its individual operation.
+        """
+        return self._list_runtime_motifs(
+            motif_alias_namespace_id=motif_alias_namespace_id,
+            domain_id=domain_id,
+            semantic_scope_id=semantic_scope_id,
+            strict_domain=True,
+        )
+
+    def list_runtime_motifs_for_domain(
+        self,
+        *,
+        motif_alias_namespace_id: UUID,
+        domain_id: str,
+        semantic_scope_id: UUID,
+    ) -> tuple[NativeRuntimeMotif, ...]:
+        """Read one domain from a private scope that lawfully spans domains.
+
+        This is not a broader namespace read.  Alias namespace and semantic
+        scope still bind the private lane; ``domain_id`` is an already-admitted
+        shared domain and filters the checked native motif states.
+        """
+        return self._list_runtime_motifs(
+            motif_alias_namespace_id=motif_alias_namespace_id,
+            domain_id=domain_id,
+            semantic_scope_id=semantic_scope_id,
+            strict_domain=False,
+        )
+
+    def _list_runtime_motifs(
+        self,
+        *,
+        motif_alias_namespace_id: UUID,
+        domain_id: str,
+        semantic_scope_id: UUID,
+        strict_domain: bool,
+    ) -> tuple[NativeRuntimeMotif, ...]:
+        """Shared implementation for strict and private-domain reads."""
         _require_uuid("motif_alias_namespace_id", motif_alias_namespace_id)
         _nonempty_text("domain_id", domain_id)
         _require_uuid("semantic_scope_id", semantic_scope_id)
@@ -178,14 +221,16 @@ class NativeMotifRuntimeReader:
                 raise SubstrateInvariantViolation(
                     "native motif runtime ID payload disagrees with its MOTIF_ID alias"
                 )
-            if state.domain_id != domain_id:
-                raise SubstrateInvariantViolation(
-                    "native motif payload domain does not match the requested runtime domain"
-                )
             if state.semantic_scope_id != semantic_scope_id:
                 raise SubstrateInvariantViolation(
                     "native motif semantic scope does not match the requested runtime scope"
                 )
+            if state.domain_id != domain_id:
+                if strict_domain:
+                    raise SubstrateInvariantViolation(
+                        "native motif payload domain does not match the requested runtime domain"
+                    )
+                continue
             members = self.list_ordered_current_motif_members(view.motif_object_id)
             motifs.append(
                 NativeRuntimeMotif(
@@ -987,9 +1032,45 @@ class NativeMotifRuntimeReader:
         dimension: int,
         semantic_scope_id: UUID,
     ) -> np.ndarray:
-        """Return the legacy-weighted centroid for current native read models."""
+        """Return the strict legacy-weighted centroid for one native domain."""
+        return self._domain_centroid(
+            motif_alias_namespace_id=motif_alias_namespace_id,
+            domain_id=domain_id,
+            dimension=dimension,
+            semantic_scope_id=semantic_scope_id,
+            strict_domain=True,
+        )
+
+    def domain_centroid_for_domain(
+        self,
+        *,
+        motif_alias_namespace_id: UUID,
+        domain_id: str,
+        dimension: int,
+        semantic_scope_id: UUID,
+    ) -> np.ndarray:
+        """Return one admitted-domain centroid from a private multi-domain lane."""
+        return self._domain_centroid(
+            motif_alias_namespace_id=motif_alias_namespace_id,
+            domain_id=domain_id,
+            dimension=dimension,
+            semantic_scope_id=semantic_scope_id,
+            strict_domain=False,
+        )
+
+    def _domain_centroid(
+        self,
+        *,
+        motif_alias_namespace_id: UUID,
+        domain_id: str,
+        dimension: int,
+        semantic_scope_id: UUID,
+        strict_domain: bool,
+    ) -> np.ndarray:
+        """Calculate a centroid after the caller selected its domain law."""
         _positive_dimension(dimension)
-        motifs = self.list_runtime_motifs(
+        reader = self.list_runtime_motifs if strict_domain else self.list_runtime_motifs_for_domain
+        motifs = reader(
             motif_alias_namespace_id=motif_alias_namespace_id,
             domain_id=domain_id,
             semantic_scope_id=semantic_scope_id,

@@ -396,14 +396,19 @@ class _NativeQualifiedQueryLane:
         workspace_id: str,
         scope_name: str,
         qualifier: str,
-        motif_domain_id: str,
+        motif_domain_ids: tuple[str, ...],
         embedder: Any,
     ) -> None:
         self._scope = scope
         self._workspace_id = workspace_id
         self._scope_name = scope_name
         self._qualifier = qualifier
-        self._motif_domain_id = motif_domain_id
+        if not motif_domain_ids or any(
+            not isinstance(domain_id, str) or not domain_id
+            for domain_id in motif_domain_ids
+        ) or len(set(motif_domain_ids)) != len(motif_domain_ids):
+            raise QualifiedQueryReadModelError("native motif domains must be an explicit distinct tuple")
+        self._motif_domain_ids = motif_domain_ids
         # Deliberately create the existing native vector runtime, not a
         # replacement SQL search path or a call to search_by_embedding.
         self._runtime: NativeMemoryVectorRuntime = scope.new_vector_runtime(embedder=embedder)
@@ -470,22 +475,28 @@ class _NativeQualifiedQueryLane:
         routing = self._scope.fabric_routing_scope
         semantic_scope_id = self._scope.memory_runtime_scope.semantic_scope_id
         with self._scope.open_readers() as readers:
-            motifs = readers.motifs.list_runtime_motifs(
-                motif_alias_namespace_id=routing.motif_alias_namespace_id,
-                domain_id=self._motif_domain_id,
-                semantic_scope_id=semantic_scope_id,
-            )
-            for motif in motifs:
-                identity = QualifiedQueryMotifIdentity(
-                    self._workspace_id,
-                    motif.read_model.domain_id,
-                    motif.read_model.runtime_motif_id,
-                    motif.semantic_scope_id,
+            for domain_id in self._motif_domain_ids:
+                reader = (
+                    readers.motifs.list_runtime_motifs_for_domain
+                    if self._scope_name == _PRIVATE
+                    else readers.motifs.list_runtime_motifs
                 )
-                for member in readers.motifs.list_ordered_current_motif_members(
-                    motif.motif_object_id
-                ):
-                    result.setdefault(member.member_object_id, []).append(identity)
+                motifs = reader(
+                    motif_alias_namespace_id=routing.motif_alias_namespace_id,
+                    domain_id=domain_id,
+                    semantic_scope_id=semantic_scope_id,
+                )
+                for motif in motifs:
+                    identity = QualifiedQueryMotifIdentity(
+                        self._workspace_id,
+                        motif.read_model.domain_id,
+                        motif.read_model.runtime_motif_id,
+                        motif.semantic_scope_id,
+                    )
+                    for member in readers.motifs.list_ordered_current_motif_members(
+                        motif.motif_object_id
+                    ):
+                        result.setdefault(member.member_object_id, []).append(identity)
         return {object_id: tuple(values) for object_id, values in result.items()}
 
 
@@ -495,8 +506,10 @@ class NativeQualifiedQueryReadModel:
     The constructor deliberately accepts a recovered-runtime shaped object so
     it can be characterized in isolation.  Production recovery provides the
     same shape; no connection, schema, or activation capability is accepted
-    here.  Private motif domains come from the verified admission descriptor,
-    never from a guessed agent/domain relationship.
+    here.  Root private plans may lawfully omit ``motif_domain_id``: their
+    private namespace and semantic scope remain exact, while their individual
+    motifs are read only through the admitted shared-domain order.  Shared
+    lanes retain their exact one-domain requirement.
     """
 
     # Fabric consumes this lower-level disposition rather than inferring
@@ -516,8 +529,8 @@ class NativeQualifiedQueryReadModel:
         self._runtime = recovered_runtime
         self._workspace_id = _workspace_id(recovered_runtime)
         self._lane_dimension = _representation_dimension(recovered_runtime)
-        self._private_motif_domains = _private_motif_domains(recovered_runtime)
         self._shared_domain_order = _explicit_shared_domain_order(recovered_runtime)
+        self._private_motif_domains = _private_motif_domains(recovered_runtime)
         self._geometry = NativeMotifGeometryAdapter(
             recovered_runtime,
             domain_ids=self._shared_domain_order,
@@ -604,7 +617,12 @@ class NativeQualifiedQueryReadModel:
             lane = _NativeQualifiedQueryLane(
                 self._runtime.lookup_private(agent_id), workspace_id=self._workspace_id,
                 scope_name=_PRIVATE, qualifier=agent_id,
-                motif_domain_id=self._private_motif_domains[agent_id], embedder=self._embedder,
+                motif_domain_ids=(
+                    (self._private_motif_domains[agent_id],)
+                    if self._private_motif_domains[agent_id] is not None
+                    else self._shared_domain_order
+                ),
+                embedder=self._embedder,
             )
             self._private_lanes[agent_id] = lane
         return lane
@@ -617,7 +635,7 @@ class NativeQualifiedQueryReadModel:
         if lane is None:
             lane = _NativeQualifiedQueryLane(
                 self._runtime.lookup_shared(domain_id), workspace_id=self._workspace_id,
-                scope_name=_SHARED, qualifier=domain_id, motif_domain_id=domain_id,
+                scope_name=_SHARED, qualifier=domain_id, motif_domain_ids=(domain_id,),
                 embedder=self._embedder,
             )
             self._shared_lanes[domain_id] = lane
@@ -687,21 +705,34 @@ def _representation_dimension(recovered_runtime: Any) -> int:
     return dimension
 
 
-def _private_motif_domains(recovered_runtime: Any) -> dict[str, str]:
+def _private_motif_domains(recovered_runtime: Any) -> dict[str, str | None]:
+    """Recover optional private motif-domain facts without inventing one.
+
+    Root P2 intentionally writes ``None`` for private plans.  A private
+    runtime still needs its agent identity, native namespace, and semantic
+    scope; it does not gain a made-up per-agent motif domain merely because a
+    later reader decorates hits with motif memberships.
+    """
     descriptor = getattr(recovered_runtime, "descriptor", None)
     payload = getattr(descriptor, "payload", None)
     lanes = payload.get("lanes") if isinstance(payload, dict) else None
     if not isinstance(lanes, list):
         raise QualifiedQueryReadModelError("recovered runtime lacks admission motif-domain evidence")
-    values: dict[str, str] = {}
+    values: dict[str, str | None] = {}
     for entry in lanes:
         plan = entry.get("plan") if isinstance(entry, dict) else None
         if not isinstance(plan, dict) or plan.get("scope_kind") != _PRIVATE_AGENT_SCOPE:
             continue
         agent_id = plan.get("agent_id")
         motif_domain_id = plan.get("motif_domain_id")
-        if not isinstance(agent_id, str) or not agent_id or not isinstance(motif_domain_id, str) or not motif_domain_id:
-            raise QualifiedQueryReadModelError("admitted private lane lacks truthful motif-domain evidence")
+        if (
+            not isinstance(agent_id, str)
+            or not agent_id
+            or (motif_domain_id is not None and (
+                not isinstance(motif_domain_id, str) or not motif_domain_id
+            ))
+        ):
+            raise QualifiedQueryReadModelError("admitted private lane lacks truthful routing evidence")
         if agent_id in values:
             raise QualifiedQueryReadModelError("admission has duplicate private query lanes")
         values[agent_id] = motif_domain_id

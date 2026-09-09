@@ -20,6 +20,7 @@ from torment_service.query_read_model import (
 from torment_service.substrate import native_memory_vector_runtime as vector_runtime_module
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.connection import open_temporary_test_connection
+from torment_service.substrate.errors import SubstrateInvariantViolation
 from torment_service.substrate.fabric_native_routing import NativeFabricRoutingScope
 from torment_service.substrate.ids import generate_native_id, native_id_from_bytes, native_id_to_bytes
 from torment_service.substrate.migration.existing_workspace_multi_scope_admission import (
@@ -422,6 +423,110 @@ def test_native_lane_search_is_legacy_shaped_and_qualified(qualified_models, kin
     assert all(item.memory_identity.scope == kind and item.memory_identity.qualifier == qualifier for item in actual)
     assert native_lane.search("   ") == ()
     assert native_embedder.calls == ["query"]
+
+
+def test_root_style_private_lane_without_motif_domain_reads_only_admitted_shared_domains(
+    qualified_models,
+):
+    """One private namespace may contain motifs for multiple shared domains."""
+    _legacy, native, native_embedder, _legacy_embedders = qualified_models
+    runtime = native._a3_fixture_runtime
+    connection = native._a3_fixture_connection
+    idempotency = native._a3_fixture_idempotency
+    private = runtime.lookup_private("aria")
+    source = NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+        legacy_source_namespace_id=private.memory_runtime_scope.legacy_source_namespace_id,
+        eid=1,
+    )
+    _create_motif(
+        connection,
+        private,
+        idempotency,
+        motif_id="private-research",
+        domain_id="research",
+        source=source,
+        centroid=(1.0, 0.0, 0.0),
+        strength=.65,
+        last_active_ts=111,
+    )
+    _create_motif(
+        connection,
+        private,
+        idempotency,
+        motif_id="private-engineering",
+        domain_id="engineering",
+        source=source,
+        centroid=(1.0, 0.0, 0.0),
+        strength=.65,
+        last_active_ts=112,
+    )
+    # The optional private-plan path is deliberately narrower than the
+    # existing strict reader.  A strict one-domain read over this mixed private
+    # namespace remains an invariant failure; only the explicit per-domain
+    # private reader may filter it.
+    with private.open_readers() as readers:
+        with pytest.raises(
+            SubstrateInvariantViolation,
+            match="payload domain does not match the requested runtime domain",
+        ):
+            readers.motifs.list_runtime_motifs(
+                motif_alias_namespace_id=private.fabric_routing_scope.motif_alias_namespace_id,
+                domain_id="research",
+                semantic_scope_id=private.memory_runtime_scope.semantic_scope_id,
+            )
+    descriptor = SimpleNamespace(payload={"lanes": [
+        {
+            "plan": {
+                **entry["plan"],
+                "motif_domain_id": None,
+            },
+        }
+        if entry["plan"]["scope_kind"] == "PRIVATE_AGENT"
+        else entry
+        for entry in runtime.descriptor.payload["lanes"]
+    ]})
+    root_style_runtime = _RecoveredRuntime(
+        runtime.workspace_id,
+        runtime.native_core_id,
+        runtime.representation_lane,
+        runtime.scopes,
+        descriptor,
+    )
+    root_style = NativeQualifiedQueryReadModel(root_style_runtime, embedder=native_embedder)
+    try:
+        hits = root_style.private_lane("orchard", "aria").search("private domains", top_k=4)
+        assert len(hits) == 2
+        assert {
+            (membership.domain_id, membership.motif_id)
+            for membership in hits[0].motif_memberships
+        } == {
+            ("research", "private-research"),
+            ("engineering", "private-engineering"),
+        }
+        with pytest.raises(ValueError, match="workspace mismatch"):
+            root_style.private_lane("other-workspace", "aria")
+        assert root_style.shared_lane("orchard", "research").search("shared", top_k=4)
+    finally:
+        root_style.close()
+
+    malformed = SimpleNamespace(payload={"lanes": [
+        {
+            "plan": {
+                "scope_kind": "PRIVATE_AGENT",
+                "agent_id": None,
+                "motif_domain_id": None,
+            },
+        },
+    ]})
+    malformed_runtime = _RecoveredRuntime(
+        runtime.workspace_id,
+        runtime.native_core_id,
+        runtime.representation_lane,
+        runtime.scopes,
+        malformed,
+    )
+    with pytest.raises(ValueError, match="truthful routing evidence"):
+        NativeQualifiedQueryReadModel(malformed_runtime, embedder=native_embedder)
 
 
 def test_filters_decay_namespaces_geometry_and_cold_rebuild(qualified_models):
