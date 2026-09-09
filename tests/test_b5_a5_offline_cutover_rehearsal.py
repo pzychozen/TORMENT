@@ -74,6 +74,46 @@ def _tree_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _legacy_memory_authority_digest(root: Path) -> str:
+    """Digest legacy memory/motif authority while excluding retained owners.
+
+    Native public writes must never mutate the admitted legacy graph or motif
+    sources.  They may, however, run the separately-qualified external role,
+    trajectory, and bridge owners; those artifacts intentionally remain outside
+    native SQLite memory authority and are therefore not a frozen legacy-memory
+    surface.
+    """
+
+    files: list[Path] = []
+    for agent_path in (root / "agents").glob("*"):
+        private = agent_path / "private"
+        if private.is_dir():
+            files.extend(
+                path
+                for path in private.rglob("*")
+                if path.is_file() and "trajectories" not in path.relative_to(private).parts
+            )
+    for domain_path in (root / "domains").glob("*"):
+        shared = domain_path / "shared"
+        if shared.is_dir():
+            files.extend(
+                path
+                for path in shared.rglob("*")
+                if path.is_file() and "trajectories" not in path.relative_to(shared).parts
+            )
+        for name in ("motifs.json", "motif_events.jsonl"):
+            path = domain_path / name
+            if path.is_file():
+                files.append(path)
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _set_hash_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name, value in {
         "TORMENT_EMBED_PROVIDER": "hash",
@@ -239,7 +279,8 @@ def test_offline_cutover_full_rehearsal_abort_and_post_active_refusal(tmp_path: 
     workspace_root = _create_real_workspace(data_root)
     _freeze_native_compatible_external_policy(workspace_root)
     _freeze_zero_eid_overlap(workspace_root, _plans(workspace_root))
-    legacy_before = _tree_digest(workspace_root)
+    legacy_tree_before = _tree_digest(workspace_root)
+    legacy_memory_authority_before = _legacy_memory_authority_digest(workspace_root)
     request, profile = _controller_request(
         data_root, workspace_root, admission_key="b5-a5-full-admission", operator_key="b5-a5-full",
     )
@@ -260,7 +301,7 @@ def test_offline_cutover_full_rehearsal_abort_and_post_active_refusal(tmp_path: 
             assert client.get("/health").json()["public_memory_mode"] == "LEGACY"
     finally:
         reset_public_runtime_for_test(data_root)
-    assert _tree_digest(workspace_root) == legacy_before
+    assert _tree_digest(workspace_root) == legacy_tree_before
 
     # P2/C1: both public transports refuse while the controller alone holds
     # maintenance authority.
@@ -390,7 +431,7 @@ def test_offline_cutover_full_rehearsal_abort_and_post_active_refusal(tmp_path: 
     finally:
         close_public_runtime(data_root)
     assert legacy_calls == []
-    assert _tree_digest(workspace_root) == legacy_before
+    assert _legacy_memory_authority_digest(workspace_root) == legacy_memory_authority_before
     restore_legacy_memory_graph()
 
     # Post-active rollback is a hard refusal.  C8 then deliberately corrupts
