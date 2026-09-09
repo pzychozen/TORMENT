@@ -53,8 +53,10 @@ from .deployment_types import (
 )
 from .errors import DeploymentAuthorityError, SubstrateConfigurationError
 from .migration.root_admission_description import RootNativeProductionAdmissionDescription
+from .migration.runtime_readiness import MigrationRuntimeScopePlan
 from .migration.root_normalization import (
     NativeRootWideNormalizationService,
+    RootP2ScopePlanCarrier,
     RootNormalizationRequest,
     RootNormalizationResult,
 )
@@ -192,7 +194,7 @@ class RootOfflineCutoverRequest:
 
     data_root: Path
     description: RootNativeProductionAdmissionDescription
-    normalization_request: RootNormalizationRequest
+    normalization_request: RootP2ScopePlanCarrier | RootNormalizationRequest
     effective_profile: QualifiedDeploymentProfile
     root_profile: RootProfileGenerationRef
     runtime_scopes: tuple[NativeMemoryRuntimeScope, ...]
@@ -209,8 +211,10 @@ class RootOfflineCutoverRequest:
             raise ValueError("root offline cutover data_root must already exist")
         if not isinstance(self.description, RootNativeProductionAdmissionDescription):
             raise ValueError("root offline cutover description must be typed")
-        if not isinstance(self.normalization_request, RootNormalizationRequest):
-            raise ValueError("root offline cutover normalization request must be typed")
+        if not isinstance(
+            self.normalization_request, (RootP2ScopePlanCarrier, RootNormalizationRequest),
+        ):
+            raise ValueError("root offline cutover P2/P3 scope-plan carrier must be typed")
         if self.normalization_request.description != self.description:
             raise ValueError("normalization request must bind the exact root description")
         if Path(self.normalization_request.data_root).expanduser().resolve() != root:
@@ -271,6 +275,14 @@ class RootOfflineCutoverRequest:
     @property
     def core_relative_path(self) -> str:
         return Path(self.normalization_request.native_core_database_path).expanduser().resolve().name
+
+    @property
+    def runtime_scope_plans(self) -> tuple[MigrationRuntimeScopePlan, ...]:
+        """Return the P2-bound scope plans without requiring P3 inputs."""
+
+        if isinstance(self.normalization_request, RootP2ScopePlanCarrier):
+            return self.normalization_request.runtime_scope_plans
+        return tuple(item.scope_plan for item in self.normalization_request.scope_inputs)
 
     @property
     def resolved_geometry_disposition_plan(self) -> RootGeometryDispositionPlan:
@@ -741,6 +753,8 @@ class OfflineCutoverController:
     ) -> RootNormalizationResult:
         """P3: run the established root normalizer under maintenance-only authority."""
 
+        if not isinstance(request.normalization_request, RootNormalizationRequest):
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P3_NORMALIZATION_REQUEST_REQUIRED")
         envelope = self._root_envelope(request)
         state = self._selector_state(request)
         self._require_root_pending(
@@ -789,7 +803,7 @@ class OfflineCutoverController:
             raise OfflineCutoverRefused("ROOT_P3_SOURCE_ADMISSION_BINDING_MISMATCH")
         p2_scope_plans = tuple(
             sorted(
-                (item.scope_plan for item in request.normalization_request.scope_inputs),
+                request.runtime_scope_plans,
                 key=lambda item: _root_scope_plan_key(item),
             )
         )
@@ -1169,9 +1183,7 @@ class OfflineCutoverController:
                     "native_staging_core_id": request.native_staging_core_id,
                     "root_profile": request.root_profile,
                     "runtime_scopes": request.runtime_scopes,
-                    "runtime_scope_plans": tuple(
-                        item.scope_plan for item in request.normalization_request.scope_inputs
-                    ),
+                    "runtime_scope_plans": request.runtime_scope_plans,
                     "connection": opened.connection,
                     "writer_freeze_evidence": request.writer_freeze_evidence,
                     "writer_freeze_recheck": request.writer_freeze_recheck,

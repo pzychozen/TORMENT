@@ -43,6 +43,8 @@ from torment_service.substrate.migration.runtime_readiness import MigrationRunti
 from torment_service.substrate.migration.root_admission_description import (
     ExpectedRootCensus,
     GeometryDerivedExternalStateDisposition,
+    MaterializedRootScopePlan,
+    MaterializedScopePosture,
     RepresentationDispositionCount,
     RootFeaturePosture,
     RootNativeProductionAdmissionDescription,
@@ -52,12 +54,13 @@ from torment_service.substrate.migration.root_admission_description import (
 )
 from torment_service.substrate.migration.root_normalization import (
     NativeRootWideNormalizationService,
+    RootP2ScopePlanCarrier,
     RootNormalizationRecoveryWitness,
     RootNormalizationRequest,
     RootNormalizationResult,
     RootWorkspaceNormalizationResult,
 )
-from torment_service.substrate.migration.root_scope import RootScopeKey
+from torment_service.substrate.migration.root_scope import RootScopeKey, RootScopeKind
 from torment_service.substrate.objects import NativeObjectService, ObjectState
 from torment_service.substrate.offline_cutover_controller import (
     OfflineCutoverController,
@@ -766,6 +769,111 @@ def test_real_root_p2_records_strong_envelope_before_pending_and_refuses_downgra
     )
     with pytest.raises(OfflineCutoverRefused, match="PENDING_BINDING_MISMATCH"):
         controller.normalize_root_under_external_fence(downgraded)
+
+
+def test_p2_scope_plan_carrier_opens_pending_without_p3_dispatch(tmp_path: Path) -> None:
+    """P2 carries P1 identities without minting P3 snapshots or children."""
+
+    compat_request, _normalization = _root_fixture(tmp_path)
+    p2_carrier = RootP2ScopePlanCarrier(
+        description=compat_request.description,
+        data_root=compat_request.root,
+        native_core_database_path=compat_request.normalization_request.native_core_database_path,
+        expected_native_core_id=compat_request.native_staging_core_id,
+        runtime_scope_plans=(),
+    )
+    request = _real_request(replace(compat_request, normalization_request=p2_carrier))
+    controller = OfflineCutoverController()
+
+    pending = controller.enter_root_external_pending(request)
+
+    assert pending.selector_state is not None
+    assert pending.selector_state.deployment_state is DeploymentState.CUTOVER_PENDING
+    with pytest.raises(OfflineCutoverRefused, match="P3_NORMALIZATION_REQUEST_REQUIRED"):
+        controller.normalize_root_under_external_fence(request)
+
+
+def test_p2_scope_plan_carrier_accepts_memory_graph_without_p3_inputs(tmp_path: Path) -> None:
+    """A memory-bearing P2 plan needs no made-up snapshot or B3/B4 request."""
+
+    root = tmp_path / "memory-graph-root"
+    scope_key = RootScopeKey("ws-memory", RootScopeKind.PRIVATE, agent_id="agent")
+    nodes = root / "workspaces" / "ws-memory" / "agents" / "agent" / "private" / "nodes.jsonl"
+    nodes.parent.mkdir(parents=True)
+    nodes.write_bytes(b'{"eid": 1}\n')
+    boundary = EvidenceOwnerBoundary(
+        "ws-memory", EvidenceOwnerBoundaryKind.PRIVATE_SCOPE, agent_id="agent",
+    )
+    manifest = RootEvidenceManifest((capture_present_source_evidence(
+        data_root=root,
+        owner_class=SourceOwnerClass.PRIVATE_GRAPH_SOURCE,
+        owner_boundary=boundary,
+        canonical_locator="nodes.jsonl",
+        semantic_role=EvidenceSemanticRole.NODES,
+        scope_key=scope_key,
+    ),))
+    lane = NativeRepresentationLane(
+        provider="st",
+        model="BAAI/bge-small-en-v1.5",
+        dimension=384,
+        representation_class="COMPAT_EMBEDDING",
+        generation=1,
+        derivation_contract_version="compat-embedding-v1",
+        encoding_id="RAW_VECTOR",
+        dtype="float32",
+    )
+    description = RootNativeProductionAdmissionDescription(
+        data_root_identity="synthetic-memory-graph-root",
+        operator_identity="p2-carrier-qualification",
+        workspace_plans=(WorkspaceRootAdmissionPlan(
+            "ws-memory",
+            private_materialized_scopes=(MaterializedRootScopePlan(
+                scope_key,
+                RootRepresentationDisposition.TARGET_COMPATIBLE,
+                MaterializedScopePosture.MEMORY_GRAPH,
+            ),),
+        ),),
+        target_representation_lane=lane,
+        expected_census=ExpectedRootCensus(
+            workspace_count=1,
+            materialized_private_scope_count=1,
+            materialized_shared_scope_count=0,
+            total_materialized_scope_count=1,
+            representation_disposition_counts=tuple(
+                RepresentationDispositionCount(
+                    disposition,
+                    1 if disposition is RootRepresentationDisposition.TARGET_COMPATIBLE else 0,
+                )
+                for disposition in RootRepresentationDisposition
+            ),
+            workspace_topology_counts=WorkspaceTopologyCounts(0, 1, 0, 1, 0, 0),
+        ),
+        explicit_source_manifest=manifest,
+        external_owner_observations=(),
+        feature_posture=RootFeaturePosture("synthetic-p2-carrier", False, False),
+    )
+    plan = MigrationRuntimeScopePlan(
+        legacy_source_namespace_id=generate_native_id(),
+        workspace_id="ws-memory",
+        scope_kind="PRIVATE_AGENT",
+        target_identity_namespace_id=generate_native_id(),
+        target_semantic_scope_id=generate_native_id(),
+        motif_alias_namespace_id=generate_native_id(),
+        motif_identity_namespace_id=generate_native_id(),
+        membership_identity_namespace_id=generate_native_id(),
+        idempotency_namespace_id=generate_native_id(),
+        agent_id="agent",
+    )
+
+    carrier = RootP2ScopePlanCarrier(
+        description=description,
+        data_root=root,
+        native_core_database_path=root / "substrate" / "cores" / "new.db",
+        expected_native_core_id=generate_native_id(),
+        runtime_scope_plans=(plan,),
+    )
+
+    assert carrier.runtime_scope_plans == (plan,)
 
 
 def test_real_root_p2_retains_record_when_selector_transition_fails_then_retries(

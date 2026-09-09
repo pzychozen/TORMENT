@@ -156,6 +156,45 @@ class MetadataLessB3BDispatch:
 
 
 @dataclass(frozen=True)
+class RootP2ScopePlanCarrier:
+    """P2-only binding of one root description to its P1 scope identities.
+
+    P2 establishes a maintenance-only proposition; it must not manufacture
+    snapshots or executable B3/B4 work merely to carry the P1 scope plan.
+    P3 source admission replaces this carrier with a
+    :class:`RootNormalizationRequest` only after it has created its own
+    snapshot-bound child requests.
+    """
+
+    description: RootNativeProductionAdmissionDescription
+    data_root: str | Path
+    native_core_database_path: str | Path
+    expected_native_core_id: UUID
+    runtime_scope_plans: tuple[MigrationRuntimeScopePlan, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.description, RootNativeProductionAdmissionDescription):
+            raise ValueError("description must be RootNativeProductionAdmissionDescription")
+        for field_name in ("data_root", "native_core_database_path"):
+            value = getattr(self, field_name)
+            if not isinstance(value, (str, Path)) or not str(value).strip():
+                raise ValueError(f"{field_name} must be an explicit path")
+        if not isinstance(self.expected_native_core_id, UUID):
+            raise ValueError("expected_native_core_id must be UUID")
+        _typed_requests(
+            self.runtime_scope_plans, MigrationRuntimeScopePlan, "runtime_scope_plans",
+        )
+        declared = _declared_scopes(self.description)
+        if len(self.runtime_scope_plans) != len(declared):
+            raise ValueError("P2 scope plans must exactly match declared runtime scopes")
+        if any(
+            sum(_scope_plan_matches_key(plan, key) for plan in self.runtime_scope_plans) != 1
+            for key in declared
+        ):
+            raise ValueError("P2 scope plans must exactly match declared runtime scopes")
+
+
+@dataclass(frozen=True)
 class RootNormalizationScopeInput:
     """Caller-owned B3/B4 request bundle for exactly one declared RootScopeKey.
 
@@ -1302,6 +1341,7 @@ __all__ = [
     "RootNormalizationRequest",
     "RootNormalizationResult",
     "RootNormalizationScopeInput",
+    "RootP2ScopePlanCarrier",
     "RootRepresentationBootstrapKind",
     "RootRepresentationNormalizationResult",
     "RootScopeNormalizationResult",

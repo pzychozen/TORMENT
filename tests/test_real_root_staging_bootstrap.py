@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 
@@ -214,3 +214,14 @@ def test_p1_corrected_alias_prerequisite_makes_old_inert_core_stale_without_muta
     assert successor.runtime_scopes[0].motif_alias_namespace_id != (
         successor.runtime_scopes[0].runtime_scope.legacy_source_namespace_id
     )
+
+
+def test_p1_refuses_non_native_uuid_before_creating_a_core(tmp_path: Path) -> None:
+    root = tmp_path / "p1-invalid-native-id"
+    root.mkdir()
+    request = _request(root, filename="invalid-id.db", core_id=uuid4())
+
+    with pytest.raises(ValueError, match="UUIDv4"):
+        replace(request, core_id=uuid5(NAMESPACE_URL, "not-a-native-id"))
+
+    assert not (root / "substrate" / "cores" / "invalid-id.db").exists()

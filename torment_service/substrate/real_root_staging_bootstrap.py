@@ -84,6 +84,12 @@ class RootProfileBootstrap:
             self.semantic_scope_id,
             self.idempotency_namespace_id,
         )
+        _native_uuid4_fields(
+            self.profile_object_id,
+            self.identity_namespace_id,
+            self.semantic_scope_id,
+            self.idempotency_namespace_id,
+        )
         _text_fields(
             self.identity_namespace_key,
             self.semantic_scope_key,
@@ -119,6 +125,14 @@ class RuntimeScopeBootstrap:
             self.membership_identity_namespace_id,
             self.idempotency_namespace_id,
         )
+        _native_uuid4_fields(
+            self.runtime_scope.legacy_source_namespace_id,
+            self.runtime_scope.identity_namespace_id,
+            self.runtime_scope.semantic_scope_id,
+            self.motif_alias_namespace_id,
+            self.membership_identity_namespace_id,
+            self.idempotency_namespace_id,
+        )
         _text_fields(
             self.identity_namespace_key,
             self.semantic_scope_key,
@@ -147,6 +161,7 @@ class P1StagingBootstrapRequest:
     def __post_init__(self) -> None:
         if not isinstance(self.core_id, UUID):
             raise ValueError("core_id must be a UUID")
+        _native_uuid4_fields(self.core_id)
         if not isinstance(self.root_profile, RootProfileBootstrap):
             raise ValueError("root_profile must be typed")
         if not isinstance(self.runtime_scopes, tuple) or any(
@@ -519,6 +534,14 @@ def _scope_key(scope: NativeMemoryRuntimeScope) -> RootScopeKey:
 def _uuid_fields(*values: UUID) -> None:
     if any(not isinstance(value, UUID) for value in values):
         raise ValueError("P1 native identifiers must be UUIDs")
+
+
+def _native_uuid4_fields(*values: UUID) -> None:
+    try:
+        for value in values:
+            native_id_to_bytes(value)
+    except Exception as exc:
+        raise ValueError("P1 native identifiers must be UUIDv4") from exc
 
 
 def _positive(value: int, label: str) -> None:
