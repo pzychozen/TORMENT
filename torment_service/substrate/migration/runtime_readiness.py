@@ -40,6 +40,7 @@ from ..provenance import (
     requires_character_provenance_witness,
 )
 from ..runtime_binding import NativeRepresentationLane
+from ..runtime_semantic_admission import RUNTIME_SEMANTIC_ADMISSION_REFUSED
 from ..schema import SCHEMA_MAJOR, SCHEMA_MINOR, open_schema
 from .legacy_governance import (
     derivable_absent_governance_values,
@@ -644,7 +645,11 @@ class NativeMigrationRuntimeReadinessPreflight:
         qualified_representation_id: UUID | None = None
         try:
             qualified = embedding_reader.read_current(object_id, expected_dimension=lane.dimension)
-        except (SubstrateInvariantViolation, ValueError):
+        except SubstrateInvariantViolation as exc:
+            qualified = None
+            if str(exc) != RUNTIME_SEMANTIC_ADMISSION_REFUSED:
+                reasons.append("QUALIFIED_REPRESENTATION_CONTRADICTORY")
+        except ValueError:
             qualified = None
             reasons.append("QUALIFIED_REPRESENTATION_CONTRADICTORY")
         if qualified is not None:

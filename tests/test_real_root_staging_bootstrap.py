@@ -82,6 +82,8 @@ def _request(root: Path, *, filename: str, core_id: UUID, generation: int = 1) -
                 identity_namespace_key=f"scope-identity-{filename}",
                 semantic_scope_key=f"scope-semantic-{filename}",
                 legacy_source_namespace_key=f"scope-legacy-namespace-{filename}",
+                motif_alias_namespace_id=uuid4(),
+                motif_alias_namespace_key=f"scope-motif-alias-{filename}",
                 membership_identity_namespace_id=uuid4(),
                 membership_identity_namespace_key=f"membership-identity-{filename}",
                 idempotency_namespace_id=uuid4(),
@@ -180,3 +182,35 @@ def test_p1_exact_reuse_and_stale_inert_supersession_preserve_legacy_public(tmp_
     assert resolve_deployment_agreement(
         data_root=root, effective_profile=_profile()
     ).mode is DeploymentResolutionMode.LEGACY_PUBLIC
+
+
+def test_p1_corrected_alias_prerequisite_makes_old_inert_core_stale_without_mutation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "p1-alias-supersession"
+    root.mkdir()
+    workflow = RealRootStagingBootstrap()
+    old_request = _request(root, filename="old-style.db", core_id=uuid4())
+    workflow.bootstrap(old_request)
+    before = (root / "substrate" / "cores" / "old-style.db").read_bytes()
+
+    corrected_request = replace(
+        old_request,
+        runtime_scopes=(replace(
+            old_request.runtime_scopes[0],
+            motif_alias_namespace_id=uuid4(),
+            motif_alias_namespace_key="corrected-motif-alias",
+        ),),
+    )
+
+    assert workflow.classify_existing(corrected_request) is P1ExistingCoreDisposition.STALE_INERT
+    with pytest.raises(P1StaleInertCore, match="stale inert"):
+        workflow.bootstrap(corrected_request)
+    assert (root / "substrate" / "cores" / "old-style.db").read_bytes() == before
+
+    successor = _request(root, filename="corrected-successor.db", core_id=uuid4())
+    result = workflow.bootstrap(successor)
+    assert result.disposition is P1ExistingCoreDisposition.CREATED
+    assert successor.runtime_scopes[0].motif_alias_namespace_id != (
+        successor.runtime_scopes[0].runtime_scope.legacy_source_namespace_id
+    )

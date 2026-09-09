@@ -375,11 +375,19 @@ class NativeMigrationRuntimeMotifProjectionService:
         for eid, row in zip(raw_eids, rows, strict=True):
             if row[2] != row[3] or row[4] != 1 or row[5] != "LEGACY_PREDECESSOR_UNKNOWN" or row[6] != native_id_to_bytes(source["transition_id"]) or row[7] != "MOTIF_MEMBERSHIP":
                 raise MigrationRuntimeMotifProjectionRefused("B4A_SOURCE_MEMBERSHIP_EVIDENCE_CHANGED")
-            aliases = self._connection.execute(
-                "SELECT a.object_id,o.object_kind FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?",
-                (native_id_to_bytes(request.legacy_source_namespace_id), str(eid)),
-            ).fetchall()
-            if len(aliases) != 1 or aliases[0][0] != row[8] or aliases[0][1] != "LEGACY_CORE_NODE":
+            aliases = []
+            for member_plan in request.scope_plans:
+                aliases.extend(self._connection.execute(
+                    """SELECT a.object_id,o.object_kind,a.legacy_source_namespace_id
+                         FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id
+                        WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?""",
+                    (native_id_to_bytes(member_plan.legacy_source_namespace_id), str(eid)),
+                ).fetchall())
+            resolved = [
+                alias for alias in aliases
+                if alias[0] == row[8] and alias[1] == "LEGACY_CORE_NODE"
+            ]
+            if len(resolved) != 1:
                 raise MigrationRuntimeMotifProjectionRefused("B4A_MEMBER_EID_UNRESOLVED")
             current = self._connection.execute(
                 """SELECT o.current_revision_id,o.current_revision_ordinal,r.effective_semantic_scope_id,

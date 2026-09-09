@@ -26,6 +26,7 @@ from .errors import (
     SubstrateRevisionConflict,
 )
 from .ids import generate_native_id, native_id_to_bytes
+from .runtime_semantic_admission import require_runtime_semantic_admission
 from .native_srg_runtime import SRGSuccessorMaterialization
 from .native_world_runtime import WorldDiagnosticSuccessorMaterialization
 from .object_revision_governance import (
@@ -551,6 +552,9 @@ class NativeMemoryReinforcementService:
         row = rows[0]
         if row[2] != _MEMORY_OBJECT_KIND:
             raise SubstrateInvariantViolation("reinforcement EID does not target a LEGACY_CORE_NODE")
+        require_runtime_semantic_admission(
+            self._connection, object_id=row[0], revision_id=row[3], revision_ordinal=row[4],
+        )
         if row[12] != "JSON" or row[13] is None:
             raise SubstrateInvariantViolation("reinforcement source payload is not JSON")
         try:

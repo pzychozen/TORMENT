@@ -24,7 +24,7 @@ from pathlib import Path
 import sqlite3
 import stat
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from ..canonical_intent import canonical_intent_text
 from ..character_seed_witness import (
@@ -73,6 +73,8 @@ from .root_admission_description import (
 )
 from .root_normalization import (
     MetadataLessB3BDispatch,
+    RootB2CertifiedRefusalDisposition,
+    RootB4CertifiedRefusalDisposition,
     RootNormalizationRequest,
     RootNormalizationScopeInput,
 )
@@ -84,6 +86,8 @@ from .runtime_normalization import (
     NativeMigrationRuntimeNormalizationService,
 )
 from .character_seed_normalization import (
+    CHARACTER_SEED_NORMALIZATION_OPERATION_KIND,
+    CHARACTER_SEED_NORMALIZATION_OUTPUT_ROLE,
     MigrationCharacterSeedNormalizationRequest,
     NativeMigrationCharacterSeedNormalizationService,
 )
@@ -121,6 +125,13 @@ from .workspace_runtime_readiness import (
 _RECORD_NAME = "p3_source_admission_carrier.json"
 _RECORD_SCHEMA = "TORMENT_ROOT_P3_SOURCE_ADMISSION_CARRIER"
 _RECORD_VERSION = 1
+_REFUSAL_EVIDENCE_NAME = "p3_b2_refused_source_semantic_gap_evidence_set.json"
+_REFUSAL_CERTIFICATE_NAME = "p3_b2_refused_source_semantic_gap_certificate.json"
+_TERMINAL_EVIDENCE_NAME = "p3_terminal_disposition_evidence_set_e.json"
+_REFUSAL_OPERATION_KIND = "P3_B2_REFUSED_SOURCE_SEMANTIC_GAP"
+_REFUSAL_CODE = "B2_REFUSED_SOURCE_SEMANTIC_GAP"
+_B4_REFUSAL_OPERATION_KIND = "P3_B4_REFUSED_MEMBER_SEMANTIC_GAP"
+_B4_REFUSAL_CODE = "B4_REFUSED_MEMBER_SEMANTIC_GAP"
 _COMPLETION_ALLOWED_ROLES = frozenset({
     EvidenceSemanticRole.WORKSPACE_META,
     EvidenceSemanticRole.EMBEDDING_SHARD_OR_MAP,
@@ -182,6 +193,50 @@ class RootP3ScopeBinding:
 
 
 @dataclass(frozen=True)
+class RootP3CertifiedRefusalSourceMember:
+    """One frozen-source identity authorized for terminal B2 refusal.
+
+    This deliberately contains no successor-core object or revision ID.  B1
+    replay creates those native identities afresh; the member selects only the
+    frozen source row whose current B1 binding must later be recorded.
+    """
+
+    scope_key: RootScopeKey
+    legacy_source_namespace_id: UUID
+    eid: int
+    selected_raw_row_sha256: str
+    nodes_source_artifact_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope_key, RootScopeKey):
+            raise ValueError("refusal source member scope_key must be RootScopeKey")
+        if not isinstance(self.legacy_source_namespace_id, UUID):
+            raise ValueError("refusal source member namespace must be UUID")
+        if not isinstance(self.eid, int) or isinstance(self.eid, bool) or self.eid < 0:
+            raise ValueError("refusal source member eid must be non-negative")
+        for value, label in (
+            (self.selected_raw_row_sha256, "selected_raw_row_sha256"),
+            (self.nodes_source_artifact_sha256, "nodes_source_artifact_sha256"),
+        ):
+            if not isinstance(value, str) or len(value) != 64:
+                raise ValueError(f"refusal source member {label} must be SHA-256")
+            try:
+                int(value, 16)
+            except ValueError as exc:
+                raise ValueError(f"refusal source member {label} must be SHA-256") from exc
+
+    @property
+    def identity_payload(self) -> dict[str, object]:
+        return {
+            "scope_key": self.scope_key.identity_payload(),
+            "legacy_source_namespace_id": str(self.legacy_source_namespace_id),
+            "eid": self.eid,
+            "selected_raw_row_sha256": self.selected_raw_row_sha256,
+            "nodes_source_artifact_sha256": self.nodes_source_artifact_sha256,
+        }
+
+
+@dataclass(frozen=True)
 class RootP3SourceAdmissionRequest:
     """One external P3A carrier request, bounded to recovered P1/P2 facts."""
 
@@ -203,6 +258,7 @@ class RootP3SourceAdmissionRequest:
     character_continuation_carrier_directory: str | Path | None = None
     partial_authority_continuation_directory: str | Path | None = None
     recovered_p2_explicit_source_manifest_digest: str | None = None
+    certified_refusal_source_members: tuple[RootP3CertifiedRefusalSourceMember, ...] = ()
 
     def __post_init__(self) -> None:
         MetadataLessPerEidEvidence, RootSourceScopePlan, _SourceArtifactPresence = _corrective_freeze_types()
@@ -232,6 +288,11 @@ class RootP3SourceAdmissionRequest:
             not isinstance(item, MetadataLessPerEidEvidence) for item in self.unknown_identity_evidence
         ):
             raise ValueError("unknown_identity_evidence must be typed")
+        if not isinstance(self.certified_refusal_source_members, tuple) or any(
+            not isinstance(item, RootP3CertifiedRefusalSourceMember)
+            for item in self.certified_refusal_source_members
+        ):
+            raise ValueError("certified_refusal_source_members must be typed")
         if not isinstance(self.post_write_configurations, tuple) or any(
             not isinstance(item, NativePostWriteQualificationConfiguration)
             for item in self.post_write_configurations
@@ -333,6 +394,24 @@ class RootP3SourceAdmissionRequest:
             self.unknown_identity_evidence
         ):
             raise ValueError("metadata-less evidence must have unique scope/EID pairs")
+        refusal_keys = {
+            (item.scope_key, item.legacy_source_namespace_id, item.eid)
+            for item in self.certified_refusal_source_members
+        }
+        if len(refusal_keys) != len(self.certified_refusal_source_members):
+            raise ValueError("certified refusal source members must have unique scope/namespace/EID keys")
+        for member in self.certified_refusal_source_members:
+            binding = bindings_by_key.get(member.scope_key)
+            if binding is None or binding.scope_plan.legacy_source_namespace_id != member.legacy_source_namespace_id:
+                raise ValueError("certified refusal source member must match its P1 source namespace")
+            node_entries = [
+                entry for entry in self.description.explicit_source_manifest.entries
+                if entry.scope_key == member.scope_key
+                and entry.semantic_role is EvidenceSemanticRole.NODES
+                and entry.presence_expectation is EvidencePresenceExpectation.EXPECTED_PRESENT
+            ]
+            if len(node_entries) != 1 or node_entries[0].sha256_hex != member.nodes_source_artifact_sha256:
+                raise ValueError("certified refusal source member must bind declared nodes evidence")
 
     @property
     def root(self) -> Path:
@@ -384,6 +463,7 @@ class RootP3SourceAdmissionResult:
     snapshot_scope_count: int
     b1_memory_count: int
     b2_memory_count: int
+    b2_refused_memory_count: int
     child_request_counts: tuple[tuple[str, int], ...]
     b1m_identity_universe_digest: str | None = None
     b1f_total_motif_count: int = 0
@@ -391,6 +471,9 @@ class RootP3SourceAdmissionResult:
     b1f_partial_motif_count: int = 0
     b1f_zero_member_motif_count: int = 0
     partial_authority_continuation_path: Path | None = None
+    final_evidence_set_e_digest: str | None = None
+    root_disposition_closed: bool = False
+    completion_class: str = "BLOCKED"
 
 
 class NativeRootP3SourceAdmissionService:
@@ -480,6 +563,7 @@ class NativeRootP3SourceAdmissionService:
             completion["previous_b1_scope_reuse"] = "QUALIFIED"
             completion["predecessor_b1_revalidation_pending"] = False
         _write_record(request.record_path, record)
+        _require_refusal_b1_source_set_closure(request, record)
 
         partial_continuation: Path | None = None
         if partial_certifications:
@@ -503,7 +587,16 @@ class NativeRootP3SourceAdmissionService:
 
         if character_bindings:
             for entry in ordered:
-                _validate_character_b1_eid_agreement(entry, character_bindings)
+                scope = _scope_key_from_payload(entry.get("scope_key"))
+                expected_character_eids: set[int] | None = None
+                if scope in character_bindings:
+                    expected_character_eids = _expected_character_b1_eids(
+                        self._connection, request, entry, character_bindings,
+                    )
+                _validate_character_b1_eid_agreement(
+                    entry, character_bindings,
+                    expected_character_eids=expected_character_eids,
+                )
         try:
             character_witnesses = select_or_recover_character_continuation(
                 directory=request.character_continuation_carrier_root,
@@ -523,6 +616,18 @@ class NativeRootP3SourceAdmissionService:
             raise RootP3SourceAdmissionRefused(exc.code) from exc
 
         lose_response = _test_lose_response_after_b2
+        refusal_certification = _prepare_source_semantic_gap_certification(
+            self._connection, request, record,
+        )
+        if refusal_certification is not None:
+            record["b2_refusal_certification"] = {
+                key: refusal_certification[key]
+                for key in (
+                    "evidence_path", "final_evidence_set_e_digest", "certificate_path",
+                    "certificate_digest", "exception_set_digest",
+                )
+            }
+            _write_record(request.record_path, record)
         for entry in ordered:
             _revalidate_b1m_identity_universe(self._connection, request, record)
             source = _source_plan_for_key(request, _scope_key_from_payload(entry.get("scope_key")))
@@ -555,11 +660,28 @@ class NativeRootP3SourceAdmissionService:
                     ).normalize_legacy_core_memory(
                         base, _test_lose_response_after_commit=lose_response,
                     )
+                elif memory["normalization_kind"] == _REFUSAL_CODE:
+                    if refusal_certification is None:
+                        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_CERTIFICATE_REQUIRED")
+                    operation_id = _record_source_semantic_gap_refusal(
+                        self._connection, request, entry, memory, refusal_certification,
+                    )
+                    b2.setdefault("memories", []).append({
+                        "eid": eid,
+                        "disposition": _REFUSAL_CODE,
+                        "certificate_digest": refusal_certification["certificate_digest"],
+                        "receipt_operation_id": str(operation_id),
+                    })
+                    b2["memories"] = sorted(b2["memories"], key=lambda item: item["eid"])
+                    b2_by_eid = _carrier_b2_memory_evidence(b2)
+                    _write_record(request.record_path, record)
+                    continue
                 else:  # _carrier_b1_memory_evidence has already made this unreachable.
                     raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_KIND_INVALID")
                 lose_response = False
                 b2.setdefault("memories", []).append({
                     "eid": eid,
+                    "disposition": "ADMITTED",
                     "r2_revision_id": str(result.revision_id),
                 })
                 b2["memories"] = sorted(b2["memories"], key=lambda item: item["eid"])
@@ -568,6 +690,12 @@ class NativeRootP3SourceAdmissionService:
             _require_b2_closure(memories, b2_by_eid)
 
         _revalidate_b1m_identity_universe(self._connection, request, record)
+        b4_routes = _prepare_or_revalidate_b4_routes(
+            self._connection, request, record, refusal_certification,
+        )
+        if record.get("b4_routes") != b4_routes:
+            record["b4_routes"] = b4_routes
+            _write_record(request.record_path, record)
         normalization_request = _build_normalization_request(
             request, record, character_witnesses, partial_continuation,
         )
@@ -575,6 +703,12 @@ class NativeRootP3SourceAdmissionService:
         expected = _carrier_evidence_child_request_counts(request, record, character_witnesses)
         if actual != expected:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_CHILD_COUNT_DRIFT")
+        terminal_evidence = _prepare_or_revalidate_terminal_disposition_evidence(
+            request, record, b1f, actual, refusal_certification,
+        )
+        if record.get("terminal_disposition_evidence") != terminal_evidence:
+            record["terminal_disposition_evidence"] = terminal_evidence
+            _write_record(request.record_path, record)
         memory_count = sum(
             len(_require_list(_require_mapping(item.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED").get("memories"), "P3_CARRIER_B1_MEMORY_EVIDENCE_REQUIRED"))
             for item in ordered
@@ -585,7 +719,21 @@ class NativeRootP3SourceAdmissionService:
             snapshot_scope_count=len(ordered),
             b1_memory_count=memory_count,
             b2_memory_count=sum(
-                len(_require_list(_require_mapping(item.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED").get("memories"), "P3_CARRIER_B2_EVIDENCE_REQUIRED"))
+                sum(
+                    item["disposition"] == "ADMITTED"
+                    for item in _carrier_b2_memory_evidence(
+                        _require_mapping(item.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
+                    ).values()
+                )
+                for item in ordered
+            ),
+            b2_refused_memory_count=sum(
+                sum(
+                    item["disposition"] == _REFUSAL_CODE
+                    for item in _carrier_b2_memory_evidence(
+                        _require_mapping(item.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
+                    ).values()
+                )
                 for item in ordered
             ),
             child_request_counts=tuple(sorted(actual.items())),
@@ -595,6 +743,9 @@ class NativeRootP3SourceAdmissionService:
             b1f_partial_motif_count=b1f["partial_motif_count"],
             b1f_zero_member_motif_count=b1f["zero_member_motif_count"],
             partial_authority_continuation_path=partial_continuation,
+            final_evidence_set_e_digest=terminal_evidence["final_evidence_set_e_digest"],
+            root_disposition_closed=True,
+            completion_class="P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS",
         )
 
 
@@ -653,6 +804,11 @@ def p3_child_request_counts(
         result["b4b"] += len(item.b4b_requests)
         result["b4c"] += len(item.b4c_requests)
         result["b4p"] += len(item.b4p_requests)
+        refused = len(item.b4_refused_motif_dispositions)
+        if refused:
+            result["b4_refused_member_semantic_gap"] = (
+                result.get("b4_refused_member_semantic_gap", 0) + refused
+            )
     result["total_b3b"] = result["ordinary_b3b"] + result["metadata_less_b3b"]
     return result
 
@@ -763,7 +919,8 @@ def _complete_predecessor_record(
     predecessor_path = request.predecessor_record_path
     assert predecessor_path is not None
     predecessor, predecessor_digest = _load_predecessor_record(predecessor_path)
-    _verify_predecessor_record(connection, predecessor, request)
+    predecessor_core_id = _verify_predecessor_record(connection, predecessor, request)
+    predecessor_core_superseded = predecessor_core_id != request.expected_native_core_id
     carrier = request.carrier_root
     if carrier.exists():
         if not carrier.is_dir() or carrier.is_symlink() or any(carrier.iterdir()):
@@ -813,7 +970,10 @@ def _complete_predecessor_record(
             # Preserve the predecessor's B1 evidence only as a candidate for
             # strict B1M revalidation.  The successor never treats the old
             # motif-presence closure as authoritative; B1F replaces it.
-            "b1": predecessor_entry.get("b1"),
+            # An old-core B1 carrier is retained source evidence, never an
+            # object/revision carrier for a distinct corrected P1 core.  The
+            # successor must therefore recapture B1 against its own R1 facts.
+            "b1": None if predecessor_core_superseded else predecessor_entry.get("b1"),
             "b2": {"memories": []},
         }
         scopes.append(scope)
@@ -823,7 +983,7 @@ def _complete_predecessor_record(
             "manifest_path": str(manifest_path),
             "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
         })
-        if not completion and predecessor_entry.get("b1") is not None:
+        if not completion and not predecessor_core_superseded and predecessor_entry.get("b1") is not None:
             inherited_b1_reuse_candidate_count += 1
     record: dict[str, Any] = {
         "root_description_digest": request.description.identity_digest,
@@ -834,6 +994,11 @@ def _complete_predecessor_record(
         "carrier_completion": {
             "predecessor_record_path": str(predecessor_path),
             "predecessor_record_digest": predecessor_digest,
+            **({
+                "predecessor_native_core_id": str(predecessor_core_id),
+                "successor_native_core_id": str(request.expected_native_core_id),
+                "predecessor_core_disposition": "PRESERVED_SUPERSEDED_PREDECESSOR_EVIDENCE",
+            } if predecessor_core_superseded else {}),
             "completed_snapshots": completed,
             "completed_manifests": [item["manifest_path"] for item in completed],
             "inherited_snapshots": inherited,
@@ -867,9 +1032,17 @@ def _verify_predecessor_record(
     connection: sqlite3.Connection,
     predecessor: dict[str, Any],
     request: RootP3SourceAdmissionRequest,
-) -> None:
-    if predecessor.get("expected_native_core_id") != str(request.expected_native_core_id):
-        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_CORE_MISMATCH")
+) -> UUID:
+    try:
+        predecessor_core_id = UUID(predecessor["expected_native_core_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_CORE_INVALID") from exc
+    if predecessor_core_id != request.expected_native_core_id:
+        # P1 corrective supersession retains the old carrier and its frozen
+        # snapshots as evidence, but the successor's distinct P1 core is the
+        # only object/revision authority for resumed B1/B2 work.
+        for binding in request.scope_bindings:
+            _require_p1_motif_alias_separation(connection, binding.scope_plan)
     scopes = _require_list(predecessor.get("scopes"), "P3_CARRIER_PREDECESSOR_SCOPE_SET_INVALID")
     keys = {
         _scope_key_from_payload(item.get("scope_key"))
@@ -899,6 +1072,7 @@ def _verify_predecessor_record(
             or entry.get("manifest_digest") != _file_digest(manifest_path)
         ):
             raise RootP3SourceAdmissionRefused("P3_CARRIER_PREDECESSOR_SNAPSHOT_BINDING_MISMATCH")
+    return predecessor_core_id
 
 
 def _complete_scope_snapshot(
@@ -1274,6 +1448,7 @@ def _run_b1f(
                     "domain_id": frozen.domain_id,
                     "disposition": classified_item.disposition.value,
                     "source_motif_payload_digest": frozen.source_motif_payload_digest,
+                    "source_member_count": len(frozen.ordered_occurrences),
                 }
                 counts[classified_item.disposition.value] += 1
                 if classified_item.disposition in {
@@ -1445,6 +1620,7 @@ def _derive_character_domain_derivations(
                 "candidate_evidence": [candidate.identity_payload() for candidate in candidate_evidence],
             }),
             witness_digest=witness.witness_digest,
+            freshly_rederived_witness=witness,
         )
     return result
 
@@ -1697,23 +1873,168 @@ def _read_b1_memory_evidence(
                 normalization_kind = "CHARACTER_SEED"
             elif item.readiness in allowed:
                 normalization_kind = "ORDINARY"
+            elif (
+                item.readiness is ObjectRuntimeReadiness.SEMANTIC_FACTS_UNRESOLVED
+                and item.governance.value == "MISSING_GOVERNANCE"
+                and item.lifecycle.value == "UNKNOWN_LIFECYCLE"
+            ):
+                normalization_kind = _REFUSAL_CODE
             else:
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_NOT_NORMALIZABLE")
             seen_eids.add(eid)
             if not isinstance(item.legacy_vector_strategy, LegacyVectorStrategy):
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_STRATEGY_INVALID")
-            memories.append({
+            memory = {
                 "eid": eid,
                 "r1_revision_id": str(item.current_revision_id),
                 "legacy_vector_strategy": item.legacy_vector_strategy.value,
                 "normalization_kind": normalization_kind,
-            })
+            }
+            if normalization_kind == _REFUSAL_CODE:
+                raw = connection.execute(
+                    """SELECT payload_text FROM object_revisions
+                         WHERE object_id=? AND object_revision_id=? AND revision_ordinal=?""",
+                    (native_id_to_bytes(item.object_id), native_id_to_bytes(item.current_revision_id),
+                     item.current_revision_ordinal),
+                ).fetchone()
+                if raw is None or not isinstance(raw[0], str):
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_RAW_ROW_MISSING")
+                raw_row_digest = hashlib.sha256(raw[0].encode("utf-8")).hexdigest()
+                source_member = _certified_refusal_source_member(
+                    request, binding.scope_key, binding.scope_plan.legacy_source_namespace_id, eid,
+                )
+                if source_member is None:
+                    # The readiness predicate is an audit assertion, never a
+                    # grant of terminal disposition for a newly appearing row.
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_UNENUMERATED_SOURCE_MEMBER")
+                if source_member.selected_raw_row_sha256 != raw_row_digest:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_RAW_ROW_DRIFT")
+                memory.update({
+                    "object_id": str(item.object_id),
+                    "raw_row_digest": raw_row_digest,
+                    "source_identity": source_member.identity_payload,
+                    "governance_readiness": "NO_EXACT_GOVERNANCE_FACT_FOUND_IN_E",
+                    "lifecycle_readiness": "NO_AUTHORITATIVE_LIFECYCLE_FACT_FOUND_IN_E",
+                    "provenance_evidence_state": item.provenance.value,
+                })
+            memories.append(memory)
         memories.sort(key=lambda item: item["eid"])
         if not memories:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_MEMORY_B1_CLOSURE_MISMATCH")
     elif any(item.eid is not None for item in report.object_items):
         raise RootP3SourceAdmissionRefused("P3_CARRIER_EMPTY_SCOPE_CREATED_MEMORY")
     return memories
+
+
+def _certified_refusal_source_member(
+    request: RootP3SourceAdmissionRequest,
+    scope_key: RootScopeKey,
+    legacy_source_namespace_id: UUID,
+    eid: int,
+) -> RootP3CertifiedRefusalSourceMember | None:
+    matches = [
+        item for item in request.certified_refusal_source_members
+        if item.scope_key == scope_key
+        and item.legacy_source_namespace_id == legacy_source_namespace_id
+        and item.eid == eid
+    ]
+    if len(matches) > 1:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_ENUMERATION_DUPLICATE")
+    return matches[0] if matches else None
+
+
+def _require_refusal_b1_source_set_closure(
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+) -> None:
+    """Prove readiness selected exactly, and only, the frozen refusal census."""
+
+    expected = {
+        canonical_intent_text(item.identity_payload)
+        for item in request.certified_refusal_source_members
+    }
+    actual: set[str] = set()
+    for entry in _ordered_scope_entries(record):
+        scope = _scope_key_from_payload(entry.get("scope_key"))
+        namespace_id = _require_uuid(
+            entry.get("legacy_source_namespace_id"), "P3_CARRIER_REFUSAL_NAMESPACE_INVALID",
+        )
+        b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        for memory in _carrier_b1_memory_evidence(b1):
+            if memory["normalization_kind"] != _REFUSAL_CODE:
+                continue
+            source_identity = _require_mapping(
+                memory.get("source_identity"), "P3_CARRIER_REFUSAL_SOURCE_IDENTITY_INVALID",
+            )
+            member = _certified_refusal_source_member(request, scope, namespace_id, memory["eid"])
+            if member is None or source_identity != member.identity_payload:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_SOURCE_IDENTITY_MISMATCH")
+            actual.add(canonical_intent_text(source_identity))
+    if actual != expected:
+        # A listed member whose fresh B1 readiness changed is a contradiction,
+        # not an invitation to manufacture a receipt from the old census.
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_B1_READINESS_DRIFT")
+
+
+def _expected_character_b1_eids(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any],
+    character_bindings: dict[RootScopeKey, Any],
+) -> set[int]:
+    """Read the stable Character B1 expectation for one bound scope.
+
+    Before B2, frozen readiness is the owner of the required Character subset.
+    After a resumable B2 plant, that readiness rightly changes; the exact
+    persisted ``CHARACTER_SEED_PLANT`` provenance becomes the stable owner of
+    the subset instead.  This never promotes a merely authorized seed EID.
+    """
+
+    binding = request_binding(request, entry)
+    rows = connection.execute(
+        """SELECT a.alias_value,op.idempotency_key
+             FROM legacy_object_aliases a
+             JOIN objects o ON o.object_id=a.object_id
+             JOIN object_revisions r
+               ON r.object_id=o.object_id AND r.object_revision_id=o.current_revision_id
+             JOIN provenance_records p ON p.provenance_id=r.provenance_id
+             JOIN operation_outputs out
+               ON out.object_id=o.object_id
+              AND out.object_revision_id=r.object_revision_id
+              AND out.object_revision_ordinal=r.revision_ordinal
+             JOIN operations op ON op.operation_id=out.operation_id
+            WHERE a.legacy_source_namespace_id=?
+              AND a.alias_kind='EID'
+              AND p.origin_kind='CHARACTER_SEED_PLANT'
+              AND op.operation_kind=?
+              AND out.output_role=?
+              AND out.output_kind='OBJECT'
+            ORDER BY a.alias_value""",
+        (
+            native_id_to_bytes(binding.scope_plan.legacy_source_namespace_id),
+            CHARACTER_SEED_NORMALIZATION_OPERATION_KIND,
+            CHARACTER_SEED_NORMALIZATION_OUTPUT_ROLE,
+        ),
+    ).fetchall()
+    persisted: set[int] = set()
+    for row in rows:
+        if (
+            len(row) != 2
+            or not isinstance(row[0], str)
+            or not row[0].isdigit()
+            or not isinstance(row[1], str)
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_B1_EID_MISMATCH")
+        eid = _require_nonnegative_int(int(row[0]), "P3_CARRIER_CHARACTER_B1_EID_MISMATCH")
+        if row[1] == _stage_key(request, entry, "B2", str(eid)):
+            persisted.add(eid)
+    if persisted:
+        return persisted
+    return {
+        item["eid"]
+        for item in _read_b1_memory_evidence(connection, request, entry, character_bindings)
+        if item["normalization_kind"] == "CHARACTER_SEED"
+    }
 
 
 def _read_b1_evidence(
@@ -1802,9 +2123,10 @@ def _carrier_b1_evidence(
 
 
 def _validate_character_b1_eid_agreement(
-    entry: dict[str, Any], character_witnesses: dict[RootScopeKey, Any],
+    entry: dict[str, Any], character_witnesses: dict[RootScopeKey, Any], *,
+    expected_character_eids: set[int] | None = None,
 ) -> None:
-    """A continuation can bind only the exact seed EID set admitted at B1."""
+    """Close Character-normalized B1 EIDs against their witness and readiness."""
 
     b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
     memories = _carrier_b1_memory_evidence(b1)
@@ -1815,7 +2137,9 @@ def _validate_character_b1_eid_agreement(
     if witness is None:
         if character_eids:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_WITNESS_REQUIRED")
-    elif character_eids != set(witness.seed_eids):
+    elif not character_eids.issubset(set(witness.seed_eids)):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_B1_EID_MISMATCH")
+    elif expected_character_eids is not None and character_eids != expected_character_eids:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_CHARACTER_B1_EID_MISMATCH")
 
 
@@ -1833,15 +2157,38 @@ def _carrier_b1_memory_evidence(b1: dict[str, Any]) -> tuple[dict[str, Any], ...
         except (TypeError, ValueError) as exc:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_STRATEGY_INVALID") from exc
         normalization_kind = memory.get("normalization_kind", "ORDINARY")
-        if normalization_kind not in {"ORDINARY", "CHARACTER_SEED"}:
+        if normalization_kind not in {"ORDINARY", "CHARACTER_SEED", _REFUSAL_CODE}:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_MEMORY_KIND_INVALID")
         seen_eids.add(eid)
-        result.append({
+        normalized = {
             "eid": eid,
             "r1_revision_id": str(revision),
             "legacy_vector_strategy": strategy.value,
             "normalization_kind": normalization_kind,
-        })
+        }
+        if normalization_kind == _REFUSAL_CODE:
+            object_id = _require_uuid(memory.get("object_id"), "P3_CARRIER_REFUSAL_OBJECT_INVALID")
+            raw_row_digest = memory.get("raw_row_digest")
+            source_identity = _require_mapping(
+                memory.get("source_identity"), "P3_CARRIER_REFUSAL_SOURCE_IDENTITY_INVALID",
+            )
+            if (
+                not isinstance(raw_row_digest, str)
+                or len(raw_row_digest) != 64
+                or memory.get("governance_readiness") != "NO_EXACT_GOVERNANCE_FACT_FOUND_IN_E"
+                or memory.get("lifecycle_readiness") != "NO_AUTHORITATIVE_LIFECYCLE_FACT_FOUND_IN_E"
+                or not isinstance(memory.get("provenance_evidence_state"), str)
+            ):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_EVIDENCE_INVALID")
+            normalized.update({
+                "object_id": str(object_id),
+                "raw_row_digest": raw_row_digest,
+                "source_identity": source_identity,
+                "governance_readiness": memory["governance_readiness"],
+                "lifecycle_readiness": memory["lifecycle_readiness"],
+                "provenance_evidence_state": memory["provenance_evidence_state"],
+            })
+        result.append(normalized)
     return tuple(sorted(result, key=lambda item: item["eid"]))
 
 
@@ -1891,7 +2238,21 @@ def _carrier_b1_motif_dispositions(b1: dict[str, Any]) -> tuple[dict[str, Any], 
             MotifSemanticDisposition.EXACT_ADMITTED.value,
             MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value,
         }:
-            if not isinstance(value.get("exact_motif"), dict):
+            member_count = value.get("source_member_count")
+            if (
+                not isinstance(value.get("exact_motif"), dict)
+                or not isinstance(member_count, int)
+                or isinstance(member_count, bool)
+                or member_count < 0
+                or (
+                    disposition == MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value
+                    and member_count != 0
+                )
+                or (
+                    disposition == MotifSemanticDisposition.EXACT_ADMITTED.value
+                    and member_count == 0
+                )
+            ):
                 raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_EXACT_DISPOSITION_INVALID")
         elif not isinstance(value.get("blocking_code"), str):
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B1_BLOCKING_DISPOSITION_INVALID")
@@ -1907,8 +2268,25 @@ def _carrier_b2_memory_evidence(b2: dict[str, Any]) -> dict[int, dict[str, Any]]
         eid = _require_nonnegative_int(memory.get("eid"), "P3_CARRIER_B2_MEMORY_EID_INVALID")
         if eid in result:
             raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_MEMORY_EID_DUPLICATE")
-        revision = _require_uuid(memory.get("r2_revision_id"), "P3_CARRIER_B2_MEMORY_REVISION_INVALID")
-        result[eid] = {"eid": eid, "r2_revision_id": str(revision)}
+        disposition = memory.get("disposition", "ADMITTED")
+        if disposition == "ADMITTED":
+            revision = _require_uuid(memory.get("r2_revision_id"), "P3_CARRIER_B2_MEMORY_REVISION_INVALID")
+            result[eid] = {"eid": eid, "disposition": disposition, "r2_revision_id": str(revision)}
+        elif disposition == _REFUSAL_CODE:
+            digest = memory.get("certificate_digest")
+            operation_id = _require_uuid(
+                memory.get("receipt_operation_id"), "P3_CARRIER_B2_REFUSAL_RECEIPT_INVALID",
+            )
+            if not isinstance(digest, str) or len(digest) != 64:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_REFUSAL_CERTIFICATE_INVALID")
+            result[eid] = {
+                "eid": eid,
+                "disposition": disposition,
+                "certificate_digest": digest,
+                "receipt_operation_id": str(operation_id),
+            }
+        else:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_MEMORY_DISPOSITION_INVALID")
     return result
 
 
@@ -1919,6 +2297,765 @@ def _require_b2_closure(
         raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_EID_SET_MISMATCH")
 
 
+def _prepare_source_semantic_gap_certification(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Write the immutable external E/certificate pair for terminal B2 refusals.
+
+    The certificate is deliberately constructed before its database receipts:
+    E binds frozen source and B1 identity facts, while receipts bind E's
+    resulting certificate digest.  Neither artifact invents semantic values.
+    """
+
+    members: list[dict[str, Any]] = []
+    source_identity_members: list[dict[str, Any]] = []
+    source_artifacts: list[dict[str, Any]] = []
+    for entry in _ordered_scope_entries(record):
+        scope = _scope_key_from_payload(entry.get("scope_key"))
+        namespace_id = _require_uuid(
+            entry.get("legacy_source_namespace_id"), "P3_CARRIER_REFUSAL_NAMESPACE_INVALID",
+        )
+        namespace_key = entry.get("legacy_source_namespace_key")
+        if not isinstance(namespace_key, str) or not namespace_key:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_NAMESPACE_INVALID")
+        manifest, _root = _character_snapshot_manifest(entry)
+        source_artifacts.append({
+            "scope_key": scope.identity_payload(),
+            "legacy_snapshot_id": str(manifest.legacy_snapshot_id),
+            "manifest_digest": entry.get("manifest_digest"),
+            "artifacts": [
+                {
+                    "artifact_id": str(artifact.artifact_id),
+                    "artifact_class": artifact.artifact_class,
+                    "observed_relative_locator": artifact.observed_relative_locator,
+                    "byte_length": artifact.byte_length,
+                    "digest": artifact.digest_hex,
+                }
+                for artifact in manifest.artifacts
+            ],
+        })
+        b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        for memory in _carrier_b1_memory_evidence(b1):
+            if memory["normalization_kind"] != _REFUSAL_CODE:
+                continue
+            source_identity = _require_mapping(
+                memory.get("source_identity"), "P3_CARRIER_REFUSAL_SOURCE_IDENTITY_INVALID",
+            )
+            expected = _certified_refusal_source_member(
+                request, scope, namespace_id, memory["eid"],
+            )
+            if expected is None or source_identity != expected.identity_payload:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_SOURCE_IDENTITY_MISMATCH")
+            source_identity_members.append(source_identity)
+            members.append({
+                "source_identity": source_identity,
+                "legacy_source_namespace_key": namespace_key,
+                "fresh_b1_native_binding": {
+                    "object_id": memory["object_id"],
+                    "r1_revision_id": memory["r1_revision_id"],
+                    "raw_row_digest": memory["raw_row_digest"],
+                    "governance_readiness": "NO_EXACT_GOVERNANCE_FACT_FOUND_IN_E",
+                    "lifecycle_readiness": "NO_AUTHORITATIVE_LIFECYCLE_FACT_FOUND_IN_E",
+                    "provenance_evidence_state": memory["provenance_evidence_state"],
+                },
+            })
+    if not members:
+        return None
+    members.sort(key=lambda item: (
+        canonical_intent_text(item["source_identity"]["scope_key"]),
+        item["source_identity"]["legacy_source_namespace_id"], item["source_identity"]["eid"],
+    ))
+    source_identity_members.sort(key=canonical_intent_text)
+    if len({canonical_intent_text(item) for item in source_identity_members}) != len(source_identity_members):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_MEMBER_DUPLICATE")
+    if source_identity_members != sorted(
+        (item.identity_payload for item in request.certified_refusal_source_members),
+        key=canonical_intent_text,
+    ):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_ENUMERATED_SET_MISMATCH")
+    b1m = _require_mapping(record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED")
+    exception_digest = _digest(source_identity_members)
+    source_artifacts.sort(key=lambda item: canonical_intent_text(item["scope_key"]))
+    predecessor = request.predecessor_record_path
+    predecessor_digest = _file_digest(predecessor) if predecessor is not None else None
+    evidence_payload = {
+        "law": "TORMENT_P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_EVIDENCE_SET_V1",
+        "native_core_id": str(request.expected_native_core_id),
+        "root_p2_binding": {
+            "root_description_digest": request.description.identity_digest,
+            "explicit_source_manifest_digest": request.description.explicit_source_manifest.digest,
+        },
+        "p3_predecessor_carrier": None if predecessor is None else {
+            "path": str(predecessor), "digest": predecessor_digest,
+        },
+        "p3_successor_carrier_path": str(request.record_path),
+        "b1m_identity_universe_digest": b1m["identity_universe_digest"],
+        "exception_set_digest": exception_digest,
+        "exception_count": len(members),
+        "enumerated_frozen_source_identities": source_identity_members,
+        "selected_raw_rows": members,
+        "frozen_snapshot_artifacts": source_artifacts,
+        "forensic_census_digest": _digest({
+            "law": "P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_FORENSIC_CENSUS_V1",
+            "count": len(members),
+            "members": members,
+            "character_external_owner_applicability": "NONE",
+        }),
+        "provisional_evidence_digest": "d44f3d095f477eb48138fb28c4538a83bd77e04042dfd6c1910ea0145955bb45",
+        "provisional_evidence_status": "SUPERSEDED",
+    }
+    evidence_digest = _write_or_load_external_immutable(
+        request.carrier_root / _REFUSAL_EVIDENCE_NAME,
+        "TORMENT_P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_EVIDENCE_SET",
+        evidence_payload,
+    )
+    certificate_payload = {
+        "law": "TORMENT_P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_CERTIFICATE_V1",
+        "native_core_id": str(request.expected_native_core_id),
+        "root_p2_binding": evidence_payload["root_p2_binding"],
+        "b1m_identity_universe_digest": b1m["identity_universe_digest"],
+        "exception_set_digest": exception_digest,
+        "final_evidence_set_e_digest": evidence_digest,
+        "members": members,
+    }
+    certificate_digest = _write_or_load_external_immutable(
+        request.carrier_root / _REFUSAL_CERTIFICATE_NAME,
+        "TORMENT_P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_CERTIFICATE",
+        certificate_payload,
+    )
+    return {
+        "evidence_path": str(request.carrier_root / _REFUSAL_EVIDENCE_NAME),
+        "final_evidence_set_e_digest": evidence_digest,
+        "certificate_path": str(request.carrier_root / _REFUSAL_CERTIFICATE_NAME),
+        "certificate_digest": certificate_digest,
+        "exception_set_digest": exception_digest,
+        "members": members,
+    }
+
+
+def _prepare_or_revalidate_terminal_disposition_evidence(
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+    b1f: dict[str, Any],
+    child_counts: dict[str, int],
+    refusal_certification: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Bind the complete B1/B2/B4 terminal partition only after assembly.
+
+    B2 refusal certificates necessarily predate their own rejection receipts.
+    They are therefore evidence for the frozen memory exception set, not the
+    final root E.  This immutable document is written only once the carrier
+    has sealed every B4 route and independently recomputed its child counts.
+    """
+
+    b4_counts = {
+        name: child_counts.get(name, 0)
+        for name in ("b4a", "b4b", "b4c", "b4p", "b4_refused_member_semantic_gap")
+    }
+    nonempty_exact_terminal_count = sum(
+        b4_counts[name]
+        for name in ("b4a", "b4b", "b4_refused_member_semantic_gap")
+    )
+    total_terminal_count = (
+        nonempty_exact_terminal_count + b4_counts["b4c"] + b4_counts["b4p"]
+    )
+    if (
+        nonempty_exact_terminal_count != b1f["exact_motif_count"]
+        or b4_counts["b4c"] != b1f["zero_member_motif_count"]
+        or b4_counts["b4p"] != b1f["partial_motif_count"]
+        or total_terminal_count != b1f["total_motif_count"]
+        or b1f["blocking_motif_count"] != 0
+    ):
+        raise RootP3SourceAdmissionRefused("P3_TERMINAL_MOTIF_DISPOSITION_CLOSURE_MISMATCH")
+    b4_routes = _require_mapping(record.get("b4_routes"), "P3_B4_ROUTE_CARRIER_REQUIRED")
+    b1m = _require_mapping(record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED")
+    b2_admitted_count = 0
+    b2_refused_count = 0
+    for entry in _ordered_scope_entries(record):
+        b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        memories = _carrier_b1_memory_evidence(b1)
+        b2 = _carrier_b2_memory_evidence(
+            _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
+        )
+        _require_b2_closure(memories, b2)
+        b2_admitted_count += sum(item["disposition"] == "ADMITTED" for item in b2.values())
+        b2_refused_count += sum(item["disposition"] == _REFUSAL_CODE for item in b2.values())
+    if b2_refused_count and refusal_certification is None:
+        raise RootP3SourceAdmissionRefused("P3_TERMINAL_REFUSAL_CERTIFICATE_REQUIRED")
+    if refusal_certification is not None:
+        if b2_refused_count != len(refusal_certification["members"]):
+            raise RootP3SourceAdmissionRefused("P3_TERMINAL_REFUSAL_MEMORY_CLOSURE_MISMATCH")
+        certificate_digest: str | None = refusal_certification["certificate_digest"]
+        b2_evidence_digest: str | None = refusal_certification["final_evidence_set_e_digest"]
+    else:
+        certificate_digest = None
+        b2_evidence_digest = None
+    payload = {
+        "law": "TORMENT_P3_TERMINAL_DISPOSITION_EVIDENCE_SET_E_V1",
+        "native_core_id": str(request.expected_native_core_id),
+        "root_p2_binding": {
+            "root_description_digest": request.description.identity_digest,
+            "explicit_source_manifest_digest": request.description.explicit_source_manifest.digest,
+        },
+        "b1m_identity_universe_digest": b1m["identity_universe_digest"],
+        "b1f_disposition_digest": b1f["disposition_digest"],
+        "b2_partition": {
+            "admitted_count": b2_admitted_count,
+            "refused_source_semantic_gap_count": b2_refused_count,
+            "refusal_certificate_digest": certificate_digest,
+            "b2_refusal_evidence_set_digest": b2_evidence_digest,
+        },
+        "b4_partition": {
+            "b4a": b4_counts["b4a"],
+            "b4b": b4_counts["b4b"],
+            "b4c": b4_counts["b4c"],
+            "b4p": b4_counts["b4p"],
+            "b4_refused_member_semantic_gap": b4_counts["b4_refused_member_semantic_gap"],
+            "total": total_terminal_count,
+            "unaccounted": 0,
+            "overlap": 0,
+        },
+        "b4_route_carrier_digest": _digest(b4_routes),
+        "source_carrier_path": str(request.record_path),
+    }
+    digest = _write_or_load_external_immutable(
+        request.carrier_root / _TERMINAL_EVIDENCE_NAME,
+        "TORMENT_P3_TERMINAL_DISPOSITION_EVIDENCE_SET_E",
+        payload,
+    )
+    summary = {
+        "path": str(request.carrier_root / _TERMINAL_EVIDENCE_NAME),
+        "final_evidence_set_e_digest": digest,
+    }
+    previous = record.get("terminal_disposition_evidence")
+    if previous is not None and previous != summary:
+        raise RootP3SourceAdmissionRefused("P3_TERMINAL_EVIDENCE_CARRIER_DRIFT")
+    return summary
+
+
+def _write_or_load_external_immutable(path: Path, schema: str, payload: dict[str, Any]) -> str:
+    """Create one external immutable document, or prove exact retry identity."""
+
+    outer = {"schema": schema, "version": 1, "payload": payload, "digest": _digest(payload)}
+    encoded = canonical_intent_text(outer) + "\n"
+    if path.exists():
+        try:
+            observed = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_EXTERNAL_RECORD_INVALID") from exc
+        if observed != outer:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_EXTERNAL_RECORD_DRIFT")
+        return outer["digest"]
+    temporary = path.with_name(f".{path.name}.tmp")
+    if temporary.exists():
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_EXTERNAL_TEMPORARY_EXISTS")
+    try:
+        with temporary.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_EXTERNAL_RECORD_WRITE_FAILED") from exc
+    return outer["digest"]
+
+
+def _record_source_semantic_gap_refusal(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any],
+    memory: dict[str, Any],
+    certification: dict[str, Any],
+) -> UUID:
+    """Persist one idempotent refusal receipt with no semantic publication."""
+
+    binding = request_binding(request, entry)
+    member_matches = [
+        item for item in certification["members"]
+        if item["source_identity"]["legacy_source_namespace_id"] == entry["legacy_source_namespace_id"]
+        and item["source_identity"]["eid"] == memory["eid"]
+    ]
+    if len(member_matches) != 1:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_CERTIFICATE_MEMBER_MISSING")
+    member = member_matches[0]
+    source_identity = _require_mapping(
+        memory.get("source_identity"), "P3_CARRIER_REFUSAL_SOURCE_IDENTITY_INVALID",
+    )
+    native_binding = _require_mapping(
+        member.get("fresh_b1_native_binding"), "P3_CARRIER_REFUSAL_CERTIFICATE_MEMBER_INVALID",
+    )
+    if member.get("source_identity") != source_identity or any(native_binding[key] != memory[key] for key in (
+        "object_id", "r1_revision_id", "raw_row_digest", "governance_readiness",
+        "lifecycle_readiness", "provenance_evidence_state",
+    )):
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_CERTIFICATE_MEMBER_DRIFT")
+    object_id = _require_uuid(memory["object_id"], "P3_CARRIER_REFUSAL_OBJECT_INVALID")
+    revision_id = _require_uuid(memory["r1_revision_id"], "P3_CARRIER_REFUSAL_REVISION_INVALID")
+    intent = canonical_intent_text({
+        "law": "TORMENT_P3_B2_REFUSED_SOURCE_SEMANTIC_GAP_RECEIPT_V1",
+        "native_core_id": str(request.expected_native_core_id),
+        "certificate_digest": certification["certificate_digest"],
+        "source_identity": source_identity,
+        "object_id": str(object_id),
+        "r1_revision_id": str(revision_id),
+        "raw_row_digest": memory["raw_row_digest"],
+    })
+    key = _stage_key(request, entry, "B2_REFUSED_SOURCE_SEMANTIC_GAP", str(memory["eid"]))
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            """SELECT operation_id,canonical_intent_json FROM operations
+                 WHERE idempotency_namespace_id=? AND idempotency_key=?""",
+            (native_id_to_bytes(binding.scope_plan.idempotency_namespace_id), key),
+        ).fetchone()
+        if existing is not None:
+            operation_id, existing_intent = existing
+            if existing_intent != intent:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_IDEMPOTENCY_CONFLICT")
+            rejection = connection.execute(
+                "SELECT rejection_code,rejection_detail FROM operation_rejections WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            transitions = connection.execute(
+                "SELECT count(*) FROM semantic_transitions WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0]
+            outputs = connection.execute(
+                "SELECT count(*) FROM operation_outputs WHERE operation_id=?", (operation_id,),
+            ).fetchone()[0]
+            if rejection != (_REFUSAL_CODE, certification["certificate_digest"]) or transitions or outputs:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_RECEIPT_DRIFT")
+            connection.execute("COMMIT")
+            return native_id_from_bytes(operation_id)
+
+        current = connection.execute(
+            """SELECT r.lineage_kind,o.current_revision_id,o.current_revision_ordinal
+                 FROM objects o JOIN object_revisions r ON r.object_id=o.object_id
+                   AND r.object_revision_id=? AND r.revision_ordinal=1
+                 JOIN legacy_object_aliases a ON a.object_id=o.object_id
+                WHERE o.object_id=? AND a.legacy_source_namespace_id=?
+                  AND a.alias_kind='EID' AND a.alias_value=?""",
+            (native_id_to_bytes(revision_id), native_id_to_bytes(object_id),
+             native_id_to_bytes(UUID(entry["legacy_source_namespace_id"])), str(memory["eid"])),
+        ).fetchone()
+        if current != ("LEGACY_PREDECESSOR_UNKNOWN", native_id_to_bytes(revision_id), 1):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_REFUSAL_R1_NOT_CURRENT_EVIDENCE")
+        operation_id = uuid4().bytes
+        connection.execute(
+            "INSERT INTO operations VALUES (?,?,?,?,?,?,0)",
+            (operation_id, native_id_to_bytes(binding.scope_plan.idempotency_namespace_id), key,
+             _REFUSAL_OPERATION_KIND, "TMS-INTENT-1", intent),
+        )
+        connection.execute(
+            """INSERT INTO operation_targets(
+                   operation_id,target_ordinal,target_role,target_kind,object_id,
+                   object_revision_id,object_revision_ordinal
+               ) VALUES (?,?,?,?,?,?,?)""",
+            (operation_id, 0, "REFUSED_SOURCE_MEMORY", "OBJECT", native_id_to_bytes(object_id),
+             native_id_to_bytes(revision_id), 1),
+        )
+        connection.execute(
+            "INSERT INTO operation_rejections VALUES (?,?,?,0)",
+            (operation_id, _REFUSAL_CODE, certification["certificate_digest"]),
+        )
+        connection.execute("COMMIT")
+        return native_id_from_bytes(operation_id)
+    except Exception:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+
+
+def _prepare_or_revalidate_b4_routes(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    record: dict[str, Any],
+    refusal_certification: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Seal P3 B4 routing from frozen lanes plus already-terminal B2 facts.
+
+    B1F remains source authority: an exact source motif is still exact even
+    when a member was truthfully refused B2 semantic admission.  This later
+    P3 seam chooses only the terminal *runtime* disposition and records a
+    no-output B4 receipt where full runtime membership is unavailable.
+    """
+
+    routes_by_scope: list[dict[str, Any]] = []
+    entries_by_namespace = {
+        str(entry["legacy_source_namespace_id"]): entry
+        for entry in _ordered_scope_entries(record)
+    }
+    for entry in _ordered_scope_entries(record):
+        binding = request_binding(request, entry)
+        source = _source_plan_for_key(request, binding.scope_key)
+        b1 = _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+        motifs = _require_list(b1.get("motifs"), "P3_CARRIER_B1_MOTIF_EVIDENCE_REQUIRED")
+        dispositions = {
+            item["motif_id"]: item
+            for item in _carrier_b1_motif_dispositions(b1)
+        }
+        workspace_plans = tuple(sorted(
+            (
+                candidate.scope_plan
+                for candidate in request.scope_bindings
+                if candidate.scope_key.workspace_id == binding.scope_key.workspace_id
+            ),
+            key=lambda item: (item.workspace_id, item.scope_kind, item.qualifier),
+        ))
+        b2_by_namespace = {
+            str(plan.legacy_source_namespace_id): _carrier_b2_memory_evidence(
+                _require_mapping(
+                    entries_by_namespace[str(plan.legacy_source_namespace_id)].get("b2"),
+                    "P3_CARRIER_B2_EVIDENCE_REQUIRED",
+                )
+            )
+            for plan in workspace_plans
+        }
+        scope_routes: list[dict[str, Any]] = []
+        for motif in sorted(motifs, key=lambda item: item["runtime_motif_id"]):
+            if not isinstance(motif, dict):
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_EVIDENCE_INVALID")
+            motif_id = motif.get("runtime_motif_id")
+            disposition = dispositions.get(motif_id)
+            if not isinstance(motif_id, str) or disposition is None:
+                raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_DISPOSITION_MISMATCH")
+            route = _derive_b4_route(
+                connection, request, entry, binding, source, motif, disposition,
+                workspace_plans, b2_by_namespace, refusal_certification,
+            )
+            if route["runtime_motif_id"] != motif_id:
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_MOTIF_ID_DRIFT")
+            scope_routes.append(route)
+        # B1F partials do not have a native source motif object.  They remain
+        # B4P source-only retention and are intentionally not in this route set.
+        if source.motif_presence.value == "PRESENT" and len(scope_routes) != len(motifs):
+            raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_EXACT_CLOSURE_MISMATCH")
+        routes_by_scope.append({
+            "scope_key": binding.scope_key.identity_payload(),
+            "routes": scope_routes,
+        })
+    payload = {
+        "law": "TORMENT_P3_B4_ROOT_BOUND_RUNTIME_ROUTE_V1",
+        "scope_routes": sorted(routes_by_scope, key=lambda item: canonical_intent_text(item["scope_key"])),
+    }
+    previous = record.get("b4_routes")
+    if previous is not None and previous != payload:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_DRIFT")
+    return payload
+
+
+def _derive_b4_route(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any],
+    binding: RootP3ScopeBinding,
+    source: Any,
+    motif: dict[str, Any],
+    disposition: dict[str, Any],
+    workspace_plans: tuple[MigrationRuntimeScopePlan, ...],
+    b2_by_namespace: dict[str, dict[int, dict[str, Any]]],
+    refusal_certification: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive one exact B4 route without consulting source-scope posture."""
+
+    if disposition["disposition"] not in {
+        MotifSemanticDisposition.EXACT_ADMITTED.value,
+        MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value,
+    }:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_NONEXACT_SOURCE")
+    plan = binding.scope_plan
+    root = Path(entry["snapshot_root"])
+    meta_path = root / "workspaces" / plan.workspace_id / "workspace_meta.json"
+    motif_path = root / "workspaces" / plan.workspace_id / "domains" / str(plan.motif_domain_id) / "motifs.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        registry = json.loads(motif_path.read_text(encoding="utf-8"))
+        raw = registry["motifs"][motif["runtime_motif_id"]]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_EVIDENCE_UNREADABLE") from exc
+    lane = (meta.get("embed_provider"), meta.get("embed_model"), meta.get("embed_dim"))
+    centroid = raw.get("centroid") if isinstance(raw, dict) else None
+    members = raw.get("members") if isinstance(raw, dict) else None
+    if (
+        not isinstance(lane[0], str) or not lane[0]
+        or not isinstance(lane[1], str) or not lane[1]
+        or not isinstance(lane[2], int) or isinstance(lane[2], bool) or lane[2] < 1
+        or not isinstance(centroid, list) or len(centroid) != lane[2]
+        or not isinstance(members, list)
+        or any(not isinstance(eid, int) or isinstance(eid, bool) or eid < 0 for eid in members)
+    ):
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_GEOMETRY_UNQUALIFIED")
+    if raw.get("motif_id") != motif["runtime_motif_id"] or raw.get("domain_id") != plan.motif_domain_id:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_MOTIF_DRIFT")
+    source_object_id = _require_uuid(motif.get("source_object_id"), "P3_B4_ROUTE_SOURCE_OBJECT_INVALID")
+    source_revision_id = _require_uuid(motif.get("r1_revision_id"), "P3_B4_ROUTE_SOURCE_REVISION_INVALID")
+    source_row = connection.execute(
+        """SELECT t.transition_id,t.operation_id
+             FROM objects o
+             JOIN object_revisions r ON r.object_id=o.object_id
+               AND r.object_revision_id=o.current_revision_id AND r.revision_ordinal=o.current_revision_ordinal
+             JOIN semantic_transitions t ON t.transition_id=o.creating_transition_id
+             JOIN legacy_object_aliases a ON a.object_id=o.object_id
+            WHERE o.object_id=? AND o.current_revision_id=? AND o.current_revision_ordinal=1
+              AND r.lineage_kind='LEGACY_PREDECESSOR_UNKNOWN'
+              AND a.legacy_source_namespace_id=? AND a.alias_kind='MOTIF_ID' AND a.alias_value=?""",
+        (
+            native_id_to_bytes(source_object_id), native_id_to_bytes(source_revision_id),
+            native_id_to_bytes(plan.legacy_source_namespace_id), motif["runtime_motif_id"],
+        ),
+    ).fetchone()
+    if source_row is None:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_MOTIF_TOPOLOGY_DRIFT")
+    transition_id, operation_id = source_row
+    rows = connection.execute(
+        """SELECT out.output_ordinal,member.object_id
+             FROM operation_outputs out JOIN relationship_revision_effects effect
+               ON effect.transition_id=? AND effect.relationship_id=out.relationship_id
+              AND effect.relationship_revision_id=out.relationship_revision_id AND effect.relationship_revision_ordinal=out.relationship_revision_ordinal
+             JOIN relationship_revisions rr ON rr.relationship_id=out.relationship_id AND rr.relationship_revision_id=out.relationship_revision_id
+             JOIN relationship_revision_endpoints motif_endpoint ON motif_endpoint.relationship_revision_id=rr.relationship_revision_id AND motif_endpoint.endpoint_ordinal=0 AND motif_endpoint.endpoint_role='MOTIF' AND motif_endpoint.binding_mode='IDENTITY'
+             JOIN relationship_revision_endpoints member ON member.relationship_revision_id=rr.relationship_revision_id AND member.endpoint_ordinal=1 AND member.endpoint_role='MEMBER' AND member.binding_mode='IDENTITY'
+            WHERE out.operation_id=? AND out.output_role='LEGACY_MOTIF_MEMBERSHIP_ADMISSION'
+              AND out.output_kind='RELATIONSHIP' AND motif_endpoint.object_id=?
+            ORDER BY out.output_ordinal""",
+        (transition_id, operation_id, native_id_to_bytes(source_object_id)),
+    ).fetchall()
+    if [row[0] for row in rows] != list(range(1, len(members) + 1)):
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_MEMBERSHIP_DRIFT")
+    if len(members) != disposition["source_member_count"]:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_SOURCE_MEMBER_COUNT_DRIFT")
+    if not members:
+        if disposition["disposition"] != MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value:
+            raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_ZERO_MEMBER_DISPOSITION_DRIFT")
+        route_name = "B4C"
+        refused_members: list[dict[str, Any]] = []
+    else:
+        if disposition["disposition"] != MotifSemanticDisposition.EXACT_ADMITTED.value:
+            raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_NONEMPTY_DISPOSITION_DRIFT")
+        refused_members = []
+        for eid, (_ordinal, object_id) in zip(members, rows, strict=True):
+            aliases: list[tuple[bytes, bytes]] = []
+            for member_plan in workspace_plans:
+                aliases.extend(connection.execute(
+                    """SELECT a.object_id,a.legacy_source_namespace_id
+                         FROM legacy_object_aliases a JOIN objects o ON o.object_id=a.object_id
+                        WHERE a.legacy_source_namespace_id=? AND a.alias_kind='EID'
+                          AND a.alias_value=? AND o.object_kind='LEGACY_CORE_NODE'""",
+                    (native_id_to_bytes(member_plan.legacy_source_namespace_id), str(eid)),
+                ).fetchall())
+            resolved = [row for row in aliases if row[0] == object_id]
+            if len(resolved) != 1:
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_MEMBER_SCOPE_UNRESOLVED")
+            namespace = str(native_id_from_bytes(resolved[0][1]))
+            b2 = b2_by_namespace.get(namespace, {}).get(eid)
+            if b2 is None:
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_MEMBER_B2_MISSING")
+            if b2["disposition"] not in {_REFUSAL_CODE, "ADMITTED"}:
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_MEMBER_B2_DISPOSITION_INVALID")
+        # The loop above deliberately verifies every member's B2 terminal
+        # status.  The scoped refusal details are recovered below from the
+        # carrier's namespace map, avoiding any motif-scope substitution.
+        for eid, (_ordinal, object_id) in zip(members, rows, strict=True):
+            aliases = []
+            for member_plan in workspace_plans:
+                aliases.extend(connection.execute(
+                    "SELECT object_id,legacy_source_namespace_id FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='EID' AND alias_value=?",
+                    (native_id_to_bytes(member_plan.legacy_source_namespace_id), str(eid)),
+                ).fetchall())
+            resolved = [row for row in aliases if row[0] == object_id]
+            namespace = str(native_id_from_bytes(resolved[0][1]))
+            b2 = b2_by_namespace[namespace][eid]
+            if b2["disposition"] != _REFUSAL_CODE:
+                continue
+            refused_members.append({
+                "legacy_source_namespace_id": namespace,
+                "eid": eid,
+                "object_id": str(native_id_from_bytes(object_id)),
+                "r1_revision_id": _member_r1_revision_id(connection, object_id, namespace, eid),
+                "b2_receipt_operation_id": b2["receipt_operation_id"],
+                "b2_certificate_digest": b2["certificate_digest"],
+            })
+        if refused_members:
+            route_name = _B4_REFUSAL_CODE
+        elif lane == (
+            request.description.target_representation_lane.provider,
+            request.description.target_representation_lane.model,
+            request.description.target_representation_lane.dimension,
+        ):
+            route_name = "B4A"
+        else:
+            route_name = "B4B"
+    route: dict[str, Any] = {
+        "runtime_motif_id": motif["runtime_motif_id"],
+        "source_motif_object_id": str(source_object_id),
+        "source_motif_r1_revision_id": str(source_revision_id),
+        "source_lane": {"provider": lane[0], "model": lane[1], "dimension": lane[2], "centroid_dimension": len(centroid)},
+        "route": route_name,
+    }
+    if route_name == _B4_REFUSAL_CODE:
+        if refusal_certification is None:
+            raise RootP3SourceAdmissionRefused("P3_B4_REFUSAL_CERTIFICATE_REQUIRED")
+        refused_members.sort(key=lambda item: (item["legacy_source_namespace_id"], item["eid"]))
+        certificate_payload = {
+            "law": "TORMENT_P3_B4_REFUSED_MEMBER_SEMANTIC_GAP_CERTIFICATE_V1",
+            "native_core_id": str(request.expected_native_core_id),
+            "b2_root_exception_certificate_digest": refusal_certification["certificate_digest"],
+            "source_motif": {
+                "legacy_source_namespace_id": str(plan.legacy_source_namespace_id),
+                "runtime_motif_id": motif["runtime_motif_id"],
+                "object_id": str(source_object_id), "r1_revision_id": str(source_revision_id),
+            },
+            "members": refused_members,
+        }
+        certificate_digest = _digest(certificate_payload)
+        receipt_operation_id = _record_b4_member_semantic_gap_refusal(
+            connection, request, entry, source_object_id, source_revision_id,
+            motif["runtime_motif_id"], certificate_digest, refused_members,
+        )
+        route["refused_members"] = refused_members
+        route["certificate_digest"] = certificate_digest
+        route["receipt_operation_id"] = str(receipt_operation_id)
+    return route
+
+
+def _member_r1_revision_id(
+    connection: sqlite3.Connection, object_id: bytes, namespace: str, eid: int,
+) -> str:
+    row = connection.execute(
+        """SELECT o.current_revision_id FROM objects o JOIN legacy_object_aliases a ON a.object_id=o.object_id
+            WHERE o.object_id=? AND a.legacy_source_namespace_id=? AND a.alias_kind='EID' AND a.alias_value=?""",
+        (object_id, native_id_to_bytes(UUID(namespace)), str(eid)),
+    ).fetchone()
+    if row is None:
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_MEMBER_R1_DRIFT")
+    return str(native_id_from_bytes(row[0]))
+
+
+def _record_b4_member_semantic_gap_refusal(
+    connection: sqlite3.Connection,
+    request: RootP3SourceAdmissionRequest,
+    entry: dict[str, Any],
+    source_object_id: UUID,
+    source_revision_id: UUID,
+    motif_id: str,
+    certificate_digest: str,
+    refused_members: list[dict[str, Any]],
+) -> UUID:
+    """Persist one idempotent rejected B4 operation, never a motif transition."""
+
+    binding = request_binding(request, entry)
+    intent = canonical_intent_text({
+        "law": "TORMENT_P3_B4_REFUSED_MEMBER_SEMANTIC_GAP_RECEIPT_V1",
+        "native_core_id": str(request.expected_native_core_id),
+        "certificate_digest": certificate_digest,
+        "source_motif": {
+            "legacy_source_namespace_id": entry["legacy_source_namespace_id"],
+            "runtime_motif_id": motif_id, "object_id": str(source_object_id),
+            "r1_revision_id": str(source_revision_id),
+        },
+        "refused_members": refused_members,
+    })
+    key = _stage_key(request, entry, _B4_REFUSAL_CODE, motif_id)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            "SELECT operation_id,canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (native_id_to_bytes(binding.scope_plan.idempotency_namespace_id), key),
+        ).fetchone()
+        if existing is not None:
+            operation_id, existing_intent = existing
+            if existing_intent != intent:
+                raise RootP3SourceAdmissionRefused("P3_B4_REFUSAL_IDEMPOTENCY_CONFLICT")
+            rejection = connection.execute(
+                "SELECT rejection_code,rejection_detail FROM operation_rejections WHERE operation_id=?", (operation_id,),
+            ).fetchone()
+            transitions = connection.execute("SELECT count(*) FROM semantic_transitions WHERE operation_id=?", (operation_id,)).fetchone()[0]
+            outputs = connection.execute("SELECT count(*) FROM operation_outputs WHERE operation_id=?", (operation_id,)).fetchone()[0]
+            if rejection != (_B4_REFUSAL_CODE, certificate_digest) or transitions or outputs:
+                raise RootP3SourceAdmissionRefused("P3_B4_REFUSAL_RECEIPT_DRIFT")
+            connection.execute("COMMIT")
+            return native_id_from_bytes(operation_id)
+        current = connection.execute(
+            """SELECT r.lineage_kind,o.current_revision_id,o.current_revision_ordinal
+                 FROM objects o JOIN object_revisions r ON r.object_id=o.object_id AND r.object_revision_id=? AND r.revision_ordinal=1
+                 JOIN legacy_object_aliases a ON a.object_id=o.object_id
+                WHERE o.object_id=? AND a.legacy_source_namespace_id=? AND a.alias_kind='MOTIF_ID' AND a.alias_value=?""",
+            (native_id_to_bytes(source_revision_id), native_id_to_bytes(source_object_id),
+             native_id_to_bytes(binding.scope_plan.legacy_source_namespace_id), motif_id),
+        ).fetchone()
+        if current != ("LEGACY_PREDECESSOR_UNKNOWN", native_id_to_bytes(source_revision_id), 1):
+            raise RootP3SourceAdmissionRefused("P3_B4_REFUSAL_SOURCE_MOTIF_NOT_CURRENT")
+        operation_id = uuid4().bytes
+        connection.execute(
+            "INSERT INTO operations VALUES (?,?,?,?,?,?,0)",
+            (operation_id, native_id_to_bytes(binding.scope_plan.idempotency_namespace_id), key,
+             _B4_REFUSAL_OPERATION_KIND, "TMS-INTENT-1", intent),
+        )
+        connection.execute(
+            """INSERT INTO operation_targets(
+                   operation_id,target_ordinal,target_role,target_kind,object_id,
+                   object_revision_id,object_revision_ordinal
+               ) VALUES (?,?,?,?,?,?,?)""",
+            (operation_id, 0, "REFUSED_SOURCE_MOTIF", "OBJECT", native_id_to_bytes(source_object_id),
+             native_id_to_bytes(source_revision_id), 1),
+        )
+        connection.execute(
+            "INSERT INTO operation_rejections VALUES (?,?,?,0)",
+            (operation_id, _B4_REFUSAL_CODE, certificate_digest),
+        )
+        connection.execute("COMMIT")
+        return native_id_from_bytes(operation_id)
+    except Exception:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+
+
+def _carrier_b4_route_map(
+    record: dict[str, Any],
+) -> dict[tuple[RootScopeKey, str], dict[str, Any]]:
+    routes = _require_mapping(record.get("b4_routes"), "P3_B4_ROUTE_CARRIER_REQUIRED")
+    if routes.get("law") != "TORMENT_P3_B4_ROOT_BOUND_RUNTIME_ROUTE_V1":
+        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
+    scope_routes = _require_list(routes.get("scope_routes"), "P3_B4_ROUTE_CARRIER_INVALID")
+    result: dict[tuple[RootScopeKey, str], dict[str, Any]] = {}
+    for item in scope_routes:
+        scope_key = _scope_key_from_payload(_require_mapping(item.get("scope_key"), "P3_B4_ROUTE_CARRIER_INVALID"))
+        values = _require_list(item.get("routes"), "P3_B4_ROUTE_CARRIER_INVALID")
+        for value in values:
+            route = _require_mapping(value, "P3_B4_ROUTE_CARRIER_INVALID")
+            motif_id = route.get("runtime_motif_id")
+            name = route.get("route")
+            source_lane = _require_mapping(route.get("source_lane"), "P3_B4_ROUTE_CARRIER_INVALID")
+            if (
+                not isinstance(motif_id, str) or not motif_id
+                or name not in {"B4A", "B4B", "B4C", _B4_REFUSAL_CODE}
+                or not isinstance(source_lane.get("provider"), str)
+                or not isinstance(source_lane.get("model"), str)
+                or not isinstance(source_lane.get("dimension"), int)
+                or not isinstance(source_lane.get("centroid_dimension"), int)
+            ):
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
+            _require_uuid(route.get("source_motif_object_id"), "P3_B4_ROUTE_CARRIER_INVALID")
+            _require_uuid(route.get("source_motif_r1_revision_id"), "P3_B4_ROUTE_CARRIER_INVALID")
+            if name == _B4_REFUSAL_CODE:
+                _require_uuid(route.get("receipt_operation_id"), "P3_B4_ROUTE_CARRIER_INVALID")
+                digest = route.get("certificate_digest")
+                if not isinstance(digest, str) or len(digest) != 64:
+                    raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
+                members = _require_list(route.get("refused_members"), "P3_B4_ROUTE_CARRIER_INVALID")
+                if not members:
+                    raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
+            elif any(key in route for key in ("receipt_operation_id", "certificate_digest", "refused_members")):
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
+            key = (scope_key, motif_id)
+            if key in result:
+                raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_DUPLICATE")
+            result[key] = dict(route)
+    return result
+
+
 def _build_normalization_request(
     request: RootP3SourceAdmissionRequest, record: dict[str, Any],
     character_witnesses: dict[RootScopeKey, Any],
@@ -1927,6 +3064,7 @@ def _build_normalization_request(
     _MetadataLessPerEidEvidence, _RootSourceScopePlan, SourceArtifactPresence = _corrective_freeze_types()
     inputs: list[RootNormalizationScopeInput] = []
     unknown_by_scope_eid = _unknown_evidence_by_scope_eid(request)
+    b4_routes = _carrier_b4_route_map(record)
     for entry in _ordered_scope_entries(record):
         binding = request_binding(request, entry)
         source = _source_plan_for_key(request, binding.scope_key)
@@ -1937,9 +3075,11 @@ def _build_normalization_request(
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
         b2_by_eid = _carrier_b2_memory_evidence(b2)
         _require_b2_closure(memories, b2_by_eid)
+        motif_disposition_by_id = {item["motif_id"]: item for item in motif_dispositions}
         b3a: list[MigrationRuntimeRepresentationBootstrapRequest] = []
         b3b: list[MigrationRuntimeReembeddingBootstrapRequest] = []
         metadata_dispatches: list[MetadataLessB3BDispatch] = []
+        b2_refused: list[RootB2CertifiedRefusalDisposition] = []
         if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
             if source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
                 _require_unknown_eid_closure(binding.scope_key, memories, unknown_by_scope_eid)
@@ -1948,6 +3088,20 @@ def _build_normalization_request(
                 b2_memory = b2_by_eid.get(eid)
                 if b2_memory is None:
                     raise RootP3SourceAdmissionRefused("P3_CARRIER_B3_REQUIRES_B2_FACT")
+                if b2_memory["disposition"] == _REFUSAL_CODE:
+                    # Certified refusal is terminal P3 disposition, never a
+                    # substitute for an R2 runtime semantic successor.
+                    b2_refused.append(RootB2CertifiedRefusalDisposition(
+                        legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
+                        eid=eid,
+                        object_id=UUID(memory["object_id"]),
+                        r1_revision_id=UUID(memory["r1_revision_id"]),
+                        receipt_operation_id=UUID(b2_memory["receipt_operation_id"]),
+                        certificate_digest=b2_memory["certificate_digest"],
+                    ))
+                    continue
+                if b2_memory["disposition"] != "ADMITTED":
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_B2_MEMORY_DISPOSITION_INVALID")
                 common = dict(
                     snapshot_root=Path(entry["snapshot_root"]),
                     manifest_path=Path(entry["manifest_path"]),
@@ -1998,8 +3152,23 @@ def _build_normalization_request(
         b4b: list[MigrationRuntimeMotifRegeometryProjectionRequest] = []
         b4c: list[MigrationRuntimeZeroMemberMotifProjectionRequest] = []
         b4p: list[PartialMotifRetentionRequest] = []
+        b4_refused: list[RootB4CertifiedRefusalDisposition] = []
         if source.motif_presence is SourceArtifactPresence.PRESENT:
+            motif_scope_plans = tuple(sorted(
+                (
+                    candidate.scope_plan
+                    for candidate in request.scope_bindings
+                    if candidate.scope_key.workspace_id == binding.scope_key.workspace_id
+                ),
+                key=lambda item: (item.workspace_id, item.scope_kind, item.qualifier),
+            ))
             for motif in motifs:
+                disposition = motif_disposition_by_id.get(motif["runtime_motif_id"])
+                if disposition is None:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_DISPOSITION_MISMATCH")
+                route = b4_routes.get((binding.scope_key, motif["runtime_motif_id"]))
+                if route is None:
+                    raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_MISSING")
                 common_motif = dict(
                     snapshot_root=Path(entry["snapshot_root"]),
                     manifest_path=Path(entry["manifest_path"]),
@@ -2009,28 +3178,40 @@ def _build_normalization_request(
                     runtime_motif_id=motif["runtime_motif_id"],
                     expected_source_motif_object_id=UUID(motif["source_object_id"]),
                     expected_source_motif_revision_id=UUID(motif["r1_revision_id"]),
-                    scope_plans=(binding.scope_plan,),
+                    scope_plans=motif_scope_plans,
                     target_lane=request.description.target_representation_lane,
                     idempotency_namespace_id=binding.scope_plan.idempotency_namespace_id,
                 )
-                if source.materialization_posture in {
-                    MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
-                    MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-                }:
+                if route["route"] == "B4C":
+                    if disposition["disposition"] != MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value:
+                        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_DISPOSITION_DRIFT")
                     b4c.append(MigrationRuntimeZeroMemberMotifProjectionRequest(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4C", str(motif["runtime_motif_id"])),
                     ))
-                elif source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+                elif disposition["disposition"] != MotifSemanticDisposition.EXACT_ADMITTED.value:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_EXACT_DISPOSITION_REQUIRED")
+                elif route["route"] == "B4A":
                     b4a.append(MigrationRuntimeMotifProjectionRequest(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4A", str(motif["runtime_motif_id"])),
                     ))
-                else:
+                elif route["route"] == "B4B":
                     b4b.append(MigrationRuntimeMotifRegeometryProjectionRequest(
                         **common_motif,
                         idempotency_key=_stage_key(request, entry, "B4B", str(motif["runtime_motif_id"])),
                     ))
+                elif route["route"] == _B4_REFUSAL_CODE:
+                    b4_refused.append(RootB4CertifiedRefusalDisposition(
+                        legacy_source_namespace_id=binding.scope_plan.legacy_source_namespace_id,
+                        runtime_motif_id=motif["runtime_motif_id"],
+                        source_motif_object_id=UUID(route["source_motif_object_id"]),
+                        source_motif_r1_revision_id=UUID(route["source_motif_r1_revision_id"]),
+                        receipt_operation_id=UUID(route["receipt_operation_id"]),
+                        certificate_digest=route["certificate_digest"],
+                    ))
+                else:
+                    raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
             for motif in motif_dispositions:
                 if motif["disposition"] != MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value:
                     continue
@@ -2057,10 +3238,15 @@ def _build_normalization_request(
             b3a_requests=tuple(b3a),
             b3b_requests=tuple(b3b),
             metadata_less_b3b_dispatches=tuple(metadata_dispatches),
+            b2_refused_memory_dispositions=tuple(b2_refused),
+            motif_source_admitted=(
+                source.motif_presence is SourceArtifactPresence.PRESENT
+            ),
             b4a_requests=tuple(b4a),
             b4b_requests=tuple(b4b),
             b4c_requests=tuple(b4c),
             b4p_requests=tuple(b4p),
+            b4_refused_motif_dispositions=tuple(b4_refused),
         ))
     return RootNormalizationRequest(
         description=request.description,
@@ -2074,6 +3260,9 @@ def _build_normalization_request(
         b1m_identity_universe_digest=_require_mapping(
             record.get("b1m"), "P3_B1M_IDENTITY_UNIVERSE_REQUIRED",
         )["identity_universe_digest"],
+        recovered_p2_explicit_source_manifest_digest=(
+            request.recovered_p2_explicit_source_manifest_digest
+        ),
     )
 
 
@@ -2115,33 +3304,58 @@ def _carrier_evidence_child_request_counts(
         "b3a": 0, "ordinary_b3b": 0, "metadata_less_b3b": 0,
         "total_b3b": 0, "b4a": 0, "b4b": 0, "b4c": 0, "b4p": 0,
     }
+    b4_routes = _carrier_b4_route_map(record)
     for entry in _ordered_scope_entries(record):
         scope_key = _scope_key_from_payload(entry.get("scope_key"))
         source = _source_plan_for_key(request, scope_key)
         memories, motifs = _carrier_b1_evidence(entry, source, character_witnesses)
         b2 = _require_mapping(entry.get("b2"), "P3_CARRIER_B2_EVIDENCE_REQUIRED")
-        _require_b2_closure(memories, _carrier_b2_memory_evidence(b2))
+        b2_by_eid = _carrier_b2_memory_evidence(b2)
+        _require_b2_closure(memories, b2_by_eid)
         if source.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH:
             if source.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
                 _require_unknown_eid_closure(scope_key, memories, unknown_by_scope_eid)
-                result["metadata_less_b3b"] += len(memories)
+                result["metadata_less_b3b"] += sum(
+                    b2_by_eid[memory["eid"]]["disposition"] == "ADMITTED"
+                    for memory in memories
+                )
             else:
                 for memory in memories:
+                    if b2_by_eid[memory["eid"]]["disposition"] == _REFUSAL_CODE:
+                        continue
                     strategy = LegacyVectorStrategy(memory["legacy_vector_strategy"])
                     if strategy is LegacyVectorStrategy.BYTE_DERIVATION_POSSIBLE:
                         result["b3a"] += 1
                     else:
                         result["ordinary_b3b"] += 1
         if source.motif_presence is SourceArtifactPresence.PRESENT:
-            if source.materialization_posture in {
-                MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF,
-                MaterializedScopePosture.DECLARED_EMPTY_SHARED,
-            }:
-                result["b4c"] += len(motifs)
-            elif source.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
-                result["b4a"] += len(motifs)
-            else:
-                result["b4b"] += len(motifs)
+            dispositions = {
+                item["motif_id"]: item
+                for item in _carrier_b1_motif_dispositions(
+                    _require_mapping(entry.get("b1"), "P3_CARRIER_B1_EVIDENCE_REQUIRED")
+                )
+            }
+            for motif in motifs:
+                disposition = dispositions.get(motif["runtime_motif_id"])
+                route = b4_routes.get((scope_key, motif["runtime_motif_id"]))
+                if disposition is None or route is None:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_B1_DISPOSITION_MISMATCH")
+                if route["route"] == "B4C":
+                    if disposition["disposition"] != MotifSemanticDisposition.ZERO_MEMBER_CERTIFIED.value:
+                        raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_DISPOSITION_DRIFT")
+                    result["b4c"] += 1
+                elif disposition["disposition"] != MotifSemanticDisposition.EXACT_ADMITTED.value:
+                    raise RootP3SourceAdmissionRefused("P3_CARRIER_MOTIF_EXACT_DISPOSITION_REQUIRED")
+                elif route["route"] == "B4A":
+                    result["b4a"] += 1
+                elif route["route"] == "B4B":
+                    result["b4b"] += 1
+                elif route["route"] == _B4_REFUSAL_CODE:
+                    result["b4_refused_member_semantic_gap"] = (
+                        result.get("b4_refused_member_semantic_gap", 0) + 1
+                    )
+                else:
+                    raise RootP3SourceAdmissionRefused("P3_B4_ROUTE_CARRIER_INVALID")
             result["b4p"] += sum(
                 item["disposition"] == MotifSemanticDisposition.PARTIAL_AUTHORITY_CERTIFIED.value
                 for item in _carrier_b1_motif_dispositions(
@@ -2214,6 +3428,7 @@ def _verify_record_snapshots(
         binding = request_binding(request, entry)
         expected_namespace_id = binding.scope_plan.legacy_source_namespace_id
         expected_namespace_key = _p1_legacy_source_namespace_key(connection, expected_namespace_id)
+        _require_p1_motif_alias_separation(connection, binding.scope_plan)
         if (
             entry.get("legacy_source_namespace_id") != str(expected_namespace_id)
             or entry.get("legacy_source_namespace_key") != expected_namespace_key
@@ -2261,6 +3476,16 @@ def _completion_snapshot_pairs(
         "completed_manifests",
         "inherited_snapshots",
     }
+    supersession_keys = {
+        "predecessor_native_core_id",
+        "successor_native_core_id",
+        "predecessor_core_disposition",
+    }
+    has_supersession = bool(set(data) & supersession_keys)
+    if has_supersession:
+        if not supersession_keys <= set(data):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
+        base_keys |= supersession_keys
     pending_keys = base_keys | {
         "previous_b1_scope_reuse_candidate_count",
         "predecessor_b1_revalidation_pending",
@@ -2279,6 +3504,24 @@ def _completion_snapshot_pairs(
     predecessor, observed_digest = _load_predecessor_record(predecessor_path)
     if observed_digest != predecessor_digest:
         raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_DRIFT")
+    if has_supersession:
+        try:
+            predecessor_core_id = UUID(data["predecessor_native_core_id"])
+            successor_core_id = UUID(data["successor_native_core_id"])
+        except (TypeError, ValueError) as exc:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID") from exc
+        if (
+            predecessor.get("expected_native_core_id") != str(predecessor_core_id)
+            or successor_core_id != request.expected_native_core_id
+        ):
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_PREDECESSOR_MISMATCH")
+        expected_disposition = (
+            "SAME_CORE_CONTINUATION"
+            if predecessor_core_id == successor_core_id
+            else "PRESERVED_SUPERSEDED_PREDECESSOR_EVIDENCE"
+        )
+        if data.get("predecessor_core_disposition") != expected_disposition:
+            raise RootP3SourceAdmissionRefused("P3_CARRIER_COMPLETION_SHAPE_INVALID")
     predecessor_pairs = {
         (
             str(Path(item.get("snapshot_root", "")).expanduser().resolve()),
@@ -2320,6 +3563,10 @@ def _completion_snapshot_pairs(
         base_keys=base_keys,
         pending_keys=pending_keys,
         qualified_keys=qualified_keys,
+        predecessor_core_superseded=(
+            has_supersession and data["predecessor_core_disposition"]
+            == "PRESERVED_SUPERSEDED_PREDECESSOR_EVIDENCE"
+        ),
     )
     return pairs
 
@@ -2332,6 +3579,7 @@ def _validate_completion_reuse_metadata(
     base_keys: set[str],
     pending_keys: set[str],
     qualified_keys: set[str],
+    predecessor_core_superseded: bool,
 ) -> None:
     """Accept only the legacy, pending, or qualified B1-reuse completion state."""
 
@@ -2349,6 +3597,10 @@ def _validate_completion_reuse_metadata(
         )
         if pair in inherited_snapshot_pairs and entry.get("b1") is not None:
             derived_candidate_count += 1
+    if predecessor_core_superseded:
+        # A predecessor B1 record names revisions in its retained old core;
+        # none may be revalidated or reused in the successor core.
+        derived_candidate_count = 0
 
     keys = set(completion)
     if keys == base_keys:
@@ -2466,6 +3718,22 @@ def _p1_legacy_source_namespace_key(
     return source_key
 
 
+def _require_p1_motif_alias_separation(
+    connection: sqlite3.Connection,
+    scope_plan: MigrationRuntimeScopePlan,
+) -> None:
+    """Prove B4's shared routing alias exists as a P1 prerequisite fact."""
+
+    if scope_plan.motif_alias_namespace_id == scope_plan.legacy_source_namespace_id:
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_MOTIF_ALIAS_COLLAPSED")
+    rows = connection.execute(
+        "SELECT source_key FROM legacy_source_namespaces WHERE legacy_source_namespace_id=?",
+        (native_id_to_bytes(scope_plan.motif_alias_namespace_id),),
+    ).fetchall()
+    if len(rows) != 1 or not isinstance(rows[0][0], str) or not rows[0][0].strip():
+        raise RootP3SourceAdmissionRefused("P3_CARRIER_P1_MOTIF_ALIAS_MISSING")
+
+
 def _stage_key(request: RootP3SourceAdmissionRequest, entry: dict[str, Any], stage: str, suffix: str) -> str:
     scope = _scope_key_from_payload(entry.get("scope_key"))
     return f"{request.operation_key}:{stage}:{'|'.join(scope.canonical_key)}:{suffix}"
@@ -2539,6 +3807,7 @@ def _require_uuid(value: object, code: str) -> UUID:
 
 __all__ = [
     "NativeRootP3SourceAdmissionService",
+    "RootP3CertifiedRefusalSourceMember",
     "RootP3ScopeBinding",
     "RootP3SourceAdmissionInterrupted",
     "RootP3SourceAdmissionInterruptionPoint",

@@ -30,6 +30,7 @@ from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .ids import native_id_to_bytes
 from .object_revision_governance import NativeObjectRevisionGovernanceService
 from .provenance import is_unknown_original_provenance_values
+from .runtime_semantic_admission import is_runtime_semantically_admitted
 from .schema import require_current_schema
 
 
@@ -75,7 +76,7 @@ class NativePostWriteMemoryAccess:
         namespace = native_id_to_bytes(self._legacy_source_namespace_id)
         alias_rows = self._connection.execute(
             """
-            SELECT a.alias_value,a.object_id
+            SELECT a.alias_value,a.object_id,r.object_revision_id,r.revision_ordinal
               FROM legacy_object_aliases a
               JOIN objects o ON o.object_id=a.object_id
               JOIN object_revisions r
@@ -88,10 +89,17 @@ class NativePostWriteMemoryAccess:
             (namespace,),
         ).fetchall()
         aliases: dict[bytes, int] = {}
-        for alias_value, object_id in alias_rows:
+        for alias_value, object_id, revision_id, revision_ordinal in alias_rows:
             eid = _canonical_eid_alias(alias_value)
             if not isinstance(object_id, bytes) or len(object_id) != 16:
                 raise SubstrateInvariantViolation("runtime EID alias has an invalid object identity")
+            if not is_runtime_semantically_admitted(
+                self._connection,
+                object_id=object_id,
+                revision_id=revision_id,
+                revision_ordinal=revision_ordinal,
+            ):
+                continue
             if object_id in aliases:
                 raise SubstrateInvariantViolation("runtime enumeration has an ambiguous object alias")
             aliases[object_id] = eid
@@ -120,6 +128,19 @@ class NativePostWriteMemoryAccess:
             ).fetchone()
             if kind is None or kind != ("LEGACY_CORE_NODE",):
                 raise SubstrateInvariantViolation("runtime enumeration order does not point at a core memory")
+            current = self._connection.execute(
+                "SELECT current_revision_id,current_revision_ordinal FROM objects WHERE object_id=?",
+                (object_id,),
+            ).fetchone()
+            if current is None:
+                raise SubstrateInvariantViolation("runtime enumeration object disappeared")
+            if not is_runtime_semantically_admitted(
+                self._connection,
+                object_id=object_id,
+                revision_id=current[0],
+                revision_ordinal=current[1],
+            ):
+                continue
             seen_ordinals.add(ordinal)
             seen_objects.add(object_id)
             ordered.append((object_id, ordinal))

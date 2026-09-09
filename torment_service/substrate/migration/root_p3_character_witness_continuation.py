@@ -28,6 +28,24 @@ _SCHEMA = "TORMENT_ROOT_P3_CHARACTER_SEED_WITNESS_DOMAIN_DERIVATION_CONTINUATION
 _VERSION = 1
 _AGGREGATE_COMMITMENT_OPENING = "AGGREGATE_COMMITMENT_OPENING"
 _CHARACTER_DOMAIN_DERIVATION_LAW = "UNIQUE_BOUNDED_CHARACTER_WITNESS_DOMAIN_V1"
+_CHARACTER_SEMANTIC_WITNESS_FIELDS = (
+    "workspace_id",
+    "agent_id",
+    "domain_id",
+    "seed_definition",
+    "seed_definition_compatibility",
+    "derived_owner_agent_id",
+    "lifecycle_compatibility",
+    "seed_definition_digest",
+    "seed_id",
+    "character_name",
+    "seed_text",
+    "seed_eids",
+    "seed_motif_id",
+    "seed_motif_member_eids",
+    "seed_motif_seed_eids",
+    "concept_summaries",
+)
 
 
 class RootP3CharacterWitnessContinuationRefused(ValueError):
@@ -36,6 +54,30 @@ class RootP3CharacterWitnessContinuationRefused(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+def _character_witness_semantically_equivalent(
+    historical_descriptor_witness: CharacterSeedWitness,
+    freshly_rederived_witness: CharacterSeedWitness,
+) -> bool:
+    """Compare two already-qualified Character witnesses across digest generations.
+
+    ``CharacterSeedWitness`` owns validation of a descriptor's historical
+    checksum forms.  P3 owns only this narrow bridge from that accepted
+    descriptor to a freshly derived frozen-byte witness.  Every semantic fact
+    must agree; the checksum-generation ``witness_digest`` is intentionally
+    the sole excluded field.
+    """
+
+    return (
+        isinstance(historical_descriptor_witness, CharacterSeedWitness)
+        and isinstance(freshly_rederived_witness, CharacterSeedWitness)
+        and all(
+            getattr(historical_descriptor_witness, field)
+            == getattr(freshly_rederived_witness, field)
+            for field in _CHARACTER_SEMANTIC_WITNESS_FIELDS
+        )
+    )
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -158,6 +200,7 @@ class RootP3CharacterDomainDerivation:
     candidate_evidence: tuple[RootP3CharacterDomainCandidateEvidence, ...]
     candidate_evidence_digest: str
     witness_digest: str
+    freshly_rederived_witness: CharacterSeedWitness
     law: str = _CHARACTER_DOMAIN_DERIVATION_LAW
 
     def __post_init__(self) -> None:
@@ -178,6 +221,15 @@ class RootP3CharacterDomainDerivation:
             raise ValueError("Character domain candidate evidence must be unique and ordered")
         _sha256_text(self.candidate_evidence_digest, "P3_CHARACTER_DOMAIN_CANDIDATE_EVIDENCE_INVALID")
         _sha256_text(self.witness_digest, "P3_CHARACTER_DOMAIN_WITNESS_DIGEST_INVALID")
+        if not isinstance(self.freshly_rederived_witness, CharacterSeedWitness):
+            raise ValueError("Character domain derivation requires a fresh Character witness")
+        if (
+            self.freshly_rederived_witness.workspace_id != self.scope_key.workspace_id
+            or self.freshly_rederived_witness.agent_id != (self.scope_key.agent_id or "")
+            or self.freshly_rederived_witness.domain_id != self.domain_id
+            or self.freshly_rederived_witness.witness_digest != self.witness_digest
+        ):
+            raise ValueError("Character domain derivation fresh witness disagrees with scope")
         expected = _sha256_value({
             "law": self.law,
             "scope_key": self.scope_key.identity_payload(),
@@ -269,7 +321,9 @@ def validate_character_witness_inputs(
         )
         if _sha256_bytes(item.seed_definition_bytes) != observation.observation_digest:
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_P2_OBSERVATION_DIGEST_MISMATCH")
-        if witness.witness_digest != derivation.witness_digest:
+        if not _character_witness_semantically_equivalent(
+            witness, derivation.freshly_rederived_witness,
+        ):
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_DOMAIN_WITNESS_MISMATCH")
         result[item.scope_key] = RootP3CharacterWitnessBinding(
             item.scope_key, item.legacy_source_namespace_id, observation.observation_key,
@@ -442,7 +496,9 @@ def _validate_payload(
         if (
             entry["seed_observation_key"] != observation.observation_key
             or entry["seed_observation_digest"] != observation.observation_digest
-            or witness.witness_digest != derivation.witness_digest
+            or not _character_witness_semantically_equivalent(
+                witness, derivation.freshly_rederived_witness,
+            )
             or scope in result
         ):
             raise RootP3CharacterWitnessContinuationRefused("P3_CHARACTER_CONTINUATION_WITNESS_MISMATCH")

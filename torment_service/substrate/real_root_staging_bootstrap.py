@@ -100,6 +100,8 @@ class RuntimeScopeBootstrap:
     identity_namespace_key: str
     semantic_scope_key: str
     legacy_source_namespace_key: str
+    motif_alias_namespace_id: UUID
+    motif_alias_namespace_key: str
     membership_identity_namespace_id: UUID
     membership_identity_namespace_key: str
     idempotency_namespace_id: UUID
@@ -113,6 +115,7 @@ class RuntimeScopeBootstrap:
         if self.runtime_scope.scope_kind not in {"PRIVATE_AGENT", "SHARED_DOMAIN"}:
             raise ValueError("runtime scope kind is unsupported")
         _uuid_fields(
+            self.motif_alias_namespace_id,
             self.membership_identity_namespace_id,
             self.idempotency_namespace_id,
         )
@@ -120,10 +123,13 @@ class RuntimeScopeBootstrap:
             self.identity_namespace_key,
             self.semantic_scope_key,
             self.legacy_source_namespace_key,
+            self.motif_alias_namespace_key,
             self.membership_identity_namespace_key,
             self.idempotency_namespace_key,
             self.idempotency_key,
         )
+        if self.motif_alias_namespace_id == self.runtime_scope.legacy_source_namespace_id:
+            raise ValueError("motif alias namespace must differ from legacy source namespace")
         if not isinstance(self.membership_witness, RootScopeMembershipWitness):
             raise ValueError("membership_witness must be typed")
 
@@ -150,6 +156,10 @@ class P1StagingBootstrapRequest:
         keys = tuple(_scope_key(item.runtime_scope) for item in self.runtime_scopes)
         if len(set(keys)) != len(keys):
             raise ValueError("runtime scope prerequisites must not collide")
+        alias_ids = tuple(item.motif_alias_namespace_id for item in self.runtime_scopes)
+        alias_keys = tuple(item.motif_alias_namespace_key for item in self.runtime_scopes)
+        if len(set(alias_ids)) != len(alias_ids) or len(set(alias_keys)) != len(alias_keys):
+            raise ValueError("motif alias namespace prerequisites must not collide")
 
 
 @dataclass(frozen=True)
@@ -294,6 +304,10 @@ def _persist_prerequisites(connection: sqlite3.Connection, request: P1StagingBoo
             scope.legacy_source_namespace_id, item.legacy_source_namespace_key,
         )
         _ensure_namespace(
+            connection, "legacy_source_namespaces", "legacy_source_namespace_id", "source_key",
+            item.motif_alias_namespace_id, item.motif_alias_namespace_key,
+        )
+        _ensure_namespace(
             connection, "identity_namespaces", "identity_namespace_id", "namespace_key",
             item.membership_identity_namespace_id, item.membership_identity_namespace_key,
         )
@@ -365,6 +379,10 @@ def _verify_prerequisites(
         _require_namespace(
             connection, "legacy_source_namespaces", "legacy_source_namespace_id", "source_key",
             scope.legacy_source_namespace_id, item.legacy_source_namespace_key,
+        )
+        _require_namespace(
+            connection, "legacy_source_namespaces", "legacy_source_namespace_id", "source_key",
+            item.motif_alias_namespace_id, item.motif_alias_namespace_key,
         )
         _require_namespace(
             connection, "identity_namespaces", "identity_namespace_id", "namespace_key",

@@ -16,6 +16,7 @@ import numpy as np
 
 from .errors import SubstrateInvariantViolation, SubstrateObjectNotFound
 from .ids import native_id_to_bytes
+from .runtime_semantic_admission import require_runtime_semantic_admission
 from .schema import open_schema
 
 
@@ -191,6 +192,12 @@ class NativeCompatEmbeddingReader:
             raise SubstrateObjectNotFound("native embedding source object was not found")
         if current[0] != MEMORY_OBJECT_KIND:
             raise SubstrateInvariantViolation("qualified embedding source must be a LEGACY_CORE_NODE")
+        require_runtime_semantic_admission(
+            self._connection,
+            object_id=object_id,
+            revision_id=UUID(bytes=current[1]),
+            revision_ordinal=current[2],
+        )
         return self._read_exact(
             object_id,
             UUID(bytes=current[1]),
@@ -204,6 +211,12 @@ class NativeCompatEmbeddingReader:
         """Revalidate and read a known old representation without currentness."""
         if not isinstance(witness, QualifiedCompatEmbedding):
             raise ValueError("a QualifiedCompatEmbedding witness is required")
+        require_runtime_semantic_admission(
+            self._connection,
+            object_id=witness.source_object_id,
+            revision_id=witness.source_revision_id,
+            revision_ordinal=witness.source_revision_ordinal,
+        )
         result = self._read_exact(
             witness.source_object_id,
             witness.source_revision_id,
@@ -297,6 +310,7 @@ class NativeCompatEmbeddingReader:
                AND object.object_kind=?
                AND object.identity_namespace_id=?
                AND source.effective_semantic_scope_id=?
+               AND source.lineage_kind IN ('NATIVE_CREATION','NATIVE_ORDINARY')
                AND state.readiness='READY'
                AND state.operational_disposition='USABLE'
                AND measurement.result='MATCH'
@@ -321,6 +335,12 @@ class NativeCompatEmbeddingReader:
         expected_representation_id: UUID | None,
         absent_is_none: bool,
     ) -> QualifiedCompatEmbedding | None:
+        require_runtime_semantic_admission(
+            self._connection,
+            object_id=object_id,
+            revision_id=revision_id,
+            revision_ordinal=revision_ordinal,
+        )
         parameters: list[object] = [
             native_id_to_bytes(object_id),
             native_id_to_bytes(revision_id),

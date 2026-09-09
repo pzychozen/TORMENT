@@ -13,13 +13,32 @@ import numpy as np
 import pytest
 
 import torment_service.substrate.migration.root_p3_source_admission as p3_source_admission
+import torment_service.substrate.migration.root_p3_character_witness_continuation as p3_character_continuation
 from torment_service.provenance_v1 import ProvenanceV1
 from torment_service.character import CharacterSeed, CharacterStore, _split_seed_text
 from torment_service.substrate.character_seed_witness import (
-    read_legacy_character_seed_witness, read_legacy_character_seed_witness_from_frozen_bytes,
+    CharacterSeedWitness, read_legacy_character_seed_witness,
+    read_legacy_character_seed_witness_from_frozen_bytes,
 )
+from torment_service.substrate.canonical_intent import canonical_intent_text
 from torment_service.substrate.connection import open_temporary_test_connection
+from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
+from torment_service.substrate.errors import SubstrateInvariantViolation
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
+from torment_service.substrate.migration.certified_refusal_runtime_proof import (
+    CertifiedRefusalRuntimeProofFailed,
+    CertifiedRefusalRuntimeSource,
+    prove_certified_refusal_runtime_negative,
+)
+from torment_service.substrate.relationships import Endpoint, NativeRelationshipService, RelationshipState
+from torment_service.substrate.representations import (
+    INTEGRITY_ALGORITHM_SHA256,
+    INTEGRITY_VALUE_ENCODING_RAW,
+    NativeRepresentationService,
+    RepresentationIntegrityExpectationRequest,
+    RepresentationReadyRequest,
+    RepresentationRequest,
+)
 from torment_service.substrate.migration import (
     EvidenceOwnerBoundary,
     EvidenceOwnerBoundaryKind,
@@ -41,8 +60,10 @@ from torment_service.substrate.migration import (
     RootEvidenceManifest,
     RootFeaturePosture,
     RootNativeProductionAdmissionDescription,
+    RootB2CertifiedRefusalDisposition,
     RootNormalizationScopeInput,
     RootP3ScopeBinding,
+    RootP3CertifiedRefusalSourceMember,
     RootP3CharacterWitnessInput,
     RootP3ExternalOwnerObservationAuthority,
     RootP3SourceAdmissionInterrupted,
@@ -62,7 +83,7 @@ from torment_service.substrate.migration import (
     pre_b1_p3_scope_shape_counts,
 )
 from torment_service.substrate.errors import SubstrateSnapshotManifestError
-from torment_service.substrate.runtime_binding import NativeRepresentationLane
+from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
 from torment_service.substrate.corrective_freeze_packet import (
     MetadataLessPerEidEvidence,
@@ -354,6 +375,501 @@ def carrier_fixture(tmp_path: Path):
         yield connection, request
     finally:
         qualified.close()
+
+
+def test_p3_certifies_source_semantic_gap_without_creating_b2_or_runtime_access(
+    carrier_fixture,
+) -> None:
+    """A missing governance/lifecycle pair reaches terminal refusal, not R2."""
+
+    connection, request = carrier_fixture
+    nodes_path = request.root / "workspaces" / "ws" / "domains" / "domain" / "shared" / "nodes.jsonl"
+    rows = [json.loads(line) for line in nodes_path.read_text(encoding="utf-8").splitlines()]
+    refused_eid = min(_MULTI_MEMORY_EIDS)
+    refused = next(item for item in rows if item["eid"] == refused_eid)
+    refused["payload"].pop("governance")
+    refused["payload"].pop("lifecycle_status")
+    nodes_path.write_bytes(b"".join(_line(item) for item in rows))
+    scope = request.source_scope_plans[0].scope_key
+    refreshed_nodes = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.SHARED_GRAPH_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="domain"),
+        canonical_locator="nodes.jsonl",
+        semantic_role=EvidenceSemanticRole.NODES,
+        scope_key=scope,
+    )
+    source_namespace = next(
+        item for item in request.scope_bindings if item.scope_key == scope
+    ).scope_plan.legacy_source_namespace_id
+    selected_raw_row = next(
+        line for line in nodes_path.read_bytes().splitlines(keepends=True)
+        if json.loads(line.decode("utf-8"))["eid"] == refused_eid
+    )
+    refusal_member = RootP3CertifiedRefusalSourceMember(
+        scope_key=scope,
+        legacy_source_namespace_id=source_namespace,
+        eid=refused_eid,
+        selected_raw_row_sha256=hashlib.sha256(selected_raw_row).hexdigest(),
+        nodes_source_artifact_sha256=refreshed_nodes.sha256_hex or "",
+    )
+    refused_request = replace(
+        request,
+        description=replace(
+            request.description,
+            explicit_source_manifest=RootEvidenceManifest(tuple(
+                refreshed_nodes if item.scope_key == scope and item.semantic_role is EvidenceSemanticRole.NODES
+                else item
+                for item in request.description.explicit_source_manifest.entries
+            )),
+        ),
+        carrier_directory=request.carrier_root.parent / "semantic-gap-carrier",
+        operation_key="p3-source-semantic-gap",
+        certified_refusal_source_members=(refusal_member,),
+    )
+
+    result = NativeRootP3SourceAdmissionService(connection).admit(refused_request)
+    assert result.b1_memory_count == len(_MULTI_MEMORY_EIDS)
+    assert result.b2_memory_count == len(_MULTI_MEMORY_EIDS) - 1
+    assert result.b2_refused_memory_count == 1
+    assert result.root_disposition_closed
+    assert result.completion_class == "P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS"
+    assert result.final_evidence_set_e_digest is not None
+    assert p3_child_request_counts(result.normalization_request.scope_inputs)["b3a"] == len(_MULTI_MEMORY_EIDS) - 1
+    refusal_input = next(item for item in result.normalization_request.scope_inputs if item.scope_key == scope)
+    assert len(refusal_input.b2_refused_memory_dispositions) == 1
+    root_result = NativeRootWideNormalizationService(connection).normalize(result.normalization_request)
+    assert root_result.b2_certified_refused_memory_count == 1
+    assert root_result.b3_completed_memory_count == len(_MULTI_MEMORY_EIDS) - 1
+    assert root_result.root_memory_disposition_closed
+    assert not root_result.root_normalization_ready
+
+    carrier = json.loads(refused_request.record_path.read_text(encoding="utf-8"))["payload"]
+    certification = carrier["b2_refusal_certification"]
+    terminal_evidence = carrier["terminal_disposition_evidence"]
+    assert terminal_evidence["final_evidence_set_e_digest"] == result.final_evidence_set_e_digest
+    assert certification["final_evidence_set_e_digest"] != result.final_evidence_set_e_digest
+    evidence = json.loads(Path(certification["evidence_path"]).read_text(encoding="utf-8"))
+    certificate = json.loads(Path(certification["certificate_path"]).read_text(encoding="utf-8"))
+    terminal = json.loads(Path(terminal_evidence["path"]).read_text(encoding="utf-8"))
+    assert evidence["payload"]["exception_count"] == 1
+    assert certificate["payload"]["final_evidence_set_e_digest"] == certification["final_evidence_set_e_digest"]
+    assert terminal["payload"]["b4_partition"] == {
+        "b4a": 0, "b4b": 0, "b4c": 3, "b4p": 0,
+        "b4_refused_member_semantic_gap": 0, "total": 3,
+        "unaccounted": 0, "overlap": 0,
+    }
+
+    b1 = next(item for item in carrier["scopes"] if item["scope_key"] == scope.identity_payload())["b1"]
+    b2 = next(item for item in carrier["scopes"] if item["scope_key"] == scope.identity_payload())["b2"]
+    refused_b1 = next(item for item in b1["memories"] if item["eid"] == refused_eid)
+    refused_b2 = next(item for item in b2["memories"] if item["eid"] == refused_eid)
+    assert refused_b1["normalization_kind"] == "B2_REFUSED_SOURCE_SEMANTIC_GAP"
+    assert refused_b2["disposition"] == "B2_REFUSED_SOURCE_SEMANTIC_GAP"
+    assert connection.execute(
+        """SELECT lineage_kind FROM object_revisions
+             WHERE object_id=? AND object_revision_id=? AND revision_ordinal=1""",
+        (UUID(refused_b1["object_id"]).bytes, UUID(refused_b1["r1_revision_id"]).bytes),
+    ).fetchone() == ("LEGACY_PREDECESSOR_UNKNOWN",)
+    operation_id = UUID(refused_b2["receipt_operation_id"]).bytes
+    assert connection.execute(
+        "SELECT operation_kind FROM operations WHERE operation_id=?", (operation_id,)
+    ).fetchone() == ("P3_B2_REFUSED_SOURCE_SEMANTIC_GAP",)
+    assert connection.execute(
+        "SELECT rejection_code FROM operation_rejections WHERE operation_id=?", (operation_id,)
+    ).fetchone() == ("B2_REFUSED_SOURCE_SEMANTIC_GAP",)
+    assert connection.execute(
+        "SELECT count(*) FROM semantic_transitions WHERE operation_id=?", (operation_id,)
+    ).fetchone() == (0,)
+    assert connection.execute(
+        "SELECT count(*) FROM operation_outputs WHERE operation_id=?", (operation_id,)
+    ).fetchone() == (0,)
+    with pytest.raises(SubstrateInvariantViolation, match="RUNTIME_SEMANTIC_ADMISSION_REFUSED"):
+        NativeMemoryCompatibilityFacade(connection).get_memory_by_eid(
+            legacy_source_namespace_id=source_namespace, eid=refused_eid,
+        )
+
+    # Existing identity relationships need not be deleted, but their semantic
+    # compatibility projection must reject an endpoint whose current revision
+    # remains only legacy R1 evidence.
+    admitted_b1 = next(item for item in b1["memories"] if item["eid"] != refused_eid)
+    binding = next(item for item in refused_request.scope_bindings if item.scope_key == scope).scope_plan
+    admitted_object_id = UUID(bytes=connection.execute(
+        """SELECT object_id FROM legacy_object_aliases
+             WHERE legacy_source_namespace_id=? AND alias_kind='EID' AND alias_value=?""",
+        (native_id_to_bytes(binding.legacy_source_namespace_id), str(admitted_b1["eid"])),
+    ).fetchone()[0])
+    relationship = NativeRelationshipService(connection).create_relationship(
+        idempotency_namespace_id=binding.idempotency_namespace_id,
+        idempotency_key="refused-identity-link",
+        state=RelationshipState(
+            binding.target_identity_namespace_id,
+            binding.target_semantic_scope_id,
+            "LINK", "EXISTS", "UNSET", True, "QUALIFIED", "NOT_APPLICABLE",
+            (
+                Endpoint(0, "SOURCE", binding.target_semantic_scope_id, UUID(refused_b1["object_id"])),
+                Endpoint(1, "TARGET", binding.target_semantic_scope_id, admitted_object_id),
+            ),
+            {"weight": 1.0}, "JSON",
+        ),
+    )
+    assert connection.execute(
+        "SELECT count(*) FROM relationships WHERE relationship_id=?",
+        (native_id_to_bytes(relationship.relationship_id),),
+    ).fetchone() == (1,)
+    with pytest.raises(SubstrateInvariantViolation, match="RUNTIME_SEMANTIC_ADMISSION_REFUSED"):
+        NativeMemoryCompatibilityFacade(connection).get_memory_relationship(
+            relationship_id=relationship.relationship_id,
+            source_legacy_source_namespace_id=source_namespace,
+            target_legacy_source_namespace_id=source_namespace,
+        )
+
+    replay = NativeRootP3SourceAdmissionService(connection).admit(refused_request)
+    assert replay.b2_memory_count == result.b2_memory_count
+    assert replay.b2_refused_memory_count == 1
+    assert connection.execute(
+        "SELECT count(*) FROM operations WHERE operation_kind='P3_B2_REFUSED_SOURCE_SEMANTIC_GAP'"
+    ).fetchone() == (1,)
+
+    # B1 historical vector bytes are lawful evidence even though this source
+    # has no B2 successor.  The proof intentionally separates those captures
+    # from native runtime representations and exercises both runtime owners.
+    runtime_scope = NativeMemoryRuntimeScope(
+        workspace_id=binding.workspace_id,
+        scope_kind=binding.scope_kind,
+        legacy_source_namespace_id=binding.legacy_source_namespace_id,
+        identity_namespace_id=binding.target_identity_namespace_id,
+        semantic_scope_id=binding.target_semantic_scope_id,
+        agent_id=binding.agent_id,
+        domain_id=binding.domain_id,
+    )
+    refusal_source = CertifiedRefusalRuntimeSource(
+        eid=refused_eid,
+        object_id=UUID(refused_b1["object_id"]),
+        r1_revision_id=UUID(refused_b1["r1_revision_id"]),
+        scope=runtime_scope,
+    )
+    proof = prove_certified_refusal_runtime_negative(
+        connection,
+        sources=(refusal_source,),
+        native_core_database_path=refused_request.native_core_database_path,
+        expected_native_core_id=refused_request.expected_native_core_id,
+        representation_lane=_lane(),
+        vector_embedder=_Embedder(),
+    )
+    assert proof.legacy_current_r1_count == 1
+    assert proof.native_ordinary_successor_count == 0
+    assert proof.legacy_evidence_capture_count == 1
+    assert proof.certified_refusal_with_no_capture_count == 0
+    assert proof.other_representation_count == 0
+    assert proof.runtime_compat_embedding_count == 0
+    assert proof.ready_usable_runtime_representation_count == 0
+    assert proof.qualified_embedding_reader_result_count == 0
+    assert proof.qualified_embedding_reader_refusal_count == 1
+    assert proof.native_vector_candidate_count == 0
+    assert proof.native_vector_search_hit_count == 0
+
+    # A READY/USABLE COMPAT_EMBEDDING on the same refused R1 must trip the
+    # proof, even though the semantic reader gate remains independently
+    # fail-closed on the legacy-only lineage.
+    payload = np.asarray([1.0] + [0.0] * 383, dtype=np.float32).tobytes()
+    representations = NativeRepresentationService(connection)
+    pending = representations.create_representation_pending(
+        idempotency_namespace_id=binding.idempotency_namespace_id,
+        idempotency_key="certified-refusal-illegal-runtime-embedding",
+        request=RepresentationRequest(
+            "OBJECT_REVISION", refusal_source.object_id, refusal_source.r1_revision_id,
+            None, None, "COMPAT_EMBEDDING", 1, "compat-embedding-v1", "RAW_VECTOR",
+            "float32", 384, (), None, len(payload),
+        ),
+    )
+    representations.establish_representation_integrity_expectation(
+        idempotency_namespace_id=binding.idempotency_namespace_id,
+        idempotency_key="certified-refusal-illegal-runtime-embedding-expectation",
+        request=RepresentationIntegrityExpectationRequest(
+            pending.representation_id, INTEGRITY_ALGORITHM_SHA256,
+            hashlib.sha256(payload).digest(), INTEGRITY_VALUE_ENCODING_RAW,
+        ),
+    )
+    representations.publish_representation_ready(
+        idempotency_namespace_id=binding.idempotency_namespace_id,
+        idempotency_key="certified-refusal-illegal-runtime-embedding-ready",
+        request=RepresentationReadyRequest(
+            pending.representation_id, "COMPAT_EMBEDDING", 1, "compat-embedding-v1",
+            "RAW_VECTOR", payload,
+        ),
+    )
+    with pytest.raises(CertifiedRefusalRuntimeProofFailed) as error:
+        prove_certified_refusal_runtime_negative(
+            connection,
+            sources=(refusal_source,),
+            native_core_database_path=refused_request.native_core_database_path,
+            expected_native_core_id=refused_request.expected_native_core_id,
+            representation_lane=_lane(),
+            vector_embedder=_Embedder(),
+        )
+    assert error.value.proof.runtime_compat_embedding_count == 1
+    assert error.value.proof.ready_usable_runtime_representation_count == 1
+
+
+def test_p3_refuses_dependent_exact_motifs_with_only_frozen_b2_gap_members(
+    carrier_fixture,
+) -> None:
+    """B4 binds the resolved source member namespace, never the motif scope."""
+
+    connection, request = carrier_fixture
+    main_scope = next(item.scope_key for item in request.scope_bindings if item.scope_key.domain_id == "domain")
+    motif_scope = next(item.scope_key for item in request.scope_bindings if item.scope_key.domain_id == "empty-domain")
+    source_namespace = next(
+        item.scope_plan.legacy_source_namespace_id
+        for item in request.scope_bindings if item.scope_key == main_scope
+    )
+    motif_binding = next(item for item in request.scope_bindings if item.scope_key == motif_scope)
+
+    nodes_path = request.root / "workspaces" / "ws" / "domains" / "domain" / "shared" / "nodes.jsonl"
+    rows = [json.loads(line) for line in nodes_path.read_text(encoding="utf-8").splitlines()]
+    refused_eids = (2, 5)
+    for row in rows:
+        if row["eid"] in refused_eids:
+            row["payload"].pop("governance")
+            row["payload"].pop("lifecycle_status")
+    nodes_path.write_bytes(b"".join(_line(item) for item in rows))
+    refreshed_nodes = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.SHARED_GRAPH_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.SHARED_SCOPE, domain_id="domain"),
+        canonical_locator="nodes.jsonl", semantic_role=EvidenceSemanticRole.NODES,
+        scope_key=main_scope,
+    )
+
+    motifs_path = request.root / "workspaces" / "ws" / "domains" / "empty-domain" / "motifs.json"
+    motifs_path.write_text(json.dumps({"motifs": {
+        "one-refused-member": {
+            "motif_id": "one-refused-member", "domain_id": "empty-domain",
+            "label": "one refused", "centroid": [1.0] + [0.0] * 383,
+            "strength": 0.8, "stability_score": 0.8, "contributing_agents": [],
+            "created_ts": 1, "last_active_ts": 2, "members": [2],
+        },
+        "several-refused-members": {
+            "motif_id": "several-refused-members", "domain_id": "empty-domain",
+            "label": "several refused", "centroid": [1.0] + [0.0] * 383,
+            "strength": 0.8, "stability_score": 0.8, "contributing_agents": [],
+            "created_ts": 1, "last_active_ts": 2, "members": [5, 2, 17],
+        },
+    }}), encoding="utf-8")
+    refreshed_motifs = capture_present_source_evidence(
+        data_root=request.root,
+        owner_class=SourceOwnerClass.MOTIF_SOURCE,
+        owner_boundary=EvidenceOwnerBoundary("ws", EvidenceOwnerBoundaryKind.DOMAIN, domain_id="empty-domain"),
+        canonical_locator="motifs.json", semantic_role=EvidenceSemanticRole.MOTIFS,
+        scope_key=motif_scope,
+    )
+    raw_rows = {
+        json.loads(line.decode("utf-8"))["eid"]: line
+        for line in nodes_path.read_bytes().splitlines(keepends=True)
+    }
+    refusal_members = tuple(
+        RootP3CertifiedRefusalSourceMember(
+            scope_key=main_scope,
+            legacy_source_namespace_id=source_namespace,
+            eid=eid,
+            selected_raw_row_sha256=hashlib.sha256(raw_rows[eid]).hexdigest(),
+            nodes_source_artifact_sha256=refreshed_nodes.sha256_hex or "",
+        )
+        for eid in refused_eids
+    )
+    refused_request = replace(
+        request,
+        description=replace(
+            request.description,
+            explicit_source_manifest=RootEvidenceManifest(tuple(
+                refreshed_nodes if item.scope_key == main_scope and item.semantic_role is EvidenceSemanticRole.NODES
+                else refreshed_motifs if item.scope_key == motif_scope and item.semantic_role is EvidenceSemanticRole.MOTIFS
+                else item
+                for item in request.description.explicit_source_manifest.entries
+            )),
+        ),
+        carrier_directory=request.carrier_root.parent / "dependent-motif-semantic-gap-carrier",
+        operation_key="p3-dependent-motif-semantic-gap",
+        certified_refusal_source_members=refusal_members,
+    )
+
+    admission = NativeRootP3SourceAdmissionService(connection).admit(refused_request)
+    motif_input = next(
+        item for item in admission.normalization_request.scope_inputs if item.scope_key == motif_scope
+    )
+    assert not (*motif_input.b4a_requests, *motif_input.b4b_requests, *motif_input.b4c_requests)
+    assert [item.runtime_motif_id for item in motif_input.b4_refused_motif_dispositions] == [
+        "one-refused-member", "several-refused-members",
+    ]
+    assert p3_child_request_counts(admission.normalization_request.scope_inputs)[
+        "b4_refused_member_semantic_gap"
+    ] == 2
+
+    normalized = NativeRootWideNormalizationService(connection).normalize(admission.normalization_request)
+    assert normalized.root_normalization_complete
+    assert normalized.root_memory_disposition_closed
+    assert normalized.root_motif_disposition_closed
+    assert normalized.b4_certified_refused_motif_count == 2
+    assert normalized.p3_completion_class == "P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS"
+    assert not normalized.root_normalization_ready
+
+    carrier = json.loads(refused_request.record_path.read_text(encoding="utf-8"))["payload"]
+    terminal = json.loads(Path(carrier["terminal_disposition_evidence"]["path"]).read_text(encoding="utf-8"))
+    assert terminal["payload"]["b4_partition"] == {
+        "b4a": 0, "b4b": 0, "b4c": 0, "b4p": 0,
+        "b4_refused_member_semantic_gap": 2, "total": 2,
+        "unaccounted": 0, "overlap": 0,
+    }
+    route_entry = next(item for item in carrier["b4_routes"]["scope_routes"] if item["scope_key"] == motif_scope.identity_payload())
+    routes = {item["runtime_motif_id"]: item for item in route_entry["routes"]}
+    assert [item["eid"] for item in routes["one-refused-member"]["refused_members"]] == [2]
+    assert [item["eid"] for item in routes["several-refused-members"]["refused_members"]] == [2, 5]
+    for route in routes.values():
+        operation_id = UUID(route["receipt_operation_id"]).bytes
+        assert connection.execute(
+            "SELECT operation_kind FROM operations WHERE operation_id=?", (operation_id,)
+        ).fetchone() == ("P3_B4_REFUSED_MEMBER_SEMANTIC_GAP",)
+        assert connection.execute(
+            "SELECT rejection_code FROM operation_rejections WHERE operation_id=?", (operation_id,)
+        ).fetchone() == ("B4_REFUSED_MEMBER_SEMANTIC_GAP",)
+        assert connection.execute(
+            "SELECT count(*) FROM semantic_transitions WHERE operation_id=?", (operation_id,)
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT count(*) FROM operation_outputs WHERE operation_id=?", (operation_id,)
+        ).fetchone() == (0,)
+    assert connection.execute("SELECT count(*) FROM objects WHERE object_kind='DERIVED_MOTIF'").fetchone() == (0,)
+    assert connection.execute(
+        "SELECT count(*) FROM legacy_object_aliases WHERE legacy_source_namespace_id=? AND alias_kind='MOTIF_ID'",
+        (native_id_to_bytes(motif_binding.scope_plan.motif_alias_namespace_id),),
+    ).fetchone() == (0,)
+
+    # A missing/nonterminal B2 member is not eligible for this narrow refusal.
+    record = json.loads(refused_request.record_path.read_text(encoding="utf-8"))["payload"]
+    motif_entry = next(item for item in record["scopes"] if item["scope_key"] == motif_scope.identity_payload())
+    main_entry = next(item for item in record["scopes"] if item["scope_key"] == main_scope.identity_payload())
+    b2_by_namespace = {
+        str(source_namespace): p3_source_admission._carrier_b2_memory_evidence(main_entry["b2"]),
+    }
+    b2_by_namespace[str(source_namespace)].pop(17)
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_B4_ROUTE_MEMBER_B2_MISSING"):
+        p3_source_admission._derive_b4_route(
+            connection,
+            refused_request,
+            motif_entry,
+            motif_binding,
+            next(item for item in refused_request.source_scope_plans if item.scope_key == motif_scope),
+            next(item for item in motif_entry["b1"]["motifs"] if item["runtime_motif_id"] == "several-refused-members"),
+            next(item for item in motif_entry["b1"]["motif_dispositions"] if item["motif_id"] == "several-refused-members"),
+            tuple(sorted(
+                (item.scope_plan for item in refused_request.scope_bindings),
+                key=lambda item: (item.workspace_id, item.scope_kind, item.qualifier),
+            )),
+            b2_by_namespace,
+            carrier["b2_refusal_certification"],
+        )
+
+    replay = NativeRootP3SourceAdmissionService(connection).admit(refused_request)
+    assert replay.child_request_counts == admission.child_request_counts
+    assert connection.execute(
+        "SELECT count(*) FROM operations WHERE operation_kind='P3_B4_REFUSED_MEMBER_SEMANTIC_GAP'"
+    ).fetchone() == (2,)
+
+
+def test_root_memory_disposition_closure_requires_an_exact_disjoint_b1_b2_partition(
+    carrier_fixture,
+) -> None:
+    """A missing or contradictory terminal B2 disposition cannot claim closure."""
+
+    connection, request = carrier_fixture
+    admission = NativeRootP3SourceAdmissionService(connection).admit(request)
+    normalized_request = admission.normalization_request
+    service = NativeRootWideNormalizationService(connection)
+    assert service.normalize(normalized_request).root_memory_disposition_closed
+
+    admitted_scope = next(
+        item for item in normalized_request.scope_inputs if len(item.b3a_requests) > 1
+    )
+    admitted_request = admitted_scope.b3a_requests[0]
+    missing_scope = replace(
+        admitted_scope, b3a_requests=admitted_scope.b3a_requests[1:],
+    )
+    missing_request = replace(
+        normalized_request,
+        scope_inputs=tuple(
+            missing_scope if item.scope_key == admitted_scope.scope_key else item
+            for item in normalized_request.scope_inputs
+        ),
+    )
+    assert not service.normalize(missing_request).root_memory_disposition_closed
+
+    object_id = UUID(bytes=connection.execute(
+        """SELECT object_id FROM legacy_object_aliases
+             WHERE legacy_source_namespace_id=? AND alias_kind='EID' AND alias_value=?""",
+        (
+            native_id_to_bytes(admitted_request.legacy_source_namespace_id),
+            str(admitted_request.eid),
+        ),
+    ).fetchone()[0])
+    contradiction = RootB2CertifiedRefusalDisposition(
+        legacy_source_namespace_id=admitted_request.legacy_source_namespace_id,
+        eid=admitted_request.eid,
+        object_id=object_id,
+        r1_revision_id=admitted_request.expected_r1_revision_id,
+        receipt_operation_id=generate_native_id(),
+        certificate_digest="0" * 64,
+    )
+    with pytest.raises(ValueError, match="B3 EIDs must be unique"):
+        replace(
+            admitted_scope,
+            b2_refused_memory_dispositions=(contradiction,),
+        )
+
+
+def test_p3_predecessor_core_supersession_retains_snapshots_but_recaptures_b1(carrier_fixture) -> None:
+    connection, request = carrier_fixture
+    predecessor = replace(
+        request,
+        carrier_directory=request.carrier_root.parent / "predecessor-core-carrier",
+        operation_key="p3-predecessor-core-carrier",
+    )
+    NativeRootP3SourceAdmissionService(connection).admit(predecessor)
+    predecessor_bytes = predecessor.record_path.read_bytes()
+
+    successor_core_id = generate_native_id()
+    successor = replace(
+        request,
+        expected_native_core_id=successor_core_id,
+        carrier_directory=request.carrier_root.parent / "successor-core-carrier",
+        predecessor_carrier_record_path=predecessor.record_path,
+        operation_key="p3-successor-core-carrier",
+    )
+    completed = p3_source_admission._complete_predecessor_record(connection, successor)
+
+    assert predecessor.record_path.read_bytes() == predecessor_bytes
+    assert completed["expected_native_core_id"] == str(successor_core_id)
+    assert all(item["b1"] is None for item in completed["scopes"])
+    assert completed["carrier_completion"] == {
+        "predecessor_record_path": str(predecessor.record_path),
+        "predecessor_record_digest": json.loads(predecessor.record_path.read_text(encoding="utf-8"))["digest"],
+        "predecessor_native_core_id": str(request.expected_native_core_id),
+        "successor_native_core_id": str(successor_core_id),
+        "predecessor_core_disposition": "PRESERVED_SUPERSEDED_PREDECESSOR_EVIDENCE",
+        "completed_snapshots": [],
+        "completed_manifests": [],
+        "inherited_snapshots": [
+            {
+                "scope_key": item["scope_key"],
+                "snapshot_root": item["snapshot_root"],
+                "manifest_path": item["manifest_path"],
+                "legacy_snapshot_id": item["legacy_snapshot_id"],
+            }
+            for item in completed["scopes"]
+        ],
+        "previous_b1_scope_reuse_candidate_count": 0,
+        "predecessor_b1_revalidation_pending": False,
+    }
 
 
 def test_p3_partial_motif_uses_b1f_certificate_and_b4p_null_projection(carrier_fixture) -> None:
@@ -675,6 +1191,220 @@ def _character_p3_request(
     ), seed_bytes
 
 
+def _historical_descriptor_payload(witness: CharacterSeedWitness) -> dict[str, object]:
+    """Produce the established descriptor checksum form predating P3 additions."""
+
+    descriptor = witness.descriptor_payload()
+    descriptor.pop("seed_definition_compatibility")
+    descriptor.pop("derived_owner_agent_id")
+    descriptor.pop("lifecycle_compatibility")
+    historic_digest_payload = {
+        "workspace_id": witness.workspace_id,
+        "agent_id": witness.agent_id,
+        "domain_id": witness.domain_id,
+        "seed_definition_digest": witness.seed_definition_digest,
+        "seed_id": witness.seed_id,
+        "character_name": witness.character_name,
+        "seed_eids": list(witness.seed_eids),
+        "seed_motif_id": witness.seed_motif_id,
+        "seed_motif_member_eids": list(witness.seed_motif_member_eids),
+        "seed_motif_seed_eids": list(witness.seed_motif_seed_eids),
+        "concept_summaries": list(witness.concept_summaries),
+    }
+    descriptor["witness_digest"] = hashlib.sha256(
+        canonical_intent_text(historic_digest_payload).encode("utf-8"),
+    ).hexdigest()
+    return descriptor
+
+
+def test_p3_character_historical_descriptor_digest_uses_character_compatibility_on_initial_and_reload(
+    carrier_fixture,
+) -> None:
+    connection, request = carrier_fixture
+    character_request, seed_bytes = _character_p3_request(connection, request)
+    input_value = character_request.character_witness_inputs[0]
+    current = CharacterSeedWitness.from_descriptor_payload(
+        workspace_id=input_value.scope_key.workspace_id,
+        agent_id=input_value.scope_key.agent_id or "",
+        domain_id="domain",
+        value=input_value.descriptor_payload,
+    )
+    historical_descriptor = _historical_descriptor_payload(current)
+    historical = CharacterSeedWitness.from_descriptor_payload(
+        workspace_id=input_value.scope_key.workspace_id,
+        agent_id=input_value.scope_key.agent_id or "",
+        domain_id="domain",
+        value=historical_descriptor,
+    )
+    assert historical.witness_digest != current.witness_digest
+    assert p3_character_continuation._character_witness_semantically_equivalent(historical, current)
+
+    compatible_request = replace(
+        character_request,
+        character_witness_inputs=(replace(
+            input_value,
+            seed_definition_bytes=seed_bytes,
+            descriptor_payload=historical_descriptor,
+        ),),
+        carrier_directory=character_request.carrier_root.parent / "historical-digest-source-carrier",
+        character_continuation_carrier_directory=(
+            character_request.carrier_root.parent / "historical-digest-continuation"
+        ),
+    )
+    service = NativeRootP3SourceAdmissionService(connection)
+    assert service.admit(compatible_request).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+    continuation = json.loads((
+        compatible_request.character_continuation_carrier_root
+        / "p3_character_seed_witness_domain_derivation_continuation.json"
+    ).read_text(encoding="utf-8"))
+    assert continuation["payload"]["witnesses"][0]["character_witness"]["witness_digest"] == historical.witness_digest
+    # A second admission reloads the immutable continuation through the same
+    # semantic-equivalence seam rather than rewriting its historical digest.
+    assert service.admit(compatible_request).b2_memory_count == len(_MULTI_MEMORY_EIDS) + 2
+
+
+def test_p3_character_exact_contrarian_historical_digest_pair_is_semantically_equivalent() -> None:
+    """Exercise the known descriptor compatibility pair from frozen P3 evidence."""
+
+    descriptor = {
+        "compatibility_status": "CHARACTER_SEED_WITNESS_QUALIFIED",
+        "seed_definition": {
+            "character_name": "Soren", "core_half_life": 3650.0, "core_weight": 0.5,
+            "created_ts": 1787695390, "derived_weight": 0.42,
+            "drift_correction_threshold": 0.35, "drift_gravity_strength": 0.12,
+            "drift_window_steps": 500, "owner_agent_id": "contrarian",
+            "relational_half_life": 30.0, "relational_weight": 0.35,
+            "seed_eids": [1, 2], "seed_id": "hivemind_n5_contrarian_fluid_v1",
+            "seed_motif_id": "motif_research_0001",
+            "seed_text": (
+                "Soren is difficult to convince too quickly. He enjoys finding the overlooked "
+                "possibility, testing comfortable assumptions, and discovering when an apparently "
+                "solid explanation has another side."
+            ),
+            "situational_half_life": 7.0, "situational_weight": 0.15, "version": "1.0.0",
+        },
+        "seed_definition_digest": "e124faff0855954266fb47accab69a19a1ded01a1d14a8c2b321dc95acb8008f",
+        "seed_id": "hivemind_n5_contrarian_fluid_v1",
+        "character_name": "Soren",
+        "seed_text": (
+            "Soren is difficult to convince too quickly. He enjoys finding the overlooked possibility, "
+            "testing comfortable assumptions, and discovering when an apparently solid explanation has another side."
+        ),
+        "seed_eids": [1, 2],
+        "seed_motif_id": "motif_research_0001",
+        "seed_motif_member_eids": [
+            1, 2, 1, 2, 1, 2, 1, 2, 1, 2,
+            3, 3, 3, 3, 3, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6,
+            7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9,
+            10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 12, 12, 12,
+            12, 12, 13,
+        ],
+        "seed_motif_seed_eids": [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+        "concept_summaries": [
+            "Soren is difficult to convince too quickly.",
+            "He enjoys finding the overlooked possibility, testing comfortable assumptions, and "
+            "discovering when an apparently solid explanation has another side.",
+        ],
+        "witness_digest": "ff18952a3e15213926867e75085f886fa7c762a6ce508b659ab67a6b9cd797e9",
+    }
+    descriptor_before = json.loads(json.dumps(descriptor, sort_keys=True))
+    workspace_id = "hivemind-bounded-context-n5-v1-n5-20260825T220310Z-2af44f6c2e"
+    historical = CharacterSeedWitness.from_descriptor_payload(
+        workspace_id=workspace_id, agent_id="contrarian", domain_id="research", value=descriptor,
+    )
+    assert descriptor == descriptor_before
+
+    lifecycle = {
+        "state": "protected", "is_authoritative_on_row": True, "requires_join": None,
+        "set_by": {"actor": "system", "via": "canon_set", "at": 1}, "history_ref": None,
+    }
+    nodes = b"".join(_line({
+        "eid": eid,
+        "payload": {
+            "summary": descriptor["concept_summaries"][index], "type": "seed_canon",
+            "mtype": "seed_canon", "memory_class": "core", "strength": .95,
+            "confidence": .95, "half_life": descriptor["seed_definition"]["core_half_life"],
+            "canon": True, "user_id": "contrarian", "created_at": 1,
+            "last_reinforced": 1, "seed_id": descriptor["seed_id"],
+            "character_name": descriptor["character_name"], "tier": "core_identity",
+            "seed_concept_index": index, "lifecycle_status": lifecycle,
+        },
+    }) for index, eid in enumerate(descriptor["seed_eids"]))
+    fresh = read_legacy_character_seed_witness_from_frozen_bytes(
+        seed_definition_bytes=json.dumps(descriptor["seed_definition"], separators=(",", ":")).encode("utf-8"),
+        private_nodes_bytes=nodes,
+        motif_bytes=json.dumps({"motifs": {
+            descriptor["seed_motif_id"]: {"members": descriptor["seed_motif_member_eids"]},
+        }}, separators=(",", ":")).encode("utf-8"),
+        workspace_id=workspace_id,
+        agent_id="contrarian",
+        domain_id="research",
+        requested_seed_id=descriptor["seed_id"],
+    )
+
+    assert historical.witness_digest == "ff18952a3e15213926867e75085f886fa7c762a6ce508b659ab67a6b9cd797e9"
+    assert fresh.witness_digest == "654ad518eb4296869bf81bb20f94e40d96b3358e8f4d23f03fb6e866b8539a9f"
+    assert historical.domain_id == fresh.domain_id == "research"
+    assert p3_character_continuation._character_witness_semantically_equivalent(historical, fresh)
+
+
+@pytest.mark.parametrize("field,replacement", (
+    ("workspace_id", "other-workspace"),
+    ("agent_id", "other-agent"),
+    ("domain_id", "other-domain"),
+    ("seed_definition", {"seed_id": "different"}),
+    ("seed_definition_compatibility", "LEGACY_MISSING_OWNER_AGENT_ID_V1"),
+    ("derived_owner_agent_id", "other-agent"),
+    ("lifecycle_compatibility", "LEGACY_PRE_Q2_PROTECTED_CANON_V1"),
+    ("seed_definition_digest", "0" * 64),
+    ("seed_id", "different-seed"),
+    ("character_name", "Other"),
+    ("seed_text", "Other text."),
+    ("seed_eids", (99, 100)),
+    ("seed_motif_id", "different-motif"),
+    ("seed_motif_member_eids", (99, 100)),
+    ("seed_motif_seed_eids", (99, 100)),
+    ("concept_summaries", ("Other",)),
+))
+def test_p3_character_semantic_equivalence_refuses_every_non_digest_difference(
+    field: str, replacement: object,
+) -> None:
+    seed = CharacterSeed(
+        "semantic-equivalence-seed", "P3 Character",
+        "A first semantic concept. A second semantic concept.", owner_agent_id="agent",
+    )
+    seed.seed_eids = [1, 2]
+    seed.seed_motif_id = "semantic-equivalence-motif"
+    seed.created_ts = 1
+    definition = seed.to_dict()
+    fresh = CharacterSeedWitness.from_descriptor_payload(
+        workspace_id="workspace", agent_id="agent", domain_id="domain",
+        value=read_legacy_character_seed_witness_from_frozen_bytes(
+            seed_definition_bytes=json.dumps(definition, separators=(",", ":")).encode("utf-8"),
+            private_nodes_bytes=b"".join(_line({
+                "eid": eid,
+                "payload": {
+                    "summary": concept, "type": "seed_canon", "mtype": "seed_canon",
+                    "memory_class": "core", "strength": .95, "confidence": .95,
+                    "half_life": seed.core_half_life, "canon": True, "user_id": "agent",
+                    "created_at": 1, "last_reinforced": 1, "seed_id": seed.seed_id,
+                    "character_name": seed.character_name, "tier": "core_identity",
+                    "seed_concept_index": index,
+                    "lifecycle_status": {
+                        "state": "protected", "is_authoritative_on_row": True, "requires_join": None,
+                        "set_by": {"actor": "system", "via": "canon_set", "at": 1}, "history_ref": None,
+                    },
+                },
+            }) for index, (eid, concept) in enumerate(zip(seed.seed_eids, _split_seed_text(seed.seed_text), strict=True))),
+            motif_bytes=json.dumps({"motifs": {seed.seed_motif_id: {"members": seed.seed_eids}}}).encode("utf-8"),
+            workspace_id="workspace", agent_id="agent", domain_id="domain", requested_seed_id=seed.seed_id,
+        ).descriptor_payload(),
+    )
+    assert not p3_character_continuation._character_witness_semantically_equivalent(
+        fresh, replace(fresh, **{field: replacement}),
+    )
+
+
 def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fallback(carrier_fixture) -> None:
     connection, request = carrier_fixture
     character_request, _seed_bytes = _character_p3_request(connection, request)
@@ -734,6 +1464,45 @@ def test_p3_character_witness_continuation_routes_seed_rows_without_unknown_fall
     p3_source_admission._write_record(character_request.record_path, record)
     with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
         NativeRootP3SourceAdmissionService(connection).admit(character_request)
+
+
+def test_p3_character_b1_agreement_uses_readiness_subset_not_full_seed_set() -> None:
+    """A witness authorizes seeds; frozen readiness selects Character rows."""
+
+    scope = RootScopeKey("workspace", RootScopeKind.PRIVATE, agent_id="agent")
+    entry = {
+        "scope_key": scope.identity_payload(),
+        "b1": {
+            "memories": [
+                {
+                    "eid": 1,
+                    "r1_revision_id": str(UUID(int=1)),
+                    "legacy_vector_strategy": "BYTE_DERIVATION_POSSIBLE",
+                    "normalization_kind": "ORDINARY",
+                },
+                {
+                    "eid": 2,
+                    "r1_revision_id": str(UUID(int=2)),
+                    "legacy_vector_strategy": "BYTE_DERIVATION_POSSIBLE",
+                    "normalization_kind": "CHARACTER_SEED",
+                },
+            ],
+        },
+    }
+    witnesses = {scope: SimpleNamespace(witness=SimpleNamespace(seed_eids=(1, 2)))}
+
+    p3_source_admission._validate_character_b1_eid_agreement(
+        entry, witnesses, expected_character_eids={2},
+    )
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
+        p3_source_admission._validate_character_b1_eid_agreement(
+            entry, witnesses, expected_character_eids={1, 2},
+        )
+    entry["b1"]["memories"][1]["eid"] = 3
+    with pytest.raises(RootP3SourceAdmissionRefused, match="P3_CARRIER_CHARACTER_B1_EID_MISMATCH"):
+        p3_source_admission._validate_character_b1_eid_agreement(
+            entry, witnesses, expected_character_eids={3},
+        )
 
 
 def test_p3_character_witness_accepts_only_the_exact_legacy_missing_owner_raw_shape(carrier_fixture) -> None:
@@ -1036,6 +1805,12 @@ def test_p3_carrier_accepts_cross_scope_members_when_the_root_topology_has_one_c
     )
     result = NativeRootP3SourceAdmissionService(connection).admit(cross_scope_request)
     assert result.b1_memory_count == result.b2_memory_count == len(_MULTI_MEMORY_EIDS)
+    motif_scope = next(
+        item for item in result.normalization_request.scope_inputs if item.scope_key == motif_key
+    )
+    assert [item.runtime_motif_id for item in motif_scope.b4a_requests] == ["cross-scope-carrier-motif"]
+    assert not motif_scope.b4b_requests
+    assert not motif_scope.b4c_requests
     record = json.loads(result.carrier_record_path.read_text(encoding="utf-8"))
     motif_entry = next(item for item in record["payload"]["scopes"] if item["scope_key"]["domain_id"] == "empty-domain")
     assert [item["runtime_motif_id"] for item in motif_entry["b1"]["motifs"]] == ["cross-scope-carrier-motif"]
@@ -1066,6 +1841,8 @@ def test_p3_carrier_accepts_cross_scope_members_when_the_root_topology_has_one_c
     assert {row[0] for row in endpoints} == {expected[str(eid)] for eid in _MULTI_MEMORY_EIDS}
     assert {row[1] for row in endpoints} == {native_id_to_bytes(source_binding.unknown_semantic_scope_id)}
     assert {row[1] for row in endpoints} != {native_id_to_bytes(motif_binding.unknown_semantic_scope_id)}
+    normalized = NativeRootWideNormalizationService(connection).normalize(result.normalization_request)
+    assert normalized.root_normalization_complete
 
 
 def test_source_carrier_recovers_snapshot_b1_and_b2_then_composes_b3b4(carrier_fixture) -> None:
@@ -1611,7 +2388,8 @@ def test_hash_source_geometry_composes_b4b_from_each_admitted_motif(carrier_fixt
         motif_id: {
             "motif_id": motif_id, "domain_id": "domain", "label": motif_id,
             "centroid": [1.0] + [0.0] * 383, "strength": 0.8, "stability_score": 0.8,
-            "contributing_agents": [], "created_ts": 1, "last_active_ts": 2, "members": [],
+            "contributing_agents": [], "created_ts": 1, "last_active_ts": 2,
+            "members": list(sorted(_MULTI_MEMORY_EIDS)),
         }
         for motif_id in ("hash-motif-a", "hash-motif-b", "hash-motif-c")
     }}), encoding="utf-8")
@@ -1685,6 +2463,7 @@ def test_hash_source_geometry_composes_b4b_from_each_admitted_motif(carrier_fixt
     assert not scope.b3a_requests
     assert len(scope.b3b_requests) == len(_MULTI_MEMORY_EIDS)
     assert not scope.b4a_requests
+    assert not scope.b4c_requests
     assert [item.runtime_motif_id for item in scope.b4b_requests] == [
         "hash-motif-a", "hash-motif-b", "hash-motif-c",
     ]

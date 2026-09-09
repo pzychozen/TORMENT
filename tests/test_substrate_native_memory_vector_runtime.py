@@ -29,6 +29,7 @@ from torment_service.substrate.motifs import MotifState, NativeMotifService, Nat
 from torment_service.substrate.native_memory_vector_runtime import (
     NativeMemoryVectorRuntime,
     NativeMemoryVectorRuntimeConfiguration,
+    NativeVectorReadConsistencyRefused,
 )
 from torment_service.substrate.representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -394,7 +395,8 @@ def test_invariant_failed_rebuild_refuses_partial_or_stale_snapshot(tmp_path: Pa
 
         monkeypatch.setattr(runtime, "_enumerate_qualified_vectors", broken_vectors)
         runtime.invalidate("test invariant failure")
-        assert runtime.search_by_embedding((1.0, 0.0, 0.0), top_k=4) == []
+        with pytest.raises(NativeVectorReadConsistencyRefused, match="candidate-rebuild-failed"):
+            runtime.search_by_embedding((1.0, 0.0, 0.0), top_k=4)
         assert runtime.snapshot is None
         assert prior.matrix.tobytes() == prior_bytes
 

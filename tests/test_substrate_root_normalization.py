@@ -736,6 +736,46 @@ def test_root_wide_normalization_composes_b3_b4_and_generalized_readiness(tmp_pa
         fixture.close()
 
 
+def test_root_memory_disposition_closure_requires_an_exact_b1_b2_partition(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Memory closure stays true across B4 refusal, but not a missing/duplicate B2 disposition."""
+
+    fixture = _positive_fixture(tmp_path)
+    try:
+        connection = fixture.qualified.connection
+        service = NativeRootWideNormalizationService(connection)
+        fully_admitted = service.normalize(fixture.request)
+        assert fully_admitted.root_memory_disposition_closed
+        assert fully_admitted.b2_certified_refused_memory_count == 0
+
+        # B4 is not a memory disposition.  Its separate failure must retain
+        # the complete all-admitted B1/B2 memory partition while readiness
+        # and aggregate completion truthfully become false.
+        dispatch_b4 = service._dispatch_b4
+
+        def refused_b4(input_item):
+            receipts = dispatch_b4(input_item)
+            if not receipts:
+                return receipts
+            return (
+                replace(
+                    receipts[0], state=RootChildCompletionState.REFUSED,
+                    reason_code="TEST_B4_REFUSED",
+                ),
+                *receipts[1:],
+            )
+
+        monkeypatch.setattr(service, "_dispatch_b4", refused_b4)
+        b4_refused = service.normalize(fixture.request)
+        assert b4_refused.root_memory_disposition_closed
+        assert not b4_refused.root_normalization_complete
+        assert not b4_refused.root_normalization_ready
+
+    finally:
+        fixture.close()
+
+
 def test_declared_empty_shared_is_runtime_membership_but_not_discovered_materialization(tmp_path: Path) -> None:
     fixture = _positive_fixture(tmp_path)
     try:
@@ -811,6 +851,33 @@ def test_physical_empty_shared_without_motif_refuses_b3_and_b4_dispatches(tmp_pa
                 fixture.request.expected_native_core_id,
                 fixture.request.description,
             )
+    finally:
+        fixture.close()
+
+
+def test_unknown_identity_scope_accepts_only_a_certified_b2_refusal_disposition(tmp_path: Path) -> None:
+    fixture = _positive_fixture(tmp_path)
+    try:
+        key = RootScopeKey("ws-c", RootScopeKind.PRIVATE, agent_id="agent-0")
+        declared = next(
+            scope
+            for workspace in fixture.request.description.workspace_plans
+            for scope in workspace.runtime_scopes
+            if scope.scope_key == key
+        )
+        assert declared.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY
+        certified_refusal_only = SimpleNamespace(
+            all_b3_requests=(), all_motif_requests=(),
+            b3a_requests=(), b3b_requests=(), metadata_less_b3b_dispatches=(),
+            b2_refused_memory_dispositions=(object(),),
+            b4a_requests=(), b4b_requests=(), b4c_requests=(),
+        )
+        _validate_scope_dispatch(
+            declared, certified_refusal_only,
+            fixture.request.description.target_representation_lane,
+            fixture.request.expected_native_core_id,
+            fixture.request.description,
+        )
     finally:
         fixture.close()
 

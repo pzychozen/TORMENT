@@ -168,6 +168,8 @@ from .generalized_runtime_readiness import (
 from .root_normalization import (
     MetadataLessB3BDispatch,
     NativeRootWideNormalizationService,
+    RootB2CertifiedRefusalDisposition,
+    RootB4CertifiedRefusalDisposition,
     RootChildCompletionState,
     RootMotifNormalizationResult,
     RootNormalizationInterrupted,
@@ -184,6 +186,7 @@ from .root_normalization import (
 )
 from .root_p3_source_admission import (
     NativeRootP3SourceAdmissionService,
+    RootP3CertifiedRefusalSourceMember,
     RootP3ScopeBinding,
     RootP3SourceAdmissionInterrupted,
     RootP3SourceAdmissionInterruptionPoint,
@@ -413,6 +416,8 @@ __all__ = [
     "NativeGeneralizedRuntimeReadiness",
     "MetadataLessB3BDispatch",
     "NativeRootWideNormalizationService",
+    "RootB2CertifiedRefusalDisposition",
+    "RootB4CertifiedRefusalDisposition",
     "RootChildCompletionState",
     "RootMotifNormalizationResult",
     "RootNormalizationInterrupted",
@@ -427,6 +432,7 @@ __all__ = [
     "RootScopeNormalizationResult",
     "RootWorkspaceNormalizationResult",
     "NativeRootP3SourceAdmissionService",
+    "RootP3CertifiedRefusalSourceMember",
     "RootP3ScopeBinding",
     "RootP3SourceAdmissionInterrupted",
     "RootP3SourceAdmissionInterruptionPoint",

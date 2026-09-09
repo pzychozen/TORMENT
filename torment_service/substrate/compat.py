@@ -34,6 +34,7 @@ from .payload_policy import (
     copy_memory_flexible_payload as _flexible_mapping,
     copy_relationship_flexible_payload as _relationship_flexible_mapping,
 )
+from .runtime_semantic_admission import has_runtime_semantic_lineage, require_runtime_semantic_admission
 from .relationships import Endpoint, NativeRelationshipService, RelationshipResult, RelationshipState
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -238,7 +239,8 @@ class NativeMemoryCompatibilityFacade:
                    r.revision_ordinal,r.effective_semantic_scope_id,
                    r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,
                    r.governance_state,r.authority_category,r.provenance_id,
-                   r.payload_format,r.payload_text
+                   r.payload_format,r.payload_text,r.lineage_kind,
+                   r.predecessor_revision_id,r.predecessor_revision_ordinal
               FROM legacy_object_aliases a
               JOIN objects o ON o.object_id=a.object_id
               JOIN object_revisions r
@@ -263,6 +265,8 @@ class NativeMemoryCompatibilityFacade:
                 raise SubstrateInvariantViolation("EID alias does not target an admissible core memory")
             if row[6] != "EXISTS":
                 continue
+            if not has_runtime_semantic_lineage(row[14], row[4], row[15], row[16]):
+                raise SubstrateInvariantViolation("RUNTIME_SEMANTIC_ADMISSION_REFUSED_LEGACY_PREDECESSOR_UNKNOWN")
             by_eid[eid] = row
         if len(by_eid) != len(requested):
             raise SubstrateObjectNotFound("one or more namespaced EID compatibility aliases were not found")
@@ -322,6 +326,9 @@ class NativeMemoryCompatibilityFacade:
         object_id = self.resolve_memory_eid(legacy_source_namespace_id=legacy_source_namespace_id, eid=eid)
         row = self._connection.execute("""SELECT o.object_id,r.object_revision_id,r.revision_ordinal,r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,r.lifecycle_authoritative,r.governance_state,r.authority_category,r.provenance_id,r.payload_format,r.payload_text FROM objects o JOIN object_revisions r ON r.object_id=o.object_id WHERE o.object_id=? AND r.object_revision_id=? AND o.object_kind=?""", (native_id_to_bytes(object_id), native_id_to_bytes(revision_id), _MEMORY_OBJECT_KIND)).fetchone()
         if row is None: raise SubstrateObjectNotFound("native core-memory revision was not found")
+        require_runtime_semantic_admission(
+            self._connection, object_id=row[0], revision_id=row[1], revision_ordinal=row[2],
+        )
         return self._view(eid, row)
 
     def create_memory_state(
@@ -693,6 +700,12 @@ class NativeMemoryCompatibilityFacade:
         target_eid = self.resolve_native_memory_legacy_eid(
             legacy_source_namespace_id=target_legacy_source_namespace_id, native_object_id=target.object_id,
         )
+        # Identity-bound endpoints may remain durably recorded, but projecting
+        # this LINK consumes their current memory semantics.  Reuse the common
+        # structural admission gate instead of treating the reverse alias
+        # lookup above as runtime authority.
+        self._current_row(source_legacy_source_namespace_id, source_eid)
+        self._current_row(target_legacy_source_namespace_id, target_eid)
         payload = _payload_mapping(row[4], row[5])
         value = payload.get("legacy_timestamp")
         timestamp = value if isinstance(value, (str, int, float)) and not isinstance(value, bool) else None
@@ -822,6 +835,7 @@ class NativeMemoryCompatibilityFacade:
             WHERE r.source_kind='OBJECT_REVISION'
               AND o.object_kind=?
               AND source.existence_state='EXISTS'
+              AND source.lineage_kind IN ('NATIVE_CREATION','NATIVE_ORDINARY')
               AND r.source_object_revision_id=o.current_revision_id
               AND r.source_object_revision_ordinal=o.current_revision_ordinal
               AND a.legacy_source_namespace_id=? AND a.alias_kind='EID'
@@ -859,6 +873,9 @@ class NativeMemoryCompatibilityFacade:
         if row is None: raise SubstrateObjectNotFound("namespaced EID compatibility alias was not found")
         if self._connection.execute("SELECT object_kind FROM objects WHERE object_id=?", (row[0],)).fetchone()[0] != _MEMORY_OBJECT_KIND: raise SubstrateInvariantViolation("EID alias does not target an admissible core memory")
         if row[4] != "EXISTS": raise SubstrateObjectNotFound("namespaced EID compatibility alias is not canonical")
+        require_runtime_semantic_admission(
+            self._connection, object_id=row[0], revision_id=row[1], revision_ordinal=row[2],
+        )
         return row
 
     def _write_result_for_operation(self, operation_id: bytes, namespace: UUID) -> CompatibilityMemoryWriteResult | None:

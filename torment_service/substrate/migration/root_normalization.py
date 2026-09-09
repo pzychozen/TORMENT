@@ -170,10 +170,17 @@ class RootNormalizationScopeInput:
     b3a_requests: tuple[MigrationRuntimeRepresentationBootstrapRequest, ...] = ()
     b3b_requests: tuple[MigrationRuntimeReembeddingBootstrapRequest, ...] = ()
     metadata_less_b3b_dispatches: tuple[MetadataLessB3BDispatch, ...] = ()
+    b2_refused_memory_dispositions: tuple[RootB2CertifiedRefusalDisposition, ...] = ()
+    # P3 has already proved whether this scope's declared MOTIFS artifact
+    # contains a semantically admissible motif domain.  ``None`` preserves the
+    # legacy direct-root caller behavior of deriving the requirement from the
+    # raw explicit manifest; P3 must bind the proved boolean explicitly.
+    motif_source_admitted: bool | None = None
     b4a_requests: tuple[MigrationRuntimeMotifProjectionRequest, ...] = ()
     b4b_requests: tuple[MigrationRuntimeMotifRegeometryProjectionRequest, ...] = ()
     b4c_requests: tuple[MigrationRuntimeZeroMemberMotifProjectionRequest, ...] = ()
     b4p_requests: tuple[PartialMotifRetentionRequest, ...] = ()
+    b4_refused_motif_dispositions: tuple[RootB4CertifiedRefusalDisposition, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.scope_key, RootScopeKey):
@@ -193,6 +200,12 @@ class RootNormalizationScopeInput:
             "metadata_less_b3b_dispatches",
         )
         _typed_requests(
+            self.b2_refused_memory_dispositions, RootB2CertifiedRefusalDisposition,
+            "b2_refused_memory_dispositions",
+        )
+        if self.motif_source_admitted is not None and not isinstance(self.motif_source_admitted, bool):
+            raise ValueError("motif_source_admitted must be bool or None")
+        _typed_requests(
             self.b4a_requests, MigrationRuntimeMotifProjectionRequest, "b4a_requests",
         )
         _typed_requests(
@@ -202,16 +215,33 @@ class RootNormalizationScopeInput:
             self.b4c_requests, MigrationRuntimeZeroMemberMotifProjectionRequest, "b4c_requests",
         )
         _typed_requests(self.b4p_requests, PartialMotifRetentionRequest, "b4p_requests")
+        _typed_requests(
+            self.b4_refused_motif_dispositions, RootB4CertifiedRefusalDisposition,
+            "b4_refused_motif_dispositions",
+        )
         if not _scope_plan_matches_key(self.scope_plan, self.scope_key):
             raise ValueError("scope_plan does not match its RootScopeKey")
         for request in self.b3a_requests:
             _validate_direct_request(request, self.scope_plan, self.legacy_snapshot_id)
         for request in (*self.b3b_requests, *(item.b3b_request for item in self.metadata_less_b3b_dispatches)):
             _validate_scoped_request(request, self.scope_plan, self.legacy_snapshot_id)
+        if any(
+            item.legacy_source_namespace_id != self.scope_plan.legacy_source_namespace_id
+            for item in self.b2_refused_memory_dispositions
+        ):
+            raise ValueError("B2 refusal disposition does not match its scope source")
+        if any(
+            item.legacy_source_namespace_id != self.scope_plan.legacy_source_namespace_id
+            for item in self.b4_refused_motif_dispositions
+        ):
+            raise ValueError("B4 refusal disposition does not match its motif source")
         for request in (*self.b4a_requests, *self.b4b_requests, *self.b4c_requests):
-            _validate_scoped_request(request, self.scope_plan, self.legacy_snapshot_id)
-        _no_duplicate_eids(self.all_b3_requests)
-        _no_duplicate_motif_requests(self.b4a_requests, self.b4b_requests, self.b4c_requests)
+            _validate_motif_scoped_request(request, self.scope_plan, self.legacy_snapshot_id)
+        _no_duplicate_eids((*self.all_b3_requests, *self.b2_refused_memory_dispositions))
+        _no_duplicate_motif_requests(
+            self.b4a_requests, self.b4b_requests, self.b4c_requests,
+            self.b4_refused_motif_dispositions,
+        )
 
     @property
     def all_b3_requests(
@@ -234,7 +264,7 @@ class RootNormalizationScopeInput:
     def all_motif_disposition_requests(self) -> tuple[object, ...]:
         """B4P is a terminal source disposition, not a runtime request."""
 
-        return (*self.all_motif_requests, *self.b4p_requests)
+        return (*self.all_motif_requests, *self.b4p_requests, *self.b4_refused_motif_dispositions)
 
 
 @dataclass(frozen=True)
@@ -251,6 +281,10 @@ class RootNormalizationRequest:
     post_write_configurations: tuple[NativePostWriteQualificationConfiguration, ...] = ()
     recovery_witness: RootNormalizationRecoveryWitness | None = None
     b1m_identity_universe_digest: str | None = None
+    # Copied P3 recovery is already bound to Envelope-C's immutable manifest.
+    # In that mode its child inputs come from P3 snapshots, not a live root
+    # reconstruction at ``data_root``.
+    recovered_p2_explicit_source_manifest_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.description, RootNativeProductionAdmissionDescription):
@@ -278,6 +312,16 @@ class RootNormalizationRequest:
             raise ValueError("recovery_witness must be RootNormalizationRecoveryWitness")
         if self.b1m_identity_universe_digest is not None:
             _require_sha256(self.b1m_identity_universe_digest, "b1m_identity_universe_digest")
+        if self.recovered_p2_explicit_source_manifest_digest is not None:
+            _require_sha256(
+                self.recovered_p2_explicit_source_manifest_digest,
+                "recovered_p2_explicit_source_manifest_digest",
+            )
+            if (
+                self.recovered_p2_explicit_source_manifest_digest
+                != self.description.explicit_source_manifest.digest
+            ):
+                raise ValueError("recovered P2 source manifest does not match description")
         declared = _declared_scopes(self.description)
         supplied = {item.scope_key: item for item in self.scope_inputs}
         if set(declared) != set(supplied):
@@ -297,6 +341,56 @@ class RootRepresentationBootstrapKind(StrEnum):
 class RootChildCompletionState(StrEnum):
     COMPLETED = "COMPLETED"
     REFUSED = "REFUSED"
+
+
+@dataclass(frozen=True)
+class RootB2CertifiedRefusalDisposition:
+    """A terminal B2 receipt that intentionally has no B3 child request."""
+
+    legacy_source_namespace_id: UUID
+    eid: int
+    object_id: UUID
+    r1_revision_id: UUID
+    receipt_operation_id: UUID
+    certificate_digest: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "legacy_source_namespace_id", "object_id", "r1_revision_id", "receipt_operation_id",
+        ):
+            if not isinstance(getattr(self, name), UUID):
+                raise ValueError(f"{name} must be UUID")
+        if not isinstance(self.eid, int) or isinstance(self.eid, bool) or self.eid < 0:
+            raise ValueError("eid must be non-negative")
+        _require_sha256(self.certificate_digest, "certificate_digest")
+
+
+@dataclass(frozen=True)
+class RootB4CertifiedRefusalDisposition:
+    """One terminal, root-bound B4 refusal with no native motif output.
+
+    This receipt preserves valid source motif/membership evidence while proving
+    that the complete membership cannot be projected because one or more
+    members are already in the frozen B2 refusal set.
+    """
+
+    legacy_source_namespace_id: UUID
+    runtime_motif_id: str
+    source_motif_object_id: UUID
+    source_motif_r1_revision_id: UUID
+    receipt_operation_id: UUID
+    certificate_digest: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "legacy_source_namespace_id", "source_motif_object_id",
+            "source_motif_r1_revision_id", "receipt_operation_id",
+        ):
+            if not isinstance(getattr(self, name), UUID):
+                raise ValueError(f"{name} must be UUID")
+        if not isinstance(self.runtime_motif_id, str) or not self.runtime_motif_id:
+            raise ValueError("runtime_motif_id must be non-empty")
+        _require_sha256(self.certificate_digest, "certificate_digest")
 
 
 @dataclass(frozen=True)
@@ -333,6 +427,8 @@ class RootScopeNormalizationResult:
     motif_results: tuple[RootMotifNormalizationResult, ...]
     partial_motif_results: tuple[RootPartialMotifRetentionResult, ...]
     completed: bool
+    b2_refused_memory_dispositions: tuple[RootB2CertifiedRefusalDisposition, ...] = ()
+    b4_refused_motif_dispositions: tuple[RootB4CertifiedRefusalDisposition, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -364,6 +460,11 @@ class RootNormalizationResult:
     reason_codes: tuple[str, ...]
     partial_motif_authority_closure: bool = False
     p3_completion_class: str = "BLOCKED"
+    b2_certified_refused_memory_count: int = 0
+    b3_completed_memory_count: int = 0
+    root_memory_disposition_closed: bool = False
+    b4_certified_refused_motif_count: int = 0
+    root_motif_disposition_closed: bool = False
 
 
 _B3Result: TypeAlias = (
@@ -401,6 +502,8 @@ class NativeRootWideNormalizationService:
         _verify_root_source_manifest(request)
         self._recheck_metadata_less_sources(request)
         self._revalidate_b1m_identity_universe(request)
+        self._revalidate_b2_refused_dispositions(request)
+        self._revalidate_b4_refused_dispositions(request)
 
         results: list[RootScopeNormalizationResult] = []
         interrupted_inside_workspace = False
@@ -433,6 +536,8 @@ class NativeRootWideNormalizationService:
                     motif_results=motif_results,
                     partial_motif_results=(),
                     completed=all(item.state is RootChildCompletionState.COMPLETED for item in (*representation_results, *motif_results)),
+                    b2_refused_memory_dispositions=input_item.b2_refused_memory_dispositions,
+                    b4_refused_motif_dispositions=input_item.b4_refused_motif_dispositions,
                 )
                 workspace_scope_results.append(result)
                 results.append(result)
@@ -464,7 +569,9 @@ class NativeRootWideNormalizationService:
         readiness, readiness_reason = self._run_generalized_readiness(request)
         if _test_interrupt_after is RootNormalizationInterruptionPoint.AFTER_CHILD_COMPLETION_BEFORE_ROOT_WITNESS:
             raise RootNormalizationInterrupted(_test_interrupt_after, witness)
-        return _aggregate_result(request, witness, tuple(results), readiness, readiness_reason)
+        return _aggregate_result(
+            self._connection, request, witness, tuple(results), readiness, readiness_reason,
+        )
 
     def _recheck_metadata_less_sources(self, request: RootNormalizationRequest) -> None:
         for scope_input in request.scope_inputs:
@@ -550,6 +657,101 @@ class NativeRootWideNormalizationService:
         if _b1m_identity_universe_digest(self._connection, request) != expected:
             raise RootNormalizationRefused("P3_B1M_IDENTITY_UNIVERSE_DRIFT")
 
+    def _revalidate_b2_refused_dispositions(self, request: RootNormalizationRequest) -> None:
+        """Accept a B2 refusal only when its terminal receipt still binds current R1."""
+
+        for scope_input in request.scope_inputs:
+            for disposition in scope_input.b2_refused_memory_dispositions:
+                row = self._connection.execute(
+                    """SELECT op.operation_kind,r.rejection_code,r.rejection_detail,
+                              target.object_id,target.object_revision_id,target.object_revision_ordinal,
+                              current.lineage_kind,current.object_revision_id,current.revision_ordinal
+                         FROM operations op
+                         JOIN operation_rejections r ON r.operation_id=op.operation_id
+                         JOIN operation_targets target ON target.operation_id=op.operation_id
+                         JOIN objects o ON o.object_id=target.object_id
+                         JOIN object_revisions current
+                           ON current.object_id=o.object_id
+                          AND current.object_revision_id=o.current_revision_id
+                          AND current.revision_ordinal=o.current_revision_ordinal
+                         JOIN legacy_object_aliases alias ON alias.object_id=o.object_id
+                        WHERE op.operation_id=? AND target.target_ordinal=0
+                          AND alias.legacy_source_namespace_id=? AND alias.alias_kind='EID'
+                          AND alias.alias_value=?""",
+                    (
+                        native_id_to_bytes(disposition.receipt_operation_id),
+                        native_id_to_bytes(disposition.legacy_source_namespace_id), str(disposition.eid),
+                    ),
+                ).fetchone()
+                expected = (
+                    "P3_B2_REFUSED_SOURCE_SEMANTIC_GAP",
+                    "B2_REFUSED_SOURCE_SEMANTIC_GAP",
+                    disposition.certificate_digest,
+                    native_id_to_bytes(disposition.object_id), native_id_to_bytes(disposition.r1_revision_id), 1,
+                    "LEGACY_PREDECESSOR_UNKNOWN", native_id_to_bytes(disposition.r1_revision_id), 1,
+                )
+                if row != expected:
+                    raise RootNormalizationRefused("P3_B2_REFUSAL_DISPOSITION_DRIFT")
+                transitions = self._connection.execute(
+                    "SELECT count(*) FROM semantic_transitions WHERE operation_id=?",
+                    (native_id_to_bytes(disposition.receipt_operation_id),),
+                ).fetchone()[0]
+                outputs = self._connection.execute(
+                    "SELECT count(*) FROM operation_outputs WHERE operation_id=?",
+                    (native_id_to_bytes(disposition.receipt_operation_id),),
+                ).fetchone()[0]
+                if transitions or outputs:
+                    raise RootNormalizationRefused("P3_B2_REFUSAL_RUNTIME_LEAK")
+
+    def _revalidate_b4_refused_dispositions(self, request: RootNormalizationRequest) -> None:
+        """Recheck the terminal B4 receipt without treating it as a motif output."""
+
+        for scope_input in request.scope_inputs:
+            for disposition in scope_input.b4_refused_motif_dispositions:
+                row = self._connection.execute(
+                    """SELECT op.operation_kind,r.rejection_code,r.rejection_detail,
+                              target.object_id,target.object_revision_id,target.object_revision_ordinal,
+                              current.lineage_kind,current.object_revision_id,current.revision_ordinal
+                         FROM operations op
+                         JOIN operation_rejections r ON r.operation_id=op.operation_id
+                         JOIN operation_targets target ON target.operation_id=op.operation_id
+                         JOIN objects o ON o.object_id=target.object_id
+                         JOIN object_revisions current
+                           ON current.object_id=o.object_id
+                          AND current.object_revision_id=o.current_revision_id
+                          AND current.revision_ordinal=o.current_revision_ordinal
+                         JOIN legacy_object_aliases alias ON alias.object_id=o.object_id
+                        WHERE op.operation_id=? AND target.target_ordinal=0
+                          AND alias.legacy_source_namespace_id=? AND alias.alias_kind='MOTIF_ID'
+                          AND alias.alias_value=?""",
+                    (
+                        native_id_to_bytes(disposition.receipt_operation_id),
+                        native_id_to_bytes(disposition.legacy_source_namespace_id),
+                        disposition.runtime_motif_id,
+                    ),
+                ).fetchone()
+                expected = (
+                    "P3_B4_REFUSED_MEMBER_SEMANTIC_GAP",
+                    "B4_REFUSED_MEMBER_SEMANTIC_GAP",
+                    disposition.certificate_digest,
+                    native_id_to_bytes(disposition.source_motif_object_id),
+                    native_id_to_bytes(disposition.source_motif_r1_revision_id), 1,
+                    "LEGACY_PREDECESSOR_UNKNOWN",
+                    native_id_to_bytes(disposition.source_motif_r1_revision_id), 1,
+                )
+                if row != expected:
+                    raise RootNormalizationRefused("P3_B4_REFUSAL_DISPOSITION_DRIFT")
+                transitions = self._connection.execute(
+                    "SELECT count(*) FROM semantic_transitions WHERE operation_id=?",
+                    (native_id_to_bytes(disposition.receipt_operation_id),),
+                ).fetchone()[0]
+                outputs = self._connection.execute(
+                    "SELECT count(*) FROM operation_outputs WHERE operation_id=?",
+                    (native_id_to_bytes(disposition.receipt_operation_id),),
+                ).fetchone()[0]
+                if transitions or outputs:
+                    raise RootNormalizationRefused("P3_B4_REFUSAL_RUNTIME_LEAK")
+
     def _run_generalized_readiness(
         self, request: RootNormalizationRequest,
     ) -> tuple[GeneralizedNativeRuntimeReadinessReport | None, str | None]:
@@ -631,6 +833,7 @@ def _b4_receipt(
 
 
 def _aggregate_result(
+    connection: sqlite3.Connection,
     request: RootNormalizationRequest,
     witness: RootNormalizationRecoveryWitness,
     scope_results: tuple[RootScopeNormalizationResult, ...],
@@ -654,7 +857,20 @@ def _aggregate_result(
     )
     child_complete = all(item.completed for item in scope_results)
     workspace_complete = all(item.completed for item in workspaces)
+    b2_refused_count = sum(
+        len(item.b2_refused_memory_dispositions) for item in scope_results
+    )
+    b3_completed_count = sum(
+        receipt.state is RootChildCompletionState.COMPLETED
+        for item in scope_results for receipt in item.representation_results
+    )
     has_partial_authority = any(item.partial_motif_results for item in scope_results)
+    b4_refused_count = sum(
+        len(item.b4_refused_motif_dispositions) for item in scope_results
+    )
+    has_terminal_certified_exception = bool(
+        has_partial_authority or b2_refused_count or b4_refused_count
+    )
     readiness_complete = readiness is not None and readiness.generalized_staging_runtime_ready
     reasons = [
         receipt.reason_code
@@ -662,13 +878,13 @@ def _aggregate_result(
         for receipt in (*scope.representation_results, *scope.motif_results, *scope.partial_motif_results)
         if receipt.reason_code is not None
     ]
-    if readiness is not None and not has_partial_authority:
+    if readiness is not None and not has_terminal_certified_exception:
         reasons.extend(readiness.reason_codes)
-    if readiness_reason is not None and not has_partial_authority:
+    if readiness_reason is not None and not has_terminal_certified_exception:
         reasons.append(readiness_reason)
     complete = bool(
         child_complete and workspace_complete and not reasons
-        and (readiness_complete or has_partial_authority)
+        and (readiness_complete or has_terminal_certified_exception)
     )
     expected = request.description.expected_census
     return RootNormalizationResult(
@@ -685,7 +901,9 @@ def _aggregate_result(
             request.description.feature_posture.geometry_derived_external_state_disposition,
         ),
         root_normalization_complete=complete,
-        root_normalization_ready=bool(complete and readiness_complete and not has_partial_authority),
+        root_normalization_ready=bool(
+            complete and readiness_complete and not has_terminal_certified_exception
+        ),
         real_root_activation_ready=False,
         partial_activation=has_partial_authority,
         reason_codes=tuple(sorted(set(reasons))),
@@ -697,10 +915,22 @@ def _aggregate_result(
             )
         ),
         p3_completion_class=(
-            "PARTIAL_MOTIF_AUTHORITY_READY" if complete and has_partial_authority
+            "P3_DISPOSITION_CLOSED_WITH_CERTIFIED_EXCEPTIONS"
+            if complete and (b2_refused_count or b4_refused_count)
+            else "PARTIAL_MOTIF_AUTHORITY_READY" if complete and has_partial_authority
             else "FULL_RUNTIME_READY" if complete and readiness_complete
             else "BLOCKED"
         ),
+        b2_certified_refused_memory_count=b2_refused_count,
+        b3_completed_memory_count=b3_completed_count,
+        # Memory disposition closure is a B1/B2 accounting fact.  It must not
+        # inherit unrelated B4 child refusal: a root can have every source
+        # memory truthfully terminally disposed while motif runtime work is
+        # independently incomplete.  Readiness and overall child completion
+        # remain intentionally stricter, separate predicates above.
+        root_memory_disposition_closed=_root_memory_disposition_closed(connection, request),
+        b4_certified_refused_motif_count=b4_refused_count,
+        root_motif_disposition_closed=bool(child_complete and workspace_complete),
     )
 
 
@@ -718,6 +948,49 @@ def _b1m_identity_universe_digest(
     connection: sqlite3.Connection, request: RootNormalizationRequest,
 ) -> str:
     """Recompute the P3-owned identity seal without consulting revisions."""
+
+    rows = _b1m_identity_rows(connection, request)
+    return hashlib.sha256(canonical_intent_text(rows).encode("utf-8")).hexdigest()
+
+
+def _root_memory_disposition_closed(
+    connection: sqlite3.Connection, request: RootNormalizationRequest,
+) -> bool:
+    """Return whether every frozen B1 memory has one truthful terminal B2 disposition.
+
+    B3 and B4 are runtime child work.  In particular, B4 refusal cannot erase
+    a B2 admission or a P3-certified B2 refusal from the memory disposition
+    universe.  The current B1 aliases are read back from the staged core, so a
+    missing request, an added alias, or a duplicated disposition fails closed.
+    """
+
+    b1_keys = {
+        (str(item["legacy_source_namespace_id"]), int(item["eid"]))
+        for item in _b1m_identity_rows(connection, request)
+    }
+    admitted_keys = [
+        (str(child.legacy_source_namespace_id), int(child.eid))
+        for item in request.scope_inputs
+        for child in item.all_b3_requests
+    ]
+    refused_keys = [
+        (str(disposition.legacy_source_namespace_id), int(disposition.eid))
+        for item in request.scope_inputs
+        for disposition in item.b2_refused_memory_dispositions
+    ]
+    admitted = set(admitted_keys)
+    refused = set(refused_keys)
+    if len(admitted) != len(admitted_keys) or len(refused) != len(refused_keys):
+        return False
+    if admitted & refused:
+        return False
+    return b1_keys == admitted | refused
+
+
+def _b1m_identity_rows(
+    connection: sqlite3.Connection, request: RootNormalizationRequest,
+) -> list[dict[str, object]]:
+    """Return the exact current B1 memory identity universe for this request."""
 
     declared = _declared_scopes(request.description)
     rows: list[dict[str, object]] = []
@@ -756,7 +1029,7 @@ def _b1m_identity_universe_digest(
     ))
     if len({(item["legacy_source_namespace_id"], item["eid"]) for item in rows}) != len(rows):
         raise RootNormalizationRefused("P3_B1M_MEMORY_ALIAS_DUPLICATE")
-    return hashlib.sha256(canonical_intent_text(rows).encode("utf-8")).hexdigest()
+    return rows
 
 
 def _partial_motif_id(request: PartialMotifRetentionRequest) -> str:
@@ -803,6 +1076,17 @@ def _validate_recovery_witness(
 
 
 def _verify_root_source_manifest(request: RootNormalizationRequest) -> None:
+    if request.recovered_p2_explicit_source_manifest_digest is not None:
+        # P3 has already checked this exact digest at its recovery boundary and
+        # every B3/B4 input is snapshot-bound.  Requiring the original raw
+        # path here would silently re-open the copied recovery against a
+        # partial synthetic projection rather than revalidate those snapshots.
+        if (
+            request.recovered_p2_explicit_source_manifest_digest
+            != request.description.explicit_source_manifest.digest
+        ):
+            raise RootNormalizationRefused("ROOT_RECOVERED_MANIFEST_BINDING_MISMATCH")
+        return
     try:
         request.description.explicit_source_manifest.verify(data_root=request.data_root)
     except (ExplicitSourceEvidenceDrift, OSError, ValueError) as exc:
@@ -817,7 +1101,10 @@ def _validate_scope_dispatch(
     description: RootNativeProductionAdmissionDescription,
 ) -> None:
     b4p_requests = tuple(getattr(input_item, "b4p_requests", ()))
-    all_motif_disposition_requests = (*input_item.all_motif_requests, *b4p_requests)
+    b4_refused_dispositions = tuple(getattr(input_item, "b4_refused_motif_dispositions", ()))
+    all_motif_disposition_requests = (
+        *input_item.all_motif_requests, *b4p_requests, *b4_refused_dispositions,
+    )
     for request in input_item.all_b3_requests:
         if (
             request.expected_native_core_id != expected_native_core_id
@@ -835,46 +1122,42 @@ def _validate_scope_dispatch(
             raise ValueError("every B4P request must use the one root core")
     has_b3a = bool(input_item.b3a_requests)
     has_b3b = bool(input_item.b3b_requests or input_item.metadata_less_b3b_dispatches)
-    motif_source_declared = any(
+    raw_motif_source_declared = any(
         entry.scope_key == declared.scope_key
         and entry.semantic_role.value == "MOTIFS"
         and entry.presence_expectation.value == "EXPECTED_PRESENT"
         for entry in description.explicit_source_manifest.entries
     )
+    admitted_motif_source = getattr(input_item, "motif_source_admitted", None)
+    motif_source_declared = (
+        raw_motif_source_declared
+        if admitted_motif_source is None
+        else admitted_motif_source
+    )
     empty_scope = declared.materialization_posture is not MaterializedScopePosture.MEMORY_GRAPH
     if declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF:
         if input_item.all_b3_requests:
             raise ValueError("declared empty shared motif scope cannot dispatch B3")
-        if (
-            declared.representation_disposition is not RootRepresentationDisposition.TARGET_COMPATIBLE
-            or input_item.b4a_requests
-            or input_item.b4b_requests
-            or b4p_requests
-            or not input_item.b4c_requests
-        ):
-            raise ValueError("declared empty shared motif scope requires only target-compatible B4C")
+        if declared.representation_disposition is not RootRepresentationDisposition.TARGET_COMPATIBLE:
+            raise ValueError("declared empty shared motif scope requires target-compatible geometry")
+        if not motif_source_declared:
+            raise ValueError("empty shared motif scope requires declared motif source evidence")
     elif empty_scope:
         if input_item.all_b3_requests:
             raise ValueError("declared empty scope cannot dispatch B3")
         if declared.representation_disposition is not RootRepresentationDisposition.NO_VECTOR:
             raise ValueError("declared empty scope requires NO_VECTOR disposition")
         if declared.materialization_posture is MaterializedScopePosture.DECLARED_EMPTY_SHARED:
-            if motif_source_declared:
-                if input_item.b4a_requests or input_item.b4b_requests or not input_item.b4c_requests:
-                    raise ValueError("declared empty shared motif scope requires only B4C")
-            elif all_motif_disposition_requests:
+            if not motif_source_declared and all_motif_disposition_requests:
                 raise ValueError("declared empty shared without motif evidence cannot dispatch B4")
         elif declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITHOUT_MOTIF:
             if motif_source_declared or all_motif_disposition_requests:
                 raise ValueError("physical empty shared without motif cannot dispatch B4")
         elif all_motif_disposition_requests:
             raise ValueError("NO_VECTOR declared empty private scope cannot dispatch B4")
-    elif not input_item.all_b3_requests:
+    elif not input_item.all_b3_requests and not input_item.b2_refused_memory_dispositions:
         raise ValueError("declared MEMORY_GRAPH scope requires B3 completion requests")
-    if empty_scope:
-        if declared.materialization_posture is MaterializedScopePosture.EMPTY_SHARED_WITH_MOTIF and not motif_source_declared:
-            raise ValueError("empty shared motif scope requires declared motif source evidence")
-    elif declared.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
+    if not empty_scope and declared.representation_disposition is RootRepresentationDisposition.TARGET_COMPATIBLE:
         # The workspace lock describes the source lane, while B3 is decided
         # per admitted EID from its qualified retained-vector evidence.  A
         # target-compatible scope can therefore lawfully contain both exact
@@ -884,10 +1167,23 @@ def _validate_scope_dispatch(
         if (
             declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH
             and not (has_b3a or input_item.b3b_requests)
+            and not input_item.b2_refused_memory_dispositions
         ):
             raise ValueError("MEMORY_GRAPH scope requires at least one ordinary B3 request")
     elif declared.representation_disposition is RootRepresentationDisposition.UNKNOWN_IDENTITY:
-        if has_b3a or input_item.b3b_requests or not input_item.metadata_less_b3b_dispatches:
+        # A source-semantic-gap refusal is terminal for its own B2 member: it
+        # deliberately has no B3/Phase-9B request.  Other admitted members of
+        # this unknown-identity scope still require their metadata-less B3B
+        # dispatches, while a scope composed solely of certified refusals is
+        # disposition-closed without inventing a B3B request.
+        if (
+            has_b3a
+            or input_item.b3b_requests
+            or (
+                not input_item.metadata_less_b3b_dispatches
+                and not input_item.b2_refused_memory_dispositions
+            )
+        ):
             raise ValueError("UNKNOWN_IDENTITY scope requires Phase 9B metadata-less B3B dispatch")
     else:
         if input_item.metadata_less_b3b_dispatches:
@@ -895,6 +1191,7 @@ def _validate_scope_dispatch(
         if (
             declared.materialization_posture is MaterializedScopePosture.MEMORY_GRAPH
             and not (has_b3a or input_item.b3b_requests)
+            and not input_item.b2_refused_memory_dispositions
         ):
             raise ValueError("MEMORY_GRAPH scope requires at least one ordinary B3 request")
     if motif_source_declared != bool(all_motif_disposition_requests):
@@ -944,6 +1241,25 @@ def _validate_scoped_request(
         raise ValueError("child request does not match its declared scope source")
 
 
+def _validate_motif_scoped_request(
+    request: object,
+    plan: MigrationRuntimeScopePlan,
+    snapshot_id: UUID,
+) -> None:
+    """A motif scope may carry its declared workspace member-plan universe."""
+
+    plans = getattr(request, "scope_plans")
+    if (
+        getattr(request, "legacy_snapshot_id") != snapshot_id
+        or getattr(request, "legacy_source_namespace_id") != plan.legacy_source_namespace_id
+        or not isinstance(plans, tuple)
+        or plan not in plans
+        or len({item.legacy_source_namespace_id for item in plans}) != len(plans)
+        or any(item.workspace_id != plan.workspace_id for item in plans)
+    ):
+        raise ValueError("motif child request does not match its declared workspace source universe")
+
+
 def _typed_requests(values: object, expected_type: type[object], name: str) -> None:
     if not isinstance(values, tuple) or any(not isinstance(value, expected_type) for value in values):
         raise ValueError(f"{name} must be a tuple of {expected_type.__name__}")
@@ -975,6 +1291,8 @@ def _census_digest(description: RootNativeProductionAdmissionDescription) -> str
 __all__ = [
     "MetadataLessB3BDispatch",
     "NativeRootWideNormalizationService",
+    "RootB2CertifiedRefusalDisposition",
+    "RootB4CertifiedRefusalDisposition",
     "RootChildCompletionState",
     "RootMotifNormalizationResult",
     "RootNormalizationInterrupted",

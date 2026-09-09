@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from hashlib import sha256
-import json
 from pathlib import Path
-from types import SimpleNamespace
 import urllib.request
+from uuid import UUID
 
 import numpy as np
 import pytest
@@ -15,10 +14,12 @@ from torment_service.substrate import representations as representations_module
 from torment_service.substrate.compat import NativeMemoryCompatibilityFacade
 from torment_service.substrate.compat_query import CompatibilityQueryLane, search_text
 from torment_service.substrate.connection import open_temporary_test_connection
-from torment_service.substrate.migration import create_snapshot_manifest
-from torment_service.substrate.migration.admission import NativeLegacyObjectAdmissionService
-from torment_service.substrate.migration.representation_admission import NativeLegacyRepresentationAdmissionService
+from torment_service.substrate.errors import SubstrateInvariantViolation
 from torment_service.substrate.ids import generate_native_id, native_id_to_bytes
+from torment_service.substrate.migration import (
+    MigrationRuntimeReembeddingBootstrapRequest,
+    NativeMigrationRuntimeReembeddingBootstrapService,
+)
 from torment_service.substrate.representations import (
     INTEGRITY_ALGORITHM_SHA256,
     INTEGRITY_VALUE_ENCODING_RAW,
@@ -30,6 +31,11 @@ from torment_service.substrate.representations import (
     RepresentationRequest,
 )
 from torment_service.substrate.schema import CORE_ROLE_STAGING, create_schema, open_schema
+
+from test_substrate_migration_runtime_representation_bootstrap import (
+    _fixture as _qualified_migration_fixture,
+    _normalize as _normalize_legacy_memory,
+)
 
 
 def _id(): return generate_native_id()
@@ -289,47 +295,52 @@ def test_text_search_preserves_pending_failed_revision_and_integrity_gates(tmp_p
         qualified.close()
 
 
-def _json_line(value):
-    return json.dumps(value, separators=(",", ":")).encode("utf-8") + b"\n"
-
-
 def test_unknown_migrated_vector_is_excluded_until_native_ready_rederivation(tmp_path: Path, monkeypatch):
-    qualified, identity, scope, idem, _source = _database(tmp_path)
+    qualified, facts = _qualified_migration_fixture(tmp_path, provider="different-provider")
+    facts["connection"] = qualified.connection
     try:
         connection = qualified.connection
-        root = tmp_path / "legacy-snapshot"
-        embeddings = root / "embeddings"
-        embeddings.mkdir(parents=True)
-        (root / "nodes.jsonl").write_bytes(_json_line({"eid": 1, "summary": "migrated", "embedding_ref": {"map": "embeddings/shard_000000.map.jsonl", "shard": "embeddings/shard_000000.npy", "row": 0, "dimension": 3, "dtype": "float32"}}))
-        np.save(embeddings / "shard_000000.npy", np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
-        (embeddings / "shard_000000.map.jsonl").write_bytes(_json_line({"eid": 1, "shard": "embeddings/shard_000000.npy", "row": 0, "dimension": 3}))
-        (embeddings / "manifest.json").write_bytes(_json_line({"encoding_id": "NUMPY_NPY", "dtype": "float32", "dimension": 3, "derivation_contract_version": "legacy-v1", "shards": [{"path": "embeddings/shard_000000.npy", "map": "embeddings/shard_000000.map.jsonl"}]}))
-        source_namespace = _id()
-        manifest = create_snapshot_manifest(
-            snapshot_root=root, manifest_path=tmp_path / "migration-manifest.json",
-            legacy_source_namespace_id=source_namespace, legacy_source_namespace_key="compat-text-migration",
-        )
-        NativeLegacyObjectAdmissionService(connection).admit_nodes_current_state(
-            snapshot_root=root, manifest_path=tmp_path / "migration-manifest.json",
-            idempotency_namespace_id=idem, object_identity_namespace_id=identity,
-            unknown_semantic_scope_id=scope,
-        )
-        legacy = NativeLegacyRepresentationAdmissionService(connection).admit_embedding_evidence(
-            snapshot_root=root, manifest_path=tmp_path / "migration-manifest.json",
-            idempotency_namespace_id=idem,
-        ).results[0]
-        assert legacy.admission_status == "ADMITTED" and legacy.representation_id is not None
+        r1 = facts["r1"]
+        source_namespace = facts["source_namespace"]
+        legacy = connection.execute(
+            """SELECT r.source_object_revision_id,s.readiness,s.operational_disposition
+                 FROM representations r JOIN representation_current_state s USING(representation_id)
+                WHERE r.representation_class='LEGACY_EMBEDDING_CAPTURE'"""
+        ).fetchone()
+        assert legacy == (native_id_to_bytes(r1), "UNKNOWN", "RECONCILIATION_REQUIRED")
         assert connection.execute(
-            "SELECT readiness,operational_disposition FROM representation_current_state WHERE representation_id=?",
-            (native_id_to_bytes(legacy.representation_id),),
-        ).fetchone() == ("UNKNOWN", "RECONCILIATION_REQUIRED")
+            "SELECT lineage_kind FROM object_revisions WHERE object_revision_id=?",
+            (native_id_to_bytes(r1),),
+        ).fetchone() == ("LEGACY_PREDECESSOR_UNKNOWN",)
         facade = NativeMemoryCompatibilityFacade(connection)
-        fake = FakeEmbedder((1.0, 0.0, 0.0))
-        monkeypatch.setattr(Path, "open", lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("text search opened a legacy file")))
-        assert _text_search(facade, manifest.legacy_source_namespace_id, fake) == ()
-        current = facade.get_memory_by_eid(legacy_source_namespace_id=manifest.legacy_source_namespace_id, eid=1)
-        native_source = SimpleNamespace(object_id=current.object_id, revision_id=current.revision_id)
-        _ready_vector(connection, native_source, idem, "rederived", (1.0, 0.0, 0.0))
-        assert [hit.eid for hit in _text_search(facade, manifest.legacy_source_namespace_id, fake)] == [1]
+        fake = FakeEmbedder(np.asarray((1.0, 0.0, 0.0), dtype=np.float32), model="synthetic")
+        with monkeypatch.context() as no_legacy_files:
+            no_legacy_files.setattr(
+                Path, "open",
+                lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("text search opened a legacy file")),
+            )
+            assert _text_search(facade, source_namespace, fake, lane=_lane(model="synthetic")) == ()
+        with pytest.raises(
+            SubstrateInvariantViolation,
+            match="RUNTIME_SEMANTIC_ADMISSION_REFUSED_LEGACY_PREDECESSOR_UNKNOWN",
+        ):
+            facade.get_memory_by_eid(legacy_source_namespace_id=source_namespace, eid=7)
+
+        r2 = _normalize_legacy_memory(facts).revision_id
+        request = MigrationRuntimeReembeddingBootstrapRequest(
+            snapshot_root=facts["root"], manifest_path=facts["manifest_path"],
+            legacy_snapshot_id=facts["manifest"].legacy_snapshot_id,
+            legacy_source_namespace_id=source_namespace,
+            expected_native_core_id=UUID(bytes=facts["metadata"].core_id), eid=7,
+            expected_r1_revision_id=r1, expected_r2_revision_id=r2,
+            scope_plans=(facts["plan"],), target_lane=facts["lane"],
+            idempotency_namespace_id=facts["idempotency"], idempotency_key="compat-text-b3b-rederived",
+        )
+        NativeMigrationRuntimeReembeddingBootstrapService(connection).bootstrap_from_qualified_text(
+            request, embedder=fake,
+        )
+        current = facade.get_memory_by_eid(legacy_source_namespace_id=source_namespace, eid=7)
+        assert current.revision_id == r2
+        assert [hit.eid for hit in _text_search(facade, source_namespace, fake, lane=_lane(model="synthetic"))] == [7]
     finally:
         qualified.close()
