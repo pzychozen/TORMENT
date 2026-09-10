@@ -6,6 +6,7 @@ persists only the retained external CharacterStore state.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
@@ -130,7 +131,7 @@ class NativeCharacterDriftRuntime:
             previous_state=prior,
         )
         ordered_memory_digest = _geometry_digest([
-            {"eid": observation.eid, "payload": dict(observation.payload)}
+            {"eid": observation.eid, "payload": observation.payload}
             for observation in observations
         ])
         native_seed_geometry_digest = _geometry_digest({
@@ -249,10 +250,26 @@ def _legacy_cache_normalize(vector: Any, *, expected_dimension: int) -> np.ndarr
 def _geometry_digest(value: object) -> str:
     """Canonical input evidence for a non-mutating target-lane observation."""
     try:
-        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        encoded = json.dumps(
+            _canonical_geometry_value(value), sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False,
+        )
     except (TypeError, ValueError) as exc:
         raise SubstrateConfigurationError("Character target geometry is not canonically serializable") from exc
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _canonical_geometry_value(value: object) -> object:
+    """Copy immutable native payload views into the bounded JSON evidence form."""
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("Character target geometry mapping keys must be text")
+        return {key: _canonical_geometry_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_canonical_geometry_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError("Character target geometry value is not JSON scalar")
 
 
 __all__ = [

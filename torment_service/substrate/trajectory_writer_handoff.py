@@ -1067,12 +1067,22 @@ class TrajectoryWriterHandoffCoordinator:
             # serialization on a cryptographic-prefix collision, while keeping
             # deeply nested Windows disposable roots below MAX_PATH.
             path = self._lock_root / f"{exclusivity_key[:24]}.lock"
-            with path.open("a+b") as handle:
-                handle.seek(0)
-                if handle.read(1) == b"":
-                    handle.seek(0)
-                    handle.write(b"0")
-                    handle.flush()
+            # On Windows, msvcrt's byte lock can deny a concurrent read of
+            # the locked byte.  Initialize the one-byte lock file atomically
+            # before opening it and never read its contents before acquiring
+            # the OS lock.  The byte is merely lockable storage; it carries no
+            # authority or transition data.
+            try:
+                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                pass
+            else:
+                try:
+                    os.write(descriptor, b"0")
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            with path.open("r+b") as handle:
                 self._acquire_os_lock(handle)
                 try:
                     yield

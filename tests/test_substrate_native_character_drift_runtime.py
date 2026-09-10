@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -30,6 +30,7 @@ from torment_service.substrate.motifs import MotifState, NativeMotifService
 from torment_service.substrate.native_character_drift_runtime import (
     NativeCharacterDriftRuntime,
     NativeCharacterDriftRuntimeConfiguration,
+    _geometry_digest,
     _legacy_cache_normalize,
 )
 from torment_service.substrate.character_baseline_disposition import QualifiedTargetGeometry
@@ -47,6 +48,14 @@ from torment_service.substrate.schema import create_schema
 
 def _id():
     return generate_native_id()
+
+
+def test_target_geometry_digest_canonicalizes_nested_native_mapping_views():
+    plain = {"nested": {"labels": ["one", "two"], "strength": 0.75}}
+    viewed = MappingProxyType({
+        "nested": MappingProxyType({"labels": ("one", "two"), "strength": 0.75}),
+    })
+    assert _geometry_digest(viewed) == _geometry_digest(plain)
 
 
 def _database(tmp_path: Path):

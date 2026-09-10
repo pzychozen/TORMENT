@@ -1019,8 +1019,14 @@ class OfflineCutoverController:
     ) -> SelectorState:
         """P7: selector activation requires the exact durable post-P6 receipt."""
 
-        envelope = self._root_envelope(request)
-        verification = self._root_verification(request, envelope, normalization)
+        try:
+            envelope = self._root_envelope(request)
+            verification = self._root_verification(request, envelope, normalization)
+        except OfflineCutoverRefused as exc:
+            # A real disposition may narrowly update retained Character state
+            # beneath workspaces.  That successor must not be mistaken for a
+            # P2 source-epoch rewrite after its immutable root receipt exists.
+            return self._activate_root_external_selector_from_disposition_recovery(request, exc)
         state = self._selector_state(request)
         if state.deployment_state is DeploymentState.NATIVE_ACTIVE:
             self._require_root_native_agreement(request, verification.completion_witness)
@@ -1182,7 +1188,10 @@ class OfflineCutoverController:
     def root_current_stage(self, request: RootOfflineCutoverRequest) -> OfflineCutoverStage:
         """Recover root lifecycle state from the existing selector/core authorities."""
 
-        envelope = self._root_envelope(request)
+        try:
+            envelope = self._root_envelope(request)
+        except OfflineCutoverRefused as exc:
+            return self._root_stage_from_disposition_recovery(request, exc)
         inspection = self._inspection(request)
         try:
             state = self._selector_state(request)
@@ -1206,6 +1215,79 @@ class OfflineCutoverController:
         if inspection.deployment_state is DeploymentState.CUTOVER_PENDING:
             return OfflineCutoverStage.CORE_PENDING
         return OfflineCutoverStage.EXTERNAL_PENDING
+
+    def _root_stage_from_disposition_recovery(
+        self, request: RootOfflineCutoverRequest, cause: OfflineCutoverRefused,
+    ) -> OfflineCutoverStage:
+        state, _active, _completion, _receipt = self._durable_root_disposition_recovery(request, cause)
+        if state.deployment_state is DeploymentState.CUTOVER_PENDING:
+            return OfflineCutoverStage.CORE_ACTIVE_EXTERNAL_PENDING
+        if state.deployment_state is DeploymentState.NATIVE_ACTIVE:
+            resolution = resolve_deployment_agreement(
+                data_root=request.root, effective_profile=request.effective_profile,
+            )
+            if resolution.mode is not DeploymentResolutionMode.NATIVE_AGREEMENT:
+                raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_NATIVE_AGREEMENT_MISSING")
+            return OfflineCutoverStage.NATIVE_ACTIVE
+        raise cause
+
+    def _activate_root_external_selector_from_disposition_recovery(
+        self, request: RootOfflineCutoverRequest, cause: OfflineCutoverRefused,
+    ) -> SelectorState:
+        state, active, _completion, receipt = self._durable_root_disposition_recovery(request, cause)
+        if state.deployment_state is DeploymentState.NATIVE_ACTIVE:
+            return state
+        try:
+            result = activate_selector_native(
+                data_root=request.root, core_relative_path=request.core_relative_path,
+                core_result=active, expected_generation=state.generation,
+                operation_key=self._key(request, "root-external-active"),
+                disposition_execution_receipt_digest=receipt.digest,
+            )
+        except DeploymentAuthorityError as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_REFUSED") from exc
+        return result
+
+    def _durable_root_disposition_recovery(
+        self, request: RootOfflineCutoverRequest, cause: OfflineCutoverRefused,
+    ) -> tuple[SelectorState, CoreMaintenanceResult, RootAdmissionCompletionWitness, object]:
+        state = self._selector_state(request)
+        inspection = self._inspection(request)
+        completion = inspection.activation_completion_witness
+        if (
+            state.deployment_state not in {DeploymentState.CUTOVER_PENDING, DeploymentState.NATIVE_ACTIVE}
+            or state.core_id != request.native_staging_core_id
+            or inspection.core_role != "ACTIVE_CORE"
+            or inspection.deployment_state is not DeploymentState.NATIVE_ACTIVE
+            or inspection.witness is None or inspection.latest_maintenance_id is None
+            or not isinstance(completion, RootAdmissionCompletionWitness)
+            or state.descriptor_digest != completion.root_admission_envelope_digest
+        ):
+            raise cause
+        try:
+            receipt = read_root_disposition_execution_receipt(
+                data_root=request.root, core_relative_path=request.core_relative_path,
+                completion_witness=completion,
+            )
+        except DeploymentAuthorityError as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_RECEIPT_REFUSED") from exc
+        if receipt is None:
+            raise cause
+        from .production_root_disposition import verify_production_root_disposition_receipt
+        try:
+            verify_production_root_disposition_receipt(data_root=request.root, receipt=receipt)
+        except DeploymentAuthorityError as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_PRODUCTION_RECEIPT_REQUIRED") from exc
+        return (
+            state,
+            CoreMaintenanceResult(
+                transition_kind="ACTIVATE_CORE", maintenance_id=inspection.latest_maintenance_id,
+                witness=inspection.witness, selector_generation=state.generation,
+                selector_witness_digest=state.core_witness_digest or "", completion_witness=completion,
+            ),
+            completion,
+            receipt,
+        )
 
     def _root_envelope(self, request: RootOfflineCutoverRequest) -> RootAdmissionEnvelope:
         try:
