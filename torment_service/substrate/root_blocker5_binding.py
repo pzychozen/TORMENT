@@ -34,6 +34,7 @@ from .migration.root_scope import RootScopeKey, RootScopeKind
 from .migration.runtime_readiness import MigrationRuntimeScopePlan
 from .root_profile import RootProfileGenerationRef
 from .root_scope_membership import RootScopeMembershipRuntime
+from .schema import RootRecoveryIntegrityContext
 from .runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 from .writer_freeze_evidence import (
     RootWriterFreezeEvidencePayload,
@@ -935,10 +936,14 @@ def root_membership_closure_digest(
 ) -> str:
     """Bind durable memberships to supplied namespace/runtime bundles exactly."""
 
-    runtime = RootScopeMembershipRuntime(
-        connection=connection, profile=profile, runtime_scopes=runtime_scopes,
-    )
-    members = tuple(runtime.resolve(key.scope_key) for key in runtime.cache_keys)
+    # Keep every fresh profile/membership read. Only the full physical integrity
+    # scans share evidence, locally, while this connection observes no change.
+    with RootRecoveryIntegrityContext(connection) as integrity_context:
+        runtime = RootScopeMembershipRuntime(
+            connection=connection, profile=profile, runtime_scopes=runtime_scopes,
+            _integrity_context=integrity_context,
+        )
+        members = tuple(runtime.resolve(key.scope_key) for key in runtime.cache_keys)
     actual = tuple(member.runtime_key.scope_key for member in members)
     expected = tuple(sorted(declared_scope_keys, key=lambda item: item.canonical_key))
     if actual != expected:

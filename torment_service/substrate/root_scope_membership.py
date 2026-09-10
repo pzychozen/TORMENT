@@ -26,7 +26,7 @@ from .ids import native_id_to_bytes
 from .relationships import Endpoint, NativeRelationshipService, RelationshipState
 from .root_profile import RootProfileGenerationRef, verify_root_profile_generation
 from .runtime_binding import NativeMemoryRuntimeScope
-from .schema import open_schema
+from .schema import RootRecoveryIntegrityContext, open_schema
 from .migration.root_scope import RootScopeKey, RootScopeKind
 
 
@@ -201,12 +201,18 @@ class RootQualifiedMemberScope:
 class RootScopeMembershipReader:
     """Read-only recovery of durable root-scope membership relationships."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        open_schema(connection)
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        _integrity_context: RootRecoveryIntegrityContext | None = None,
+    ) -> None:
+        open_schema(connection, _integrity_context=_integrity_context)
         self._connection = connection
+        self._integrity_context = _integrity_context
 
     def recover(self, profile: RootProfileGenerationRef) -> tuple[RootScopeMembershipRecord, ...]:
-        return _recover_memberships(self._connection, profile)
+        return _recover_memberships(self._connection, profile, _integrity_context=self._integrity_context)
 
 
 class RootScopeMembershipService:
@@ -438,8 +444,9 @@ class RootScopeMembershipRuntime:
         connection: sqlite3.Connection,
         profile: RootProfileGenerationRef,
         runtime_scopes: tuple[NativeMemoryRuntimeScope, ...],
+        _integrity_context: RootRecoveryIntegrityContext | None = None,
     ) -> None:
-        self._reader = RootScopeMembershipReader(connection)
+        self._reader = RootScopeMembershipReader(connection, _integrity_context=_integrity_context)
         self._profile = profile
         self._bindings = _binding_map(runtime_scopes)
         self._active: dict[RootQualifiedRuntimeKey, RootQualifiedMemberScope] = {}
@@ -503,10 +510,11 @@ def _recover_memberships(
     profile: RootProfileGenerationRef,
     *,
     verify_profile: bool = True,
+    _integrity_context: RootRecoveryIntegrityContext | None = None,
 ) -> tuple[RootScopeMembershipRecord, ...]:
     if verify_profile:
         try:
-            verify_root_profile_generation(connection, profile)
+            verify_root_profile_generation(connection, profile, _integrity_context=_integrity_context)
         except Exception as exc:
             raise RootScopeMembershipError("root profile generation is not a current admissible authority") from exc
     rows = connection.execute(

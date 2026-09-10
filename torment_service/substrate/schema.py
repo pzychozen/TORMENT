@@ -5,6 +5,7 @@ path and implements no semantic repository, operation, transition, or cutover.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 from dataclasses import dataclass
 import json
@@ -379,10 +380,71 @@ def _create_schema(
         raise
 
 
-def open_schema(connection: sqlite3.Connection, *, writable: bool = True) -> SchemaMetadata:
+class RootRecoveryIntegrityContext:
+    """One closure's structural-check reuse, never a profile/membership cache.
+
+    All logical/catalog checks and committed-state reads remain live. Only a
+    successful full FK/integrity pair may be reused on this same connection
+    while its external-commit, schema and local-change observations agree.
+    There is no transaction, connection ownership, or cross-closure reuse.
+    """
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._active = False
+        self._used = False
+        self._validated_version: tuple[int, int, int] | None = None
+
+    def __enter__(self) -> "RootRecoveryIntegrityContext":
+        if self._used:
+            raise SubstrateConfigurationError("root integrity context cannot be reused")
+        self._used = True
+        self._active = True
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self._active = False
+        self._validated_version = None
+
+    def _require_connection(self, connection: sqlite3.Connection) -> None:
+        if not self._active or connection is not self._connection:
+            raise SubstrateConfigurationError("root integrity context is expired or belongs to another connection")
+
+    def _version(self) -> tuple[int, int, int]:
+        return (
+            int(self._connection.execute("PRAGMA main.data_version").fetchone()[0]),
+            int(self._connection.execute("PRAGMA main.schema_version").fetchone()[0]),
+            self._connection.total_changes,
+        )
+
+    def _require_integrity(self, connection: sqlite3.Connection) -> None:
+        self._require_connection(connection)
+        before = self._version()
+        if self._validated_version == before:
+            return
+        # Failed checks or a commit during checking must never publish reusable
+        # evidence. The next check repeats validation after an observed change.
+        self._validated_version = None
+        _require_foreign_key_integrity(connection)
+        _require_sqlite_integrity(connection)
+        after = self._version()
+        if before == after:
+            self._validated_version = after
+
+
+def open_schema(
+    connection: sqlite3.Connection,
+    *,
+    writable: bool = True,
+    _integrity_context: RootRecoveryIntegrityContext | None = None,
+) -> SchemaMetadata:
     """Open a validated core, refusing writes against older supported versions."""
+    if _integrity_context is not None:
+        if type(_integrity_context) is not RootRecoveryIntegrityContext:
+            raise SubstrateConfigurationError("root integrity context must be explicitly bound")
+        _integrity_context._require_connection(connection)
     _require_qualified_connection(connection)
-    metadata = _validate_schema(connection)
+    metadata = _validate_schema(connection, _integrity_context=_integrity_context)
     if writable and (metadata.schema_major, metadata.schema_minor) != _CURRENT_SCHEMA_VERSION:
         raise SubstrateSchemaCompatibilityError(
             "older schema is read-only; explicit schema upgrade is required for writes"
@@ -529,7 +591,12 @@ def _require_qualified_connection(connection: sqlite3.Connection) -> None:
         raise SubstrateConfigurationError("foreign keys must be enabled before schema bootstrap")
 
 
-def _validate_schema(connection: sqlite3.Connection) -> SchemaMetadata:
+@timed("schema.validation")
+def _validate_schema(
+    connection: sqlite3.Connection,
+    *,
+    _integrity_context: RootRecoveryIntegrityContext | None = None,
+) -> SchemaMetadata:
     tables = _user_tables(connection)
     if "core_metadata" not in tables:
         raise SubstrateSchemaCompatibilityError("native schema is incomplete or unknown")
@@ -565,12 +632,24 @@ def _validate_schema(connection: sqlite3.Connection) -> SchemaMetadata:
     if (major, minor) == _CURRENT_SCHEMA_VERSION:
         _validate_runtime_order_structure(connection)
     _validate_migration_ledger(connection, major, minor)
+    if _integrity_context is None:
+        _require_foreign_key_integrity(connection)
+        _require_sqlite_integrity(connection)
+    else:
+        _integrity_context._require_integrity(connection)
+    return SchemaMetadata(core_id, role, schema_id, major, minor)
+
+
+@timed("schema.foreign_key_check")
+def _require_foreign_key_integrity(connection: sqlite3.Connection) -> None:
     if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise SubstrateSchemaCompatibilityError("foreign-key structural health check failed")
-    integrity = connection.execute("PRAGMA integrity_check").fetchone()
-    if integrity != ("ok",):
+
+
+@timed("schema.integrity_check")
+def _require_sqlite_integrity(connection: sqlite3.Connection) -> None:
+    if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
         raise SubstrateSchemaCompatibilityError("SQLite integrity check failed")
-    return SchemaMetadata(core_id, role, schema_id, major, minor)
 
 
 def _schema_expectations(

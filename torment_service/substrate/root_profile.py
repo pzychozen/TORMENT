@@ -16,7 +16,7 @@ from uuid import UUID
 
 from .errors import SubstrateConfigurationError
 from .ids import native_id_from_bytes, native_id_to_bytes
-from .schema import SchemaMetadata, open_schema
+from .schema import RootRecoveryIntegrityContext, SchemaMetadata, open_schema
 
 
 ROOT_NATIVE_PROFILE_GENERATION_KIND: Final[str] = "ROOT_NATIVE_PROFILE_GENERATION"
@@ -75,10 +75,14 @@ def root_profile_generation_payload(profile_generation: int) -> dict[str, object
     }
 
 
-def current_root_profile_generation(connection: sqlite3.Connection) -> RootProfileGenerationRef:
+def current_root_profile_generation(
+    connection: sqlite3.Connection,
+    *,
+    _integrity_context: RootRecoveryIntegrityContext | None = None,
+) -> RootProfileGenerationRef:
     """Discover exactly one current admissible durable root-profile generation."""
 
-    metadata = open_schema(connection)
+    metadata = open_schema(connection, _integrity_context=_integrity_context)
     rows = connection.execute(
         "SELECT o.object_id,o.object_kind,r.object_revision_id,r.revision_ordinal,"
         "r.effective_semantic_scope_id,r.existence_state,r.lifecycle_state,"
@@ -106,12 +110,14 @@ def current_root_profile_generation(connection: sqlite3.Connection) -> RootProfi
 def verify_root_profile_generation(
     connection: sqlite3.Connection,
     claimed: RootProfileGenerationRef,
+    *,
+    _integrity_context: RootRecoveryIntegrityContext | None = None,
 ) -> RootProfileGenerationRef:
     """Verify a caller claim solely against durable root/deployment facts."""
 
     if not isinstance(claimed, RootProfileGenerationRef):
         raise RootProfileGenerationError("root profile claim must be typed")
-    metadata = open_schema(connection)
+    metadata = open_schema(connection, _integrity_context=_integrity_context)
     kind_row = connection.execute(
         "SELECT object_kind FROM objects WHERE object_id=?",
         (native_id_to_bytes(claimed.profile_object_id),),
@@ -120,7 +126,7 @@ def verify_root_profile_generation(
         raise RootProfileGenerationError("claimed root profile object is absent")
     if kind_row[0] != ROOT_NATIVE_PROFILE_GENERATION_KIND:
         raise RootProfileGenerationError("claimed object is not a root profile generation")
-    actual = current_root_profile_generation(connection)
+    actual = current_root_profile_generation(connection, _integrity_context=_integrity_context)
     if actual.core_id != native_id_from_bytes(metadata.core_id) or actual != claimed:
         raise RootProfileGenerationError("root profile claim conflicts with current durable authority")
     return actual
