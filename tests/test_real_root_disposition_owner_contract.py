@@ -32,7 +32,7 @@ _VALID_CLASSIFICATIONS = frozenset(
     }
 )
 
-# This is deliberately test-local.  It mirrors the v1.1 contract and is not a
+# This is deliberately test-local.  It mirrors the v1.2 contract and is not a
 # production registry, adapter, or selector input.
 _CLASSIFICATION_BY_OWNER = {
     "bridge_registry": REAL_RECEIPT_ONLY,
@@ -45,7 +45,7 @@ _CLASSIFICATION_BY_OWNER = {
     "hivemind_historical_geometry_scores": REAL_RECEIPT_ONLY,
     "proposal_registry": REAL_RECEIPT_ONLY,
     "srg_payload_markers": SYNTHETIC_ONLY_NO_PRODUCTION_ANALOG,
-    "world_trajectory": OWNER_ABSENT_REQUIRES_NEW_ARCHITECTURE,
+    "world_trajectory": REAL_AUTHORITY_TRANSITION_REQUIRED,
 }
 
 
@@ -91,9 +91,10 @@ def _validate_claim(claim: _CompletionClaim) -> None:
         REAL_RECEIPT_ONLY,
     } and not claim.evidence:
         raise ContractRefused("completion evidence is required")
-    if classification == OWNER_ABSENT_REQUIRES_NEW_ARCHITECTURE:
-        raise ContractRefused("owner contract is absent")
-    if classification == REAL_MUTATION_REQUIRED and claim.successor != _expected_successor(claim.owner):
+    if classification in {
+        REAL_MUTATION_REQUIRED,
+        REAL_AUTHORITY_TRANSITION_REQUIRED,
+    } and claim.successor != _expected_successor(claim.owner):
         raise ContractRefused("conflicting successor")
 
 
