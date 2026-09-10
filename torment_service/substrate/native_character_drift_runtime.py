@@ -7,6 +7,8 @@ persists only the retained external CharacterStore state.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any
 from uuid import UUID
 
@@ -89,6 +91,61 @@ class NativeCharacterDriftRuntime:
         self._memory_read = memory_read
         self._memory_enumeration = memory_enumeration
         self._motif_reader = motif_reader
+
+    def recompute_target_geometry_baseline(
+        self, *, target_representation_identity: str, current_step: int,
+    ) -> "QualifiedTargetGeometry":
+        """Read the qualified native lane without applying normal drift state.
+
+        This is deliberately separate from ``measure_for_post_write``: it
+        uses the same qualified readers and geometry function but neither
+        appends history nor calls ``persist_character_drift_state``. The
+        caller may pass the resulting bounded observation to the narrow
+        CharacterStore disposition owner.
+        """
+        from .character_baseline_disposition import QualifiedTargetGeometry
+
+        config = self._configuration
+        if not isinstance(target_representation_identity, str) or not target_representation_identity:
+            raise SubstrateConfigurationError("Character target representation identity is required")
+        seed_id = config.seed_id.strip()
+        if not seed_id:
+            raise SubstrateConfigurationError("Character baseline seed is unavailable")
+        seed = self._store.load_seed(config.workspace_id, seed_id)
+        if seed is None or not seed.seed_motif_id:
+            raise SubstrateConfigurationError("Character baseline seed is unavailable")
+        observations = tuple(
+            CharacterDriftMemoryObservation(view.eid, view.payload)
+            for view in self._memory_enumeration.list_current()
+        )
+        prior = self._store.load_state(config.workspace_id, config.agent_id)
+        drift = measure_drift_from_observations(
+            observations=observations,
+            cached_embedding=self._cached_embedding,
+            seed_centroid=lambda average: self._seed_centroid(seed, average),
+            coherence_field=None,
+            seed=seed,
+            agent_id=config.agent_id,
+            current_step=current_step,
+            previous_state=prior,
+        )
+        ordered_memory_digest = _geometry_digest([
+            {"eid": observation.eid, "payload": dict(observation.payload)}
+            for observation in observations
+        ])
+        native_seed_geometry_digest = _geometry_digest({
+            "seed_id": seed.seed_id,
+            "seed_motif_id": seed.seed_motif_id,
+            "seed_eids": list(seed.seed_eids),
+            "expected_dimension": config.expected_dimension,
+        })
+        return QualifiedTargetGeometry(
+            target_representation_identity=target_representation_identity,
+            ordered_native_memory_digest=ordered_memory_digest,
+            native_seed_geometry_digest=native_seed_geometry_digest,
+            expected_dimension=config.expected_dimension,
+            distance_to_seed=float(drift["distance_to_seed"]),
+        )
 
     def measure_for_post_write(
         self, request: CharacterDriftPostWriteRequest,
@@ -187,6 +244,15 @@ def _legacy_cache_normalize(vector: Any, *, expected_dimension: int) -> np.ndarr
             value = value[:int(expected_dimension)]
     norm = float(np.linalg.norm(value) + 1e-12)
     return (value / norm).astype(np.float32)
+
+
+def _geometry_digest(value: object) -> str:
+    """Canonical input evidence for a non-mutating target-lane observation."""
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise SubstrateConfigurationError("Character target geometry is not canonically serializable") from exc
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 __all__ = [

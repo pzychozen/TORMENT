@@ -80,11 +80,11 @@ from .root_blocker5_binding import (
     RootBlocker5BindingRefused,
     RootCompletionVerification,
     RootGeometryDispositionPlan,
+    RootDispositionAdapter,
     RootWriterFreezeWitness,
-    SyntheticRootDispositionAdapter,
     build_real_root_v2_admission_envelope,
     build_root_admission_envelope,
-    execute_synthetic_root_disposition_plan,
+    execute_root_disposition_plan,
     frozen_root_geometry_disposition_plan,
     require_persisted_root_admission_envelope,
     require_persisted_root_writer_freeze_evidence,
@@ -979,7 +979,7 @@ class OfflineCutoverController:
         request: RootOfflineCutoverRequest,
         normalization: RootNormalizationResult,
         *,
-        adapter: SyntheticRootDispositionAdapter,
+        adapter: RootDispositionAdapter,
     ) -> RootDispositionExecutionReceipt:
         """Post-P6 only: create or recover the immutable root receipt."""
 
@@ -999,7 +999,7 @@ class OfflineCutoverController:
         if existing is not None:
             return existing
         try:
-            receipt = execute_synthetic_root_disposition_plan(
+            receipt = execute_root_disposition_plan(
                 envelope=envelope, adapter=adapter,
             )
             return record_root_disposition_execution(
@@ -1036,6 +1036,15 @@ class OfflineCutoverController:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_RECEIPT_REFUSED") from exc
         if receipt is None:
             raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_RECEIPT_REQUIRED")
+        # Root P7 is the canonical selector route. A historical generic
+        # receipt is no longer enough: re-read the concrete Character and
+        # trajectory owner evidence immediately before this one selector call.
+        from .production_root_disposition import verify_production_root_disposition_receipt
+
+        try:
+            verify_production_root_disposition_receipt(data_root=request.root, receipt=receipt)
+        except DeploymentAuthorityError as exc:
+            raise OfflineCutoverRefused("ROOT_OFFLINE_CUTOVER_P7_PRODUCTION_RECEIPT_REQUIRED") from exc
         try:
             result = activate_selector_native(
                 data_root=request.root,

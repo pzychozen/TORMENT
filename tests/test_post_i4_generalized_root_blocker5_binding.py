@@ -545,10 +545,12 @@ def test_synthetic_root_bridge_requires_post_p6_receipt_then_recovers_idempotent
             disposition_execution_receipt_digest=_digest("mismatched-receipt"),
         )
 
-    selector = controller.activate_root_external_selector(request, normalization)
-    assert selector.deployment_state.value == "NATIVE_ACTIVE"
-    assert controller.activate_root_external_selector(request, normalization) == selector
-    assert controller.root_current_stage(request) is OfflineCutoverStage.NATIVE_ACTIVE
+    # Ratified v1.2 no longer permits a copy-only synthetic receipt to reach
+    # P7. The historical seam still proves recording/idempotency behavior,
+    # but it cannot substitute for the real Character/trajectory owners.
+    with pytest.raises(OfflineCutoverRefused, match="P7_PRODUCTION_RECEIPT_REQUIRED"):
+        controller.activate_root_external_selector(request, normalization)
+    assert controller.root_current_stage(request) is OfflineCutoverStage.CORE_ACTIVE_EXTERNAL_PENDING
 
 
 def test_root_discovery_refuses_an_undeclared_canonical_workspace(tmp_path: Path) -> None:

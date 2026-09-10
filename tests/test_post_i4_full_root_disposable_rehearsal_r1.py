@@ -16,6 +16,7 @@ from uuid import UUID
 
 import pytest
 
+from torment_service.character import CharacterSeed, CharacterState, CharacterStore
 from torment_service.public_runtime import (
     NativePublicOperationRefused,
     PublicRuntimeConfiguration,
@@ -59,6 +60,16 @@ from torment_service.substrate.production_native_owner import (
 from torment_service.substrate.root_blocker5_binding import (
     RootWriterFreezeWitness,
     root_runtime_scope_plan_digest,
+)
+from torment_service.substrate.character_baseline_disposition import (
+    CharacterBaselineBinding, CharacterBaselineRequest, QualifiedTargetGeometry,
+)
+from torment_service.substrate.production_root_disposition import (
+    ProductionRootDispositionAdapter, ReceiptOnlyDispositionEvidence,
+    SyntheticOnlyDispositionEvidence, TrajectoryScopeHandoffInstruction,
+)
+from torment_service.substrate.trajectory_writer_handoff import (
+    TrajectoryHandoffBinding, TrajectoryScopeIdentity,
 )
 from torment_service.substrate.root_profile import (
     ROOT_NATIVE_PROFILE_GENERATION_KIND,
@@ -336,6 +347,89 @@ def _build_disposable_root(
     return request, profile
 
 
+def _production_disposition_adapter(request: RootOfflineCutoverRequest, envelope, active):
+    """Build the real-owner adapter for this disposable R1 continuation."""
+    plan = envelope.geometry_disposition_plan
+    store = CharacterStore(str(request.root))
+    runtimes = {
+        (item.workspace_id, item.scope_kind, item.qualifier): item
+        for item in request.runtime_scopes
+    }
+    character_requests, instructions = [], []
+    for workspace in request.description.workspace_plans:
+        for materialized in workspace.materialized_scopes:
+            scope = materialized.scope_key
+            runtime = runtimes[(
+                scope.workspace_id,
+                "PRIVATE_AGENT" if scope.scope_kind is RootScopeKind.PRIVATE else "SHARED_DOMAIN",
+                scope.qualifier,
+            )]
+            if scope.scope_kind is RootScopeKind.PRIVATE:
+                artifact = request.root / "workspaces" / scope.workspace_id / "agents" / str(scope.agent_id) / "private"
+            else:
+                artifact = request.root / "workspaces" / scope.workspace_id / "domains" / str(scope.domain_id) / "shared"
+            identity = TrajectoryScopeIdentity(
+                data_root_identity=request.description.data_root_identity, scope_key=scope,
+                legacy_source_namespace_id=runtime.legacy_source_namespace_id, artifact_root=str(artifact),
+            )
+            instructions.append(TrajectoryScopeHandoffInstruction(
+                scope=identity, legacy_writer_identity="LEGACY_MEMORY_GRAPH",
+                operation_key=f"r1-production-handoff:{scope.workspace_id}:{scope.scope_kind.value}:{scope.qualifier}",
+                quiescing_evidence_digest=_digest("r1-quiescing:" + repr(scope.canonical_key)),
+                quiescence_evidence_digest=_digest("r1-quiesced:" + repr(scope.canonical_key)),
+                native_admission_evidence_digest=_digest("r1-native:" + repr(scope.canonical_key)),
+            ))
+            if scope.scope_kind is RootScopeKind.PRIVATE:
+                seed_id = f"r1-cutover-{scope.workspace_id}-{scope.agent_id}"
+                store.save_seed(scope.workspace_id, CharacterSeed(
+                    seed_id=seed_id, character_name="Disposable", seed_text="A disposable qualified Character seed.",
+                    seed_motif_id="r1-native-seed", seed_eids=[7],
+                ))
+                store.save_state(scope.workspace_id, CharacterState(
+                    workspace_id=scope.workspace_id, agent_id=str(scope.agent_id), seed_id=seed_id,
+                    distance_to_seed=0.1, drift_direction="away_seed", drift_history=[(1, 0.1)],
+                ))
+                character_requests.append(CharacterBaselineRequest(
+                    workspace_id=scope.workspace_id, agent_id=str(scope.agent_id), seed_id=seed_id,
+                    operation_key=f"r1-production-character:{scope.workspace_id}:{scope.agent_id}",
+                    binding=CharacterBaselineBinding(
+                        corrected_core_id=envelope.native_staging_core_id, p6_receipt_id=str(active.maintenance_id),
+                        root_admission_envelope_digest=envelope.digest, plan_digest=plan.digest,
+                    ),
+                    target_geometry=QualifiedTargetGeometry(
+                        target_representation_identity="r1-native-lane:384",
+                        ordered_native_memory_digest=_digest("r1-memory:" + repr(scope.canonical_key)),
+                        native_seed_geometry_digest=_digest("r1-seed:" + repr(scope.canonical_key)),
+                        expected_dimension=384, distance_to_seed=0.8,
+                    ),
+                ))
+    binding = TrajectoryHandoffBinding(
+        corrected_core_id=envelope.native_staging_core_id, p6_receipt_id=str(active.maintenance_id),
+        root_admission_envelope_digest=envelope.digest, plan_digest=plan.digest,
+    )
+    receipt_only = [
+        ReceiptOnlyDispositionEvidence(entry.owner_identity, envelope.digest, plan.digest,
+                                       entry.source_observation_digest, _digest("r1-receipt:" + entry.owner_identity))
+        for entry in plan.entries
+        if entry.owner_identity in {
+            "bridge_registry", "character_drift_history", "character_seed", "conflict_role_affect_identity",
+            "deep_archive_vector_state", "hivemind_historical_geometry_scores", "proposal_registry",
+        }
+    ]
+    synthetic_only = [
+        SyntheticOnlyDispositionEvidence(entry.owner_identity, envelope.digest, plan.digest,
+                                         entry.source_observation_digest, _digest("r1-synthetic:" + entry.owner_identity))
+        for entry in plan.entries
+        if entry.owner_identity in {"checkpoint_kernel_calibration", "srg_payload_markers"}
+    ]
+    return ProductionRootDispositionAdapter(
+        data_root=request.root, p6_receipt_id=str(active.maintenance_id), plan_digest=plan.digest,
+        character_requests=tuple(character_requests), trajectory_binding=binding,
+        trajectory_instructions=tuple(instructions), receipt_only_evidence=receipt_only,
+        synthetic_only_evidence=synthetic_only,
+    )
+
+
 def _service_environment(root: Path, profile: QualifiedDeploymentProfile) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update({
@@ -451,16 +545,13 @@ def _activate_root_to_p7(
     assert controller.root_current_stage(request) is OfflineCutoverStage.CORE_ACTIVE_EXTERNAL_PENDING
     with pytest.raises(OfflineCutoverRefused):
         controller.safe_root_pending_abort(request)
-    receipt = controller.execute_root_disposition_plan(
-        request, normalization, adapter=_DisposableDispositionAdapter(),
-    )
+    adapter = _production_disposition_adapter(request, verified.envelope, active)
+    receipt = controller.execute_root_disposition_plan(request, normalization, adapter=adapter)
     # R3: the durable receipt and frozen plan are recovered by a third
     # controller before selector activation.
     controller = OfflineCutoverController()
     assert controller.root_current_stage(request) is OfflineCutoverStage.CORE_ACTIVE_EXTERNAL_PENDING
-    assert controller.execute_root_disposition_plan(
-        request, normalization, adapter=_DisposableDispositionAdapter(),
-    ) == receipt
+    assert controller.execute_root_disposition_plan(request, normalization, adapter=adapter) == receipt
     with pytest.raises(Exception):
         activate_selector_native(
             data_root=request.root,

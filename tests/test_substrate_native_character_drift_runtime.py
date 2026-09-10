@@ -32,6 +32,7 @@ from torment_service.substrate.native_character_drift_runtime import (
     NativeCharacterDriftRuntimeConfiguration,
     _legacy_cache_normalize,
 )
+from torment_service.substrate.character_baseline_disposition import QualifiedTargetGeometry
 from torment_service.substrate.native_memory_runtime_access import NativePostWriteMemoryAccess
 from torment_service.substrate.representations import (
     INTEGRITY_ALGORITHM_SHA256,
@@ -278,6 +279,36 @@ def test_native_character_measurement_matches_legacy_order_filter_cache_and_exte
         assert _state_without_timestamp(native_store.state) == _state_without_timestamp(legacy_store.state)
         assert native_store.state is not None and native_store.state.drift_history == [(10, native_result.drift["drift_score"])]
         assert _semantic_counts(values["connection"]) == before
+    finally:
+        values["qualified"].close()
+
+
+def test_target_geometry_rebaseline_reader_is_native_and_non_mutating(tmp_path: Path):
+    values = _database(tmp_path)
+    try:
+        source = _memory(values, "target-geometry", born_step=9)
+        _ready(values, source, "target-geometry", (1.0, 0.0, 0.0))
+        _seed_motif(values, source)
+        seed = CharacterSeed(
+            "seed", "Character", "Seed text.", seed_motif_id="seed-motif", seed_eids=[source.eid],
+        )
+        state = CharacterState("ws", "aria", "seed", distance_to_seed=0.55, drift_history=[(1, 0.2)])
+        store = _Store(seed, state)
+        runtime = _native(values, store)
+        before_state = _state_without_timestamp(store.state)
+        before_counts = _semantic_counts(values["connection"])
+
+        geometry = runtime.recompute_target_geometry_baseline(
+            target_representation_identity="native:compat-embedding-v1:3", current_step=10,
+        )
+
+        assert isinstance(geometry, QualifiedTargetGeometry)
+        assert geometry.expected_dimension == 3
+        assert len(geometry.ordered_native_memory_digest) == 64
+        assert len(geometry.native_seed_geometry_digest) == 64
+        assert _state_without_timestamp(store.state) == before_state
+        assert store.saved == []
+        assert _semantic_counts(values["connection"]) == before_counts
     finally:
         values["qualified"].close()
 

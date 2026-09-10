@@ -1,6 +1,7 @@
 # torment_service/memory_graph.py
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Tuple
 import os, json, time
 import logging
@@ -28,6 +29,11 @@ from .lifecycle import (
     validate_lifecycle_envelope,
 )
 from .candidate_types import CandidateShapedValue
+from .substrate.trajectory_writer_handoff import (
+    TrajectoryWriteAuthority,
+    TrajectoryWriterFamily,
+    discover_trajectory_write_authority,
+)
 
 log = logging.getLogger("torment.memory_graph")
 
@@ -257,10 +263,22 @@ class MemoryGraph:
         )
         self._last_trajectory_step: Optional[int] = None
         self._last_trajectory_frame_seq: Optional[int] = None
-        if self._trajectory_format == "v2":
-            self.traj = TrajectoryV2Writer(root_dir=self.data_dir)
-        else:
-            self.traj = TrajectoryLogger(root_dir=self.data_dir)
+        # A coordinator is discovered only after a real disposition execution
+        # has installed its sidecar.  Pre-handoff/test roots retain their
+        # historical behavior, while every post-installation writer becomes
+        # fail-closed on a missing scope record or stale durable token.
+        self._trajectory_authority: TrajectoryWriteAuthority | None = (
+            discover_trajectory_write_authority(
+                artifact_root=self.data_dir,
+                family=TrajectoryWriterFamily.LEGACY,
+                writer_identity="LEGACY_MEMORY_GRAPH",
+            )
+        )
+        with self._trajectory_effect("trajectory_writer_initialize"):
+            if self._trajectory_format == "v2":
+                self.traj = TrajectoryV2Writer(root_dir=self.data_dir)
+            else:
+                self.traj = TrajectoryLogger(root_dir=self.data_dir)
 
         # Derive fixed child paths from the canonical root.
         self.meta_path = _child_path(self.data_dir, "nodes.jsonl")
@@ -270,6 +288,27 @@ class MemoryGraph:
         self.edges: List[Dict[str, Any]] = []
 
         self._load()
+
+    def _trajectory_effect(self, effect_kind: str):
+        """Return the durable trajectory fence for one artifact effect.
+
+        A graph constructed below a post-disposition authority sidecar owns a
+        legacy token.  Roots without that sidecar intentionally retain the
+        pre-handoff behavior, so the null context is the compatibility path
+        rather than a bypass once coordination exists.
+        """
+        authority = self._trajectory_authority
+        # A graph can pre-date creation of the sidecar. Re-discovering only
+        # while it has no token closes that historical-process gap without
+        # ever refreshing a stale token after a fence.
+        if authority is None:
+            authority = discover_trajectory_write_authority(
+                artifact_root=self.data_dir,
+                family=TrajectoryWriterFamily.LEGACY,
+                writer_identity="LEGACY_MEMORY_GRAPH",
+            )
+            self._trajectory_authority = authority
+        return nullcontext() if authority is None else authority.effect(effect_kind)
 
     def _init_shard_storage(self) -> None:
         """Initialize shard writer and reader for embedding storage."""
@@ -666,11 +705,12 @@ class MemoryGraph:
         )
         if kinematic_reset and self._trajectory_format == "v2":
             try:
-                self.traj.mark_entity_reset(
-                    eid,
-                    last_observed_step=self._last_trajectory_step,
-                    last_observed_frame_seq=self._last_trajectory_frame_seq,
-                )
+                with self._trajectory_effect("trajectory_entity_reset"):
+                    self.traj.mark_entity_reset(
+                        eid,
+                        last_observed_step=self._last_trajectory_step,
+                        last_observed_frame_seq=self._last_trajectory_frame_seq,
+                    )
             except Exception as e:
                 log.debug("Trajectory reset boundary skipped: %s", e)
         # Mirror to SQLite sidecar (Phase 4) — failure is non-fatal
@@ -789,7 +829,8 @@ class MemoryGraph:
         self.entities[int(ent.eid)] = ent
         if self._trajectory_format == "v2":
             try:
-                self.traj.write_genesis(ent)
+                with self._trajectory_effect("trajectory_genesis"):
+                    self.traj.write_genesis(ent)
             except Exception as e:
                 log.debug("Trajectory genesis skipped: %s", e)
 
@@ -951,7 +992,8 @@ class MemoryGraph:
             ]
             if self._trajectory_format == "v2":
                 try:
-                    result = self.traj.write_step(live_entities, step=int(step))
+                    with self._trajectory_effect("trajectory_v2_step"):
+                        result = self.traj.write_step(live_entities, step=int(step))
                     if result.ok:
                         self._last_trajectory_step = int(step)
                         self._last_trajectory_frame_seq = result.frame_seq
@@ -962,7 +1004,8 @@ class MemoryGraph:
             else:
                 for ent in live_entities:
                     try:
-                        self.traj.log_entity(ent, step=int(step))
+                        with self._trajectory_effect("trajectory_legacy_step"):
+                            self.traj.log_entity(ent, step=int(step))
                     except Exception as e:
                         log.debug("Trajectory log skipped: %s", e)
 
@@ -1004,9 +1047,15 @@ class MemoryGraph:
         """
         if self._trajectory_format == "v2":
             try:
-                self.traj.close()
+                with self._trajectory_effect("trajectory_v2_close"):
+                    self.traj.close()
             except Exception as e:
                 log.debug("Trajectory V2 close skipped: %s", e)
+        if self._trajectory_authority is not None:
+            try:
+                self._trajectory_authority.close()
+            except Exception as e:
+                log.debug("Trajectory authority close skipped: %s", e)
         if self._shard_writer is not None:
             self._shard_writer.close()
         if self._shard_reader is not None:

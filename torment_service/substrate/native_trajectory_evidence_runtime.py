@@ -6,6 +6,7 @@ using the same two legacy artifact formats selected by ``MemoryGraph``.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import logging
 import os
@@ -17,6 +18,12 @@ from uuid import UUID
 
 from torment_service.kernel.trajectory_logging import TrajectoryLogger
 from torment_service.kernel.trajectory_v2 import TrajectoryV2Writer
+
+from .trajectory_writer_handoff import (
+    TrajectoryWriteAuthority,
+    TrajectoryWriterFamily,
+    discover_trajectory_write_authority,
+)
 
 
 log = logging.getLogger("torment.substrate.native_trajectory_evidence")
@@ -42,17 +49,41 @@ class NativeTrajectoryEvidenceRuntime:
         # so these facts are retained only by this external evidence owner.
         self._last_observed_step: int | None = None
         self._last_observed_frame_seq: int | None = None
-        if self.trajectory_format == "v2":
-            self._writer: TrajectoryV2Writer | TrajectoryLogger = TrajectoryV2Writer(str(self.root_dir))
-        else:
-            self._writer = TrajectoryLogger(str(self.root_dir))
+        self._trajectory_authority: TrajectoryWriteAuthority | None = (
+            discover_trajectory_write_authority(
+                artifact_root=self.root_dir,
+                family=TrajectoryWriterFamily.NATIVE,
+                writer_identity="NATIVE_TRAJECTORY_EVIDENCE",
+            )
+        )
+        with self._trajectory_effect("trajectory_writer_initialize"):
+            if self.trajectory_format == "v2":
+                self._writer: TrajectoryV2Writer | TrajectoryLogger = TrajectoryV2Writer(str(self.root_dir))
+            else:
+                self._writer = TrajectoryLogger(str(self.root_dir))
+
+    def _trajectory_effect(self, effect_kind: str):
+        """Fence this exact artifact effect when a handoff sidecar is installed."""
+        authority = self._trajectory_authority
+        # A native runtime can survive sidecar creation. It must discover the
+        # new durable authority before its next effect, but it must never
+        # refresh an already-issued token after that token is fenced.
+        if authority is None:
+            authority = discover_trajectory_write_authority(
+                artifact_root=self.root_dir,
+                family=TrajectoryWriterFamily.NATIVE,
+                writer_identity="NATIVE_TRAJECTORY_EVIDENCE",
+            )
+            self._trajectory_authority = authority
+        return nullcontext() if authority is None else authority.effect(effect_kind)
 
     def write_genesis(self, entity: Any) -> None:
         """Write V2 birth evidence at the legacy creation boundary, if selected."""
         if self.trajectory_format != "v2":
             return
         try:
-            result = self._writer.write_genesis(entity)  # type: ignore[union-attr]
+            with self._trajectory_effect("trajectory_genesis"):
+                result = self._writer.write_genesis(entity)  # type: ignore[union-attr]
             if not result.ok:
                 log.debug("Trajectory V2 genesis incomplete: %s", result.detail)
         except Exception as exc:
@@ -66,7 +97,8 @@ class NativeTrajectoryEvidenceRuntime:
         )
         if self.trajectory_format == "v2":
             try:
-                result = self._writer.write_step(live, step=int(step))  # type: ignore[union-attr]
+                with self._trajectory_effect("trajectory_v2_step"):
+                    result = self._writer.write_step(live, step=int(step))  # type: ignore[union-attr]
                 if not result.ok:
                     log.debug("Trajectory V2 step incomplete: %s", result.detail)
                 else:
@@ -77,24 +109,26 @@ class NativeTrajectoryEvidenceRuntime:
             return
         for entity in live:
             try:
-                self._writer.log_entity(entity, step=int(step))  # type: ignore[union-attr]
+                with self._trajectory_effect("trajectory_legacy_step"):
+                    self._writer.log_entity(entity, step=int(step))  # type: ignore[union-attr]
             except Exception as exc:
                 log.debug("Trajectory log skipped: %s", exc)
 
     def write_classification_event(self, entity: Any, *, step: int, label: str) -> None:
         """Append the existing non-authoritative classification event record."""
         try:
-            event_path = (self.root_dir / "memory_events.jsonl").resolve()
-            if event_path.parent != self.root_dir:
-                raise ValueError(f"trajectory event path escapes data root: {event_path!s}")
-            with event_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps({
-                    "type": "TRAJ_CLASSIFY",
-                    "ts": int(time.time()),
-                    "step": int(step),
-                    "eid": int(getattr(entity, "eid")),
-                    "traj_label": str(label),
-                }, ensure_ascii=False) + "\n")
+            with self._trajectory_effect("trajectory_classification_event"):
+                event_path = (self.root_dir / "memory_events.jsonl").resolve()
+                if event_path.parent != self.root_dir:
+                    raise ValueError(f"trajectory event path escapes data root: {event_path!s}")
+                with event_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({
+                        "type": "TRAJ_CLASSIFY",
+                        "ts": int(time.time()),
+                        "step": int(step),
+                        "eid": int(getattr(entity, "eid")),
+                        "traj_label": str(label),
+                    }, ensure_ascii=False) + "\n")
         except Exception as exc:
             log.debug("Traj classify event write skipped: %s", exc)
 
@@ -103,7 +137,8 @@ class NativeTrajectoryEvidenceRuntime:
         if self.trajectory_format != "v2":
             return
         try:
-            result = self._writer.close()  # type: ignore[union-attr]
+            with self._trajectory_effect("trajectory_v2_close"):
+                result = self._writer.close()  # type: ignore[union-attr]
             if not result.ok:
                 log.debug("Trajectory V2 close incomplete: %s", result.detail)
         except Exception as exc:

@@ -863,8 +863,8 @@ def verify_root_completion(
     return RootCompletionVerification(envelope, closure, completion)
 
 
-class SyntheticRootDispositionAdapter(Protocol):
-    """Narrow synthetic owner seam; real external owners are intentionally absent."""
+class RootDispositionAdapter(Protocol):
+    """Narrow plan-entry router implemented by synthetic or production owners."""
 
     def execute(
         self,
@@ -875,24 +875,24 @@ class SyntheticRootDispositionAdapter(Protocol):
     ) -> str: ...
 
 
-def execute_synthetic_root_disposition_plan(
+def execute_root_disposition_plan(
     *,
     envelope: RootAdmissionEnvelope,
-    adapter: SyntheticRootDispositionAdapter,
+    adapter: RootDispositionAdapter,
 ) -> RootDispositionExecutionReceipt:
     """Build deterministic, idempotency-addressable post-P6 receipt evidence."""
 
     # Protocol runtime checks cannot validate method shape; keep a narrow
     # structural check and never inspect real owner modules.
     if not callable(getattr(adapter, "execute", None)):
-        raise RootBlocker5BindingRefused("synthetic disposition adapter must expose execute")
+        raise RootBlocker5BindingRefused("root disposition adapter must expose execute")
     transition = f"ROOT_GEOMETRY_EPOCH:{envelope.digest}"
     results = tuple(
         RootDispositionOwnerResult(
             owner_identity=entry.owner_identity,
             source_observation_digest=entry.source_observation_digest,
             disposition=entry.disposition,
-            outcome=_synthetic_outcome(
+            outcome=_root_disposition_outcome(
                 adapter=adapter,
                 entry=entry,
                 root_admission_envelope_digest=envelope.digest,
@@ -909,6 +909,17 @@ def execute_synthetic_root_disposition_plan(
         geometry_transition_identity=transition,
         owner_results=results,
     )
+
+
+# Historical rehearsal imports remain valid, but production code calls the
+# neutral operation name above. The compatibility alias grants no authority.
+SyntheticRootDispositionAdapter = RootDispositionAdapter
+
+
+def execute_synthetic_root_disposition_plan(
+    *, envelope: RootAdmissionEnvelope, adapter: RootDispositionAdapter,
+) -> RootDispositionExecutionReceipt:
+    return execute_root_disposition_plan(envelope=envelope, adapter=adapter)
 
 
 def root_membership_closure_digest(
@@ -1359,9 +1370,9 @@ def _declared_scope_keys(description: RootNativeProductionAdmissionDescription) 
     ))
 
 
-def _synthetic_outcome(
+def _root_disposition_outcome(
     *,
-    adapter: SyntheticRootDispositionAdapter,
+    adapter: RootDispositionAdapter,
     entry: RootGeometryDispositionPlanEntry,
     root_admission_envelope_digest: str,
     geometry_transition_identity: str,
@@ -1372,7 +1383,7 @@ def _synthetic_outcome(
         geometry_transition_identity=geometry_transition_identity,
     )
     if not isinstance(outcome, str) or not outcome:
-        raise RootBlocker5BindingRefused("synthetic disposition adapter returned an invalid outcome")
+        raise RootBlocker5BindingRefused("root disposition adapter returned an invalid outcome")
     return outcome
 
 
@@ -1405,11 +1416,13 @@ __all__ = [
     "RootGeometryDispositionPlan",
     "RootGeometryDispositionPlanEntry",
     "RootWriterFreezeWitness",
+    "RootDispositionAdapter",
     "SyntheticRootDispositionAdapter",
     "build_root_admission_envelope",
     "build_real_root_v2_admission_envelope",
     "declared_census_digest",
     "discover_canonical_root_layout",
+    "execute_root_disposition_plan",
     "execute_synthetic_root_disposition_plan",
     "frozen_root_geometry_disposition_plan",
     "normalization_closure_digest",
