@@ -7,6 +7,7 @@ provider, or create another deployment authority.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 from dataclasses import dataclass
 import hashlib
@@ -501,6 +502,7 @@ class RootAdmissionEnvelopeRecord:
         }
 
 
+@timed("root.admission_record_decode_validation")
 def root_admission_envelope_record_from_payload(value: object) -> RootAdmissionEnvelopeRecord:
     """Decode one explicit versioned record; unknown shapes never downgrade."""
 
@@ -806,6 +808,7 @@ class RootCompletionVerification:
     completion_witness: RootAdmissionCompletionWitness
 
 
+@timed("root.full_completion_verification")
 def verify_root_completion(
     *,
     data_root: str | Path,
@@ -922,6 +925,7 @@ def execute_synthetic_root_disposition_plan(
     return execute_root_disposition_plan(envelope=envelope, adapter=adapter)
 
 
+@timed("root.membership_closure")
 def root_membership_closure_digest(
     *,
     connection: sqlite3.Connection,
@@ -1098,6 +1102,7 @@ def _verify_root_writer_freeze_evidence(
         raise RootBlocker5BindingRefused("ROOT_WRITER_FREEZE_EVIDENCE_STALE_OR_INVALID") from exc
 
 
+@timed("root.normalization_completion_verification")
 def _require_normalization_complete(
     result: RootNormalizationResult,
     description: RootNativeProductionAdmissionDescription,

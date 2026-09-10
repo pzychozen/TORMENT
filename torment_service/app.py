@@ -1,5 +1,6 @@
 # app.py
 from __future__ import annotations
+from .diagnostic_query_timing import timed, QueryTimingMiddleware
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 import logging
@@ -185,6 +186,9 @@ async def enforce_rest_auth_boundary(request: Request, call_next):
     except PublicRuntimeStartupRefused as exc:
         return JSONResponse(status_code=503, content={"detail": str(exc)})
     return await call_next(request)
+
+app.add_middleware(QueryTimingMiddleware)
+
 
 class _AppRuntimeProxy:
     """Keep existing endpoint call sites on one lazy public runtime surface."""
@@ -1256,6 +1260,7 @@ def ingest_route_probe(req: IngestRouteProbeReq, request: Request) -> Dict[str, 
     return preview_route_decision(spine_req, fabric, ctx).to_dict()
 
 @app.post("/agent/query")
+@timed("http.endpoint", endpoint=True)
 def query(req: QueryReq) -> Dict[str, Any]:
     # When thinking advisory is active, run the ThinkingController to
     # produce a MemoryPlan that influences lane-specific retrieval.

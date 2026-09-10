@@ -1,5 +1,6 @@
 # fabric.py
 from __future__ import annotations
+from .diagnostic_query_timing import timed, span
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 import os, time, json, re, atexit, tempfile, threading, uuid, logging, math
@@ -4345,6 +4346,7 @@ class TormentFabric:
             _qualification_read_model=read_model,
         )
 
+    @timed("query.private_search")
     def _query_private_lane(
         self,
         ak: str,
@@ -4381,6 +4383,7 @@ class TormentFabric:
             hits, read_model=read_model,
         )
 
+    @timed("query.shared_search")
     def _query_shared_lane(
         self,
         ws: Any,
@@ -4731,6 +4734,7 @@ class TormentFabric:
                     _canonical_step = max(_canonical_step, int(getattr(_ent_fb, "born_step", 0) or 0))
         return _canonical_step
 
+    @timed("query.fabric")
     def query(
         self,
         workspace_id: str,
@@ -4805,7 +4809,8 @@ class TormentFabric:
                 "native query collective context is not yet qualified"
             )
 
-        qemb = self.kernel.embedder.embed(query_text)
+        with span("query.embedding"):
+            qemb = self.kernel.embedder.embed(query_text)
         if int(np.asarray(qemb).reshape(-1).shape[0]) != int(ws.embed_dim):
             raise HTTPException(
                 status_code=409,

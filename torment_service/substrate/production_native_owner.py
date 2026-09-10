@@ -7,6 +7,7 @@ only within explicit, same-thread query or write contexts.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -287,6 +288,7 @@ class NativeProductionResourceOwner:
     def closed(self) -> bool:
         return self._closed
 
+    @timed("native.read_context_acquisition")
     def open_query_context(
         self, *, embedder: Any, workspace_id: str | None = None,
     ) -> "NativeProductionQueryContext":
@@ -360,6 +362,7 @@ class NativeProductionResourceOwner:
             private_trajectory_evidence_process_state=self._private_trajectory_evidence_process_state,
         )
 
+    @timed("native.owner_recovery")
     def _recover_active_runtime(self, *, workspace_id: str | None = None) -> Any:
         self._require_open()
         agreement = self._revalidate_authority()
@@ -403,6 +406,7 @@ class NativeProductionResourceOwner:
         _require_profile_scope_plan(runtime.descriptor, self._effective_profile)
         return runtime
 
+    @timed("native.authority_revalidation")
     def _revalidate_authority(self) -> DeploymentResolution:
         self._require_open()
         current = _resolve_exact_agreement(
@@ -435,6 +439,7 @@ class _NativeProductionContext:
         self._thread_id = threading.get_ident()
         self._closed = False
 
+    @timed("native.context_closure")
     def close(self) -> None:
         if self._closed:
             return
@@ -561,6 +566,7 @@ class NativeProductionPostWriteContext(_NativeProductionContext):
         self._adapter.close()
 
 
+@timed("root.workspace_recovery")
 def _recover_root_v2_workspace_runtime(
     *,
     data_root: Path,
@@ -708,6 +714,7 @@ def _recover_root_v2_workspace_runtime(
     )
 
 
+@timed("root.record_completion_verification")
 def _require_root_v2_record_agreement(
     *,
     record: RootAdmissionEnvelopeRecord,

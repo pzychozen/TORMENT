@@ -7,6 +7,7 @@ therefore remains a fact for a later, explicitly authorized cutover phase.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed, sqlite_connect
 
 from dataclasses import dataclass
 import json
@@ -553,6 +554,7 @@ def abort_selector_pending_inert_core(
     )
 
 
+@timed("deployment.profile_agreement")
 def resolve_deployment_agreement(
     *, data_root: str | Path, effective_profile: QualifiedDeploymentProfile
 ) -> DeploymentResolution:
@@ -804,16 +806,16 @@ def _open_selector(
         raise DeploymentAuthorityError("selector path must not be a symlink")
     try:
         if create:
-            connection = sqlite3.connect(str(path), isolation_level=None, check_same_thread=True)
+            connection = sqlite_connect(str(path), isolation_level=None, check_same_thread=True)
         elif writable:
-            connection = sqlite3.connect(
+            connection = sqlite_connect(
                 f"{path.resolve().as_uri()}?mode=rw",
                 uri=True,
                 isolation_level=None,
                 check_same_thread=True,
             )
         else:
-            connection = sqlite3.connect(
+            connection = sqlite_connect(
                 f"{path.resolve().as_uri()}?mode=ro",
                 uri=True,
                 isolation_level=None,

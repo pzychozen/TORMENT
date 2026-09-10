@@ -23,6 +23,7 @@
 #   5. Collective provenance cannot outrank seed/canon identity by default.
 # ---------------------------------------------------------------------------
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 import json
 import logging
@@ -315,6 +316,7 @@ _VALID_SURFACES = frozenset({SURFACE_LLM_CONTEXT, SURFACE_COLLECTIVE_EXPORT})
 _RAW_HITS_MIN_TRUST = 1.0
 
 
+@timed("query.filtering")
 def filter_llm_facing(
     hits: list,
     *,

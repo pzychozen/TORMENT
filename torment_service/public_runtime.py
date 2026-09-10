@@ -5,6 +5,7 @@ module consumes that decision; it never initializes or mutates selector/core
 state, and it contains no request-controlled backend choice.
 """
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -706,6 +707,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             raise TypeError(f"unsupported native public ingest arguments: {sorted(kwargs)}")
         return self._executor.execute(request)
 
+    @timed("query.native")
     def query(
         self,
         workspace_id: str,
@@ -743,6 +745,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
             "_native_public": True,
         }
 
+    @timed("native.agent_preparation")
     def _prepare_native_agent(self, workspace_id: str, agent_id: str) -> Any:
         runtime = self._active_runtime(workspace_id)
         try:
@@ -773,6 +776,7 @@ class NativePublicTormentRuntime(PublicTormentRuntime):
         if scope.workspace_id != workspace_id:
             raise NativePublicOperationRefused("native public workspace is not admitted")
 
+    @timed("native.workspace_view")
     def _workspace_view(self, workspace_id: str) -> NativePublicWorkspaceView:
         # Revalidate before consulting the process cache.  A cached inert view
         # must never outlive the selector/profile agreement that qualified it.

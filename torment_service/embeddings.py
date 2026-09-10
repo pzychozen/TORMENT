@@ -10,6 +10,7 @@ Design:
 """
 
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 import hashlib
 import json
@@ -149,6 +150,7 @@ class STEmbedding:
         test = self._st.encode(["dim_probe"], normalize_embeddings=True)
         self.dim = int(np.asarray(test).shape[-1])
 
+    @timed("bge.encode")
     def embed(self, text: str) -> np.ndarray:
         text = (text or "").strip()
         if not text:

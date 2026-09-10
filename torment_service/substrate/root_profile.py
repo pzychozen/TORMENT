@@ -6,6 +6,7 @@ profile nor any root-scope membership.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 from dataclasses import dataclass
 import json
@@ -101,6 +102,7 @@ def current_root_profile_generation(connection: sqlite3.Connection) -> RootProfi
     return admissible[0]
 
 
+@timed("root.profile_verification")
 def verify_root_profile_generation(
     connection: sqlite3.Connection,
     claimed: RootProfileGenerationRef,

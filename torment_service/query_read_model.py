@@ -7,6 +7,7 @@ remains the native authority; the native vector runtime is an independently
 rebuildable candidate cache and this module does not add SQL ranking.
 """
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -416,6 +417,7 @@ class _NativeQualifiedQueryLane:
     def close(self) -> None:
         self._runtime.close()
 
+    @timed("query.qualified_lane_search")
     def search(
         self,
         query_text: str,
@@ -555,6 +557,7 @@ class NativeQualifiedQueryReadModel:
         self._private_lanes.clear()
         self._shared_lanes.clear()
 
+    @timed("query.continuity_read")
     def effective_srg_state(self, hit: QualifiedQueryHit) -> dict[str, Any] | None:
         """Return current durable-or-process-local SRG state for one native hit."""
         scope = self._native_srg_scope(hit)
@@ -568,6 +571,7 @@ class NativeQualifiedQueryReadModel:
             state = runtime.effective_srg_state(view)
             return None if state is None else dict(state)
 
+    @timed("query.continuity_overlay")
     def replace_srg_state(self, hit: QualifiedQueryHit, state: Mapping[str, Any]) -> None:
         """Store an evolved SRG overlay under the exact current native witness."""
         scope = self._native_srg_scope(hit)
@@ -641,6 +645,7 @@ class NativeQualifiedQueryReadModel:
             self._shared_lanes[domain_id] = lane
         return lane
 
+    @timed("query.motif_geometry")
     def domain_geometry(self, domain_id: str) -> QualifiedDomainGeometry:
         scope = self._runtime.lookup_shared(domain_id)
         semantic_scope_id = scope.memory_runtime_scope.semantic_scope_id
@@ -662,6 +667,7 @@ class NativeQualifiedQueryReadModel:
             ),
         )
 
+    @timed("query.active_motifs")
     def active_motifs(self, domain_id: str, top_k: int = 8) -> list[dict[str, Any]]:
         scope = self._runtime.lookup_shared(domain_id)
         with scope.open_readers() as readers:

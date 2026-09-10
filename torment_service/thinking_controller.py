@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 import os
 import re
@@ -1113,6 +1114,7 @@ class ThinkingController:
             action_decision=action,
         )
 
+    @timed("query.thinking_advisory")
     def think(
         self,
         workspace_id: str,

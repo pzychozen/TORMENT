@@ -11,6 +11,7 @@ scope when membership is absent.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 import base64
 import binascii
@@ -496,6 +497,7 @@ class RootScopeMembershipRuntime:
         return tuple(sorted(self._active, key=lambda key: key.cache_key))
 
 
+@timed("root.membership_recovery")
 def _recover_memberships(
     connection: sqlite3.Connection,
     profile: RootProfileGenerationRef,

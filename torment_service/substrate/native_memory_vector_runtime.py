@@ -8,6 +8,7 @@ selects it from Fabric or changes native activation state.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -278,6 +279,7 @@ class NativeMemoryVectorRuntime:
         self._dirty = True
         self._last_invalidation_reason = reason
 
+    @timed("vector.text_encode_entry")
     def search(
         self,
         query_text: str,
@@ -330,6 +332,7 @@ class NativeMemoryVectorRuntime:
             canon_only=canon_only,
         )
 
+    @timed("vector.search")
     def _search_vector(
         self,
         query: np.ndarray,
@@ -407,6 +410,7 @@ class NativeMemoryVectorRuntime:
         results.sort(key=lambda item: item["score"], reverse=True)
         return results
 
+    @timed("vector.candidate_projection")
     def _batch_project_current_rows(
         self,
         rows: tuple[NativeVectorRuntimeRow, ...],
@@ -463,6 +467,7 @@ class NativeMemoryVectorRuntime:
                 self._connection.execute("ROLLBACK")
             return None
 
+    @timed("vector.snapshot_acquisition")
     def _ensure_snapshot(self) -> NativeVectorRuntimeSnapshot | None:
         self._require_open()
         try:
@@ -516,6 +521,7 @@ class NativeMemoryVectorRuntime:
         self._rebuild_count += 1
         return candidate
 
+    @timed("vector.snapshot_build")
     def _build_snapshot(
         self,
         initial_signature: tuple[object, ...] | None,
@@ -594,6 +600,7 @@ class NativeMemoryVectorRuntime:
             final_data_version if final_data_version != initial_data_version else initial_data_version,
         )
 
+    @timed("vector.source_enumeration")
     def _enumerate_current_sources(self) -> tuple[NativeVectorRuntimeSourceWitness, ...]:
         """Validate full alias/order completeness in bounded bulk reads."""
         namespace = native_id_to_bytes(self._configuration.scope.legacy_source_namespace_id)
@@ -668,6 +675,7 @@ class NativeMemoryVectorRuntime:
         sources.sort(key=lambda item: item.runtime_ordinal)
         return tuple(sources)
 
+    @timed("vector.qualified_vector_enumeration")
     def _enumerate_qualified_vectors(self) -> dict[UUID, _QualifiedVectorCandidate]:
         """Read every eligible raw float32 row through the frozen qualification law."""
         lane = self._configuration.representation_lane

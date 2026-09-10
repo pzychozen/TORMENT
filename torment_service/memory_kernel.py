@@ -1,5 +1,6 @@
 # torment_service/memory_kernel.py
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -131,6 +132,7 @@ class TriOctaMemoryKernel:
         Omega = np.sqrt(w) * (np.cos(phases) + 1j * np.sin(phases))
         return Omega.astype(np.complex128)
 
+    @timed("native.kernel_initialization")
     def init_state(self, seed_text: str = "boot",
                    character_modulation: Optional[Dict[str, Any]] = None) -> ModelState:
         if character_modulation and "omega_init" in character_modulation:

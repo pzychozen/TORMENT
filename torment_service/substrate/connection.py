@@ -1,6 +1,7 @@
 """Qualified SQLite connection boundaries for the native substrate."""
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed, sqlite_connect
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,7 +99,7 @@ def open_temporary_test_connection(
             "temporary substrate database parent directory must already exist"
         )
     try:
-        connection = sqlite3.connect(
+        connection = sqlite_connect(
             str(path),
             isolation_level=None,
             check_same_thread=True,
@@ -114,6 +115,7 @@ def open_temporary_test_connection(
     return QualifiedTemporaryConnection(connection, qualification, path)
 
 
+@timed("native.core_connection_acquisition")
 def open_existing_native_core_connection(
     database_path: str | Path,
     *,
@@ -131,7 +133,7 @@ def open_existing_native_core_connection(
         raise SubstrateConfigurationError("busy_timeout_ms must be a non-negative integer")
     qualification = qualify_runtime(policy=runtime_policy)
     try:
-        connection = sqlite3.connect(
+        connection = sqlite_connect(
             f"{path.as_uri()}?mode=rw",
             uri=True,
             isolation_level=None,
@@ -165,7 +167,7 @@ def open_new_native_core_connection(
         raise SubstrateConfigurationError("busy_timeout_ms must be a non-negative integer")
     qualification = qualify_runtime(policy=runtime_policy)
     try:
-        connection = sqlite3.connect(
+        connection = sqlite_connect(
             str(path),
             isolation_level=None,
             check_same_thread=True,

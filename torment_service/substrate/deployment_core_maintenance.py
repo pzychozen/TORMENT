@@ -6,6 +6,7 @@ writers or construct a public native capability.
 """
 
 from __future__ import annotations
+from ..diagnostic_query_timing import timed, sqlite_connect
 
 from dataclasses import dataclass
 import json
@@ -298,6 +299,7 @@ def record_root_admission_envelope(
     return record
 
 
+@timed("root.admission_record_read")
 def read_root_admission_envelope_record(
     *,
     data_root: str | Path,
@@ -558,6 +560,7 @@ def record_root_disposition_execution(
     return receipt
 
 
+@timed("root.disposition_receipt_read")
 def read_root_disposition_execution_receipt(
     *,
     data_root: str | Path,
@@ -1027,6 +1030,7 @@ def _root_writer_freeze_evidence_events(connection: sqlite3.Connection) -> list[
     return events
 
 
+@timed("root.receipt_completion_verification")
 def _require_root_receipt_matches_completion(
     receipt: RootDispositionExecutionReceipt,
     completion: RootAdmissionCompletionWitness,
@@ -1246,7 +1250,7 @@ def _open_readonly_core(path: Path) -> sqlite3.Connection:
 
     qualify_runtime()
     try:
-        connection = sqlite3.connect(
+        connection = sqlite_connect(
             f"{path.as_uri()}?mode=ro",
             uri=True,
             isolation_level=None,

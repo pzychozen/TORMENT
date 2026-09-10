@@ -27,6 +27,7 @@ Design:
       4. Tier-aware context assembly for model queries
 """
 from __future__ import annotations
+from .diagnostic_query_timing import timed
 
 import json
 import logging
@@ -903,6 +904,7 @@ def build_self_state(
     return ss.to_dict()
 
 
+@timed("query.character_enrichment")
 def assemble_character_context(
     *,
     graph,            # MemoryGraph (private graph)
