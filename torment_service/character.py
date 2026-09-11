@@ -43,6 +43,8 @@ import numpy as np
 
 from .motifs import cosine
 from .pathing import approved_subdir, stable_filename
+from . import external_owner_json as _owner_json
+from .atomic_publication import publish_if_absent, replace_if_exact_predecessor
 
 log = logging.getLogger("torment.character")
 
@@ -235,6 +237,129 @@ class CharacterStore:
         if resolved != base and not resolved.startswith(base + os.sep):
             raise ValueError(f"Character seed path escapes data directory: {resolved!r}")
         return resolved
+
+    def _onboarding_seed_path(self, workspace_id: str, seed_id: str) -> str:
+        _owner_json.logical_id(workspace_id, "workspace_id")
+        _owner_json.logical_id(seed_id, "seed_id")
+        return _owner_json.require_exact_owner_path(
+            self._seed_path(workspace_id, seed_id),
+            os.path.join(self.data_dir, "workspaces", workspace_id, "seeds", seed_id, "seed.json"),
+        )
+
+    @staticmethod
+    def seed_from_strict_json(raw: bytes) -> CharacterSeed:
+        """Strict owner document, without CharacterSeed.from_dict defaults."""
+        value = _owner_json.strict_object(raw)
+        _owner_json.exact_keys(value, CharacterSeed.__dataclass_fields__, "Character seed")
+        for key in ("seed_id", "owner_agent_id"):
+            _owner_json.logical_id(value[key], key)
+        for key in ("character_name", "seed_text", "version"):
+            _owner_json.nonempty_text(value[key], key)
+        _owner_json.integer(value["created_ts"], "created_ts")
+        _owner_json.integer(value["drift_window_steps"], "drift_window_steps", minimum=1)
+        for key in ("drift_correction_threshold", "drift_gravity_strength", "core_half_life", "relational_half_life",
+                    "situational_half_life", "core_weight", "derived_weight", "relational_weight", "situational_weight"):
+            _owner_json.require(type(value[key]) in (int, float), f"{key} must be numeric")
+        eids = value["seed_eids"]
+        _owner_json.require(type(eids) is list, "seed_eids must be an array")
+        for eid in eids:
+            _owner_json.integer(eid, "seed EID", minimum=1)
+        _owner_json.require(len(set(eids)) == len(eids), "duplicate seed EIDs")
+        motif = value["seed_motif_id"]
+        _owner_json.require(type(motif) is str and bool(eids) == bool(motif), "partial Character linkage")
+        if motif:
+            _owner_json.nonempty_text(motif, "seed_motif_id")
+        return CharacterSeed(**value)
+
+    @staticmethod
+    def _unplanted_definition(expected_definition: Mapping[str, Any], created_ts: int) -> CharacterSeed:
+        _owner_json.require(isinstance(expected_definition, Mapping), "expected definition must be an object")
+        value = dict(expected_definition)
+        definition_keys = set(CharacterSeed.__dataclass_fields__) - {"created_ts", "seed_eids", "seed_motif_id"}
+        _owner_json.exact_keys(value, definition_keys, "complete stable Character definition")
+        value.update(created_ts=created_ts, seed_eids=[], seed_motif_id="")
+        return CharacterStore.seed_from_strict_json(_owner_json.owner_bytes(value))
+
+    @staticmethod
+    def stable_seed_projection(seed: CharacterSeed) -> Dict[str, Any]:
+        """I1 stable declaration plus creation fact; native linkage is separate."""
+        value = seed.to_dict()
+        del value["seed_eids"]
+        del value["seed_motif_id"]
+        return value
+
+    @staticmethod
+    def _verify_seed_definition(existing: CharacterSeed, expected: CharacterSeed) -> None:
+        from .substrate.character_seed_witness import character_seed_definition_digest
+
+        # The existing digest deliberately excludes linkage/created_ts and uses
+        # its established canonicalization. Exact JSON also binds timestamp and
+        # original identifier spelling, so normalization cannot adopt an alias.
+        _owner_json.require(character_seed_definition_digest(existing) == character_seed_definition_digest(expected) and
+                            _owner_json.exact_json(CharacterStore.stable_seed_projection(existing)) ==
+                            _owner_json.exact_json(CharacterStore.stable_seed_projection(expected)),
+                            "Character definition conflicts with intent")
+
+    def read_seed_strict_for_onboarding(self, workspace_id: str, seed_id: str) -> Optional[CharacterSeed]:
+        raw = _owner_json.read_optional_owner(self._onboarding_seed_path(workspace_id, seed_id))
+        if raw is None:
+            return None
+        seed = self.seed_from_strict_json(raw)
+        _owner_json.require(seed.seed_id == seed_id, "Character seed ID conflicts with requested path")
+        return seed
+
+    def create_or_verify_seed_definition(
+        self, workspace_id: str, expected_definition: Mapping[str, Any], *, created_ts: int,
+    ) -> CharacterSeed:
+        """Publish an unplanted definition, or retain a matching later owner.
+
+        A finalized return value proves only stable definition compatibility.
+        Its generated linkage must separately match a native completion result;
+        neither this method nor the stable external-owner digest proves planting.
+        """
+        expected = self._unplanted_definition(expected_definition, created_ts)
+        path = self._onboarding_seed_path(workspace_id, expected.seed_id)
+        existing = self.read_seed_strict_for_onboarding(workspace_id, expected.seed_id)
+        if existing is None:
+            parent = os.path.realpath(os.path.dirname(path))
+            _owner_json.require(parent.startswith(self.data_dir + os.sep), "Character owner escaped data root")
+            os.makedirs(parent, exist_ok=True)
+            publish_if_absent(path, _owner_json.owner_bytes(expected.to_dict()))
+            existing = self.read_seed_strict_for_onboarding(workspace_id, expected.seed_id)
+        _owner_json.require(existing is not None, "Character definition publication is absent")
+        self._verify_seed_definition(existing, expected)
+        return existing
+
+    def finalize_or_verify_seed_linkage(
+        self, workspace_id: str, expected_definition: Mapping[str, Any], *, created_ts: int,
+        seed_eids: tuple[int, ...], seed_motif_id: str,
+    ) -> CharacterSeed:
+        """Apply supplied native linkage only to the exact unplanted predecessor.
+
+        The later native owner must validate the supplied completed result. I2
+        only owns these existing external fields; it invokes no seed planter.
+        """
+        expected = self._unplanted_definition(expected_definition, created_ts)
+        _owner_json.require(type(seed_eids) is tuple and bool(seed_eids), "final linkage requires an EID tuple")
+        successor = expected.to_dict()
+        successor.update(seed_eids=list(seed_eids), seed_motif_id=seed_motif_id)
+        finalized = self.seed_from_strict_json(_owner_json.owner_bytes(successor))
+        path = self._onboarding_seed_path(workspace_id, expected.seed_id)
+        raw = _owner_json.read_optional_owner(path)
+        _owner_json.require(raw is not None, "Character definition must exist before finalization")
+        existing = self.seed_from_strict_json(raw)
+        self._verify_seed_definition(existing, expected)
+        if _owner_json.exact_json(existing.to_dict()) == _owner_json.exact_json(successor):
+            return existing
+        _owner_json.require(_owner_json.exact_json(existing.to_dict()) == _owner_json.exact_json(expected.to_dict()),
+                            "Character linkage conflicts with native result")
+        # Compare the exact observed bytes, allowing existing JSON whitespace
+        # while preventing a concurrent owner change from being overwritten.
+        replace_if_exact_predecessor(path, raw, _owner_json.owner_bytes(successor))
+        observed = self.read_seed_strict_for_onboarding(workspace_id, expected.seed_id)
+        _owner_json.require(observed is not None and _owner_json.exact_json(observed.to_dict()) ==
+                            _owner_json.exact_json(finalized.to_dict()), "Character finalization verification failed")
+        return observed
 
     def load_seed(self, workspace_id: str, seed_id: str) -> Optional[CharacterSeed]:
         p = self._seed_path(workspace_id, seed_id)

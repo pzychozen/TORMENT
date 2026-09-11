@@ -84,6 +84,7 @@ from .srg_runtime_state import LegacySRGTransientRuntime
 from .candidate_types import CandidateShapedValue
 from .derived_memory_runtime import LegacyDerivedMemoryRuntime
 from .pathing import validate_portable_new_identifier, validate_structural_path_component
+from .workspace_declaration import domains_payload, workspace_meta_payload
 from .post_write_runtime import (
     FabricPostWriteContext,
     LegacyFabricPostWriteAdapter,
@@ -709,13 +710,12 @@ class Workspace:
                     return json.load(f) or {}
             except Exception:
                 return {}
-        meta = {
-            "workspace_id": self.workspace_id,
-            "created_ts": _now_ts(),
-            "embed_dim": int(getattr(self.kernel.embedder, "dim", 0) or 0),
-            "embed_provider": str(getattr(self.kernel.embedder, "provider", "")),
-            "embed_model": str(getattr(self.kernel.embedder, "model", "")),
-        }
+        meta = workspace_meta_payload(
+            workspace_id=self.workspace_id, created_ts=_now_ts(),
+            embed_dim=int(getattr(self.kernel.embedder, "dim", 0) or 0),
+            embed_provider=str(getattr(self.kernel.embedder, "provider", "")),
+            embed_model=str(getattr(self.kernel.embedder, "model", "")),
+        )
         with open(p, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, sort_keys=True)
         return meta
@@ -744,7 +744,7 @@ class Workspace:
                         added = True
                 if added:
                     with open(p, "w", encoding="utf-8") as f:
-                        json.dump({"domains": existing}, f, indent=2)
+                        json.dump(domains_payload(existing), f, indent=2)
             return existing
         # New workspace — use requested domains or single-agent default.
         # For multi-agent hive-mind, pass domains explicitly (e.g. DEFAULT_DOMAINS).
@@ -752,7 +752,7 @@ class Workspace:
         for d in domains:
             _validate_new_path_component(d, "domain_id")
         with open(p, "w", encoding="utf-8") as f:
-            json.dump({"domains": domains}, f, indent=2)
+            json.dump(domains_payload(domains), f, indent=2)
         return domains
 
     def _load_or_init_domain_policies(self) -> Dict[str, Any]:
