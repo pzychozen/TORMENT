@@ -21,15 +21,16 @@ from torment_service.world_runtime import legacy_world_genesis_payload
 
 from .canonical_intent import canonical_intent_text
 from .character_seed_witness import character_seed_definition_digest
+from .compat_embedding_reader import NativeCompatEmbeddingReader
 from .errors import SubstrateConfigurationError, SubstrateIdempotencyConflict, SubstrateInvariantViolation
 from .fabric_native_routing import NativeFabricRoutingScope
 from .ids import generate_native_id, native_id_to_bytes
 from .memory_runtime_order import allocate_next_runtime_ordinal, publish_runtime_order
 from .motif_runtime_reader import NativeMotifRuntimeReader, NativeRuntimeMotif
-from .motifs import MotifState, NativeMotifService, NativeMotifSplitResult
+from .motifs import MotifState, NativeMotifService, NativeMotifSplitResult, _motif_state_from_intent
 from .native_motif_split import prepare_qualified_native_motif_split
 from .object_revision_governance import NativeMemoryGovernanceFacts, _insert_published_governance_for_qualification
-from .objects import ObjectState, SubstrateTx, execute_semantic
+from .objects import NativeObjectService, ObjectState, SubstrateTx, execute_semantic
 from .provenance import NativeProvenanceRecord
 from .representations import (
     INTEGRITY_ALGORITHM_SHA256, INTEGRITY_VALUE_ENCODING_RAW, NativeRepresentationService,
@@ -156,9 +157,16 @@ class NativeCharacterSeedPlantRuntime:
         sources: list[NativeCharacterSeedSourceResult] = []
         vectors: list[np.ndarray] = []
         for index, concept in enumerate(concepts):
-            vector = self._embed(concept)
-            source = self._source(request, definition_digest, index, concept, vector)
-            ready = self._publish_representation(source, vector)
+            source = self._recover_source(request, definition_digest, index, concept)
+            recovered = self._recover_ready_representation(source) if source is not None else None
+            if recovered is None:
+                vector = self._embed(concept)
+                if source is not None and _sha(vector) != source.payload_sha256:
+                    raise SubstrateIdempotencyConflict("Character seed recovery embedding hash differs")
+                source = self._source(request, definition_digest, index, concept, vector)
+                ready = self._publish_representation(source, vector)
+            else:
+                ready, vector = recovered
             sources.append(NativeCharacterSeedSourceResult(
                 source.object_id, source.revision_id, source.eid, source.provenance_id,
                 ready.representation_id, index, concept, source.payload_sha256, source.created_ts,
@@ -171,6 +179,200 @@ class NativeCharacterSeedPlantRuntime:
             definition_digest, tuple(source.eid for source in sources), motif_id,
             motif_object_id, tuple(sources),
         )
+
+    def recover_completed_seed(self, request: NativeCharacterSeedPlantRequest) -> NativeCharacterSeedPlantResult | None:
+        """Read the committed source/READY/decision/basin receipts, with no writes.
+
+        The basin-boost operation is the existing final native commit. Its exact
+        revision (not a newly selected basin or a later motif revision) supplies
+        the completed linkage. None means that final commit is still absent.
+        """
+        if not isinstance(request, NativeCharacterSeedPlantRequest):
+            raise ValueError("request must be NativeCharacterSeedPlantRequest")
+        if request.seed.owner_agent_id != self._config.agent_id:
+            raise CharacterSeedPlantRefused("CHARACTER_SEED_OWNER_AGENT_MISMATCH")
+        concepts = tuple(_split_seed_text(request.seed.seed_text))
+        if not concepts:
+            raise CharacterSeedPlantRefused("CHARACTER_SEED_CONCEPTS_REQUIRED")
+        digest = character_seed_definition_digest(request.seed)
+        boosted = self._operation_result(self._motif_key(request.seed.seed_id, "SEED_BASIN_BOOST"))
+        sources = []
+        affected = set()
+        for index, concept in enumerate(concepts):
+            source = self._recover_source(request, digest, index, concept)
+            recovered = self._recover_ready_representation(source) if source is not None else None
+            if source is None or recovered is None:
+                if boosted is not None:
+                    raise SubstrateInvariantViolation("completed Character seed has incomplete source evidence")
+                return None
+            ready, _vector = recovered
+            sources.append(NativeCharacterSeedSourceResult(
+                source.object_id, source.revision_id, source.eid, source.provenance_id,
+                ready.representation_id, index, concept, source.payload_sha256, source.created_ts,
+            ))
+            decision = self._operation_result(self._motif_key(request.seed.seed_id, f"DECISION:{index}"))
+            if decision is not None:
+                self._verify_motif_decision_receipt(request.seed.seed_id, source, decision)
+            if decision is None:
+                if boosted is not None:
+                    raise SubstrateInvariantViolation("completed Character seed has no motif decision")
+            elif isinstance(decision, NativeMotifSplitResult):
+                affected.update((decision.parent_motif_object_id, decision.child_motif_object_id))
+            else:
+                affected.add(decision.motif_object_id)
+        if boosted is None:
+            return None
+        if isinstance(boosted, NativeMotifSplitResult) or boosted.motif_object_id not in affected:
+            raise SubstrateInvariantViolation("Character seed basin receipt conflicts with decisions")
+        view = NativeObjectService(self._connection).get_object_revision(boosted.motif_revision_id)
+        payload = json.loads(view.payload)
+        scope = self._config.routing_scope
+        receipt = json.loads(self._operation_row(self._motif_key(request.seed.seed_id, "SEED_BASIN_BOOST"))[1])
+        motif_id = payload.get("motif_id")
+        if (view.object_id != boosted.motif_object_id or view.scope_id != scope.runtime_scope.semantic_scope_id
+            or view.ordinal != boosted.motif_revision_ordinal
+            or receipt.get("kind") != "NATIVE_MOTIF_STATE_ADVANCE"
+            or receipt.get("motif_object_id") != str(boosted.motif_object_id)
+            or receipt.get("motif_alias_namespace_id") != str(scope.motif_alias_namespace_id)
+            or _motif_state_from_intent(receipt.get("state")).payload() != payload
+            or payload.get("domain_id") != self._config.domain_id
+            or self._motifs.resolve_motif_alias(motif_alias_namespace_id=scope.motif_alias_namespace_id,
+                                               runtime_motif_id=motif_id) != boosted.motif_object_id):
+            raise SubstrateInvariantViolation("Character seed basin identity conflicts")
+        return NativeCharacterSeedPlantResult(digest, tuple(v.eid for v in sources), motif_id,
+                                              boosted.motif_object_id, tuple(sources))
+
+    def _verify_motif_decision_receipt(self, seed_id, source, result):
+        row = self._operation_row(self._motif_key(seed_id, f"DECISION:{source.concept_index}"))
+        receipt = json.loads(row[1])
+        scope = self._config.routing_scope
+        if (receipt.get("motif_alias_namespace_id") != str(scope.motif_alias_namespace_id)
+            or receipt.get("membership_identity_namespace_id") != str(scope.membership_identity_namespace_id)):
+            raise SubstrateInvariantViolation("Character seed motif decision namespaces conflict")
+        if isinstance(result, NativeMotifSplitResult):
+            plan = receipt.get("plan", {})
+            valid = (receipt.get("kind") == "NATIVE_MOTIF_SPLIT_WITH_MEMBER"
+                     and receipt.get("motif_identity_namespace_id") == str(scope.motif_identity_namespace_id)
+                     and plan.get("candidate_member_object_id") == str(source.object_id))
+            states = (plan.get("parent_state"), plan.get("child_state"))
+        else:
+            valid = (receipt.get("kind") in {"NATIVE_MOTIF_CREATE_WITH_MEMBER", "NATIVE_MOTIF_ADD_MEMBER"}
+                     and receipt.get("member_object_id") == str(source.object_id))
+            states = (receipt.get("state"),)
+            view = NativeObjectService(self._connection).get_object_revision(result.motif_revision_id)
+            if view.object_id != result.motif_object_id or json.loads(view.payload) != _motif_state_from_intent(states[0]).payload():
+                raise SubstrateInvariantViolation("Character seed motif decision revision conflicts")
+        if not valid or any(_motif_state_from_intent(state).semantic_scope_id != scope.runtime_scope.semantic_scope_id
+                            or _motif_state_from_intent(state).domain_id != self._config.domain_id for state in states):
+            raise SubstrateInvariantViolation("Character seed motif decision source or scope conflicts")
+
+    def _operation_row(self, key: str):
+        return self._connection.execute(
+            "SELECT operation_id,canonical_intent_json FROM operations WHERE idempotency_namespace_id=? AND idempotency_key=?",
+            (native_id_to_bytes(self._config.routing_scope.idempotency_namespace_id), key),
+        ).fetchone()
+
+    def _recover_source(self, request, definition_digest, index, concept):
+        prior = self._operation_row(self._source_key(request.seed.seed_id, index))
+        if prior is None:
+            return None
+        try:
+            stored = json.loads(prior[1])
+            expected = dict(
+                kind=_SOURCE_KIND, child_key=self._child_key(request.seed.seed_id),
+                workspace_id=self._config.workspace_id, agent_id=self._config.agent_id,
+                domain_id=self._config.domain_id, step=request.step, seed_id=request.seed.seed_id,
+                character_name=request.seed.character_name, seed_definition_digest=definition_digest,
+                concept_index=index, concept=concept, embedding_sha256=stored["embedding_sha256"],
+            )
+            if _source_retry_contract(stored) != expected:
+                raise SubstrateIdempotencyConflict("Character seed source idempotency intent differs")
+            digest = stored["embedding_sha256"]
+            if (type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+                or type(stored["created_ts"]) is not int or stored["created_ts"] < 0):
+                raise ValueError("invalid committed hash or timestamp")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SubstrateInvariantViolation("stored Character seed source intent is malformed") from exc
+        source = self._source_result(prior[0])
+        if source is None:
+            raise SubstrateInvariantViolation("stored Character seed source is incomplete")
+        scope = self._config.routing_scope.runtime_scope
+        view = NativeObjectService(self._connection).get_object_revision(source.revision_id)
+        committed_payload = json.loads(view.payload)
+        state = _seed_state(self._config.routing_scope, self._config.agent_id, request,
+                            index, concept, source.created_ts, source.provenance_id,
+                            _recovered_lifecycle=committed_payload["lifecycle_status"])
+        identity = self._connection.execute("SELECT identity_namespace_id,object_kind FROM objects WHERE object_id=?",
+                                            (source.object_id.bytes,)).fetchone()
+        aliases = self._connection.execute(
+            "SELECT legacy_source_namespace_id,alias_value FROM legacy_object_aliases WHERE object_id=? AND alias_kind='EID'",
+            (source.object_id.bytes,),
+        ).fetchall()
+        provenance = self._connection.execute(
+            "SELECT origin_kind,source_channel,source_role,derivation_status,uncertainty_state,source_time_ns,capture_time_ns,memory_role,descriptive_notes FROM provenance_records WHERE provenance_id=?",
+            (source.provenance_id.bytes,),
+        ).fetchone()
+        if (source.eid < 0 or view.object_id != source.object_id or view.scope_id != scope.semantic_scope_id or view.ordinal != 1
+            or view.payload_format != "JSON"
+            or committed_payload != state.payload or view.existence_state != state.existence_state
+            or view.lifecycle_state != state.lifecycle_state or view.governance_state != state.governance_state
+            or view.authority_category != state.authority_category
+            or identity != (scope.identity_namespace_id.bytes, "LEGACY_CORE_NODE")
+            or aliases != [(scope.legacy_source_namespace_id.bytes, str(source.eid))]
+            or provenance != _provenance_values(_seed_provenance(request.seed, definition_digest, index))):
+            raise SubstrateInvariantViolation("Character seed source evidence conflicts")
+        return source
+
+    def _recover_ready_representation(self, source):
+        """Recover raw committed bytes before considering a recovery embedding."""
+        pending = self._operation_row(self._representation_key(source, "PENDING"))
+        ready_op = self._operation_row(self._representation_key(source, "READY"))
+        expectation_op = self._operation_row(self._representation_key(source, "EXPECTATION"))
+        if pending is None:
+            if ready_op is not None or expectation_op is not None:
+                raise SubstrateInvariantViolation("Character seed representation receipt order conflicts")
+            return None
+        lane = self._config.representation_lane
+        request = RepresentationRequest(
+            "OBJECT_REVISION", source.object_id, source.revision_id, None, None,
+            lane.representation_class, lane.generation, lane.derivation_contract_version,
+            lane.encoding_id, lane.dtype, lane.dimension, (), None, lane.dimension * 4,
+        )
+        if pending[1] != self._representations._pending_intent(request):
+            raise SubstrateIdempotencyConflict("Character seed representation lane or source differs")
+        metadata = self._representations._pending_result(pending[0])
+        if metadata is None:
+            raise SubstrateInvariantViolation("Character seed PENDING receipt is incomplete")
+        if metadata.integrity_expectation_id is not None:
+            expectation = self._representations.get_representation_integrity_expectation(metadata.representation_id)
+            if (expectation_op is None or expectation.algorithm_id != INTEGRITY_ALGORITHM_SHA256
+                or expectation.value_encoding != INTEGRITY_VALUE_ENCODING_RAW
+                or expectation.expected_value.hex() != source.payload_sha256):
+                raise SubstrateInvariantViolation("Character seed representation expectation differs from source")
+            expected_intent = self._representations._expectation_intent(RepresentationIntegrityExpectationRequest(
+                metadata.representation_id, expectation.algorithm_id, expectation.expected_value, expectation.value_encoding))
+            if expectation_op[1] != expected_intent:
+                raise SubstrateInvariantViolation("Character seed expectation receipt conflicts")
+        elif expectation_op is not None:
+            raise SubstrateInvariantViolation("Character seed expectation receipt is incomplete")
+        if ready_op is None:
+            if metadata.readiness != "PENDING":
+                raise SubstrateInvariantViolation("Character seed representation cannot be resumed")
+            return None
+        ready = self._representations._ready_result(ready_op[0])
+        if ready is None or ready.representation_id != metadata.representation_id:
+            raise SubstrateInvariantViolation("Character seed READY receipt is incomplete")
+        qualified = NativeCompatEmbeddingReader(self._connection)._read_exact(
+            source.object_id, source.revision_id, 1, expected_dimension=lane.dimension,
+            expected_representation_id=ready.representation_id, absent_is_none=False,
+        )
+        if qualified.dependencies or qualified.payload_sha256 != source.payload_sha256:
+            raise SubstrateInvariantViolation("Character seed READY bytes differ from committed source")
+        if ready_op[1] != self._representations._ready_intent(RepresentationReadyRequest(
+            ready.representation_id, lane.representation_class, lane.generation, lane.derivation_contract_version,
+            lane.encoding_id, qualified.payload_bytes)):
+            raise SubstrateInvariantViolation("Character seed READY receipt conflicts")
+        return ready, qualified.float32_vector()
 
     @dataclass(frozen=True)
     class _Source:
@@ -547,7 +749,7 @@ def _seed_provenance(seed: CharacterSeed, definition_digest: str, index: int) ->
 
 
 def _seed_state(scope: NativeFabricRoutingScope, agent_id: str, request: NativeCharacterSeedPlantRequest,
-                index: int, concept: str, created_ts: int, provenance_id: UUID) -> ObjectState:
+                index: int, concept: str, created_ts: int, provenance_id: UUID, *, _recovered_lifecycle=None) -> ObjectState:
     payload: dict[str, Any] = {
         "summary": concept, "type": "seed_canon", "memory_class": "core", "strength": .95,
         "confidence": .95, "canon": True, "created_at": request.step, "created_ts": created_ts,
@@ -555,6 +757,10 @@ def _seed_state(scope: NativeFabricRoutingScope, agent_id: str, request: NativeC
         "user_id": agent_id, "seed_id": request.seed.seed_id,
         "character_name": request.seed.character_name, "tier": "core_identity", "seed_concept_index": index,
     }
+    if _recovered_lifecycle is not None:
+        # Recovery validates the committed envelope, including its historical
+        # clock stamp. Fresh creation keeps the unchanged stamping path below.
+        payload["lifecycle_status"] = _recovered_lifecycle
     _ensure_lifecycle_envelope(payload)
     payload.update(legacy_world_genesis_payload(payload))
     return ObjectState(
