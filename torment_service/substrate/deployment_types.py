@@ -1,12 +1,12 @@
-"""Typed, canonical facts shared by B5-A2 deployment administration.
+"""Typed, canonical deployment facts and origin-specific completion evidence.
 
-These values describe deployment authority only.  They do not grant a memory
-writer, select a Fabric backend, or expose a public routing capability.
+These values describe authority bindings or completion evidence. They do not
+grant a memory writer, select a Fabric backend, or expose public routing.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 import hashlib
 import json
@@ -17,6 +17,13 @@ from uuid import UUID
 from .errors import DeploymentAuthorityError
 from .ids import native_id_from_text
 from .schema import SCHEMA_ID, SCHEMA_MAJOR, SCHEMA_MINOR
+from .genesis_contracts import (
+    GenesisAcceptedStart, GenesisExternalOwnerProjection, GenesisIntent,
+    GenesisMembershipReference, GenesisRepresentationLane,
+    GenesisRootProfileReference, GenesisRuntimePlan, GenesisSeedCompletion,
+    exact_object, initial_membership_closure_digest, ordered_runtime_plans,
+    payload_digest, require as require_genesis, runtime_plan_digest,
+)
 
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -284,7 +291,169 @@ class RootAdmissionCompletionWitness:
         }
 
 
-CompletionWitness: TypeAlias = AdmissionCompletionWitness | RootAdmissionCompletionWitness
+@dataclass(frozen=True)
+class NativeGenesisCompletionWitness:
+    """Self-contained fresh-origin evidence, not an activation capability.
+
+    All initial declarations are retained without consulting external defaults.
+    preparation_result_digest hashes preparation_payload(), excluding only that
+    digest itself. digest hashes the complete payload. These are different,
+    non-circular bindings. The immutable initial overlay lives only in intent;
+    mutable owner overlays/process observations are not completion evidence.
+    """
+
+    data_root_identity: str
+    operation_key: str
+    intent_digest: str
+    expanded_intent: GenesisIntent
+    accepted_start_observation: GenesisAcceptedStart
+    native_core_id: UUID
+    core_relative_path: str
+    schema_id: str
+    schema_major: int
+    schema_minor: int
+    qualified_deployment_profile: QualifiedDeploymentProfile
+    qualified_deployment_profile_digest: str
+    representation_lane: GenesisRepresentationLane
+    root_profile: GenesisRootProfileReference
+    runtime_scope_plans: tuple[GenesisRuntimePlan, ...]
+    runtime_plan_digest: str
+    external_owner_projection: GenesisExternalOwnerProjection
+    external_owner_closure_digest: str
+    character_seed_completion: GenesisSeedCompletion
+    initial_memberships: tuple[GenesisMembershipReference, ...]
+    initial_membership_closure_digest: str
+    quiescence_evidence_digest: str
+    preparation_result_digest: str
+
+    CONTRACT = "TORMENT_NATIVE_GENESIS_COMPLETION_WITNESS"
+    VERSION = 1
+    ORIGIN = "NATIVE_GENESIS"
+
+    def __post_init__(self) -> None:
+        for name, cls in (
+            ("expanded_intent", GenesisIntent), ("accepted_start_observation", GenesisAcceptedStart),
+            ("qualified_deployment_profile", QualifiedDeploymentProfile),
+            ("representation_lane", GenesisRepresentationLane), ("root_profile", GenesisRootProfileReference),
+            ("external_owner_projection", GenesisExternalOwnerProjection),
+            ("character_seed_completion", GenesisSeedCompletion),
+        ):
+            require_genesis(isinstance(getattr(self, name), cls), f"{name} must be typed")
+        intent = self.expanded_intent.payload()
+        require_genesis(self.data_root_identity == self.expanded_intent.data_root_identity and
+                        self.operation_key == self.expanded_intent.operation_key and
+                        self.intent_digest == self.expanded_intent.digest, "fresh completion intent binding mismatch")
+        self.accepted_start_observation.require_intent(self.expanded_intent)
+        require_uuid(self.native_core_id, "native_core_id")
+        allocations = intent["allocations"]
+        require_genesis(str(self.native_core_id) == allocations["core_id"] and
+                        self.core_relative_path == allocations["core_relative_path"], "fresh core allocation mismatch")
+        require_genesis(self.schema_id == SCHEMA_ID and type(self.schema_major) is int and
+                        type(self.schema_minor) is int and
+                        (self.schema_major, self.schema_minor) == (SCHEMA_MAJOR, SCHEMA_MINOR), "fresh completion requires current schema")
+        require_genesis(self.qualified_deployment_profile.is_qualified, "fresh profile must be qualified")
+        profile = self.qualified_profile_payload()
+        require_genesis(all(profile[k] == v and type(profile[k]) is type(v) for k, v in intent["profile_choice"].items()), "fresh profile differs from immutable choice")
+        require_genesis(self.representation_lane.payload() == intent["representation_lane"], "fresh representation lane mismatch")
+        require_genesis(type(self.runtime_scope_plans) is tuple and
+                        all(isinstance(p, GenesisRuntimePlan) for p in self.runtime_scope_plans), "fresh plans must be a typed tuple")
+        require_genesis(self.runtime_scope_plans == self.expanded_intent.runtime_plans, "fresh plans differ from allocated routing bundle")
+        require_genesis(self.runtime_plan_digest == runtime_plan_digest(self.runtime_scope_plans) ==
+                        profile["admitted_scope_plan_digest"], "fresh runtime plan digest mismatch")
+        require_genesis(self.external_owner_projection.digest == payload_digest(self.expanded_intent.external_owner_projection()),
+                        "fresh external owner projection mismatch")
+        require_genesis(self.external_owner_closure_digest == self.external_owner_projection.digest ==
+                        profile["external_owner_digest"], "fresh external owner digest mismatch")
+        require_genesis(self.qualified_deployment_profile_digest == self.qualified_deployment_profile.digest,
+                        "fresh qualified profile digest mismatch")
+        ref = self.root_profile.payload()
+        for ref_key, allocation_key in (("core_id", "core_id"), ("profile_generation", "root_profile_generation"),
+                                        ("profile_object_id", "root_profile_object_id"),
+                                        ("profile_semantic_scope_id", "root_profile_semantic_scope_id")):
+            require_genesis(ref[ref_key] == allocations[allocation_key], "fresh root profile allocation mismatch")
+        require_genesis(type(self.initial_memberships) is tuple and
+                        all(isinstance(m, GenesisMembershipReference) for m in self.initial_memberships),
+                        "initial memberships must be a typed tuple")
+        require_genesis(self.initial_memberships == tuple(sorted(self.initial_memberships, key=lambda m: m.canonical_key)),
+                        "initial memberships must use canonical scope ordering")
+        for key in ("relationship_id", "relationship_revision_id"):
+            require_genesis(len({m.payload()[key] for m in self.initial_memberships}) == len(self.initial_memberships),
+                            "initial membership references collide")
+        require_genesis(self.initial_membership_closure_digest == initial_membership_closure_digest(
+            self.root_profile, self.runtime_scope_plans, self.initial_memberships), "fresh membership closure digest mismatch")
+        seed = self.character_seed_completion.payload()
+        require_genesis(seed["mode"] == intent["character"]["mode"], "fresh seed mode differs from intent")
+        if seed["mode"] == "ENABLED":
+            require_genesis(seed["definition_digest"] == payload_digest(intent["character"]["definition"]),
+                            "fresh seed definition digest mismatch")
+        require_digest(self.quiescence_evidence_digest, "quiescence_evidence_digest")
+        require_genesis(self.preparation_result_digest == payload_digest(self.preparation_payload()),
+                        "fresh preparation result digest mismatch")
+
+    @property
+    def admission_identity_digest(self) -> str:
+        return self.intent_digest
+
+    @property
+    def profile_digest(self) -> str:
+        return self.qualified_deployment_profile_digest
+
+    @property
+    def digest(self) -> str:
+        return payload_digest(self.payload())
+
+    def qualified_profile_payload(self) -> dict[str, object]:
+        """Exact seven-field convenience export, never an authority lookup."""
+        return asdict(self.qualified_deployment_profile)
+
+    def preparation_payload(self) -> dict[str, object]:
+        result: dict[str, object] = {"contract": self.CONTRACT, "version": self.VERSION, "origin": self.ORIGIN}
+        for field in fields(self):
+            if field.name == "preparation_result_digest":
+                continue
+            value = getattr(self, field.name)
+            if field.name == "qualified_deployment_profile":
+                value = self.qualified_profile_payload()
+            elif isinstance(value, UUID):
+                value = str(value)
+            elif isinstance(value, tuple):
+                value = [v.payload() for v in value]
+            elif hasattr(value, "payload"):
+                value = value.payload()
+            result[field.name] = value
+        return result
+
+    def payload(self) -> dict[str, object]:
+        return {**self.preparation_payload(), "preparation_result_digest": self.preparation_result_digest}
+
+    @classmethod
+    def from_payload(cls, value: object) -> NativeGenesisCompletionWitness:
+        # Validate finite JSON before comparisons (True must never alias 1).
+        payload_digest(value)
+        value = exact_object(value, "contract version origin " + " ".join(f.name for f in fields(cls)), "fresh completion")
+        require_genesis(value["contract"] == cls.CONTRACT and type(value["version"]) is int and
+                        value["version"] == cls.VERSION and value["origin"] == cls.ORIGIN,
+                        "unsupported fresh completion discriminator")
+        profile = exact_object(value["qualified_deployment_profile"], " ".join(f.name for f in fields(QualifiedDeploymentProfile)), "qualified profile")
+        require_genesis(isinstance(value["initial_memberships"], list), "initial memberships must be an array")
+        from .genesis_contracts import uuid_text
+        uuid_text(value["native_core_id"], "native_core_id")
+        typed = dict(value)
+        for name, contract in (("expanded_intent", GenesisIntent), ("accepted_start_observation", GenesisAcceptedStart),
+                               ("representation_lane", GenesisRepresentationLane), ("root_profile", GenesisRootProfileReference),
+                               ("external_owner_projection", GenesisExternalOwnerProjection),
+                               ("character_seed_completion", GenesisSeedCompletion)):
+            typed[name] = contract.from_payload(value[name])
+        typed["native_core_id"] = UUID(value["native_core_id"])
+        typed["qualified_deployment_profile"] = QualifiedDeploymentProfile(**profile)
+        typed["runtime_scope_plans"] = ordered_runtime_plans(value["runtime_scope_plans"])
+        typed["initial_memberships"] = tuple(GenesisMembershipReference.from_payload(m) for m in value["initial_memberships"])
+        for key in ("contract", "version", "origin"):
+            del typed[key]
+        return cls(**typed)
+
+
+CompletionWitness: TypeAlias = AdmissionCompletionWitness | RootAdmissionCompletionWitness | NativeGenesisCompletionWitness
 
 
 @dataclass(frozen=True)
@@ -444,13 +613,19 @@ def require_uuid(value: object, label: str) -> UUID:
 
 
 def completion_witness_from_payload(value: object) -> CompletionWitness:
-    """Decode durable v1 or explicitly discriminated root-v2 evidence."""
+    """Explicit dispatch for historical v1, migration root-v2, and fresh Genesis.
+
+    V1 remains untagged with its historical optional profile digest. Unknown
+    tags (including explicit null tags) cannot fall through to that branch.
+    """
 
     if not isinstance(value, Mapping):
         raise DeploymentAuthorityError("completion witness payload must be an object")
     contract = value.get("contract")
     version = value.get("version")
     try:
+        if contract == NativeGenesisCompletionWitness.CONTRACT:
+            return NativeGenesisCompletionWitness.from_payload(value)
         if contract == RootAdmissionCompletionWitness.CONTRACT and version == RootAdmissionCompletionWitness.VERSION:
             return RootAdmissionCompletionWitness(
                 data_root_identity=value["data_root_identity"],
@@ -470,7 +645,11 @@ def completion_witness_from_payload(value: object) -> CompletionWitness:
                 root_membership_closure_digest=value["root_membership_closure_digest"],
                 normalization_closure_digest=value["normalization_closure_digest"],
             )
-        if contract is not None or version is not None:
+        historical_keys = {
+            "admission_identity_digest", "completed_descriptor_digest", "completed_progress_digest",
+            "native_core_id", "workspace_id", "whole_workspace_closure_digest",
+        }
+        if "contract" in value or "version" in value or not historical_keys <= value.keys():
             raise DeploymentAuthorityError("completion witness contract/version is unsupported")
         return AdmissionCompletionWitness(
             admission_identity_digest=value["admission_identity_digest"],
@@ -555,6 +734,7 @@ __all__ = [
     "DeploymentState",
     "FROZEN_ROOT_GEOMETRY_DISPOSITIONS",
     "QualifiedDeploymentProfile",
+    "NativeGenesisCompletionWitness",
     "RootAdmissionCompletionWitness",
     "RootDispositionExecutionReceipt",
     "RootDispositionOwnerResult",

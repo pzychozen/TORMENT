@@ -132,6 +132,67 @@ class _SyntheticDispositionAdapter:
         return "SYNTHETIC_LAWFUL_NO_MUTATION"
 
 
+def test_pure_completion_wire_shapes_retain_historical_v1_and_root_v2() -> None:
+    """Decoder regression independent of the SQLite-backed bridge fixture."""
+    from uuid import UUID
+    from torment_service.substrate.deployment_types import (
+        RootAdmissionCompletionWitness, canonical_json,
+    )
+
+    core_id = UUID("00000000-0000-4000-8000-000000000001")
+    v1 = {
+        "admission_identity_digest": "a" * 64, "completed_descriptor_digest": "b" * 64,
+        "completed_progress_digest": "c" * 64, "native_core_id": str(core_id),
+        "workspace_id": "historical", "whole_workspace_closure_digest": "d" * 64, "profile_digest": None,
+    }
+    v2 = {
+        "contract": "TORMENT_ROOT_ADMISSION_COMPLETION_WITNESS", "version": 2,
+        "data_root_identity": "historical-root", "root_admission_envelope_digest": "a" * 64,
+        "declared_census_digest": "b" * 64, "discovered_census_digest": "c" * 64,
+        "manifest_digest": "d" * 64, "external_owner_observation_digest": "e" * 64,
+        "geometry_disposition_table_digest": "f" * 64, "target_representation_identity": "historical-lane",
+        "root_writer_freeze_witness_digest": "0" * 64, "native_staging_core_id": str(core_id),
+        "qualified_deployment_profile_digest": "1" * 64,
+        "root_profile_object_id": "00000000-0000-4000-8000-000000000002",
+        "root_profile_revision_id": "00000000-0000-4000-8000-000000000003",
+        "root_profile_ordinal": 1, "root_membership_closure_digest": "2" * 64,
+        "normalization_closure_digest": "3" * 64,
+    }
+    for payload, kind in ((v1, AdmissionCompletionWitness), (v2, RootAdmissionCompletionWitness)):
+        result = completion_witness_from_payload(payload)
+        assert type(result) is kind
+        assert result.payload() == payload
+        assert canonical_json(result.payload()) == canonical_json(payload)
+        assert result.native_core_id == core_id
+    assert completion_witness_from_payload(v2).admission_identity_digest == v2["root_admission_envelope_digest"]
+    assert completion_witness_from_payload(v2).profile_digest == v2["qualified_deployment_profile_digest"]
+    del v1["profile_digest"]
+    assert completion_witness_from_payload(v1).profile_digest is None
+
+
+def test_pure_genesis_routing_retains_existing_root_plan_digest_contract() -> None:
+    """Fresh allocation uses the established routing projection, without P2/P3."""
+    from torment_service.substrate.genesis_contracts import GenesisRuntimePlan, runtime_plan_digest
+    from torment_service.substrate.root_blocker5_binding import root_runtime_scope_plan_payloads
+
+    lane = NativeRepresentationLane("fixture-provider", "fixture-model", 3, "COMPAT_EMBEDDING", 1,
+                                    "compat-embedding-v1", "RAW_VECTOR", "float32")
+    plans = tuple(MigrationRuntimeScopePlan(
+        legacy_source_namespace_id=generate_native_id(), workspace_id="ws-pure", scope_kind=kind,
+        target_identity_namespace_id=generate_native_id(), target_semantic_scope_id=generate_native_id(),
+        motif_alias_namespace_id=generate_native_id(), motif_identity_namespace_id=generate_native_id(),
+        membership_identity_namespace_id=generate_native_id(), idempotency_namespace_id=generate_native_id(),
+        agent_id="agent" if kind == "PRIVATE_AGENT" else None,
+        domain_id="domain" if kind == "SHARED_DOMAIN" else None, motif_domain_id="domain",
+    ) for kind in ("SHARED_DOMAIN", "PRIVATE_AGENT"))
+    payloads = root_runtime_scope_plan_payloads(plans, lane)
+    fresh_plans = tuple(GenesisRuntimePlan.from_payload(p) for p in payloads)
+    assert tuple(p.payload() for p in fresh_plans) == payloads
+    assert runtime_plan_digest(fresh_plans) == root_runtime_scope_plan_digest(plans, lane)
+    assert root_runtime_scope_plan_digest(tuple(reversed(plans)), lane) == runtime_plan_digest(fresh_plans)
+    assert root_runtime_scope_plan_digest(plans, replace(lane, model="different")) != runtime_plan_digest(fresh_plans)
+
+
 def _root_fixture(tmp_path: Path):
     root = tmp_path / "synthetic-root"
     workspace = root / "workspaces" / "ws-one"
