@@ -1,8 +1,4 @@
-"""Read-only I3 projection of the fixed Genesis record; no native authority.
-
-Fresh completion/activation recovery is deliberately not integrated here. A
-record can only block legacy startup or conflict at this implementation boundary.
-"""
+"""Read-only Genesis fence: native active evidence outranks administrative phase."""
 
 from __future__ import annotations
 
@@ -72,9 +68,11 @@ def read_genesis_operation_record(*, data_root: str | Path) -> GenesisOperationR
 
 
 def read_genesis_fence(*, data_root: str | Path) -> GenesisFenceDisposition:
-    """Fail closed on unavailable/malformed evidence, without any writes/SQLite."""
+    """Fail closed without writes; only a present record adds Genesis inspection."""
     root_identity = str(data_root)
     record = None
+    authority = GenesisAuthorityDisposition.UNPUBLISHED
+    completion = None
     try:
         # Absence adds no Genesis path policy to historical roots. The existing
         # resolver/Fabric retains its own path validation in that case. Once a
@@ -91,6 +89,12 @@ def read_genesis_fence(*, data_root: str | Path) -> GenesisFenceDisposition:
             record = read_genesis_operation_record(data_root=data_root)
             if record is None:
                 raise GenesisPreparationRefused("Genesis record disappeared during projection")
+            from .genesis_recovery import verify_active_native_genesis
+
+            active = verify_active_native_genesis(data_root=data_root, expected_intent=record.expanded_intent)
+            if active is not None:
+                authority = GenesisAuthorityDisposition.NATIVE_ACTIVE_AGREEMENT
+                completion = active.completion
         status = GenesisEvidenceStatus.ABSENT if record is None else GenesisEvidenceStatus.VALID
     except (OSError, ValueError, TypeError, DeploymentAuthorityError):
         status = GenesisEvidenceStatus.INVALID
@@ -99,10 +103,10 @@ def read_genesis_fence(*, data_root: str | Path) -> GenesisFenceDisposition:
         record_status=status,
         record_data_root_identity=None if record is None else record.expanded_intent.data_root_identity,
         record_operation_key=None if record is None else record.expanded_intent.operation_key,
-        authority_disposition=GenesisAuthorityDisposition.UNPUBLISHED,
-        fresh_completion_status=GenesisEvidenceStatus.ABSENT,
-        fresh_completion_data_root_identity=None,
-        fresh_completion_operation_key=None,
+        authority_disposition=authority,
+        fresh_completion_status=GenesisEvidenceStatus.ABSENT if completion is None else GenesisEvidenceStatus.VALID,
+        fresh_completion_data_root_identity=None if completion is None else completion.data_root_identity,
+        fresh_completion_operation_key=None if completion is None else completion.operation_key,
     ))
 
 

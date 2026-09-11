@@ -39,6 +39,7 @@ from .deployment_types import (
     DeploymentResolution,
     DeploymentResolutionMode,
     QualifiedDeploymentProfile,
+    NativeGenesisCompletionWitness,
     RootAdmissionCompletionWitness,
     SelectorState,
 )
@@ -82,6 +83,7 @@ from .runtime_qualification import (
     qualify_runtime,
 )
 from .runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
+from .genesis_recovery import recover_active_native_genesis
 
 
 _OWNER_PREPARED = object()
@@ -165,6 +167,7 @@ class NativeProductionResourceOwner:
         character_store: Any | None,
         root_v2_completion: RootAdmissionCompletionWitness | None,
         _prepared_marker: object,
+        genesis_completion: NativeGenesisCompletionWitness | None = None,
     ) -> None:
         if _prepared_marker is not _OWNER_PREPARED:
             raise NativeProductionResourceOwnerError(
@@ -175,6 +178,7 @@ class NativeProductionResourceOwner:
         self._admission_descriptor_path = admission_descriptor_path
         self._character_store = character_store
         self._root_v2_completion = root_v2_completion
+        self._genesis_completion = genesis_completion
         self._root_workspace_views: dict[str, _RootV2WorkspaceRuntime] = {}
         self._srg_process_state = NativeSRGProcessState()
         self._world_process_state = NativeWorldProcessState()
@@ -227,6 +231,10 @@ class NativeProductionResourceOwner:
                 completion=root_v2_completion,
                 workspace_id=None,
             )
+        elif isinstance(root_v2_completion, NativeGenesisCompletionWitness):
+            recovered = _recover_genesis_runtime(root, root_v2_completion)
+            if recovered.selector_state != state or recovered.core_inspection.witness != witness:
+                raise NativeProductionResourceOwnerError("Genesis authority changed during owner construction")
         else:
             if admission_descriptor_path is None:
                 raise NativeProductionResourceOwnerError(
@@ -276,6 +284,7 @@ class NativeProductionResourceOwner:
                 else None
             ),
             _prepared_marker=_OWNER_PREPARED,
+            genesis_completion=(root_v2_completion if isinstance(root_v2_completion, NativeGenesisCompletionWitness) else None),
         )
 
     @property
@@ -366,6 +375,10 @@ class NativeProductionResourceOwner:
     def _recover_active_runtime(self, *, workspace_id: str | None = None) -> Any:
         self._require_open()
         agreement = self._revalidate_authority()
+        if self._genesis_completion is not None:
+            if not isinstance(workspace_id, str) or not workspace_id:
+                raise NativeProductionResourceOwnerError("Genesis recovery requires an exact workspace identity")
+            return _recover_genesis_runtime(self._authority_facts.data_root, self._genesis_completion, workspace_id)
         if self._root_v2_completion is not None:
             if not isinstance(workspace_id, str) or not workspace_id:
                 raise NativeProductionResourceOwnerError("root-v2 recovery requires an exact workspace identity")
@@ -424,6 +437,10 @@ class NativeProductionResourceOwner:
             raise NativeProductionResourceOwnerError("stale production owner authority is refused")
         if _qualified_runtime_witness() != self._authority_facts.sqlite_runtime_witness:
             raise NativeProductionResourceOwnerError("production SQLite runtime witness changed")
+        if self._genesis_completion is not None:
+            recovered = _recover_genesis_runtime(self._authority_facts.data_root, self._genesis_completion)
+            if recovered.selector_state != state or recovered.core_inspection.witness != witness:
+                raise NativeProductionResourceOwnerError("Genesis authority changed during revalidation")
         return current
 
     def _require_open(self) -> None:
@@ -460,9 +477,30 @@ class _NativeProductionContext:
         if threading.get_ident() != self._thread_id:
             raise NativeProductionResourceOwnerError("production native context cannot cross threads")
         self._owner._require_open()
+        if getattr(self._owner, "_genesis_completion", None) is not None:
+            self._owner._revalidate_authority()
 
     def _close_resources(self) -> None:
         raise NotImplementedError
+
+
+class _RevalidatedQueryLane:
+    """Keep a returned lane bound to its request's current durable authority."""
+
+    def __init__(self, context, lane):
+        self._context, self._lane = context, lane
+
+    def __getattr__(self, name):
+        self._context._require_open()
+        value = getattr(self._lane, name)
+        if not callable(value):
+            return value
+
+        def checked(*args, **kwargs):
+            # Recheck at invocation too: callers may retain a bound method.
+            self._context._require_open()
+            return value(*args, **kwargs)
+        return checked
 
 
 class NativeProductionQueryContext(_NativeProductionContext):
@@ -478,11 +516,13 @@ class NativeProductionQueryContext(_NativeProductionContext):
 
     def private_lane(self, workspace_id: str, agent_id: str) -> QualifiedQueryLane:
         self._require_open()
-        return self._model.private_lane(workspace_id, agent_id)
+        lane = self._model.private_lane(workspace_id, agent_id)
+        return _RevalidatedQueryLane(self, lane) if self._owner._genesis_completion is not None else lane
 
     def shared_lane(self, workspace_id: str, domain_id: str) -> QualifiedQueryLane:
         self._require_open()
-        return self._model.shared_lane(workspace_id, domain_id)
+        lane = self._model.shared_lane(workspace_id, domain_id)
+        return _RevalidatedQueryLane(self, lane) if self._owner._genesis_completion is not None else lane
 
     def domain_geometry(self, domain_id: str) -> QualifiedDomainGeometry:
         self._require_open()
@@ -564,6 +604,14 @@ class NativeProductionPostWriteContext(_NativeProductionContext):
 
     def _close_resources(self) -> None:
         self._adapter.close()
+
+
+def _recover_genesis_runtime(data_root, completion, workspace_id=None):
+    try:
+        return recover_active_native_genesis(data_root=data_root, workspace_id=workspace_id,
+            expected_completion=completion)
+    except DeploymentAuthorityError as exc:
+        raise NativeProductionResourceOwnerError("production fresh Genesis recovery refused") from exc
 
 
 @timed("root.workspace_recovery")

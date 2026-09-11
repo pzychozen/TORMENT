@@ -47,6 +47,7 @@ from .substrate.deployment_types import (
     DeploymentResolutionMode,
     QualifiedDeploymentProfile,
     RootAdmissionCompletionWitness,
+    NativeGenesisCompletionWitness,
 )
 from .substrate.native_derived_memory_runtime import NativeDerivedMemoryRuntimeConfiguration
 from .substrate.native_post_write_runtime import (
@@ -1087,18 +1088,18 @@ def create_public_runtime(
             if configured is None:
                 raise PublicRuntimeStartupRefused("native public startup requires a host-qualified profile")
             state = resolution.selector_state
-            root_v2 = (
+            root_native = (
                 state is not None
                 and state.core_relative_path is not None
                 and isinstance(
                     inspect_contained_core_deployment(
                         data_root=root, core_relative_path=state.core_relative_path,
                     ).activation_completion_witness,
-                    RootAdmissionCompletionWitness,
+                    (RootAdmissionCompletionWitness, NativeGenesisCompletionWitness),
                 )
             )
-            if root_v2:
-                # Root-v2 has no host descriptor dependency.  Recover its
+            if root_native:
+                # Root-v2 and fresh Genesis have no host descriptor dependency. Recover the
                 # single native owner from selected-core evidence before
                 # constructing any ordinary Fabric compatibility surface.
                 owner = NativeProductionResourceOwner.from_native_agreement(
