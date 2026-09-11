@@ -182,6 +182,40 @@ def open_new_native_core_connection(
     return QualifiedNewCoreConnection(connection, qualification, path)
 
 
+@dataclass
+class QualifiedBootstrapConnection(QualifiedNewCoreConnection):
+    """A private existing bootstrap file whose schema the caller must qualify.
+
+    This is not an existing-core authority handle. The caller must first prove
+    exclusive ownership of the private bootstrap and its immutable request.
+    """
+
+
+def open_existing_native_bootstrap_connection(
+    database_path: str | Path,
+    *,
+    busy_timeout_ms: int = DEFAULT_NEW_CORE_BUSY_TIMEOUT_MS,
+) -> QualifiedBootstrapConnection:
+    """Resume an explicitly owned private bootstrap, without schema assumptions.
+
+    Never creates a missing file. Existing public/core readers retain their
+    mandatory current-schema gate. No source admission semantics live here.
+    """
+    path = _validate_existing_core_database_path(database_path)
+    if type(busy_timeout_ms) is not int or busy_timeout_ms < 0:
+        raise SubstrateConfigurationError("busy_timeout_ms must be a non-negative integer")
+    qualification = qualify_runtime()
+    connection = sqlite_connect(
+        f"{path.as_uri()}?mode=rw", uri=True, isolation_level=None, check_same_thread=True,
+    )
+    try:
+        _configure_connection(connection, busy_timeout_ms=busy_timeout_ms)
+    except Exception:
+        connection.close()
+        raise
+    return QualifiedBootstrapConnection(connection, qualification, path)
+
+
 def _validate_test_database_path(database_path: str | Path) -> Path:
     if not isinstance(database_path, (str, Path)):
         raise SubstrateConfigurationError("a file-backed temporary database path is required")

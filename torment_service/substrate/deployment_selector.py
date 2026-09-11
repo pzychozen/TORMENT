@@ -561,6 +561,14 @@ def resolve_deployment_agreement(
     """Resolve durable agreement facts without routing, writes, or Fabric creation."""
 
     try:
+        from .genesis_fence import read_genesis_fence
+        from .genesis_contracts import GenesisFenceDisposition
+
+        genesis = read_genesis_fence(data_root=data_root)
+        if genesis is GenesisFenceDisposition.BLOCK_LEGACY:
+            return _refused("native-genesis-preparation-incomplete")
+        if genesis is GenesisFenceDisposition.CONFLICT:
+            return _refused("native-genesis-evidence-invalid")
         paths = selector_paths(data_root)
         marker_exists = paths.marker_path.exists() or paths.marker_path.is_symlink()
         selector_exists = paths.selector_path.exists() or paths.selector_path.is_symlink()

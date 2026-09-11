@@ -1024,6 +1024,10 @@ class TormentFabric:
         *,
         native_memory_binding: Optional["NativeMemoryRuntimeBinding"] = None,
     ) -> None:
+        if data_dir != ":memory:":
+            from .substrate.genesis_fence import require_genesis_allows_legacy_materialization
+
+            require_genesis_allows_legacy_materialization(data_root=data_dir)
         # Block C1 (Windows): map data_dir=":memory:" to a real
         # TemporaryDirectory so every sub-store's os.makedirs call
         # works cross-platform. ':' is an illegal filename character
