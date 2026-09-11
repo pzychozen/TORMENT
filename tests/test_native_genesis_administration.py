@@ -291,22 +291,20 @@ def test_fence_and_resolver_read_only_no_sqlite(tmp_path, monkeypatch, state):
     monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: pytest.fail("fence opened SQLite"))
     # Profile is irrelevant to absent/preparing evidence; no profile is finalized.
     result = resolve_deployment_agreement(data_root=root, effective_profile=None)
-    expected = DeploymentResolutionMode.LEGACY_PUBLIC if state in ("absent", "empty") else DeploymentResolutionMode.REFUSED
-    assert result.mode is expected
-    assert result.reason == ("pre-selector-compatible" if expected is DeploymentResolutionMode.LEGACY_PUBLIC else
+    assert result.mode is DeploymentResolutionMode.REFUSED
+    assert result.reason == ("fresh-root-requires-native-genesis" if state in ("absent", "empty") else
                              "native-genesis-preparation-incomplete" if state == "preparing" else "native-genesis-evidence-invalid")
     assert (files(root) if root.exists() else {}) == before
     if state == "absent": assert not root.exists()
 
 
-def test_no_record_preserves_existing_non_genesis_path_policy(tmp_path):
+def test_no_genesis_record_does_not_make_unrelated_residue_legacy(tmp_path):
     root = tmp_path / "legacy-root"
     root.mkdir()
-    # Before I3 this inert non-Genesis path returns pre-selector compatibility.
-    # The Genesis reader must not introduce a new absent-record path refusal.
+    # The Genesis reader stays ABSENT; I11 separately refuses ambiguous residue.
     (root / "substrate").write_text("historical non-Genesis fixture")
     assert f.read_genesis_fence(data_root=root) is g.GenesisFenceDisposition.ABSENT
-    assert resolve_deployment_agreement(data_root=root, effective_profile=None).reason == "pre-selector-compatible"
+    assert resolve_deployment_agreement(data_root=root, effective_profile=None).reason == "pre-selector-root-ambiguous-or-invalid"
 
 
 def test_formatted_matching_record_reuses_then_checkpoints_actual_predecessor(tmp_path):

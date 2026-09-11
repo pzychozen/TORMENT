@@ -66,14 +66,14 @@ def _profile(**overrides: object) -> QualifiedDeploymentProfile:
     return QualifiedDeploymentProfile(**values)  # type: ignore[arg-type]
 
 
-def test_absent_legacy_root_resolves_read_only_before_fabric_creation(tmp_path: Path):
+def test_absent_root_requires_genesis_before_fabric_creation(tmp_path: Path):
     root = tmp_path / "new-legacy-root"
     assert not root.exists()
 
     resolution = resolve_deployment_agreement(data_root=root, effective_profile=_profile())
 
-    assert resolution.mode is DeploymentResolutionMode.LEGACY_PUBLIC
-    assert resolution.reason == "pre-selector-compatible"
+    assert resolution.mode is DeploymentResolutionMode.REFUSED
+    assert resolution.reason == "fresh-root-requires-native-genesis"
     assert not root.exists()
 
 
@@ -154,7 +154,8 @@ def test_preselector_and_marker_without_selector_dispositions(tmp_path: Path):
     profile = _profile()
 
     preselector = resolve_deployment_agreement(data_root=root, effective_profile=profile)
-    assert preselector.mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    assert preselector.mode is DeploymentResolutionMode.REFUSED
+    assert preselector.reason == "pre-selector-root-ambiguous-or-invalid"
 
     establish_selector_era(data_root=root)
     marker_without_db = resolve_deployment_agreement(data_root=root, effective_profile=profile)

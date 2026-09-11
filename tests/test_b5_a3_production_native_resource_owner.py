@@ -308,7 +308,7 @@ def test_owner_requires_exact_native_agreement_and_refuses_deep_profiles(tmp_pat
     legacy_root = tmp_path / "legacy-root"
     legacy_root.mkdir()
     legacy = resolve_deployment_agreement(data_root=legacy_root, effective_profile=profile)
-    assert legacy.mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    assert legacy.mode is DeploymentResolutionMode.REFUSED
     with pytest.raises(NativeProductionResourceOwnerError, match="NATIVE_AGREEMENT"):
         NativeProductionResourceOwner.from_native_agreement(
             data_root=legacy_root, effective_profile=profile, agreement=legacy,

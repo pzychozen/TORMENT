@@ -40,6 +40,7 @@ from test_b5_a5_offline_cutover_rehearsal import (
 )
 from test_substrate_existing_workspace_multi_scope_admission import (
     _create_real_workspace,
+    _prepare_existing_legacy_workspace,
     _freeze_zero_eid_overlap,
     _plans,
 )
@@ -187,6 +188,7 @@ def test_b5_a6_formal_two_window_rehearsal_and_safe_abort(tmp_path: Path, monkey
 
     _set_hash_environment(monkeypatch)
     data_root = tmp_path / "formal-api-token-redacted-root"
+    _prepare_existing_legacy_workspace(data_root)
 
     # R0/R1: the established executable service creates the required private
     # plus shared legacy lanes through ordinary HTTP, then shuts down cleanly.

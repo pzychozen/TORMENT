@@ -95,13 +95,9 @@ def test_factory_uses_read_only_selector_dispositions(tmp_path: Path, monkeypatc
     monkeypatch.setattr(public_runtime, "TormentFabric", _NativeLaneFabric)
     legacy_root = tmp_path / "legacy"
     legacy_root.mkdir()
-    legacy = create_public_runtime(legacy_root)
-    try:
-        assert legacy.mode is PublicRuntimeMode.LEGACY
-        assert legacy.native_owner is None
-        assert not (legacy_root / "substrate" / "deployment").exists()
-    finally:
-        close_public_runtime(legacy_root)
+    with pytest.raises(PublicRuntimeStartupRefused, match="fresh-root-requires-native-genesis"):
+        create_public_runtime(legacy_root)
+    assert list(legacy_root.iterdir()) == []
 
     pending_root, _core, descriptor, profile, pending = _active_fixture(tmp_path / "pending", activate=False)
     assert pending.mode is DeploymentResolutionMode.MAINTENANCE_ONLY

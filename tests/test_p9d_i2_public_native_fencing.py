@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,15 @@ from test_b5_a4r3_public_backend_selection import (
     _native_counts,
     _prime_external_identity,
 )
+
+
+def _existing_legacy_root(root: Path) -> None:
+    # These tests exercise adding scopes to an existing installation. Empty
+    # roots no longer supply legacy authority; use F7's historical identity owner.
+    workspace = root / "workspaces" / "preexisting"
+    workspace.mkdir(parents=True)
+    (workspace / "workspace_meta.json").write_text(
+        json.dumps({"workspace_id": "preexisting"}), encoding="utf-8")
 
 
 def _native_runtime(tmp_path: Path, monkeypatch):
@@ -77,6 +87,7 @@ def test_m3_legacy_root_keeps_historical_workspace_and_agent_creation(tmp_path: 
 
     monkeypatch.setattr(public_runtime, "TormentFabric", _NativeLaneFabric)
     root = tmp_path / "legacy-root"
+    _existing_legacy_root(root)
     runtime = create_public_runtime(root)
     try:
         assert runtime.mode is PublicRuntimeMode.LEGACY
@@ -199,6 +210,7 @@ def test_m10_rest_creation_and_legacy_maintenance_routes_are_unclassified_in_nat
 def test_m11_same_workspace_shape_is_legacy_materializing_or_native_refusal_by_selector_mode(tmp_path: Path, monkeypatch):
     native_root, _profile, native_runtime = _native_runtime(tmp_path / "native", monkeypatch)
     legacy_root = tmp_path / "legacy"
+    _existing_legacy_root(legacy_root)
     legacy_runtime = create_public_runtime(legacy_root)
     try:
         with pytest.raises(NativePublicOperationRefused):

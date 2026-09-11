@@ -574,7 +574,14 @@ def resolve_deployment_agreement(
         selector_exists = paths.selector_path.exists() or paths.selector_path.is_symlink()
         if not marker_exists and not selector_exists:
             _require_only_inert_controlled_cores(paths, selected=None)
-            return DeploymentResolution(DeploymentResolutionMode.LEGACY_PUBLIC, "pre-selector-compatible")
+            from .preselector_root_classification import PreselectorRootClass, classify_preselector_root
+
+            presence = classify_preselector_root(data_root)
+            if presence is PreselectorRootClass.FRESH_UNINITIALIZED:
+                return _refused("fresh-root-requires-native-genesis")
+            if presence is PreselectorRootClass.EXISTING_LEGACY:
+                return DeploymentResolution(DeploymentResolutionMode.LEGACY_PUBLIC, "pre-selector-existing-legacy")
+            return _refused("pre-selector-root-ambiguous-or-invalid")
         if marker_exists != selector_exists:
             return _refused("selector-era-marker-and-selector-must-coexist")
         _read_marker(paths)
@@ -1135,10 +1142,8 @@ def _data_root(value: str | Path) -> Path:
     if not isinstance(value, (str, Path)) or not str(value).strip():
         raise DeploymentAuthorityError("deployment data root is required")
     root = Path(value).expanduser().resolve()
-    # The resolver is read-only and must preserve ordinary first legacy
-    # startup: Fabric creates a new data root only after this pre-selector
-    # check has returned LEGACY_PUBLIC. A non-directory remains invalid, but
-    # a missing root is simply empty pre-selector authority.
+    # Path validation is read-only. Missing roots are classified by the
+    # resolver; only the explicit administration APIs may initialize them.
     if root.exists() and not root.is_dir():
         raise DeploymentAuthorityError("deployment data root must be a directory when it exists")
     return root

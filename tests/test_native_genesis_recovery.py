@@ -526,11 +526,13 @@ def test_startup_conflict_never_constructs_compatibility_or_repairs(tmp_path):
     assert events == [] and file_snapshot(root) == before
 
 
-def test_absent_legacy_root_keeps_existing_resolution_without_creation(tmp_path):
+def test_absent_root_requires_genesis_without_creation(tmp_path):
     root = tmp_path / "never-created"
     from test_b5_a2_deployment_fence import _profile
     assert read_genesis_fence(data_root=root).value == "ABSENT"
-    assert selector.resolve_deployment_agreement(data_root=root, effective_profile=_profile()).mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    result = selector.resolve_deployment_agreement(data_root=root, effective_profile=_profile())
+    assert result.mode is DeploymentResolutionMode.REFUSED
+    assert result.reason == "fresh-root-requires-native-genesis"
     assert not root.exists()
 
 

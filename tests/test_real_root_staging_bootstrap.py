@@ -136,7 +136,8 @@ def test_p1_bootstrap_is_source_free_contained_and_non_authoritative(
     ) is None
 
     agreement = resolve_deployment_agreement(data_root=root, effective_profile=_profile())
-    assert agreement.mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    assert agreement.mode is DeploymentResolutionMode.REFUSED
+    assert agreement.reason == "pre-selector-root-ambiguous-or-invalid"
     with pytest.raises(NativeProductionResourceOwnerError, match="NATIVE_AGREEMENT"):
         NativeProductionResourceOwner.from_native_agreement(
             data_root=root,
@@ -147,7 +148,7 @@ def test_p1_bootstrap_is_source_free_contained_and_non_authoritative(
         read_selector_state(data_root=root)
 
 
-def test_p1_exact_reuse_and_stale_inert_supersession_preserve_legacy_public(tmp_path: Path) -> None:
+def test_p1_exact_reuse_and_stale_inert_supersession_do_not_supply_legacy_presence(tmp_path: Path) -> None:
     root = tmp_path / "p1-supersession"
     root.mkdir()
     workflow = RealRootStagingBootstrap()
@@ -181,7 +182,7 @@ def test_p1_exact_reuse_and_stale_inert_supersession_preserve_legacy_public(tmp_
 
     assert resolve_deployment_agreement(
         data_root=root, effective_profile=_profile()
-    ).mode is DeploymentResolutionMode.LEGACY_PUBLIC
+    ).mode is DeploymentResolutionMode.REFUSED
 
 
 def test_p1_corrected_alias_prerequisite_makes_old_inert_core_stale_without_mutation(

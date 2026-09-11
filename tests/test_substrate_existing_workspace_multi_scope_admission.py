@@ -138,8 +138,31 @@ def _tree_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _prepare_existing_legacy_workspace(data: Path) -> Path:
+    """Supply an existing legacy owner for service/migration fixtures after I11.
+
+    This fixture used to create a new legacy installation by starting on an
+    empty root. Normal service no longer authorizes that bootstrap. Preserve
+    existing historical fixtures verbatim; prepare owners only on a fresh root.
+    """
+    from torment_service.workspace_declaration import workspace_meta_payload, domains_payload
+
+    workspace = data / "workspaces" / "orchard"
+    if (workspace / "workspace_meta.json").exists():
+        return workspace
+    assert not data.exists() or not any(data.iterdir()), "fixture must not modernize existing legacy state"
+    workspace.mkdir(parents=True)
+    (workspace / "workspace_meta.json").write_text(json.dumps(workspace_meta_payload(
+        workspace_id="orchard", created_ts=1, embed_dim=3,
+        embed_provider="hash", embed_model="hash:3:torment")), encoding="utf-8")
+    (workspace / "domains.json").write_text(json.dumps(domains_payload(
+        ["personal", "research", "engineering", "creative"])), encoding="utf-8")
+    return workspace
+
+
 def _create_real_workspace(data: Path) -> Path:
-    """Use the ordinary executable service plus HTTP ingestion for every lane."""
+    """Use an existing legacy workspace, normal service and HTTP for every lane."""
+    _prepare_existing_legacy_workspace(data)
     environment = os.environ.copy()
     environment.update({
         "TORMENT_DATA_DIR": str(data), "TORMENT_EMBED_PROVIDER": "hash", "TORMENT_HASH_DIM": "3",
