@@ -2,7 +2,8 @@
 """
 check_forge_output.py — Acceptance checker for start/torment_character_creator.html
 
-Validates that each emitted-Python template section in the forge satisfies the doctrinal
+Rejects known injected fingerprinting signatures and NUL bytes across the whole file.
+Then validates that each emitted-Python template section in the forge satisfies the doctrinal
 and field-shape contracts defined in start/SOLO_ALIGNMENT_SPEC.md §4 and
 start/BASIC_HIVE_AGENT_SPEC.md §4.
 
@@ -12,7 +13,7 @@ Section discovery:
     - hivemind_basic_hive   — fence comments inside generateHivemind
     - hivemind_broadcast    — fence comments inside generateHivemind
 
-Manual use only. No pre-commit wiring yet.
+Runs manually and in the existing CodeQL workflow on pushes and pull requests.
 
 Exit codes:
     0 — all sections pass.
@@ -27,6 +28,40 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 HTML_PATH = Path(__file__).resolve().parent.parent / "start" / "torment_character_creator.html"
+
+
+# Whole-file signatures from the known injected fingerprinting regression.
+# Keep these specific: ordinary navigator reads are allowed.
+WHOLE_FILE_FORBIDDEN: List[Tuple[str, bytes]] = [
+    ("GLS/ user-agent marker", rb"GLS/"),
+    ("navigator.userAgent assignment",
+     rb"""\bnavigator\s*(?:\.\s*userAgent\b|\[\s*['"]userAgent['"]\s*\])\s*(?:\+?=|\|\|=|\?\?=)(?!=)"""),
+    ("navigator.userAgent property override",
+     rb"""(?:Object|Reflect)\s*\.\s*defineProperty\s*\(\s*(?:(?:window|globalThis)\s*\.\s*)?(?:navigator|Navigator\s*\.\s*prototype)\s*,\s*['"]userAgent['"]"""),
+    ("navigator.userAgent properties override",
+     rb"""Object\s*\.\s*defineProperties\s*\(\s*(?:(?:window|globalThis)\s*\.\s*)?(?:navigator|Navigator\s*\.\s*prototype)\s*,\s*\{[^{}]*?\buserAgent\b\s*['"]?\s*:"""),
+    ("navigator.userAgent getter override",
+     rb"""\bnavigator\s*\.\s*__defineGetter__\s*\(\s*['"]userAgent['"]"""),
+    ("PluginArray.prototype", rb"\bPluginArray\s*\.\s*prototype\b"),
+    ("fake plugin REST Tester", rb"REST Tester"),
+    ("fake plugin ChanWebPlugin", rb"ChanWebPlugin"),
+    ("fake plugin SpecialPlayer", rb"SpecialPlayer"),
+    ("NUL byte", rb"\x00"),
+]
+
+
+def check_whole_file(source: bytes) -> List[str]:
+    """Reject known injection signatures before decoding or discovering sections."""
+    failures: List[str] = []
+    for label, pattern in WHOLE_FILE_FORBIDDEN:
+        match = re.search(pattern, source)
+        if match:
+            line = source[:match.start()].count(b"\n") + 1
+            failures.append(
+                f"  FORBIDDEN whole-file signature: {label} (line {line}); "
+                "remove the injected code or corrupt byte."
+            )
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +282,16 @@ def main() -> int:
         print(f"error: forge HTML not found at {HTML_PATH}", file=sys.stderr)
         return 2
 
-    text = HTML_PATH.read_text(encoding="utf-8")
+    raw = HTML_PATH.read_bytes()
+    failures = check_whole_file(raw)
+    if failures:
+        print("[FAIL] whole_file:")
+        for failure in failures:
+            print(failure)
+        return 1
+    print("[PASS] whole_file")
+
+    text = raw.decode("utf-8")
     lines = text.splitlines()
 
     fn_sections = find_function_sections(lines)
