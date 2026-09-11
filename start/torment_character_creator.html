@@ -1542,16 +1542,14 @@
         <div class="model-name">Claude (Anthropic API)</div>
         <div class="model-desc">Excellent instruction following and character consistency.</div>
         <div class="model-extra">
-          <label>API KEY</label>
-          <input type="text" id="claude-key" value="" placeholder="sk-ant-... (for your env config only)">
+          <div class="model-desc">Set <code>ANTHROPIC_API_KEY</code> in your terminal before running.</div>
         </div>
       </div>
       <div class="model-card" onclick="selectModel(this,'openai')">
         <div class="model-name">OpenAI API</div>
         <div class="model-desc">GPT-4o, GPT-4, o1, etc. Works with any OpenAI-compatible endpoint.</div>
         <div class="model-extra">
-          <label>API KEY</label>
-          <input type="text" id="openai-key" value="" placeholder="sk-... (for your env config only)">
+          <div class="model-desc">Set <code>OPENAI_API_KEY</code> in your terminal before running.</div>
           <label style="margin-top:8px;display:block">MODEL</label>
           <input type="text" id="openai-model" value="gpt-4o" placeholder="e.g. gpt-4o, gpt-4-turbo">
         </div>
@@ -2930,9 +2928,9 @@ function generateHivemind() {
   // LLM config (from shared section 07)
   envOutput += '# Your LLM\n';
   if (selectedModel === 'claude') {
-    envOutput += 'export ANTHROPIC_API_KEY=' + (document.getElementById('claude-key')?.value || 'your_key_here') + '\n\n';
+    envOutput += 'export ANTHROPIC_API_KEY=your_key_here\n\n';
   } else if (selectedModel === 'openai') {
-    envOutput += 'export OPENAI_API_KEY=' + (document.getElementById('openai-key')?.value || 'your_key_here') + '\n';
+    envOutput += 'export OPENAI_API_KEY=your_key_here\n';
     envOutput += 'export OPENAI_MODEL=' + (document.getElementById('openai-model')?.value || 'gpt-4o') + '\n\n';
   } else if (selectedModel === 'ollama') {
     envOutput += 'export OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
@@ -2970,9 +2968,9 @@ function generateHivemind() {
     if (!features.crystal) envOutput += 'set TORMENT_SRG_CRYSTAL=0\n';
   }
   if (selectedModel === 'claude') {
-    envOutput += 'set ANTHROPIC_API_KEY=' + (document.getElementById('claude-key')?.value || 'your_key_here') + '\n';
+    envOutput += 'set ANTHROPIC_API_KEY=your_key_here\n';
   } else if (selectedModel === 'openai') {
-    envOutput += 'set OPENAI_API_KEY=' + (document.getElementById('openai-key')?.value || 'your_key_here') + '\n';
+    envOutput += 'set OPENAI_API_KEY=your_key_here\n';
   } else if (selectedModel === 'ollama') {
     envOutput += 'set OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
     envOutput += 'set OLLAMA_MODEL=' + (document.getElementById('ollama-model')?.value || 'qwen3:32b') + '\n';

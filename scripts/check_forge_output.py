@@ -3,6 +3,7 @@
 check_forge_output.py — Acceptance checker for start/torment_character_creator.html
 
 Rejects known injected fingerprinting signatures and NUL bytes across the whole file.
+Requires placeholder-only provider environment templates without browser secret inputs.
 Then validates that each emitted-Python template section in the forge satisfies the doctrinal
 and field-shape contracts defined in start/SOLO_ALIGNMENT_SPEC.md §4 and
 start/BASIC_HIVE_AGENT_SPEC.md §4.
@@ -61,6 +62,57 @@ def check_whole_file(source: bytes) -> List[str]:
                 f"  FORBIDDEN whole-file signature: {label} (line {line}); "
                 "remove the injected code or corrupt byte."
             )
+    return failures
+
+
+# S2 covers the retired browser fields and the two existing env-template forms.
+# Environment variable names and SDK os.environ reads remain legitimate.
+PROVIDER_SECRET_INPUT_IDS = ("claude-key", "openai-key")
+PROVIDER_ENV_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+
+def check_provider_secrets(source: str) -> List[str]:
+    """Keep provider credentials outside Forge-owned input and output state."""
+    failures: List[str] = []
+    for field_id in PROVIDER_SECRET_INPUT_IDS:
+        if field_id in source:
+            failures.append(
+                f"  FORBIDDEN provider secret input/access: {field_id}; "
+                "configure credentials in the terminal instead."
+            )
+
+    for key in PROVIDER_ENV_KEYS:
+        # Solo renders Linux and CMD from the same llmVars literal.
+        bindings = re.findall(
+            rf"""llmVars\s*\.\s*push\s*\((?=[^;]*['"]{key}['"])[^;]*;""",
+            source,
+        )
+        literal_binding = (
+            rf"""llmVars\s*\.\s*push\s*\(\s*\{{\s*key\s*:\s*['"]{key}['"]"""
+            r"""\s*,\s*val\s*:\s*['"]your_key_here['"]\s*\}\s*\)\s*;"""
+        )
+        if len(bindings) != 1 or not re.fullmatch(literal_binding, bindings[0]):
+            failures.append(
+                f"  Solo {key} must have one literal your_key_here binding; "
+                "do not interpolate a browser value."
+            )
+
+        # Hivemind emits each shell command directly. Require the whole literal
+        # statement, not just a placeholder fallback within a dynamic expression.
+        for command in ("export", "set"):
+            statements = re.findall(
+                rf"""envOutput\s*\+=\s*['"\x60]{command}\s+{key}\b[^\r\n]*""",
+                source,
+            )
+            literal_command = (
+                rf"""envOutput\s*\+=\s*(['"]){command}\s+{key}=your_key_here"""
+                r"""(?:\\n)+\1\s*;\s*"""
+            )
+            if len(statements) != 1 or not re.fullmatch(literal_command, statements[0]):
+                failures.append(
+                    f"  Hivemind {command} {key} must be one literal "
+                    "your_key_here command; do not concatenate a browser value."
+                )
     return failures
 
 
@@ -292,6 +344,13 @@ def main() -> int:
     print("[PASS] whole_file")
 
     text = raw.decode("utf-8")
+    failures = check_provider_secrets(text)
+    if failures:
+        print("[FAIL] provider_secrets:")
+        for failure in failures:
+            print(failure)
+        return 1
+    print("[PASS] provider_secrets")
     lines = text.splitlines()
 
     fn_sections = find_function_sections(lines)
