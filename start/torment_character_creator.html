@@ -1058,6 +1058,12 @@
         <input type="text" id="workspace-id" placeholder="e.g. ryuki" maxlength="30">
       </div>
     </div>
+    <div class="field">
+      <label for="solo-data-root">TORMENT DATA ROOT</label>
+      <input type="text" id="solo-data-root" placeholder="Absolute path to a new installation" autocomplete="off">
+      <div class="section-desc">This is where this new TORMENT character installation will live. Use a new/empty root for a fresh installation. Native Genesis verifies the path before writing.</div>
+      <div class="section-desc">Enter the canonical path: on Windows, use lowercase and backslashes; avoid aliases and <code>..</code> segments. The browser cannot prove filesystem identity. I9's canonical-path validation is authoritative.</div>
+    </div>
   </div>
 
   <!-- 02 SEED (SOLO) -->
@@ -1170,14 +1176,14 @@
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Character System</div>
-        <div class="toggle-desc">Living identity layer — seed planting, drift protection, gravity correction. This is what makes your character stay themselves over time. Recommended ON.</div>
+        <div class="toggle-desc">Living identity layer — seed planting, drift protection, gravity correction. This is what makes your character stay themselves over time. Recommended ON. When OFF, the seed description is not planted as a TORMENT Character basin.</div>
       </div>
     </div>
     <div class="toggle-row" id="toggle-compression" onclick="toggleFeature('compression')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Memory Compression</div>
-        <div class="toggle-desc">Event-gated compression with deep memory store. Old memories get compressed and can "spirit return" as echoes later. Turn on after your character has 100+ conversation turns. Off by default.</div>
+        <div class="toggle-desc">Fresh Native Genesis requires compression disabled during the qualified onboarding profile. Turn Compression off to generate a fresh setup.</div>
       </div>
     </div>
   </div>
@@ -1510,6 +1516,11 @@
         <div class="model-extra">
           <label>MODEL</label>
           <input type="text" id="st-model" value="BAAI/bge-small-en-v1.5" placeholder="model name">
+          <div class="solo-mode">
+            <label for="st-dimension">DIMENSION</label>
+            <input type="number" id="st-dimension" value="384" min="1" step="1">
+            <div class="model-desc">Must match the selected model. Native Genesis refuses before root mutation if it does not. Changing the model leaves this explicit operator declaration unchanged.</div>
+          </div>
           <label style="margin-top:8px;display:block">DEVICE</label>
           <select id="st-device" onchange="checkGpuWarn()">
             <option value="cpu" selected>cpu (recommended)</option>
@@ -1526,6 +1537,11 @@
         <div class="model-extra">
           <label>MODEL</label>
           <input type="text" id="ollama-embed-model" value="nomic-embed-text" placeholder="e.g. nomic-embed-text">
+          <div class="solo-mode">
+            <label for="ollama-embed-dimension">DIMENSION</label>
+            <input type="number" id="ollama-embed-dimension" min="1" step="1" placeholder="Required positive integer">
+            <div class="model-desc">Declare the embedding model's dimension explicitly. This is separate from the conversational Ollama model below; the CLI/runtime validates the lane.</div>
+          </div>
           <label style="margin-top:8px;display:block">OLLAMA URL</label>
           <input type="text" id="ollama-url" value="http://127.0.0.1:11434" placeholder="http://127.0.0.1:11434">
         </div>
@@ -1589,16 +1605,17 @@
 
     <div class="info-box">
       <div class="info-title">HOW TO USE THIS</div>
-      Copy each step in order. Step 0 starts the server. Steps 1-2 create your character.
-      Step 3 is your environment config. Step 4 is the system prompt template.
-      Step 5 is the integration loop — the code your chatbot runs every conversation turn.
+      <div class="solo-mode">Copy each step in order. Step 0 installs dependencies. Save Step 1 as <code>torment_genesis_request.json</code> outside the selected data root. Step 2 creates the native installation while offline. Only after success, Step 3 loads the exported profile and starts the server. Step 4 is the system prompt; Step 5 is the ordinary chat loop.
+      Keep <code>torment_genesis_request.json</code>, <code>torment_genesis_intent.json</code>, and <code>torment_genesis_profile.json</code> outside the data root. Run commands from the repository with these external artifact paths, or from an environment where TORMENT is installed.</div>
+      <div class="hivemind-mode">Fresh Native Genesis onboarding in this pass is qualified for Solo only. Collective/multi-agent fresh onboarding remains a separate lifecycle task. Existing-installation Hivemind output is unchanged.</div>
       Use <code>export as .md</code> at the bottom to save everything as a reference file.
     </div>
 
     <!-- STEP 0 -->
     <div id="output-install" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 0 — INSTALL + START SERVER</span>
+        <span class="output-title solo-mode">STEP 0 — INSTALL DEPENDENCIES</span>
+        <span class="output-title hivemind-mode">STEP 0 — INSTALL + START SERVER</span>
         <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
       </div>
       <div class="output-body" id="out-install"></div>
@@ -1607,16 +1624,19 @@
     <!-- STEP 1 -->
     <div id="output-workspace" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 1 — CREATE WORKSPACE</span>
+        <span class="output-title solo-mode">STEP 1 — NATIVE GENESIS REQUEST</span>
+        <span class="output-title hivemind-mode">STEP 1 — CREATE WORKSPACE</span>
         <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
       </div>
+      <div class="section-desc solo-mode">Save the JSON below as <code>torment_genesis_request.json</code> outside the selected TORMENT data root. Copy includes JSON only.</div>
       <div class="output-body" id="out-workspace"></div>
     </div>
 
     <!-- STEP 2 -->
     <div id="output-agent" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 2 — CREATE AGENT + SEED</span>
+        <span class="output-title solo-mode">STEP 2 — CREATE NATIVE TORMENT ROOT</span>
+        <span class="output-title hivemind-mode">STEP 2 — CREATE AGENT + SEED</span>
         <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
       </div>
       <div class="output-body" id="out-agent"></div>
@@ -1625,7 +1645,8 @@
     <!-- STEP 3 -->
     <div id="output-env" class="output-block">
       <div class="output-header">
-        <span class="output-title">STEP 3 — ENVIRONMENT CONFIG</span>
+        <span class="output-title solo-mode">STEP 3 — STARTUP ENVIRONMENT + START SERVER</span>
+        <span class="output-title hivemind-mode">STEP 3 — ENVIRONMENT CONFIG</span>
         <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
       </div>
       <div class="output-body" id="out-env"></div>
@@ -2197,7 +2218,108 @@ function generate() {
   }
 }
 
+// <<< BEGIN solo_genesis >>>
+// Declaration assembly only. I9 owns canonical path checks, validation and allocation.
+function buildSoloGenesisRequest(options) {
+  const root = options.dataRoot.trim();
+  if (!root || !(/^(?:[A-Za-z]:[\\/]|\/|\\\\[^\\]+\\[^\\]+)/).test(root)) {
+    throw new Error('Enter an absolute TORMENT DATA ROOT for the new installation. Native Genesis performs final canonical-path validation.');
+  }
+  if (options.compression) {
+    throw new Error('Fresh Native Genesis currently requires compression disabled during the qualified onboarding profile. Turn Compression off to generate a fresh setup.');
+  }
+  const provider = options.provider;
+  if (!['hash', 'st', 'ollama'].includes(provider)) throw new Error('Select an embedding provider.');
+  const model = provider === 'hash' ? 'hash:384:torment' : options.model.trim();
+  const dimension = provider === 'hash' ? 384 : Number(options.dimension);
+  if (!model || !Number.isSafeInteger(dimension) || dimension <= 0) {
+    throw new Error('Declare an embedding model and its positive integer DIMENSION.');
+  }
+  const seedId = options.agentId + '_v1';
+  const identitySeed = {
+    core_traits: options.traits.length ? [...options.traits] : ['analytical'],
+    priority_weights: {facts: 0.8, projects: 0.7, preferences: 0.4, motifs: 0.7},
+    coupling_mode: 'read_only', coupling_strength: 0.25,
+    seed_text: options.characterEnabled ? options.seed : '',
+    seed_id: options.characterEnabled ? seedId : ''
+  };
+  let character = {mode: 'DISABLED'};
+  if (options.characterEnabled) {
+    identitySeed.character_name = options.name;
+    character = {mode: 'ENABLED', definition: {
+      seed_id: seedId, character_name: options.name, seed_text: options.seed,
+      owner_agent_id: options.agentId, drift_window_steps: 500,
+      drift_correction_threshold: options.drift, drift_gravity_strength: options.gravity,
+      core_half_life: 3650.0, relational_half_life: 30.0, situational_half_life: 7.0,
+      core_weight: 0.50, derived_weight: 0.42, relational_weight: 0.35,
+      situational_weight: 0.15, version: '1.0.0'
+    }};
+  }
+  return {
+    contract: 'TORMENT_NATIVE_GENESIS_ONBOARDING_REQUEST', version: 1,
+    data_root_identity: root,
+    workspace: {workspace_id: options.workspaceId, ordered_domains: ['personal']},
+    agent: {agent_id: options.agentId, identity_seed: identitySeed,
+      initial_overlay: {
+        write_threshold: options.writeThreshold, decay_scale: options.decayScale,
+        novelty_bias: options.noveltyBias, motif_sensitivity: options.motifSensitivity,
+        promotion_bias: 0.6, contradiction_sensitivity: 0.8, reinforcement_gain: 0.9,
+        coupling_strength: 0.25, shared_trust: 0.6, stability_guard: 0.8
+      }, private_motif_domain_id: 'personal'},
+    character,
+    profile_choice: {compression_enabled: false, deep_memory_enabled: false,
+      representation_provider: provider, representation_model: model, representation_dimension: dimension},
+    representation_lane: {provider, model, dimension, representation_class: 'COMPAT_EMBEDDING',
+      generation: 1, derivation_contract_version: 'compat-embedding-v1', encoding_id: 'RAW_VECTOR', dtype: 'float32'}
+  };
+}
+
+function soloEmbeddingVars(lane, device, ollamaUrl) {
+  const vars = [{key: 'TORMENT_EMBED_PROVIDER', val: lane.provider}];
+  if (lane.provider === 'hash') {
+    vars.push({key: 'TORMENT_HASH_DIM', val: '384'}, {key: 'TORMENT_HASH_SALT', val: 'torment'});
+  } else {
+    vars.push({key: 'TORMENT_EMBED_MODEL', val: lane.model}, {key: 'TORMENT_EMBED_STRICT', val: '1'});
+    vars.push(lane.provider === 'st' ? {key: 'TORMENT_EMBED_DEVICE', val: device}
+      : {key: 'TORMENT_OLLAMA_URL', val: ollamaUrl});
+  }
+  return vars;
+}
+
+function soloEnvLine(shell, key, value) {
+  const val = String(value);
+  // CMD expands these even in quoted SET values. Refuse unsafe copy/paste output.
+  if (/[\r\n"%!]/.test(val)) throw new Error('Command values cannot contain newlines, double quotes, % or ! in the generated CMD instructions.');
+  if (shell === 'cmd') return 'set "' + key + '=' + val + '"\n';
+  const quoted = /^[A-Za-z0-9_./:-]+$/.test(val) ? val : "'" + val.replace(/'/g, "'\\''") + "'";
+  return 'export ' + key + '=' + quoted + '\n';
+}
+
+function soloGenesisCreateCommands(embedVars) {
+  const checks = [
+    'Keep request, intent and profile artifacts outside the selected data root.',
+    'Use a terminal where TORMENT is installed; these filenames refer to your external artifact directory.',
+    'The offline confirmation is a human statement. Check these conditions before running:',
+    'TORMENT service stopped; MCP stopped; other direct TORMENT tools/writers stopped;',
+    'Fabric hosts stopped; root jobs absent; public listener absent.',
+    'The flag is not an automatic process census. The browser has not verified offline conditions.',
+    'Replace issuer-reference with your operator reference. Keep all conditions true until completion.'
+  ];
+  const command = 'python -m torment_service.native_genesis create --request torment_genesis_request.json' +
+    ' --intent torment_genesis_intent.json --operator-attestation "I confirm all listed offline conditions for this root throughout creation."' +
+    ' --issuer-reference "local-human-operator" --public-listener http://127.0.0.1:8787' +
+    ' --confirm-all-offline-conditions --profile-out torment_genesis_profile.json';
+  return ['posix', 'cmd'].map(shell => {
+    const comment = shell === 'cmd' ? ':: ' : '# ';
+    return comment + (shell === 'cmd' ? 'Windows CMD' : 'Linux / macOS / WSL') + '\n' +
+      checks.map(line => comment + line).join('\n') + '\n\n' +
+      embedVars.map(v => soloEnvLine(shell, v.key, v.val)).join('') + '\n' + command;
+  }).join('\n\n');
+}
+// <<< END solo_genesis >>>
+
 function generateSolo() {
+  document.getElementById('output-section').classList.remove('visible');
   const name = document.getElementById('char-name').value.trim();
   const wsId = document.getElementById('workspace-id').value.trim()
     || name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9_]/g, '')
@@ -2208,14 +2330,34 @@ function generateSolo() {
   if (!seed || seed.length < 20) { alert('Write a seed description (at least a few sentences).'); return; }
 
   const agentId = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-  const seedId = agentId + '_v1';
-  const traits = selectedTraits.length ? selectedTraits : [];
+  if (!agentId) { alert('Use a character name containing letters or numbers for the agent ID.'); return; }
   const driftVal = driftMap[document.getElementById('drift-slider').value];
   const gravVal = gravityMap[document.getElementById('gravity-slider').value];
   const PORT = '8787';
   const BASE = 'http://127.0.0.1:' + PORT;
 
-  // ── STEP 0: Install + Start ──
+  let request, embedVars, createCommands;
+  try {
+    request = buildSoloGenesisRequest({
+      dataRoot: document.getElementById('solo-data-root').value,
+      workspaceId: wsId, agentId, name, seed, traits: selectedTraits,
+      characterEnabled: features.character, compression: features.compression,
+      drift: driftVal.threshold, gravity: gravVal.value,
+      writeThreshold: overlayMap.wt[document.getElementById('wt-slider').value].val,
+      decayScale: overlayMap.ds[document.getElementById('ds-slider').value].val,
+      noveltyBias: overlayMap.nb[document.getElementById('nb-slider').value].val,
+      motifSensitivity: overlayMap.ms[document.getElementById('ms-slider').value].val,
+      provider: selectedEmbed,
+      model: document.getElementById(selectedEmbed === 'ollama' ? 'ollama-embed-model' : 'st-model').value,
+      dimension: document.getElementById(selectedEmbed === 'ollama' ? 'ollama-embed-dimension' : 'st-dimension').value
+    });
+    embedVars = soloEmbeddingVars(request.representation_lane,
+      document.getElementById('st-device').value, document.getElementById('ollama-url').value);
+    soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
+    createCommands = soloGenesisCreateCommands(embedVars);
+  } catch (error) { alert(error.message); return; }
+
+  // ── STEP 0: Install dependencies only ──
   let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
 
   if (selectedEmbed === 'st') {
@@ -2228,60 +2370,14 @@ function generateSolo() {
     installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install OpenAI SDK\npip install openai';
   }
 
-  const startNum = selectedEmbed === 'st' ? '4' : '3';
-  installLines += '\n\n# ' + startNum + '. Start the TORMENT server\npython -m torment_service\n\n# Server runs at ' + BASE + '\n# Verify it works:\ncurl ' + BASE + '/health';
-
   document.getElementById('out-install').textContent = installLines;
 
-  // ── STEP 1: Workspace ──
-  document.getElementById('out-workspace').textContent =
-    'curl -X POST ' + BASE + '/workspace/create \\\n  -H "Content-Type: application/json" \\\n  -d \'{"workspace_id": "' + wsId + '", "domains": ["personal"]}\'';
+  // STEP 1: JSON only; STEP 2: explicit offline operator command.
+  document.getElementById('out-workspace').textContent = JSON.stringify(request, null, 2);
+  document.getElementById('out-agent').textContent = createCommands;
 
-  // ── STEP 2: Agent + Seed ──
-  const wtVal = overlayMap.wt[document.getElementById('wt-slider').value].val;
-  const dsVal = overlayMap.ds[document.getElementById('ds-slider').value].val;
-  const nbVal = overlayMap.nb[document.getElementById('nb-slider').value].val;
-  const msVal = overlayMap.ms[document.getElementById('ms-slider').value].val;
-
-  const agentPayload = {
-    workspace_id: wsId,
-    agent_id: agentId,
-    seed: {
-      seed_text: seed,
-      seed_id: seedId,
-      character_name: name,
-      drift_correction_threshold: driftVal.threshold,
-      drift_gravity_strength: gravVal.value,
-      coupling_mode: "read_only",
-      coupling_strength: 0.25
-    }
-  };
-  if (traits.length > 0) {
-    agentPayload.seed.core_traits = traits;
-  }
-
-  document.getElementById('out-agent').textContent =
-    '# Display name: "' + name + '" (seed_id: "' + seedId + '")\n' +
-    'curl -X POST ' + BASE + '/agent/create \\\n  -H "Content-Type: application/json" \\\n  -d \'' + JSON.stringify(agentPayload, null, 2) + '\'';
-
-  // ── STEP 3: Env Config ──
-  let envParts = [];
-
-  const embedVars = [];
-  let embedNote = '';
-  if (selectedEmbed === 'hash') {
-    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'hash'});
-    embedNote = '# Hash: zero setup, but no real semantic understanding.';
-  } else if (selectedEmbed === 'st') {
-    const stModel = document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5';
-    const stDevice = document.getElementById('st-device')?.value || 'cpu';
-    embedVars.push({key: 'TORMENT_EMBED_PROVIDER', val: 'st'});
-    embedVars.push({key: 'TORMENT_EMBED_MODEL', val: stModel});
-    embedVars.push({key: 'TORMENT_EMBED_DEVICE', val: stDevice});
-  }
-  envParts.push({comment: 'Embeddings', vars: embedVars, note: embedNote});
-
-  envParts.push({comment: 'Profile', vars: [{key: 'TORMENT_PROFILE', val: 'companion'}], note: ''});
+  // STEP 3: the exact exported deployment profile is the startup authority.
+  const envParts = [{comment: 'Embeddings (same lane as Genesis)', vars: embedVars, note: ''}];
 
   const charVars = [{key: 'TORMENT_CHARACTER_ENABLE', val: features.character ? '1' : '0'}];
   let charNote = '';
@@ -2291,10 +2387,8 @@ function generateSolo() {
   }
   envParts.push({comment: 'Character System', vars: charVars, note: charNote});
 
-  const compVars = [{key: 'TORMENT_COMPRESS_ENABLE', val: features.compression ? '1' : '0'}];
-  let compNote = features.compression ?
-    '# Triggers automatically on corridor exits and phase transitions.' :
-    '# Turn on after 100+ conversation turns for automatic memory management.';
+  const compVars = [{key: 'TORMENT_COMPRESS_ENABLE', val: '0'}];
+  const compNote = '# Compression and deep memory remain disabled in this qualified profile.';
   envParts.push({comment: 'Compression', vars: compVars, note: compNote});
 
   if (features.srg) {
@@ -2340,10 +2434,6 @@ function generateSolo() {
     envParts.push({comment: 'Advanced Cognition', vars: cogVars, note: cogNote});
   }
 
-  const overlayNote = 'write_threshold: ' + wtVal.toFixed(2) + ', decay_scale: ' + dsVal.toFixed(2) +
-    ', novelty_bias: ' + nbVal.toFixed(2) + ', motif_sensitivity: ' + msVal.toFixed(2);
-  envParts.push({comment: 'Overlay (set in identity.json)', vars: [], note: '# ' + overlayNote});
-
   const llmVars = [];
   if (selectedModel === 'claude') {
     llmVars.push({key: 'ANTHROPIC_API_KEY', val: 'your_key_here'});
@@ -2360,31 +2450,39 @@ function generateSolo() {
   envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
   // Build Linux/Mac section
-  let envOutput = '# ── Environment Configuration ──\n';
-  envOutput += '# Linux / Mac / WSL — paste into terminal before starting server\n\n';
+  let envOutput = '# Only after successful Native Genesis create. Use the same external artifact directory.\n';
+  envOutput += '# Linux / macOS / WSL\n';
+  envOutput += soloEnvLine('posix', 'TORMENT_DATA_DIR', request.data_root_identity);
+  envOutput += 'unset TORMENT_PROFILE TORMENT_ADMISSION_DESCRIPTOR_PATH\n';
+  envOutput += 'export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"\n\n';
   envParts.forEach(part => {
     if (part.vars.length > 0) {
       envOutput += '# ' + part.comment + '\n';
       part.vars.forEach(v => {
-        envOutput += 'export ' + v.key + '=' + v.val + '\n';
+        envOutput += soloEnvLine('posix', v.key, v.val);
       });
       envOutput += '\n';
     }
     if (part.note) envOutput += part.note + '\n\n';
   });
 
+  envOutput += 'python -m torment_service\n# In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
   envOutput += '# ────────────────────────────────────────────────────────────────────\n\n';
   envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
+  envOutput += soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
+  envOutput += 'set "TORMENT_PROFILE="\nset "TORMENT_ADMISSION_DESCRIPTOR_PATH="\n';
+  envOutput += 'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\nset /p TORMENT_DEPLOYMENT_PROFILE_JSON=<torment_genesis_profile.json\n\n';
   envParts.forEach(part => {
     if (part.vars.length > 0) {
       envOutput += ':: ' + part.comment + '\n';
       part.vars.forEach(v => {
-        envOutput += 'set ' + v.key + '=' + v.val + '\n';
+        envOutput += soloEnvLine('cmd', v.key, v.val);
       });
       envOutput += '\n';
     }
   });
 
+  envOutput += 'python -m torment_service\n:: In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
   envOutput += '\n# ────────────────────────────────────────────────────────────────────\n\n';
 
   // API key guidance based on selected model
@@ -2504,14 +2602,12 @@ function generateSolo() {
       '            reply = resp.choices[0].message.content';
   }
 
-  // Build seed dict as Python repr
-  const pySeedDict = JSON.stringify(agentPayload.seed, null, 4);
-
   document.getElementById('out-loop-python').textContent =
     '"""\n' +
     'TORMENT Integration \u2014 ' + name + '\n' +
     'Run: python chat_' + agentId + '.py\n\n' +
-    'First run creates workspace + agent automatically.\n' +
+    'Run Native Genesis setup first.\n' +
+    'This script uses an already-onboarded TORMENT installation.\n' +
     'Server must be running first (python -m torment_service).\n' +
     '"""\n' +
     'from __future__ import annotations\n\n' +
@@ -2528,7 +2624,6 @@ function generateSolo() {
     'AGENT_ID       = "' + agentId + '"\n' +
     'CHARACTER_NAME = "' + name + '"\n' +
     'TOP_K          = 8\n\n' +
-    'SEED = ' + pySeedDict + '\n\n' +
     '# \u2500\u2500 System prompt \u2500\u2500\n' +
     '# Minimal by design. TORMENT characters are defined by their seed + accumulated memory\n' +
     '# + drift correction. Do not hardcode personality traits here \u2014 they surface through\n' +
@@ -2550,24 +2645,20 @@ function generateSolo() {
     '    r.raise_for_status()\n' +
     '    return r.json()\n\n' +
     'def setup() -> None:\n' +
-    '    """Ensure server, workspace, and agent exist. Safe to re-run."""\n' +
+    '    """Verify the service and the already-onboarded identity. No writes."""\n' +
     '    try:\n' +
     '        t_get("/health")\n' +
     '    except Exception as e:\n' +
     '        print(f"ERROR: TORMENT server not reachable at {TORMENT_URL}")\n' +
     '        print(f"  {e}")\n' +
-    '        print("  Start it first:  python -m torment_service")\n' +
+    '        print("  Complete Native Genesis setup, then load its exported profile and start the server.")\n' +
     '        sys.exit(1)\n' +
     '    try:\n' +
-    '        t_post("/workspace/create", {"workspace_id": WORKSPACE_ID, "domains": ["personal"]})\n' +
-    '    except requests.HTTPError as e:\n' +
-    '        if getattr(e.response, "status_code", None) != 409:\n' +
-    '            raise\n' +
-    '    try:\n' +
-    '        t_post("/agent/create", {"workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID, "seed": SEED})\n' +
-    '    except requests.HTTPError as e:\n' +
-    '        if getattr(e.response, "status_code", None) != 409:\n' +
-    '            raise\n\n' +
+    '        t_get(f"/agent/{AGENT_ID}/identity", {"workspace_id": WORKSPACE_ID})\n' +
+    '    except requests.RequestException as e:\n' +
+    '        print(f"ERROR: Cannot verify onboarded identity {WORKSPACE_ID}/{AGENT_ID}: {e}")\n' +
+    '        print("  Complete Native Genesis setup and check the selected root, workspace and agent.")\n' +
+    '        sys.exit(1)\n\n' +
     'def t_query(text: str, top_k: int = TOP_K) -> Dict[str, Any]:\n' +
     '    return t_post("/agent/query", {\n' +
     '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
@@ -4154,10 +4245,10 @@ function exportSetup() {
   if (deploymentMode === 'solo') {
     const name = document.getElementById('char-name').value.trim() || 'character';
     const blocks = [
-      ['0. Install + Start Server', document.getElementById('out-install').textContent, 'bash'],
-      ['1. Create Workspace', document.getElementById('out-workspace').textContent, 'bash'],
-      ['2. Create Agent + Seed', document.getElementById('out-agent').textContent, 'bash'],
-      ['3. Environment Config', document.getElementById('out-env').textContent, 'bash'],
+      ['0. Install Dependencies', document.getElementById('out-install').textContent, 'bash'],
+      ['1. Native Genesis Request', document.getElementById('out-workspace').textContent, 'json'],
+      ['2. Create Native TORMENT Root', document.getElementById('out-agent').textContent, 'text'],
+      ['3. Startup Environment + Start Server', document.getElementById('out-env').textContent, 'text'],
       ['4. System Prompt Wrapper', document.getElementById('out-prompts').textContent, ''],
       ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash'],
       ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
@@ -4167,6 +4258,7 @@ function exportSetup() {
     if (voiceContent) blocks.push(['Voice Pipeline (optional)', voiceContent, 'bash']);
 
     let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement_\n';
+    md += '\nSave Step 1 as torment_genesis_request.json. Keep this request, torment_genesis_intent.json and torment_genesis_profile.json outside the selected data root. Use the shell section for your operating system. Complete offline Genesis creation before Step 3 starts the server.\n';
     blocks.forEach(([title, content, lang]) => {
       md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
     });

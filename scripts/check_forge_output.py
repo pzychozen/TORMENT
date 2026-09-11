@@ -189,6 +189,11 @@ FIELD_SHAPE_ALL = ALL_SECTIONS  # all emitted Python must speak the TORMENT shap
 # Patterns that MUST NOT appear.
 # Entry: (label, regex, applies_to_sections)
 FORBIDDEN: List[Tuple[str, str, List[str]]] = [
+    ("retired Solo REST bootstrap", r"/workspace/create|/agent/create", ["solo"]),
+    ("retired Solo automatic installation claim",
+     r"First run creates workspace \+ agent automatically", ["solo"]),
+    ("retired Solo companion preset",
+     r"TORMENT_PROFILE=companion|key:\s*['\"]TORMENT_PROFILE['\"],\s*val:\s*['\"]companion", ["solo"]),
     # ---- shared field-shape contracts (SOLO_ALIGNMENT_SPEC §4) ----
     ("wrong memory key `text` preferred",
      r"""h(?:it)?\.get\(\s*["']text["']""",
@@ -296,6 +301,17 @@ REQUIRED: List[Tuple[str, str, List[str]]] = [
      ["hivemind_broadcast"]),
 ]
 
+# The pure assembly helper belongs only to Solo. Hivemind keeps its existing contract.
+SOLO_GENESIS_REQUIRED = (
+    "TORMENT_NATIVE_GENESIS_ONBOARDING_REQUEST", "data_root_identity", "ordered_domains",
+    "identity_seed", "initial_overlay", "private_motif_domain_id", "profile_choice",
+    "representation_lane", "python -m torment_service.native_genesis create",
+    "--request", "--intent", "--profile-out", "--confirm-all-offline-conditions",
+    "TORMENT_DATA_DIR", "TORMENT_DEPLOYMENT_PROFILE_JSON", "python -m torment_service",
+)
+REQUIRED.extend((term, re.escape(term), ["solo"]) for term in SOLO_GENESIS_REQUIRED)
+REQUIRED.append(("onboarding version 1", r'(?:"version"|\bversion):\s*1\b', ["solo"]))
+
 
 # ---------------------------------------------------------------------------
 # Runner
@@ -380,6 +396,12 @@ def main() -> int:
     all_pass = True
     for name, (start, end) in sections.items():
         source = "\n".join(lines[start - 1:end])
+        if name == "solo":
+            helper = re.search(r"// <<< BEGIN solo_genesis >>>(.*?)// <<< END solo_genesis >>>", text, re.S)
+            if helper is None:
+                print("error: missing Solo Genesis helper fence", file=sys.stderr)
+                return 2
+            source = helper.group(1) + source
         failures = check_section(name, source)
         if failures:
             all_pass = False
