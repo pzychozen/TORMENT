@@ -461,21 +461,40 @@ def test_character_strict_document_refusal(tmp_path, bad):
     assert snapshot(path) == before
 
 
-def test_character_exact_finalization_and_later_definition_replay(tmp_path, monkeypatch):
+@pytest.mark.parametrize("eids", [(11, 12), (0,), (0, 1, 2)])
+def test_character_exact_finalization_and_later_definition_replay(tmp_path, monkeypatch, eids):
     store = CharacterStore(str(tmp_path))
     unplanted = create_seed(store)
-    result = finalize_seed(store)
-    assert result.seed_eids == [11, 12] and result.seed_motif_id == "native-seed-motif"
+    result = finalize_seed(store, eids)
+    assert result.seed_eids == list(eids) and result.seed_motif_id == "native-seed-motif"
     assert result.created_ts == unplanted.created_ts == 12
     assert character_seed_definition_digest(result) == character_seed_definition_digest(unplanted)
     assert store.stable_seed_projection(result) == store.stable_seed_projection(unplanted)
     path = store._seed_path("workspace", result.seed_id)
     before = snapshot(path)
     monkeypatch.setattr(character_module, "replace_if_exact_predecessor", fail)
-    assert finalize_seed(store).to_dict() == result.to_dict()
+    assert finalize_seed(store, eids).to_dict() == result.to_dict()
     assert create_seed(store).to_dict() == result.to_dict()
     assert store.load_seed("workspace", result.seed_id).to_dict() == result.to_dict()
+    reopened = CharacterStore(str(tmp_path))
+    assert reopened.read_seed_strict_for_onboarding("workspace", result.seed_id).to_dict() == result.to_dict()
+    assert finalize_seed(reopened, eids).to_dict() == result.to_dict()
     assert snapshot(path) == before
+
+
+@pytest.mark.parametrize("eids", [(-1,), (-1, 0), (False,), (True,), (0, 0), (1, 1), ("0",), (0.0,), (None,)])
+def test_character_strict_linkage_refuses_invalid_eids_without_replacing_owner(tmp_path, eids):
+    store = CharacterStore(str(tmp_path))
+    unplanted = create_seed(store)
+    path = store._seed_path("workspace", unplanted.seed_id)
+    before = snapshot(path)
+    with pytest.raises(ExternalOwnerConflict):
+        finalize_seed(store, eids)
+    assert snapshot(path) == before
+    invalid = unplanted.to_dict()
+    invalid.update(seed_eids=list(eids), seed_motif_id="native-seed-motif")
+    with pytest.raises(ExternalOwnerConflict):
+        store.seed_from_strict_json(owner_bytes(invalid))
 
 
 @pytest.mark.parametrize("eids,motif", [((13,), "native-seed-motif"), ((11, 12), "other"), ((12, 11), "native-seed-motif")])

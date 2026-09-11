@@ -263,7 +263,7 @@ class CharacterStore:
         eids = value["seed_eids"]
         _owner_json.require(type(eids) is list, "seed_eids must be an array")
         for eid in eids:
-            _owner_json.integer(eid, "seed EID", minimum=1)
+            _owner_json.integer(eid, "seed EID", minimum=0)
         _owner_json.require(len(set(eids)) == len(eids), "duplicate seed EIDs")
         motif = value["seed_motif_id"]
         _owner_json.require(type(motif) is str and bool(eids) == bool(motif), "partial Character linkage")

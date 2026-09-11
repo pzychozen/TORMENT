@@ -403,6 +403,26 @@ def test_enabled_seed_requires_completed_native_evidence(field, value):
         completion_witness_from_payload(source)
 
 
+@pytest.mark.parametrize("eids", [[0], [0, 1, 2], [1], [11, 12]])
+def test_completed_seed_accepts_nonnegative_eids_and_fresh_completion_round_trip(eids):
+    source = completion_payload(True)
+    seed = source["character_seed_completion"]
+    seed["seed_eids"] = eids
+    seed["representation_ids"] = [uid(150 + i) for i in range(len(eids))]
+    assert g.GenesisCompletedSeed.from_payload(seed).payload() == seed
+    del source["preparation_result_digest"]
+    source["preparation_result_digest"] = digest_mapping(source)
+    assert completion_witness_from_payload(source).payload() == source
+
+
+@pytest.mark.parametrize("eids", [[], [-1], [-1, 0], [False], [True], [0, 0], [1, 1], ["0"], [0.0], [None]])
+def test_completed_seed_refuses_invalid_or_duplicate_eids(eids):
+    seed = completion_payload(True)["character_seed_completion"]
+    seed["seed_eids"] = eids
+    with pytest.raises(g.GenesisContractError):
+        g.GenesisCompletedSeed.from_payload(seed)
+
+
 def historical_payload():
     return dict(admission_identity_digest="a" * 64, completed_descriptor_digest="b" * 64,
                 completed_progress_digest="c" * 64, native_core_id=uid(1), workspace_id="historical",

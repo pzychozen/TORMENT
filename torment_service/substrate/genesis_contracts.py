@@ -556,7 +556,7 @@ class GenesisCompletedSeed(GenesisSeedCompletion):
             require(isinstance(entries, list) and bool(entries), f"{key} must be nonempty")
             for entry in entries:
                 if key == "seed_eids":
-                    positive_int(entry, key)
+                    positive_int(entry, key, minimum=0)
                 else:
                     uuid_text(entry, key)
             require(len(set(entries)) == len(entries), f"duplicate {key}")
