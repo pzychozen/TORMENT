@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 from uuid import UUID, uuid4
 
 import pytest
@@ -42,8 +43,11 @@ def assert_inert(root, intent, record):
     assert len(snapshot["core_metadata"]) == len(snapshot["deployment_metadata"]) == 1
     assert {t: len(snapshot[t]) for t in a.CATALOG_COLUMNS} == {
         "identity_namespaces": 10, "semantic_scopes": 4,
-        "legacy_source_namespaces": 6, "idempotency_namespaces": 3,
+        "legacy_source_namespaces": 6, "idempotency_namespaces": 4,
     }
+    allocation = intent.payload()["allocations"]
+    profile_namespace = allocation["root_profile_idempotency_namespace_id"]
+    assert (UUID(profile_namespace).bytes, allocation["namespace_keys"][profile_namespace]) in snapshot["idempotency_namespaces"]
     # All remaining schema tables are exactly devoid of rows, including objects,
     # relationships/memberships, revisions/profiles, representations, transitions,
     # operations, provenance, source admissions, maintenance, and migration ledger.
@@ -111,7 +115,7 @@ def test_response_loss_and_partial_preparation_reuse_exact_intent(tmp_path, poin
     assert_inert(root, intent, replay)
 
 
-@pytest.mark.parametrize("point", ["after-private-open", "after-private-preparation", "after-core-publication", "during-catalog:identity_namespaces", "after-native-commit:semantic_scopes"])
+@pytest.mark.parametrize("point", ["after-private-open", "after-private-preparation", "after-core-publication", "during-catalog:identity_namespaces", "after-native-commit:semantic_scopes", "during-catalog:idempotency_namespaces", "after-native-commit:idempotency_namespaces"])
 def test_hard_process_death_wal_recovery_and_root_lock_release(tmp_path, point):
     root = tmp_path / "root"
     intent = intent_for(root)
@@ -157,6 +161,62 @@ def test_conflicting_native_catalog_or_semantic_content_is_not_adopted(tmp_path,
     with pytest.raises(a.GenesisPreparationRefused):
         prepare(root, intent)
     assert native_snapshot(path) == before
+
+
+@pytest.mark.parametrize("conflict", ["missing", "wrong-uuid", "wrong-key", "extra", "scope-key-collision", "scope-uuid-collision", "swapped-uuid-bindings"])
+def test_c2_prepared_root_profile_idempotency_namespace_conflicts_refuse(tmp_path, conflict):
+    root = tmp_path / "root"
+    intent = intent_for(root)
+    prepare(root, intent)
+    path = core_path(root, intent)
+    allocation = intent.payload()["allocations"]
+    identifier = UUID(allocation["root_profile_idempotency_namespace_id"]).bytes
+    scope_id = allocation["runtime_scope_plans"][0]["scope_plan"]["idempotency_namespace_id"]
+    scope_key = allocation["namespace_keys"][scope_id]
+    original = native_snapshot(path)
+    with open_existing_native_core_connection(path) as opened:
+        connection = opened.connection
+        if conflict == "missing":
+            connection.execute("DELETE FROM idempotency_namespaces WHERE idempotency_namespace_id=?", (identifier,))
+        elif conflict == "wrong-uuid":
+            connection.execute("UPDATE idempotency_namespaces SET idempotency_namespace_id=? WHERE idempotency_namespace_id=?", (uuid4().bytes, identifier))
+        elif conflict == "wrong-key":
+            connection.execute("UPDATE idempotency_namespaces SET namespace_key=? WHERE idempotency_namespace_id=?", ("foreign-profile-operation-domain", identifier))
+        elif conflict == "extra":
+            connection.execute("INSERT INTO idempotency_namespaces VALUES (?,?)", (uuid4().bytes, "extra-profile-operation-domain"))
+        elif conflict in {"scope-key-collision", "scope-uuid-collision"}:
+            column, value = ("namespace_key", scope_key) if conflict == "scope-key-collision" else ("idempotency_namespace_id", UUID(scope_id).bytes)
+            with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+                connection.execute(f"UPDATE idempotency_namespaces SET {column}=? WHERE idempotency_namespace_id=?", (value, identifier))
+        else:
+            # Both UUIDs still exist, but their owner-domain keys are swapped.
+            connection.execute("UPDATE idempotency_namespaces SET namespace_key=? WHERE idempotency_namespace_id=?", ("temporary-swap-key", identifier))
+            connection.execute("UPDATE idempotency_namespaces SET namespace_key=? WHERE idempotency_namespace_id=?",
+                (allocation["namespace_keys"][allocation["root_profile_idempotency_namespace_id"]], UUID(scope_id).bytes))
+            connection.execute("UPDATE idempotency_namespaces SET namespace_key=? WHERE idempotency_namespace_id=?", (scope_key, identifier))
+    before = native_snapshot(path)
+    if conflict in {"scope-key-collision", "scope-uuid-collision"}:
+        assert before == original
+        assert_inert(root, intent, prepare(root, intent))
+        assert native_snapshot(path) == original
+        return
+    with pytest.raises(a.GenesisPreparationRefused):
+        prepare(root, intent)
+    assert native_snapshot(path) == before
+
+
+def test_c2_profile_operation_namespace_uses_only_its_expanded_key(tmp_path):
+    root = tmp_path / "root"
+    payload = intent_for(root).payload()
+    identifier = payload["allocations"]["root_profile_idempotency_namespace_id"]
+    payload["allocations"]["namespace_keys"][identifier] = "explicit-custom-root-profile-operation-domain"
+    intent = g.GenesisIntent.from_payload(payload)
+    first = prepare(root, intent)
+    snapshot = assert_inert(root, intent, first)
+    assert a.genesis_prerequisites(intent)["idempotency_namespaces"][identifier] == "explicit-custom-root-profile-operation-domain"
+    assert (UUID(identifier).bytes, "explicit-custom-root-profile-operation-domain") in snapshot["idempotency_namespaces"]
+    assert_inert(root, intent, prepare(root, intent))
+    assert native_snapshot(core_path(root, intent)) == snapshot
 
 
 def test_partial_catalog_effect_without_checkpoint_is_verified_and_repaired(tmp_path):

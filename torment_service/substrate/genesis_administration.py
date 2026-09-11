@@ -443,6 +443,8 @@ def genesis_prerequisites(intent: GenesisIntent) -> dict[str, dict[str, str]]:
     allocations = intent.payload()["allocations"]
     keys = allocations["namespace_keys"]
     result = {table: {} for table in CATALOG_COLUMNS}
+    profile_operation_namespace = allocations["root_profile_idempotency_namespace_id"]
+    result["idempotency_namespaces"][profile_operation_namespace] = keys[profile_operation_namespace]
     root_id = allocations["root_profile_identity_namespace_id"]
     result["identity_namespaces"][root_id] = keys[root_id]
     scope_id = allocations["root_profile_semantic_scope_id"]

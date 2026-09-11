@@ -40,7 +40,7 @@ def intent_payload(enabled=False):
         character = dict(mode="ENABLED", definition=definition)
         seed.update({k: definition[k] for k in ("seed_id", "seed_text", "character_name")})
     plans = []
-    namespace_keys = {uid(4): "root-profile-identity"}
+    namespace_keys = {uid(4): "root-profile-identity", uid(5): "root-profile-idempotency"}
     for i, (kind, qualifier) in enumerate((("PRIVATE", "agent"), ("SHARED", "alpha"), ("SHARED", "zeta"))):
         ids = {key: uid(10 + i * 10 + n) for n, key in enumerate(g.SCOPE_PLAN_UUID_FIELDS)}
         namespace_keys.update({value: f"scope-{i}-{key}" for key, value in ids.items() if key != "target_semantic_scope_id"})
@@ -62,7 +62,8 @@ def intent_payload(enabled=False):
         representation_lane=lane,
         allocations=dict(core_id=uid(1), core_relative_path="genesis.db", root_profile_generation=1,
                          root_profile_object_id=uid(2), root_profile_semantic_scope_id=uid(3),
-                         root_profile_identity_namespace_id=uid(4), namespace_keys=namespace_keys, runtime_scope_plans=plans),
+                         root_profile_identity_namespace_id=uid(4), root_profile_idempotency_namespace_id=uid(5),
+                         namespace_keys=namespace_keys, runtime_scope_plans=plans),
         creation_facts=dict(workspace_created_ts=10, identity_created_ts=11, character_created_ts=12 if enabled else None),
     )
 
@@ -150,6 +151,130 @@ def test_intent_round_trip_is_expanded_immutable_and_ordered(enabled):
     assert intent.payload()["agent"]["initial_overlay"]["decay_scale"] == 0.5
     with pytest.raises(FrozenInstanceError):
         intent._canonical_payload = "{}"
+
+
+def test_c2_root_profile_idempotency_is_explicit_immutable_v1_allocation():
+    source = intent_payload()
+    intent = g.GenesisIntent.from_payload(source)
+    allocation = intent.payload()["allocations"]
+    identifier = allocation["root_profile_idempotency_namespace_id"]
+    assert UUID(identifier).version == 4 and identifier == uid(5)
+    assert intent.payload()["version"] == 1
+    assert intent.CONTRACT == "TORMENT_NATIVE_GENESIS_INTENT"
+    assert allocation["namespace_keys"][identifier] == "root-profile-idempotency"
+    assert g.GenesisIntent.from_payload(json.loads(canonical_json(intent.payload()))) == intent
+    assert intent.digest == digest_mapping(intent.payload())
+    source["allocations"]["namespace_keys"][identifier] = "explicit-different-profile-operation-domain"
+    changed = g.GenesisIntent.from_payload(source)
+    assert changed.digest != intent.digest
+    assert intent.payload()["allocations"]["namespace_keys"][identifier] == "root-profile-idempotency"
+    assert changed.external_owner_projection() == intent.external_owner_projection()
+
+
+def test_c2_root_profile_idempotency_missing_field_never_defaults():
+    source = intent_payload()
+    del source["allocations"]["root_profile_idempotency_namespace_id"]
+    with pytest.raises(g.GenesisContractError, match="allocations"):
+        g.GenesisIntent.from_payload(source)
+
+
+@pytest.mark.parametrize("value", [None, True, 5, "", "not-a-uuid", str(UUID(int=5, version=1)),
+                                  str(UUID(int=5, version=5)), "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+                                  uid(5).replace("-", ""), " " + uid(5)])
+def test_c2_root_profile_idempotency_requires_canonical_uuid4(value):
+    source = intent_payload()
+    source["allocations"]["root_profile_idempotency_namespace_id"] = value
+    with pytest.raises(g.GenesisContractError, match="UUIDv4"):
+        g.GenesisIntent.from_payload(source)
+
+
+_C2_OTHER_ALLOCATIONS = [(key, intent_payload()["allocations"][key]) for key in
+                         ("core_id", "root_profile_object_id", "root_profile_identity_namespace_id", "root_profile_semantic_scope_id")]
+_C2_OTHER_ALLOCATIONS += [(f"scope-{index}:{key}", plan["scope_plan"][key])
+                         for index, plan in enumerate(intent_payload()["allocations"]["runtime_scope_plans"])
+                         for key in g.SCOPE_PLAN_UUID_FIELDS]
+
+
+@pytest.mark.parametrize("label,identifier", _C2_OTHER_ALLOCATIONS, ids=[v[0] for v in _C2_OTHER_ALLOCATIONS])
+def test_c2_root_profile_idempotency_cannot_collide_with_any_generated_uuid(label, identifier):
+    source = intent_payload()
+    source["allocations"]["root_profile_idempotency_namespace_id"] = identifier
+    with pytest.raises(g.GenesisContractError, match="allocation IDs collide"):
+        g.GenesisIntent.from_payload(source)
+
+
+@pytest.mark.parametrize("conflict", ["missing", "extra", "wrong-set", "duplicate-value", "empty-value", "nontext-value"])
+def test_c2_root_profile_namespace_key_closure_refuses_conflicts(conflict):
+    source = intent_payload()
+    keys = source["allocations"]["namespace_keys"]
+    if conflict in {"missing", "wrong-set"}:
+        del keys[uid(5)]
+    if conflict in {"extra", "wrong-set"}:
+        keys[uid(999)] = "unallocated-profile-operation-domain"
+    if conflict == "duplicate-value":
+        keys[uid(5)] = keys[uid(4)]
+    if conflict == "empty-value":
+        keys[uid(5)] = ""
+    if conflict == "nontext-value":
+        keys[uid(5)] = 5
+    with pytest.raises(g.GenesisContractError, match="namespace"):
+        g.GenesisIntent.from_payload(source)
+
+
+def test_c2_duplicate_serialized_namespace_mapping_refuses():
+    source = json.dumps(intent_payload())
+    entry = json.dumps(uid(5)) + ': "root-profile-idempotency"'
+    assert source.count(entry) == 1
+    with pytest.raises(g.GenesisContractError, match="duplicate"):
+        g.GenesisIntent(source.replace(entry, entry + ", " + entry))
+
+
+def test_c2_corrected_intent_purely_binds_existing_root_profile_api(monkeypatch):
+    import inspect
+    from torment_service.substrate.objects import NativeObjectService, ObjectState
+    from torment_service.substrate.root_profile import ROOT_NATIVE_PROFILE_GENERATION_KIND, root_profile_generation_payload
+
+    intent = g.GenesisIntent.from_payload(intent_payload())
+    allocation = intent.payload()["allocations"]
+    signature = inspect.signature(NativeObjectService.create_object)
+    def forbidden(*args, **kwargs):
+        pytest.fail("C2 compatibility proof attempted publication or SQLite")
+    monkeypatch.setattr(sqlite3, "connect", forbidden)
+    monkeypatch.setattr(NativeObjectService, "create_object", forbidden)
+    state = ObjectState(UUID(allocation["root_profile_identity_namespace_id"]),
+        UUID(allocation["root_profile_semantic_scope_id"]), ROOT_NATIVE_PROFILE_GENERATION_KIND,
+        "EXISTS", "ACTIVE", True, "QUALIFIED", authority_category="EVIDENCE",
+        payload=root_profile_generation_payload(allocation["root_profile_generation"]), payload_format="JSON")
+    operation_key = "genesis-root-profile:" + g.payload_digest(dict(
+        parent_operation_key=intent.operation_key, intent_digest=intent.digest, role="root-profile-generation"))
+    bound = signature.bind(None, idempotency_namespace_id=UUID(allocation["root_profile_idempotency_namespace_id"]),
+                           idempotency_key=operation_key, state=state, object_id=UUID(allocation["root_profile_object_id"]))
+    assert bound.arguments["idempotency_namespace_id"] == UUID(uid(5))
+    assert state.payload == {"contract": "TMS-ROOT-NATIVE-PROFILE-GENERATION-1", "profile_generation": 1}
+    assert bound.arguments["object_id"] == UUID(uid(2))
+    NativeObjectService._state(state)  # Existing pure payload validation only.
+
+
+@pytest.mark.parametrize("generation", [0, -1, True, 1.0, "1", None])
+def test_c2_existing_root_profile_generation_contract_refuses_invalid_values(generation):
+    from torment_service.substrate.root_profile import RootProfileGenerationError, root_profile_generation_payload
+    with pytest.raises(RootProfileGenerationError):
+        root_profile_generation_payload(generation)
+
+
+@pytest.mark.parametrize("provenance", ["QUALIFICATION_TEST", "EXTERNAL_ISSUED"])
+def test_c2_existing_root_profile_and_membership_reference_contracts_are_pure(monkeypatch, provenance):
+    from torment_service.substrate.root_profile import RootProfileGenerationRef
+    from torment_service.substrate.root_scope_membership import RootScopeMembershipWitness
+    def forbidden(*args, **kwargs):
+        pytest.fail("pure root contract attempted SQLite")
+    monkeypatch.setattr(sqlite3, "connect", forbidden)
+    reference = RootProfileGenerationRef(UUID(uid(1)), 1, UUID(uid(2)), UUID(uid(900)), 1, UUID(uid(3)))
+    assert reference.payload() == {"core_id": uid(1), "profile_generation": 1}
+    witness = RootScopeMembershipWitness("synthetic-reference", "a" * 64, "contract-test", provenance)
+    assert RootScopeMembershipWitness(**witness.payload()) == witness
+    with pytest.raises(FrozenInstanceError):
+        witness.witness_id = "changed"
 
 
 @pytest.mark.parametrize("path,value", [

@@ -325,19 +325,19 @@ class GenesisIntent(GenesisPayload):
         lane = GenesisRepresentationLane.from_payload(value["representation_lane"]).payload()
         for profile_key, lane_key in (("representation_provider", "provider"), ("representation_model", "model"), ("representation_dimension", "dimension")):
             require(type(profile[profile_key]) is type(lane[lane_key]) and profile[profile_key] == lane[lane_key], "profile choice and lane disagree")
-        allocations = exact_object(value["allocations"], "core_id core_relative_path root_profile_generation root_profile_object_id root_profile_semantic_scope_id root_profile_identity_namespace_id namespace_keys runtime_scope_plans", "allocations")
+        allocations = exact_object(value["allocations"], "core_id core_relative_path root_profile_generation root_profile_object_id root_profile_semantic_scope_id root_profile_identity_namespace_id root_profile_idempotency_namespace_id namespace_keys runtime_scope_plans", "allocations")
         from .deployment_types import require_relative_core_path
         require_relative_core_path(allocations["core_relative_path"])
         logical_id(allocations["core_relative_path"], "core_relative_path")
-        for key in ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id", "root_profile_identity_namespace_id"):
+        for key in ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id", "root_profile_identity_namespace_id", "root_profile_idempotency_namespace_id"):
             uuid_text(allocations[key], key)
         require(type(allocations["root_profile_generation"]) is int and allocations["root_profile_generation"] == 1,
                 "initial profile generation must be one")
         plans = ordered_runtime_plans(allocations["runtime_scope_plans"])
         expected = {(workspace_id, "PRIVATE", agent_id)} | {(workspace_id, "SHARED", d) for d in domains}
         require({p.canonical_key for p in plans} == expected, "routing plans do not cover the declared bundle")
-        allocated_ids = [allocations[key] for key in ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id", "root_profile_identity_namespace_id")]
-        namespace_ids = {allocations["root_profile_identity_namespace_id"]}
+        allocated_ids = [allocations[key] for key in ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id", "root_profile_identity_namespace_id", "root_profile_idempotency_namespace_id")]
+        namespace_ids = {allocations["root_profile_identity_namespace_id"], allocations["root_profile_idempotency_namespace_id"]}
         for plan in plans:
             entry = plan.payload()
             require(entry["representation_lane"] == lane, "routing lane differs from intent")

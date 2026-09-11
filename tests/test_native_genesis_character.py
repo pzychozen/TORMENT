@@ -85,6 +85,13 @@ def assert_inert(root, intent, record):
         assert connection.execute("SELECT deployment_state,referenced_core_id FROM deployment_metadata").fetchall() == [("LEGACY_ACTIVE", None)]
         assert connection.execute("SELECT count(*) FROM relationships WHERE relationship_kind='ROOT_SCOPE_MEMBERSHIP'").fetchone() == (0,)
         allocation = intent.payload()["allocations"]
+        profile_operation_id = allocation["root_profile_idempotency_namespace_id"]
+        profile_operation_namespace = UUID(profile_operation_id).bytes
+        assert connection.execute("SELECT count(*) FROM idempotency_namespaces").fetchone() == (4,)
+        assert connection.execute("SELECT namespace_key FROM idempotency_namespaces WHERE idempotency_namespace_id=?",
+            (profile_operation_namespace,)).fetchone() == (allocation["namespace_keys"][profile_operation_id],)
+        assert connection.execute("SELECT count(*) FROM operations WHERE idempotency_namespace_id=?",
+            (profile_operation_namespace,)).fetchone() == (0,)
         assert connection.execute("SELECT count(*) FROM objects WHERE object_id=? OR identity_namespace_id=?",
             (UUID(allocation["root_profile_object_id"]).bytes, UUID(allocation["root_profile_identity_namespace_id"]).bytes)).fetchone() == (0,)
         assert connection.execute("SELECT count(*) FROM object_revisions WHERE effective_semantic_scope_id=?",
@@ -135,6 +142,25 @@ def test_first_bundle_and_full_replay(tmp_path, enabled, monkeypatch):
     assert replay_record.child_operation_references == record.child_operation_references
     assert len(replay_record.quiescence_observations) == len(record.quiescence_observations) + 3
     assert_inert(root, intent, replay_record)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("conflict", ["missing", "wrong-key"])
+def test_c2_i4_requires_root_profile_operation_namespace_before_any_bundle_work(tmp_path, enabled, conflict):
+    root, intent = setup_root(tmp_path, enabled)
+    namespace = UUID(intent.payload()["allocations"]["root_profile_idempotency_namespace_id"]).bytes
+    with i4.open_existing_native_core_connection(core_path(root, intent)) as opened:
+        if conflict == "missing":
+            opened.connection.execute("DELETE FROM idempotency_namespaces WHERE idempotency_namespace_id=?", (namespace,))
+        else:
+            opened.connection.execute("UPDATE idempotency_namespaces SET namespace_key=? WHERE idempotency_namespace_id=?",
+                                      ("wrong-profile-domain-key", namespace))
+    before = native_snapshot(root, intent)
+    embedder = DeterministicEmbedder(forbid=True)
+    with pytest.raises(GenesisPreparationRefused, match="prerequisite|namespace"):
+        run_bundle(root, intent, embedder)
+    assert native_snapshot(root, intent) == before
+    assert not embedder.calls and not (root / "workspaces").exists()
 
 
 def test_completed_readonly_recovery_and_direct_planter_replay(tmp_path):
