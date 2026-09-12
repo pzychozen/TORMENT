@@ -190,6 +190,8 @@ FIELD_SHAPE_ALL = ALL_SECTIONS  # all emitted Python must speak the TORMENT shap
 # Entry: (label, regex, applies_to_sections)
 FORBIDDEN: List[Tuple[str, str, List[str]]] = [
     ("retired Solo REST bootstrap", r"/workspace/create|/agent/create", ["solo"]),
+    ("unsupported Solo identity endpoint", r"""/agent/[^/\s"']+/identity(?!\w)""", ["solo"]),
+    ("unsupported Solo /identity command or route", r"/identity\b", ["solo"]),
     ("retired Solo automatic installation claim",
      r"First run creates workspace \+ agent automatically", ["solo"]),
     ("retired Solo companion preset",
@@ -261,12 +263,11 @@ REQUIRED: List[Tuple[str, str, List[str]]] = [
     ("retrieval tries `hits` before `results`",
      r"""\.get\(\s*["']hits["']""",
      FIELD_SHAPE_ALL),
-    # Identity endpoint: solo/window/basic_hive talk to one agent and call
-    # /agent/{id}/identity directly. Broadcast reads character_context from
-    # the per-query response instead — no identity endpoint needed there.
+    # Preserve the historical Hivemind window/basic_hive identity endpoint.
+    # Native Solo uses health-only setup and ordinary query character_context.
     ("identity endpoint uses `/agent/{id}/identity`",
      r"""/agent/[^/\s"']+/identity(?!\w)""",
-     ["solo", "hivemind_window", "hivemind_basic_hive"]),
+     ["hivemind_window", "hivemind_basic_hive"]),
 
     # ---- hivemind shared (COLLECTIVE_ROSTER) ----
     ("hivemind scripts include COLLECTIVE_ROSTER block",

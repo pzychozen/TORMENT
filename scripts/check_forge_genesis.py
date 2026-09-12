@@ -16,7 +16,6 @@ from pathlib import Path
 import py_compile
 import subprocess
 import sys
-from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -114,7 +113,7 @@ def main():
         source = '\n'.join(blocks.values())
         for term in SOLO_GENESIS_REQUIRED:
             assert term in source, term
-        errors = check_section('solo', source)
+        errors = check_section('solo', source + '\n' + output['markdown'])
         assert not errors, errors
         for forbidden in ('/workspace/create', '/agent/create', 'TORMENT_PROFILE=companion',
                           'First run creates workspace + agent automatically',
@@ -136,34 +135,36 @@ def main():
         py.write_text(blocks['out-loop-python'], encoding='utf-8')
         py_compile.compile(str(py), cfile=str(artifacts / (label + '-chat.pyc')), doraise=True)
         tree = ast.parse(py.read_text(encoding='utf-8'))
+        assert not any(isinstance(n, ast.FunctionDef) and n.name == 't_identity' for n in tree.body)
+        for command in ('/status', '/debug', '/memories', '/clear'):
+            assert command in blocks['out-loop-python'], command
+        assert 'identity_state' in blocks['out-response']
         setup = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'setup')
         calls = [n for n in ast.walk(setup) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
         assert not any(n.func.id == 't_post' for n in calls)
+        assert '/identity' not in ast.get_source_segment(blocks['out-loop-python'], setup)
         # Execute only setup, with fake GETs. No imports, SDK, network or chat loop.
         gets = []
         namespace = {'t_get': lambda *args: gets.append(args), 'TORMENT_URL': 'fixture',
                      'WORKSPACE_ID': 'forge_qualification', 'AGENT_ID': 'forge_qualification'}
         exec(compile(ast.Module(body=[setup], type_ignores=[]), '<emitted-setup>', 'exec'), namespace)
         namespace['setup']()
-        assert gets == [('/health',), ('/agent/forge_qualification/identity', {'workspace_id': 'forge_qualification'})]
-        for missing in ('/health', '/agent/forge_qualification/identity'):
-            attempted = []
-            def refused_get(path, *params):
-                attempted.append(path)
-                if path == missing:
-                    raise RuntimeError('fixture unavailable')
-            namespace.update(t_get=refused_get, sys=sys,
-                             requests=SimpleNamespace(RequestException=RuntimeError))
-            message = io.StringIO()
-            with redirect_stdout(message):
-                try:
-                    namespace['setup']()
-                except SystemExit as exc:
-                    assert exc.code == 1
-                else:
-                    raise AssertionError('setup accepted missing onboarding')
-            assert 'Complete Native Genesis setup' in message.getvalue()
-            assert attempted[-1] == missing
+        assert gets == [('/health',)]
+        attempted = []
+        def refused_get(path, *params):
+            attempted.append(path)
+            raise RuntimeError('fixture unavailable')
+        namespace.update(t_get=refused_get, sys=sys)
+        message = io.StringIO()
+        with redirect_stdout(message):
+            try:
+                namespace['setup']()
+            except SystemExit as exc:
+                assert exc.code == 1
+            else:
+                raise AssertionError('setup accepted an unreachable service')
+        assert 'Complete Native Genesis setup' in message.getvalue()
+        assert attempted == ['/health']
         assert not any(isinstance(n, ast.Name) and n.id == 'SEED' for n in ast.walk(tree))
         (artifacts / (label + '-request.json')).write_text(raw, encoding='utf-8')
         results[label] = 'PASS'

@@ -2549,9 +2549,7 @@ function generateSolo() {
     '  }\'\n\n' +
     '# NOTE: "text" should be a SHORT summary, not the full conversation.\n' +
     '# Good: "User asked about music. ' + name + ' shared a memory about drums."\n' +
-    '# Bad:  [pasting the entire multi-paragraph exchange]\n\n' +
-    '# \u2500\u2500 OPTIONAL: check identity state \u2500\u2500\n' +
-    'curl ' + BASE + '/agent/' + agentId + '/identity?workspace_id=' + wsId;
+    '# Bad:  [pasting the entire multi-paragraph exchange]\n';
 
   // ── STEP 5: Integration Loop (python) ──
   let pyImport, pyClient;
@@ -2646,19 +2644,16 @@ function generateSolo() {
     '    r.raise_for_status()\n' +
     '    return r.json()\n\n' +
     'def setup() -> None:\n' +
-    '    """Verify the service and the already-onboarded identity. No writes."""\n' +
+    '    """Verify that the configured TORMENT service is reachable.\n' +
+    '    The first ordinary /agent/query exercises workspace/agent native authority.\n' +
+    '    Health alone does not verify the configured agent or its membership.\n' +
+    '    """\n' +
     '    try:\n' +
     '        t_get("/health")\n' +
     '    except Exception as e:\n' +
     '        print(f"ERROR: TORMENT server not reachable at {TORMENT_URL}")\n' +
     '        print(f"  {e}")\n' +
     '        print("  Complete Native Genesis setup, then load its exported profile and start the server.")\n' +
-    '        sys.exit(1)\n' +
-    '    try:\n' +
-    '        t_get(f"/agent/{AGENT_ID}/identity", {"workspace_id": WORKSPACE_ID})\n' +
-    '    except requests.RequestException as e:\n' +
-    '        print(f"ERROR: Cannot verify onboarded identity {WORKSPACE_ID}/{AGENT_ID}: {e}")\n' +
-    '        print("  Complete Native Genesis setup and check the selected root, workspace and agent.")\n' +
     '        sys.exit(1)\n\n' +
     'def t_query(text: str, top_k: int = TOP_K) -> Dict[str, Any]:\n' +
     '    return t_post("/agent/query", {\n' +
@@ -2670,8 +2665,6 @@ function generateSolo() {
     '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
     '        "text": summary, "step": step,\n' +
     '    })\n\n' +
-    'def t_identity() -> Dict[str, Any]:\n' +
-    '    return t_get(f"/agent/{AGENT_ID}/identity", {"workspace_id": WORKSPACE_ID})\n\n' +
     '# \u2500\u2500 Formatting helpers \u2500\u2500\n' +
     'def format_memories(hits: List[Dict[str, Any]], top_k: int = TOP_K) -> str:\n' +
     '    if not hits:\n' +
@@ -2741,7 +2734,6 @@ function generateSolo() {
     '    print()\n' +
     '    print("  Type your message. \'quit\' or \'exit\' to leave.")\n' +
     '    print("  /status              \u2014 show runtime settings")\n' +
-    '    print("  /identity            \u2014 show current agent identity")\n' +
     '    print("  /debug               \u2014 show last raw query result")\n' +
     '    print("  /memories <query>    \u2014 peek at retrieved memories")\n' +
     '    print("  /clear               \u2014 clear local chat history only")\n' +
@@ -2764,12 +2756,6 @@ function generateSolo() {
     '            print(f"  WORKSPACE_ID: {WORKSPACE_ID}")\n' +
     '            print(f"  AGENT_ID:     {AGENT_ID}")\n' +
     '            print(f"  TOP_K:        {TOP_K}")\n' +
-    '            continue\n' +
-    '        if lower == "/identity":\n' +
-    '            try:\n' +
-    '                print(json.dumps(t_identity(), indent=2, ensure_ascii=False))\n' +
-    '            except Exception as e:\n' +
-    '                print(f"  Error: {e}")\n' +
     '            continue\n' +
     '        if lower == "/debug":\n' +
     '            if last_result:\n' +
