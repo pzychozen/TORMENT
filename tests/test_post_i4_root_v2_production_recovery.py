@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
@@ -491,7 +492,7 @@ def test_root_v2_private_plan_without_motif_domain_supports_native_public_write_
         workspace = setup.get_workspace("ws-one", domains=["domain-one"])
         workspace.domain_policies["domain-one"]["auto_merge_motifs"] = False
         Path(workspace.domain_policies_path).write_text(
-            '{"policies":{"domain-one":{"auto_merge_motifs":false}}}',
+            json.dumps({"policies": workspace.domain_policies}),
             encoding="utf-8",
         )
         setup.create_agent("ws-one", "agent-one")

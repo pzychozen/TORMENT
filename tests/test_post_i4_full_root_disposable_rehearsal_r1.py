@@ -158,6 +158,8 @@ def _create_root_profile(connection):
 
 
 def _write_disposable_public_shape(root: Path, workspace_id: str, domain_id: str) -> None:
+    from torment_service.domain_policies import DEFAULT_DOMAIN_POLICIES
+
     workspace = root / "workspaces" / workspace_id
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / "workspace_meta.json").write_text("{}", encoding="utf-8")
@@ -165,7 +167,7 @@ def _write_disposable_public_shape(root: Path, workspace_id: str, domain_id: str
         json.dumps({"domains": [domain_id]}, sort_keys=True), encoding="utf-8",
     )
     (workspace / "domain_policies.json").write_text(
-        json.dumps({"policies": {domain_id: {"auto_merge_motifs": False}}}, sort_keys=True),
+        json.dumps({"policies": {domain_id: dict(DEFAULT_DOMAIN_POLICIES["research"])}}, sort_keys=True),
         encoding="utf-8",
     )
 

@@ -22,6 +22,8 @@ import numpy as np
 
 from .conflicts import CanonConflict, ConflictRegistry
 from .bridges import BridgeRegistry
+from .domain_policies import validate_complete_domain_policy
+from .external_owner_json import ExternalOwnerConflict
 from .fabric import (
     DEFAULT_DOMAIN_POLICIES,
     DomainScore,
@@ -1207,10 +1209,19 @@ def _read_domain_policies(data_dir: str, workspace_id: str, domains: tuple[str, 
         pass
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise NativePublicOperationRefused("native public domain policy evidence is unreadable") from exc
-    return MappingProxyType({
-        domain: MappingProxyType(dict(values.get(domain) or DEFAULT_DOMAIN_POLICIES.get(domain) or {}))
-        for domain in domains
-    })
+    qualified = {}
+    for domain in domains:
+        # Presence, not truthiness, selects persisted authority. Never fill a
+        # partial policy from defaults or let an admitted domain execute on {}.
+        policy = values[domain] if domain in values else DEFAULT_DOMAIN_POLICIES.get(domain)
+        try:
+            validate_complete_domain_policy(policy)
+        except ExternalOwnerConflict as exc:
+            raise NativePublicOperationRefused(
+                "native public domain policy is unqualified for admitted domain"
+            ) from exc
+        qualified[domain] = MappingProxyType(dict(policy))
+    return MappingProxyType(qualified)
 
 
 def _read_workspace_meta(data_dir: str, workspace_id: str) -> Mapping[str, Any]:

@@ -106,7 +106,7 @@ HIVEMIND_INITIAL_POSTURE = "hivemind_initial_v1"
 
 # Frozen v1 document shape, not another set of semantic defaults. Saved setup
 # requests retain their full policy bytes when default values change later.
-_INITIAL_V1_FIELD_TYPES = {
+_DOMAIN_POLICY_FIELD_TYPES = {
     "auto_propose_max_per_window": int,
     "auto_propose_min_gap_s": int,
     "auto_propose_min_promotion": float,
@@ -122,6 +122,17 @@ _INITIAL_V1_FIELD_TYPES = {
     "auto_merge_motifs": bool,
     "auto_merge_entropy_trigger": float,
 }
+
+
+def validate_complete_domain_policy(value) -> dict:
+    """Validate one policy without selecting a domain, posture, or defaults."""
+    from .external_owner_json import exact_keys, finite_json, require
+
+    policy = exact_keys(value, _DOMAIN_POLICY_FIELD_TYPES, "complete domain policy")
+    for field, kind in _DOMAIN_POLICY_FIELD_TYPES.items():
+        require(type(policy[field]) is kind, f"invalid domain policy field: {field}")
+    finite_json(policy)
+    return policy
 
 
 def _posture_domains(posture, domains=None):
@@ -149,9 +160,7 @@ def validate_initial_policy(raw: bytes, posture: str, *, domains=None) -> dict:
     exact_keys(value, ("policies",), "domain policy document")
     exact_keys(value["policies"], declared, "posture domains")
     for domain in declared:
-        policy = exact_keys(value["policies"][domain], _INITIAL_V1_FIELD_TYPES, "complete domain policy")
-        for field, kind in _INITIAL_V1_FIELD_TYPES.items():
-            require(type(policy[field]) is kind, f"invalid domain policy field: {field}")
+        policy = validate_complete_domain_policy(value["policies"][domain])
         require(policy["auto_merge_motifs"] is False, "initial posture requires auto-merge disabled")
     if posture == HIVEMIND_INITIAL_POSTURE:
         require(raw == owner_bytes(value), "initial Hivemind policy must use canonical owner bytes")
