@@ -24,6 +24,7 @@ from torment_service.character_gravity_runtime import CharacterGravityCorrection
 from torment_service.memory_graph import MemoryGraph
 from torment_service.motifs import MotifRegistry
 from torment_service.provenance_v1 import ProvenanceV1
+from torment_service.workspace_declaration import domains_payload, workspace_meta_payload
 from torment_service.substrate.character_seed_witness import (
     EXPLICIT_CHARACTER_LIFECYCLE, LEGACY_PRE_Q2_PROTECTED_CANON_V1,
     CharacterSeedWitness, CharacterSeedWitnessRefused, read_legacy_character_seed_witness,
@@ -50,6 +51,7 @@ from torment_service.substrate.native_post_write_runtime import (
     NativePostWriteQualificationProfile,
 )
 from torment_service.substrate.native_world_runtime import NativeWorldProcessState
+from torment_service.substrate.preselector_root_classification import PreselectorRootClass, classify_preselector_root
 from torment_service.substrate.runtime_binding import NativeMemoryRuntimeScope, NativeRepresentationLane
 from torment_service.substrate.schema import create_schema
 from torment_service.substrate.migration import (
@@ -763,8 +765,18 @@ def _http_json(path: str, payload: dict):
 
 
 def test_normal_service_character_workspace_admits_and_cold_recovers(tmp_path: Path):
-    """The only legacy writer in this test is normal ``python -m torment_service``."""
+    """Service-written legacy Character seeds survive admission and cold recovery."""
     data = tmp_path / "normal-service-data"; native = tmp_path / "native"; snapshot = tmp_path / "snapshot"
+    # I11 requires Native Genesis for fresh installations. Supply only a
+    # recognized historical workspace owner; normal python -m torment_service
+    # remains the writer of all Character seeds, memories, embeddings and motifs.
+    root = data / "workspaces" / "orchard"
+    root.mkdir(parents=True)
+    (root / "workspace_meta.json").write_text(json.dumps(workspace_meta_payload(
+        workspace_id="orchard", created_ts=1, embed_dim=384,
+        embed_provider="hash", embed_model="hash:384:torment")), encoding="utf-8")
+    (root / "domains.json").write_text(json.dumps(domains_payload(["personal"])), encoding="utf-8")
+    assert classify_preselector_root(data) is PreselectorRootClass.EXISTING_LEGACY
     native.mkdir(); snapshot.mkdir()
     environment = os.environ.copy()
     environment.update({
@@ -809,7 +821,7 @@ def test_normal_service_character_workspace_admits_and_cold_recovers(tmp_path: P
             except (AttributeError, subprocess.TimeoutExpired):
                 server.terminate(); server.wait(timeout=10)
 
-    root = data / "workspaces" / "orchard"; store = CharacterStore(str(data))
+    store = CharacterStore(str(data))
     seed = store.load_seed("orchard", "aria-production-v1")
     assert seed is not None and seed.seed_eids and seed.seed_motif_id
     metadata = json.loads((root / "workspace_meta.json").read_text(encoding="utf-8"))
