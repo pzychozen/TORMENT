@@ -67,15 +67,8 @@ def child(code, *args):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
-@pytest.mark.parametrize("state,kind", [
-    ("absent", "ABSENT_ROOT"), ("empty", "EMPTY_ROOT"),
-    ("readme", "ALLOWED_NON_AUTHORITATIVE_ROOT_FILES"),
-    ("gitkeep", "ALLOWED_NON_AUTHORITATIVE_ROOT_FILES"),
-    ("substrate", "PRE_INTENT_GENESIS_CONTROL_RESIDUE"),
-    ("deployment", "PRE_INTENT_GENESIS_CONTROL_RESIDUE"),
-    ("lock", "PRE_INTENT_GENESIS_CONTROL_RESIDUE"),
-])
-def test_accepted_start_and_first_fence_order(tmp_path, state, kind):
+@pytest.mark.parametrize("state", ["absent", "empty", "readme", "gitkeep", "substrate", "deployment", "lock"])
+def test_accepted_start_and_first_fence_order(tmp_path, state):
     root = tmp_path / "root"
     if state != "absent":
         root.mkdir()
@@ -89,6 +82,8 @@ def test_accepted_start_and_first_fence_order(tmp_path, state, kind):
         (root / a.CONTROL_DIRECTORY / a.LOCK_NAME).touch()
     intent = intent_for(root)
     before = files(root) if root.exists() else {}
+    # The coherent observation occurs after the rendezvous control paths exist.
+    kind = "PRE_INTENT_GENESIS_CONTROL_RESIDUE"
     assert a.inspect_genesis_start(data_root=root, intent=intent).payload()["classification"] == kind
     assert (files(root) if root.exists() else {}) == before
     with a.begin_genesis_administration(data_root=root, intent=intent) as session:
@@ -119,20 +114,27 @@ def test_unknown_legacy_selector_core_and_malformed_entry_refuse_without_changes
     path.parent.mkdir(parents=True)
     path.write_bytes(b"unexplained fixture")
     before = files(root)
+    before_paths = {p.relative_to(root).as_posix() for p in root.rglob("*")}
     with pytest.raises(a.GenesisPreparationRefused):
         with a.begin_genesis_administration(data_root=root, intent=intent_for(root)):
             pytest.fail("invalid root accepted")
     assert files(root) == before
-    assert not (root / a.CONTROL_DIRECTORY / a.LOCK_NAME).exists()
+    # Shallow peer-possible evidence may establish only the OS rendezvous.
+    after_paths = {p.relative_to(root).as_posix() for p in root.rglob("*")}
+    assert after_paths - before_paths <= set(g.GenesisAcceptedStart.CONTROL_ENTRIES)
 
 
-def test_allowed_files_plus_old_preintent_residue_are_not_silently_reclassified(tmp_path):
-    # I1 permits root-only files OR the exact control prefix, not their mixture.
+def test_allowed_files_plus_control_residue_are_accepted_under_mutex(tmp_path):
+    # The selected observation boundary permits allowed files plus its controls.
     root = tmp_path / "root"
     (root / "substrate").mkdir(parents=True)
     (root / "README.md").write_text("retained")
-    with pytest.raises(a.GenesisPreparationRefused):
-        a.inspect_genesis_start(data_root=root, intent=intent_for(root))
+    before = (root / "README.md").read_bytes()
+    with a.begin_genesis_administration(data_root=root, intent=intent_for(root)) as session:
+        start = session.record.accepted_start_observation.payload()
+        assert start["classification"] == "PRE_INTENT_GENESIS_CONTROL_RESIDUE"
+        assert start["observed_entries"] == list(g.GenesisAcceptedStart.CONTROL_ENTRIES) + ["README.md"]
+    assert (root / "README.md").read_bytes() == before
 
 
 def test_competing_intent_and_root_identity_refuse(tmp_path):
@@ -159,7 +161,7 @@ def test_noncontrol_delta_during_lock_acquisition_is_refused(tmp_path, monkeypat
         (path / "racing-writer.txt").write_text("not adopted")
 
     monkeypatch.setattr(a, "_establish_control", race)
-    with pytest.raises(a.GenesisPreparationRefused, match="changed beyond"):
+    with pytest.raises(a.GenesisPreparationRefused, match="unknown artifact"):
         with a.begin_genesis_administration(data_root=root, intent=intent_for(root)):
             pytest.fail("racing writer accepted")
     assert not (root / a.CONTROL_DIRECTORY / a.RECORD_NAME).exists()

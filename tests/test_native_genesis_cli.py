@@ -19,7 +19,7 @@ from torment_service.substrate import genesis_recovery as i7
 from torment_service.substrate.errors import SubstrateError
 from test_native_genesis_administration import child
 from test_native_genesis_completion import file_snapshot
-from test_native_genesis_onboarding import request_payload, planned, run_driver, confirmation, DeterministicTestEmbedder, NoEmbeddingDependency
+from test_native_genesis_onboarding import request_payload, planned, run_driver, confirmation, DeterministicTestEmbedder, NoEmbeddingDependency, assert_control_only
 
 
 def inputs(tmp_path, enabled=False):
@@ -48,11 +48,12 @@ def forbidden_factory():
     pytest.fail("model dependency must not be constructed")
 
 
-def test_plan_has_no_root_or_model_effect_and_exact_replay(tmp_path):
+def test_plan_has_only_rendezvous_effect_and_exact_replay(tmp_path):
     root, request, intent = inputs(tmp_path, True)
     args = arguments(request, intent, command="plan")
     code, first = call(args, embedder_factory=forbidden_factory)
-    assert code == 0 and first["status"] == "PLANNED" and not root.exists()
+    assert code == 0 and first["status"] == "PLANNED"
+    assert_control_only(root)
     before = intent.read_bytes(), intent.stat().st_mtime_ns
     assert call(args, embedder_factory=forbidden_factory) == (code, first)
     assert (intent.read_bytes(), intent.stat().st_mtime_ns) == before
@@ -138,7 +139,7 @@ def test_exact_cli_command_recovers_cross_phase_process_death(tmp_path, stage):
     output, error = process.communicate(timeout=60)
     assert process.returncode == 71, output + error
     before = intent_path.read_bytes()
-    if stage == "after-intent-publication": assert not root.exists()
+    if stage == "after-intent-publication": assert_control_only(root)
     process = child(CHILD_COMMAND, "no-fault", *args)
     output, error = process.communicate(timeout=60)
     assert process.returncode == 0, output + error
@@ -230,7 +231,8 @@ def test_conflicting_profile_refuses_before_activation_and_secrets_never_echo(tm
     profile.write_bytes(b'{"credential":"DO-NOT-ECHO-THIS"}')
     before = profile.read_bytes()
     code, value = call(arguments(request, intent, profile=profile), embedder_factory=forbidden_factory)
-    assert code == 2 and not root.exists() and profile.read_bytes() == before
+    assert code == 2 and profile.read_bytes() == before
+    assert_control_only(root)
     assert "DO-NOT-ECHO-THIS" not in json.dumps(value) and "First anchor" not in json.dumps(value)
 
 

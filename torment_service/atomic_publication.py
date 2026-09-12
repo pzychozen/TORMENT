@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from enum import Enum
 import os
 from pathlib import Path
+import re
 import tempfile
 import time
 
@@ -29,6 +30,17 @@ class PublicationResult(str, Enum):
     ALREADY_EXISTS = "ALREADY_EXISTS"
     REPLACED = "REPLACED"
     ALREADY_EXACT = "ALREADY_EXACT"
+
+
+def is_publication_temporary(path: Path, targets) -> bool:
+    """Recognize only this publisher's mkstemp names beside explicit targets.
+
+    A recognized name is nonsemantic residue, never proof of target ownership
+    or permission to read/adopt the temporary contents.
+    """
+    return any(path.parent == target.parent and re.fullmatch(
+        r"\." + re.escape(target.name) + r"\.[a-z0-9_]{8}\.tmp", path.name)
+        for target in map(Path, targets))
 
 
 def _bytes(value: bytes) -> None:

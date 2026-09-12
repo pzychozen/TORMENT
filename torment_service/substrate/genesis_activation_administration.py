@@ -144,7 +144,7 @@ def _transition_inventory(root, record):
         allowed[path.as_posix()] = False
         for parent in path.parents:
             allowed[parent.as_posix()] = True
-    entries = i3._inventory(root)
+    entries = i3._inventory(root, publication_targets=i4._owner_paths(record.expanded_intent), selector_marker_residue=True)
     initialization_coordination = set()
     # The qualified selector owner may retain its publication hard link on
     # Windows while SQLite handles are open. It is the same file, not another
@@ -292,7 +292,7 @@ class GenesisActivationResult:
 
 
 def activate_genesis(*, data_root, intent: GenesisIntent, observer=None, operator_attestation=None,
-                     issuer_reference=None, timeout_seconds=1.0, fault=i3._noop):
+                     issuer_reference=None, timeout_seconds=1.0, fault=i3._noop, held_lock=None):
     """Activate/recover one sealed root using a live local operator observation.
 
     Already active replay performs reads and, if needed, administrative closeout
@@ -301,21 +301,20 @@ def activate_genesis(*, data_root, intent: GenesisIntent, observer=None, operato
     """
     root = canonical_genesis_root(data_root)
     _require(isinstance(intent, GenesisIntent) and intent.data_root_identity == str(root), "requires the canonical explicit root intent")
-    # Refuse absent/unsealed roots before even establishing a lock rendezvous.
-    record = read_genesis_operation_record(data_root=root)
-    _require(record is not None and record.expanded_intent == intent and record.administrative_phase in (_SEALED, _CORE, _DONE),
-        "requires an existing sealed Genesis operation")
     keys = activation_operation_keys(intent)
     initialize_key = keys["selector-initialize"]
-    with i3.root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
-        state = _read_state(root, intent, keys)
+    with i3.root_observation(data_root=root, timeout_seconds=timeout_seconds, held_lock=held_lock) as held:
+        record = held.observe(read_genesis_operation_record, data_root=root)
+        _require(record is not None and record.expanded_intent == intent and record.administrative_phase in (_SEALED, _CORE, _DONE),
+            "requires an existing sealed Genesis operation")
+        state = held.observe(_read_state, root, intent, keys)
         if len(state.states) < 3:
             _require(callable(observer), "activation requires a fresh writer observation")
             since = time.time_ns()
             facts = observer(root, intent)
             _require(isinstance(facts, i3.GenesisWriterObservation), "requires a typed writer observation")
             facts.evidence(intent, since_ns=since, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
-            _require(_read_state(root, intent, keys) == state, "root changed during activation-time observation")
+            _require(held.observe(_read_state, root, intent, keys) == state, "root changed during activation-time observation")
         while True:
             completion = state.completion
             arguments = dict(data_root=root, core_relative_path=completion.core_relative_path)
@@ -337,7 +336,7 @@ def activate_genesis(*, data_root, intent: GenesisIntent, observer=None, operato
                 fault("after-core-activation")
             elif state.record.administrative_phase is _SEALED:
                 fault("before-core-activated-checkpoint")
-                _require(_read_state(root, intent, keys) == state, "core checkpoint predecessor changed")
+                _require(held.observe(_read_state, root, intent, keys) == state, "core checkpoint predecessor changed")
                 successor = replace(state.record, administrative_phase=_CORE, phase_revision=state.record.phase_revision + 1,
                     final_activation_references=(_core_reference(state.receipts[1], keys),))
                 replace_if_exact_predecessor(_record_path(root), state.raw, owner_bytes(successor.payload()))
@@ -349,7 +348,7 @@ def activate_genesis(*, data_root, intent: GenesisIntent, observer=None, operato
                 fault("after-selector-activation")
             elif state.record.administrative_phase is _CORE:
                 fault("before-completed-checkpoint")
-                _require(_read_state(root, intent, keys) == state, "completed checkpoint predecessor changed")
+                _require(held.observe(_read_state, root, intent, keys) == state, "completed checkpoint predecessor changed")
                 activation_intent = _selector_intent("selector-activate", keys, completion, state.receipts[1])
                 successor = replace(state.record, administrative_phase=_DONE, phase_revision=state.record.phase_revision + 1,
                     final_activation_references=(_core_reference(state.receipts[1], keys),
@@ -358,4 +357,4 @@ def activate_genesis(*, data_root, intent: GenesisIntent, observer=None, operato
                 fault("after-completed-checkpoint")
             else:
                 return GenesisActivationResult(completion, state.record, state.receipts[1], state.states[2])
-            state = _read_state(root, intent, keys)
+            state = held.observe(_read_state, root, intent, keys)

@@ -62,6 +62,14 @@ def planned(tmp_path, enabled=False):
     return root, request, path, intent
 
 
+def assert_control_only(root):
+    assert root.is_dir()
+    assert {".", *(p.relative_to(root).as_posix() for p in root.rglob("*"))} == set(g.GenesisAcceptedStart.CONTROL_ENTRIES)
+    assert all((root / name).is_dir() for name in g.GenesisAcceptedStart.CONTROL_ENTRIES[:-1])
+    assert (root / i3.CONTROL_DIRECTORY / i3.LOCK_NAME).is_file()
+    assert read_genesis_operation_record(data_root=root) is None
+
+
 def run_driver(intent, path, **kwargs):
     kwargs.setdefault("observer", confirmation())
     return onboarding.run_native_genesis_onboarding(intent=intent, intent_path=path,
@@ -72,7 +80,7 @@ def run_driver(intent, path, **kwargs):
 @pytest.mark.parametrize("enabled", [False, True])
 def test_empty_root_through_driver_and_active_replay_without_embedding(tmp_path, enabled):
     root, request, path, intent = planned(tmp_path, enabled)
-    assert not root.exists()
+    assert_control_only(root)
     embedder = DeterministicTestEmbedder()
     profile = tmp_path / "profile.json"
     result = run_driver(intent, path, embedder=embedder, profile_out=profile)
@@ -135,14 +143,15 @@ def test_planning_generates_once_and_exact_replay_never_calls_factories(tmp_path
     assert second.operation_key != request.operation_key
     with pytest.raises(SubstrateError):
         onboarding.prepare_intent_plan(second, intent_path=path, id_factory=forbidden, time_factory=forbidden)
-    assert not root.exists() and (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert_control_only(root)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
 def test_operator_request_cannot_be_used_as_execution_authority(tmp_path):
     root, request, path, intent = planned(tmp_path)
     with pytest.raises(SubstrateError, match="typed expanded GenesisIntent"):
         run_driver(request, path)
-    assert not root.exists()
+    assert_control_only(root)
 
 
 @pytest.mark.parametrize("bad", ["extra", "operation-key", "allocations", "creation-facts", "version-bool", "relative-root",
@@ -185,13 +194,14 @@ def test_duplicate_key_json_refuses_and_tuning_is_preserved_exactly(tmp_path):
 
 
 @pytest.mark.parametrize("field", ["provider", "model", "dim"])
-def test_embedder_mismatch_refuses_before_any_root_mutation(tmp_path, field):
+def test_embedder_mismatch_refuses_before_any_authority_mutation(tmp_path, field):
     root, request, path, intent = planned(tmp_path, True)
     dependency = DeterministicTestEmbedder()
     setattr(dependency, field, 4 if field == "dim" else "foreign")
     with pytest.raises(SubstrateError, match="embedder differs"):
         run_driver(intent, path, embedder=dependency)
-    assert not root.exists() and not dependency.calls
+    assert_control_only(root)
+    assert not dependency.calls
 
 
 @pytest.mark.parametrize("condition", ["service_stopped", "mcp_stopped", "direct_tools_stopped", "fabric_hosts_stopped", "root_jobs_absent", "public_listener_absent"])
@@ -281,7 +291,7 @@ def test_active_native_authority_leaves_stale_admin_checkpoint_untouched(tmp_pat
 def test_status_has_no_writes_or_model_dependency(tmp_path, state):
     root, request, path, intent = planned(tmp_path)
     if state == "CONFLICT":
-        root.mkdir(); (root / "legacy.db").write_bytes(b"unsupported existing installation")
+        root.mkdir(exist_ok=True); (root / "legacy.db").write_bytes(b"unsupported existing installation")
     elif state == "PREPARING":
         with pytest.raises(BoundaryLoss): run_driver(intent, path, fault=stop_after("after-i3"))
     elif state in ("PREPARATION_SEALED", "CORE_ACTIVATED_SELECTOR_PENDING"):

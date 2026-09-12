@@ -52,7 +52,8 @@ def _inspect(root, intent):
         allowed[path.with_name(f".{path.name}.publication.lock").as_posix()] = False
         for parent in path.parents:
             allowed[parent.as_posix()] = True
-    entries = i3._inventory(root)
+    entries = i3._inventory(root, publication_targets=i4._owner_paths(intent),
+        selector_marker_residue=record.administrative_phase is _SEALED)
     if any(name not in allowed or facts[0] != allowed[name] for name, facts in entries.items()):
         raise GenesisPreparationRefused("I6 contains an undeclared artifact, selector or marker")
     for name in entries:
@@ -221,11 +222,14 @@ class GenesisCompletionAdministration:
     def __init__(self, root, intent, record, fault=i3._noop):
         self.root, self.intent, self.record, self.fault = root, intent, record, fault
         self._lease = None
+        self._held_lock = None
 
     def _current(self):
         if self._lease is not _LIVE_SESSION:
             raise GenesisPreparationRefused("I6 requires a live root-onboarding lock session")
-        current = _inspect(self.root, self.intent)
+        if self._held_lock is None:
+            raise GenesisPreparationRefused("I6 requires a live root-onboarding lock acquisition")
+        current = self._held_lock.observe(_inspect, self.root, self.intent)
         if current[0] != self.record:
             raise GenesisPreparationRefused("I6 administrative predecessor changed")
         return current
@@ -276,14 +280,12 @@ class GenesisCompletionAdministration:
 
 @contextmanager
 def begin_genesis_completion_administration(*, data_root: str | Path, intent: GenesisIntent,
-                                           timeout_seconds=1.0, fault=i3._noop):
+                                           timeout_seconds=1.0, fault=i3._noop, held_lock=None):
     root = canonical_genesis_root(data_root)
-    before = _inspect(root, intent)
-    with i3.root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
-        after = _inspect(root, intent)
-        if after != before:
-            raise GenesisPreparationRefused("I6 root changed while acquiring the onboarding lock")
+    with i3.root_observation(data_root=root, timeout_seconds=timeout_seconds, held_lock=held_lock) as held:
+        after = held.observe(_inspect, root, intent)
         session = GenesisCompletionAdministration(root, intent, after[0], fault)
+        session._held_lock = held
         session._lease = _LIVE_SESSION
         try:
             yield session

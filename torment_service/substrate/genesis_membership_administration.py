@@ -352,7 +352,7 @@ class GenesisMembershipAdministration(i3.GenesisAdministration):
 
     def _require_record(self):
         self._require_active()
-        record, _entries = i4._inspect(self.root, self.intent)
+        record, _entries = self._held_lock.observe(i4._inspect, self.root, self.intent)
         if record != self.record or record.sealed_completion_payload is not None or record.final_activation_references:
             raise GenesisPreparationRefused("I5 requires the unchanged, unsealed PREPARING record")
         expected = [i3.GenesisAdministration._reference(self, "native-core-preparation", i3._bootstrap_manifest(self.intent))]
@@ -443,14 +443,12 @@ class GenesisMembershipAdministration(i3.GenesisAdministration):
 
 @contextmanager
 def begin_genesis_membership_administration(*, data_root: str | Path, intent: GenesisIntent,
-                                           timeout_seconds=1.0, fault=i3._noop):
+                                           timeout_seconds=1.0, fault=i3._noop, held_lock=None):
     root = canonical_genesis_root(data_root)
-    record, before = i4._inspect(root, intent)
-    with i3.root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
-        current, after = i4._inspect(root, intent)
-        if current != record or after != before:
-            raise GenesisPreparationRefused("I5 root changed while acquiring the onboarding lock")
+    with i3.root_observation(data_root=root, timeout_seconds=timeout_seconds, held_lock=held_lock) as held:
+        record, _entries = held.observe(i4._inspect, root, intent)
         session = GenesisMembershipAdministration(root, record, fault)
+        session._held_lock = held
         session._lease = _LIVE_SESSION
         try:
             session._require_record()

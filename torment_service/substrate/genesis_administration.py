@@ -11,13 +11,15 @@ from dataclasses import dataclass, replace
 import hashlib
 import math
 import os
+import re
+import threading
 from pathlib import Path
 import stat
 import time
 from typing import Callable
 from uuid import UUID
 
-from ..atomic_publication import publish_if_absent, replace_if_exact_predecessor
+from ..atomic_publication import is_publication_temporary, publish_if_absent, replace_if_exact_predecessor
 from ..diagnostic_query_timing import sqlite_connect
 from ..external_owner_json import owner_bytes, strict_object
 from .connection import (
@@ -59,7 +61,10 @@ def _noop(_point: str) -> None:
 def _ensure_directory(path: Path) -> None:
     info = checked_stat(path)
     if info is None:
-        path.mkdir()  # never create undeclared ancestors
+        try:
+            path.mkdir()  # never create undeclared ancestors
+        except FileExistsError:
+            pass  # A peer can establish the same control directory before locking.
         _sync_directory(path.parent)
         info = checked_stat(path)
     if info is None or not stat.S_ISDIR(info.st_mode):
@@ -115,8 +120,103 @@ def root_onboarding_lock(*, data_root: str | Path, timeout_seconds: float = 1.0)
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _inventory(root: Path) -> dict[str, tuple]:
-    """No SQLite; retain file identity/content for the before/after lock check."""
+_LOCK_TOKEN_KEY = object()
+
+
+class _HeldRootLock:
+    """Process/thread-bound lifetime of an existing OS acquisition; no authority."""
+    def __init__(self, root, key):
+        if key is not _LOCK_TOKEN_KEY:
+            raise GenesisPreparationRefused("a live root lock acquisition is required")
+        self.root, self._live = root, True
+        self._owner = (os.getpid(), threading.get_ident())
+
+    def require(self, root):
+        if not self._live or self.root != root or self._owner != (os.getpid(), threading.get_ident()):
+            raise GenesisPreparationRefused("a live same-root, same-thread lock acquisition is required")
+
+    def observe(self, operation, *args, **kwargs):
+        self.require(self.root)
+        return _observe(operation, *args, **kwargs)
+
+
+class GenesisObservationUnavailable(GenesisPreparationRefused):
+    pass
+
+
+def _observe(operation, *args, **kwargs):
+    """One bounded PermissionError re-read of a pure observation under the mutex."""
+    for attempt in range(2):
+        try:
+            return operation(*args, **kwargs)
+        except GenesisObservationUnavailable:
+            raise
+        except Exception as exc:
+            cause = exc
+            while cause is not None and not isinstance(cause, PermissionError):
+                cause = cause.__cause__
+            if cause is None:
+                raise
+            if attempt:
+                raise GenesisObservationUnavailable("root observation unavailable") from exc
+
+
+def _prelock_gate(root):
+    """Shallow names/types only. In-flight or unavailable evidence is provisional."""
+    def children(path, directories, files, provisional=lambda name: False):
+        if checked_stat(path) is None:
+            return
+        for child in path.iterdir():
+            info = checked_stat(child)
+            if info is None:
+                continue
+            if child.name in directories:
+                valid = stat.S_ISDIR(info.st_mode)
+            else:
+                valid = stat.S_ISREG(info.st_mode) and (child.name in files or provisional(child.name))
+            if not valid:
+                raise GenesisPreparationRefused("foreign structural root or unknown artifact")
+    try:
+        children(root, {"substrate", "workspaces"}, GenesisAcceptedStart.ALLOWED_FILES)
+        children(root / "substrate", {"deployment", "cores"}, set())
+        deployment = root / CONTROL_DIRECTORY
+        children(deployment, {PRIVATE_DIRECTORY.name},
+            {LOCK_NAME, RECORD_NAME, f".{RECORD_NAME}.publication.lock", "selector-era-v1.json",
+             "selector.sqlite", "selector.sqlite-wal", "selector.sqlite-shm", "selector.sqlite-journal"},
+            lambda name: is_publication_temporary(Path(name), [Path(RECORD_NAME)])
+                or re.fullmatch(r"\.selector-init-[0-9a-f]{32}\.sqlite(?:-wal|-shm)?", name)
+                or re.fullmatch(r"\.selector-era-v1\.json\.[0-9a-f]{32}\.tmp", name))
+        if (checked_stat(deployment / "selector.sqlite") is not None
+            and checked_stat(deployment / "selector-era-v1.json") is None):
+            raise GenesisPreparationRefused("selector without Genesis marker")
+    except PermissionError:
+        # This cannot establish an invalid root or a matching peer. Re-observe
+        # under the root mutex, where persistent unavailability must refuse.
+        return
+
+
+@contextmanager
+def root_observation(*, data_root, timeout_seconds=1.0, held_lock=None):
+    """Reuse or acquire the existing mutex for coherent observation and execution."""
+    root = canonical_genesis_root(data_root)
+    if held_lock is not None:
+        if type(held_lock) is not _HeldRootLock:
+            raise GenesisPreparationRefused("a live root lock token is required")
+        held_lock.require(root)
+        yield held_lock
+        return
+    _prelock_gate(root)
+    with root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
+        token = _HeldRootLock(root, _LOCK_TOKEN_KEY)
+        try:
+            yield token
+        finally:
+            token._live = False
+
+
+def _inventory(root: Path, *, publication_targets=(), selector_marker_residue=False) -> dict[str, tuple]:
+    """Lock-held content inventory; exact publisher residue is never opened."""
+    targets = (CONTROL_DIRECTORY / RECORD_NAME, PRIVATE_MANIFEST, *publication_targets)
     entries = {}
 
     def visit(path: Path):
@@ -125,6 +225,13 @@ def _inventory(root: Path) -> dict[str, tuple]:
             return
         name = "." if path == root else path.relative_to(root).as_posix()
         directory = stat.S_ISDIR(info.st_mode)
+        if not directory and is_publication_temporary(path.relative_to(root), targets):
+            return
+        if (not directory and selector_marker_residue and path.parent == root / CONTROL_DIRECTORY
+            and re.fullmatch(r"\.selector-era-v1\.json\.[0-9a-f]{32}\.tmp", path.name)):
+            # I8's existing marker owner uses UUID names, not mkstemp. Only a
+            # sealed/activating Genesis continuation enables this exact residue.
+            return
         fingerprint = (directory, info.st_dev, info.st_ino)
         if not directory and not path.name.endswith(".lock"):
             fingerprint += (info.st_size, info.st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
@@ -182,28 +289,40 @@ def _classify(root: Path, intent: GenesisIntent, entries: dict[str, tuple]) -> G
                 raise GenesisPreparationRefused("orphan SQLite sidecar")
         kind = GenesisStartKind.MATCHING_GENESIS_RECOVERY_STATE
         operation = intent.operation_key
-    elif not entries:
-        kind = GenesisStartKind.ABSENT_ROOT
-    elif names == {"."}:
-        kind = GenesisStartKind.EMPTY_ROOT
-    elif names - {"."} <= GenesisAcceptedStart.ALLOWED_FILES and all(not entries[n][0] for n in names - {"."}):
-        kind = GenesisStartKind.ALLOWED_NON_AUTHORITATIVE_ROOT_FILES
-        observed = sorted(names - {"."})
     else:
-        prefix = GenesisAcceptedStart.CONTROL_ENTRIES[:len(entries)]
-        if names != set(prefix) or any(entries[n][0] != (n != GenesisAcceptedStart.CONTROL_ENTRIES[-1]) for n in names):
-            raise GenesisPreparationRefused("root is not an accepted Genesis start")
-        kind = GenesisStartKind.PRE_INTENT_GENESIS_CONTROL_RESIDUE
-        observed = list(prefix)
+        return _fresh_start(root, entries)
     return GenesisAcceptedStart.from_payload(dict(
         classification=kind.value, data_root_identity=str(root), observed_at_ns=time.time_ns(),
         observed_entries=observed, matching_operation_key=operation,
     ))
 
 
+def _fresh_start(root, entries):
+    names = set(entries)
+    files = names & GenesisAcceptedStart.ALLOWED_FILES
+    control_names = names - files
+    controls = GenesisAcceptedStart.CONTROL_ENTRIES
+    if not entries:
+        kind, observed = GenesisStartKind.ABSENT_ROOT, []
+    elif names == {"."}:
+        kind, observed = GenesisStartKind.EMPTY_ROOT, []
+    elif control_names == {"."} and files and all(not entries[n][0] for n in files):
+        kind, observed = GenesisStartKind.ALLOWED_NON_AUTHORITATIVE_ROOT_FILES, sorted(files)
+    elif (control_names == set(controls[:len(control_names)])
+          and all(entries[n][0] == (n != controls[-1]) for n in control_names)
+          and all(not entries[n][0] for n in files)):
+        kind = GenesisStartKind.PRE_INTENT_GENESIS_CONTROL_RESIDUE
+        observed = list(controls[:len(control_names)]) + sorted(files)
+    else:
+        raise GenesisPreparationRefused("root is not an accepted Genesis start; unknown artifact")
+    return GenesisAcceptedStart.from_payload(dict(classification=kind.value, data_root_identity=str(root),
+        observed_at_ns=time.time_ns(), observed_entries=observed, matching_operation_key=None))
+
+
 def inspect_genesis_start(*, data_root: str | Path, intent: GenesisIntent) -> GenesisAcceptedStart:
     root = canonical_genesis_root(data_root)
-    return _classify(root, intent, _inventory(root))
+    with root_observation(data_root=root) as held:
+        return held.observe(lambda: _classify(root, intent, _inventory(root)))
 
 
 @dataclass(frozen=True)
@@ -255,6 +374,7 @@ class GenesisAdministration:
         self.root, self.record, self.fault = root, record, fault
         self._active = True
         self._quiescent = False
+        self._held_lock = None
 
     @property
     def intent(self) -> GenesisIntent:
@@ -263,6 +383,9 @@ class GenesisAdministration:
     def _require_active(self):
         if not self._active:
             raise GenesisPreparationRefused("Genesis administrative lock session has ended")
+        if self._held_lock is None:
+            raise GenesisPreparationRefused("requires a live I3 root-onboarding lock session")
+        self._held_lock.require(self.root)
 
     def replace_record(self, expected: GenesisOperationRecord, replacement: GenesisOperationRecord):
         self._require_active()
@@ -276,7 +399,7 @@ class GenesisAdministration:
             raise GenesisPreparationRefused("checkpoint is not an append-only PREPARING successor")
         path = self.root / CONTROL_DIRECTORY / RECORD_NAME
         checked_stat(path)
-        predecessor_bytes = path.read_bytes()
+        predecessor_bytes = self._held_lock.observe(path.read_bytes)
         current = GenesisOperationRecord.from_payload(strict_object(predecessor_bytes))
         if current == replacement:
             self.record = replacement
@@ -298,7 +421,7 @@ class GenesisAdministration:
         evidence = facts.evidence(self.intent, since_ns=since,
                                   operator_attestation=operator_attestation, issuer_reference=issuer_reference)
         # Reinspect for paths created by a racing/non-cooperating startup.
-        _classify(self.root, self.intent, _inventory(self.root))
+        self._held_lock.observe(lambda: _classify(self.root, self.intent, _inventory(self.root)))
         current = _matching_record(self.root, self.intent)
         if current != self.record:
             raise GenesisPreparationRefused("administrative record changed during observation")
@@ -336,7 +459,7 @@ class GenesisAdministration:
         self._require_active()
         if not self._quiescent:
             raise GenesisPreparationRefused("fresh successful quiescence observation required")
-        _classify(self.root, self.intent, _inventory(self.root))
+        self._held_lock.observe(lambda: _classify(self.root, self.intent, _inventory(self.root)))
         expected = genesis_prerequisites(self.intent)
         path = self.root / CORE_DIRECTORY / self.intent.payload()["allocations"]["core_relative_path"]
         core_ref = self._reference("native-core-preparation", _bootstrap_manifest(self.intent))
@@ -390,22 +513,12 @@ class GenesisAdministration:
 
 @contextmanager
 def begin_genesis_administration(*, data_root: str | Path, intent: GenesisIntent,
-                                 timeout_seconds: float = 1.0, fault: Callable[[str], None] = _noop):
-    """Inspect, lock, prove the control-only delta, then publish the first fence."""
+                                 timeout_seconds: float = 1.0, fault: Callable[[str], None] = _noop,
+                                 held_lock=None):
+    """Gate names/types, then classify and publish the fence under the root mutex."""
     root = canonical_genesis_root(data_root)
-    before = _inventory(root)
-    accepted = _classify(root, intent, before)
-    with root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
-        after = _inventory(root)
-        controls = set(GenesisAcceptedStart.CONTROL_ENTRIES)
-        if (any(after.get(name) != value for name, value in before.items()) or
-            not set(after).difference(before) <= controls):
-            raise GenesisPreparationRefused("root changed beyond the fixed pre-intent control residue")
-        # Verify fixed path types, then preserve the truthful PRE-lock observation
-        # (e.g. README.md plus only our newly introduced control tree).
-        for name in controls:
-            if name not in after or after[name][0] != (name != GenesisAcceptedStart.CONTROL_ENTRIES[-1]):
-                raise GenesisPreparationRefused("fixed pre-intent control residue is invalid")
+    with root_observation(data_root=root, timeout_seconds=timeout_seconds, held_lock=held_lock) as held:
+        accepted = held.observe(lambda: _classify(root, intent, _inventory(root)))
         record = _matching_record(root, intent)
         if record is None:
             record = GenesisOperationRecord(intent, intent.digest, accepted,
@@ -417,6 +530,7 @@ def begin_genesis_administration(*, data_root: str | Path, intent: GenesisIntent
                 raise GenesisPreparationRefused("initial Genesis record publication conflict")
         fault("after-record-publication")
         session = GenesisAdministration(root, record, fault)
+        session._held_lock = held
         try:
             yield session
         finally:
@@ -427,8 +541,8 @@ def begin_genesis_administration(*, data_root: str | Path, intent: GenesisIntent
 def prepare_genesis_inert_root(*, data_root: str | Path, intent: GenesisIntent,
                               observer: Callable[[Path, GenesisIntent], GenesisWriterObservation],
                               operator_attestation: str, issuer_reference: str,
-                              timeout_seconds: float = 1.0, fault: Callable[[str], None] = _noop) -> GenesisOperationRecord:
-    with begin_genesis_administration(data_root=data_root, intent=intent, timeout_seconds=timeout_seconds, fault=fault) as session:
+                              timeout_seconds: float = 1.0, fault: Callable[[str], None] = _noop, held_lock=None) -> GenesisOperationRecord:
+    with begin_genesis_administration(data_root=data_root, intent=intent, timeout_seconds=timeout_seconds, fault=fault, held_lock=held_lock) as session:
         session.observe_quiescence(observer, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
         session.prepare_inert_core()
         return session.record

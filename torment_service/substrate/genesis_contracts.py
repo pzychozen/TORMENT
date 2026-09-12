@@ -422,8 +422,11 @@ class GenesisAcceptedStart(GenesisPayload):
             elif kind is GenesisStartKind.ALLOWED_NON_AUTHORITATIVE_ROOT_FILES:
                 require(bool(entries) and set(entries) <= cls.ALLOWED_FILES, "unsupported root-only file")
             else:
-                require(bool(entries) and tuple(entries) == cls.CONTROL_ENTRIES[:len(entries)],
-                        "pre-intent residue must be the fixed parent-first control prefix")
+                controls = [e for e in entries if e not in cls.ALLOWED_FILES]
+                files = [e for e in entries if e in cls.ALLOWED_FILES]
+                require(bool(controls) and tuple(controls) == cls.CONTROL_ENTRIES[:len(controls)]
+                        and entries == controls + sorted(files),
+                        "pre-intent residue must be the fixed control prefix plus allowed root files")
 
     def require_intent(self, intent: GenesisIntent) -> None:
         value = self.payload()

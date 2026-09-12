@@ -55,7 +55,7 @@ def _inspect(root, intent):
         allowed[path.with_name(f".{path.name}.publication.lock").as_posix()] = False
         for parent in path.parents:
             allowed[parent.as_posix()] = True
-    entries = i3._inventory(root)
+    entries = i3._inventory(root, publication_targets=_owner_paths(intent))
     if any(name not in allowed or facts[0] != allowed[name] for name, facts in entries.items()):
         raise GenesisPreparationRefused("unknown artifact in I4 recovery root")
     for name in entries:
@@ -149,7 +149,7 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
 
     def _require_record(self):
         self._require_active()
-        record, _entries = _inspect(self.root, self.intent)
+        record, _entries = self._held_lock.observe(_inspect, self.root, self.intent)
         if record != self.record:
             raise GenesisPreparationRefused("I4 administrative record changed")
         expected = [super()._reference("native-core-preparation", i3._bootstrap_manifest(self.intent))]
@@ -301,14 +301,12 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
 
 @contextmanager
 def begin_genesis_character_administration(*, data_root: str | Path, intent: GenesisIntent,
-                                           timeout_seconds=1.0, fault=i3._noop):
+                                           timeout_seconds=1.0, fault=i3._noop, held_lock=None):
     root = canonical_genesis_root(data_root)
-    record, before = _inspect(root, intent)
-    with i3.root_onboarding_lock(data_root=root, timeout_seconds=timeout_seconds):
-        current, after = _inspect(root, intent)
-        if current != record or before != after:
-            raise GenesisPreparationRefused("I4 root changed while acquiring the onboarding lock")
+    with i3.root_observation(data_root=root, timeout_seconds=timeout_seconds, held_lock=held_lock) as held:
+        record, _entries = held.observe(_inspect, root, intent)
         session = GenesisCharacterAdministration(root, record, fault)
+        session._held_lock = held
         session._lease = _LIVE_SESSION
         try:
             session._require_record()

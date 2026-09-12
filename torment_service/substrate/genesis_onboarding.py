@@ -157,32 +157,41 @@ def read_intent_plan(path):
 
 
 def _empty_start(root):
-    entries = i3._inventory(root)
-    names = set(entries)
-    allowed = g.GenesisAcceptedStart.ALLOWED_FILES
-    controls = g.GenesisAcceptedStart.CONTROL_ENTRIES
-    accepted = not entries or names == {"."} or (names - {"."} <= allowed
-        and all(not entries[name][0] for name in names - {"."}))
-    accepted |= names == set(controls[:len(entries)]) and all(entries[name][0] == (name != controls[-1]) for name in names)
-    _require(accepted, "fresh onboarding cannot adopt an existing installation")
+    i3._fresh_start(root, i3._inventory(root))
+
+
+def _root_snapshot(root, intent=None):
+    """Only called under root_observation; authority and phase share its boundary."""
+    authority = _active(root, intent)
+    if authority is not None:
+        return authority, None
+    record = read_genesis_operation_record(data_root=root)
+    _require(intent is None or record is None or record.expanded_intent == intent,
+        "root belongs to another Genesis intent")
+    if record is None:
+        _empty_start(root)
+    else:
+        # Planning and dependency selection must also refuse unexplained roots;
+        # the phase owner revalidates these facts before its own mutation.
+        phase = _phase(record)
+        if phase == 3:
+            i3._classify(root, record.expanded_intent, i3._inventory(root))
+        elif phase in (4, 5):
+            i4._inspect(root, record.expanded_intent)
+        elif phase == 6:
+            i6._inspect(root, record.expanded_intent)
+        else:
+            i8._read_state(root, record.expanded_intent, i8.activation_operation_keys(record.expanded_intent))
+    return None, record
 
 
 def _recovered_intent(root):
-    record = read_genesis_operation_record(data_root=root)
-    if record is not None:
-        authority = i7.verify_active_native_genesis(data_root=root, expected_intent=record.expanded_intent)
-        if authority is not None:
-            i7.recover_active_native_genesis(data_root=root, expected_completion=authority.completion)
-        return record.expanded_intent
-    authority = i7.verify_active_native_genesis(data_root=root)
-    if authority is not None:
-        return i7.recover_active_native_genesis(data_root=root).completion.expanded_intent
-    _empty_start(root)
-    return None
+    authority, record = _root_snapshot(root)
+    return authority.completion.expanded_intent if authority is not None else record.expanded_intent if record is not None else None
 
 
 def prepare_intent_plan(request, *, intent_path, request_path=None, id_factory=generate_native_id, time_factory=None):
-    """Recover or publish the one exact external plan before any root mutation."""
+    """Recover/publish the exact external plan; only the OS rendezvous precedes it."""
     _require(isinstance(request, NativeGenesisOnboardingRequest), "typed onboarding request required")
     root = canonical_genesis_root(request.payload()["data_root_identity"])
     target = _regular_path(intent_path, root=root)
@@ -190,20 +199,21 @@ def prepare_intent_plan(request, *, intent_path, request_path=None, id_factory=g
         source = _regular_path(request_path, root=root, required=True)
         _require(source != target and read_onboarding_request(source) == request, "request file differs from declaration")
     _regular_path(target.with_name(f".{target.name}.publication.lock"), root=root)
-    with _replacement_lock(target):
-        _regular_path(target, root=root)
-        existing = read_intent_plan(target) if target.exists() else None
-        recovered = _recovered_intent(root)
-        for candidate in (existing, recovered):
-            if candidate is not None:
-                _require(request_from_intent(candidate) == request, "existing plan/root belongs to another declaration")
-        if existing is not None:
-            _require(recovered is None or recovered == existing, "saved allocations disagree with root recovery evidence")
-            return existing
-        intent = recovered if recovered is not None else plan_native_genesis(request, id_factory=id_factory, time_factory=time_factory)
-        publish_if_absent(target, owner_bytes(intent.payload()))
-        _require(read_intent_plan(target) == intent, "published intent differs from the frozen plan")
-        return intent
+    with i3.root_observation(data_root=root, timeout_seconds=60.0) as held:
+        with _replacement_lock(target):
+            _regular_path(target, root=root)
+            existing = read_intent_plan(target) if target.exists() else None
+            recovered = held.observe(_recovered_intent, root)
+            for candidate in (existing, recovered):
+                if candidate is not None:
+                    _require(request_from_intent(candidate) == request, "existing plan/root belongs to another declaration")
+            if existing is not None:
+                _require(recovered is None or recovered == existing, "saved allocations disagree with root recovery evidence")
+                return existing
+            intent = recovered if recovered is not None else plan_native_genesis(request, id_factory=id_factory, time_factory=time_factory)
+            publish_if_absent(target, owner_bytes(intent.payload()))
+            _require(read_intent_plan(target) == intent, "published intent differs from the frozen plan")
+            return intent
 
 
 def _profile_target(intent, path):
@@ -257,14 +267,6 @@ def _phase(record):
     return 3
 
 
-def _record(root, intent):
-    record = read_genesis_operation_record(data_root=root)
-    _require(record is None or record.expanded_intent == intent, "root belongs to another Genesis intent")
-    if record is None:
-        _empty_start(root)
-    return record
-
-
 def _needs_embedding(root, intent, record):
     if intent.payload()["character"]["mode"] == "DISABLED" or _phase(record) > 4:
         return False
@@ -280,9 +282,9 @@ def onboarding_needs_embedding(intent):
     """Read-only dependency decision, including completed native seed recovery."""
     request_from_intent(intent)
     root = canonical_genesis_root(intent.data_root_identity)
-    if _active(root, intent) is not None:
-        return False
-    return _needs_embedding(root, intent, _record(root, intent))
+    with i3.root_observation(data_root=root, timeout_seconds=60.0) as held:
+        authority, record = held.observe(_root_snapshot, root, intent)
+        return False if authority is not None else held.observe(_needs_embedding, root, intent, record)
 
 
 @dataclass(frozen=True)
@@ -329,10 +331,10 @@ def onboarding_result(authority):
 
 def run_native_genesis_onboarding(*, intent, intent_path, observer, operator_attestation, issuer_reference,
                                  embedder=None, profile_out=None, timeout_seconds=1.0, fault=i3._noop):
-    """Apply a durably saved intent through I3–I8, with no outer root lock.
+    """Observe, select and run each phase within one existing root acquisition.
 
-    Embedder selection is the caller's responsibility. An active replay returns
-    before touching that dependency, operator observations or admin checkpoints.
+    Phase owners reuse the live token and retain their quiescence, identity,
+    completion and activation checks. Active replay does not invoke the observer.
     """
     request_from_intent(intent)
     root = canonical_genesis_root(intent.data_root_identity)
@@ -340,79 +342,75 @@ def run_native_genesis_onboarding(*, intent, intent_path, observer, operator_att
     _require(read_intent_plan(target) == intent, "the exact intent must be persisted before execution")
     output = _profile_target(intent, profile_out)
     _require(output is None or output != target, "intent and profile outputs must be distinct")
-    authority = _active(root, intent)
-    if authority is not None:
-        export_qualified_profile(intent, authority.completion.qualified_deployment_profile, output)
-        return onboarding_result(authority)
-    record = _record(root, intent)
-    _require(callable(observer), "typed writer observer required")
-    # Check the supplied observation/attestation before even the I3 lock file.
-    since = time.time_ns()
-    facts = observer(root, intent)
-    _require(isinstance(facts, i3.GenesisWriterObservation), "typed writer observation required")
-    facts.evidence(intent, since_ns=since, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
-    dependency = None
-    if intent.payload()["character"]["mode"] == "ENABLED":
-        dependency = embedder if _needs_embedding(root, intent, record) else i5._CommittedLane(intent)
-        lane = intent.payload()["representation_lane"]
-        _require(dependency is not None and dependency.provider == lane["provider"] and dependency.model == lane["model"]
-            and type(dependency.dim) is int and dependency.dim == lane["dimension"], "embedder differs from declared representation lane")
     deadline = time.monotonic() + 60.0
     observations = dict(observer=observer, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
-    context = dict(data_root=root, intent=intent, timeout_seconds=timeout_seconds)
     while True:
-        authority = _active(root, intent)
-        if authority is not None:
-            export_qualified_profile(intent, authority.completion.qualified_deployment_profile, output)
-            return onboarding_result(authority)
-        record = _record(root, intent)
-        phase = _phase(record)
         try:
-            if phase == 3:
-                i3.prepare_genesis_inert_root(**context, **observations)
-            elif phase == 4:
-                with i4.begin_genesis_character_administration(**context) as session:
-                    session.observe_quiescence(**observations)
-                    session.prepare_first_character_bundle(embedder=dependency, **observations)
-            elif phase == 5:
-                with i5.begin_genesis_membership_administration(**context) as session:
-                    session.observe_quiescence(**observations)
-                    session.prepare_initial_memberships(**observations)
-            elif phase == 6:
-                with i6.begin_genesis_completion_administration(**context) as session:
-                    session.seal_preparation(**observations)
-            else:
-                i8.activate_genesis(**context, **observations)
+            with i3.root_observation(data_root=root, timeout_seconds=timeout_seconds) as held:
+                authority, record = held.observe(_root_snapshot, root, intent)
+                if authority is not None:
+                    export_qualified_profile(intent, authority.completion.qualified_deployment_profile, output)
+                    return onboarding_result(authority)
+                _require(callable(observer), "typed writer observer required")
+                since = time.time_ns()
+                facts = observer(root, intent)
+                _require(isinstance(facts, i3.GenesisWriterObservation), "typed writer observation required")
+                facts.evidence(intent, since_ns=since, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
+                dependency = None
+                if intent.payload()["character"]["mode"] == "ENABLED":
+                    dependency = embedder if held.observe(_needs_embedding, root, intent, record) else i5._CommittedLane(intent)
+                    lane = intent.payload()["representation_lane"]
+                    _require(dependency is not None and dependency.provider == lane["provider"] and dependency.model == lane["model"]
+                        and type(dependency.dim) is int and dependency.dim == lane["dimension"], "embedder differs from declared representation lane")
+                phase = _phase(record)
+                context = dict(data_root=root, intent=intent, timeout_seconds=timeout_seconds, held_lock=held)
+                if phase == 3:
+                    i3.prepare_genesis_inert_root(**context, **observations)
+                elif phase == 4:
+                    with i4.begin_genesis_character_administration(**context) as session:
+                        session.observe_quiescence(**observations)
+                        session.prepare_first_character_bundle(embedder=dependency, **observations)
+                elif phase == 5:
+                    with i5.begin_genesis_membership_administration(**context) as session:
+                        session.observe_quiescence(**observations)
+                        session.prepare_initial_memberships(**observations)
+                elif phase == 6:
+                    with i6.begin_genesis_completion_administration(**context) as session:
+                        session.seal_preparation(**observations)
+                else:
+                    i8.activate_genesis(**context, **observations)
         except SubstrateError as exc:
-            # A competing matching driver may advance between our read and a
-            # phase's own lock acquisition. Only observed forward progress or
-            # the existing mutex-busy refusal justifies a bounded retry.
-            current = read_genesis_operation_record(data_root=root)
-            same = current is not None and current.expanded_intent == intent
-            if same and time.monotonic() < deadline and (_phase(current) > phase or str(exc) == "root-onboarding-lock-busy"):
-                time.sleep(.02)
+            # A busy mutex proves only that observation must wait. Exact peer
+            # identity is established after acquisition, never inferred here.
+            if str(exc) == "root-onboarding-lock-busy" and time.monotonic() < deadline:
                 continue
             raise
         fault("after-i" + str(phase))
 
 
 def native_genesis_status(*, data_root, intent=None):
-    """Read-only evidence projection; no lock file, provider or phase mutation."""
+    """Coherent evidence projection; only the OS rendezvous, no provider/phase writes."""
     root = canonical_genesis_root(data_root)
     try:
-        authority = _active(root, intent)
-        if authority is not None:
-            return onboarding_result(authority)
-        record = read_genesis_operation_record(data_root=root)
-        if record is None:
-            _empty_start(root)
-            return dict(status="NOT_STARTED", data_root=str(root))
-        _require(intent is None or record.expanded_intent == intent, "foreign Genesis intent")
-        _require(read_genesis_fence(data_root=root).value == "BLOCK_LEGACY", "unfinished Genesis fence conflicts")
-        status = record.administrative_phase.value
-        if status != "PREPARING":
-            state = i8._read_state(root, record.expanded_intent, i8.activation_operation_keys(record.expanded_intent))
-            status = "CORE_ACTIVATED_SELECTOR_PENDING" if len(state.receipts) == 2 else "PREPARATION_SEALED"
-        return dict(status=status, data_root=str(root))
+        with i3.root_observation(data_root=root, timeout_seconds=60.0) as held:
+            return held.observe(_status, root, intent)
+
     except (SubstrateError, ValueError, OSError):
         return dict(status="CONFLICT", data_root=str(root))
+
+
+def _status(root, intent):
+    authority = _active(root, intent)
+    if authority is not None:
+        return onboarding_result(authority)
+    record = read_genesis_operation_record(data_root=root)
+    if record is None:
+        _empty_start(root)
+        return dict(status="NOT_STARTED", data_root=str(root))
+    _require(intent is None or record.expanded_intent == intent, "foreign Genesis intent")
+    _require(read_genesis_fence(data_root=root).value == "BLOCK_LEGACY", "unfinished Genesis fence conflicts")
+    status = record.administrative_phase.value
+    if status != "PREPARING":
+        state = i8._read_state(root, record.expanded_intent, i8.activation_operation_keys(record.expanded_intent))
+        status = "CORE_ACTIVATED_SELECTOR_PENDING" if len(state.receipts) == 2 else "PREPARATION_SEALED"
+    return dict(status=status, data_root=str(root))
