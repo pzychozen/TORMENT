@@ -14,25 +14,49 @@ captured root/parent identities.  A mismatch fails closed, records the stable
 `filesystem_containment_substitution` security incident, and discards the
 cached identity so a later normal operation can rederive it after restoration.
 
+Checkpoint load uses the same pathname-containment family but does not carry a
+Level-2 identity-continuity guard between root validation and the final file
+open.  In the current native deployment the REST checkpoint load/list routes
+are refused before their handlers, so this load path is not externally
+reachable there; native automatic checkpoint write/prune operations remain
+active.  Historical/legacy route exposure must therefore be evaluated under
+the same deployment assumptions below.
+
 This is **identity continuity detection**, not handle pinning and not a claim
 of race-free filesystem access.  A same-user actor can still replace a path
-after the final check and before the operating-system sink.
+after the final check and before the operating-system sink.  The same race
+class can affect pathname-based load, write, prune, and sweep operations; the
+Level-2 checks reduce substitution windows where present but do not eliminate
+check-to-use races.
 
 ## Deployment acceptance
 
 Current disposition: **ACCEPT_LOCAL_RACE**.  Severity is **LOW** only for the
 current loopback, single-operator deployment in which TORMENT and anyone able
 to alter its data directory run under the same OS principal.  That actor
-already has direct read/write authority over TORMENT's persistent state.
+already has direct read/write authority over TORMENT's persistent state and
+anything else reachable with that principal's filesystem permissions; TORMENT
+is therefore not granting a less-privileged principal new filesystem authority
+through this accepted race.
 
 This decision makes no remote-path-traversal claim and does not treat the
 residual local race as fixed.
 
+The acceptance additionally assumes that the configured TORMENT data directory
+and its ancestor directories are not writable by another OS principal.  The
+data directory should not be placed under a sync/on-demand filesystem location
+(such as OneDrive) whose reparse/placeholder behavior can introduce unexpected
+path substitutions or containment refusals, and untrusted archives should not
+be extracted directly into the TORMENT data directory.
+
 The acceptance expires immediately if TORMENT runs as a service, under a
 different account than the interactive/local user, elevated, or with any
 privilege asymmetry between TORMENT and a user who can modify its data
-directory.  In those deployments, Level-3 pinned-handle containment is
-mandatory before the affected destructive paths are used.
+directory or an ancestor of that directory.  It also expires for any deployment
+where another principal or service can mutate the relevant filesystem namespace
+without already holding equivalent TORMENT filesystem authority.  In those
+deployments, Level-3 pinned-handle containment is mandatory before the affected
+paths are used.
 
 ## Observability boundary
 
