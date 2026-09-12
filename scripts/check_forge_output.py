@@ -4,15 +4,13 @@ check_forge_output.py — Acceptance checker for start/torment_character_creator
 
 Rejects known injected fingerprinting signatures and NUL bytes across the whole file.
 Requires placeholder-only provider environment templates without browser secret inputs.
-Then validates that each emitted-Python template section in the forge satisfies the doctrinal
-and field-shape contracts defined in start/SOLO_ALIGNMENT_SPEC.md §4 and
-start/BASIC_HIVE_AGENT_SPEC.md §4.
+Then validates Solo template contracts and the shared native Hive client guards.
+The executable native Hive flow is covered by check_forge_hivemind.py.
 
 Section discovery:
     - solo                  — function generateSolo(...)        [function signature]
-    - hivemind_window       — fence comments inside generateHivemind
-    - hivemind_basic_hive   — fence comments inside generateHivemind
-    - hivemind_broadcast    — fence comments inside generateHivemind
+    - native_hive_client    — shared template for Window, Basic Hive and Broadcast
+    - historical legacy Hive fences remain recognized for older Forge snapshots
 
 Runs manually and in the existing CodeQL workflow on pushes and pull requests.
 
@@ -97,7 +95,14 @@ def check_provider_secrets(source: str) -> List[str]:
                 "do not interpolate a browser value."
             )
 
-        # Hivemind emits each shell command directly. Require the whole literal
+        if '// <<< BEGIN native_hive_client >>>' in source:
+            binding = re.search(r'const hiveCredentials = (.*?);', source, re.S)
+            if binding is None or not re.search(
+                rf"key:'{key}',val:'your_key_here'", binding.group(1)
+            ):
+                failures.append(f"  Native Hivemind {key} must remain a literal placeholder.")
+            continue
+        # Historical Hivemind emitted each shell command directly. Require the whole literal
         # statement, not just a placeholder fallback within a dynamic expression.
         for command in ("export", "set"):
             statements = re.findall(
@@ -150,6 +155,9 @@ def find_function_sections(lines: List[str]) -> Dict[str, Tuple[int, int]]:
     sections: Dict[str, Tuple[int, int]] = {}
     for idx, (name, start) in enumerate(starts):
         end = starts[idx + 1][1] - 1 if idx + 1 < len(starts) else len(lines)
+        if name == 'solo':
+            end = next((i - 1 for i in range(start, end + 1)
+                if lines[i - 1].startswith('let lastHivemindGeneration')), end)
         sections[name] = (start, end)
     return sections
 
@@ -389,8 +397,9 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    fence_sections = find_fence_sections(lines, fn_sections["hivemind"])
-    expected_fenced = {"hivemind_window", "hivemind_basic_hive", "hivemind_broadcast"}
+    native_hive = '// <<< BEGIN native_hive_client >>>' in text
+    fence_sections = {} if native_hive else find_fence_sections(lines, fn_sections["hivemind"])
+    expected_fenced = set() if native_hive else {"hivemind_window", "hivemind_basic_hive", "hivemind_broadcast"}
     missing_fences = expected_fenced - set(fence_sections.keys())
     if missing_fences:
         print(f"error: missing fence sub-sections inside generateHivemind: "
@@ -408,6 +417,23 @@ def main() -> int:
     print()
 
     all_pass = True
+    if native_hive:
+        hive = text.split('let lastHivemindGeneration', 1)[1].split('function switchTab(', 1)[0]
+        required = ['version:2', 'hivemind_initial_v1', 'class HiveClient:',
+            '"PENDING_WRITE"', '"NOT_ATTEMPTED"', '"COMPLETE"', 'Idempotency-Key',
+            'def retry(self)', 'self.mode == "broadcast"', 'self.mode != "window"',
+            'self.mode == "basic_hive" and not agent_id', 'stored', 'collective_context',
+            'key_factory']
+        # Mode behavior, wire shapes, retries and provider failures are executed
+        # by check_forge_hivemind.py against the actual emitted clients.
+        missing = [value for value in required if value not in hive]
+        forbidden = [value for value in ('/workspace/create','/agent/create','/collective/events',
+            '/collective/reingest','/proposals/status','/character/state','[LLM ERROR]') if value in hive]
+        if missing or forbidden:
+            all_pass = False
+            print(f'[FAIL] native_hive: missing={missing}; forbidden={forbidden}')
+        else:
+            print('[PASS] native_hive shared three-mode client; run check_forge_hivemind.py for behavioral qualification')
     for name, (start, end) in sections.items():
         source = "\n".join(lines[start - 1:end])
         if name == "solo":

@@ -1200,14 +1200,14 @@
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label" style="color:#b388ff">Crystal Attunement (SRG)</div>
-        <div class="toggle-desc"><span class="hivemind-mode">Living memory dynamics powered by Symbolic Resonant Geometry. Each memory gets a heartbeat (Class A: slow/deep or Class B: fast/active), a golden tower frequency band, and a breathing compression field. Identity memories become indestructible crystals. Memories that overlap semantically collide — rhythm syncs, amplitude preserves identity. Optional — everything works without it.</span><span class="solo-mode">Adds frequency-band and heartbeat state to newly ingested memories and uses that state in retrieval scoring. This does not change the Character seed, canonical identity, or Native Genesis seed linkage. OFF disables these SRG ingest and scoring effects; existing stored metadata is retained.</span></div>
+        <div class="toggle-desc"><span class="hivemind-mode">Adds frequency-band and heartbeat state to newly ingested memories and uses it in retrieval scoring. OFF disables these ingest and scoring effects. Genesis Character identity and existing stored metadata remain unchanged.</span><span class="solo-mode">Adds frequency-band and heartbeat state to newly ingested memories and uses that state in retrieval scoring. This does not change the Character seed, canonical identity, or Native Genesis seed linkage. OFF disables these SRG ingest and scoring effects; existing stored metadata is retained.</span></div>
       </div>
     </div>
 
     <div id="srg-config-inner" style="display:none">
     <div class="section-desc" style="margin-top:16px">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to the memories it produces.</div>
 
-    <div class="hivemind-mode" style="margin-bottom:16px">
+    <div class="hivemind-mode" hidden style="display:none;margin-bottom:16px">
       <div class="field">
         <label>IDENTITY MODE MAPPING</label>
         <div class="section-desc" style="margin-bottom:8px">If your character has distinct identity modes (like Ryuki's playful / protector / self), map each mode to a golden tower band. Leave empty for automatic band assignment based on memory coherence.</div>
@@ -1228,7 +1228,7 @@
       </div>
     </div>
 
-    <div class="hivemind-mode">
+    <div class="hivemind-mode" hidden style="display:none">
     <div class="toggle-row active" id="toggle-crystal" onclick="toggleFeature('crystal')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
@@ -1364,6 +1364,11 @@
         <label>TEAM NAME <span style="color:var(--text-dim);font-size:10px">(cosmetic label)</span></label>
         <input type="text" id="hive-team-name" placeholder="e.g. Council of Minds" maxlength="40">
       </div>
+      <div class="field">
+        <label for="hive-data-root">TORMENT DATA ROOT — FRESH INSTALLATION</label>
+        <input type="text" id="hive-data-root" placeholder="Absolute path to a new Hive installation" autocomplete="off">
+        <div class="section-desc">Keep Genesis and policy setup artifacts outside this data root.</div>
+      </div>
     </div>
     <div class="field" style="margin-top:16px">
       <label>AGENT COUNT (2–8)</label>
@@ -1376,24 +1381,24 @@
 
   <!-- 02 AGENT CARDS (HIVEMIND) -->
   <div class="hivemind-mode section">
-    <div class="section-label hivemind">02 — agent collective</div>
-    <div class="section-desc">Configure each agent with a name, role, seed description, and primary domain. Use the preset loaders to quickly populate common archetypes.</div>
+    <div class="section-label hivemind">02 — initial agent collective</div>
+    <div class="section-desc">Configure the initial roster. Role is a conversational prompt role, not server permission. Primary domain is the default write domain, not private/shared membership. Adding or removing agents after installation is not yet a qualified Forge operation.</div>
     <div class="section">
       <div class="section-label hivemind">02.5 — interaction mode</div>
-      <div class="section-desc">Choose how users will experience the collective at runtime. All three modes use the same shared memory field — only the generated Python chat loop changes.</div>
+      <div class="section-desc">All three modes use the same server-side Hivemind semantics. Each agent has private memory; the workspace has shared domain lanes. Collective packets and events provide context without direct access to another agent's private memory.</div>
       <div class="radio-grid">
         <label class="radio-card">
           <input type="radio" name="hive-interaction" value="window" checked>
           <div class="radio-card-body">
             <div class="radio-card-title">Switch Between Agents <span class="mini-badge recommended">recommended</span></div>
-            <div class="radio-card-desc">Talk to one agent at a time and move between them with <code>/switch &lt;agent_id&gt;</code>. This preserves identity more clearly and matches the canonical hivemind interaction model.</div>
+            <div class="radio-card-desc">Talk to one selected agent per turn. <code>/switch &lt;agent_id&gt;</code> clears local conversation history; persistent TORMENT memory is unchanged.</div>
           </div>
         </label>
         <label class="radio-card">
           <input type="radio" name="hive-interaction" value="basic_hive">
           <div class="radio-card-body">
             <div class="radio-card-title">Basic Hive Agent</div>
-            <div class="radio-card-desc">The simplest shape: one agent, one terminal, shared collective underneath. Open a separate terminal for each agent — they find each other through the memory field. A clear first step into hivemind.</div>
+            <div class="radio-card-desc">Bind one client process to an explicit agent. Multiple terminals connect to the same central TORMENT server.</div>
           </div>
         </label>
         <label class="radio-card">
@@ -1406,7 +1411,7 @@
       </div>
       <div style="margin-top:12px;padding:12px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);font-size:13px;line-height:1.5;color:var(--fg2);">
         <div style="font-weight:600;letter-spacing:0.5px;margin-bottom:6px;color:var(--fg);">ONE TERMINAL PER AGENT (Basic Hive Agent)</div>
-        Opens a window to one agent. Run a separate terminal for each agent you want to chat with — they share memory through the collective field, so convergence still happens across terminals. No <code>/switch</code> by design.
+        Run <code>python &lt;client&gt; --agent &lt;agent_id&gt;</code> in each client terminal. All terminals use one central server. No <code>/switch</code> in Basic Hive mode.
       </div>
     </div>
     <div class="agent-cards-container" id="agent-cards-container">
@@ -1417,22 +1422,22 @@
   <!-- 03 DOMAINS (HIVEMIND) -->
   <div class="hivemind-mode section">
     <div class="section-label hivemind">03 — domain configuration</div>
-    <div class="section-desc">Define the operational domains for your collective. Each domain is a focus area that agents can be assigned to. Default domains: research, engineering, creative, operations, meta.</div>
+    <div class="section-desc">Native Hivemind V1 supports research, engineering, creative, operations and meta. Remove or restore these known domains below. Arbitrary custom domains and personal are not offered. Removing a default write domain moves affected agents to a remaining domain.</div>
     <div class="domain-chips-wrap" id="domain-chips">
       <!-- Chips generated dynamically by JavaScript -->
     </div>
-    <div class="domain-input-wrap">
-      <input type="text" id="domain-input" placeholder="add custom domain..." maxlength="20">
+    <div class="domain-input-wrap" id="known-hive-domain-controls">
+      <select id="domain-input" aria-label="Restore a supported Hive domain"><option value="research">research</option><option value="engineering">engineering</option><option value="creative">creative</option><option value="operations">operations</option><option value="meta">meta</option></select>
       <button class="btn-small" onclick="addDomain()">+ add</button>
     </div>
   </div>
 
   <!-- 04 COLLECTIVE POLICY (HIVEMIND) -->
   <div class="hivemind-mode section">
-    <div class="section-label hivemind">04 — collective policy tuning</div>
-    <div class="section-desc">Fine-tune how the agents in your collective interact and share memories. These parameters control echo strength, convergence thresholds, and policy confidence gates.</div>
+    <div class="section-label hivemind">04 — collective retrieval</div>
+    <div class="section-desc">Retrieval Discount adjusts collective-provenance echo retrieval scores. Other collective policies retain their existing runtime values.</div>
     <div class="slider-grid">
-      <div class="slider-field">
+      <div class="slider-field" hidden style="display:none">
         <div class="slider-header">
           <span class="slider-name">Echo Strength</span>
           <span class="slider-value" id="echo-val">0.25</span>
@@ -1447,12 +1452,12 @@
           <span class="slider-name">Retrieval Discount</span>
           <span class="slider-value" id="discount-val">0.50</span>
         </div>
-        <p class="slider-desc">How much to discount collective memories during retrieval. Lower = less shared context, higher = more collective influence on retrieval.</p>
+        <p class="slider-desc">Discounts collective-provenance echo retrieval scores. This does not weight all shared memories.</p>
         <input type="range" id="discount-slider" min="30" max="100" value="50" step="1" oninput="updateHivemindSlider('discount', this.value)">
         <div class="slider-labels"><span>individual</span><span>collective</span></div>
       </div>
 
-      <div class="slider-field">
+      <div class="slider-field" hidden style="display:none">
         <div class="slider-header">
           <span class="slider-name">Convergence Threshold</span>
           <span class="slider-value" id="convergence-val">0.72</span>
@@ -1462,7 +1467,7 @@
         <div class="slider-labels"><span>easy</span><span>rare</span></div>
       </div>
 
-      <div class="slider-field">
+      <div class="slider-field" hidden style="display:none">
         <div class="slider-header">
           <span class="slider-name">Policy Confidence Gate</span>
           <span class="slider-value" id="confidence-val">0.60</span>
@@ -1472,7 +1477,7 @@
         <div class="slider-labels"><span>permissive</span><span>strict</span></div>
       </div>
 
-      <div class="slider-field">
+      <div class="slider-field" hidden style="display:none">
         <div class="slider-header">
           <span class="slider-name">Drift Budget</span>
           <span class="slider-value" id="drift-budget-val">0.30</span>
@@ -1482,7 +1487,7 @@
         <div class="slider-labels"><span>strict</span><span>permissive</span></div>
       </div>
 
-      <div class="slider-field">
+      <div class="slider-field" hidden style="display:none">
         <div class="slider-header">
           <span class="slider-name">Rate Limit</span>
           <span class="slider-value" id="rate-limit-val">3</span>
@@ -1497,14 +1502,15 @@
   <!-- 05 FEATURES (HIVEMIND - auto-enable hivemind toggle) -->
   <div class="hivemind-mode section">
     <div class="section-label hivemind">05 — features</div>
-    <div class="toggle-row active" id="toggle-character-hive" onclick="toggleFeature('character-hive')">
+    <div class="section-desc">Character is enabled for every generated Forge agent. Hivemind mode is required and enabled for this setup.</div>
+    <div class="toggle-row active" hidden style="display:none" id="toggle-character-hive" onclick="toggleFeature('character-hive')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Character System (per-agent)</div>
         <div class="toggle-desc">Each agent maintains its own identity with seed, drift protection, and gravity correction. Recommended ON.</div>
       </div>
     </div>
-    <div class="toggle-row active" id="toggle-hivemind-feature" onclick="toggleFeature('hivemind-feature')">
+    <div class="toggle-row active" hidden style="display:none" id="toggle-hivemind-feature" onclick="toggleFeature('hivemind-feature')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label" style="color:var(--orange)">Hivemind Mode</div>
@@ -1512,7 +1518,7 @@
       </div>
     </div>
     <div class="section-desc" style="margin-top:16px;padding:10px 12px;border-left:2px solid #b388ff;background:rgba(179,136,255,0.06)">
-      <strong style="color:#b388ff">Crystal Attunement (SRG)</strong> is configured in the shared section above — those settings affect hivemind generation as well. Bands, heartbeat bias, and crystal protection all apply to every agent in the hive.
+      <strong style="color:#b388ff">Crystal Attunement (SRG)</strong> is configured in the shared section above — those settings affect hivemind generation as well. Live band and heartbeat settings apply when SRG is enabled. OFF explicitly disables SRG; existing stored metadata remains.
     </div>
   </div>
 
@@ -1621,8 +1627,8 @@
     <div class="info-box">
       <div class="info-title">HOW TO USE THIS</div>
       <div class="solo-mode">Follow the steps in order. Copy only the section for your shell: LINUX / MACOS / WSL or WINDOWS CMD. Step 0 installs dependencies; Step 1 is the request to save; Step 2 runs offline Genesis. Only after success, Step 3 loads the exported profile and starts the server. Step 4 is the prompt; Step 5 is chat/query integration.</div>
-      <div class="solo-mode" id="out-directory-guide" style="white-space:pre-wrap;margin-top:12px"></div>
-      <div class="hivemind-mode">Fresh Native Genesis onboarding in this pass is qualified for Solo only. Collective/multi-agent fresh onboarding remains a separate lifecycle task. Existing-installation Hivemind output is unchanged.</div>
+      <div class="" id="out-directory-guide" style="white-space:pre-wrap;margin-top:12px"></div>
+      <div class="hivemind-mode">Fresh Hive: save the Genesis v2 request, run offline Genesis, prepare/create/verify the initial Hivemind policy, load the profile and start one central server. Then run the selected client. This creates the initial roster only; later admission, removal and Solo conversion are not qualified Forge operations.</div>
       Use <code>export as .md</code> at the bottom to save everything as a reference file.
     </div>
 
@@ -1630,10 +1636,10 @@
     <div id="output-install" class="output-block">
       <div class="output-header">
         <span class="output-title solo-mode">STEP 0 — INSTALL DEPENDENCIES</span>
-        <span class="output-title hivemind-mode">STEP 0 — INSTALL + START SERVER</span>
+        <span class="output-title hivemind-mode">STEP 0 — INSTALL DEPENDENCIES</span>
         <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
       </div>
-      <div class="section-desc solo-mode" id="out-install-guidance"></div>
+      <div class="section-desc " id="out-install-guidance"></div>
       <div class="output-body" id="out-install"></div>
     </div>
 
@@ -1641,10 +1647,10 @@
     <div id="output-workspace" class="output-block">
       <div class="output-header">
         <span class="output-title solo-mode">STEP 1 — NATIVE GENESIS REQUEST</span>
-        <span class="output-title hivemind-mode">STEP 1 — CREATE WORKSPACE</span>
+        <span class="output-title hivemind-mode">STEP 1 — NATIVE GENESIS V2 REQUEST</span>
         <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
       </div>
-      <div class="section-desc solo-mode" id="out-request-guidance"></div>
+      <div class="section-desc " id="out-request-guidance"></div>
       <div class="output-body" id="out-workspace"></div>
     </div>
 
@@ -1652,10 +1658,10 @@
     <div id="output-agent" class="output-block">
       <div class="output-header">
         <span class="output-title solo-mode">STEP 2 — CREATE NATIVE TORMENT ROOT</span>
-        <span class="output-title hivemind-mode">STEP 2 — CREATE AGENT + SEED</span>
+        <span class="output-title hivemind-mode">STEP 2 — CREATE NATIVE ROOT</span>
         <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
       </div>
-      <div class="section-desc solo-mode" id="out-create-guidance"></div>
+      <div class="section-desc " id="out-create-guidance"></div>
       <div class="output-body" id="out-agent"></div>
     </div>
 
@@ -1663,12 +1669,12 @@
     <div id="output-env" class="output-block">
       <div class="output-header">
         <span class="output-title solo-mode">STEP 3 — STARTUP ENVIRONMENT + START SERVER</span>
-        <span class="output-title hivemind-mode">STEP 3 — ENVIRONMENT CONFIG</span>
+        <span class="output-title hivemind-mode">STEP 3 — INITIAL POLICY + PROFILE + SERVER</span>
         <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
       </div>
-      <div class="section-desc solo-mode" id="out-startup-guidance"></div>
+      <div class="section-desc " id="out-startup-guidance"></div>
       <div class="output-body" id="out-env"></div>
-      <div class="section-desc solo-mode" id="out-credentials-guidance" style="white-space:pre-wrap"></div>
+      <div class="section-desc " id="out-credentials-guidance" style="white-space:pre-wrap"></div>
     </div>
 
     <!-- STEP 4 -->
@@ -1700,7 +1706,7 @@
           <button class="btn-copy" onclick="copyActiveLoop(this)">copy</button>
         </div>
       </div>
-      <div class="section-desc solo-mode" id="out-chat-guidance"></div>
+      <div class="section-desc " id="out-chat-guidance"></div>
       <div class="output-body" id="out-loop-curl"></div>
       <div class="output-body" id="out-loop-python" style="display:none"></div>
     </div>
@@ -1898,7 +1904,7 @@ function initializeHivemind() {
       name: 'Agent ' + (i + 1),
       role: '',
       seed: '',
-      domain: 'research'
+      domain: hivemindDomains[0]
     });
   }
   renderAgentCards();
@@ -1917,11 +1923,15 @@ function updateAgentCount(count) {
         name: 'Agent ' + (idx + 1),
         role: '',
         seed: '',
-        domain: 'research'
+        domain: hivemindDomains[0]
       });
     }
   }
   renderAgentCards();
+}
+
+function hiveHtml(value) {
+  return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 function renderAgentCards() {
@@ -1941,20 +1951,21 @@ function renderAgentCards() {
       <div class="agent-row2">
         <div class="agent-field">
           <label>AGENT NAME</label>
-          <input type="text" placeholder="e.g. Iris, Alex, Nexus" maxlength="30" value="${agent.name}" onchange="updateAgent(${i}, 'name', this.value)">
+          <input type="text" placeholder="e.g. Iris, Alex, Nexus" maxlength="30" value="${hiveHtml(agent.name)}" onchange="updateAgent(${i}, 'name', this.value)">
         </div>
         <div class="agent-field">
-          <label>ROLE</label>
-          <input type="text" placeholder="e.g. researcher, builder, creative" maxlength="30" value="${agent.role}" onchange="updateAgent(${i}, 'role', this.value)">
+          <label>CONVERSATIONAL PROMPT ROLE</label>
+          <input type="text" placeholder="e.g. researcher, builder, creative" maxlength="30" value="${hiveHtml(agent.role)}" onchange="updateAgent(${i}, 'role', this.value)">
         </div>
       </div>
       <div class="agent-field" style="margin-bottom:12px">
         <label>SEED DESCRIPTION</label>
-        <textarea placeholder="Describe this agent's core nature, perspective, and approach..." onchange="updateAgent(${i}, 'seed', this.value)">${agent.seed}</textarea>
+        <div class="section-desc">Line breaks and tabs become spaces in the Native Genesis seed declaration.</div>
+        <textarea placeholder="Describe this agent's core nature, perspective, and approach..." onchange="updateAgent(${i}, 'seed', this.value)">${hiveHtml(agent.seed)}</textarea>
       </div>
       <div class="agent-row2">
         <div class="agent-field">
-          <label>PRIMARY DOMAIN</label>
+          <label>PRIMARY DOMAIN — DEFAULT WRITE DOMAIN</label>
           <select onchange="updateAgent(${i}, 'domain', this.value)">
             ${hivemindDomains.map(d => `<option value="${d}" ${agent.domain === d ? 'selected' : ''}>${d}</option>`).join('')}
           </select>
@@ -2023,9 +2034,9 @@ function renderDomainChips() {
 function addDomain() {
   const input = document.getElementById('domain-input');
   const domain = input.value.trim().toLowerCase();
+  if (!knownHiveDomains.includes(domain)) { alert('Only supported Hive domains can be added.'); return; }
   if (domain && !hivemindDomains.includes(domain)) {
     hivemindDomains.push(domain);
-    input.value = '';
     renderDomainChips();
     renderAgentCards();
   }
@@ -2034,7 +2045,9 @@ function addDomain() {
 function removeDomain(domain) {
   const idx = hivemindDomains.indexOf(domain);
   if (idx > -1) {
+    if (hivemindDomains.length === 1) { alert('Keep at least one default write domain.'); return; }
     hivemindDomains.splice(idx, 1);
+    hivemindAgents.forEach(agent => { if (agent.domain === domain) agent.domain = hivemindDomains[0]; });
     renderDomainChips();
     renderAgentCards();
   }
@@ -2950,1324 +2963,408 @@ function generateSolo() {
   document.getElementById('output-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+let lastHivemindGeneration = null;
+const knownHiveDomains = ['research', 'engineering', 'creative', 'operations', 'meta'];
+
+function hivePortableId(value, label) {
+  if (!value || /[\x00-\x1f\x7f\\/:<>"|?*]/.test(value) || value.includes('..') ||
+      /^[ ]|[ .]$/.test(value) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)) {
+    throw new Error(label + ' must be a non-empty portable Genesis identifier.');
+  }
+  return value;
+}
+
+function buildHivemindGenesisRequest(options) {
+  if (options.agents.length < 2) throw new Error('Add at least two agents for a fresh Hive.');
+  if (!options.domains.length || new Set(options.domains).size !== options.domains.length ||
+      options.domains.some(domain => !knownHiveDomains.includes(domain))) {
+    throw new Error('Select only supported Hive domains: ' + knownHiveDomains.join(', ') + '.');
+  }
+  hivePortableId(options.workspaceId, 'Workspace ID');
+  const ids = new Set();
+  const declarations = options.agents.map(agent => {
+    if (!agent.name.trim() || agent.seed.trim().length < 20) throw new Error('Each agent needs a name and a seed of at least 20 characters.');
+    const agentId = hivePortableId(agent.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''), 'Derived agent ID');
+    const normalized = agentId.normalize('NFC').toLowerCase();
+    if (ids.has(normalized)) throw new Error('Duplicate derived agent ID: ' + agentId + '. Use distinct names.');
+    ids.add(normalized);
+    if (!options.domains.includes(agent.domain)) throw new Error('Choose a valid default write domain for ' + agent.name + '.');
+    // Existing identity defaults and existing Hive Character values, unchanged.
+    const seed = agent.seed.replace(/\r\n?|\n|\t/g, ' ');
+    if (/[\x00-\x1f\x7f]/.test(seed + agent.name)) throw new Error('Agent names and seed text cannot contain control characters.');
+    const single = buildSoloGenesisRequest({...options, agentId, name:agent.name, seed,
+      traits:[], characterEnabled:true, compression:false, drift:0.35, gravity:0.12,
+      writeThreshold:0.45, decayScale:1.0, noveltyBias:0.5, motifSensitivity:0.7});
+    single.agent.private_motif_domain_id = agent.domain;
+    return {single, agent:{...single.agent, character:single.character}};
+  });
+  const {agent, character, ...common} = declarations[0].single;
+  return {...common, version:2, workspace:{workspace_id:options.workspaceId, ordered_domains:[...options.domains]},
+    agents:declarations.map(item => item.agent).sort((a,b) => a.agent_id < b.agent_id ? -1 : a.agent_id > b.agent_id ? 1 : 0)};
+}
+
 function generateHivemind() {
-  const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
-  const teamName = document.getElementById('hive-team-name').value.trim() || 'Hivemind Collective';
-  const interactionMode = (document.querySelector('input[name="hive-interaction"]:checked') || { value: 'window' }).value;
-
-  if (!hivemindAgents.length) { alert('Add at least one agent.'); return; }
-
-  const allValid = hivemindAgents.every(a => a.name && a.seed && a.seed.length >= 20);
-  if (!allValid) { alert('All agents need a name and seed description (at least 20 chars).'); return; }
-
-  const PORT = '8787';
-  const BASE = 'http://127.0.0.1:' + PORT;
-
-  // ── STEP 0: Install + Start ──
-  let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
-  installLines += '\n\n# 2. Enable hivemind mode\nexport TORMENT_HIVEMIND_ENABLE=1';
-  installLines += '\n\n# 3. Install Anthropic SDK\npip install anthropic';
-  installLines += '\n\n# 4. Start the TORMENT server\npython -m torment_service\n\n# Server runs at ' + BASE + '\ncurl ' + BASE + '/health';
-
-  document.getElementById('out-install').textContent = installLines;
-
-  // ── STEP 1: Workspace with domains ──
-  const domainsJson = JSON.stringify(hivemindDomains);
-  document.getElementById('out-workspace').textContent =
-    'curl -X POST ' + BASE + '/workspace/create \\\n' +
-    '  -H "Content-Type: application/json" \\\n' +
-    '  -d \'{"workspace_id": "' + wsId + '", "domains": ' + domainsJson + '}\'\n\n' +
-    '# NOTE: Hivemind is enabled via env var TORMENT_HIVEMIND_ENABLE=1, not the workspace payload.';
-
-  // ── STEP 2: Create multiple agents ──
-  let agentCmds = '# Create ' + hivemindAgents.length + ' agents in collective\n\n';
-
-  hivemindAgents.forEach((agent, idx) => {
-    const agentId = agent.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const seedId = agentId + '_v1';
-
-    const payload = {
-      workspace_id: wsId,
-      agent_id: agentId,
-      seed: {
-        seed_text: agent.seed,
-        seed_id: seedId,
-        character_name: agent.name,
-        drift_correction_threshold: 0.35,
-        drift_gravity_strength: 0.12,
-        coupling_mode: "read_only",
-        coupling_strength: 0.25
-      }
-    };
-
-    agentCmds += '# Agent ' + (idx + 1) + ': ' + agent.name + '\n';
-    agentCmds += 'curl -X POST ' + BASE + '/agent/create \\\n';
-    agentCmds += '  -H "Content-Type: application/json" \\\n';
-    agentCmds += '  -d \'' + JSON.stringify(payload, null, 2) + '\'\n\n';
-  });
-
-  document.getElementById('out-agent').textContent = agentCmds.trim();
-
-  // ── STEP 3: Env Config ──
-  const echoVal = (parseInt(document.getElementById('echo-slider').value) / 100).toFixed(2);
-  const discountVal = (parseInt(document.getElementById('discount-slider').value) / 100).toFixed(2);
-  const convergenceVal = (parseInt(document.getElementById('convergence-slider').value) / 100).toFixed(2);
-  const confidenceVal = (parseInt(document.getElementById('confidence-slider').value) / 100).toFixed(2);
-  const driftBudgetVal = (parseInt(document.getElementById('drift-budget-slider').value) / 100).toFixed(2);
-  const rateLimitVal = document.getElementById('rate-limit-slider').value;
-
-  let envOutput = '# ── Hivemind Configuration ──\n';
-  envOutput += '# Linux / Mac / WSL — paste into terminal before starting server\n\n';
-  envOutput += '# Core feature flags\n';
-  envOutput += 'export TORMENT_PROFILE=companion\n';
-  envOutput += 'export TORMENT_CHARACTER_ENABLE=1\n';
-  envOutput += 'export TORMENT_COMPRESS_ENABLE=0\n';
-  envOutput += 'export TORMENT_HIVEMIND_ENABLE=1\n\n';
-
-  // Embeddings config (from shared section 06)
-  envOutput += '# Embeddings (real embeddings strongly recommended for convergence)\n';
-  if (selectedEmbed === 'hash') {
-    envOutput += 'export TORMENT_EMBED_PROVIDER=hash\n';
-    envOutput += '# WARNING: hash embeddings produce near-orthogonal vectors.\n';
-    envOutput += '# Convergence detection will be very weak. Use st or ollama for production.\n\n';
-  } else if (selectedEmbed === 'st') {
-    const stModel = document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5';
-    const stDevice = document.getElementById('st-device')?.value || 'cpu';
-    envOutput += 'export TORMENT_EMBED_PROVIDER=st\n';
-    envOutput += 'export TORMENT_EMBED_MODEL=' + stModel + '\n';
-    envOutput += 'export TORMENT_EMBED_DEVICE=' + stDevice + '\n\n';
-  } else if (selectedEmbed === 'ollama') {
-    const ollamaModel = document.getElementById('ollama-embed-model')?.value || 'nomic-embed-text';
-    const ollamaUrl = document.getElementById('ollama-url')?.value || 'http://127.0.0.1:11434';
-    envOutput += 'export TORMENT_EMBED_PROVIDER=ollama\n';
-    envOutput += 'export TORMENT_OLLAMA_MODEL=' + ollamaModel + '\n';
-    envOutput += 'export TORMENT_OLLAMA_URL=' + ollamaUrl + '\n\n';
-  }
-
-  envOutput += '# Collective policy parameters\n';
-  envOutput += 'export TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT=' + discountVal + '\n';
-  envOutput += '# Echo strength, convergence threshold, confidence gate, drift budget,\n';
-  envOutput += '# and rate limit are configured in collective_policy.py defaults.\n';
-  envOutput += '# Current settings: echo=' + echoVal + ', convergence=' + convergenceVal + ',\n';
-  envOutput += '# confidence=' + confidenceVal + ', drift_budget=' + driftBudgetVal + ', rate=' + rateLimitVal + '/hr\n\n';
-
-  // Crystal Attunement (SRG) — shared toggle, applies to hivemind too
-  if (features.srg) {
-    envOutput += '# Crystal Attunement (SRG)\n';
-    envOutput += 'export TORMENT_SRG_ENABLE=1\n';
-    const srgBands = document.getElementById('srg-bands')?.value || '5';
-    if (srgBands !== '5') {
-      envOutput += 'export TORMENT_SRG_BANDS=' + srgBands + '\n';
-    }
-    const hbBias = document.getElementById('srg-heartbeat')?.value;
-    if (hbBias === 'deep') {
-      envOutput += 'export TORMENT_SRG_CLASS_A_RATIO=0.6\n';
-      envOutput += '# Heartbeat bias: deep (60% Class A).\n';
-    } else if (hbBias === 'active') {
-      envOutput += 'export TORMENT_SRG_CLASS_A_RATIO=0.1\n';
-      envOutput += '# Heartbeat bias: active (90% Class B).\n';
-    }
-    if (!features.crystal) {
-      envOutput += 'export TORMENT_SRG_CRYSTAL=0\n';
-      envOutput += '# Crystal protection disabled.\n';
-    }
-    envOutput += '\n';
-  }
-
-  // LLM config (from shared section 07)
-  envOutput += '# Your LLM\n';
-  if (selectedModel === 'claude') {
-    envOutput += 'export ANTHROPIC_API_KEY=your_key_here\n\n';
-  } else if (selectedModel === 'openai') {
-    envOutput += 'export OPENAI_API_KEY=your_key_here\n';
-    envOutput += 'export OPENAI_MODEL=' + (document.getElementById('openai-model')?.value || 'gpt-4o') + '\n\n';
-  } else if (selectedModel === 'ollama') {
-    envOutput += 'export OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
-    envOutput += 'export OLLAMA_MODEL=' + (document.getElementById('ollama-model')?.value || 'qwen3:32b') + '\n\n';
-  } else {
-    envOutput += 'export LLM_BASE_URL=' + (document.getElementById('other-url')?.value || 'http://localhost:1234/v1') + '\n';
-    envOutput += 'export LLM_MODEL=' + (document.getElementById('other-model')?.value || 'your-model') + '\n\n';
-  }
-
-  envOutput += '# ────────────────────────────────────────────────────────────────────\n\n';
-  envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
-  envOutput += 'set TORMENT_PROFILE=companion\n';
-  envOutput += 'set TORMENT_CHARACTER_ENABLE=1\n';
-  envOutput += 'set TORMENT_COMPRESS_ENABLE=0\n';
-  envOutput += 'set TORMENT_HIVEMIND_ENABLE=1\n';
-  if (selectedEmbed === 'st') {
-    envOutput += 'set TORMENT_EMBED_PROVIDER=st\n';
-    envOutput += 'set TORMENT_EMBED_MODEL=' + (document.getElementById('st-model')?.value || 'BAAI/bge-small-en-v1.5') + '\n';
-    envOutput += 'set TORMENT_EMBED_DEVICE=' + (document.getElementById('st-device')?.value || 'cpu') + '\n';
-  } else if (selectedEmbed === 'ollama') {
-    envOutput += 'set TORMENT_EMBED_PROVIDER=ollama\n';
-    envOutput += 'set TORMENT_OLLAMA_MODEL=' + (document.getElementById('ollama-embed-model')?.value || 'nomic-embed-text') + '\n';
-    envOutput += 'set TORMENT_OLLAMA_URL=' + (document.getElementById('ollama-url')?.value || 'http://127.0.0.1:11434') + '\n';
-  } else {
-    envOutput += 'set TORMENT_EMBED_PROVIDER=hash\n';
-  }
-  envOutput += 'set TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT=' + discountVal + '\n';
-  if (features.srg) {
-    envOutput += 'set TORMENT_SRG_ENABLE=1\n';
-    const srgBandsW = document.getElementById('srg-bands')?.value || '5';
-    if (srgBandsW !== '5') envOutput += 'set TORMENT_SRG_BANDS=' + srgBandsW + '\n';
-    const hbBiasW = document.getElementById('srg-heartbeat')?.value;
-    if (hbBiasW === 'deep') envOutput += 'set TORMENT_SRG_CLASS_A_RATIO=0.6\n';
-    else if (hbBiasW === 'active') envOutput += 'set TORMENT_SRG_CLASS_A_RATIO=0.1\n';
-    if (!features.crystal) envOutput += 'set TORMENT_SRG_CRYSTAL=0\n';
-  }
-  if (selectedModel === 'claude') {
-    envOutput += 'set ANTHROPIC_API_KEY=your_key_here\n';
-  } else if (selectedModel === 'openai') {
-    envOutput += 'set OPENAI_API_KEY=your_key_here\n';
-  } else if (selectedModel === 'ollama') {
-    envOutput += 'set OLLAMA_HOST=' + (document.getElementById('ollama-host')?.value || 'http://127.0.0.1:11434') + '\n';
-    envOutput += 'set OLLAMA_MODEL=' + (document.getElementById('ollama-model')?.value || 'qwen3:32b') + '\n';
-  }
-
-  document.getElementById('out-env').textContent = envOutput.trim();
-
-  // ── STEP 4: System Prompts ──
-  let promptText = '# Hivemind Collective System Prompts\n\n';
-  promptText += '## Team: ' + teamName + '\n';
-  promptText += 'Domains: ' + hivemindDomains.join(', ') + '\n';
-  promptText += 'Agents: ' + hivemindAgents.length + '\n\n';
-
-  hivemindAgents.forEach((agent, idx) => {
-    promptText += '\n--- Agent ' + (idx + 1) + ': ' + agent.name + ' ---\n';
-    promptText += 'Role: ' + agent.role + '\n';
-    promptText += 'Domain: ' + agent.domain + '\n';
-    promptText += 'Nature:\n' + agent.seed + '\n';
-  });
-
-  document.getElementById('out-prompts').textContent = promptText.trim();
-
-  // ── STEP 5: Integration ──
-  // Build real agent IDs for examples
-  const agentIds = hivemindAgents.map(a =>
-    a.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
-  );
-  const exAgent1 = agentIds[0] || 'agent_1';
-  const exAgent2 = agentIds[1] || 'agent_2';
-  const exAgent3 = agentIds.length > 2 ? agentIds[2] : agentIds[0];
-
-  let integrationText = '# ── Hivemind Integration Workflow ──\n';
-  integrationText += '# Each agent has its own memory. The collective field detects convergence.\n';
-  integrationText += '# Interaction mode: ' + (interactionMode === 'window' ? 'switch (agent-window style)' : 'broadcast (all-agents style)') + '\n\n';
-
-  integrationText += '# ── 1. Ingest for each agent (per conversation turn) ──\n';
-  integrationText += '# Each agent gets its own ingest call with domain_id set.\n';
-  integrationText += '# step MUST increment each turn (1, 2, 3, ...).\n\n';
-
-  hivemindAgents.forEach((agent, idx) => {
-    const aid = agentIds[idx];
-    integrationText += '# ' + agent.name + ' (' + agent.role + ')\n';
-    integrationText += 'curl -X POST ' + BASE + '/agent/ingest \\\n';
-    integrationText += '  -H "Content-Type: application/json" \\\n';
-    integrationText += '  -d \'{\n';
-    integrationText += '    "workspace_id": "' + wsId + '",\n';
-    integrationText += '    "agent_id": "' + aid + '",\n';
-    integrationText += '    "text": "[2-6 line summary of what ' + agent.name + ' observed]",\n';
-    integrationText += '    "step": 1,\n';
-    integrationText += '    "domain_id": "' + agent.domain + '"\n';
-    integrationText += '  }\'\n\n';
-  });
-
-  integrationText += '# ── 2. Query an agent\'s memory (before it responds) ──\n';
-  integrationText += 'curl -X POST ' + BASE + '/agent/query \\\n';
-  integrationText += '  -H "Content-Type: application/json" \\\n';
-  integrationText += '  -d \'{\n';
-  integrationText += '    "workspace_id": "' + wsId + '",\n';
-  integrationText += '    "agent_id": "' + exAgent1 + '",\n';
-  integrationText += '    "query": "[current user message or task]",\n';
-  integrationText += '    "top_k": 8\n';
-  integrationText += '  }\'\n\n';
-
-  integrationText += '# ── 3. Monitor collective field ──\n';
-  integrationText += '# Check field status (packet/event counts, active agents)\n';
-  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/status\n\n';
-  integrationText += '# View convergence events\n';
-  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/events\n\n';
-  integrationText += '# View a specific event\n';
-  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/events/{event_id}\n\n';
-
-  integrationText += '# ── 4. Echo re-ingestion (manual, operator-triggered) ──\n';
-  integrationText += '# When convergence detected, reingest into a target agent:\n';
-  integrationText += 'curl -X POST ' + BASE + '/workspace/' + wsId + '/collective/reingest \\\n';
-  integrationText += '  -H "Content-Type: application/json" \\\n';
-  integrationText += '  -d \'{\n';
-  integrationText += '    "agent_id": "' + exAgent3 + '",\n';
-  integrationText += '    "event_id": "cev_...",\n';
-  integrationText += '    "echo_strength_override": 0.25\n';
-  integrationText += '  }\'\n';
-  integrationText += '# Runs through 7-gate policy engine. Echo is terminal (cannot re-emit).\n\n';
-
-  integrationText += '# ── 5. Check agent health ──\n';
-  integrationText += 'curl "' + BASE + '/agent/' + exAgent1 + '/character/state?workspace_id=' + wsId + '"\n\n';
-
-  integrationText += '# ── 6. Proposal bridge status ──\n';
-  integrationText += 'curl ' + BASE + '/workspace/' + wsId + '/collective/proposals/status\n\n';
-
-  integrationText += '# ════════════════════════════════════════════════════════════════\n';
-  integrationText += '# Python Hivemind Client\n';
-  integrationText += '# ════════════════════════════════════════════════════════════════\n\n';
-
-  integrationText += 'import requests\n\n';
-  integrationText += 'class HivemindClient:\n';
-  integrationText += '    def __init__(self, base_url="' + BASE + '", workspace_id="' + wsId + '"):\n';
-  integrationText += '        self.base = base_url\n';
-  integrationText += '        self.ws = workspace_id\n\n';
-
-  integrationText += '    def ingest(self, agent_id, text, step, domain_id):\n';
-  integrationText += '        """Store a memory for one agent. Automatically emits resonance packet."""\n';
-  integrationText += '        return requests.post(f"{self.base}/agent/ingest", json={\n';
-  integrationText += '            "workspace_id": self.ws, "agent_id": agent_id,\n';
-  integrationText += '            "text": text, "step": step, "domain_id": domain_id,\n';
-  integrationText += '        }).json()\n\n';
-
-  integrationText += '    def query(self, agent_id, query, top_k=8):\n';
-  integrationText += '        """Retrieve memories + character context for one agent."""\n';
-  integrationText += '        return requests.post(f"{self.base}/agent/query", json={\n';
-  integrationText += '            "workspace_id": self.ws, "agent_id": agent_id,\n';
-  integrationText += '            "query": query, "top_k": top_k,\n';
-  integrationText += '        }).json()\n\n';
-
-  integrationText += '    def check_convergence(self):\n';
-  integrationText += '        """Get all convergence events in the workspace."""\n';
-  integrationText += '        return requests.get(f"{self.base}/workspace/{self.ws}/collective/events").json()\n\n';
-
-  integrationText += '    def reingest(self, agent_id, event_id, strength=None):\n';
-  integrationText += '        """Reingest a convergence event as echo into target agent."""\n';
-  integrationText += '        payload = {"agent_id": agent_id, "event_id": event_id}\n';
-  integrationText += '        if strength is not None:\n';
-  integrationText += '            payload["echo_strength_override"] = strength\n';
-  integrationText += '        return requests.post(\n';
-  integrationText += '            f"{self.base}/workspace/{self.ws}/collective/reingest",\n';
-  integrationText += '            json=payload,\n';
-  integrationText += '        ).json()\n\n';
-
-  integrationText += '    def status(self):\n';
-  integrationText += '        """Get collective field status."""\n';
-  integrationText += '        return requests.get(f"{self.base}/workspace/{self.ws}/collective/status").json()\n\n';
-
-  integrationText += '# Usage:\n';
-  integrationText += '# hive = HivemindClient()\n';
-  integrationText += '# hive.ingest("' + exAgent1 + '", "Found a key insight...", step=1, domain_id="' + hivemindAgents[0].domain + '")\n';
-  integrationText += '# events = hive.check_convergence()\n';
-  integrationText += '# hive.reingest("' + exAgent3 + '", events[0]["event_id"])\n\n';
-
-  integrationText += '# ════════════════════════════════════════════════════════════════\n';
-  integrationText += '# Reference: Convergence Event Shape\n';
-  integrationText += '# ════════════════════════════════════════════════════════════════\n';
-  integrationText += '# {\n';
-  integrationText += '#   "event_id": "cev_abc123",\n';
-  integrationText += '#   "workspace_id": "' + wsId + '",\n';
-  integrationText += '#   "domain_id": "research",\n';
-  integrationText += '#   "participating_agents": ["' + exAgent1 + '", "' + exAgent2 + '"],\n';
-  integrationText += '#   "confidence": 0.78,\n';
-  integrationText += '#   "semantic_overlap": 0.85,\n';
-  integrationText += '#   "phase_alignment": 0.65,\n';
-  integrationText += '#   "symbol_alignment": 0.70,\n';
-  integrationText += '#   "dominant_motifs": ["oscillator-patterns", "memory-structure"],\n';
-  integrationText += '#   "summary": "Both agents independently noted structural parallels...",\n';
-  integrationText += '#   "policy_flags": {"reingestable": true, "proposal_eligible": true}\n';
-  integrationText += '# }\n';
-
-  document.getElementById('out-loop-curl').textContent = integrationText.trim();
-
-  // ── STEP 5 Python tab: Full runnable hivemind script ──
-  // Build LLM client code based on selectedModel (same approach as SOLO mode)
-  let hivePyImport, hivePyClientSetup, hivePyCall;
-
-  if (selectedModel === 'claude') {
-    hivePyImport = 'import anthropic';
-    hivePyClientSetup =
-      '    client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY env var';
-    hivePyCall =
-      '        resp = client.messages.create(\n' +
-      '            model="claude-sonnet-4-6",\n' +
-      '            max_tokens=1024,\n' +
-      '            system=system_prompt,\n' +
-      '            messages=conversation,\n' +
-      '        )\n' +
-      '        return resp.content[0].text';
-  } else if (selectedModel === 'openai') {
-    hivePyImport = 'from openai import OpenAI';
-    hivePyClientSetup =
-      '    client = OpenAI()  # uses OPENAI_API_KEY env var';
-    hivePyCall =
-      '        resp = client.chat.completions.create(\n' +
-      '            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
-      '        )\n' +
-      '        return resp.choices[0].message.content or ""';
-  } else if (selectedModel === 'ollama') {
-    const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
-    hivePyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
-    hivePyClientSetup =
-      '    client = OpenAI(\n' +
-      '        base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
-      '        api_key="ollama",\n' +
-      '    )';
-    hivePyCall =
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + olm + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
-      '            temperature=0.85,\n' +
-      '        )\n' +
-      '        return resp.choices[0].message.content or ""';
-  } else {
-    const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
-    const oModel = document.getElementById('other-model')?.value || 'your-model';
-    hivePyImport = 'from openai import OpenAI';
-    hivePyClientSetup =
-      '    client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))';
-    hivePyCall =
-      '        resp = client.chat.completions.create(\n' +
-      '            model="' + oModel + '",\n' +
-      '            messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
-      '        )\n' +
-      '        return resp.choices[0].message.content or ""';
-  }
-
-  // Build agents config as Python dict
-  const pyEscape = (s) => String(s ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"');
-  const pyTripleEscape = (s) => String(s ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"""/g, '\\"""');
-  const pyAgentsDict = hivemindAgents.map((agent, idx) => {
-    const aid = agentIds[idx];
-    const safeName = pyEscape(agent.name || 'Agent');
-    const safeRole = pyEscape(agent.role || 'agent');
-    const safeDomain = pyEscape(agent.domain || 'research');
-    const safeSeedBlock = pyTripleEscape(agent.seed || '');
-    const safeSeedJson = JSON.stringify(String(agent.seed || ''));
-    return `    "${aid}": {
-        "name": "${safeName}",
-        "role": "${safeRole}",
-        "domain_id": "${safeDomain}",
-        "seed": {
-            "seed_text": ${safeSeedJson},
-            "seed_id": "${aid}_v1",
-            "character_name": "${safeName}",
-            "drift_correction_threshold": 0.35,
-            "drift_gravity_strength": 0.12,
-            "coupling_mode": "read_only",
-            "coupling_strength": 0.25,
-        },
-        "system_prompt": textwrap.dedent("""\
-You are ${safeName}, a ${safeRole} in a collective field.
-
-{collective_roster}
-
-{character_context}
-
-${safeSeedBlock}
-
-You must follow these output rules:
-  - Speak only as ${safeName}.
-  - Do not simulate a full dialogue scene.
-  - Do not write lines for the other participants in the roster unless the user explicitly asks you to quote or paraphrase them.
-  - Do not invent any other speaker or participant.
-  - If asked how you differ from another agent, describe the difference from ${safeName}'s perspective only.
-  - Keep your reply as a single bounded response, not a script.
-
-{memory_context}
-
-{drift_note}
-"""),
-    }`;
-  }).join(',\n\n');
-
-  const pyDomainsList = JSON.stringify(hivemindDomains);
-  const pyRoster = hivemindAgents.map(a => `  - ${a.name} — ${a.role || 'agent'}`).join('\n');
-  const initialAgentId = agentIds[0] || 'agent_1';
-
-  let pyScript;
-  // <<< BEGIN hivemind_branch_dispatch >>>
-  if (interactionMode === 'broadcast') {
-    // <<< BEGIN broadcast >>>
-    pyScript = `"""
-TORMENT Hivemind — ${teamName}
-Run: python hivemind_${wsId}.py
-
-First run creates workspace + agents automatically.
-Server must be running first (python -m torment_service).
-
-Set environment variables before running (see Step 3).
-"""
-import json
-import os
-import sys
-import textwrap
-import time
-import requests
-${hivePyImport}
-
-TORMENT = "${BASE}"
-WS = "${wsId}"
-DOMAINS = ${pyDomainsList}
-TOP_K = 8
-
-COLLECTIVE_ROSTER = textwrap.dedent("""\
-[Collective roster]
-There are exactly ${hivemindAgents.length} participants in this collective:
-${pyRoster}
-
-Never invent, rename, or introduce any additional participant.
-Never output dialogue for any participant who is not explicitly named above.
-""")
-
-AGENTS = {
-${pyAgentsDict}
+  document.getElementById('output-section').classList.remove('visible');
+  lastHivemindGeneration = null;
+  try {
+    const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
+    soloEnvLine('cmd', 'TORMENT_WORKSPACE', wsId); // Same shell-context validation as generated environment values.
+    const team = document.getElementById('hive-team-name').value.trim() || 'Hivemind Collective';
+    const mode = document.querySelector('input[name="hive-interaction"]:checked').value;
+    if (!['window','basic_hive','broadcast'].includes(mode)) throw new Error('Select a supported interaction mode.');
+    const request = buildHivemindGenesisRequest({workspaceId:wsId, dataRoot:document.getElementById('hive-data-root').value,
+      agents:hivemindAgents, domains:hivemindDomains, provider:selectedEmbed,
+      model:document.getElementById(selectedEmbed === 'ollama' ? 'ollama-embed-model' : 'st-model').value,
+      dimension:document.getElementById(selectedEmbed === 'ollama' ? 'ollama-embed-dimension' : 'st-dimension').value});
+    const embedVars = soloEmbeddingVars(request.representation_lane, document.getElementById('st-device').value, document.getElementById('ollama-url').value);
+    const model = selectedModel === 'claude' ? 'claude-sonnet-4-6' : document.getElementById(
+      selectedModel === 'openai' ? 'openai-model' : selectedModel === 'ollama' ? 'ollama-model' : 'other-model').value.trim();
+    const host = selectedModel === 'ollama' ? document.getElementById('ollama-host').value.trim() :
+      selectedModel === 'other' ? document.getElementById('other-url').value.trim() : '';
+    if (!model || (['ollama','other'].includes(selectedModel) && !/^https?:\/\//.test(host))) throw new Error('Select a model and a valid provider URL.');
+    const heartbeat = document.getElementById('srg-heartbeat').value;
+    const vars = [...embedVars,
+      {key:'TORMENT_CHARACTER_ENABLE',val:'1'}, {key:'TORMENT_CHARACTER_DRIFT_CHECK_EVERY',val:'25'},
+      {key:'TORMENT_COMPRESS_ENABLE',val:'0'}, {key:'TORMENT_HIVEMIND_ENABLE',val:'1'},
+      {key:'TORMENT_COLLECTIVE_RETRIEVAL_DISCOUNT',val:(Number(document.getElementById('discount-slider').value)/100).toFixed(2)},
+      {key:'TORMENT_SRG_ENABLE',val:features.srg ? '1':'0'}, {key:'TORMENT_SRG_BANDS',val:document.getElementById('srg-bands').value},
+      {key:'TORMENT_SRG_CLASS_A_RATIO',val:heartbeat === 'deep' ? '0.6' : heartbeat === 'active' ? '0.1':'0.25'},
+      {key:'TORMENT_SRG_CRYSTAL',val:'1'}];
+    for (const key of ['THINKING_ADVISORY','SPINE_ENABLE','IDENTITY_SENSITIVE','SRG_COGNITION','ARCHIVE_RECALL','LIVE_SOCIAL','CONTEXTUAL_ABSTENTION']) vars.push({key:'TORMENT_'+key,val:'0'});
+    const hiveCredentials = selectedModel === 'claude' ? [{key:'ANTHROPIC_API_KEY',val:'your_key_here'}] :
+      selectedModel === 'openai' ? [{key:'OPENAI_API_KEY',val:'your_key_here'},{key:'OPENAI_MODEL',val:model}] :
+      selectedModel === 'ollama' ? [{key:'OLLAMA_HOST',val:host},{key:'OLLAMA_MODEL',val:model}] :
+      [{key:'LLM_BASE_URL',val:host},{key:'LLM_MODEL',val:model}];
+    vars.push(...hiveCredentials);
+    // Validate command contexts before making any output visible.
+    [...vars,{key:'TORMENT_DATA_DIR',val:request.data_root_identity}].forEach(v => soloEnvLine('cmd',v.key,v.val));
+    const agents = hivemindAgents.map(agent => ({...agent,agent_id:agent.name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')}));
+    const config = {workspace:wsId,agents,mode,provider:selectedModel,model,host,url:'http://127.0.0.1:8787'};
+    let install = '# Run in the repository with the torment environment active.\npip install -r requirements.txt\n';
+    if (selectedEmbed === 'st') install += 'pip install sentence-transformers\n# First use may require model acquisition from Hugging Face.\n# Only after the complete model is cached, HF_HUB_OFFLINE=1 supports offline use.\n';
+    if (selectedEmbed === 'ollama') install += '# Start the selected Ollama embedding server with its model already available.\n';
+    install += selectedModel === 'claude' ? 'pip install anthropic\n' : 'pip install openai\n';
+    document.getElementById('out-install').textContent = ['posix','cmd'].map(shell => soloShellHeading(shell) + (shell === 'cmd' ? install.replace(/^# /gm,':: ') : install)).join('\n\n');
+    document.getElementById('out-workspace').textContent = JSON.stringify(request,null,2);
+    document.getElementById('out-agent').textContent = soloGenesisCreateCommands(embedVars);
+    document.getElementById('out-env').textContent = ['posix','cmd'].map(shell => {
+      const root = shell === 'cmd' ? '"%TORMENT_DATA_DIR%"' : '"$TORMENT_DATA_DIR"';
+      const workspace = shell === 'cmd' ? '"'+wsId+'"' : "'"+wsId.replace(/'/g,"'\\''")+"'";
+      const policy = ['prepare','create','verify'].map(command => 'python -m torment_service.domain_policy_setup '+command+
+        ' --data-root '+root+' --workspace '+workspace+' --posture hivemind_initial_v1 --request torment_hive_policy_request.json');
+      const commands = [...policy];
+      if (shell === 'cmd') commands.push('set "TORMENT_PROFILE="','set "TORMENT_ADMISSION_DESCRIPTOR_PATH="','set "TORMENT_DEPLOYMENT_PROFILE_JSON="',
+        'for /f "delims=" %P in (\'python -X utf8 -c "import sys,json; print(json.dumps(json.load(open(sys.argv[1]))))" torment_genesis_profile.json\') do @set "TORMENT_DEPLOYMENT_PROFILE_JSON=%P"');
+      else commands.push('unset TORMENT_PROFILE TORMENT_ADMISSION_DESCRIPTOR_PATH','export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"');
+      commands.push(...vars.map(v => soloEnvLine(shell,v.key,v.val).trimEnd()),'python -m torment_service');
+      return soloShellHeading(shell) + (shell === 'cmd' ? ':: ' : '# ') + 'Initial setup only; replace artifact filenames with quoted absolute paths outside the data root.\n'+
+        soloEnvLine(shell,'TORMENT_DATA_DIR',request.data_root_identity) + commands.join(shell === 'cmd' ? ' && ^\n' : ' && \\\n');
+    }).join('\n\n');
+    const guidance = soloSetupGuidance();
+    Object.entries(guidance).forEach(([id,text]) => { document.getElementById(id).textContent = text.replaceAll('torment_solo_policy_request.json','torment_hive_policy_request.json').replaceAll('my-character','my-hive'); });
+    document.getElementById('out-startup-guidance').textContent = 'After Genesis succeeds, run initial policy prepare/create/verify, load the exported profile and environment, then start one central server. Use only your shell section. Replace artifact filenames with quoted absolute paths. For later restarts, load the same profile and environment and start the service; omit the initial policy commands.';
+    document.getElementById('out-credentials-guidance').textContent = 'Set provider credentials only in the client terminal; never enter them in Forge or save actual keys in the export. '+
+      (selectedModel === 'other' ? 'Use LLM_API_KEY if the custom API needs a key. ' : selectedModel === 'ollama' ? 'Local Ollama needs no provider API key. ' : 'Replace your_key_here in the selected provider setting. ')+
+      'TORMENT authentication is separate: set TORMENT_API_KEY for an installation configured to accept X-API-Key. The client otherwise assumes compatible local trust settings.';
+    document.getElementById('out-chat-guidance').textContent = 'After server health succeeds, save the Python block as hivemind_client.py in the setup-artifact directory. Run it from that directory in another terminal with torment active and the selected provider credentials. '+
+      (mode === 'basic_hive' ? 'Run python hivemind_client.py --agent '+agents[0].agent_id+'. Each terminal binds one explicit agent; all use the same server.' :
+       mode === 'window' ? 'Run python hivemind_client.py. /switch <agent_id> clears local conversation history; persistent TORMENT memory remains.' :
+       'Run python hivemind_client.py. Broadcast visits agents sequentially in the displayed order and stops on failure. /retry resumes pending storage and the remaining agents.')+
+      ' Keep the process open to retry pending writes; /abandon discards unfinished work.';
+    document.getElementById('out-prompts').textContent = 'Conversational prompt roles do not grant server permissions. Character context comes from TORMENT query results.\n\n'+agents.map(a => a.name+' — prompt role: '+a.role+'; default write domain: '+a.domain).join('\n');
+    document.getElementById('out-loop-python').textContent = buildHivemindClient(config);
+    const query = JSON.stringify({workspace_id:wsId,agent_id:agents[0].agent_id,domain_id:agents[0].domain,query:'[current user message]',top_k:8});
+    const write = JSON.stringify({workspace_id:wsId,agent_id:agents[0].agent_id,domain_id:agents[0].domain,scope:'private',text:'[completed response summary]',step:1});
+    const quote = text => "'"+text.replace(/'/g,"'\\''")+"'";
+    document.getElementById('out-loop-curl').textContent = '# POSIX reference only. Use the Python client for retained pending writes and retries.\n'+
+      '# Query must succeed before the provider call. Each intended agent write has its own key.\n'+
+      'curl --fail-with-body '+config.url+'/agent/query -H "Content-Type: application/json" -d '+quote(query)+'\n'+
+      '# Retain the exact payload and key for retry; choose a new key for a new write or different agent.\n'+
+      'curl --fail-with-body '+config.url+'/agent/ingest -H "Content-Type: application/json" -H "Idempotency-Key: <unique-key-for-this-agent-write>" -d '+quote(write)+'\n'+
+      '# Add X-API-Key when your TORMENT installation requires it. Check stored=true; a 409 is a refusal.';
+    document.getElementById('out-response').textContent = JSON.stringify({hits:[{summary:'Retrieved memory',scope:'private',domain_id:agents[0].domain}],character_context:{seed_preamble:'Character context',recommendations:[],drift_score:0,drift_summary:''},collective_context:{recent_events:[]}},null,2);
+    document.getElementById('output-voice').style.display='none';
+    lastHivemindGeneration = {team,config};
+    document.getElementById('output-section').classList.add('visible');
+    document.getElementById('output-section').scrollIntoView({behavior:'smooth'});
+  } catch (error) { alert(error.message); }
 }
 
-def llm_call(system_prompt, conversation):
-${hivePyClientSetup}
-    try:
-${hivePyCall}
-    except Exception as e:
-        return f"[LLM ERROR] {e}"
+function exportHivemindSetup() {
+  if (!lastHivemindGeneration) { alert('Generate a valid fresh Hive setup first.'); return; }
+  const {team,config} = lastHivemindGeneration;
+  let md = '# '+team+' — Fresh Native Hivemind\n\nThis generator creates the initial roster. Adding/removing agents later or converting an existing Solo root is not yet a qualified Forge operation. Existing historical legacy installations keep their separate lifecycle.\n\n';
+  md += 'Each agent has private memory; the workspace has shared domain lanes. Hivemind emits collective packets/events. Echo provenance does not give direct access to another agent\'s private memory.\n\n';
+  md += 'Client display order: '+config.agents.map(a=>a.agent_id).join(' → ')+'. Genesis uses canonical identity order.\n\n';
+  md += document.getElementById('out-directory-guide').textContent+'\n\n';
+  const blocks = [['0. Install dependencies','out-install','shells','out-install-guidance'],
+    ['1. Save Genesis v2 request','out-workspace','json','out-request-guidance'],
+    ['2. Create Native Genesis','out-agent','shells','out-create-guidance'],
+    ['3. Initial policy, profile and server','out-env','shells','out-startup-guidance'],
+    ['4. Conversational prompt roles','out-prompts','',''],
+    ['5. Run the selected client','out-loop-python','python','out-chat-guidance'],
+    ['POSIX request reference','out-loop-curl','bash','']];
+  for (const [title,id,lang,guidance] of blocks) {
+    md += '\n## '+title+'\n\n'+(guidance ? document.getElementById(guidance).textContent+'\n\n':'');
+    const value = document.getElementById(id).textContent;
+    if (lang === 'shells') {
+      const [posix,cmd] = value.split(soloShellHeading('cmd'));
+      md += '### LINUX / MACOS / WSL\n\n```bash\n'+posix.trim()+'\n```\n\n### WINDOWS CMD\n\n```bat\n'+soloShellHeading('cmd')+cmd.trim()+'\n```\n';
+    } else {
+      // A longer fence keeps arbitrary natural-language backticks as data.
+      const runs = [...value.matchAll(/`+/g)].map(m=>m[0].length);
+      const fence = '`'.repeat(Math.max(3,...runs.map(n=>n+1)));
+      md += fence+lang+'\n'+value+'\n'+fence+'\n';
+    }
+  }
+  md += '\n'+document.getElementById('out-credentials-guidance').textContent+'\n';
+  downloadFile(md,'hivemind_'+config.workspace+'_setup.md');
+}
 
-def t_post(path, payload):
-    r = requests.post(f"{TORMENT}{path}", json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()
-
-def t_get(path):
-    r = requests.get(f"{TORMENT}{path}", timeout=60)
-    r.raise_for_status()
-    return r.json()
-
-def t_query(agent_id, query, top_k=TOP_K):
-    return t_post("/agent/query", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "query": query,
-        "top_k": top_k,
-    })
-
-def t_ingest(agent_id, text, step, domain_id):
-    return t_post("/agent/ingest", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "text": text,
-        "step": step,
-        "domain_id": domain_id,
-    })
-
-def t_health():
-    return t_get("/health")
-
-def setup():
-    try:
-        t_health()
-    except Exception:
-        print("ERROR: TORMENT server not reachable at", TORMENT)
-        print("Start it first: python -m torment_service")
-        sys.exit(1)
-
-    try:
-        t_post("/workspace/create", {"workspace_id": WS, "domains": DOMAINS})
-    except requests.HTTPError as e:
-        if getattr(e.response, "status_code", None) != 409:
-            raise
-
-    for agent_id, agent in AGENTS.items():
-        try:
-            t_post("/agent/create", {
-                "workspace_id": WS,
-                "agent_id": agent_id,
-                "seed": agent["seed"],
-            })
-        except requests.HTTPError as e:
-            if getattr(e.response, "status_code", None) != 409:
-                raise
-
-def format_memories(hits, top_k):
-    if not hits:
-        return ""
-    lines = ["[Retrieved memories]"]
-    for i, h in enumerate(hits[:top_k], 1):
-        summary = (h.get("summary") or "").strip().replace("\\n", " ")
-        score = h.get("final_score", h.get("score", 0.0))
-        tier = h.get("character_tier", "")
-        prov = h.get("provenance_type", "")
-        tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
-        lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
-    return "\\n".join(lines)
-
-def format_character_context(char_ctx):
-    if not char_ctx:
-        return ""
-    parts = []
-    preamble = char_ctx.get("seed_preamble", "")
-    if preamble:
-        parts.append(f"[Core identity]\\n{preamble}")
-    recs = char_ctx.get("recommendations", [])
-    if recs:
-        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))
-    return "\\n\\n".join(parts)
-
-def format_drift_note(char_ctx):
-    if not isinstance(char_ctx, dict):
-        return ""
-    ds = char_ctx.get("drift_score", 0.0)
-    summary = char_ctx.get("drift_summary", "")
-    if abs(ds) < 0.1 and not summary:
-        return ""
-    return f"[Drift: {ds:+.2f}] {summary}"
-
-def sanitize_reply_for_summary(reply):
-    cleaned = (reply or "").strip()
-    for agent in AGENTS.values():
-        for pat in (agent["name"], agent["name"] + ":", agent["name"] + " —"):
-            cleaned = cleaned.replace(pat, "").strip()
-    return cleaned
-
-def build_summary(agent_name, user_msg, reply):
-    return f"{agent_name} observed: user asked '{user_msg}'. {sanitize_reply_for_summary(reply)}"
-
-def run_agent_turn(agent_id, user_input, step):
-    agent = AGENTS[agent_id]
-    q = t_query(agent_id, user_input, TOP_K)
-    hits = q.get("hits", q.get("results", []))
-    char_ctx = q.get("character_context", {}) if isinstance(q, dict) else {}
-    other_names = ", ".join(a["name"] for aid, a in AGENTS.items() if aid != agent_id) or "the other agents"
-    system_prompt = agent["system_prompt"].format(
-        collective_roster=COLLECTIVE_ROSTER,
-        character_context=format_character_context(char_ctx),
-        memory_context=format_memories(hits, TOP_K),
-        drift_note=format_drift_note(char_ctx),
-    )
-    conversation = [{
-        "role": "user",
-        "content": (
-            f"Reply only as {agent['name']}. "
-            f"Do not simulate dialogue for {other_names}. "
-            f"Do not invent additional participants.\\n\\n"
-            f"User message: {user_input}"
-        )
-    }]
-    reply = llm_call(system_prompt, conversation)
-    summary = build_summary(agent["name"], user_input, reply)
-    t_ingest(agent_id, summary, step, agent["domain_id"])
-    return reply
-
-def main():
-    setup()
-    step = int(time.time())
-    print(f"=== ${teamName} — Broadcast Collective Ready ===")
-    print("Agents:", ", ".join(a["name"] for a in AGENTS.values()))
-    print("Type a message to send it to every agent. Use quit to exit.\\n")
-
-    while True:
-        try:
-            user_input = input("You > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not user_input:
-            continue
-        if user_input.lower() in ("quit", "exit", "/quit"):
-            break
-
-        step += 1
-        for agent_id, agent in AGENTS.items():
-            print(f"\\n{agent['name']} ({agent['role']}) >")
-            reply = run_agent_turn(agent_id, user_input, step)
-            print(f"  {reply}")
-        print()
-
-if __name__ == "__main__":
-    main()
-`;
-    // <<< END broadcast >>>
-  } else if (interactionMode === 'basic_hive') {
-    // <<< BEGIN basic_hive >>>
-    pyScript = `"""
-TORMENT Hivemind — ${teamName} (Basic Hive Agent)
-Run: python hivemind_${wsId}.py --agent <agent_id>
-
-Basic Hive Agent mode: one agent, one terminal, shared collective underneath.
-Open a separate terminal for each agent you want to chat with.
-Agents share memory via the collective field — no /switch command.
-
-First run creates workspace + agents automatically.
-Server must be running first (python -m torment_service).
-
-Set environment variables before running (see Step 3).
+// <<< BEGIN native_hive_client >>>
+function buildHivemindClient(config) {
+  return String.raw`"""Fresh Native Hivemind client. Complete Genesis and initial policy setup first.
+One central TORMENT server serves every client terminal.
+Pending writes live in this process: use /retry before exiting or /abandon.
 """
+from __future__ import annotations
 import argparse
 import json
 import os
-import sys
-import textwrap
-import time
+import uuid
 import requests
-${hivePyImport}
 
-TORMENT = "${BASE}"
-WS = "${wsId}"
-DOMAINS = ${pyDomainsList}
-TOP_K = 8
+CONFIG = json.loads(${JSON.stringify(JSON.stringify(config))})
 
-COLLECTIVE_ROSTER = textwrap.dedent("""\
-[Collective roster]
-There are exactly ${hivemindAgents.length} participants in this collective:
-${pyRoster}
 
-Never invent, rename, or introduce any additional participant.
-Never output dialogue for any participant who is not explicitly named above.
-""")
+class HttpTransport:
+    def __init__(self, url=None):
+        self.url = (url or os.environ.get("TORMENT_URL", CONFIG["url"])).rstrip("/")
+        self.session = requests.Session()
+        key = os.environ.get("TORMENT_API_KEY")
+        if key:
+            self.session.headers["X-API-Key"] = key
 
-AGENTS = {
-${pyAgentsDict}
-}
+    def get(self, path):
+        response = self.session.get(self.url + path, timeout=30)
+        response.raise_for_status()
+        return response.json()
 
-def llm_call(system_prompt, conversation):
-${hivePyClientSetup}
-    try:
-${hivePyCall}
-    except Exception as e:
-        return f"[LLM ERROR] {e}"
+    def post(self, path, payload, key=None):
+        headers = {"Idempotency-Key": key} if key else {}
+        response = self.session.post(self.url + path, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        value = response.json()
+        if not isinstance(value, dict):
+            raise ValueError("TORMENT returned an invalid response")
+        return value
 
-def t_post(path, payload):
-    r = requests.post(f"{TORMENT}{path}", json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()
 
-def t_get(path):
-    r = requests.get(f"{TORMENT}{path}", timeout=60)
-    r.raise_for_status()
-    return r.json()
+def call_provider(agent, system, messages):
+    # Selected model/URL are explicit. Unrelated provider environment values
+    # cannot change them. Provider credentials remain in the client terminal.
+    choice = CONFIG["provider"]
+    if choice == "claude":
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), base_url="https://api.anthropic.com")
+        result = client.messages.create(model=CONFIG["model"], max_tokens=1024, system=system, messages=messages)
+        return "\n".join(block.text for block in result.content if getattr(block, "type", "text") == "text")
+    from openai import OpenAI
+    if choice == "openai":
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), base_url="https://api.openai.com/v1")
+    elif choice == "ollama":
+        base = CONFIG["host"].rstrip("/")
+        client = OpenAI(api_key="ollama", base_url=base if base.endswith("/v1") else base + "/v1")
+    else:
+        client = OpenAI(api_key=os.environ.get("LLM_API_KEY", "none"), base_url=CONFIG["host"])
+    result = client.chat.completions.create(model=CONFIG["model"], messages=[{"role":"system", "content":system}] + messages)
+    return result.choices[0].message.content
 
-def t_query(agent_id, query, top_k=TOP_K):
-    return t_post("/agent/query", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "query": query,
-        "top_k": top_k,
-    })
 
-def t_ingest(agent_id, text, step, domain_id):
-    return t_post("/agent/ingest", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "text": text,
-        "step": step,
-        "domain_id": domain_id,
-    })
+def system_prompt(agent, query):
+    # Natural-language braces and quotes are data, never format expressions.
+    character = query.get("character_context") or {}
+    parts = ["You are " + agent["name"] + ".", "Conversational prompt role: " + agent["role"]]
+    if character:
+        parts.append("TORMENT Character context:\n" + json.dumps(character, ensure_ascii=False))
+    hits = query.get("hits", query.get("results", []))
+    if hits:
+        parts.append("Retrieved memory:\n" + json.dumps(hits, ensure_ascii=False))
+    if query.get("collective_context"):
+        parts.append("Collective context:\n" + json.dumps(query["collective_context"], ensure_ascii=False))
+    return "\n\n".join(parts)
 
-def t_collective_status():
-    return t_get(f"/workspace/{WS}/collective/status")
 
-def t_collective_events():
-    return t_get(f"/workspace/{WS}/collective/events")
+class HiveClient:
+    def __init__(self, agent_id=None, *, transport=None, provider=None, emit=print, key_factory=None):
+        self.mode = CONFIG["mode"]
+        self.agents = CONFIG["agents"]  # Forge display order, independent of Genesis.
+        self.by_id = {agent["agent_id"]: agent for agent in self.agents}
+        if self.mode == "basic_hive" and not agent_id:
+            raise ValueError("Basic Hive requires --agent <agent_id>")
+        self.selected = agent_id or self.agents[0]["agent_id"]
+        if self.selected not in self.by_id:
+            raise ValueError("Unknown agent: " + self.selected)
+        self.transport = transport or HttpTransport()
+        self.provider = provider or call_provider
+        self.emit = emit
+        self.key_factory = key_factory or (lambda: uuid.uuid4().hex)
+        self.history = {agent_id: [] for agent_id in self.by_id}
+        self.step = 0
+        self.turn = None
+        self.last_turn = None
+        self.last_query = {}
 
-def t_collective_reingest(agent_id, event_id, strength=0.25):
-    return t_post(f"/workspace/{WS}/collective/reingest", {
-        "agent_id": agent_id,
-        "event_id": event_id,
-        "echo_strength_override": strength,
-    })
+    def setup(self):
+        self.transport.get("/health")
+        self.emit("TORMENT is reachable. The first query verifies the selected native agent.")
 
-def t_agent_identity(agent_id):
-    return t_get(f"/agent/{agent_id}/identity?workspace_id={WS}")
+    def query(self, agent, text):
+        result = self.transport.post("/agent/query", {"workspace_id":CONFIG["workspace"],
+            "agent_id":agent["agent_id"], "query":text, "domain_id":agent["domain"], "top_k":8})
+        if result.get("error") or result.get("failure") or result.get("refused"):
+            raise RuntimeError("TORMENT query refused: " + str(result.get("reason", result.get("error", "unknown"))))
+        self.last_query = result
+        return result
 
-def t_agent_character_state(agent_id):
-    return t_get(f"/agent/{agent_id}/character/state?workspace_id={WS}")
+    def progress(self):
+        turn = self.turn or self.last_turn
+        return [] if turn is None else [(entry["agent_id"], entry["state"]) for entry in turn["agents"]]
 
-def t_health():
-    return t_get("/health")
+    def report_progress(self):
+        self.emit("Turn progress: " + ", ".join(agent + "=" + state for agent, state in self.progress()))
+        self.emit("/retry resumes this turn; /abandon discards its pending and unattempted work.")
 
-def setup():
-    """Ensure server is up; create workspace + every agent in AGENTS. Idempotent."""
-    try:
-        t_health()
-    except Exception:
-        print("ERROR: TORMENT server not reachable at", TORMENT)
-        print("Start it first: python -m torment_service")
-        sys.exit(1)
+    def submit(self, text):
+        if self.turn is not None:
+            self.emit("This turn is unfinished. Use /retry or /abandon before a new turn.")
+            return False
+        self.step += 1
+        ids = [a["agent_id"] for a in self.agents] if self.mode == "broadcast" else [self.selected]
+        self.turn = {"text":text, "step":self.step, "agents":[
+            {"agent_id":agent_id, "state":"NOT_ATTEMPTED", "pending":None} for agent_id in ids]}
+        return self._advance()
 
-    try:
-        t_post("/workspace/create", {"workspace_id": WS, "domains": DOMAINS})
-    except requests.HTTPError as e:
-        if getattr(e.response, "status_code", None) != 409:
-            raise
-
-    for agent_id, agent in AGENTS.items():
-        try:
-            t_post("/agent/create", {
-                "workspace_id": WS,
-                "agent_id": agent_id,
-                "seed": agent["seed"],
-            })
-        except requests.HTTPError as e:
-            if getattr(e.response, "status_code", None) != 409:
-                raise
-
-def format_memories(hits, top_k):
-    if not hits:
-        return ""
-    lines = ["[Retrieved memories]"]
-    for i, h in enumerate(hits[:top_k], 1):
-        summary = (h.get("summary") or "").strip().replace("\\n", " ")
-        score = h.get("final_score", h.get("score", 0.0))
-        tier = h.get("character_tier", "")
-        prov = h.get("provenance_type", "")
-        tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
-        lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
-    return "\\n".join(lines)
-
-def format_character_context(char_ctx):
-    if not char_ctx:
-        return ""
-    parts = []
-    preamble = char_ctx.get("seed_preamble", "")
-    if preamble:
-        parts.append(f"[Core identity]\\n{preamble}")
-    recs = char_ctx.get("recommendations", [])
-    if recs:
-        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))
-    return "\\n\\n".join(parts)
-
-def format_drift_note(char_ctx):
-    if not isinstance(char_ctx, dict):
-        return ""
-    ds = char_ctx.get("drift_score", 0.0)
-    summary = char_ctx.get("drift_summary", "")
-    if abs(ds) < 0.1 and not summary:
-        return ""
-    return f"[Drift: {ds:+.2f}] {summary}"
-
-def sanitize_reply_for_summary(reply):
-    cleaned = (reply or "").strip()
-    for agent in AGENTS.values():
-        for pat in (agent["name"], agent["name"] + ":", agent["name"] + " —"):
-            cleaned = cleaned.replace(pat, "").strip()
-    return cleaned
-
-def build_summary(agent_name, user_msg, reply):
-    return f"{agent_name} observed: user asked '{user_msg}'. {sanitize_reply_for_summary(reply)}"
-
-def print_banner(agent_id):
-    agent = AGENTS[agent_id]
-    print("=" * 60)
-    print(f"  TORMENT Basic Hive Agent — ${teamName}")
-    print(f"  (one terminal per agent — open another terminal for a different agent)")
-    print()
-    print(f"  Visible agent: {agent['name']} — {agent['role']}")
-    print(f"  Workspace: {WS}")
-    print()
-    print("  Type your message. 'quit' to exit.")
-    print("  /status  /events  /reingest <id>  /health  /identity  /debug")
-    print("  /memories <query>  /clear")
-    print("=" * 60)
-    print()
-
-def run_agent_turn(agent_id, user_input, step, conversation):
-    agent = AGENTS[agent_id]
-    q = t_query(agent_id, user_input, TOP_K)
-    hits = q.get("hits", q.get("results", []))
-    char_ctx = q.get("character_context", {}) if isinstance(q, dict) else {}
-    other_names = ", ".join(a["name"] for aid, a in AGENTS.items() if aid != agent_id) or "the other agents"
-    system_prompt = agent["system_prompt"].format(
-        collective_roster=COLLECTIVE_ROSTER,
-        character_context=format_character_context(char_ctx),
-        memory_context=format_memories(hits, TOP_K),
-        drift_note=format_drift_note(char_ctx),
-    )
-    bounded_user_input = (
-        f"Reply only as {agent['name']}. "
-        f"Do not simulate dialogue for {other_names}. "
-        f"Do not invent additional participants.\\n\\n"
-        f"User message: {user_input}"
-    )
-    conversation.append({"role": "user", "content": bounded_user_input})
-    if len(conversation) > 40:
-        del conversation[:-40]
-    reply = llm_call(system_prompt, conversation)
-    conversation.append({"role": "assistant", "content": reply})
-    summary = build_summary(agent["name"], user_input, reply)
-    t_ingest(agent_id, summary, step, agent["domain_id"])
-    return reply, q
-
-def handle_slash_command(cmd, current_agent_id, conversation, last_result):
-    parts = cmd.strip().split(None, 1)
-    op = parts[0].lower()
-    arg = parts[1].strip() if len(parts) > 1 else ""
-
-    if op == "/status":
-        print(json.dumps(t_collective_status(), indent=2)[:4000])
-        return True
-
-    if op == "/events":
-        events = t_collective_events()
-        if not events:
-            print("No convergence events found.")
-        else:
-            for ev in events[:20]:
-                participants = ", ".join(ev.get("participating_agents", []))
-                motifs = ", ".join(ev.get("dominant_motifs", []))
-                print(f"- {ev.get('event_id')}  conf={ev.get('confidence', 0):.2f}  participants=[{participants}]  motifs=[{motifs}]")
-                if ev.get("summary"):
-                    print(f"  {ev.get('summary')}")
-        return True
-
-    if op == "/reingest":
-        if not arg:
-            print("Usage: /reingest <event_id>")
-            return True
-        print(json.dumps(t_collective_reingest(current_agent_id, arg, 0.25), indent=2)[:4000])
-        return True
-
-    if op == "/health":
-        print(json.dumps(t_agent_character_state(current_agent_id), indent=2)[:4000])
-        return True
-
-    if op == "/identity":
-        print(json.dumps(t_agent_identity(current_agent_id), indent=2)[:4000])
-        return True
-
-    if op == "/memories":
-        if not arg:
-            print("Usage: /memories <query>")
-            return True
-        q = t_query(current_agent_id, arg, TOP_K)
-        print(format_memories(q.get("hits", q.get("results", [])), TOP_K))
-        return True
-
-    if op == "/clear":
-        conversation.clear()
-        print("Cleared local conversation window.")
-        return True
-
-    if op == "/debug":
-        print(json.dumps(last_result, indent=2)[:4000] if last_result is not None else "No debug payload yet.")
-        return True
-
-    print(f"Unknown command: {cmd}")
-    return True
-
-def parse_args():
-    p = argparse.ArgumentParser(description="TORMENT Basic Hive Agent — one terminal, one agent, shared collective.")
-    p.add_argument("--agent", required=True, choices=sorted(AGENTS.keys()),
-                   help="Which agent this terminal is a window to. Open another terminal for a different agent.")
-    return p.parse_args()
-
-def chat_loop(current_agent_id):
-    step = int(time.time())
-    conversation = []
-    last_result = None
-
-    print_banner(current_agent_id)
-
-    while True:
-        try:
-            user_input = input("You > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not user_input:
-            continue
-        if user_input.lower() in ("quit", "exit"):
-            break
-
-        if user_input.startswith("/"):
-            if handle_slash_command(user_input, current_agent_id, conversation, last_result):
+    def _advance(self):
+        for entry in self.turn["agents"]:
+            if entry["state"] == "COMPLETE":
                 continue
+            agent = self.by_id[entry["agent_id"]]
+            if entry["state"] == "NOT_ATTEMPTED":
+                try:
+                    query = self.query(agent, self.turn["text"])
+                except Exception as exc:
+                    self.emit("TORMENT query failed; no provider call or memory write: " + str(exc))
+                    self.report_progress()
+                    return False
+                messages = self.history[agent["agent_id"]] + [{"role":"user", "content":self.turn["text"]}]
+                try:
+                    reply = self.provider(agent, system_prompt(agent, query), messages)
+                    if not isinstance(reply, str) or not reply.strip():
+                        raise ValueError("Provider returned no assistant text")
+                except Exception as exc:
+                    self.emit("Provider failed; no memory write: " + str(exc))
+                    self.report_progress()
+                    return False
+                payload = {"workspace_id":CONFIG["workspace"], "agent_id":agent["agent_id"],
+                    "domain_id":agent["domain"], "scope":"private", "step":self.turn["step"],
+                    "text":"User: " + self.turn["text"] + "\n" + agent["name"] + ": " + reply}
+                entry["pending"] = {"payload_json":json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    "key":"hive:" + agent["agent_id"] + ":" + str(self.key_factory()),
+                    "agent_id":agent["agent_id"], "domain_id":agent["domain"], "reply":reply}
+                entry["state"] = "PENDING_WRITE"
+                self.history[agent["agent_id"]] = messages + [{"role":"assistant", "content":reply}]
+                self.emit(agent["name"] + ": " + reply)
+            pending = entry["pending"]
+            try:
+                result = self.transport.post("/agent/ingest", json.loads(pending["payload_json"]), key=pending["key"])
+            except Exception as exc:
+                self.emit("Memory storage failed; response retained for /retry: " + str(exc))
+                self.report_progress()
+                return False
+            if result.get("stored") is not True:
+                self.emit("TORMENT did not retain this turn (stored=false/declined or unconfirmed). " + str(result.get("reason", "")))
+                self.report_progress()
+                return False
+            entry["state"] = "COMPLETE"
+            entry["storage_result"] = result
+            self.emit("TORMENT stored the response for " + agent["agent_id"] + ".")
+        self.last_turn = self.turn
+        self.turn = None
+        return True
 
-        step += 1
-        reply, last_result = run_agent_turn(current_agent_id, user_input, step, conversation)
-        agent = AGENTS[current_agent_id]
-        print(f"\\n{agent['name']} ({agent['role']}) >\\n  {reply}\\n")
+    def retry(self):
+        if self.turn is None:
+            self.emit("No unfinished turn.")
+            return False
+        return self._advance()
 
-        try:
-            events = t_collective_events()
-            if isinstance(events, list) and events:
-                latest = events[-1]
-                conf = latest.get("confidence", 0.0)
-                participants = latest.get("participating_agents", [])
-                if conf > 0.6 and current_agent_id in participants:
-                    eid = latest.get("event_id", "?")
-                    motifs = latest.get("dominant_motifs", [])
-                    print(f"  [Collective] Relevant convergence detected: {eid}")
-                    print(f"    confidence={conf:.2f}  motifs={motifs}")
-                    print(f"    Use '/reingest {eid}' to echo into {current_agent_id}.\\n")
-        except Exception:
-            pass
+    def switch(self, agent_id):
+        if self.mode != "window":
+            self.emit("/switch is available only in Window mode.")
+            return False
+        if self.turn is not None:
+            self.emit("Use /retry or /abandon before switching; the pending write keeps its original target.")
+            return False
+        if agent_id not in self.by_id:
+            self.emit("Unknown agent: " + agent_id)
+            return False
+        self.selected = agent_id
+        self.history = {key: [] for key in self.by_id}
+        self.emit("Selected " + agent_id + ". Local conversation history cleared; persistent TORMENT memory is unchanged.")
+        return True
+
+    def command(self, text):
+        command, _, argument = text.partition(" ")
+        if command == "/retry": return self.retry()
+        if command == "/abandon":
+            self.turn = None
+            self.emit("Unfinished turn abandoned. Previously stored responses remain in TORMENT.")
+        elif command == "/clear":
+            self.history = {key: [] for key in self.by_id}
+            self.emit("Local history cleared. Persistent memory and pending writes are unchanged.")
+        elif command == "/switch" and self.mode == "window": return self.switch(argument.strip())
+        elif command == "/agents" and self.mode == "window":
+            self.emit("\n".join(a["agent_id"] + " — " + a["name"] for a in self.agents))
+        elif command == "/debug": self.emit(json.dumps(self.last_query, indent=2, ensure_ascii=False))
+        elif command == "/memories":
+            self.emit(json.dumps(self.last_query.get("hits", self.last_query.get("results", [])), indent=2, ensure_ascii=False))
+        elif command == "/help":
+            self.emit("/help /clear /debug /memories /retry /abandon" + (" /switch <agent_id> /agents" if self.mode == "window" else ""))
+            self.emit("/memories shows the last query's retrieved memories. Broadcast proceeds sequentially in display order.")
+        else: self.emit("Unknown command. Use /help.")
+
 
 def main():
-    args = parse_args()
-    setup()
-    chat_loop(args.agent)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--agent", required=CONFIG["mode"] == "basic_hive", choices=[a["agent_id"] for a in CONFIG["agents"]])
+    args = parser.parse_args()
+    client = HiveClient(args.agent)
+    try:
+        client.setup()
+    except Exception as exc:
+        parser.exit(1, "TORMENT startup check failed: " + str(exc) + "\n")
+    client.command("/help")
+    while True:
+        try:
+            text = input("You> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if text.lower() in ("quit", "exit"):
+            break
+        if not text:
+            continue
+        client.command(text) if text.startswith("/") else client.submit(text)
+    if client.turn is not None:
+        print("Exiting abandons this process's pending writes and remaining broadcast agents.")
+
 
 if __name__ == "__main__":
     main()
 `;
-    // <<< END basic_hive >>>
-  } else {
-    // <<< BEGIN window >>>
-    pyScript = `"""
-TORMENT Hivemind — ${teamName}
-Run: python hivemind_${wsId}.py --agent ${initialAgentId}
-
-First run creates workspace + agents automatically.
-Server must be running first (python -m torment_service).
-
-Set environment variables before running (see Step 3).
-"""
-import argparse
-import json
-import os
-import sys
-import textwrap
-import time
-import requests
-${hivePyImport}
-
-TORMENT = "${BASE}"
-WS = "${wsId}"
-DOMAINS = ${pyDomainsList}
-TOP_K = 8
-
-COLLECTIVE_ROSTER = textwrap.dedent("""\
-[Collective roster]
-There are exactly ${hivemindAgents.length} participants in this collective:
-${pyRoster}
-
-Never invent, rename, or introduce any additional participant.
-Never output dialogue for any participant who is not explicitly named above.
-""")
-
-AGENTS = {
-${pyAgentsDict}
 }
+// <<< END native_hive_client >>>
 
-def llm_call(system_prompt, conversation):
-${hivePyClientSetup}
-    try:
-${hivePyCall}
-    except Exception as e:
-        return f"[LLM ERROR] {e}"
-
-def t_post(path, payload):
-    r = requests.post(f"{TORMENT}{path}", json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()
-
-def t_get(path):
-    r = requests.get(f"{TORMENT}{path}", timeout=60)
-    r.raise_for_status()
-    return r.json()
-
-def t_query(agent_id, query, top_k=TOP_K):
-    return t_post("/agent/query", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "query": query,
-        "top_k": top_k,
-    })
-
-def t_ingest(agent_id, text, step, domain_id):
-    return t_post("/agent/ingest", {
-        "workspace_id": WS,
-        "agent_id": agent_id,
-        "text": text,
-        "step": step,
-        "domain_id": domain_id,
-    })
-
-def t_collective_status():
-    return t_get(f"/workspace/{WS}/collective/status")
-
-def t_collective_events():
-    return t_get(f"/workspace/{WS}/collective/events")
-
-def t_collective_reingest(agent_id, event_id, strength=0.25):
-    return t_post(f"/workspace/{WS}/collective/reingest", {
-        "agent_id": agent_id,
-        "event_id": event_id,
-        "echo_strength_override": strength,
-    })
-
-def t_agent_identity(agent_id):
-    return t_get(f"/agent/{agent_id}/identity?workspace_id={WS}")
-
-def t_agent_character_state(agent_id):
-    return t_get(f"/agent/{agent_id}/character/state?workspace_id={WS}")
-
-def t_health():
-    return t_get("/health")
-
-def setup():
-    """Ensure server is up; create workspace + every agent in AGENTS. Idempotent."""
-    try:
-        t_health()
-    except Exception:
-        print("ERROR: TORMENT server not reachable at", TORMENT)
-        print("Start it first: python -m torment_service")
-        sys.exit(1)
-
-    try:
-        t_post("/workspace/create", {"workspace_id": WS, "domains": DOMAINS})
-    except requests.HTTPError as e:
-        if getattr(e.response, "status_code", None) != 409:
-            raise
-
-    for agent_id, agent in AGENTS.items():
-        try:
-            t_post("/agent/create", {
-                "workspace_id": WS,
-                "agent_id": agent_id,
-                "seed": agent["seed"],
-            })
-        except requests.HTTPError as e:
-            if getattr(e.response, "status_code", None) != 409:
-                raise
-
-def format_memories(hits, top_k):
-    if not hits:
-        return ""
-    lines = ["[Retrieved memories]"]
-    for i, h in enumerate(hits[:top_k], 1):
-        summary = (h.get("summary") or "").strip().replace("\\n", " ")
-        score = h.get("final_score", h.get("score", 0.0))
-        tier = h.get("character_tier", "")
-        prov = h.get("provenance_type", "")
-        tag = " ".join(f"[{t}]" for t in [tier, prov] if t)
-        lines.append(f"  {i}. (score {score:.2f}{' ' + tag if tag else ''}) {summary}")
-    return "\\n".join(lines)
-
-def format_character_context(char_ctx):
-    if not char_ctx:
-        return ""
-    parts = []
-    preamble = char_ctx.get("seed_preamble", "")
-    if preamble:
-        parts.append(f"[Core identity]\\n{preamble}")
-    recs = char_ctx.get("recommendations", [])
-    if recs:
-        parts.append("[Guidance]\\n" + "\\n".join(f"  - {r}" for r in recs))
-    return "\\n\\n".join(parts)
-
-def format_drift_note(char_ctx):
-    if not isinstance(char_ctx, dict):
-        return ""
-    ds = char_ctx.get("drift_score", 0.0)
-    summary = char_ctx.get("drift_summary", "")
-    if abs(ds) < 0.1 and not summary:
-        return ""
-    return f"[Drift: {ds:+.2f}] {summary}"
-
-def sanitize_reply_for_summary(reply):
-    cleaned = (reply or "").strip()
-    for agent in AGENTS.values():
-        for pat in (agent["name"], agent["name"] + ":", agent["name"] + " —"):
-            cleaned = cleaned.replace(pat, "").strip()
-    return cleaned
-
-def build_summary(agent_name, user_msg, reply):
-    return f"{agent_name} observed: user asked '{user_msg}'. {sanitize_reply_for_summary(reply)}"
-
-def print_banner(agent_id):
-    agent = AGENTS[agent_id]
-    print("=" * 60)
-    print(f"  TORMENT Hivemind Window — ${teamName}")
-    print()
-    print(f"  Visible agent: {agent['name']} — {agent['role']}")
-    print(f"  Workspace: {WS}")
-    print()
-    print("  Type your message. 'quit' to exit.")
-    print("  /status  /events  /reingest <id>  /health  /identity  /debug")
-    print("  /memories <query>  /clear  /switch <agent_id>  /agents  /help")
-    print("=" * 60)
-    print()
-
-def run_agent_turn(agent_id, user_input, step, conversation):
-    agent = AGENTS[agent_id]
-    q = t_query(agent_id, user_input, TOP_K)
-    hits = q.get("hits", q.get("results", []))
-    char_ctx = q.get("character_context", {}) if isinstance(q, dict) else {}
-    other_names = ", ".join(a["name"] for aid, a in AGENTS.items() if aid != agent_id) or "the other agents"
-    system_prompt = agent["system_prompt"].format(
-        collective_roster=COLLECTIVE_ROSTER,
-        character_context=format_character_context(char_ctx),
-        memory_context=format_memories(hits, TOP_K),
-        drift_note=format_drift_note(char_ctx),
-    )
-    bounded_user_input = (
-        f"Reply only as {agent['name']}. "
-        f"Do not simulate dialogue for {other_names}. "
-        f"Do not invent additional participants.\\n\\n"
-        f"User message: {user_input}"
-    )
-    conversation.append({"role": "user", "content": bounded_user_input})
-    if len(conversation) > 40:
-        del conversation[:-40]
-    reply = llm_call(system_prompt, conversation)
-    conversation.append({"role": "assistant", "content": reply})
-    summary = build_summary(agent["name"], user_input, reply)
-    t_ingest(agent_id, summary, step, agent["domain_id"])
-    return reply, q
-
-def handle_slash_command(cmd, current_agent_id, conversation, last_result):
-    parts = cmd.strip().split(None, 1)
-    op = parts[0].lower()
-    arg = parts[1].strip() if len(parts) > 1 else ""
-
-    if op == "/status":
-        print(json.dumps(t_collective_status(), indent=2)[:4000])
-        return True, current_agent_id
-
-    if op == "/events":
-        events = t_collective_events()
-        if not events:
-            print("No convergence events found.")
-        else:
-            for ev in events[:20]:
-                participants = ", ".join(ev.get("participating_agents", []))
-                motifs = ", ".join(ev.get("dominant_motifs", []))
-                print(f"- {ev.get('event_id')}  conf={ev.get('confidence', 0):.2f}  participants=[{participants}]  motifs=[{motifs}]")
-                if ev.get("summary"):
-                    print(f"  {ev.get('summary')}")
-        return True, current_agent_id
-
-    if op == "/reingest":
-        if not arg:
-            print("Usage: /reingest <event_id>")
-            return True, current_agent_id
-        print(json.dumps(t_collective_reingest(current_agent_id, arg, 0.25), indent=2)[:4000])
-        return True, current_agent_id
-
-    if op == "/health":
-        print(json.dumps(t_agent_character_state(current_agent_id), indent=2)[:4000])
-        return True, current_agent_id
-
-    if op == "/identity":
-        print(json.dumps(t_agent_identity(current_agent_id), indent=2)[:4000])
-        return True, current_agent_id
-
-    if op == "/memories":
-        if not arg:
-            print("Usage: /memories <query>")
-            return True, current_agent_id
-        q = t_query(current_agent_id, arg, TOP_K)
-        print(format_memories(q.get("hits", q.get("results", [])), TOP_K))
-        return True, current_agent_id
-
-    if op == "/clear":
-        conversation.clear()
-        print("Cleared local conversation window.")
-        return True, current_agent_id
-
-    if op == "/debug":
-        print(json.dumps(last_result, indent=2)[:4000] if last_result is not None else "No debug payload yet.")
-        return True, current_agent_id
-
-    if op == "/switch":
-        if not arg:
-            print("Usage: /switch <agent_id>")
-            return True, current_agent_id
-        if arg not in AGENTS:
-            print(f"Unknown agent: {arg}")
-            return True, current_agent_id
-        return True, arg
-
-    if op == "/agents":
-        for aid, agent in AGENTS.items():
-            marker = "*" if aid == current_agent_id else " "
-            print(f"  {marker} {aid:<20} {agent['name']} ({agent['role']})")
-        return True, current_agent_id
-
-    if op == "/help":
-        print_banner(current_agent_id)
-        return True, current_agent_id
-
-    print(f"Unknown command: {cmd}")
-    return True, current_agent_id
-
-def parse_args():
-    p = argparse.ArgumentParser(description="TORMENT hivemind window — single visible agent + /switch.")
-    p.add_argument("--agent", choices=sorted(AGENTS.keys()), default=sorted(AGENTS.keys())[0],
-                   help="Which agent to start with (default: first agent in this collective).")
-    return p.parse_args()
-
-def chat_loop(initial_agent_id):
-    step = int(time.time())
-    conversation = []
-    last_result = None
-    current_agent_id = initial_agent_id
-
-    print_banner(current_agent_id)
-
-    while True:
-        try:
-            user_input = input("You > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not user_input:
-            continue
-        if user_input.lower() in ("quit", "exit"):
-            break
-
-        if user_input.startswith("/"):
-            handled, new_agent_id = handle_slash_command(user_input, current_agent_id, conversation, last_result)
-            if new_agent_id != current_agent_id:
-                current_agent_id = new_agent_id
-                conversation = []
-                print_banner(current_agent_id)
-            if handled:
-                continue
-
-        step += 1
-        reply, last_result = run_agent_turn(current_agent_id, user_input, step, conversation)
-        agent = AGENTS[current_agent_id]
-        print(f"\\n{agent['name']} ({agent['role']}) >\\n  {reply}\\n")
-
-        try:
-            events = t_collective_events()
-            if isinstance(events, list) and events:
-                latest = events[-1]
-                conf = latest.get("confidence", 0.0)
-                participants = latest.get("participating_agents", [])
-                if conf > 0.6 and current_agent_id in participants:
-                    eid = latest.get("event_id", "?")
-                    motifs = latest.get("dominant_motifs", [])
-                    print(f"  [Collective] Relevant convergence detected: {eid}")
-                    print(f"    confidence={conf:.2f}  motifs={motifs}")
-                    print(f"    Use '/reingest {eid}' to echo into {current_agent_id}.\\n")
-        except Exception:
-            pass
-
-def main():
-    args = parse_args()
-    setup()
-    chat_loop(args.agent)
-
-if __name__ == "__main__":
-    main()
-`;
-    // <<< END window >>>
-  }
-  // <<< END hivemind_branch_dispatch >>>
-
-  document.getElementById('out-loop-python').textContent = pyScript;
-  document.getElementById('out-response').textContent = '// Hivemind mode — see integration tab for convergence event reference.';
-
-  // Hivemind does not include voice pipeline output (solo only)
-  document.getElementById('output-voice').style.display = 'none';
-
-  document.getElementById('output-section').classList.add('visible');
-}
-
-// ════════════════════════════════════════════════════════════════════════════════════
-// TAB SWITCHING
-// ════════════════════════════════════════════════════════════════════════════════════
 
 function switchTab(tab, btn) {
   btn.closest('.tab-row').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -4337,52 +3434,7 @@ function exportSetup() {
     const filename = name.toLowerCase().replace(/\s+/g, '_') + '_torment_setup.md';
     downloadFile(md, filename);
   } else {
-    const teamName = document.getElementById('hive-team-name').value || 'hivemind_collective';
-    const wsId = document.getElementById('hive-workspace-id').value.trim() || 'collective';
-    const interactionMode = (document.querySelector('input[name="hive-interaction"]:checked') || { value: 'window' }).value;
-    const interactionLabel =
-      interactionMode === 'window' ? 'Switch between agents (one visible agent at a time)'
-      : interactionMode === 'basic_hive' ? 'Basic Hive Agent (one terminal per agent, shared collective underneath)'
-      : 'Broadcast to all agents (every message goes to everyone)';
-    const agentLines = hivemindAgents.map((agent, idx) => {
-      const aid = (agent.name || ('agent_' + (idx + 1))).toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-      const oneLine = ((agent.seed || '').split(/[.!?]/)[0] || agent.seed || '').trim().slice(0, 140);
-      return '  ' + (idx + 1) + '. **' + (agent.name || ('Agent ' + (idx + 1))) + '** (`' + aid + '`) — ' + (agent.role || 'agent') + ', domain: `' + (agent.domain || 'research') + '`\n     > ' + oneLine;
-    }).join('\n');
-    let content = '# ' + teamName + ' \u2014 TORMENT Hivemind Setup\n_Generated by TORMENT Character Forge_\n\n';
-    content += '## What you just created\n\n';
-    content += '- **Collective:** ' + teamName + ' (`' + wsId + '`)\n';
-    content += '- **Interaction mode:** ' + interactionLabel + '\n';
-    content += '- **Agents (' + hivemindAgents.length + '):**\n' + agentLines + '\n';
-    content += '- **Domains in this workspace:** `' + hivemindDomains.join('`, `') + '`\n\n';
-    content += '## Fastest way to try it\n\n';
-    content += '1. Set the environment variables from the **Environment** section below.\n';
-    content += '2. Start the server: `python -m torment_service`\n';
-    const firstAgentId = ((hivemindAgents[0]?.name) || 'agent_1').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    if (interactionMode === 'window') {
-      content += '3. Run the generated script: `python hivemind_' + wsId + '.py --agent ' + firstAgentId + '`\n';
-      content += '4. Use `/agents` to list everyone, `/switch <agent_id>` to change who you are talking to, and `quit` to exit.\n\n';
-    } else if (interactionMode === 'basic_hive') {
-      content += '3. Open one terminal per agent you want to chat with — each terminal is a window to a single agent. For example:\n';
-      hivemindAgents.forEach((agent, idx) => {
-        const aid = (agent.name || ('agent_' + (idx + 1))).toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        content += '   - Terminal ' + (idx + 1) + ': `python hivemind_' + wsId + '.py --agent ' + aid + '`\n';
-      });
-      content += '4. Agents share memory through the collective field — convergence happens across terminals even though each terminal only talks to one agent. No `/switch` command. Type `quit` to exit a terminal.\n\n';
-    } else {
-      content += '3. Run the generated script: `python hivemind_' + wsId + '.py`\n';
-      content += '4. Type a message and every agent will respond in turn. Use `quit` to exit.\n\n';
-    }
-    content += '## Install\n```bash\n' + document.getElementById('out-install').textContent + '\n```\n\n';
-    content += '## Workspace\n```bash\n' + document.getElementById('out-workspace').textContent + '\n```\n\n';
-    content += '## Agents\n```bash\n' + document.getElementById('out-agent').textContent + '\n```\n\n';
-    content += '## Environment\n```bash\n' + document.getElementById('out-env').textContent + '\n```\n\n';
-    content += '## Prompts\n' + document.getElementById('out-prompts').textContent + '\n\n';
-    content += '## Integration (curl)\n```bash\n' + (document.getElementById('out-loop-curl')?.textContent || document.getElementById('out-integration')?.textContent || '') + '\n```\n\n';
-    content += '## Integration (Python)\n```python\n' + (document.getElementById('out-loop-python')?.textContent || '') + '\n```\n';
-
-    const filename = teamName.toLowerCase().replace(/\s+/g, '_') + '_hivemind_setup.md';
-    downloadFile(content, filename);
+    exportHivemindSetup();
   }
 }
 
