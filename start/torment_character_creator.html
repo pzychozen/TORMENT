@@ -2471,7 +2471,8 @@ function generateSolo() {
   envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
   envOutput += soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
   envOutput += 'set "TORMENT_PROFILE="\nset "TORMENT_ADMISSION_DESCRIPTOR_PATH="\n';
-  envOutput += 'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\nset /p TORMENT_DEPLOYMENT_PROFILE_JSON=<torment_genesis_profile.json\n\n';
+  envOutput += 'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\n';
+  envOutput += 'for /f "delims=" %P in (\'python -X utf8 -c "import sys,json; print(json.dumps(json.load(open(sys.argv[1]))))" torment_genesis_profile.json\') do @set "TORMENT_DEPLOYMENT_PROFILE_JSON=%P"\n\n';
   envParts.forEach(part => {
     if (part.vars.length > 0) {
       envOutput += ':: ' + part.comment + '\n';

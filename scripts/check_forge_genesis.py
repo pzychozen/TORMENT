@@ -11,6 +11,7 @@ import ast
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import py_compile
 import subprocess
@@ -24,9 +25,55 @@ from torment_service.substrate.genesis_fence import canonical_genesis_root
 from check_forge_output import check_section, SOLO_GENESIS_REQUIRED
 
 
+def check_windows_profile_loader(output, artifacts, profile_file=None):
+    """Run the emitted interactive CMD loader, adapting only %P for a batch file."""
+    if os.name != 'nt':
+        return 'NOT_APPLICABLE_ON_THIS_PLATFORM'
+    target = artifacts / 'torment_genesis_profile.json'
+    if profile_file is not None:
+        raw = profile_file.read_bytes()
+    else:
+        # Same multiline serializer/shape used by I9; no installation is created.
+        from torment_service.external_owner_json import owner_bytes
+        raw = owner_bytes(dict(compression_enabled=False, deep_memory_enabled=False,
+            representation_provider='st', representation_model='BAAI/bge-small-en-v1.5',
+            representation_dimension=384, admitted_scope_plan_digest='a' * 64,
+            external_owner_digest='b' * 64))
+    assert len(raw.splitlines()) > 1 and len(json.loads(raw)) == 7
+    target.write_bytes(raw)
+    lines = output['outputs']['out-env'].splitlines()
+    loader, = [line for line in lines if line.startswith('for /f "delims=" %P ')]
+    assert '%%P' not in loader, 'Forge must emit interactive CMD syntax'
+    verifier = artifacts / 'verify_profile_env.py'
+    verifier.write_text('''import json, os
+from pathlib import Path
+text = os.environ["TORMENT_DEPLOYMENT_PROFILE_JSON"]
+value = json.loads(text)
+expected = json.loads(Path("torment_genesis_profile.json").read_text(encoding="utf-8"))
+assert value == expected and len(value) == 7
+assert "\\n" not in text and "\\r" not in text
+Path("windows-profile-env.json").write_text(json.dumps({"json_parse": "PASS",
+    "exact_value_equality": "PASS", "field_count": len(value), "profile": value}, indent=2))
+print("WINDOWS_PROFILE_ENV_JSON_PARSE=PASS; WINDOWS_PROFILE_ENV_EXACT_VALUE_EQUALITY=PASS; WINDOWS_PROFILE_ENV_FIELD_COUNT=7")
+''', encoding='utf-8')
+    batch = artifacts / 'profile-loader.cmd'
+    batch.write_text('@echo off\ncall conda activate torment\nif errorlevel 1 exit /b %errorlevel%\n'
+        'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\n' + loader.replace('%P', '%%P') +
+        '\npython -B -X utf8 verify_profile_env.py\n', encoding='utf-8')
+    proc = subprocess.run(['cmd.exe', '/d', '/c', batch.name], cwd=artifacts,
+                          text=True, encoding='utf-8', capture_output=True)
+    (artifacts / 'profile-loader.stdout.log').write_text(proc.stdout, encoding='utf-8')
+    (artifacts / 'profile-loader.stderr.log').write_text(proc.stderr, encoding='utf-8')
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    print(proc.stdout.strip())
+    return 'PASS'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--artifacts-dir', required=True, type=Path)
+    parser.add_argument('--profile-file', type=Path,
+                        help='Optional existing I9 profile for actual Windows CMD transport validation')
     args = parser.parse_args()
     artifacts = args.artifacts_dir.resolve()
     if artifacts.is_relative_to(REPO):
@@ -70,14 +117,17 @@ def main():
         errors = check_section('solo', source)
         assert not errors, errors
         for forbidden in ('/workspace/create', '/agent/create', 'TORMENT_PROFILE=companion',
-                          'First run creates workspace + agent automatically'):
+                          'First run creates workspace + agent automatically',
+                          'set /p TORMENT_DEPLOYMENT_PROFILE_JSON='):
             assert forbidden not in source + output['markdown'], forbidden
         assert 'python -m torment_service' not in blocks['out-install']
         assert '/health' not in blocks['out-install']
         assert blocks['out-agent'].count('python -m torment_service.native_genesis create') == 2
         assert '--confirm-all-offline-conditions' in blocks['out-agent']
         assert 'human statement' in blocks['out-agent'] and 'not an automatic process census' in blocks['out-agent']
-        assert 'set /p TORMENT_DEPLOYMENT_PROFILE_JSON=<torment_genesis_profile.json' in blocks['out-env']
+        assert 'for /f "delims=" %P ' in blocks['out-env']
+        assert 'json.dumps(json.load(open(sys.argv[1])))' in blocks['out-env']
+        assert 'torment_genesis_profile.json\') do @set "TORMENT_DEPLOYMENT_PROFILE_JSON=%P"' in blocks['out-env']
         assert 'export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"' in blocks['out-env']
         assert 'TORMENT_ADMISSION_DESCRIPTOR_PATH' in blocks['out-env']
         assert 'outside the selected data root' in output['markdown']
@@ -119,7 +169,8 @@ def main():
         results[label] = 'PASS'
         return payload, output
 
-    default, _ = valid('default-st')
+    default, default_output = valid('default-st')
+    results['windows-profile-loader'] = check_windows_profile_loader(default_output, artifacts, args.profile_file)
     assert default['representation_lane']['model'] == 'BAAI/bge-small-en-v1.5'
     assert default['representation_lane']['dimension'] == 384
     assert default['agent']['initial_overlay'] == dict(write_threshold=.45, decay_scale=1.0,
