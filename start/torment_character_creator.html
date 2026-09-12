@@ -1605,8 +1605,8 @@
 
     <div class="info-box">
       <div class="info-title">HOW TO USE THIS</div>
-      <div class="solo-mode">Copy each step in order. Step 0 installs dependencies. Save Step 1 as <code>torment_genesis_request.json</code> outside the selected data root. Step 2 creates the native installation while offline. Only after success, Step 3 loads the exported profile and starts the server. Step 4 is the system prompt; Step 5 is the ordinary chat loop.
-      Keep <code>torment_genesis_request.json</code>, <code>torment_genesis_intent.json</code>, and <code>torment_genesis_profile.json</code> outside the data root. Run commands from the repository with these external artifact paths, or from an environment where TORMENT is installed.</div>
+      <div class="solo-mode">Follow the steps in order. Copy only the section for your shell: LINUX / MACOS / WSL or WINDOWS CMD. Step 0 installs dependencies; Step 1 is the request to save; Step 2 runs offline Genesis. Only after success, Step 3 loads the exported profile and starts the server. Step 4 is the prompt; Step 5 is chat/query integration.</div>
+      <div class="solo-mode" id="out-directory-guide" style="white-space:pre-wrap;margin-top:12px"></div>
       <div class="hivemind-mode">Fresh Native Genesis onboarding in this pass is qualified for Solo only. Collective/multi-agent fresh onboarding remains a separate lifecycle task. Existing-installation Hivemind output is unchanged.</div>
       Use <code>export as .md</code> at the bottom to save everything as a reference file.
     </div>
@@ -1618,6 +1618,7 @@
         <span class="output-title hivemind-mode">STEP 0 — INSTALL + START SERVER</span>
         <button class="btn-copy" onclick="copyBlock('out-install',this)">copy</button>
       </div>
+      <div class="section-desc solo-mode" id="out-install-guidance"></div>
       <div class="output-body" id="out-install"></div>
     </div>
 
@@ -1628,7 +1629,7 @@
         <span class="output-title hivemind-mode">STEP 1 — CREATE WORKSPACE</span>
         <button class="btn-copy" onclick="copyBlock('out-workspace',this)">copy</button>
       </div>
-      <div class="section-desc solo-mode">Save the JSON below as <code>torment_genesis_request.json</code> outside the selected TORMENT data root. Copy includes JSON only.</div>
+      <div class="section-desc solo-mode" id="out-request-guidance"></div>
       <div class="output-body" id="out-workspace"></div>
     </div>
 
@@ -1639,6 +1640,7 @@
         <span class="output-title hivemind-mode">STEP 2 — CREATE AGENT + SEED</span>
         <button class="btn-copy" onclick="copyBlock('out-agent',this)">copy</button>
       </div>
+      <div class="section-desc solo-mode" id="out-create-guidance"></div>
       <div class="output-body" id="out-agent"></div>
     </div>
 
@@ -1649,7 +1651,9 @@
         <span class="output-title hivemind-mode">STEP 3 — ENVIRONMENT CONFIG</span>
         <button class="btn-copy" onclick="copyBlock('out-env',this)">copy</button>
       </div>
+      <div class="section-desc solo-mode" id="out-startup-guidance"></div>
       <div class="output-body" id="out-env"></div>
+      <div class="section-desc solo-mode" id="out-credentials-guidance" style="white-space:pre-wrap"></div>
     </div>
 
     <!-- STEP 4 -->
@@ -1681,6 +1685,7 @@
           <button class="btn-copy" onclick="copyActiveLoop(this)">copy</button>
         </div>
       </div>
+      <div class="section-desc solo-mode" id="out-chat-guidance"></div>
       <div class="output-body" id="out-loop-curl"></div>
       <div class="output-body" id="out-loop-python" style="display:none"></div>
     </div>
@@ -2295,10 +2300,51 @@ function soloEnvLine(shell, key, value) {
   return 'export ' + key + '=' + quoted + '\n';
 }
 
+function soloShellHeading(shell) {
+  const comment = shell === 'cmd' ? ':: ' : '# ';
+  return comment + '============================================================\n' +
+    comment + (shell === 'cmd' ? 'WINDOWS CMD' : 'LINUX / MACOS / WSL') + ' — copy this section only\n' +
+    comment + '============================================================\n\n';
+}
+
+function soloSetupGuidance() {
+  return {
+    'out-directory-guide': [
+      'Choose three separate directories. These paths are examples only; replace them with your own.',
+      '',
+      'REPOSITORY DIRECTORY',
+      'Run dependency installation, Python modules and the TORMENT service here, with the torment environment active.',
+      'Windows example: C:\\path\\to\\TORMENT',
+      'POSIX example: /path/to/TORMENT',
+      '',
+      'GENESIS ARTIFACT DIRECTORY (your setup-artifact directory)',
+      'Store torment_genesis_request.json, torment_genesis_intent.json and torment_genesis_profile.json here.',
+      'Windows example: C:\\path\\to\\my-character-setup',
+      'POSIX example: /path/to/my-character-setup',
+      '',
+      'TORMENT DATA ROOT',
+      'The native durable root selected in the form. Keep setup artifacts outside the selected data root.',
+      'Windows example: c:\\path\\to\\my-character-data',
+      'POSIX example: /path/to/my-character-data',
+      '',
+      'In Steps 2 and 3, replace each bare artifact filename with its quoted absolute path in your setup-artifact directory.',
+      'For example, replace torment_genesis_request.json with "C:\\path\\to\\my-character-setup\\torment_genesis_request.json" on Windows,',
+      'or "/path/to/my-character-setup/torment_genesis_request.json" on POSIX.',
+      'Use the same directory for the intent and exported profile. Keep the terminal in the repository; do not change into the artifact directory.'
+    ].join('\n'),
+    'out-install-guidance': 'Run from the TORMENT repository with the torment environment active. Choose only your shell section below.',
+    'out-request-guidance': 'Save this JSON as torment_genesis_request.json inside your setup-artifact directory, NOT inside the TORMENT data root. The copy block contains valid JSON only.',
+    'out-create-guidance': 'Run the following from the TORMENT repository with the torment environment active. Before running, replace the request, intent and profile filenames below with their quoted absolute paths in your setup-artifact directory. Genesis reads the saved request and writes the intent and exported profile there. Choose only your shell section.',
+    'out-startup-guidance': 'Only after Genesis succeeds, run from the TORMENT repository with the torment environment active. Replace torment_genesis_profile.json below with the quoted absolute path to the profile exported into your setup-artifact directory. Load it and start the server in the same terminal. Use the same data root; choose only your shell section.',
+    'out-chat-guidance': 'After the server starts and health succeeds, use another terminal with the torment environment active. Save the Python block as a chat script in your setup-artifact directory and run it by its quoted absolute path. Its setup checks health only; your first ordinary query exercises the onboarded agent. The curl reference uses POSIX shell syntax.'
+  };
+}
+
 function soloGenesisCreateCommands(embedVars) {
   const checks = [
+    'Run from the TORMENT repository with the torment environment active.',
     'Keep request, intent and profile artifacts outside the selected data root.',
-    'Use a terminal where TORMENT is installed; these filenames refer to your external artifact directory.',
+    'Replace each artifact filename below with its quoted absolute path in your setup-artifact directory.',
     'The offline confirmation is a human statement. Check these conditions before running:',
     'TORMENT service stopped; MCP stopped; other direct TORMENT tools/writers stopped;',
     'Fabric hosts stopped; root jobs absent; public listener absent.',
@@ -2311,7 +2357,7 @@ function soloGenesisCreateCommands(embedVars) {
     ' --confirm-all-offline-conditions --profile-out torment_genesis_profile.json';
   return ['posix', 'cmd'].map(shell => {
     const comment = shell === 'cmd' ? ':: ' : '# ';
-    return comment + (shell === 'cmd' ? 'Windows CMD' : 'Linux / macOS / WSL') + '\n' +
+    return soloShellHeading(shell) +
       checks.map(line => comment + line).join('\n') + '\n\n' +
       embedVars.map(v => soloEnvLine(shell, v.key, v.val)).join('') + '\n' + command;
   }).join('\n\n');
@@ -2357,6 +2403,10 @@ function generateSolo() {
     createCommands = soloGenesisCreateCommands(embedVars);
   } catch (error) { alert(error.message); return; }
 
+  Object.entries(soloSetupGuidance()).forEach(([id, text]) => {
+    document.getElementById(id).textContent = text;
+  });
+
   // ── STEP 0: Install dependencies only ──
   let installLines = '# 1. Install core dependencies\npip install -r requirements.txt';
 
@@ -2370,7 +2420,9 @@ function generateSolo() {
     installLines += '\n\n# ' + (selectedEmbed === 'st' ? '3' : '2') + '. Install OpenAI SDK\npip install openai';
   }
 
-  document.getElementById('out-install').textContent = installLines;
+  document.getElementById('out-install').textContent = ['posix', 'cmd'].map(shell =>
+    soloShellHeading(shell) + (shell === 'cmd' ? installLines.replace(/^# /gm, ':: ') : installLines)
+  ).join('\n\n');
 
   // STEP 1: JSON only; STEP 2: explicit offline operator command.
   document.getElementById('out-workspace').textContent = JSON.stringify(request, null, 2);
@@ -2450,8 +2502,9 @@ function generateSolo() {
   envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
   // Build Linux/Mac section
-  let envOutput = '# Only after successful Native Genesis create. Use the same external artifact directory.\n';
-  envOutput += '# Linux / macOS / WSL\n';
+  let envOutput = soloShellHeading('posix');
+  envOutput += '# Only after successful Native Genesis create. Run from the repository with torment active.\n';
+  envOutput += '# Replace the profile filename with its quoted absolute path in your setup-artifact directory.\n';
   envOutput += soloEnvLine('posix', 'TORMENT_DATA_DIR', request.data_root_identity);
   envOutput += 'unset TORMENT_PROFILE TORMENT_ADMISSION_DESCRIPTOR_PATH\n';
   envOutput += 'export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"\n\n';
@@ -2467,8 +2520,9 @@ function generateSolo() {
   });
 
   envOutput += 'python -m torment_service\n# In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
-  envOutput += '# ────────────────────────────────────────────────────────────────────\n\n';
-  envOutput += '# Windows CMD — paste into command prompt before starting server\n\n';
+  envOutput += soloShellHeading('cmd');
+  envOutput += ':: Only after successful Native Genesis create. Run from the repository with torment active.\n';
+  envOutput += ':: Replace the profile filename with its quoted absolute path in your setup-artifact directory.\n';
   envOutput += soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
   envOutput += 'set "TORMENT_PROFILE="\nset "TORMENT_ADMISSION_DESCRIPTOR_PATH="\n';
   envOutput += 'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\n';
@@ -2484,32 +2538,20 @@ function generateSolo() {
   });
 
   envOutput += 'python -m torment_service\n:: In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
-  envOutput += '\n# ────────────────────────────────────────────────────────────────────\n\n';
 
-  // API key guidance based on selected model
+  // Shell-neutral guidance stays outside the copied command block.
+  let credentialGuidance = '';
   if (selectedModel === 'claude') {
-    envOutput += '# HOW TO GET YOUR ANTHROPIC API KEY:\n';
-    envOutput += '# 1. Go to https://console.anthropic.com/\n';
-    envOutput += '# 2. Sign in or create an account\n';
-    envOutput += '# 3. Go to Settings > API Keys > Create Key\n';
-    envOutput += '# 4. Copy the key (starts with "sk-ant-...")\n';
-    envOutput += '# 5. Replace "your_key_here" above with your actual key\n';
-    envOutput += '#\n';
-    envOutput += '# IMPORTANT: Never share your API key or commit it to git.\n';
-    envOutput += '# Keep it in environment variables, not in source code.\n';
+    credentialGuidance = 'Anthropic credentials: create your API key at https://console.anthropic.com/ and replace your_key_here in the ANTHROPIC_API_KEY command for your shell.';
   } else if (selectedModel === 'openai') {
-    envOutput += '# HOW TO GET YOUR OPENAI API KEY:\n';
-    envOutput += '# 1. Go to https://platform.openai.com/api-keys\n';
-    envOutput += '# 2. Sign in or create an account\n';
-    envOutput += '# 3. Click "Create new secret key"\n';
-    envOutput += '# 4. Copy the key (starts with "sk-...")\n';
-    envOutput += '# 5. Replace "your_key_here" above with your actual key\n';
+    credentialGuidance = 'OpenAI credentials: create your API key at https://platform.openai.com/api-keys and replace your_key_here in the OPENAI_API_KEY command for your shell.';
   } else if (selectedModel === 'ollama') {
-    envOutput += '# OLLAMA SETUP:\n';
-    envOutput += '# 1. Install Ollama: https://ollama.ai/download\n';
-    envOutput += '# 2. Pull your model: ollama pull qwen3:32b\n';
-    envOutput += '# 3. Ollama runs locally — no API key needed.\n';
+    credentialGuidance = 'Local Ollama: install from https://ollama.ai/download, then run ollama pull qwen3:32b. No API key is needed.';
   }
+  if (selectedModel === 'claude' || selectedModel === 'openai') {
+    credentialGuidance += '\nSet the actual key only in your terminal environment. Do not enter it into Forge, save it in the exported Markdown, or commit it to source control.';
+  }
+  document.getElementById('out-credentials-guidance').textContent = credentialGuidance;
 
   document.getElementById('out-env').textContent = envOutput.trim();
 
@@ -4232,22 +4274,35 @@ function exportSetup() {
   if (deploymentMode === 'solo') {
     const name = document.getElementById('char-name').value.trim() || 'character';
     const blocks = [
-      ['0. Install Dependencies', document.getElementById('out-install').textContent, 'bash'],
-      ['1. Native Genesis Request', document.getElementById('out-workspace').textContent, 'json'],
-      ['2. Create Native TORMENT Root', document.getElementById('out-agent').textContent, 'text'],
-      ['3. Startup Environment + Start Server', document.getElementById('out-env').textContent, 'text'],
+      ['0. Install Dependencies', document.getElementById('out-install').textContent, 'shells', 'out-install-guidance'],
+      ['1. Native Genesis Request', document.getElementById('out-workspace').textContent, 'json', 'out-request-guidance'],
+      ['2. Create Native TORMENT Root', document.getElementById('out-agent').textContent, 'shells', 'out-create-guidance'],
+      ['3. Startup Environment + Start Server', document.getElementById('out-env').textContent, 'shells', 'out-startup-guidance'],
       ['4. System Prompt Wrapper', document.getElementById('out-prompts').textContent, ''],
-      ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash'],
-      ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python'],
+      ['5a. Integration Loop (curl)', document.getElementById('out-loop-curl').textContent, 'bash', 'out-chat-guidance'],
+      ['5b. Integration Loop (Python)', document.getElementById('out-loop-python').textContent, 'python', 'out-chat-guidance'],
       ['Reference: Query Response Shape', document.getElementById('out-response').textContent, 'json'],
     ];
     const voiceContent = document.getElementById('out-voice')?.textContent;
     if (voiceContent) blocks.push(['Voice Pipeline (optional)', voiceContent, 'bash']);
 
     let md = '# ' + name + ' \u2014 TORMENT Setup\n_Generated by TORMENT Character Forge & Crystal Attunement_\n';
-    md += '\nSave Step 1 as torment_genesis_request.json. Keep this request, torment_genesis_intent.json and torment_genesis_profile.json outside the selected data root. Use the shell section for your operating system. Complete offline Genesis creation before Step 3 starts the server.\n';
-    blocks.forEach(([title, content, lang]) => {
-      md += '\n---\n\n## ' + title + '\n\n```' + lang + '\n' + content + '\n```\n';
+    md += '\nFollow the steps in order. Copy only your shell section. Complete offline Genesis creation before Step 3 loads the exported profile and starts the server.\n';
+    md += '\n## Directory guide\n\n' + document.getElementById('out-directory-guide').textContent.replace(/\n/g, '  \n') + '\n';
+    blocks.forEach(([title, content, lang, guidanceId]) => {
+      md += '\n---\n\n## ' + title + '\n\n';
+      if (guidanceId) md += document.getElementById(guidanceId).textContent + '\n\n';
+      if (lang === 'shells') {
+        const [posix, cmd] = content.split(soloShellHeading('cmd'));
+        md += '### LINUX / MACOS / WSL\n\n```bash\n' + posix.trim() + '\n```\n\n';
+        md += '### WINDOWS CMD\n\n```bat\n' + soloShellHeading('cmd') + cmd.trim() + '\n```\n';
+      } else {
+        md += '```' + lang + '\n' + content + '\n```\n';
+      }
+      if (title === '3. Startup Environment + Start Server') {
+        const credentials = document.getElementById('out-credentials-guidance').textContent;
+        if (credentials) md += '\n' + credentials + '\n';
+      }
     });
 
     const filename = name.toLowerCase().replace(/\s+/g, '_') + '_torment_setup.md';

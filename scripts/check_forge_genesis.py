@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import py_compile
+import re
 import subprocess
 import sys
 
@@ -65,7 +66,63 @@ print("WINDOWS_PROFILE_ENV_JSON_PARSE=PASS; WINDOWS_PROFILE_ENV_EXACT_VALUE_EQUA
     (artifacts / 'profile-loader.stderr.log').write_text(proc.stderr, encoding='utf-8')
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     print(proc.stdout.strip())
+    # Follow the S5 path guidance: stay in the repository and use quoted absolute
+    # artifact paths, including spaces. Only the filename placeholder is replaced.
+    external = artifacts / 'setup artifacts'
+    external.mkdir(exist_ok=True)
+    external_profile = external / target.name
+    external_profile.write_bytes(raw)
+    absolute_loader = loader.replace(target.name, '"' + str(external_profile) + '"')
+    absolute_verifier = external / verifier.name
+    absolute_verifier.write_text(verifier.read_text(encoding='utf-8').replace(
+        'Path("torment_genesis_profile.json")', 'Path(' + repr(str(external_profile)) + ')').replace(
+        'Path("windows-profile-env.json")', 'Path(' + repr(str(external / 'windows-profile-env.json')) + ')'),
+        encoding='utf-8')
+    absolute_batch = artifacts / 'profile-loader-from-repo.cmd'
+    absolute_batch.write_text('@echo off\ncall conda activate torment\nif errorlevel 1 exit /b %errorlevel%\n'
+        'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\n' + absolute_loader.replace('%P', '%%P') +
+        '\npython -B -X utf8 "' + str(absolute_verifier) + '"\n', encoding='utf-8')
+    proc = subprocess.run(['cmd.exe', '/d', '/c', str(absolute_batch)], cwd=REPO,
+                          text=True, encoding='utf-8', capture_output=True)
+    (artifacts / 'profile-loader-from-repo.stdout.log').write_text(proc.stdout, encoding='utf-8')
+    (artifacts / 'profile-loader-from-repo.stderr.log').write_text(proc.stderr, encoding='utf-8')
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    print('WINDOWS_PROFILE_FROM_REPOSITORY_WITH_EXTERNAL_PATH=PASS')
     return 'PASS'
+
+
+def check_solo_presentation(output):
+    """Check the actual exported instructions without running product commands."""
+    blocks, markdown = output['outputs'], output['markdown']
+    guide = blocks['out-directory-guide']
+    for role in ('REPOSITORY DIRECTORY', 'GENESIS ARTIFACT DIRECTORY', 'TORMENT DATA ROOT'):
+        assert role in guide and role in markdown, role
+    assert 'examples only' in guide
+    assert 'C:\\path\\to\\TORMENT' in guide and '/path/to/TORMENT' in guide
+    assert 'my-character-setup' in guide and 'my-character-data' in guide
+    assert 'quoted absolute path' in guide and 'do not change into the artifact directory' in guide
+    for name in ('install', 'request', 'create', 'startup', 'chat'):
+        assert blocks['out-' + name + '-guidance'] in markdown, name
+    assert 'NOT inside the TORMENT data root' in blocks['out-request-guidance']
+    for name in ('install', 'create', 'startup'):
+        assert 'repository with the torment environment active' in blocks['out-' + name + '-guidance']
+    request_section = markdown.split('## 1. Native Genesis Request\n\n', 1)[1].split('\n---', 1)[0]
+    assert request_section.index(blocks['out-request-guidance']) < request_section.index('```json')
+    assert '```json\n' + blocks['out-workspace'] + '\n```' in request_section
+    for name in ('out-install', 'out-agent', 'out-env'):
+        source = blocks[name]
+        assert source.count('LINUX / MACOS / WSL — copy this section only') == 1
+        assert source.count('WINDOWS CMD — copy this section only') == 1
+        posix, cmd = source.split(':: ' + '=' * 60, 1)
+        assert not any(line.startswith('#') for line in cmd.splitlines())
+        assert not any(line.startswith(('set ', 'for /f', '::')) for line in posix.splitlines())
+    windows_blocks = re.findall(r'```bat\n(.*?)\n```', markdown, re.S)
+    assert len(windows_blocks) == 3
+    assert all(not any(line.startswith('#') for line in block.splitlines()) for block in windows_blocks)
+    assert markdown.count('### LINUX / MACOS / WSL') == markdown.count('### WINDOWS CMD') == 3
+    credentials = blocks['out-credentials-guidance']
+    if credentials:
+        assert credentials in markdown and credentials not in blocks['out-env']
 
 
 def main():
@@ -130,7 +187,7 @@ def main():
         assert 'export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"' in blocks['out-env']
         assert 'TORMENT_ADMISSION_DESCRIPTOR_PATH' in blocks['out-env']
         assert 'outside the selected data root' in output['markdown']
-        assert '## 1. Native Genesis Request\n\n```json\n' + raw in output['markdown']
+        check_solo_presentation(output)
         py = artifacts / (label + '-chat.py')
         py.write_text(blocks['out-loop-python'], encoding='utf-8')
         py_compile.compile(str(py), cfile=str(artifacts / (label + '-chat.pyc')), doraise=True)
