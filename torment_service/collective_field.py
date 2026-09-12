@@ -25,6 +25,35 @@ from .pathing import safe_slug
 log = logging.getLogger("torment.collective_field")
 
 
+def read_existing_collective_events(workspace_id: str, data_dir: str) -> List[Dict[str, Any]]:
+    """Read optional event information without constructing a writable field.
+
+    Query must not create a collective directory, warm packet caches or acquire
+    a writer merely to read context. Missing files (including a concurrent
+    removal) are empty; incomplete/malformed JSONL records are skipped just as
+    in the existing field reader.
+    """
+    workspace_id = safe_slug(workspace_id, "workspace_id")
+    canonical_data = _canonical_storage_root(data_dir)
+    base = os.path.realpath(os.path.join(canonical_data, "workspaces", workspace_id, "collective"))
+    if not base.startswith(canonical_data + os.sep):
+        raise ValueError(f"Workspace path escapes base: {base!r}")
+    events_path = _child_path(base, "events.jsonl")
+    rows = []
+    try:
+        with open(events_path, "r", encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except FileNotFoundError:
+        return []
+    return rows
+
+
 class CollectiveField:
     """Workspace-level collective resonance field.
 

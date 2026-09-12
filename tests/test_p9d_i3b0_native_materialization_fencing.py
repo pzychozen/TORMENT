@@ -40,7 +40,7 @@ NATIVE_READ_MATERIALIZER_CENSUS = {
     "collective_field": {
         "route": "TormentFabric.query -> _collective_query_context",
         "materializer": "CollectiveField.__init__ -> collective directory",
-        "disposition": "refuse when native collective context is applicable",
+        "disposition": "H2a reads existing events without constructing CollectiveField",
     },
     "archive_recall": {
         "route": "POST /retrieve -> _get_archive_store",
@@ -87,14 +87,16 @@ def _tree_signature(root: Path) -> tuple[tuple[str, str], ...]:
     return tuple(values)
 
 
-def test_native_collective_query_refuses_before_collective_directory_creation(tmp_path, monkeypatch):
+def test_native_collective_query_succeeds_without_collective_directory_creation(tmp_path, monkeypatch):
     root, runtime = _native_runtime(tmp_path, monkeypatch)
     collective_dir = root / "workspaces" / "orchard" / "collective"
     runtime.cognition_fabric._hivemind_enable = True
     try:
-        with pytest.raises(NativePublicOperationRefused, match="qualified read evidence"):
-            runtime.query("orchard", "aria", "collective context")
+        before = _tree_signature(root / "workspaces")
+        result = runtime.query("orchard", "aria", "collective context")
+        assert result.get("collective_context", {}) == {}
         assert not collective_dir.exists()
+        assert _tree_signature(root / "workspaces") == before
     finally:
         close_public_runtime(root)
 

@@ -3043,10 +3043,12 @@ class TormentFabric:
         Does NOT influence scoring — informational only.
         """
         try:
-            field = self._get_collective_field(workspace_id)
+            from .collective_field import read_existing_collective_events
+
+            events = read_existing_collective_events(workspace_id, self.data_dir)
             relevant_events = []
             for d in domains:
-                relevant_events.extend(field.events_by_domain(d, limit=5))
+                relevant_events.extend([event for event in events if event.get("domain_id") == d][-5:])
             # Deduplicate by event_id
             seen = set()
             unique = []
@@ -4805,14 +4807,6 @@ class TormentFabric:
             # rather than silently mixing native core candidates with legacy
             # deep-memory retrieval.
             raise ValueError("qualified native query does not support enabled deep retrieval")
-        if native_qualification and self._hivemind_enable:
-            # CollectiveField is a legacy external store whose constructor
-            # creates its directory. Native query has no qualified,
-            # non-materializing collective read adapter yet.
-            raise NativeQueryReadRefused(
-                "native query collective context is not yet qualified"
-            )
-
         with span("query.embedding"):
             qemb = self.kernel.embedder.embed(query_text)
         if int(np.asarray(qemb).reshape(-1).shape[0]) != int(ws.embed_dim):
