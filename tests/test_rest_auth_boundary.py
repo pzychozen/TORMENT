@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import os
 import re
 from typing import Iterator
@@ -160,6 +161,28 @@ def test_invalid_key_rejected_before_sensitive_handler(auth_client):
 
     assert response.status_code == 401, response.text
     assert response.json()["detail"] == "Invalid API key."
+
+
+def test_runtime_startup_refusal_returns_generic_detail_and_logs_reason(auth_client, monkeypatch, caplog):
+    client, appmod = auth_client
+    reason = (
+        "public startup refused by durable deployment authority: "
+        "effective-profile-is-not-the-qualified-selector-profile"
+    )
+
+    def refuse_runtime():
+        raise appmod.PublicRuntimeStartupRefused(reason)
+
+    monkeypatch.setattr(appmod.fabric, "runtime", refuse_runtime)
+    with caplog.at_level(logging.ERROR, logger="torment.app"):
+        response = client.get("/health", headers=_auth_headers())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "public runtime startup refused"}
+    assert "effective-profile-is-not-the-qualified-selector-profile" not in response.text
+    assert (
+        "torment.app", logging.ERROR, f"public runtime startup refused: {reason}"
+    ) in caplog.record_tuples
 
 
 def test_valid_header_and_query_api_keys_reach_sensitive_handler(auth_client):

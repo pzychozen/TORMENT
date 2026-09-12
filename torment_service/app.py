@@ -184,7 +184,11 @@ async def enforce_rest_auth_boundary(request: Request, call_next):
                 content={"detail": "native public route is refused before legacy-memory effect"},
             )
     except PublicRuntimeStartupRefused as exc:
-        return JSONResponse(status_code=503, content={"detail": str(exc)})
+        _log.error("public runtime startup refused: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "public runtime startup refused"},
+        )
     return await call_next(request)
 
 app.add_middleware(QueryTimingMiddleware)
