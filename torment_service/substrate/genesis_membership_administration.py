@@ -259,15 +259,20 @@ def _verify_core(connection, intent, profile, records):
             _operation_key(intent, "initial-membership", scope_key=plan["scope_key"])))
         relationships[record.relationship_id.bytes] = (record.membership_identity_namespace_id.bytes,
             ROOT_SCOPE_MEMBERSHIP_KIND, record.semantic_scope_id.bytes)
-    seed_result = None
-    seed = i4._seed(intent)
-    if seed is not None:
-        config = i4._configuration(intent, _CommittedLane(intent))
+    seed_results = {}
+    for agent in intent.initial_agents():
+        agent_id = agent["agent_id"]
+        seed = i4._seed(intent, agent_id)
+        seed_results[agent_id] = None
+        if seed is None:
+            continue
+        config = i4._configuration(intent, _CommittedLane(intent), agent_id)
         runtime = NativeCharacterSeedPlantRuntime(connection, configuration=config)
         request = NativeCharacterSeedPlantRequest(seed)
         seed_result = runtime.recover_completed_seed(request)
         if seed_result is None:
             raise GenesisPreparationRefused("I5 requires committed I4 Character completion; planting is forbidden")
+        seed_results[agent_id] = seed_result
         scope = config.routing_scope
         namespace = scope.idempotency_namespace_id.bytes
         source_ids = set()
@@ -319,7 +324,7 @@ def _verify_core(connection, intent, profile, records):
         "integrity_expectations", "integrity_measurements", "legacy_object_aliases", "object_revision_governance",
         "memory_runtime_enumeration_orders",
     }
-    if seed is None:
+    if not any(seed_results.values()):
         allowed = set(i3.CATALOG_COLUMNS) | {
             "core_metadata", "deployment_metadata", "objects", "object_revisions", "relationships",
             "relationship_revisions", "relationship_revision_endpoints", "operations", "operation_outputs",
@@ -332,7 +337,7 @@ def _verify_core(connection, intent, profile, records):
             raise GenesisPreparationRefused("I5 unexpected native content outside authorized effects")
     if connection.execute("PRAGMA foreign_key_check").fetchone():
         raise GenesisPreparationRefused("I5 native foreign-key integrity conflicts")
-    return seed_result
+    return i4._versioned_seed_result(intent, seed_results)
 
 
 class GenesisMembershipAdministration(i3.GenesisAdministration):
@@ -358,7 +363,7 @@ class GenesisMembershipAdministration(i3.GenesisAdministration):
         expected = [i3.GenesisAdministration._reference(self, "native-core-preparation", i3._bootstrap_manifest(self.intent))]
         for table, rows in i3.genesis_prerequisites(self.intent).items():
             expected.append(i3.GenesisAdministration._reference(self, "native-catalog:" + table, dict(table=table, rows=rows)))
-        owners = i4._EXTERNAL_OWNERS + (i4._NATIVE_OWNERS if i4._seed(self.intent) is not None else ())
+        owners = i4._owners(self.intent)
         seen = set()
         for ref in record.child_operation_references:
             if ref in expected:

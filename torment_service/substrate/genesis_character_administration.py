@@ -33,8 +33,33 @@ _EXTERNAL_OWNERS = ("first-workspace", "first-identity", "first-character-declar
 _NATIVE_OWNERS = ("first-character-native-seed", "first-character-linkage")
 
 
-def _owner_paths(intent):
+def _agent_value(intent, agent_id=None):
     value = intent.payload()
+    agent = intent.initial_agent(agent_id)
+    return {**value, "agent": {k: v for k, v in agent.items() if k != "character"}, "character": agent["character"]}
+
+
+def _agent_owners(intent, agent_id):
+    external = _EXTERNAL_OWNERS
+    native = _NATIVE_OWNERS if _seed(intent, agent_id) is not None else ()
+    if intent.VERSION == 1:
+        return external, native
+    prefix = "initial-agent:" + agent_id + ":"
+    return (external[0], *(prefix + name for name in external[1:])), tuple(prefix + name for name in native)
+
+
+def _owners(intent):
+    return tuple(dict.fromkeys(owner for agent in intent.initial_agents()
+        for group in _agent_owners(intent, agent["agent_id"]) for owner in group))
+
+
+def _owner_paths(intent):
+    return list(dict.fromkeys(path for agent in intent.initial_agents()
+        for path in _agent_owner_paths(intent, agent["agent_id"])))
+
+
+def _agent_owner_paths(intent, agent_id=None):
+    value = _agent_value(intent, agent_id)
     workspace = Path("workspaces") / value["workspace"]["workspace_id"]
     paths = [workspace / "workspace_meta.json", workspace / "domains.json",
              workspace / "agents" / value["agent"]["agent_id"] / "identity.json"]
@@ -72,10 +97,11 @@ def _inspect(root, intent):
     return record, entries
 
 
-def _routing(intent):
+def _routing(intent, agent_id=None):
     """Construct allocated PRIVATE facts; never discover or allocate identities."""
-    value = intent.payload()
-    plans = [p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE"]
+    value = _agent_value(intent, agent_id)
+    plans = [p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE"
+             and p.payload()["scope_key"]["agent_id"] == value["agent"]["agent_id"]]
     if len(plans) != 1:
         raise GenesisPreparationRefused("I4 requires exactly the allocated first PRIVATE plan")
     plan = plans[0]
@@ -96,17 +122,17 @@ def _routing(intent):
     return routing, NativeRepresentationLane(**value["representation_lane"]), scope["motif_domain_id"]
 
 
-def _seed(intent):
-    value = intent.payload()
+def _seed(intent, agent_id=None):
+    value = _agent_value(intent, agent_id)
     if value["character"]["mode"] == "DISABLED":
         return None
     return CharacterSeed(**value["character"]["definition"],
                          created_ts=value["creation_facts"]["character_created_ts"], seed_eids=[], seed_motif_id="")
 
 
-def _configuration(intent, embedder):
-    scope, lane, domain = _routing(intent)
-    seed = _seed(intent)
+def _configuration(intent, embedder, agent_id=None):
+    scope, lane, domain = _routing(intent, agent_id)
+    seed = _seed(intent, agent_id)
     parent = "genesis-i4-seed:" + payload_digest(dict(
         genesis_operation_key=intent.operation_key, intent_digest=intent.digest,
         workspace_id=scope.runtime_scope.workspace_id, agent_id=scope.runtime_scope.agent_id,
@@ -116,6 +142,35 @@ def _configuration(intent, embedder):
         scope.runtime_scope.workspace_id, scope.runtime_scope.agent_id, domain, parent, scope, lane,
         embedder, now_ts=lambda: intent.payload()["creation_facts"]["character_created_ts"],
     )
+
+
+def _configurations(intent, embedder):
+    if intent.VERSION == 1:
+        agent = intent.initial_agent()
+        return {agent["agent_id"]: _configuration(intent, embedder)
+                if agent["character"]["mode"] == "ENABLED" else None}
+    return {a["agent_id"]: _configuration(intent, embedder, a["agent_id"])
+            if a["character"]["mode"] == "ENABLED" else None for a in intent.initial_agents()}
+
+
+def _recover_seeds(connection, intent):
+    from .genesis_membership_administration import _CommittedLane
+    return {agent_id: NativeCharacterSeedPlantRuntime(connection, configuration=config).recover_completed_seed(
+        NativeCharacterSeedPlantRequest(_seed(intent, agent_id))) if config is not None else None
+        for agent_id, config in _configurations(intent, _CommittedLane(intent)).items()}
+
+
+def _seed_results(intent, result):
+    if intent.VERSION == 1:
+        return {intent.initial_agent()["agent_id"]: result}
+    expected = {a["agent_id"] for a in intent.initial_agents()}
+    if not isinstance(result, dict) or set(result) != expected:
+        raise GenesisPreparationRefused("per-agent native results do not cover the initial roster")
+    return result
+
+
+def _versioned_seed_result(intent, results):
+    return next(iter(results.values())) if intent.VERSION == 1 else results
 
 
 def _json_result(value):
@@ -132,6 +187,12 @@ def _json_result(value):
 class GenesisFirstCharacterBundle:
     character_mode: str
     native_seed: NativeCharacterSeedPlantResult | None
+    child_references: tuple[GenesisEvidenceReference, ...]
+
+
+@dataclass(frozen=True)
+class GenesisInitialCharacterRoster:
+    native_seeds: dict[str, NativeCharacterSeedPlantResult | None]
     child_references: tuple[GenesisEvidenceReference, ...]
 
 
@@ -157,7 +218,7 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
             expected.append(super()._reference("native-catalog:" + table, dict(table=table, rows=rows)))
         if not all(ref in record.child_operation_references for ref in expected):
             raise GenesisPreparationRefused("I4 requires complete I3 preparation checkpoints")
-        owners = _EXTERNAL_OWNERS + (_NATIVE_OWNERS if _seed(self.intent) is not None else ())
+        owners = _owners(self.intent)
         for ref in record.child_operation_references:
             if ref not in expected and (ref.payload()["owner"] not in owners or
                 ref.payload()["operation_key"] != self._reference(ref.payload()["owner"], {}).payload()["operation_key"]):
@@ -184,26 +245,39 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
         return evidence
 
     def _references(self, result):
+        refs = [ref for agent_id, native in _seed_results(self.intent, result).items()
+                for ref in GenesisCharacterAdministration._agent_references(self, native, agent_id)]
+        return tuple(dict.fromkeys(refs))
+
+    def _verify_external(self, result):
+        for agent_id, native in _seed_results(self.intent, result).items():
+            GenesisCharacterAdministration._verify_agent_external(self, native, agent_id)
+
+    def _agent_references(self, result, agent_id):
         projection = self.intent.external_owner_projection()
-        value = self.intent.payload()
+        if self.intent.VERSION == 2:
+            entry = next(a for a in projection["agents"] if a["identity"]["agent_id"] == agent_id)
+            projection = dict(workspace=projection["workspace"], **entry)
+        external_owners, native_owners = _agent_owners(self.intent, agent_id)
+        value = _agent_value(self.intent, agent_id)
         refs = tuple(self._reference(owner, projection[key]) for owner, key in
-                     zip(_EXTERNAL_OWNERS, ("workspace", "identity", "character"), strict=True))
+                     zip(external_owners, ("workspace", "identity", "character"), strict=True))
         if result is not None:
-            refs += (self._reference(_NATIVE_OWNERS[0], _json_result(asdict(result))),
-                     self._reference(_NATIVE_OWNERS[1], dict(
+            refs += (self._reference(native_owners[0], _json_result(asdict(result))),
+                     self._reference(native_owners[1], dict(
                          workspace_id=value["workspace"]["workspace_id"],
                          seed_id=value["character"]["definition"]["seed_id"],
                          definition_digest=result.seed_definition_digest,
                          seed_eids=list(result.seed_eids), seed_motif_id=result.seed_motif_id)))
         return refs
 
-    def _verify_external(self, result):
+    def _verify_agent_external(self, result, agent_id):
         """Reopen fixed owners after the final observation; never repair here."""
-        value = self.intent.payload()
+        value = _agent_value(self.intent, agent_id)
         workspace, agent, created, lane = value["workspace"], value["agent"], value["creation_facts"], value["representation_lane"]
         declaration = WorkspaceDeclaration(workspace["workspace_id"], created["workspace_created_ts"], lane["dimension"],
             lane["provider"], lane["model"], tuple(workspace["ordered_domains"]))
-        for path, expected in zip(_owner_paths(self.intent)[:2], (declaration.metadata_payload(), declaration.domain_payload()), strict=True):
+        for path, expected in zip(_agent_owner_paths(self.intent, agent_id)[:2], (declaration.metadata_payload(), declaration.domain_payload()), strict=True):
             if not (self.root / path).is_file() or payload_digest(i3.strict_object((self.root / path).read_bytes())) != payload_digest(expected):
                 raise GenesisPreparationRefused("workspace changed during I4 verification")
         identities = IdentityStore(str(self.root))
@@ -216,11 +290,30 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
         if result is not None:
             characters = CharacterStore(str(self.root))
             seed = characters.read_seed_strict_for_onboarding(workspace["workspace_id"], value["character"]["definition"]["seed_id"])
-            if (seed is None or characters.stable_seed_projection(seed) != characters.stable_seed_projection(_seed(self.intent))
+            if (seed is None or characters.stable_seed_projection(seed) != characters.stable_seed_projection(_seed(self.intent, agent_id))
                 or tuple(seed.seed_eids) != result.seed_eids or seed.seed_motif_id != result.seed_motif_id):
                 raise GenesisPreparationRefused("Character owner changed during I4 verification")
 
     def prepare_first_character_bundle(self, *, embedder, observer, operator_attestation, issuer_reference):
+        results = {}
+        for index, agent in enumerate(self.intent.initial_agents()):
+            agent_id = agent["agent_id"]
+            if self.intent.VERSION == 2:
+                self.fault("before-initial-agent:" + str(index))
+            if index:
+                self.observe_quiescence(observer, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
+            bundle = self._prepare_agent(agent_id, embedder=embedder, observer=observer,
+                operator_attestation=operator_attestation, issuer_reference=issuer_reference)
+            results[agent_id] = bundle.native_seed
+            if self.intent.VERSION == 2:
+                self.fault("after-initial-agent:" + str(index))
+        native = _versioned_seed_result(self.intent, results)
+        self._verify_external(native)
+        if self.intent.VERSION == 1:
+            return GenesisFirstCharacterBundle(self.intent.initial_agent()["character"]["mode"], native, self._references(native))
+        return GenesisInitialCharacterRoster(native, self._references(native))
+
+    def _prepare_agent(self, agent_id, *, embedder, observer, operator_attestation, issuer_reference):
         self._require_record()
         if not self._quiescent:
             raise GenesisPreparationRefused("fresh successful quiescence observation required")
@@ -228,21 +321,23 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
         # before this bounded mutation, and consume it even if a child fails.
         self.observe_quiescence(observer, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
         self._quiescent = False
-        value = self.intent.payload()
-        seed = _seed(self.intent)
-        config = _configuration(self.intent, embedder) if seed is not None else None
+        value = _agent_value(self.intent, agent_id)
+        seed = _seed(self.intent, agent_id)
+        configs = _configurations(self.intent, embedder)
+        config = configs[agent_id]
         core = self.root / i3.CORE_DIRECTORY / value["allocations"]["core_relative_path"]
         request = NativeCharacterSeedPlantRequest(seed) if seed is not None else None
         with closing(i3._open_readonly(core)) as connection:
-            _verify_core(connection, self.intent, config)
+            _verify_core(connection, self.intent, configs)
             recovered = NativeCharacterSeedPlantRuntime(connection, configuration=config).recover_completed_seed(request) if config else None
+        external_owners, native_owners = _agent_owners(self.intent, agent_id)
         prior_refs = {ref.payload()["owner"]: ref for ref in self.record.child_operation_references}
-        for ref in self._references(recovered):
+        for ref in self._agent_references(recovered, agent_id):
             self._has_reference(ref)
-        if recovered is None and any(owner in prior_refs for owner in _NATIVE_OWNERS):
+        if recovered is None and any(owner in prior_refs for owner in native_owners):
             raise GenesisPreparationRefused("checkpointed native seed completion is absent")
-        paths = _owner_paths(self.intent)
-        for owner, required in zip(_EXTERNAL_OWNERS, (paths[:2], paths[2:3], paths[3:]), strict=True):
+        paths = _agent_owner_paths(self.intent, agent_id)
+        for owner, required in zip(external_owners, (paths[:2], paths[2:3], paths[3:]), strict=True):
             if owner in prior_refs and any(not (self.root / p).is_file() for p in required):
                 raise GenesisPreparationRefused("checkpointed external owner is missing")
         workspace, agent, created, lane = value["workspace"], value["agent"], value["creation_facts"], value["representation_lane"]
@@ -266,13 +361,13 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
             self.fault("after-character-definition")
             if recovered is None:
                 with open_existing_native_core_connection(core) as opened:
-                    _verify_core(opened.connection, self.intent, config)
+                    _verify_core(opened.connection, self.intent, configs)
                     runtime = NativeCharacterSeedPlantRuntime(opened.connection, configuration=config)
                     runtime.plant_seed(request)
                 self.fault("after-native-seed-plant")
             # Always reread committed owner truth, including the native-ahead case.
             with closing(i3._open_readonly(core)) as connection:
-                _verify_core(connection, self.intent, config)
+                _verify_core(connection, self.intent, configs)
                 recovered = NativeCharacterSeedPlantRuntime(connection, configuration=config).recover_completed_seed(request)
                 if recovered is None:
                     raise GenesisPreparationRefused("native seed completion did not recover")
@@ -286,11 +381,11 @@ class GenesisCharacterAdministration(i3.GenesisAdministration):
         self.observe_quiescence(observer, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
         self._quiescent = False
         with closing(i3._open_readonly(core)) as connection:
-            _verify_core(connection, self.intent, config)
+            _verify_core(connection, self.intent, configs)
             if config and NativeCharacterSeedPlantRuntime(connection, configuration=config).recover_completed_seed(request) != recovered:
                 raise GenesisPreparationRefused("native seed changed during final observation")
-        self._verify_external(recovered)
-        references = self._references(recovered)
+        self._verify_agent_external(recovered, agent_id)
+        references = self._agent_references(recovered, agent_id)
         missing = tuple(ref for ref in references if not self._has_reference(ref))
         if missing:
             self.fault("before-first-character-checkpoint")
@@ -320,9 +415,14 @@ def begin_genesis_character_administration(*, data_root: str | Path, intent: Gen
 def _verify_core(connection, intent, config):
     """Exact I3 catalogs plus only the bounded seed operation's native effects."""
     expected = i3.genesis_prerequisites(intent)
-    if config is not None:
-        value = intent.payload()
-        private = next(p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE")
+    configs = config if isinstance(config, dict) else {intent.initial_agent()["agent_id"]: config}
+    if set(configs) != {a["agent_id"] for a in intent.initial_agents()}:
+        raise GenesisPreparationRefused("I4 configurations do not cover the initial roster")
+    enabled = {agent_id: candidate for agent_id, candidate in configs.items() if candidate is not None}
+    for agent_id, config in enabled.items():
+        value = _agent_value(intent, agent_id)
+        private = next(p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE"
+                       and p.payload()["scope_key"]["agent_id"] == agent_id)
         plan, routing = private["scope_plan"], config.routing_scope
         observed = dict(
             workspace_id=routing.runtime_scope.workspace_id, scope_kind=routing.runtime_scope.scope_kind,
@@ -339,7 +439,7 @@ def _verify_core(connection, intent, config):
             or asdict(config.representation_lane) != value["representation_lane"]
             or config.workspace_id != value["workspace"]["workspace_id"] or config.agent_id != value["agent"]["agent_id"]):
             raise GenesisPreparationRefused("I4 routing configuration differs from frozen PRIVATE allocation")
-    if config is None or connection.execute("SELECT 1 FROM operations LIMIT 1").fetchone() is None:
+    if not enabled or connection.execute("SELECT 1 FROM operations LIMIT 1").fetchone() is None:
         i3._verify_native(connection, intent, expected, complete=True)
         return
     metadata = require_current_schema(connection)
@@ -351,49 +451,56 @@ def _verify_core(connection, intent, config):
         if ({str(UUID(bytes=r[0])): r[1] for r in rows} != expected[table]
             or (table != "idempotency_namespaces" and any(r[2] != 0 for r in rows))):
             raise GenesisPreparationRefused("I4 allocated prerequisite closure conflicts")
-    runtime = NativeCharacterSeedPlantRuntime(connection, configuration=config)
-    request = NativeCharacterSeedPlantRequest(_seed(intent))
-    seed = request.seed
-    digest = character_seed_definition_digest(seed)
-    keys, source_ids = set(), set()
-    for index, concept in enumerate(_split_seed_text(seed.seed_text)):
-        keys.add(runtime._source_key(seed.seed_id, index))
-        keys.add(runtime._motif_key(seed.seed_id, f"DECISION:{index}"))
-        source = runtime._recover_source(request, digest, index, concept)
-        if source is not None:
-            source_ids.add(source.object_id.bytes)
-            runtime._recover_ready_representation(source)
-            keys.update(runtime._representation_key(source, stage) for stage in ("PENDING", "EXPECTATION", "READY"))
-    keys.add(runtime._motif_key(seed.seed_id, "SEED_BASIN_BOOST"))
-    for namespace, key in connection.execute("SELECT idempotency_namespace_id,idempotency_key FROM operations"):
-        if namespace != config.routing_scope.idempotency_namespace_id.bytes or key not in keys:
-            raise GenesisPreparationRefused("native effect is not a child of this I4 seed")
-    scope = config.routing_scope
-    motif_ids = set()
-    for oid, namespace, kind in connection.execute("SELECT object_id,identity_namespace_id,object_kind FROM objects"):
-        if not ((oid in source_ids and namespace == scope.runtime_scope.identity_namespace_id.bytes and kind == "LEGACY_CORE_NODE")
-                or (namespace == scope.motif_identity_namespace_id.bytes and kind == "DERIVED_MOTIF")):
-            raise GenesisPreparationRefused("I4 contains a foreign object or root profile")
-        if kind == "DERIVED_MOTIF":
-            motif_ids.add(oid)
-    catalog = runtime._motif_reader.list_runtime_motifs(motif_alias_namespace_id=scope.motif_alias_namespace_id,
-        domain_id=config.domain_id, semantic_scope_id=scope.runtime_scope.semantic_scope_id)
-    if {m.motif_object_id.bytes for m in catalog} != motif_ids:
-        raise GenesisPreparationRefused("I4 motif domain or alias closure conflicts")
-    members = set()
-    for motif in catalog:
-        for member in runtime._motifs.list_current_motif_members(motif.motif_object_id):
-            if member.member_object_id.bytes not in source_ids or member.member_semantic_scope_id != scope.runtime_scope.semantic_scope_id:
-                raise GenesisPreparationRefused("I4 motif contains a foreign member")
-            members.add(member.member_object_id.bytes)
-    if runtime.recover_completed_seed(request) is not None and members != source_ids:
-        raise GenesisPreparationRefused("I4 completed seed motif membership closure is incomplete")
-    for namespace, kind in connection.execute("SELECT identity_namespace_id,relationship_kind FROM relationships"):
-        if namespace != scope.membership_identity_namespace_id.bytes or kind != "MOTIF_MEMBERSHIP":
+    allowed_operations, allowed_objects, allowed_relationships = set(), {}, {}
+    for agent_id, config in enabled.items():
+        runtime = NativeCharacterSeedPlantRuntime(connection, configuration=config)
+        request = NativeCharacterSeedPlantRequest(_seed(intent, agent_id))
+        seed = request.seed
+        digest = character_seed_definition_digest(seed)
+        scope = config.routing_scope
+        semantic = scope.runtime_scope.semantic_scope_id.bytes
+        keys, source_ids = set(), set()
+        for index, concept in enumerate(_split_seed_text(seed.seed_text)):
+            keys.add(runtime._source_key(seed.seed_id, index))
+            keys.add(runtime._motif_key(seed.seed_id, f"DECISION:{index}"))
+            source = runtime._recover_source(request, digest, index, concept)
+            if source is not None:
+                source_ids.add(source.object_id.bytes)
+                allowed_objects[source.object_id.bytes] = (scope.runtime_scope.identity_namespace_id.bytes, "LEGACY_CORE_NODE", semantic)
+                runtime._recover_ready_representation(source)
+                keys.update(runtime._representation_key(source, stage) for stage in ("PENDING", "EXPECTATION", "READY"))
+        keys.add(runtime._motif_key(seed.seed_id, "SEED_BASIN_BOOST"))
+        allowed_operations.update((scope.idempotency_namespace_id.bytes, key) for key in keys)
+        motif_ids = {row[0] for row in connection.execute("SELECT object_id FROM objects WHERE identity_namespace_id=? AND object_kind='DERIVED_MOTIF'",
+            (scope.motif_identity_namespace_id.bytes,))}
+        for oid in motif_ids:
+            allowed_objects[oid] = (scope.motif_identity_namespace_id.bytes, "DERIVED_MOTIF", semantic)
+        catalog = runtime._motif_reader.list_runtime_motifs(motif_alias_namespace_id=scope.motif_alias_namespace_id,
+            domain_id=config.domain_id, semantic_scope_id=scope.runtime_scope.semantic_scope_id)
+        if {m.motif_object_id.bytes for m in catalog} != motif_ids:
+            raise GenesisPreparationRefused("I4 motif domain or alias closure conflicts")
+        members = set()
+        for motif in catalog:
+            for member in runtime._motifs.list_current_motif_members(motif.motif_object_id):
+                if member.member_object_id.bytes not in source_ids or member.member_semantic_scope_id != scope.runtime_scope.semantic_scope_id:
+                    raise GenesisPreparationRefused("I4 motif contains a foreign member")
+                members.add(member.member_object_id.bytes)
+        if runtime.recover_completed_seed(request) is not None and members != source_ids:
+            raise GenesisPreparationRefused("I4 completed seed motif membership closure is incomplete")
+        allowed_relationships[scope.membership_identity_namespace_id.bytes] = semantic
+    if any((namespace, key) not in allowed_operations for namespace, key in connection.execute(
+        "SELECT idempotency_namespace_id,idempotency_key FROM operations")):
+        raise GenesisPreparationRefused("native effect is not a child of this I4 seed roster")
+    actual = {row[0]: row[1:] for row in connection.execute("SELECT object_id,identity_namespace_id,object_kind FROM objects")}
+    if actual != {oid: facts[:2] for oid, facts in allowed_objects.items()}:
+        raise GenesisPreparationRefused("I4 contains a foreign object or root profile")
+    for oid, semantic in connection.execute("SELECT object_id,effective_semantic_scope_id FROM object_revisions"):
+        if oid not in allowed_objects or allowed_objects[oid][2] != semantic:
+            raise GenesisPreparationRefused("I4 object revision scope conflicts")
+    for namespace, kind, semantic in connection.execute("SELECT r.identity_namespace_id,r.relationship_kind,rr.effective_semantic_scope_id "
+        "FROM relationships r JOIN relationship_revisions rr ON rr.relationship_id=r.relationship_id"):
+        if namespace not in allowed_relationships or kind != "MOTIF_MEMBERSHIP" or allowed_relationships[namespace] != semantic:
             raise GenesisPreparationRefused("I4 contains a root membership or foreign relationship")
-    if connection.execute("SELECT 1 FROM object_revisions WHERE effective_semantic_scope_id<>? LIMIT 1",
-                          (scope.runtime_scope.semantic_scope_id.bytes,)).fetchone():
-        raise GenesisPreparationRefused("I4 object revision scope conflicts")
     for table, column, output in (("object_revisions", "object_revision_id", "object_revision_id"),
                                   ("relationship_revisions", "relationship_revision_id", "relationship_revision_id"),
                                   ("representations", "representation_id", "representation_id")):

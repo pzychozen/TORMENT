@@ -22,7 +22,7 @@ from .character_seed_witness import character_seed_definition_digest
 from .deployment_types import NativeGenesisCompletionWitness
 from .genesis_contracts import (
     GenesisAdministrativePhase, GenesisCompletedSeed, GenesisIntent,
-    GenesisOperationRecord, GenesisSeedCompletion, initial_membership_closure_digest,
+    GenesisOperationRecord, GenesisSeedCompletion, GenesisAgentSeedCompletion, initial_membership_closure_digest,
     payload_digest, runtime_plan_digest,
 )
 from .genesis_fence import (
@@ -93,7 +93,7 @@ class _OwnerReads:
     verify_external = i4.GenesisCharacterAdministration._verify_external
 
 
-def _character_projections(intent, native_result):
+def _character_projections(intent, native_result, agent_id=None):
     """Documented source-family and result projections with distinct digest domains.
 
     The source projection cross-binds the Genesis declaration digest and the
@@ -101,17 +101,18 @@ def _character_projections(intent, native_result):
     explicitly and retains every ordered source field from the recovered result.
     Neither projection is a durable operation ledger or a new completion type.
     """
-    value = intent.payload()
+    value = i4._agent_value(intent, agent_id)
     definition = value["character"]["definition"]
-    seed = i4._seed(intent)
+    seed = i4._seed(intent, agent_id)
     if seed is None or {key: seed.to_dict()[key] for key in definition} != definition:
         raise GenesisPreparationRefused("I6 reconstructed Character declaration conflicts")
     genesis_digest = payload_digest(definition)
     native_digest = character_seed_definition_digest(seed)
     if native_result is None or native_result.seed_definition_digest != native_digest or native_result.state != "COMPLETE":
         raise GenesisPreparationRefused("I6 native Character definition digest or completion conflicts")
-    config = i4._configuration(intent, i5._CommittedLane(intent))
-    private = next(p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE")
+    config = i4._configuration(intent, i5._CommittedLane(intent), agent_id)
+    private = next(p.payload() for p in intent.runtime_plans if p.payload()["scope_key"]["scope_kind"] == "PRIVATE"
+                   and p.payload()["scope_key"]["agent_id"] == value["agent"]["agent_id"])
     source = dict(parent_native_operation_key=config.parent_native_operation_key,
         workspace_id=config.workspace_id, agent_id=config.agent_id, domain_id=config.domain_id,
         seed_id=seed.seed_id, genesis_definition_digest=genesis_digest,
@@ -127,11 +128,21 @@ def _character_projections(intent, native_result):
 
 
 def _character_completion(intent, native_result):
-    if intent.payload()["character"]["mode"] == "DISABLED":
+    if intent.VERSION == 1:
+        return _agent_character_completion(intent, native_result)
+    results = i4._seed_results(intent, native_result)
+    return tuple(GenesisAgentSeedCompletion.from_payload(dict(agent_id=agent["agent_id"],
+        seed_id=agent["character"].get("definition", {}).get("seed_id"),
+        completion=_agent_character_completion(intent, results[agent["agent_id"]], agent["agent_id"]).payload()))
+        for agent in intent.initial_agents())
+
+
+def _agent_character_completion(intent, native_result, agent_id=None):
+    if intent.initial_agent(agent_id)["character"]["mode"] == "DISABLED":
         if native_result is not None:
             raise GenesisPreparationRefused("I6 disabled Character has a native result")
         return GenesisSeedCompletion.from_payload({"mode": "DISABLED"})
-    source, result = _character_projections(intent, native_result)
+    source, result = _character_projections(intent, native_result, agent_id)
     return GenesisCompletedSeed.from_payload(dict(mode="ENABLED", status="COMPLETED",
         definition_digest=source["genesis_definition_digest"],
         source_operation_key=source["parent_native_operation_key"], source_intent_digest=payload_digest(source),
@@ -183,7 +194,7 @@ def _completion(record, truth):
     if membership_digest != closure.initial_membership_closure_digest:
         raise GenesisPreparationRefused("I6 canonical completion order changes I5 closure")
     profile = closure.qualified_deployment_profile
-    payload = dict(contract=NativeGenesisCompletionWitness.CONTRACT, version=NativeGenesisCompletionWitness.VERSION,
+    payload = dict(contract=NativeGenesisCompletionWitness.CONTRACT, version=intent.VERSION,
         origin=NativeGenesisCompletionWitness.ORIGIN, data_root_identity=intent.data_root_identity,
         operation_key=intent.operation_key, intent_digest=intent.digest, expanded_intent=value,
         accepted_start_observation=record.accepted_start_observation.payload(), native_core_id=str(UUID(bytes=metadata.core_id)),
@@ -193,9 +204,13 @@ def _completion(record, truth):
         representation_lane=value["representation_lane"], root_profile=closure.root_profile.payload(),
         runtime_scope_plans=[p.payload() for p in intent.runtime_plans], runtime_plan_digest=runtime_plan_digest(intent.runtime_plans),
         external_owner_projection=intent.external_owner_projection(),
-        external_owner_closure_digest=payload_digest(intent.external_owner_projection()), character_seed_completion=character.payload(),
+        external_owner_closure_digest=payload_digest(intent.external_owner_projection()),
         initial_memberships=[m.payload() for m in members], initial_membership_closure_digest=membership_digest,
         quiescence_evidence_digest=payload_digest({"quiescence_observations": [v.payload() for v in record.quiescence_observations]}))
+    if intent.VERSION == 1:
+        payload["character_seed_completion"] = character.payload()
+    else:
+        payload["character_seed_completions"] = [entry.payload() for entry in character]
     payload["preparation_result_digest"] = payload_digest(payload)
     completion = NativeGenesisCompletionWitness.from_payload(payload)
     if (NativeGenesisCompletionWitness.from_payload(completion.payload()) != completion

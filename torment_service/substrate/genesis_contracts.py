@@ -257,6 +257,72 @@ INITIAL_OVERLAY_KEYS = (
 )
 
 
+
+def validate_initial_agent(agent, character, domains):
+    agent = exact_object(agent, "agent_id identity_seed initial_overlay private_motif_domain_id", "agent")
+    agent_id = logical_id(agent["agent_id"], "agent_id")
+    require(agent["private_motif_domain_id"] in domains, "private motif domain is undeclared")
+    require(isinstance(character, dict), "character must be an object")
+    enabled = character.get("mode") == "ENABLED"
+    exact_object(character, "mode definition" if enabled else "mode", "character")
+    require(character["mode"] in ("ENABLED", "DISABLED"), "unsupported Character mode")
+    seed = exact_object(agent["identity_seed"], IDENTITY_SEED_KEYS + (" character_name" if enabled else ""), "identity_seed")
+    require(isinstance(seed["core_traits"], list), "core_traits must be an array")
+    for trait in seed["core_traits"]:
+        text(trait, "core trait")
+    require(isinstance(seed["priority_weights"], dict), "priority_weights must be an object")
+    for key, weight in seed["priority_weights"].items():
+        text(key, "priority key")
+        number(weight, "priority weight")
+    text(seed["coupling_mode"], "coupling_mode")
+    number(seed["coupling_strength"], "coupling_strength")
+    overlay = exact_object(agent["initial_overlay"], INITIAL_OVERLAY_KEYS, "initial_overlay")
+    for key, entry in overlay.items():
+        number(entry, key)
+    if enabled:
+        definition = exact_object(character["definition"], CHARACTER_DEFINITION_KEYS, "Character definition")
+        logical_id(definition["seed_id"], "seed_id")
+        for key in ("character_name", "seed_text", "version"):
+            text(definition[key], key)
+        require(definition["owner_agent_id"] == agent_id, "Character owner disagrees with agent")
+        positive_int(definition["drift_window_steps"], "drift_window_steps")
+        for key in CHARACTER_DEFINITION_KEYS.split()[5:-1]:
+            number(definition[key], key)
+        for key in ("seed_id", "seed_text", "character_name"):
+            require(seed[key] == definition[key], "Character definition disagrees with identity seed")
+    else:
+        require(seed["seed_id"] == "" and seed["seed_text"] == "", "disabled Character contains seed facts")
+
+def declared_agents(value):
+    """Version-specific declarations, with v1 retaining its singular wire shape."""
+    if value["version"] == 1:
+        exact_object(value["agent"], "agent_id identity_seed initial_overlay private_motif_domain_id", "agent")
+        return ({**value["agent"], "character": value["character"]},)
+    require(value["version"] == 2, "unsupported Genesis roster version")
+    agents = value["agents"]
+    require(isinstance(agents, list) and bool(agents), "agents must be a nonempty array")
+    for agent in agents:
+        exact_object(agent, "agent_id identity_seed initial_overlay private_motif_domain_id character", "initial agent")
+        logical_id(agent["agent_id"], "agent_id")
+    ids = [agent["agent_id"] for agent in agents]
+    # New filesystem owners cannot alias each other on Windows or under NFC.
+    import unicodedata
+    keys = [unicodedata.normalize("NFC", name).casefold() for name in ids]
+    require(len(set(keys)) == len(keys), "duplicate or conflicting initial agent IDs")
+    require(ids == sorted(ids), "agents must use canonical agent ordering")
+    seeds = []
+    for agent in agents:
+        character = agent["character"]
+        require(isinstance(character, dict), "character must be an object")
+        if character.get("mode") == "ENABLED":
+            definition = character.get("definition")
+            require(isinstance(definition, dict), "Character definition must be an object")
+            seeds.append(logical_id(definition.get("seed_id"), "seed_id"))
+    require(len({unicodedata.normalize("NFC", name).casefold() for name in seeds}) == len(seeds),
+            "initial agents cannot share a Character seed owner")
+    return tuple(agents)
+
+
 class GenesisIntent(GenesisPayload):
     """Expanded declaration; initial_overlay is immutable creation input only.
 
@@ -272,6 +338,24 @@ class GenesisIntent(GenesisPayload):
             "profile_choice representation_lane allocations creation_facts")
 
     @classmethod
+    def from_payload(cls, value):
+        if cls is GenesisIntent and isinstance(value, Mapping) and type(value.get("version")) is int and value["version"] == 2:
+            return GenesisIntentV2.from_payload(value)
+        return super().from_payload(value)
+
+    def initial_agents(self):
+        return declared_agents(self.payload())
+
+    def initial_agent(self, agent_id=None):
+        agents = self.initial_agents()
+        if agent_id is None:
+            require(len(agents) == 1, "explicit agent identity required for a roster")
+            return agents[0]
+        matches = [a for a in agents if a["agent_id"] == agent_id]
+        require(len(matches) == 1, "agent is not in the initial roster")
+        return matches[0]
+
+    @classmethod
     def validate(cls, value: dict) -> None:
         require(value["contract"] == cls.CONTRACT and type(value["version"]) is int and
                 value["version"] == cls.VERSION and value["origin"] == cls.ORIGIN,
@@ -285,40 +369,11 @@ class GenesisIntent(GenesisPayload):
         for domain in domains:
             logical_id(domain, "domain_id")
         require(len(set(domains)) == len(domains), "duplicate domain declaration")
-        agent = exact_object(value["agent"], "agent_id identity_seed initial_overlay private_motif_domain_id", "agent")
-        agent_id = logical_id(agent["agent_id"], "agent_id")
-        require(agent["private_motif_domain_id"] in domains, "private motif domain is undeclared")
-        character = value["character"]
-        require(isinstance(character, dict), "character must be an object")
-        enabled = character.get("mode") == "ENABLED"
-        exact_object(character, "mode definition" if enabled else "mode", "character")
-        require(character["mode"] in ("ENABLED", "DISABLED"), "unsupported Character mode")
-        seed = exact_object(agent["identity_seed"], IDENTITY_SEED_KEYS + (" character_name" if enabled else ""), "identity_seed")
-        require(isinstance(seed["core_traits"], list), "core_traits must be an array")
-        for trait in seed["core_traits"]:
-            text(trait, "core trait")
-        require(isinstance(seed["priority_weights"], dict), "priority_weights must be an object")
-        for key, weight in seed["priority_weights"].items():
-            text(key, "priority key")
-            number(weight, "priority weight")
-        text(seed["coupling_mode"], "coupling_mode")
-        number(seed["coupling_strength"], "coupling_strength")
-        overlay = exact_object(agent["initial_overlay"], INITIAL_OVERLAY_KEYS, "initial_overlay")
-        for key, entry in overlay.items():
-            number(entry, key)
-        if enabled:
-            definition = exact_object(character["definition"], CHARACTER_DEFINITION_KEYS, "Character definition")
-            logical_id(definition["seed_id"], "seed_id")
-            for key in ("character_name", "seed_text", "version"):
-                text(definition[key], key)
-            require(definition["owner_agent_id"] == agent_id, "Character owner disagrees with agent")
-            positive_int(definition["drift_window_steps"], "drift_window_steps")
-            for key in CHARACTER_DEFINITION_KEYS.split()[5:-1]:
-                number(definition[key], key)
-            for key in ("seed_id", "seed_text", "character_name"):
-                require(seed[key] == definition[key], "Character definition disagrees with identity seed")
-        else:
-            require(seed["seed_id"] == "" and seed["seed_text"] == "", "disabled Character contains seed facts")
+        agents = declared_agents(value)
+        for agent in agents:
+            validate_initial_agent({k: v for k, v in agent.items() if k != "character"}, agent["character"], domains)
+        by_agent = {agent["agent_id"]: agent for agent in agents}
+        enabled = any(agent["character"]["mode"] == "ENABLED" for agent in agents)
         profile = exact_object(value["profile_choice"], "compression_enabled deep_memory_enabled representation_provider representation_model representation_dimension", "profile_choice")
         require(profile["compression_enabled"] is False and profile["deep_memory_enabled"] is False,
                 "Genesis requires compression and deep memory disabled")
@@ -334,7 +389,7 @@ class GenesisIntent(GenesisPayload):
         require(type(allocations["root_profile_generation"]) is int and allocations["root_profile_generation"] == 1,
                 "initial profile generation must be one")
         plans = ordered_runtime_plans(allocations["runtime_scope_plans"])
-        expected = {(workspace_id, "PRIVATE", agent_id)} | {(workspace_id, "SHARED", d) for d in domains}
+        expected = {(workspace_id, "PRIVATE", agent_id) for agent_id in by_agent} | {(workspace_id, "SHARED", d) for d in domains}
         require({p.canonical_key for p in plans} == expected, "routing plans do not cover the declared bundle")
         allocated_ids = [allocations[key] for key in ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id", "root_profile_identity_namespace_id", "root_profile_idempotency_namespace_id")]
         namespace_ids = {allocations["root_profile_identity_namespace_id"], allocations["root_profile_idempotency_namespace_id"]}
@@ -342,7 +397,7 @@ class GenesisIntent(GenesisPayload):
             entry = plan.payload()
             require(entry["representation_lane"] == lane, "routing lane differs from intent")
             scope = entry["scope_plan"]
-            expected_motif = agent["private_motif_domain_id"] if plan.canonical_key[1] == "PRIVATE" else plan.canonical_key[2]
+            expected_motif = by_agent[plan.canonical_key[2]]["private_motif_domain_id"] if plan.canonical_key[1] == "PRIVATE" else plan.canonical_key[2]
             require(scope["motif_domain_id"] == expected_motif, "routing motif domain differs from intent")
             allocated_ids.extend(scope[key] for key in SCOPE_PLAN_UUID_FIELDS)
             namespace_ids.update(scope[key] for key in SCOPE_PLAN_UUID_FIELDS if key != "target_semantic_scope_id")
@@ -386,6 +441,25 @@ class GenesisIntent(GenesisPayload):
                          "seed": agent["identity_seed"], "created_ts": created["identity_created_ts"]},
             "character": character,
         }
+
+
+class GenesisIntentV2(GenesisIntent):
+    """Fresh one-workspace initial roster; no later membership authority."""
+    VERSION = 2
+    KEYS = ("contract version origin operation_key data_root_identity workspace agents "
+            "profile_choice representation_lane allocations creation_facts")
+
+    def external_owner_projection(self):
+        value = self.payload()
+        created, workspace = value["creation_facts"], value["workspace"]
+        agents = []
+        for agent in self.initial_agents():
+            character = dict(agent["character"])
+            if character["mode"] == "ENABLED":
+                character["created_ts"] = created["character_created_ts"]
+            agents.append(dict(identity=dict(workspace_id=workspace["workspace_id"], agent_id=agent["agent_id"],
+                seed=agent["identity_seed"], created_ts=created["identity_created_ts"]), character=character))
+        return dict(workspace={**workspace, "created_ts": created["workspace_created_ts"]}, agents=agents)
 
 
 class GenesisStartKind(str, Enum):
@@ -455,6 +529,20 @@ class GenesisExternalOwnerProjection(GenesisPayload):
         require(isinstance(character, Mapping), "Character witness must be an object")
         require(character.get("mode") in ("ENABLED", "DISABLED"), "unsupported Character witness mode")
         exact_object(character, "mode definition created_ts" if character["mode"] == "ENABLED" else "mode", "Character witness")
+
+
+class GenesisExternalOwnerProjectionV2(GenesisExternalOwnerProjection):
+    KEYS = "workspace agents"
+
+    @classmethod
+    def validate(cls, value):
+        require(isinstance(value["agents"], list) and bool(value["agents"]), "owner agents must be nonempty")
+        ids = []
+        for entry in value["agents"]:
+            exact_object(entry, "identity character", "agent owner projection")
+            GenesisExternalOwnerProjection.validate(dict(workspace=value["workspace"], **entry))
+            ids.append(logical_id(entry["identity"]["agent_id"], "agent_id"))
+        require(ids == sorted(set(ids)), "owner agents must be unique and canonically ordered")
 
 
 class GenesisRootProfileReference(GenesisPayload):
@@ -563,6 +651,20 @@ class GenesisCompletedSeed(GenesisSeedCompletion):
                 else:
                     uuid_text(entry, key)
             require(len(set(entries)) == len(entries), f"duplicate {key}")
+
+
+class GenesisAgentSeedCompletion(GenesisPayload):
+    """V2 explicit agent/seed binding, including disabled agents."""
+    KEYS = "agent_id seed_id completion"
+
+    @classmethod
+    def validate(cls, value):
+        logical_id(value["agent_id"], "agent_id")
+        completion = GenesisSeedCompletion.from_payload(value["completion"])
+        if completion.payload()["mode"] == "DISABLED":
+            require(value["seed_id"] is None, "disabled agent cannot name a seed")
+        else:
+            logical_id(value["seed_id"], "seed_id")
 
 
 class GenesisEvidenceReference(GenesisPayload):

@@ -194,7 +194,7 @@ class RecoveredNativeGenesisWorkspace:
 def _verify_external(root, completion):
     intent = completion.expanded_intent
     value = intent.payload()
-    workspace, agent = value["workspace"], value["agent"]
+    workspace = value["workspace"]
     created, lane = value["creation_facts"], value["representation_lane"]
     declaration = WorkspaceDeclaration(workspace["workspace_id"], created["workspace_created_ts"],
         lane["dimension"], lane["provider"], lane["model"], tuple(workspace["ordered_domains"]))
@@ -202,19 +202,21 @@ def _verify_external(root, completion):
     for path, wanted in zip(paths[:2], (declaration.metadata_payload(), declaration.domain_payload()), strict=True):
         if exact_json(strict_object(path.read_bytes())) != exact_json(wanted):
             raise NativeGenesisRecoveryRefused("Genesis workspace declaration changed")
-    # Use the existing owner's strict decoder and continuing stable projection.
-    # IdentityStore.__init__ creates directories, so recovery uses no constructor.
-    identity = IdentityStore.identity_from_strict_json(paths[2].read_bytes())
-    expected = AgentIdentity(workspace["workspace_id"], agent["agent_id"], agent["identity_seed"],
-        agent["initial_overlay"], created["identity_created_ts"], created["identity_created_ts"])
-    if exact_json(IdentityStore.stable_identity_projection(identity)) != exact_json(IdentityStore.stable_identity_projection(expected)):
-        raise NativeGenesisRecoveryRefused("Genesis stable identity changed")
-    if value["character"]["mode"] == "ENABLED":
-        seed = CharacterStore.seed_from_strict_json(paths[-1].read_bytes())
-        evidence = completion.character_seed_completion.payload()
-        if (exact_json(CharacterStore.stable_seed_projection(seed)) != exact_json(CharacterStore.stable_seed_projection(i4._seed(intent)))
-            or seed.seed_eids != evidence["seed_eids"] or seed.seed_motif_id != evidence["seed_motif_id"]):
-            raise NativeGenesisRecoveryRefused("Genesis Character declaration or linkage changed")
+    for agent in intent.initial_agents():
+        paths = tuple(_checked_path(root, root / path) for path in i4._agent_owner_paths(intent, agent["agent_id"]))
+        # Use the existing owner's strict decoder and continuing stable projection.
+        # IdentityStore.__init__ creates directories, so recovery uses no constructor.
+        identity = IdentityStore.identity_from_strict_json(paths[2].read_bytes())
+        expected = AgentIdentity(workspace["workspace_id"], agent["agent_id"], agent["identity_seed"],
+            agent["initial_overlay"], created["identity_created_ts"], created["identity_created_ts"])
+        if exact_json(IdentityStore.stable_identity_projection(identity)) != exact_json(IdentityStore.stable_identity_projection(expected)):
+            raise NativeGenesisRecoveryRefused("Genesis stable identity changed")
+        if agent["character"]["mode"] == "ENABLED":
+            seed = CharacterStore.seed_from_strict_json(paths[-1].read_bytes())
+            evidence = completion.seed_completion_for(agent["agent_id"]).payload()
+            if (exact_json(CharacterStore.stable_seed_projection(seed)) != exact_json(CharacterStore.stable_seed_projection(i4._seed(intent, agent["agent_id"])))
+                or seed.seed_eids != evidence["seed_eids"] or seed.seed_motif_id != evidence["seed_motif_id"]):
+                raise NativeGenesisRecoveryRefused("Genesis Character declaration or linkage changed")
 
 
 def recover_active_native_genesis(*, data_root, workspace_id=None, expected_completion=None):
@@ -263,12 +265,9 @@ def recover_active_native_genesis(*, data_root, workspace_id=None, expected_comp
                 actual = {str(UUID(bytes=row[0])): row[1] for row in connection.execute(f"SELECT {identifier},{key} FROM {table}")}
                 if any(actual.get(identity) != name for identity, name in expected.items()):
                     raise NativeGenesisRecoveryRefused("Genesis runtime catalog allocation changed")
-            native_seed = None
-            seed = i4._seed(intent)
-            if seed is not None:
-                config = i4._configuration(intent, i5._CommittedLane(intent))
-                native_seed = NativeCharacterSeedPlantRuntime(connection, configuration=config).recover_completed_seed(NativeCharacterSeedPlantRequest(seed))
-            if _character_completion(intent, native_seed) != completion.character_seed_completion:
+            native_seed = i4._versioned_seed_result(intent, i4._recover_seeds(connection, intent))
+            expected_seeds = completion.character_seed_completion if intent.VERSION == 1 else completion.character_seed_completions
+            if _character_completion(intent, native_seed) != expected_seeds:
                 raise NativeGenesisRecoveryRefused("Genesis committed Character completion changed")
         _verify_external(authority.data_root, completion)
         if verify_active_native_genesis(data_root=authority.data_root) != authority:

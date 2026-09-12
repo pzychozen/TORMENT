@@ -46,7 +46,7 @@ def _parser():
         child = commands.add_parser(command)
         child.add_argument("--intent", required=True, help="Frozen external GenesisIntent file; never inside the data root")
         if command != "apply":
-            child.add_argument("--request", required=True, help="Strict version-1 operator declaration JSON")
+            child.add_argument("--request", required=True, help="Strict version-1 or version-2 operator declaration JSON")
         if command != "plan":
             child.add_argument("--operator-attestation", required=True)
             child.add_argument("--issuer-reference", required=True)

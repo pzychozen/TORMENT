@@ -113,11 +113,7 @@ def _transition_truth(root, record, completion):
             identifier, key = i3.CATALOG_COLUMNS[table]
             actual = {str(i7.UUID(bytes=row[0])): row[1] for row in connection.execute(f"SELECT {identifier},{key} FROM {table}")}
             _require(all(actual.get(identity) == name for identity, name in expected.items()), "native catalog changed")
-        native_seed = None
-        seed = i4._seed(intent)
-        if seed is not None:
-            runtime = i7.NativeCharacterSeedPlantRuntime(connection, configuration=i4._configuration(intent, i5._CommittedLane(intent)))
-            native_seed = runtime.recover_completed_seed(i7.NativeCharacterSeedPlantRequest(seed))
+        native_seed = i4._versioned_seed_result(intent, i4._recover_seeds(connection, intent))
         character = i6._character_completion(intent, native_seed)
         _require(i6._completion(record, (metadata, closure, character)) == completion, "sealed completion differs from durable truth")
         _require(not connection.execute("PRAGMA foreign_key_check").fetchone(), "native foreign-key closure conflicts")

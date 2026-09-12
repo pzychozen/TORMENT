@@ -42,7 +42,13 @@ def _require(condition, message):
 _DECLARATION_FIELDS = "data_root_identity workspace agent character profile_choice representation_lane"
 
 
+def _declaration_fields(version):
+    return _DECLARATION_FIELDS if version == 1 else "data_root_identity workspace agents profile_choice representation_lane"
+
+
 def _operation_key(value):
+    if value["version"] == 2:
+        return "genesis-onboarding-v2:" + g.payload_digest(value)
     return "genesis-onboarding-v1:" + g.payload_digest(dict(contract=value["contract"], version=value["version"],
         data_root_identity=value["data_root_identity"], workspace_id=value["workspace"]["workspace_id"],
         agent_id=value["agent"]["agent_id"], request_digest=g.payload_digest(value)))
@@ -50,7 +56,8 @@ def _operation_key(value):
 
 def _expanded_payload(value, id_factory, timestamp):
     """One allocation layout for validation and planning; no I/O or defaults."""
-    workspace, agent = value["workspace"], value["agent"]
+    workspace, agents = value["workspace"], g.declared_agents(value)
+    by_agent = {a["agent_id"]: a for a in agents}
     key = _operation_key(value)
     root_fields = ("core_id", "root_profile_object_id", "root_profile_semantic_scope_id",
                    "root_profile_identity_namespace_id", "root_profile_idempotency_namespace_id")
@@ -58,7 +65,7 @@ def _expanded_payload(value, id_factory, timestamp):
     allocation.update(core_relative_path="genesis-" + allocation["core_id"] + ".db", root_profile_generation=1)
     namespace_keys = {allocation[field]: key + ":" + field for field in root_fields[-2:]}
     plans = []
-    scopes = [("PRIVATE", agent["agent_id"])] + [("SHARED", d) for d in workspace["ordered_domains"]]
+    scopes = [("PRIVATE", agent["agent_id"]) for agent in agents] + [("SHARED", d) for d in workspace["ordered_domains"]]
     for kind, qualifier in sorted(scopes):
         scope_key = dict(workspace_id=workspace["workspace_id"], scope_kind=kind,
             agent_id=qualifier if kind == "PRIVATE" else None, domain_id=qualifier if kind == "SHARED" else None)
@@ -68,19 +75,25 @@ def _expanded_payload(value, id_factory, timestamp):
                               if field != "target_semantic_scope_id"})
         plans.append(dict(scope_key=scope_key, scope_plan=dict(**identifiers, workspace_id=workspace["workspace_id"],
             scope_kind="PRIVATE_AGENT" if kind == "PRIVATE" else "SHARED_DOMAIN", qualifier=qualifier,
-            motif_domain_id=agent["private_motif_domain_id"] if kind == "PRIVATE" else qualifier),
+            motif_domain_id=by_agent[qualifier]["private_motif_domain_id"] if kind == "PRIVATE" else qualifier),
             representation_lane=value["representation_lane"]))
     allocation.update(namespace_keys=namespace_keys, runtime_scope_plans=plans)
-    return dict(contract=g.GenesisIntent.CONTRACT, version=g.GenesisIntent.VERSION, origin=g.GenesisIntent.ORIGIN,
-        operation_key=key, **{name: value[name] for name in _DECLARATION_FIELDS.split()}, allocations=allocation,
+    return dict(contract=g.GenesisIntent.CONTRACT, version=value["version"], origin=g.GenesisIntent.ORIGIN,
+        operation_key=key, **{name: value[name] for name in _declaration_fields(value["version"]).split()}, allocations=allocation,
         creation_facts=dict(workspace_created_ts=timestamp, identity_created_ts=timestamp,
-            character_created_ts=timestamp if value["character"]["mode"] == "ENABLED" else None))
+            character_created_ts=timestamp if any(a["character"]["mode"] == "ENABLED" for a in agents) else None))
 
 
 class NativeGenesisOnboardingRequest(g.GenesisPayload):
     CONTRACT = "TORMENT_NATIVE_GENESIS_ONBOARDING_REQUEST"
     VERSION = 1
     KEYS = "contract version " + _DECLARATION_FIELDS
+
+    @classmethod
+    def from_payload(cls, value):
+        if cls is NativeGenesisOnboardingRequest and isinstance(value, dict) and type(value.get("version")) is int and value["version"] == 2:
+            return NativeGenesisOnboardingRequestV2.from_payload(value)
+        return super().from_payload(value)
 
     @classmethod
     def validate(cls, value):
@@ -104,11 +117,31 @@ class NativeGenesisOnboardingRequest(g.GenesisPayload):
         return _operation_key(self.payload())
 
 
+class NativeGenesisOnboardingRequestV2(NativeGenesisOnboardingRequest):
+    VERSION = 2
+    KEYS = "contract version " + _declaration_fields(2)
+
+    def __post_init__(self):
+        # Only the request roster is unordered. Intent/completion arrays must
+        # already be canonical, and ordered_domains retains its v1 meaning.
+        import json
+        value = json.loads(self._canonical_payload, object_pairs_hook=g._unique_object)
+        g.exact_object(value, self.KEYS, "v2 onboarding request")
+        agents = value["agents"]
+        g.require(isinstance(agents, list) and bool(agents), "agents must be a nonempty array")
+        for agent in agents:
+            g.require(isinstance(agent, dict), "agent must be an object")
+            g.logical_id(agent.get("agent_id"), "agent_id")
+        value["agents"] = sorted(agents, key=lambda a: a["agent_id"])
+        object.__setattr__(self, "_canonical_payload", json.dumps(value, ensure_ascii=True, allow_nan=False))
+        super().__post_init__()
+
+
 def request_from_intent(intent):
     _require(isinstance(intent, g.GenesisIntent), "typed expanded GenesisIntent required")
     value = intent.payload()
     request = NativeGenesisOnboardingRequest.from_payload(dict(contract=NativeGenesisOnboardingRequest.CONTRACT,
-        version=1, **{name: value[name] for name in _DECLARATION_FIELDS.split()}))
+        version=value["version"], **{name: value[name] for name in _declaration_fields(value["version"]).split()}))
     _require(intent.operation_key == request.operation_key, "intent operation identity differs from its operator declaration")
     return request
 
@@ -257,9 +290,7 @@ def _phase(record):
     owners = {ref.payload()["owner"] for ref in record.child_operation_references}
     if set(i5._OWNERS) <= owners:
         return 6
-    character_owners = set(i4._EXTERNAL_OWNERS)
-    if record.expanded_intent.payload()["character"]["mode"] == "ENABLED":
-        character_owners.update(i4._NATIVE_OWNERS)
+    character_owners = set(i4._owners(record.expanded_intent))
     if character_owners <= owners:
         return 5
     if {"native-core-preparation", *("native-catalog:" + table for table in i3.CATALOG_COLUMNS)} <= owners:
@@ -268,14 +299,14 @@ def _phase(record):
 
 
 def _needs_embedding(root, intent, record):
-    if intent.payload()["character"]["mode"] == "DISABLED" or _phase(record) > 4:
+    if not any(a["character"]["mode"] == "ENABLED" for a in intent.initial_agents()) or _phase(record) > 4:
         return False
     if _phase(record) < 4:
         return True
     path = root / i3.CORE_DIRECTORY / intent.payload()["allocations"]["core_relative_path"]
     with closing(i3._open_readonly(path)) as connection:
-        runtime = i7.NativeCharacterSeedPlantRuntime(connection, configuration=i4._configuration(intent, i5._CommittedLane(intent)))
-        return runtime.recover_completed_seed(i7.NativeCharacterSeedPlantRequest(i4._seed(intent))) is None
+        return any(result is None for agent, result in i4._recover_seeds(connection, intent).items()
+                   if intent.initial_agent(agent)["character"]["mode"] == "ENABLED")
 
 
 def onboarding_needs_embedding(intent):
@@ -323,8 +354,9 @@ class LocalOperatorConfirmation:
 def onboarding_result(authority):
     completion = authority.completion
     value = completion.expanded_intent.payload()
+    roster = dict(agent_id=value["agent"]["agent_id"]) if value["version"] == 1 else dict(agent_ids=[a["agent_id"] for a in value["agents"]])
     return dict(status="NATIVE_ACTIVE", data_root=str(authority.data_root), workspace_id=value["workspace"]["workspace_id"],
-        agent_id=value["agent"]["agent_id"], core_id=str(completion.native_core_id), core_relative_path=completion.core_relative_path,
+        **roster, core_id=str(completion.native_core_id), core_relative_path=completion.core_relative_path,
         selector_generation=authority.selector_state.generation, completion_digest=completion.digest,
         qualified_deployment_profile=completion.qualified_profile_payload())
 
@@ -357,7 +389,7 @@ def run_native_genesis_onboarding(*, intent, intent_path, observer, operator_att
                 _require(isinstance(facts, i3.GenesisWriterObservation), "typed writer observation required")
                 facts.evidence(intent, since_ns=since, operator_attestation=operator_attestation, issuer_reference=issuer_reference)
                 dependency = None
-                if intent.payload()["character"]["mode"] == "ENABLED":
+                if any(a["character"]["mode"] == "ENABLED" for a in intent.initial_agents()):
                     dependency = embedder if held.observe(_needs_embedding, root, intent, record) else i5._CommittedLane(intent)
                     lane = intent.payload()["representation_lane"]
                     _require(dependency is not None and dependency.provider == lane["provider"] and dependency.model == lane["model"]
@@ -367,11 +399,11 @@ def run_native_genesis_onboarding(*, intent, intent_path, observer, operator_att
                 if phase == 3:
                     i3.prepare_genesis_inert_root(**context, **observations)
                 elif phase == 4:
-                    with i4.begin_genesis_character_administration(**context) as session:
+                    with i4.begin_genesis_character_administration(**context, fault=fault if intent.VERSION == 2 else i3._noop) as session:
                         session.observe_quiescence(**observations)
                         session.prepare_first_character_bundle(embedder=dependency, **observations)
                 elif phase == 5:
-                    with i5.begin_genesis_membership_administration(**context) as session:
+                    with i5.begin_genesis_membership_administration(**context, fault=fault if intent.VERSION == 2 else i3._noop) as session:
                         session.observe_quiescence(**observations)
                         session.prepare_initial_memberships(**observations)
                 elif phase == 6:

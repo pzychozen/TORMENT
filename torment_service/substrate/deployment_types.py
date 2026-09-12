@@ -11,7 +11,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import Any, Mapping, TypeAlias
+from typing import Any, ClassVar, Mapping, TypeAlias
 from uuid import UUID
 
 from .errors import DeploymentAuthorityError
@@ -19,6 +19,7 @@ from .ids import native_id_from_text
 from .schema import SCHEMA_ID, SCHEMA_MAJOR, SCHEMA_MINOR
 from .genesis_contracts import (
     GenesisAcceptedStart, GenesisExternalOwnerProjection, GenesisIntent,
+    GenesisExternalOwnerProjectionV2, GenesisAgentSeedCompletion,
     GenesisMembershipReference, GenesisRepresentationLane,
     GenesisRootProfileReference, GenesisRuntimePlan, GenesisSeedCompletion,
     exact_object, initial_membership_closure_digest, ordered_runtime_plans,
@@ -335,11 +336,23 @@ class NativeGenesisCompletionWitness:
             ("expanded_intent", GenesisIntent), ("accepted_start_observation", GenesisAcceptedStart),
             ("qualified_deployment_profile", QualifiedDeploymentProfile),
             ("representation_lane", GenesisRepresentationLane), ("root_profile", GenesisRootProfileReference),
-            ("external_owner_projection", GenesisExternalOwnerProjection),
-            ("character_seed_completion", GenesisSeedCompletion),
+            ("external_owner_projection", GenesisExternalOwnerProjection if self.VERSION == 1 else GenesisExternalOwnerProjectionV2),
         ):
             require_genesis(isinstance(getattr(self, name), cls), f"{name} must be typed")
         intent = self.expanded_intent.payload()
+        require_genesis(intent["version"] == self.VERSION, "fresh completion and intent versions differ")
+        if self.VERSION == 1:
+            require_genesis(isinstance(self.character_seed_completion, GenesisSeedCompletion), "character_seed_completion must be typed")
+        else:
+            require_genesis(type(self.character_seed_completions) is tuple and
+                all(isinstance(entry, GenesisAgentSeedCompletion) for entry in self.character_seed_completions),
+                "character_seed_completions must be a typed tuple")
+            agents = self.expanded_intent.initial_agents()
+            require_genesis([entry.payload()["agent_id"] for entry in self.character_seed_completions] ==
+                [agent["agent_id"] for agent in agents], "agent seed completions differ from canonical roster")
+            for agent, entry in zip(agents, self.character_seed_completions, strict=True):
+                expected = agent["character"].get("definition", {}).get("seed_id")
+                require_genesis(entry.payload()["seed_id"] == expected, "agent seed identity differs from intent")
         require_genesis(self.data_root_identity == self.expanded_intent.data_root_identity and
                         self.operation_key == self.expanded_intent.operation_key and
                         self.intent_digest == self.expanded_intent.digest, "fresh completion intent binding mismatch")
@@ -381,14 +394,22 @@ class NativeGenesisCompletionWitness:
                             "initial membership references collide")
         require_genesis(self.initial_membership_closure_digest == initial_membership_closure_digest(
             self.root_profile, self.runtime_scope_plans, self.initial_memberships), "fresh membership closure digest mismatch")
-        seed = self.character_seed_completion.payload()
-        require_genesis(seed["mode"] == intent["character"]["mode"], "fresh seed mode differs from intent")
-        if seed["mode"] == "ENABLED":
-            require_genesis(seed["definition_digest"] == payload_digest(intent["character"]["definition"]),
-                            "fresh seed definition digest mismatch")
+        for agent in self.expanded_intent.initial_agents():
+            seed = self.seed_completion_for(agent["agent_id"]).payload()
+            require_genesis(seed["mode"] == agent["character"]["mode"], "fresh seed mode differs from intent")
+            if seed["mode"] == "ENABLED":
+                require_genesis(seed["definition_digest"] == payload_digest(agent["character"]["definition"]),
+                                "fresh seed definition digest mismatch")
         require_digest(self.quiescence_evidence_digest, "quiescence_evidence_digest")
         require_genesis(self.preparation_result_digest == payload_digest(self.preparation_payload()),
                         "fresh preparation result digest mismatch")
+
+    def seed_completion_for(self, agent_id):
+        self.expanded_intent.initial_agent(agent_id)
+        if self.VERSION == 1:
+            return self.character_seed_completion
+        return GenesisSeedCompletion.from_payload(next(entry.payload()["completion"]
+            for entry in self.character_seed_completions if entry.payload()["agent_id"] == agent_id))
 
     @property
     def admission_identity_digest(self) -> str:
@@ -428,6 +449,9 @@ class NativeGenesisCompletionWitness:
 
     @classmethod
     def from_payload(cls, value: object) -> NativeGenesisCompletionWitness:
+        # Explicit dispatch; a v1-shaped document tagged v2 still refuses.
+        if cls is NativeGenesisCompletionWitness and isinstance(value, Mapping) and type(value.get("version")) is int and value["version"] == 2:
+            return NativeGenesisCompletionWitnessV2.from_payload(value)
         # Validate finite JSON before comparisons (True must never alias 1).
         payload_digest(value)
         value = exact_object(value, "contract version origin " + " ".join(f.name for f in fields(cls)), "fresh completion")
@@ -441,9 +465,14 @@ class NativeGenesisCompletionWitness:
         typed = dict(value)
         for name, contract in (("expanded_intent", GenesisIntent), ("accepted_start_observation", GenesisAcceptedStart),
                                ("representation_lane", GenesisRepresentationLane), ("root_profile", GenesisRootProfileReference),
-                               ("external_owner_projection", GenesisExternalOwnerProjection),
-                               ("character_seed_completion", GenesisSeedCompletion)):
+                               ("external_owner_projection", GenesisExternalOwnerProjection if cls.VERSION == 1 else GenesisExternalOwnerProjectionV2)):
             typed[name] = contract.from_payload(value[name])
+        if cls.VERSION == 1:
+            typed["character_seed_completion"] = GenesisSeedCompletion.from_payload(value["character_seed_completion"])
+        else:
+            require_genesis(isinstance(value["character_seed_completions"], list), "agent seed completions must be an array")
+            typed["character_seed_completions"] = tuple(GenesisAgentSeedCompletion.from_payload(entry)
+                for entry in value["character_seed_completions"])
         typed["native_core_id"] = UUID(value["native_core_id"])
         typed["qualified_deployment_profile"] = QualifiedDeploymentProfile(**profile)
         typed["runtime_scope_plans"] = ordered_runtime_plans(value["runtime_scope_plans"])
@@ -451,6 +480,14 @@ class NativeGenesisCompletionWitness:
         for key in ("contract", "version", "origin"):
             del typed[key]
         return cls(**typed)
+
+
+@dataclass(frozen=True)
+class NativeGenesisCompletionWitnessV2(NativeGenesisCompletionWitness):
+    """Fresh roster evidence; no singular seed field is serialized or decoded."""
+    VERSION = 2
+    character_seed_completion: ClassVar[None] = None
+    character_seed_completions: tuple[GenesisAgentSeedCompletion, ...]
 
 
 CompletionWitness: TypeAlias = AdmissionCompletionWitness | RootAdmissionCompletionWitness | NativeGenesisCompletionWitness
