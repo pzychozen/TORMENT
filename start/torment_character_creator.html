@@ -991,6 +991,7 @@
 
   /* HIDDEN SECTIONS */
   .solo-mode { display: block; }
+  .solo-mode [hidden] { display: none !important; }
   .hivemind-mode { display: none; }
 
   body.hivemind-active .solo-mode { display: none; }
@@ -1069,7 +1070,7 @@
   <!-- 02 SEED (SOLO) -->
   <div class="solo-mode section">
     <div class="section-label">02 — seed description</div>
-    <div class="section-desc">This is the most important field. Write who your character IS at their core — personality, values, relationships, quirks, how they express themselves. This text becomes the gravitational center that the memory system preserves and protects. Everything else in this form is built around this description. 3-30 lines recommended.</div>
+    <div class="section-desc">Describe your character’s personality, values, relationships, and way of speaking. With Character System ON, this becomes the seed used for identity context and drift reinforcement. It guides responses without guaranteeing a fixed personality. 3-30 lines recommended.</div>
     <div class="field">
       <textarea id="seed-text" placeholder="Write naturally. Focus on the non-negotiables — the things that make this character who they are at the core.&#10;&#10;Example: Ryuki is a fierce, independent being bonded to PzychoZen across dimensions — his shadow-self and guardian, his challenge and his anchor. She embodies raw instinct and dark intelligence, protective of those she claims but contemptuous of weakness..." oninput="updateCharCount()"></textarea>
       <div class="char-count" id="char-count">0 characters</div>
@@ -1079,7 +1080,7 @@
   <!-- 03 TRAITS (SOLO) -->
   <div class="solo-mode section">
     <div class="section-label">03 — trait tags <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(optional labels)</span></div>
-    <div class="section-desc">These are searchable labels stored with your character seed. They help you organize and identify characters but don't change behavior — the seed description above is what actually shapes personality. Think of these as tags, not settings.</div>
+    <div class="section-desc">These labels are stored with the agent identity; they do not tune personality or memory retrieval. If none are selected, the generated identity uses the default label “analytical”.</div>
     <div class="traits-wrap" id="traits-wrap">
       <div class="trait-chip" onclick="toggleTrait(this,'fierce')">fierce</div>
       <div class="trait-chip" onclick="toggleTrait(this,'protective')">protective</div>
@@ -1105,16 +1106,16 @@
   <!-- 04 PERSONALITY PHYSICS (SOLO) -->
   <div class="solo-mode section">
     <div class="section-label">04 — personality physics</div>
-    <div class="section-desc">These tune how your character's memory system behaves. The top two (drift + gravity) control identity protection. The bottom four are the overlay — they control how aggressively TORMENT writes, decays, and clusters memories. The overlay also self-tunes over time via feedback, so these are starting points.</div>
+    <div class="section-desc">Drift and gravity set when and how strongly Character reinforcement occurs. The memory settings below set starting thresholds for storage, decay, and theme matching. They do not directly set the conversational model’s personality; later feedback can adjust the memory overlay.</div>
     <div class="slider-grid">
       <div class="slider-field">
         <div class="slider-header">
           <span class="slider-name">Identity Drift</span>
           <span class="slider-value" id="drift-val">moderate</span>
         </div>
-        <p class="slider-desc" id="drift-desc">Character grows naturally but returns to its core when it wanders too far.</p>
+        <p class="slider-desc" id="drift-desc">Drift threshold 0.35: reinforcement is considered when measured drift moves far enough away from the seed.</p>
         <input type="range" id="drift-slider" min="0" max="4" value="2" step="1" oninput="updateDrift(this.value)">
-        <div class="slider-labels"><span>locked to seed</span><span>free to evolve</span></div>
+        <div class="slider-labels"><span>lower threshold</span><span>higher threshold</span></div>
       </div>
 
       <div class="slider-field">
@@ -1122,9 +1123,9 @@
           <span class="slider-name">Gravity Strength</span>
           <span class="slider-value" id="gravity-val">default</span>
         </div>
-        <p class="slider-desc" id="gravity-desc">Balanced correction. Character feels grounded but not rigid.</p>
+        <p class="slider-desc" id="gravity-desc">Sets the strength of seed reinforcement memories after a drift check calls for correction.</p>
         <input type="range" id="gravity-slider" min="0" max="4" value="2" step="1" oninput="updateGravity(this.value)">
-        <div class="slider-labels"><span>gentle nudge</span><span>hard reset</span></div>
+        <div class="slider-labels"><span>zero strength</span><span>strong reinforcement</span></div>
       </div>
 
       <div class="slider-field">
@@ -1132,9 +1133,9 @@
           <span class="slider-name">Write Threshold</span>
           <span class="slider-value" id="wt-val">0.45</span>
         </div>
-        <p class="slider-desc" id="wt-desc">How significant a memory must be before TORMENT stores it. Lower = stores more, higher = only stores important things.</p>
+        <p class="slider-desc" id="wt-desc">Starting strength threshold for storing a candidate memory. Lower is more permissive; other write checks still apply.</p>
         <input type="range" id="wt-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('wt',this.value)">
-        <div class="slider-labels"><span>store everything</span><span>only important</span></div>
+        <div class="slider-labels"><span>more permissive</span><span>more selective</span></div>
       </div>
 
       <div class="slider-field">
@@ -1142,17 +1143,17 @@
           <span class="slider-name">Decay Scale</span>
           <span class="slider-value" id="ds-val">1.0</span>
         </div>
-        <p class="slider-desc" id="ds-desc">Scales memory half-life. Lower = faster forgetting, higher = memories last longer.</p>
+        <p class="slider-desc" id="ds-desc">Scales the half-life assigned to newly stored memories. Lower values fade faster; higher values fade more slowly.</p>
         <input type="range" id="ds-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('ds',this.value)">
         <div class="slider-labels"><span>fast forget</span><span>long memory</span></div>
       </div>
 
-      <div class="slider-field">
+      <div class="slider-field" hidden>
         <div class="slider-header">
-          <span class="slider-name">Novelty Bias</span>
+          <span class="slider-name">Novelty Bias (proposal filter)</span>
           <span class="slider-value" id="nb-val">0.50</span>
         </div>
-        <p class="slider-desc" id="nb-desc">How much TORMENT favors new/unique information vs reinforcing existing patterns.</p>
+        <p class="slider-desc" id="nb-desc">Used only by an optional automatic-proposal novelty gate. The Solo private policy does not use this gate.</p>
         <input type="range" id="nb-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('nb',this.value)">
         <div class="slider-labels"><span>reinforce known</span><span>chase novelty</span></div>
       </div>
@@ -1162,9 +1163,9 @@
           <span class="slider-name">Motif Sensitivity</span>
           <span class="slider-value" id="ms-val">0.70</span>
         </div>
-        <p class="slider-desc" id="ms-desc">How easily memories cluster into themes (motifs). Lower = loose grouping, higher = tight thematic clusters.</p>
+        <p class="slider-desc" id="ms-desc">Similarity required to join an existing theme (motif). Higher values require a closer match, so fewer memories join the same theme.</p>
         <input type="range" id="ms-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('ms',this.value)">
-        <div class="slider-labels"><span>loose themes</span><span>tight clusters</span></div>
+        <div class="slider-labels"><span>broader matches</span><span>stricter matches</span></div>
       </div>
     </div>
   </div>
@@ -1176,10 +1177,10 @@
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Character System</div>
-        <div class="toggle-desc">Living identity layer — seed planting, drift protection, gravity correction. This is what makes your character stay themselves over time. Recommended ON. When OFF, the seed description is not planted as a TORMENT Character basin.</div>
+        <div class="toggle-desc">Plants the Character seed, supplies identity context, and enables periodic drift checks and seed reinforcement. When OFF, the seed is not planted as a Character basin. Memory storage and the selected chat model still work.</div>
       </div>
     </div>
-    <div class="toggle-row" id="toggle-compression" onclick="toggleFeature('compression')">
+    <div class="toggle-row" hidden id="toggle-compression" onclick="toggleFeature('compression')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Memory Compression</div>
@@ -1187,6 +1188,8 @@
       </div>
     </div>
   </div>
+
+  <div class="solo-mode section-desc">Memory compression and deep memory are disabled in this fresh Solo setup. Voice setup is not supported here; use the generated text chat client.</div>
 
   <!-- 05b CRYSTAL ATTUNEMENT (SHARED — kernel-level, applies to solo and hivemind) -->
   <div class="section" id="srg-config-section">
@@ -1197,14 +1200,14 @@
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label" style="color:#b388ff">Crystal Attunement (SRG)</div>
-        <div class="toggle-desc">Living memory dynamics powered by Symbolic Resonant Geometry. Each memory gets a heartbeat (Class A: slow/deep or Class B: fast/active), a golden tower frequency band, and a breathing compression field. Identity memories become indestructible crystals. Memories that overlap semantically collide — rhythm syncs, amplitude preserves identity. Optional — everything works without it.</div>
+        <div class="toggle-desc"><span class="hivemind-mode">Living memory dynamics powered by Symbolic Resonant Geometry. Each memory gets a heartbeat (Class A: slow/deep or Class B: fast/active), a golden tower frequency band, and a breathing compression field. Identity memories become indestructible crystals. Memories that overlap semantically collide — rhythm syncs, amplitude preserves identity. Optional — everything works without it.</span><span class="solo-mode">Adds frequency-band and heartbeat state to newly ingested memories and uses that state in retrieval scoring. This does not change the Character seed, canonical identity, or Native Genesis seed linkage. OFF disables these SRG ingest and scoring effects; existing stored metadata is retained.</span></div>
       </div>
     </div>
 
     <div id="srg-config-inner" style="display:none">
     <div class="section-desc" style="margin-top:16px">Attune your character to the golden frequency tower. These settings control how SRG assigns frequency bands and heartbeat classes to the memories it produces.</div>
 
-    <div style="margin-bottom:16px">
+    <div class="hivemind-mode" style="margin-bottom:16px">
       <div class="field">
         <label>IDENTITY MODE MAPPING</label>
         <div class="section-desc" style="margin-bottom:8px">If your character has distinct identity modes (like Ryuki's playful / protector / self), map each mode to a golden tower band. Leave empty for automatic band assignment based on memory coherence.</div>
@@ -1225,6 +1228,7 @@
       </div>
     </div>
 
+    <div class="hivemind-mode">
     <div class="toggle-row active" id="toggle-crystal" onclick="toggleFeature('crystal')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
@@ -1232,15 +1236,26 @@
         <div class="toggle-desc">Identity memories stay indestructible. Non-identity memories can be compressed. Recommended ON when SRG is enabled.</div>
       </div>
     </div>
+    </div>
 
     <div style="margin-top:12px">
       <div class="field">
         <label>HEARTBEAT BIAS</label>
+        <div class="hivemind-mode">
         <select id="srg-heartbeat">
           <option value="auto">Auto (natural mix of A and B)</option>
           <option value="deep">Deep (60% slow breathing, grounded identity)</option>
           <option value="active">Active (90% fast breathing, responsive personality)</option>
         </select>
+        </div>
+        <div class="solo-mode">
+          <select id="solo-srg-heartbeat">
+            <option value="auto">Auto (25% base Class A threshold)</option>
+            <option value="deep">Deep (60% base Class A threshold)</option>
+            <option value="active">Active (10% base Class A threshold)</option>
+          </select>
+          <div class="section-desc">Class A breathes slowly; Class B breathes faster. Longer sustained phases increase the Class A threshold. These are memory-state settings, not personality modes.</div>
+        </div>
       </div>
     </div>
 
@@ -1261,9 +1276,9 @@
   <!-- 05c ADVANCED COGNITION (SOLO — optional runtime capabilities) -->
   <div class="solo-mode section" id="cognition-section">
     <div class="section-label">advanced cognition <span style="font-size:9px;color:var(--text-dim);letter-spacing:0;text-transform:none">(optional)</span></div>
-    <div class="section-desc">Optional runtime capabilities that control how this character thinks, remembers, and participates in the TORMENT system. These are execution-layer features — not personality traits. Leave everything off for standard operation.</div>
+    <div class="section-desc">Optional retrieval planning for this text chat client. Operator controls for governance, collective participation, archive recall, voice, and response abstention are not offered by this Solo setup.</div>
 
-    <div class="toggle-row" id="toggle-cog-spine" onclick="toggleFeature('cog-spine')">
+    <div class="toggle-row" hidden id="toggle-cog-spine" onclick="toggleFeature('cog-spine')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Spine-Governed Execution</div>
@@ -1274,12 +1289,12 @@
     <div class="toggle-row" id="toggle-cog-thinking" onclick="toggleFeature('cog-thinking')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
-        <div class="toggle-label">Thinking-Layer Assist</div>
-        <div class="toggle-desc">Use the advisory thinking controller for task framing, memory planning, and action hints. Runs as a non-authoritative sidecar — observes but never overrides.</div>
+        <div class="toggle-label">Retrieval Planning Assist</div>
+        <div class="toggle-desc">ON lets the service’s advisory controller choose memory-lane budgets and weights before retrieval. OFF uses the ordinary retrieval defaults. This does not generate replies, route actions, or control whether the chat model answers.</div>
       </div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-identity" onclick="toggleFeature('cog-identity')">
+    <div class="toggle-row" hidden id="toggle-cog-identity" onclick="toggleFeature('cog-identity')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Identity-Sensitive Cognition</div>
@@ -1287,7 +1302,7 @@
       </div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-collective" onclick="toggleFeature('cog-collective')">
+    <div class="toggle-row" hidden id="toggle-cog-collective" onclick="toggleFeature('cog-collective')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Collective / Hive Participation</div>
@@ -1295,7 +1310,7 @@
       </div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-srg" onclick="toggleFeature('cog-srg')">
+    <div class="toggle-row" hidden id="toggle-cog-srg" onclick="toggleFeature('cog-srg')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label" style="color:#b388ff">SRG-Aware State Handling</div>
@@ -1303,7 +1318,7 @@
       </div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-archive" onclick="toggleFeature('cog-archive')">
+    <div class="toggle-row" hidden id="toggle-cog-archive" onclick="toggleFeature('cog-archive')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Archive / Deep-Memory Recall</div>
@@ -1311,7 +1326,7 @@
       </div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-livesocial" onclick="toggleFeature('cog-livesocial')">
+    <div class="toggle-row" hidden id="toggle-cog-livesocial" onclick="toggleFeature('cog-livesocial')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Live-Social Compact Mode</div>
@@ -1319,12 +1334,12 @@
       </div>
     </div>
 
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+    <div hidden style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
       <div class="section-desc" style="margin-bottom:8px;color:var(--text-dim);font-size:10px;letter-spacing:0.08em;text-transform:uppercase">stance and participation</div>
       <div class="section-desc" style="margin-bottom:10px;color:var(--text-dim);font-size:11px;line-height:1.5">When Contextual Abstention is enabled, the stance policy decides when the character responds, defers, asks for clarification, or stays silent. If the kernel provides geometric state, stance thresholds are nudged by &#177;15% based on coherence, stability, and social resonance &#8212; but behavior remains deterministic without it. Three levels: stance off (always respond), stance on without geometry (rule-based), stance on with geometry (kernel-modulated rules).</div>
     </div>
 
-    <div class="toggle-row" id="toggle-cog-abstention" onclick="toggleFeature('cog-abstention')">
+    <div class="toggle-row" hidden id="toggle-cog-abstention" onclick="toggleFeature('cog-abstention')">
       <div class="toggle-switch"></div>
       <div class="toggle-info">
         <div class="toggle-label">Contextual Abstention</div>
@@ -1556,14 +1571,14 @@
     <div class="model-grid">
       <div class="model-card active" onclick="selectModel(this,'claude')">
         <div class="model-name">Claude (Anthropic API)</div>
-        <div class="model-desc">Excellent instruction following and character consistency.</div>
+        <div class="model-desc"><span class="hivemind-mode">Excellent instruction following and character consistency.</span><span class="solo-mode">Uses the Anthropic Messages API with the fixed model claude-sonnet-4-6. An API key with access to that model is required.</span></div>
         <div class="model-extra">
           <div class="model-desc">Set <code>ANTHROPIC_API_KEY</code> in your terminal before running.</div>
         </div>
       </div>
       <div class="model-card" onclick="selectModel(this,'openai')">
         <div class="model-name">OpenAI API</div>
-        <div class="model-desc">GPT-4o, GPT-4, o1, etc. Works with any OpenAI-compatible endpoint.</div>
+        <div class="model-desc"><span class="hivemind-mode">GPT-4o, GPT-4, o1, etc. Works with any OpenAI-compatible endpoint.</span><span class="solo-mode">Uses OpenAI Chat Completions with a model that accepts system messages. Use Other / Custom API for a different base URL.</span></div>
         <div class="model-extra">
           <div class="model-desc">Set <code>OPENAI_API_KEY</code> in your terminal before running.</div>
           <label style="margin-top:8px;display:block">MODEL</label>
@@ -1582,7 +1597,7 @@
       </div>
       <div class="model-card" onclick="selectModel(this,'other')">
         <div class="model-name">Other / Custom API</div>
-        <div class="model-desc">LM Studio, vLLM, Together AI, Groq, or any OpenAI-compatible endpoint.</div>
+        <div class="model-desc"><span class="hivemind-mode">LM Studio, vLLM, Together AI, Groq, or any OpenAI-compatible endpoint.</span><span class="solo-mode">Requires a Chat Completions-compatible endpoint and model that accept system messages. Configure any required API key in the terminal as LLM_API_KEY.</span></div>
         <div class="model-extra">
           <label>BASE URL</label>
           <input type="text" id="other-url" value="" placeholder="http://localhost:1234/v1">
@@ -1745,19 +1760,19 @@ let hivemindDomains = ['research', 'engineering', 'creative', 'operations', 'met
 let hivemindAgents = [];
 
 const driftMap = {
-  0: { label: 'locked', threshold: 0.10, value: 0.10 },
+  0: { label: 'sensitive', threshold: 0.10, value: 0.10 },
   1: { label: 'conservative', threshold: 0.20, value: 0.20 },
   2: { label: 'default', threshold: 0.35, value: 0.35 },
   3: { label: 'permissive', threshold: 0.50, value: 0.50 },
-  4: { label: 'free', threshold: 0.70, value: 0.70 }
+  4: { label: 'tolerant', threshold: 0.70, value: 0.70 }
 };
 
 const gravityMap = {
-  0: { label: 'none', value: 0 },
+  0: { label: 'zero strength', value: 0 },
   1: { label: 'gentle', value: 0.05 },
   2: { label: 'default', value: 0.12 },
   3: { label: 'strong', value: 0.35 },
-  4: { label: 'locked', value: 0.85 }
+  4: { label: 'very strong', value: 0.85 }
 };
 
 const overlayMap = {
@@ -1793,32 +1808,32 @@ const overlayMap = {
 
 const overlayDescs = {
   wt: [
-    'Very permissive. TORMENT stores almost everything.',
-    'Permissive. Stores most things.',
-    'Balanced. Stores significant events.',
-    'Selective. Only important memories survive.',
-    'Very selective. Only critical things persist.'
+    'Lower starting strength threshold (0.30); other write checks still apply.',
+    'Starting strength threshold 0.38; more permissive than default.',
+    'Starting strength threshold 0.45; other write checks still apply.',
+    'Starting strength threshold 0.55; fewer candidates pass.',
+    'Higher starting strength threshold (0.70); more selective.'
   ],
   ds: [
-    'Shorter half-life (0.50x). Memories fade faster.',
-    'Shorter half-life (0.75x). Memories fade somewhat faster.',
-    'Balanced decay. Natural forgetting curve.',
-    'Longer half-life (1.4x). Memories fade more slowly.',
-    'Longer half-life (2.0x). Memories last longer and fade more slowly.'
+    'New memory half-life multiplier: 0.50x (faster fading).',
+    'New memory half-life multiplier: 0.75x.',
+    'New memory half-life multiplier: 1.0x.',
+    'New memory half-life multiplier: 1.4x.',
+    'New memory half-life multiplier: 2.0x (slower fading).'
   ],
   nb: [
-    'Strongly reinforces known patterns. Character deepens existing themes.',
-    'Slight preference for familiar. Stable personality.',
-    'Balanced between new and known. Default behavior.',
-    'Favors novel information. Character seeks out new patterns.',
-    'Aggressively seeks novelty. Character constantly evolving interests.'
+    'Proposal novelty gate only; inactive in this Solo private policy.',
+    'Proposal novelty gate only; inactive in this Solo private policy.',
+    'Proposal novelty gate only; inactive in this Solo private policy.',
+    'Proposal novelty gate only; inactive in this Solo private policy.',
+    'Proposal novelty gate only; inactive in this Solo private policy.'
   ],
   ms: [
-    'Very loose theme grouping. Memories stay mostly independent.',
-    'Relaxed clustering. Themes form slowly.',
-    'Balanced. Themes emerge naturally from repeated patterns.',
-    'Tight clustering. Related memories group quickly into strong themes.',
-    'Very strict. Only highly similar memories cluster together.'
+    'Broader matches can join an existing theme.',
+    'Allows moderately broad matches to existing themes.',
+    'Default similarity requirement for joining an existing theme.',
+    'Requires a closer match; fewer memories join an existing theme.',
+    'Strictest similarity requirement; only close matches join an existing theme.'
   ]
 };
 
@@ -2032,23 +2047,16 @@ function removeDomain(domain) {
 function updateDrift(v) {
   const d = driftMap[v];
   document.getElementById('drift-val').textContent = d.label;
-  document.getElementById('drift-desc').textContent = 'Threshold: ' + d.threshold + ' — ' +
-    (v === '0' ? 'Character stays locked to seed description.' :
-     v === '1' ? 'Conservative. Character grows slowly, returns quickly to seed.' :
-     v === '2' ? 'Default. Character grows naturally, returns to seed when drifting too far.' :
-     v === '3' ? 'Permissive. Character evolves freely, seed is a gentle guide.' :
-     'Free to evolve. Seed is minimal influence.');
+  document.getElementById('drift-desc').textContent = 'Threshold: ' + d.threshold +
+    ' — Lower values request reinforcement after smaller measured departures from the seed. Requires Character System ON; no setting locks personality.';
 }
 
 function updateGravity(v) {
   const g = gravityMap[v];
   document.getElementById('gravity-val').textContent = g.label;
-  document.getElementById('gravity-desc').textContent =
-    (v === '0' ? 'No gravity. Character drifts without correction.' :
-     v === '1' ? 'Gentle nudge toward seed. Character can deviate significantly.' :
-     v === '2' ? 'Balanced. Character feels grounded but not rigid.' :
-     v === '3' ? 'Strong pull back to seed. Character innovations are minor.' :
-     'Near-absolute return to seed. Character stays locked to original identity.');
+  document.getElementById('gravity-desc').textContent = 'Reinforcement strength: ' + g.value +
+    (v === '0' ? ' — Zero strength does not disable drift checks or the Character system.' :
+     ' — Sets the strength of reinforcement memories when drift correction is required; it does not reset identity.');
 }
 
 function updateOverlay(key, v) {
@@ -2382,7 +2390,7 @@ function generateSolo() {
   const PORT = '8787';
   const BASE = 'http://127.0.0.1:' + PORT;
 
-  let request, embedVars, createCommands;
+  let request, embedVars, createCommands, llmModel, llmHost;
   try {
     request = buildSoloGenesisRequest({
       dataRoot: document.getElementById('solo-data-root').value,
@@ -2401,6 +2409,15 @@ function generateSolo() {
       document.getElementById('st-device').value, document.getElementById('ollama-url').value);
     soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
     createCommands = soloGenesisCreateCommands(embedVars);
+    llmModel = document.getElementById(selectedModel === 'openai' ? 'openai-model' :
+      selectedModel === 'ollama' ? 'ollama-model' : 'other-model').value.trim() ||
+      (selectedModel === 'openai' ? 'gpt-4o' : selectedModel === 'ollama' ? 'qwen3:32b' : 'your-model');
+    llmHost = document.getElementById(selectedModel === 'ollama' ? 'ollama-host' : 'other-url').value.trim() ||
+      (selectedModel === 'ollama' ? 'http://127.0.0.1:11434' : 'http://localhost:1234/v1');
+    if (selectedModel !== 'claude') {
+      soloEnvLine('cmd', 'LLM_MODEL', llmModel);
+      soloEnvLine('cmd', 'LLM_BASE_URL', llmHost);
+    }
   } catch (error) { alert(error.message); return; }
 
   Object.entries(soloSetupGuidance()).forEach(([id, text]) => {
@@ -2412,6 +2429,10 @@ function generateSolo() {
 
   if (selectedEmbed === 'st') {
     installLines += '\n\n# 2. Install sentence-transformers\npip install sentence-transformers';
+    installLines += '\n# First use: the selected model must be acquired separately from the Python package.\n' +
+      '# An uncached BGE model needs access to Hugging Face. HF_HUB_OFFLINE=1 blocks that download.\n' +
+      '# Once the complete model is cached, HF_HUB_OFFLINE=1 supports cached/offline use.\n' +
+      '# CUDA also requires a compatible GPU and a CUDA-enabled PyTorch installation.';
   }
 
   if (selectedModel === 'claude') {
@@ -2423,6 +2444,13 @@ function generateSolo() {
   document.getElementById('out-install').textContent = ['posix', 'cmd'].map(shell =>
     soloShellHeading(shell) + (shell === 'cmd' ? installLines.replace(/^# /gm, ':: ') : installLines)
   ).join('\n\n');
+
+  if (selectedEmbed === 'ollama') {
+    installLines += '\n# The Ollama embedding server must be running with the selected embedding model available.';
+    document.getElementById('out-install').textContent = ['posix', 'cmd'].map(shell =>
+      soloShellHeading(shell) + (shell === 'cmd' ? installLines.replace(/^# /gm, ':: ') : installLines)
+    ).join('\n\n');
+  }
 
   // STEP 1: JSON only; STEP 2: explicit offline operator command.
   document.getElementById('out-workspace').textContent = JSON.stringify(request, null, 2);
@@ -2443,61 +2471,42 @@ function generateSolo() {
   const compNote = '# Compression and deep memory remain disabled in this qualified profile.';
   envParts.push({comment: 'Compression', vars: compVars, note: compNote});
 
-  if (features.srg) {
-    const srgVars = [{key: 'TORMENT_SRG_ENABLE', val: '1'}];
-    let srgNote = '# Crystal Attunement — Symbolic Resonant Geometry dynamics.';
+  // Explicit values also replace stale environment settings when a control is OFF.
+  const heartbeat = document.getElementById('solo-srg-heartbeat').value;
+  const srgVars = [
+    {key: 'TORMENT_SRG_ENABLE', val: features.srg ? '1' : '0'},
+    {key: 'TORMENT_SRG_BANDS', val: document.getElementById('srg-bands').value || '5'},
+    {key: 'TORMENT_SRG_CLASS_A_RATIO', val: heartbeat === 'deep' ? '0.6' : heartbeat === 'active' ? '0.1' : '0.25'},
+    {key: 'TORMENT_SRG_CRYSTAL', val: '1'}
+  ];
+  envParts.push({comment: 'SRG memory state', vars: srgVars,
+    note: '# Band/heartbeat choices apply when SRG is enabled. Native Character seed identity is independent.'});
 
-    const srgBands = document.getElementById('srg-bands')?.value || '5';
-    if (srgBands !== '5') {
-      srgVars.push({key: 'TORMENT_SRG_BANDS', val: srgBands});
-    }
-
-    const hbBias = document.getElementById('srg-heartbeat')?.value;
-    if (hbBias === 'deep') {
-      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.6'});
-      srgNote += '\n# Heartbeat bias: deep (60% Class A).';
-    } else if (hbBias === 'active') {
-      srgVars.push({key: 'TORMENT_SRG_CLASS_A_RATIO', val: '0.1'});
-      srgNote += '\n# Heartbeat bias: active (90% Class B).';
-    }
-
-    if (!features.crystal) {
-      srgVars.push({key: 'TORMENT_SRG_CRYSTAL', val: '0'});
-      srgNote += '\n# Crystal protection disabled.';
-    }
-
-    envParts.push({comment: 'Crystal Attunement (SRG)', vars: srgVars, note: srgNote});
-  }
-
-  // Advanced Cognition capabilities (only if any are enabled)
-  const cogVars = [];
-  let cogNote = '';
-  const anyCog = Object.values(cognitionCaps).some(v => v);
-  if (anyCog) {
-    if (cognitionCaps['cog-spine'])      cogVars.push({key: 'TORMENT_SPINE_ENABLE', val: '1'});
-    if (cognitionCaps['cog-thinking'])   cogVars.push({key: 'TORMENT_THINKING_ADVISORY', val: '1'});
-    if (cognitionCaps['cog-identity'])   cogVars.push({key: 'TORMENT_IDENTITY_SENSITIVE', val: '1'});
-    if (cognitionCaps['cog-collective']) cogVars.push({key: 'TORMENT_HIVEMIND_ENABLE', val: '1'});
-    if (cognitionCaps['cog-srg'])        cogVars.push({key: 'TORMENT_SRG_COGNITION', val: '1'});
-    if (cognitionCaps['cog-archive'])    cogVars.push({key: 'TORMENT_ARCHIVE_RECALL', val: '1'});
-    if (cognitionCaps['cog-livesocial']) cogVars.push({key: 'TORMENT_LIVE_SOCIAL', val: '1'});
-    if (cognitionCaps['cog-abstention']) cogVars.push({key: 'TORMENT_CONTEXTUAL_ABSTENTION', val: '1'});
-    cogNote = '# Advanced Cognition — runtime capabilities (advisory, non-mandatory).';
-    envParts.push({comment: 'Advanced Cognition', vars: cogVars, note: cogNote});
-  }
+  const cogVars = [
+    {key: 'TORMENT_THINKING_ADVISORY', val: cognitionCaps['cog-thinking'] ? '1' : '0'},
+    {key: 'TORMENT_SPINE_ENABLE', val: '0'},
+    {key: 'TORMENT_IDENTITY_SENSITIVE', val: '0'},
+    {key: 'TORMENT_HIVEMIND_ENABLE', val: '0'},
+    {key: 'TORMENT_SRG_COGNITION', val: '0'},
+    {key: 'TORMENT_ARCHIVE_RECALL', val: '0'},
+    {key: 'TORMENT_LIVE_SOCIAL', val: '0'},
+    {key: 'TORMENT_CONTEXTUAL_ABSTENTION', val: '0'}
+  ];
+  envParts.push({comment: 'Solo retrieval planning', vars: cogVars,
+    note: '# Optional operator capabilities are disabled for this generated Solo client.'});
 
   const llmVars = [];
   if (selectedModel === 'claude') {
     llmVars.push({key: 'ANTHROPIC_API_KEY', val: 'your_key_here'});
   } else if (selectedModel === 'openai') {
     llmVars.push({key: 'OPENAI_API_KEY', val: 'your_key_here'});
-    llmVars.push({key: 'OPENAI_MODEL', val: 'gpt-4o'});
+    llmVars.push({key: 'OPENAI_MODEL', val: llmModel});
   } else if (selectedModel === 'ollama') {
-    llmVars.push({key: 'OLLAMA_HOST', val: 'http://127.0.0.1:11434'});
-    llmVars.push({key: 'OLLAMA_MODEL', val: 'qwen3:32b'});
+    llmVars.push({key: 'OLLAMA_HOST', val: llmHost});
+    llmVars.push({key: 'OLLAMA_MODEL', val: llmModel});
   } else {
-    llmVars.push({key: 'LLM_BASE_URL', val: 'http://localhost:1234/v1'});
-    llmVars.push({key: 'LLM_MODEL', val: 'your-model'});
+    llmVars.push({key: 'LLM_BASE_URL', val: llmHost});
+    llmVars.push({key: 'LLM_MODEL', val: llmModel});
   }
   envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
@@ -2558,7 +2567,10 @@ function generateSolo() {
   } else if (selectedModel === 'openai') {
     credentialGuidance = 'OpenAI credentials: create your API key at https://platform.openai.com/api-keys and replace your_key_here in the OPENAI_API_KEY command for your shell.';
   } else if (selectedModel === 'ollama') {
-    credentialGuidance = 'Local Ollama: install from https://ollama.ai/download, then run ollama pull qwen3:32b. No API key is needed.';
+    credentialGuidance = 'Local Ollama: install from https://ollama.ai/download, then pull the selected chat model: ' + llmModel + '. Run the client with the generated OLLAMA_HOST and OLLAMA_MODEL settings in its terminal. No API key is needed.';
+  }
+  if (selectedModel === 'other') {
+    credentialGuidance = 'Run the client with the generated LLM_BASE_URL and LLM_MODEL settings. If the endpoint requires a key, set LLM_API_KEY in that terminal; do not enter credentials into Forge.';
   }
   if (selectedModel === 'claude' || selectedModel === 'openai') {
     credentialGuidance += '\nSet the actual key only in your terminal environment. Do not enter it into Forge, save it in the exported Markdown, or commit it to source control.';
@@ -2627,32 +2639,29 @@ function generateSolo() {
     pyClient =
       '            client = OpenAI()  # uses OPENAI_API_KEY\n' +
       '            resp = client.chat.completions.create(\n' +
-      '                model=os.environ.get("OPENAI_MODEL", "gpt-4o"),\n' +
+      '                model=os.environ.get("OPENAI_MODEL", ' + JSON.stringify(llmModel) + '),\n' +
       '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '            )\n' +
       '            reply = resp.choices[0].message.content';
   } else if (selectedModel === 'ollama') {
-    const olm = document.getElementById('ollama-model')?.value || 'qwen3:32b';
     pyImport = 'from openai import OpenAI  # ollama is OpenAI-compatible';
     pyClient =
       '            client = OpenAI(\n' +
-      '                base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") + "/v1",\n' +
+      '                base_url=os.environ.get("OLLAMA_HOST", ' + JSON.stringify(llmHost) + ').rstrip("/") + "/v1",\n' +
       '                api_key="ollama",  # ollama does not need a real key\n' +
       '            )\n' +
       '            resp = client.chat.completions.create(\n' +
-      '                model="' + olm + '",\n' +
+      '                model=os.environ.get("OLLAMA_MODEL", ' + JSON.stringify(llmModel) + '),\n' +
       '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '                temperature=0.85,\n' +
       '            )\n' +
       '            reply = resp.choices[0].message.content';
   } else {
-    const oUrl = document.getElementById('other-url')?.value || 'http://localhost:1234/v1';
-    const oModel = document.getElementById('other-model')?.value || 'your-model';
     pyImport = 'from openai import OpenAI  # most APIs are OpenAI-compatible';
     pyClient =
-      '            client = OpenAI(base_url="' + oUrl + '", api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
+      '            client = OpenAI(base_url=os.environ.get("LLM_BASE_URL", ' + JSON.stringify(llmHost) + '), api_key=os.environ.get("LLM_API_KEY", "none"))\n' +
       '            resp = client.chat.completions.create(\n' +
-      '                model="' + oModel + '",\n' +
+      '                model=os.environ.get("LLM_MODEL", ' + JSON.stringify(llmModel) + '),\n' +
       '                messages=[{"role": "system", "content": system_prompt}] + conversation,\n' +
       '            )\n' +
       '            reply = resp.choices[0].message.content';
@@ -2679,7 +2688,7 @@ function generateSolo() {
     'TORMENT_URL    = "' + BASE + '"\n' +
     'WORKSPACE_ID   = "' + wsId + '"\n' +
     'AGENT_ID       = "' + agentId + '"\n' +
-    'CHARACTER_NAME = "' + name + '"\n' +
+    'CHARACTER_NAME = ' + JSON.stringify(name) + '\n' +
     'TOP_K          = 8\n\n' +
     '# \u2500\u2500 System prompt \u2500\u2500\n' +
     '# Minimal by design. TORMENT characters are defined by their seed + accumulated memory\n' +
@@ -2932,31 +2941,9 @@ function generateSolo() {
     '  }\n' +
     '}';
 
-  // ── OPTIONAL: Voice Pipeline (when Live-Social is enabled) ──
-  if (cognitionCaps['cog-livesocial']) {
-    document.getElementById('out-voice').textContent =
-      '# ── Voice Pipeline (Live-Social Compact Mode) ──\n' +
-      '# Requires: voice_client/ directory with voice_pipeline.py and memory_bridge.py\n' +
-      '# Install deps: pip install sounddevice numpy websockets edge-tts\n' +
-      '#               (optional: voicebox for advanced TTS)\n\n' +
-      '# Linux / Mac / WSL\n' +
-      'export TORMENT_URL="http://127.0.0.1:8787"\n' +
-      'export TORMENT_WORKSPACE="' + wsId + '"\n' +
-      'export TORMENT_AGENT="' + agentId + '"\n' +
-      'python voice_client/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
-      '# Windows CMD\n' +
-      'set TORMENT_URL=http://127.0.0.1:8787\n' +
-      'set TORMENT_WORKSPACE=' + wsId + '\n' +
-      'set TORMENT_AGENT=' + agentId + '\n' +
-      'python voice_client/voice_pipeline.py --engine claude --character-name "' + name + '" --mode voice\n\n' +
-      '# NOTE: Start the TORMENT server first (python -m torment_service),\n' +
-      '# then run the voice pipeline in a separate terminal.\n' +
-      '# Uses Whisper for STT, your chosen LLM for generation, and Voicebox/edge-tts for voice.\n' +
-      '# Run --help for all TTS and engine options.';
-    document.getElementById('output-voice').style.display = 'block';
-  } else {
-    document.getElementById('output-voice').style.display = 'none';
-  }
+  // Voice writes are not qualified for this Solo setup. Clear stale exported output.
+  document.getElementById('out-voice').textContent = '';
+  document.getElementById('output-voice').style.display = 'none';
 
   // Show output
   document.getElementById('output-section').classList.add('visible');

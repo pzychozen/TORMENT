@@ -1,10 +1,11 @@
 // Execute the real inline Forge script in a DOM stub. No browser, network or SDK.
-// Input: JSON {dataRoot, fields?, provider?, llm?, character?, compression?, traits?}.
+// Input: JSON {dataRoot, fields?, provider?, llm?, character?, compression?, traits?,
+//              features?, cognition?, htmlPath?, mode?, interaction?}.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const html = fs.readFileSync(path.join(__dirname, '../start/torment_character_creator.html'), 'utf8');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const html = fs.readFileSync(input.htmlPath || path.join(__dirname, '../start/torment_character_creator.html'), 'utf8');
 const nodes = new Map();
 for (const match of html.matchAll(/<([\w-]+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
   const value = /\bvalue="([^"]*)"/.exec(match[2])?.[1] || '';
@@ -22,7 +23,7 @@ Object.entries({'char-name': 'Forge Qualification', 'workspace-id': 'forge_quali
   nodes.get(key).value = String(value);
 });
 const alerts = [];
-const sandbox = {document: {getElementById: id => {
+const sandbox = {document: {querySelector: () => ({value: input.interaction || 'window'}), getElementById: id => {
   if (!nodes.has(id)) throw new Error('Unknown DOM id: ' + id);
   return nodes.get(id);
 }}, window: {addEventListener() {}}, alert: msg => alerts.push(msg)};
@@ -36,7 +37,16 @@ vm.runInContext(`
   features.character = fixture.character ?? true;
   features.compression = fixture.compression ?? false;
   features.srg = true;
-  generateSolo();
+  Object.assign(features, fixture.features ?? {});
+  Object.assign(cognitionCaps, fixture.cognition ?? {});
+  if (fixture.mode === 'hivemind') {
+    deploymentMode = 'hivemind';
+    hivemindAgents = [{name: 'Fixture One', role: 'researcher', domain: 'research', seed: 'Keeps careful records of shared projects.'},
+      {name: 'Fixture Two', role: 'builder', domain: 'engineering', seed: 'Builds reliable tools and documents decisions.'}];
+    generateHivemind();
+  } else {
+    generateSolo();
+  }
 `, sandbox);
 let markdown = '';
 if (!alerts.length) {
