@@ -312,6 +312,19 @@ SOLO_GENESIS_REQUIRED = (
 )
 REQUIRED.extend((term, re.escape(term), ["solo"]) for term in SOLO_GENESIS_REQUIRED)
 REQUIRED.append(("onboarding version 1", r'(?:"version"|\bversion):\s*1\b', ["solo"]))
+REQUIRED.extend([
+    ("Solo initial policy owner command", r'torment_service\.domain_policy_setup', ["solo"]),
+    ("Solo named policy posture", r'solo_private_v1', ["solo"]),
+    ("Solo policy prepare/create/verify order", r"(?:\['prepare', 'create', 'verify'\]|domain_policy_setup prepare[\s\S]*domain_policy_setup create[\s\S]*domain_policy_setup verify)", ["solo"]),
+    ("Solo saved policy request", r'torment_solo_policy_request\.json', ["solo"]),
+    ("Solo startup follows policy commands", r"(?:commands\.push\('python -m torment_service'\)|domain_policy_setup verify[^\n]* && python -m torment_service)", ["solo"]),
+    ("Solo policy failure gates startup", r"(?:commands\.join\(' && '\)|domain_policy_setup verify[^\n]* && )", ["solo"]),
+    ("Solo ingest transports the caller mutation key", r'Idempotency-Key', ["solo"]),
+    ("Solo allocates a fresh key for each new memory", r'uuid\.uuid4\(\)\.hex', ["solo"]),
+    ("Solo ingest requires an explicit retry key", r'idempotency_key:\s*str', ["solo"]),
+    ("Solo retries the retained write", r't_ingest\(\*\*pending_write\)', ["solo"]),
+    ("curl explains retry-set identity", r'Reuse the same key only when retrying the same write', ["solo"]),
+])
 
 
 # ---------------------------------------------------------------------------

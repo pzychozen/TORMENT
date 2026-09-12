@@ -1142,9 +1142,9 @@
           <span class="slider-name">Decay Scale</span>
           <span class="slider-value" id="ds-val">1.0</span>
         </div>
-        <p class="slider-desc" id="ds-desc">How fast old memories fade. Lower = memories last longer, higher = faster forgetting.</p>
+        <p class="slider-desc" id="ds-desc">Scales memory half-life. Lower = faster forgetting, higher = memories last longer.</p>
         <input type="range" id="ds-slider" min="0" max="4" value="2" step="1" oninput="updateOverlay('ds',this.value)">
-        <div class="slider-labels"><span>long memory</span><span>fast forget</span></div>
+        <div class="slider-labels"><span>fast forget</span><span>long memory</span></div>
       </div>
 
       <div class="slider-field">
@@ -1800,11 +1800,11 @@ const overlayDescs = {
     'Very selective. Only critical things persist.'
   ],
   ds: [
-    'Slow decay. Memories stay strong for a very long time.',
-    'Moderate decay. Memories gradually fade.',
+    'Shorter half-life (0.50x). Memories fade faster.',
+    'Shorter half-life (0.75x). Memories fade somewhat faster.',
     'Balanced decay. Natural forgetting curve.',
-    'Faster decay. Recent events dominate, old ones fade quicker.',
-    'Aggressive forgetting. Only recent and reinforced memories survive.'
+    'Longer half-life (1.4x). Memories fade more slowly.',
+    'Longer half-life (2.0x). Memories last longer and fade more slowly.'
   ],
   nb: [
     'Strongly reinforces known patterns. Character deepens existing themes.',
@@ -2318,7 +2318,7 @@ function soloSetupGuidance() {
       'POSIX example: /path/to/TORMENT',
       '',
       'GENESIS ARTIFACT DIRECTORY (your setup-artifact directory)',
-      'Store torment_genesis_request.json, torment_genesis_intent.json and torment_genesis_profile.json here.',
+      'Store torment_genesis_request.json, torment_genesis_intent.json, torment_genesis_profile.json and torment_solo_policy_request.json here.',
       'Windows example: C:\\path\\to\\my-character-setup',
       'POSIX example: /path/to/my-character-setup',
       '',
@@ -2330,12 +2330,12 @@ function soloSetupGuidance() {
       'In Steps 2 and 3, replace each bare artifact filename with its quoted absolute path in your setup-artifact directory.',
       'For example, replace torment_genesis_request.json with "C:\\path\\to\\my-character-setup\\torment_genesis_request.json" on Windows,',
       'or "/path/to/my-character-setup/torment_genesis_request.json" on POSIX.',
-      'Use the same directory for the intent and exported profile. Keep the terminal in the repository; do not change into the artifact directory.'
+      'Use the same directory for the intent, exported profile and saved initial policy request. Keep the terminal in the repository; do not change into the artifact directory.'
     ].join('\n'),
     'out-install-guidance': 'Run from the TORMENT repository with the torment environment active. Choose only your shell section below.',
     'out-request-guidance': 'Save this JSON as torment_genesis_request.json inside your setup-artifact directory, NOT inside the TORMENT data root. The copy block contains valid JSON only.',
     'out-create-guidance': 'Run the following from the TORMENT repository with the torment environment active. Before running, replace the request, intent and profile filenames below with their quoted absolute paths in your setup-artifact directory. Genesis reads the saved request and writes the intent and exported profile there. Choose only your shell section.',
-    'out-startup-guidance': 'Only after Genesis succeeds, run from the TORMENT repository with the torment environment active. Replace torment_genesis_profile.json below with the quoted absolute path to the profile exported into your setup-artifact directory. Load it and start the server in the same terminal. Use the same data root; choose only your shell section.',
+    'out-startup-guidance': 'Only after Genesis succeeds, run from the TORMENT repository with the torment environment active. Replace torment_genesis_profile.json and torment_solo_policy_request.json below with their quoted absolute paths in your setup-artifact directory. Keep the saved policy request for initial setup retries. Setup completes only after policy verification passes; the command chain then starts the server. Use the same data root; choose only your shell section. For later normal restarts, load the same profile and environment and run python -m torment_service without repeating initial policy setup.',
     'out-chat-guidance': 'After the server starts and health succeeds, use another terminal with the torment environment active. Save the Python block as a chat script in your setup-artifact directory and run it by its quoted absolute path. Its setup checks health only; your first ordinary query exercises the onboarded agent. The curl reference uses POSIX shell syntax.'
   };
 }
@@ -2501,10 +2501,22 @@ function generateSolo() {
   }
   envParts.push({comment: 'LLM', vars: llmVars, note: ''});
 
+  // Explicit initial policy setup belongs to the policy owner, after Genesis.
+  // Keep the full mapping out of Forge. Every failure stops before startup.
+  const policyStartup = shell => {
+    const root = shell === 'cmd' ? '"%TORMENT_DATA_DIR%"' : '"$TORMENT_DATA_DIR"';
+    const args = ' --data-root ' + root + ' --workspace "' + wsId + '"' +
+      ' --posture solo_private_v1 --request torment_solo_policy_request.json';
+    const commands = ['prepare', 'create', 'verify'].map(command =>
+      'python -m torment_service.domain_policy_setup ' + command + args);
+    commands.push('python -m torment_service');
+    return commands.join(' && ');
+  };
+
   // Build Linux/Mac section
   let envOutput = soloShellHeading('posix');
   envOutput += '# Only after successful Native Genesis create. Run from the repository with torment active.\n';
-  envOutput += '# Replace the profile filename with its quoted absolute path in your setup-artifact directory.\n';
+  envOutput += '# Initial setup: replace profile and policy-request filenames with quoted absolute artifact paths.\n';
   envOutput += soloEnvLine('posix', 'TORMENT_DATA_DIR', request.data_root_identity);
   envOutput += 'unset TORMENT_PROFILE TORMENT_ADMISSION_DESCRIPTOR_PATH\n';
   envOutput += 'export TORMENT_DEPLOYMENT_PROFILE_JSON="$(cat torment_genesis_profile.json)"\n\n';
@@ -2519,10 +2531,10 @@ function generateSolo() {
     if (part.note) envOutput += part.note + '\n\n';
   });
 
-  envOutput += 'python -m torment_service\n# In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
+  envOutput += policyStartup('posix') + '\n# In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
   envOutput += soloShellHeading('cmd');
   envOutput += ':: Only after successful Native Genesis create. Run from the repository with torment active.\n';
-  envOutput += ':: Replace the profile filename with its quoted absolute path in your setup-artifact directory.\n';
+  envOutput += ':: Initial setup: replace profile and policy-request filenames with quoted absolute artifact paths.\n';
   envOutput += soloEnvLine('cmd', 'TORMENT_DATA_DIR', request.data_root_identity);
   envOutput += 'set "TORMENT_PROFILE="\nset "TORMENT_ADMISSION_DESCRIPTOR_PATH="\n';
   envOutput += 'set "TORMENT_DEPLOYMENT_PROFILE_JSON="\n';
@@ -2537,7 +2549,7 @@ function generateSolo() {
     }
   });
 
-  envOutput += 'python -m torment_service\n:: In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
+  envOutput += policyStartup('cmd') + '\n:: In another terminal, after the server is listening:\ncurl ' + BASE + '/health\n\n';
 
   // Shell-neutral guidance stays outside the copied command block.
   let credentialGuidance = '';
@@ -2581,8 +2593,11 @@ function generateSolo() {
     '# and "identity_state" (kernel phase info). "drift_score" / "drift_summary" live in\n' +
     '# character_context.\n\n' +
     '# \u2500\u2500 AFTER ' + name + ' responds: store the memory \u2500\u2500\n' +
+    '# Choose the caller key below. Reuse the same key only when retrying the same write.\n' +
+    '# Keep the text and step unchanged on retry. Use a new key for a new conversation memory.\n' +
     'curl -X POST ' + BASE + '/agent/ingest \\\n' +
     '  -H "Content-Type: application/json" \\\n' +
+    '  -H "Idempotency-Key: <unique-key-for-this-write>" \\\n' +
     '  -d \'{\n' +
     '    "workspace_id": "' + wsId + '",\n' +
     '    "agent_id": "' + agentId + '",\n' +
@@ -2657,6 +2672,7 @@ function generateSolo() {
     'import sys\n' +
     'import textwrap\n' +
     'import time\n' +
+    'import uuid\n' +
     'from typing import Any, Dict, List\n\n' +
     'import requests\n' +
     pyImport + '\n\n' +
@@ -2702,11 +2718,14 @@ function generateSolo() {
     '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
     '        "query": text, "top_k": top_k,\n' +
     '    })\n\n' +
-    'def t_ingest(summary: str, step: int) -> Dict[str, Any]:\n' +
-    '    return t_post("/agent/ingest", {\n' +
+    'def t_ingest(summary: str, step: int, *, idempotency_key: str) -> Dict[str, Any]:\n' +
+    '    """Send one memory; retries reuse its exact summary, step and caller key."""\n' +
+    '    r = requests.post(f"{TORMENT_URL}/agent/ingest", json={\n' +
     '        "workspace_id": WORKSPACE_ID, "agent_id": AGENT_ID,\n' +
     '        "text": summary, "step": step,\n' +
-    '    })\n\n' +
+    '    }, headers={"Idempotency-Key": idempotency_key}, timeout=30)\n' +
+    '    r.raise_for_status()\n' +
+    '    return r.json()\n\n' +
     '# \u2500\u2500 Formatting helpers \u2500\u2500\n' +
     'def format_memories(hits: List[Dict[str, Any]], top_k: int = TOP_K) -> str:\n' +
     '    if not hits:\n' +
@@ -2767,6 +2786,8 @@ function generateSolo() {
     '    step = int(time.time())\n' +
     '    conversation: List[Dict[str, str]] = []\n' +
     '    last_result: Dict[str, Any] = {}\n\n' +
+    '    # Retain one failed write in this process; never regenerate its key on retry.\n' +
+    '    pending_write: Dict[str, Any] | None = None\n\n' +
     '    print("\\n" + "=" * 72)\n' +
     '    print(f"  {CHARACTER_NAME} \u2014 TORMENT Chat")\n' +
     '    print("=" * 72)\n' +
@@ -2779,6 +2800,7 @@ function generateSolo() {
     '    print("  /debug               \u2014 show last raw query result")\n' +
     '    print("  /memories <query>    \u2014 peek at retrieved memories")\n' +
     '    print("  /clear               \u2014 clear local chat history only")\n' +
+    '    print("  /retry               \u2014 resend the pending memory write unchanged")\n' +
     '    print()\n' +
     '    print("  Note: /clear does NOT erase TORMENT memories.")\n' +
     '    print("=" * 72 + "\\n")\n\n' +
@@ -2816,6 +2838,21 @@ function generateSolo() {
     '            conversation.clear()\n' +
     '            print("  Local history cleared. TORMENT memories persist.")\n' +
     '            continue\n\n' +
+    '        if lower == "/retry":\n' +
+    '            if pending_write is None:\n' +
+    '                print("  No pending memory write.")\n' +
+    '                continue\n' +
+    '            try:\n' +
+    '                t_ingest(**pending_write)\n' +
+    '            except Exception as e:\n' +
+    '                print(f"  [TORMENT ingest failed: {e}]")\n' +
+    '            else:\n' +
+    '                pending_write = None\n' +
+    '                print("  Pending memory write accepted.")\n' +
+    '            continue\n' +
+    '        if pending_write is not None:\n' +
+    '            print("  A memory write is pending in this process. Use /retry or quit before continuing.")\n' +
+    '            continue\n\n' +
     '        try:\n' +
     '            result = t_query(user_input)\n' +
     '            last_result = result\n' +
@@ -2842,10 +2879,15 @@ function generateSolo() {
     '        conversation.append({"role": "assistant", "content": reply})\n' +
     '        print(f"\\n{CHARACTER_NAME} > {reply}\\n")\n\n' +
     '        step += 1\n' +
+    '        pending_write = {"summary": build_summary(user_input, reply), "step": step,\n' +
+    '                         "idempotency_key": uuid.uuid4().hex}\n' +
     '        try:\n' +
-    '            t_ingest(build_summary(user_input, reply), step)\n' +
+    '            t_ingest(**pending_write)\n' +
     '        except Exception as e:\n' +
-    '            print(f"  [TORMENT ingest failed: {e}]")\n\n' +
+    '            print(f"  [TORMENT ingest failed: {e}]")\n' +
+    '            print("  Use /retry to resend this write unchanged; quitting discards the local retry record.")\n' +
+    '        else:\n' +
+    '            pending_write = None\n\n' +
     'if __name__ == "__main__":\n' +
     '    main()\n';
 
