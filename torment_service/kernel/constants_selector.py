@@ -38,6 +38,13 @@ def theta_value(Ci: float, Cj: float) -> float:
     """
     return abs(Ci / Cj - Cj / Ci) / math.sqrt(Ci * Cj)
 
+def _ordered_theta_values():
+    c = get_core_constants()
+    th1 = theta_value(c.sqrt3, c.phi)
+    th2 = theta_value(c.pi, c.e)
+    th3 = theta_value(c.phi, c.e)
+    return th1, th2, th3
+
 def theta_soft_triplet(alpha: float = 1.0) -> np.ndarray:
     """
     Softer mapping of θ-pairs into k-values.
@@ -48,10 +55,7 @@ def theta_soft_triplet(alpha: float = 1.0) -> np.ndarray:
 
     Result: k_i = alpha * sqrt(θ_i / θ_base).
     """
-    c = get_core_constants()
-    th1 = theta_value(c.sqrt3, c.phi)
-    th2 = theta_value(c.pi, c.e)
-    th3 = theta_value(c.phi, c.e)
+    th1, th2, th3 = _ordered_theta_values()
 
     base = th1 if th1 != 0.0 else 1.0
     ratios = np.array([th1, th2, th3], dtype=float) / base
@@ -65,11 +69,8 @@ def theta_triplet_scaled() -> np.ndarray:
 
     This ties directly into your θ-ladder paper.
     """
-    c = get_core_constants()
     # three special θ-pairs you like
-    th1 = theta_value(c.sqrt3, c.phi)
-    th2 = theta_value(c.pi, c.e)
-    th3 = theta_value(c.phi, c.e)
+    th1, th2, th3 = _ordered_theta_values()
 
     base = th1 if th1 != 0.0 else 1.0
     k1 = th1 / base
