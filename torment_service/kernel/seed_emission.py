@@ -4,14 +4,16 @@ from dataclasses import dataclass
 import numpy as np
 from typing import Dict, Any, Tuple
 
+if __package__:
+    from .phase_triad_sync import triad_coherence as _triad_coherence
+else:
+    from phase_triad_sync import triad_coherence as _triad_coherence
+
 def wrap_pi(a: np.ndarray) -> np.ndarray:
     return (a + np.pi) % (2*np.pi) - np.pi
 
 def triad_coherence_from_omega(Omega: np.ndarray) -> Tuple[float, float, complex]:
-    Omega = np.asarray(Omega, dtype=np.complex128).reshape(3)
-    phi = np.angle(Omega)
-    S = np.mean(np.exp(1j * 3.0 * phi))
-    return float(np.abs(S)), float(np.angle(S)), S
+    return _triad_coherence(Omega)
 
 @dataclass
 class GapGate:
