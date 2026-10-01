@@ -1,0 +1,25 @@
+{
+  "schema": "TORMENT_COHERENCE_PHASE1B_ADMISSION_v1",
+  "production_baseline_commit": "a06edcc5c9df5d3b56405085d9f2942b768dc203",
+  "external_phase1a_manifest_sha256": "2442282d709dac838f879d0c3b1f5c076084549aaaa0733f220b4f1881ff136e",
+  "fixture_filename": "G_coherence_closure.json",
+  "fixture_sha256": "fb64ddb6e41f390de5daac6eb2e3d1ede192f115a42a68920eb87ffb6fbbcead",
+  "fixture_origin": "C:\\Users\\Notandi\\.codex\\reports\\TORMENT_PRODUCTION_KERNEL_CLEANUP_PHASE1A_20261001\\fixtures\\G_coherence_closure.json",
+  "fixture_case_count": 55,
+  "admission_date": "2026-10-01",
+  "expected_output_policy": "IMMUTABLE_PRODUCTION_BEFORE_VALUES",
+  "source_identity_policy": "PROVENANCE_ONLY_NOT_TEST_CONDITION",
+  "capture_environment": {
+    "python": "3.11.15",
+    "numpy": "2.4.4",
+    "platform": "win32",
+    "machine": "AMD64",
+    "byteorder": "little"
+  },
+  "candidate_entrypoints": [
+    "torment_service.kernel.phase_triad_sync.triad_coherence",
+    "torment_service.kernel.seed_emission.triad_coherence_from_omega"
+  ],
+  "fixture_metadata_policy": "Original capture paths, line numbers, AST hashes and sampler_source_only are retained as provenance; they are not current-source acceptance conditions. No sampler is executed by these candidate tests.",
+  "scope": "Test admission only. No production consolidation, Historical dependency or expected-value regeneration."
+}
