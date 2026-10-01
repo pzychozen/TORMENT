@@ -1,0 +1,29 @@
+{
+  "schema": "TORMENT_THETA_PHASE2D_ADMISSION_v1",
+  "production_baseline_commit": "3444deefeaf3738d08be9e4420d5c6565ab45bc6",
+  "constants_selector_baseline_sha256": "80d8825691079bfb10151a94b243dd9757fb4fe5759aa5fde85dba09e9ba7edf",
+  "fixture_filename": "theta_fixture.json",
+  "fixture_sha256": "ad0f439cebc5419bd14adc414489941334c2131267f7e36927529a240145dd8c",
+  "external_phase2c_manifest_sha256": "83cd925fd3ef5d9ba41ce3565ec423add919c3f9c1b85cac11377d77112cbbce",
+  "fixture_origin": "C:\\Users\\Notandi\\.codex\\reports\\TORMENT_PRODUCTION_KERNEL_CLEANUP_PHASE2C_20261001\\theta_fixture.json",
+  "admission_date": "2026-10-01",
+  "fixture_case_count": 88,
+  "expected_output_policy": "IMMUTABLE_PRODUCTION_BEFORE_VALUES",
+  "source_identity_policy": "PROVENANCE_ONLY_NOT_TEST_CONDITION",
+  "capture_environment": {
+    "python": "3.11.15",
+    "python_executable": "C:\\Users\\Notandi\\miniconda3\\envs\\torment\\python.exe",
+    "numpy": "2.4.4",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "byteorder": "little",
+    "numpy_error_policy": {
+      "divide": "warn",
+      "over": "warn",
+      "under": "ignore",
+      "invalid": "warn"
+    },
+    "bytecode_writes_disabled": true
+  },
+  "admission_scope": "Test-only admission; no production helper, profile merge or implementation change.",
+  "metadata_policy": "Baseline HEAD, source hash, capture paths and runtime metadata are provenance. Tests compare frozen behavior, not current HEAD/source hashes/AST."
+}

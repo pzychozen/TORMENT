@@ -1,0 +1,2 @@
+# Preserve the exact sealed Phase 2C bytes on every checkout.
+theta_fixture.json -text
