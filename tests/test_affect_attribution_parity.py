@@ -17,7 +17,9 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
+import torment_service.fabric as fabric_module
 from torment_service.affect_attribution import SCHEMA_VERSION, read_affect_attribution
 from torment_service.fabric import TormentFabric
 from torment_service.scoring import ContinuityContext, compute_continuity_bonuses
@@ -242,12 +244,24 @@ class TestBaselineFullSurfaceParity(unittest.TestCase):
             self._saved[k] = os.environ.get(k)
             os.environ[k] = v
         self.tmpdir = tempfile.mkdtemp(prefix="torment_d1s1_full_parity_")
+        # final_score carries a wall-clock recency term: trace() scores each hit
+        # with recency_days derived from fabric._now_ts() (int(time.time())).
+        # The before/after arms below are separated by real time, so pin the
+        # exact clock source trace scoring reads to one fixed value for the
+        # whole test; both arms then score at the same effective time and the
+        # exact-equality assertions are deterministic.  Semantics unchanged.
+        self._pinned_now_ts = fabric_module._now_ts()
+        self._clock_patch = mock.patch.object(
+            fabric_module, "_now_ts", lambda: self._pinned_now_ts,
+        )
+        self._clock_patch.start()
         self.fabric = TormentFabric(data_dir=self.tmpdir)
         self.fabric.get_workspace("ws")
         self.fabric.create_agent("ws", "agent")
         self.ak = self.fabric._agent_key("ws", "agent")
 
     def tearDown(self):
+        self._clock_patch.stop()
         shutil.rmtree(self.tmpdir, ignore_errors=True)
         for k, v in self._saved.items():
             if v is None:
