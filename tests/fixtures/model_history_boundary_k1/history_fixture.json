@@ -1,0 +1,1862 @@
+{
+ "authority": {
+  "captured_by": "windows_ab/k1_ab.py capture --label BASE_WINDOWS on a git-archive copy of fa20855a (Windows A/B, 2026-10-03); K1_WINDOWS capture on the same environment was byte-identical (K1_WINDOWS_EXACT_PARITY = PASS)",
+  "captured_from_commit": "fa20855ae6b66280b211528b027655755a0dad45",
+  "captured_from_source": "pre-K1 torment_service/kernel/model_core.py (sha256 raw c9fcc15940749b27fbe9a8afea6aad46fed6e56b469b30ad976a7ba225ac66ab, CR-stripped 91fab757999b4271640268994fd792c924d7fd5f01061c20fd4fe8e3e0b34a98); model_history.py absent",
+  "environment": {
+   "blas": {
+    "name": "scipy-openblas",
+    "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=24",
+    "version": "0.3.31.188.0"
+   },
+   "lapack": {
+    "name": "scipy-openblas",
+    "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=24",
+    "version": "0.3.31.188.0"
+   },
+   "machine": "AMD64",
+   "numpy_version": "2.4.4",
+   "python_compiler": "MSC v.1942 64 bit (AMD64)",
+   "python_version": "3.11.15",
+   "simd": {
+    "baseline": [
+     "X86_V2"
+    ],
+    "found": [
+     "X86_V3"
+    ]
+   },
+   "system": "Windows"
+  },
+  "environment_info": {
+   "compilers": {
+    "c": {
+     "commands": "cl",
+     "linker": "link",
+     "name": "msvc",
+     "version": "19.44.35225"
+    },
+    "c++": {
+     "commands": "cl",
+     "linker": "link",
+     "name": "msvc",
+     "version": "19.44.35225"
+    },
+    "cython": {
+     "commands": "cython",
+     "linker": "cython",
+     "name": "cython",
+     "version": "3.2.4"
+    }
+   },
+   "conda_env": "torment",
+   "executable": "C:\\Users\\Notandi\\miniconda3\\envs\\torment\\python.exe",
+   "platform": "Windows-10-10.0.26200-SP0",
+   "python": "3.11.15 | packaged by Anaconda, Inc. | (main, Mar 11 2026, 17:12:15) [MSC v.1942 64 bit (AMD64)]"
+  },
+  "note": "Linux captures of the same cases differ from this authority in the last ulp (uxy_coords, Omega, Z_*, dots, kappa, z); the exact comparison is therefore gated on the environment fingerprint, never relaxed with tolerances.",
+  "results_serialisation": "json.dumps(results, indent=1, sort_keys=True) + '\\n' (UTF-8); floats/complex as float.hex",
+  "results_sha256": "9d48aef7166fe3d80437750f96dcc88453ee03cbe00ee8067ffef3a38edae40b",
+  "role": "production bit-exact oracle for TriOctaPhaseLockModel.run() history; valid ONLY on the bound environment below"
+ },
+ "results": {
+  "cases": {
+   "n0_default_dt": {
+    "has_latent_foreclosure": false,
+    "history": {
+     "Omega": {
+      "data": [],
+      "dtype": "complex128",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "Z_total": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "cycle_stage": {
+      "data": [],
+      "dtype": "int64",
+      "shape": [
+       0
+      ]
+     },
+     "dot_chiral_macro": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     },
+     "dot_vec_chiral": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     },
+     "dot_vec_macro": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     },
+     "identity_state": {
+      "data": [],
+      "dtype": "int64",
+      "shape": [
+       0
+      ]
+     },
+     "kappa": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     },
+     "phi_index": {
+      "data": [],
+      "dtype": "int64",
+      "shape": [
+       0
+      ]
+     },
+     "t": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     },
+     "uxy_coords": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0,
+       3
+      ]
+     },
+     "z": {
+      "data": [],
+      "dtype": "float64",
+      "shape": [
+       0
+      ]
+     }
+    },
+    "initial_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 0,
+     "identity_state": 0,
+     "phi_index": 0,
+     "step": 0,
+     "t": "0x0.0p+0",
+     "z": "0x0.0p+0"
+    },
+    "keys": [
+     "Omega",
+     "Z_chiral",
+     "Z_macro",
+     "Z_total",
+     "Z_vec",
+     "cycle_stage",
+     "dot_chiral_macro",
+     "dot_vec_chiral",
+     "dot_vec_macro",
+     "identity_state",
+     "kappa",
+     "phi_index",
+     "t",
+     "uxy_coords",
+     "z"
+    ],
+    "meta_seed": null,
+    "meta_version": "unknown",
+    "terminal_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 0,
+     "identity_state": 0,
+     "phi_index": 0,
+     "step": 0,
+     "t": "0x0.0p+0",
+     "z": "0x0.0p+0"
+    }
+   },
+   "n1_default_dt": {
+    "has_latent_foreclosure": false,
+    "history": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "Z_total": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "cycle_stage": {
+      "data": [
+       0
+      ],
+      "dtype": "int64",
+      "shape": [
+       1
+      ]
+     },
+     "dot_chiral_macro": {
+      "data": [
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     },
+     "dot_vec_chiral": {
+      "data": [
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     },
+     "dot_vec_macro": {
+      "data": [
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     },
+     "identity_state": {
+      "data": [
+       0
+      ],
+      "dtype": "int64",
+      "shape": [
+       1
+      ]
+     },
+     "kappa": {
+      "data": [
+       "0x1.43d136248490fp-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     },
+     "phi_index": {
+      "data": [
+       0
+      ],
+      "dtype": "int64",
+      "shape": [
+       1
+      ]
+     },
+     "t": {
+      "data": [
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     },
+     "uxy_coords": {
+      "data": [
+       "0x1.279a74590331dp-1",
+       "-0x1.6a09e667f3bcep-3",
+       "0x1.a20bd700c2c42p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1,
+       3
+      ]
+     },
+     "z": {
+      "data": [
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       1
+      ]
+     }
+    },
+    "initial_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 0,
+     "identity_state": 0,
+     "phi_index": 0,
+     "step": 0,
+     "t": "0x0.0p+0",
+     "z": "0x0.0p+0"
+    },
+    "keys": [
+     "Omega",
+     "Z_chiral",
+     "Z_macro",
+     "Z_total",
+     "Z_vec",
+     "cycle_stage",
+     "dot_chiral_macro",
+     "dot_vec_chiral",
+     "dot_vec_macro",
+     "identity_state",
+     "kappa",
+     "phi_index",
+     "t",
+     "uxy_coords",
+     "z"
+    ],
+    "meta_seed": 7,
+    "meta_version": "k1-freeze",
+    "terminal_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.634c8feb2bb10p-3",
+        "0x1.5a3b13ddb3cb8p-4"
+       ],
+       [
+        "-0x1.9b272e430695bp-5",
+        "0x1.c36cca31acc3bp-3"
+       ],
+       [
+        "0x1.c7afeaf0a3dddp-4",
+        "-0x1.63f410fc8aad6p-3"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "-0x1.02da74115f57ep-6",
+       "0x1.440c919debd12p-5",
+       "0x1.5c048ca313bc9p-5"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x1.6f7930159a0e6p-4",
+       "0x1.a8525c5281068p-5",
+       "0x1.a8525c5281069p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x1.4f1de1936e236p-4",
+       "0x1.252c5290bb778p-4",
+       "0x1.ff537f7b45f5bp-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 1,
+     "identity_state": 4,
+     "phi_index": 1,
+     "step": 1,
+     "t": "0x1.999999999999ap-4",
+     "z": "0x1.a8525c5281069p-4"
+    }
+   },
+   "n5_default_dt": {
+    "has_latent_foreclosure": false,
+    "history": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ],
+       [
+        "0x1.634c8feb2bb10p-3",
+        "0x1.5a3b13ddb3cb8p-4"
+       ],
+       [
+        "-0x1.9b272e430695bp-5",
+        "0x1.c36cca31acc3bp-3"
+       ],
+       [
+        "0x1.c7afeaf0a3dddp-4",
+        "-0x1.63f410fc8aad6p-3"
+       ],
+       [
+        "0x1.fe6a1bf2a8f82p-4",
+        "0x1.06ee307805d63p-4"
+       ],
+       [
+        "0x1.8812bffed7588p-6",
+        "0x1.04adbf58ffb19p-3"
+       ],
+       [
+        "0x1.03045769cbecdp-3",
+        "-0x1.922a00577d6adp-4"
+       ],
+       [
+        "0x1.c670c63c11f08p-4",
+        "0x1.8525b2ae6263fp-5"
+       ],
+       [
+        "0x1.0e91893b54563p-4",
+        "0x1.3c36d62ca9942p-4"
+       ],
+       [
+        "0x1.2a3c10833c82bp-3",
+        "-0x1.a6f4392a26e58p-5"
+       ],
+       [
+        "0x1.d487630949b35p-4",
+        "0x1.26232f5e11416p-5"
+       ],
+       [
+        "0x1.85341b65a6406p-4",
+        "0x1.99d3537800555p-5"
+       ],
+       [
+        "0x1.59e8bbce7b357p-3",
+        "-0x1.69483c6caf937p-6"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "-0x1.02da74115f57ep-6",
+       "0x1.440c919debd12p-5",
+       "0x1.5c048ca313bc9p-5",
+       "-0x1.2e3f10a249cd1p-6",
+       "0x1.4d794fc36a833p-6",
+       "0x1.d5683014df182p-7",
+       "-0x1.e02388661b962p-7",
+       "0x1.9e6073e6d60d0p-7",
+       "0x1.63af0df8c6696p-8",
+       "-0x1.5989b97914274p-7",
+       "0x1.195f4d2b25241p-7",
+       "0x1.2edfbbf9ec5c8p-9"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.6f7930159a0e6p-4",
+       "0x1.a8525c5281068p-5",
+       "0x1.a8525c5281069p-4",
+       "-0x1.4e96242fa6ceep-5",
+       "-0x1.21c2a98fc97dbp-4",
+       "-0x1.4e96242fa6cedp-4",
+       "-0x1.1be6a5da7ab81p-58",
+       "-0x1.015ffbcf5deb7p-4",
+       "-0x1.015ffbcf5deb7p-4",
+       "-0x1.1bcd6257743c2p-5",
+       "0x1.eb8f5a4985163p-5",
+       "0x1.1bcd6257743c4p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_total": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.4f1de1936e236p-4",
+       "0x1.252c5290bb778p-4",
+       "0x1.ff537f7b45f5bp-4",
+       "-0x1.9a25e85839422p-5",
+       "-0x1.f026ff2eb85a9p-5",
+       "-0x1.313fa12e58dd5p-4",
+       "-0x1.e02388661b966p-8",
+       "-0x1.cef3e921e1154p-5",
+       "-0x1.ec8506bf2f705p-5",
+       "-0x1.46fe998696c10p-5",
+       "0x1.075da1f774dd6p-4",
+       "0x1.2088e1475bedbp-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.4f1de1936e236p-4",
+       "0x1.252c5290bb778p-4",
+       "0x1.ff537f7b45f5bp-4",
+       "-0x1.9a25e85839422p-5",
+       "-0x1.f026ff2eb85a9p-5",
+       "-0x1.313fa12e58dd5p-4",
+       "-0x1.e02388661b966p-8",
+       "-0x1.cef3e921e1154p-5",
+       "-0x1.ec8506bf2f705p-5",
+       "-0x1.46fe998696c10p-5",
+       "0x1.075da1f774dd6p-4",
+       "0x1.2088e1475bedbp-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "cycle_stage": {
+      "data": [
+       0,
+       1,
+       1,
+       1,
+       1
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_chiral_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.2458abd3e9de4p-1",
+       "-0x1.0999aa39f3d70p-1",
+       "-0x1.458148fca102bp-1",
+       "0x1.8a36378861e83p-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_vec_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.5fc7aff9599a8p-1",
+       "-0x1.a4299eaecbaa9p-2",
+       "-0x1.1f0fa01c3d2c1p-1",
+       "0x1.97c2ec1cfcfa8p-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_vec_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.fa454e3e160ffp-1",
+       "0x1.fc2859528697cp-1",
+       "0x1.fdbfe6e6d5f33p-1",
+       "0x1.ff8933d35fe7ep-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "identity_state": {
+      "data": [
+       0,
+       4,
+       5,
+       5,
+       4
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "kappa": {
+      "data": [
+       "0x1.43d136248490fp-1",
+       "0x1.7287d797b9166p-2",
+       "0x1.fe30672fd89a0p-3",
+       "0x1.c43c947b4a217p-3",
+       "0x1.dff1d34fad5bap-3"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "phi_index": {
+      "data": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "t": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.999999999999ap-4",
+       "0x1.999999999999ap-3",
+       "0x1.3333333333334p-2",
+       "0x1.999999999999ap-2"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "uxy_coords": {
+      "data": [
+       "0x1.279a74590331dp-1",
+       "-0x1.6a09e667f3bcep-3",
+       "0x1.a20bd700c2c42p-4",
+       "0x1.279a74590331dp-1",
+       "-0x1.32a58e70c8a28p-4",
+       "0x1.4498534d09060p-7",
+       "0x1.279a74590331dp-1",
+       "0x1.0c5a9cb5c0ddcp-5",
+       "-0x1.90177b90be62ep-4",
+       "0x1.279a74590331cp-1",
+       "0x1.f7fca027d6dd4p-5",
+       "-0x1.87de5179febaep-3",
+       "0x1.279a74590331ep-1",
+       "0x1.2bc180bbf28f4p-5",
+       "-0x1.e908b7f4c14a6p-3"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "z": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.a8525c5281069p-4",
+       "-0x1.4e96242fa6cedp-4",
+       "-0x1.015ffbcf5deb7p-4",
+       "0x1.1bcd6257743c4p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     }
+    },
+    "initial_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 0,
+     "identity_state": 0,
+     "phi_index": 0,
+     "step": 0,
+     "t": "0x0.0p+0",
+     "z": "0x0.0p+0"
+    },
+    "keys": [
+     "Omega",
+     "Z_chiral",
+     "Z_macro",
+     "Z_total",
+     "Z_vec",
+     "cycle_stage",
+     "dot_chiral_macro",
+     "dot_vec_chiral",
+     "dot_vec_macro",
+     "identity_state",
+     "kappa",
+     "phi_index",
+     "t",
+     "uxy_coords",
+     "z"
+    ],
+    "meta_seed": 7,
+    "meta_version": "k1-freeze",
+    "terminal_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.043b8ec569d4fp-3",
+        "0x1.d8ae54875d033p-6"
+       ],
+       [
+        "0x1.e945a3fa6053ap-4",
+        "0x1.24667b68d6917p-5"
+       ],
+       [
+        "0x1.92b48cd38518bp-3",
+        "-0x1.65f0766f5024cp-9"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "-0x1.e157f43d9079dp-8",
+       "0x1.8a8547902d7f5p-8",
+       "0x1.1d8adae4580a6p-10"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "-0x1.ce848fc948c70p-5",
+       "0x1.0b08e7d22a7adp-5",
+       "0x1.0b08e7d22a7aep-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "-0x1.ec9a0f0d21ceap-5",
+       "0x1.23b13c4b2d52cp-5",
+       "0x1.0d43fd87f32afp-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 1,
+     "identity_state": 4,
+     "phi_index": 5,
+     "step": 5,
+     "t": "0x1.0000000000000p-1",
+     "z": "0x1.0b08e7d22a7aep-4"
+    }
+   },
+   "n5_dt005": {
+    "has_latent_foreclosure": false,
+    "history": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ],
+       [
+        "0x1.634c8feb2bb10p-3",
+        "0x1.5a3b13ddb3cb8p-4"
+       ],
+       [
+        "-0x1.9b272e430695bp-5",
+        "0x1.c36cca31acc3bp-3"
+       ],
+       [
+        "0x1.c7afeaf0a3dddp-4",
+        "-0x1.63f410fc8aad6p-3"
+       ],
+       [
+        "0x1.fe6a1bf2a8f82p-4",
+        "0x1.06ee307805d63p-4"
+       ],
+       [
+        "0x1.8812bffed7588p-6",
+        "0x1.04adbf58ffb19p-3"
+       ],
+       [
+        "0x1.03045769cbecdp-3",
+        "-0x1.922a00577d6adp-4"
+       ],
+       [
+        "0x1.c670c63c11f08p-4",
+        "0x1.8525b2ae6263fp-5"
+       ],
+       [
+        "0x1.0e91893b54563p-4",
+        "0x1.3c36d62ca9942p-4"
+       ],
+       [
+        "0x1.2a3c10833c82bp-3",
+        "-0x1.a6f4392a26e58p-5"
+       ],
+       [
+        "0x1.d487630949b35p-4",
+        "0x1.26232f5e11416p-5"
+       ],
+       [
+        "0x1.85341b65a6406p-4",
+        "0x1.99d3537800555p-5"
+       ],
+       [
+        "0x1.59e8bbce7b357p-3",
+        "-0x1.69483c6caf937p-6"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "-0x1.02da74115f57ep-6",
+       "0x1.440c919debd12p-5",
+       "0x1.5c048ca313bc9p-5",
+       "-0x1.2e3f10a249cd1p-6",
+       "0x1.4d794fc36a833p-6",
+       "0x1.d5683014df182p-7",
+       "-0x1.e02388661b962p-7",
+       "0x1.9e6073e6d60d0p-7",
+       "0x1.63af0df8c6696p-8",
+       "-0x1.5989b97914274p-7",
+       "0x1.195f4d2b25241p-7",
+       "0x1.2edfbbf9ec5c8p-9"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.7a3aba66fbe73p-4",
+       "0x1.b4bde006edd49p-5",
+       "0x1.b4bde006edd4ap-4",
+       "-0x1.6275c05d79576p-5",
+       "-0x1.32f8a973872fdp-4",
+       "-0x1.6275c05d79575p-4",
+       "-0x1.359139b81e4fdp-58",
+       "-0x1.18a4a52caa155p-4",
+       "-0x1.18a4a52caa155p-4",
+       "-0x1.3e8482f2154d1p-5",
+       "0x1.13d82786e5aa2p-4",
+       "0x1.3e8482f2154d3p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_total": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.59df6be4cffc3p-4",
+       "0x1.2b62146af1de9p-4",
+       "0x1.05df8197d961ep-3",
+       "-0x1.ae0584860bcaap-5",
+       "-0x1.09497f7b19df7p-4",
+       "-0x1.451f3d5c2b65dp-4",
+       "-0x1.e02388661b967p-8",
+       "-0x1.fd7d3bdc79690p-5",
+       "-0x1.0d872cbce3e20p-4",
+       "-0x1.69b5ba2137d20p-5",
+       "0x1.256e1c5997fc6p-4",
+       "0x1.434001e1fcfeap-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x1.59df6be4cffc3p-4",
+       "0x1.2b62146af1de9p-4",
+       "0x1.05df8197d961ep-3",
+       "-0x1.ae0584860bcaap-5",
+       "-0x1.09497f7b19df7p-4",
+       "-0x1.451f3d5c2b65dp-4",
+       "-0x1.e02388661b967p-8",
+       "-0x1.fd7d3bdc79690p-5",
+       "-0x1.0d872cbce3e20p-4",
+       "-0x1.69b5ba2137d20p-5",
+       "0x1.256e1c5997fc6p-4",
+       "0x1.434001e1fcfeap-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "cycle_stage": {
+      "data": [
+       0,
+       1,
+       1,
+       1,
+       1
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_chiral_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.2458abd3e9de4p-1",
+       "-0x1.0999aa39f3d70p-1",
+       "-0x1.458148fca102bp-1",
+       "0x1.8a36378861e83p-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_vec_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.5e60319219dc1p-1",
+       "-0x1.aaf54b03d71a1p-2",
+       "-0x1.22900fbe001fcp-1",
+       "0x1.96635a355cc7dp-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "dot_vec_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.fa8e105b2700bp-1",
+       "0x1.fc99b88ec8850p-1",
+       "0x1.fe2119ea9327cp-1",
+       "0x1.ffa09870b8644p-1"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "identity_state": {
+      "data": [
+       0,
+       4,
+       5,
+       5,
+       4
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "kappa": {
+      "data": [
+       "0x1.43d136248490fp-1",
+       "0x1.7287d797b9166p-2",
+       "0x1.fe30672fd89a0p-3",
+       "0x1.c43c947b4a217p-3",
+       "0x1.dff1d34fad5bap-3"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "phi_index": {
+      "data": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "dtype": "int64",
+      "shape": [
+       5
+      ]
+     },
+     "t": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.999999999999ap-5",
+       "0x1.999999999999ap-4",
+       "0x1.3333333333334p-3",
+       "0x1.999999999999ap-3"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     },
+     "uxy_coords": {
+      "data": [
+       "0x1.279a74590331dp-1",
+       "-0x1.6a09e667f3bcep-3",
+       "0x1.a20bd700c2c42p-4",
+       "0x1.279a74590331dp-1",
+       "-0x1.32a58e70c8a28p-4",
+       "0x1.4498534d09060p-7",
+       "0x1.279a74590331dp-1",
+       "0x1.0c5a9cb5c0ddcp-5",
+       "-0x1.90177b90be62ep-4",
+       "0x1.279a74590331cp-1",
+       "0x1.f7fca027d6dd4p-5",
+       "-0x1.87de5179febaep-3",
+       "0x1.279a74590331ep-1",
+       "0x1.2bc180bbf28f4p-5",
+       "-0x1.e908b7f4c14a6p-3"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5,
+       3
+      ]
+     },
+     "z": {
+      "data": [
+       "0x0.0p+0",
+       "0x1.b4bde006edd4ap-4",
+       "-0x1.6275c05d79575p-4",
+       "-0x1.18a4a52caa155p-4",
+       "0x1.3e8482f2154d3p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       5
+      ]
+     }
+    },
+    "initial_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.3333333333333p-2",
+        "0x1.999999999999ap-4"
+       ],
+       [
+        "-0x1.999999999999ap-3",
+        "0x1.999999999999ap-2"
+       ],
+       [
+        "0x1.999999999999ap-4",
+        "-0x1.3333333333333p-2"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "0x0.0p+0",
+       "0x0.0p+0",
+       "0x0.0p+0"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 0,
+     "identity_state": 0,
+     "phi_index": 0,
+     "step": 0,
+     "t": "0x0.0p+0",
+     "z": "0x0.0p+0"
+    },
+    "keys": [
+     "Omega",
+     "Z_chiral",
+     "Z_macro",
+     "Z_total",
+     "Z_vec",
+     "cycle_stage",
+     "dot_chiral_macro",
+     "dot_vec_chiral",
+     "dot_vec_macro",
+     "identity_state",
+     "kappa",
+     "phi_index",
+     "t",
+     "uxy_coords",
+     "z"
+    ],
+    "meta_seed": null,
+    "meta_version": "k1-freeze",
+    "terminal_state": {
+     "Omega": {
+      "data": [
+       [
+        "0x1.043b8ec569d4fp-3",
+        "0x1.d8ae54875d033p-6"
+       ],
+       [
+        "0x1.e945a3fa6053ap-4",
+        "0x1.24667b68d6917p-5"
+       ],
+       [
+        "0x1.92b48cd38518bp-3",
+        "-0x1.65f0766f5024cp-9"
+       ]
+      ],
+      "dtype": "complex128",
+      "shape": [
+       3
+      ]
+     },
+     "Z_chiral": {
+      "data": [
+       "-0x1.e157f43d9079dp-8",
+       "0x1.8a8547902d7f5p-8",
+       "0x1.1d8adae4580a6p-10"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_macro": {
+      "data": [
+       "-0x1.0b24de4f991b0p-4",
+       "0x1.3478a9c50d32ep-5",
+       "0x1.3478a9c50d32fp-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "Z_vec": {
+      "data": [
+       "-0x1.1a2f9df1859edp-4",
+       "0x1.4d20fe3e100adp-5",
+       "0x1.36b3bf7ad5e30p-4"
+      ],
+      "dtype": "float64",
+      "shape": [
+       3
+      ]
+     },
+     "cycle_stage": 1,
+     "identity_state": 4,
+     "phi_index": 5,
+     "step": 5,
+     "t": "0x1.0000000000000p-2",
+     "z": "0x1.3478a9c50d32fp-4"
+    }
+   }
+  },
+  "latent": {
+   "entries": [
+    {
+     "R_opt": "nan",
+     "V_opt": "nan",
+     "survival_frac": "0x0.0p+0"
+    }
+   ],
+   "history": {
+    "Omega": {
+     "data": [
+      [
+       "0x1.3333333333333p-2",
+       "0x1.999999999999ap-4"
+      ],
+      [
+       "-0x1.999999999999ap-3",
+       "0x1.999999999999ap-2"
+      ],
+      [
+       "0x1.999999999999ap-4",
+       "-0x1.3333333333333p-2"
+      ],
+      [
+       "0x1.634c8feb2bb10p-3",
+       "0x1.5a3b13ddb3cb8p-4"
+      ],
+      [
+       "-0x1.9b272e430695bp-5",
+       "0x1.c36cca31acc3bp-3"
+      ],
+      [
+       "0x1.c7afeaf0a3dddp-4",
+       "-0x1.63f410fc8aad6p-3"
+      ],
+      [
+       "0x1.fe6a1bf2a8f82p-4",
+       "0x1.06ee307805d63p-4"
+      ],
+      [
+       "0x1.8812bffed7588p-6",
+       "0x1.04adbf58ffb19p-3"
+      ],
+      [
+       "0x1.03045769cbecdp-3",
+       "-0x1.922a00577d6adp-4"
+      ]
+     ],
+     "dtype": "complex128",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "Z_chiral": {
+     "data": [
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "-0x1.02da74115f57ep-6",
+      "0x1.440c919debd12p-5",
+      "0x1.5c048ca313bc9p-5",
+      "-0x1.2e3f10a249cd1p-6",
+      "0x1.4d794fc36a833p-6",
+      "0x1.d5683014df182p-7"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "Z_macro": {
+     "data": [
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x1.6f7930159a0e6p-4",
+      "0x1.a8525c5281068p-5",
+      "0x1.a8525c5281069p-4",
+      "-0x1.4e96242fa6ceep-5",
+      "-0x1.21c2a98fc97dbp-4",
+      "-0x1.4e96242fa6cedp-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "Z_total": {
+     "data": [
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x1.4f1de1936e236p-4",
+      "0x1.252c5290bb778p-4",
+      "0x1.ff537f7b45f5bp-4",
+      "-0x1.9a25e85839422p-5",
+      "-0x1.f026ff2eb85a9p-5",
+      "-0x1.313fa12e58dd5p-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "Z_vec": {
+     "data": [
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x0.0p+0",
+      "0x1.4f1de1936e236p-4",
+      "0x1.252c5290bb778p-4",
+      "0x1.ff537f7b45f5bp-4",
+      "-0x1.9a25e85839422p-5",
+      "-0x1.f026ff2eb85a9p-5",
+      "-0x1.313fa12e58dd5p-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "cycle_stage": {
+     "data": [
+      0,
+      1,
+      1
+     ],
+     "dtype": "int64",
+     "shape": [
+      3
+     ]
+    },
+    "dot_chiral_macro": {
+     "data": [
+      "0x0.0p+0",
+      "0x1.2458abd3e9de4p-1",
+      "-0x1.0999aa39f3d70p-1"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "dot_vec_chiral": {
+     "data": [
+      "0x0.0p+0",
+      "0x1.5fc7aff9599a8p-1",
+      "-0x1.a4299eaecbaa9p-2"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "dot_vec_macro": {
+     "data": [
+      "0x0.0p+0",
+      "0x1.fa454e3e160ffp-1",
+      "0x1.fc2859528697cp-1"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "identity_state": {
+     "data": [
+      0,
+      4,
+      5
+     ],
+     "dtype": "int64",
+     "shape": [
+      3
+     ]
+    },
+    "kappa": {
+     "data": [
+      "0x1.43d136248490fp-1",
+      "0x1.7287d797b9166p-2",
+      "0x1.fe30672fd89a0p-3"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "phi_index": {
+     "data": [
+      0,
+      1,
+      2
+     ],
+     "dtype": "int64",
+     "shape": [
+      3
+     ]
+    },
+    "t": {
+     "data": [
+      "0x0.0p+0",
+      "0x1.999999999999ap-4",
+      "0x1.999999999999ap-3"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "uxy_coords": {
+     "data": [
+      "0x1.279a74590331dp-1",
+      "-0x1.6a09e667f3bcep-3",
+      "0x1.a20bd700c2c42p-4",
+      "0x1.279a74590331dp-1",
+      "-0x1.32a58e70c8a28p-4",
+      "0x1.4498534d09060p-7",
+      "0x1.279a74590331dp-1",
+      "0x1.0c5a9cb5c0ddcp-5",
+      "-0x1.90177b90be62ep-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3,
+      3
+     ]
+    },
+    "z": {
+     "data": [
+      "0x0.0p+0",
+      "0x1.a8525c5281069p-4",
+      "-0x1.4e96242fa6cedp-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    }
+   },
+   "present": true,
+   "terminal_state": {
+    "Omega": {
+     "data": [
+      [
+       "0x1.c670c63c11f08p-4",
+       "0x1.8525b2ae6263fp-5"
+      ],
+      [
+       "0x1.0e91893b54563p-4",
+       "0x1.3c36d62ca9942p-4"
+      ],
+      [
+       "0x1.2a3c10833c82bp-3",
+       "-0x1.a6f4392a26e58p-5"
+      ]
+     ],
+     "dtype": "complex128",
+     "shape": [
+      3
+     ]
+    },
+    "Z_chiral": {
+     "data": [
+      "-0x1.e02388661b962p-7",
+      "0x1.9e6073e6d60d0p-7",
+      "0x1.63af0df8c6696p-8"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "Z_macro": {
+     "data": [
+      "-0x1.1be6a5da7ab81p-58",
+      "-0x1.015ffbcf5deb7p-4",
+      "-0x1.015ffbcf5deb7p-4"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "Z_vec": {
+     "data": [
+      "-0x1.e02388661b966p-8",
+      "-0x1.cef3e921e1154p-5",
+      "-0x1.ec8506bf2f705p-5"
+     ],
+     "dtype": "float64",
+     "shape": [
+      3
+     ]
+    },
+    "cycle_stage": 1,
+    "identity_state": 5,
+    "phi_index": 3,
+    "step": 3,
+    "t": "0x1.3333333333334p-2",
+    "z": "-0x1.015ffbcf5deb7p-4"
+   }
+  },
+  "omega0": {
+   "data": [
+    [
+     "0x1.3333333333333p-2",
+     "0x1.999999999999ap-4"
+    ],
+    [
+     "-0x1.999999999999ap-3",
+     "0x1.999999999999ap-2"
+    ],
+    [
+     "0x1.999999999999ap-4",
+     "-0x1.3333333333333p-2"
+    ]
+   ],
+   "dtype": "complex128",
+   "shape": [
+    3
+   ]
+  }
+ }
+}

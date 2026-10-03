@@ -1,13 +1,14 @@
 # model_core.py
-import datetime
-import uuid
+# K1 structural split: history/offline run machinery (history allocation,
+# record-before-step loop, uxy chart sampling, run metadata, optional
+# latent-foreclosure post-run hook) lives in model_history.py.  This module
+# keeps the live kernel: parameters, state, recurrence, phase sync, noise,
+# clock, staged Z, cycle stage, identity state and the master step().
 import numpy as np
 from dataclasses import dataclass, field
 
 from .constants_selector import default_k_triplet
-from .su3_basis import project_to_uxy
 from .phase_triad_sync import apply_phase_triad_sync
-from .latent_foreclosure import compute_option_volume
 from .identity_rules import (
     CycleConfig,
     compute_cycle_stage,
@@ -16,19 +17,17 @@ from .identity_rules import (
 
 
 # -----------------------------
-# Diagnostic-only helpers
+# Diagnostic-only helpers (implementation owned by model_history; these
+# names stay here as thin delegators for existing source-shape consumers)
 # -----------------------------
 def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    v = np.asarray(v, dtype=float)
-    n = float(np.linalg.norm(v))
-    if n < eps:
-        return np.zeros_like(v, dtype=float)
-    return v / n
+    from .model_history import unit
+    return unit(v, eps)
 
 
 def _mirror_z(v: np.ndarray) -> np.ndarray:
-    v = np.asarray(v, dtype=float)
-    return np.array([float(v[0]), float(v[1]), -float(v[2])], dtype=float)
+    from .model_history import mirror_z
+    return mirror_z(v)
 
 
 @dataclass
@@ -101,12 +100,8 @@ class ModelState:
 
 
 def _make_history_meta(seed: int | None = None, version: str | None = None) -> dict:
-    return {
-        "run_id": f"run_{uuid.uuid4().hex[:10]}",
-        "seed": None if seed is None else int(seed),
-        "version": version if version is not None else "unknown",
-        "timestamp_utc": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-    }
+    from .model_history import make_history_meta
+    return make_history_meta(seed=seed, version=version)
 
 
 class TriOctaPhaseLockModel:
@@ -265,69 +260,9 @@ class TriOctaPhaseLockModel:
         version: str | None = None
     ):
         """Run the model for n_steps and return history arrays for analysis."""
-        history = {
-            "Omega": np.zeros((n_steps, 3), dtype=complex),
-            "kappa": np.zeros(n_steps),
-            "phi_index": np.zeros(n_steps, dtype=int),
-            "z": np.zeros(n_steps),
-
-            "Z_macro": np.zeros((n_steps, 3)),         # macro geometry contribution
-            "Z_total": np.zeros((n_steps, 3)),         # blended total (alpha*macro + beta*chiral)
-            "Z_vec": np.zeros((n_steps, 3)),           # legacy alias for Z_total
-            "Z_chiral": np.zeros((n_steps, 3)),        # pure chirality embedding
-            "dot_vec_macro": np.zeros(n_steps),
-            "dot_chiral_macro": np.zeros(n_steps),
-            "dot_vec_chiral": np.zeros(n_steps),
-
-            "cycle_stage": np.zeros(n_steps, dtype=int),
-            "identity_state": np.zeros(n_steps, dtype=int),
-            "t": np.zeros(n_steps),
-            "uxy_coords": np.zeros((n_steps, 3)),
-        }
-        history["_meta"] = _make_history_meta(seed=seed, version=version)
-
-        for i in range(n_steps):
-            # record
-            history["Omega"][i] = state.Omega
-            history["kappa"][i] = state.kappa()
-            history["phi_index"][i] = state.phi_index
-            history["z"][i] = state.z
-
-            history["Z_macro"][i] = state.Z_macro
-            history["Z_chiral"][i] = state.Z_chiral
-            history["Z_total"][i] = state.Z_vec
-            history["Z_vec"][i] = state.Z_vec
-
-            Zm = np.asarray(state.Z_macro, dtype=float)
-            Zv = np.asarray(state.Z_vec, dtype=float)
-            Zc = np.asarray(state.Z_chiral, dtype=float)
-
-            Zm_u = _unit(Zm)
-            Zv_u = _unit(Zv)
-            Zc_u = _unit(Zc)
-
-            history["dot_vec_macro"][i] = float(np.dot(Zv_u, Zm_u))
-            history["dot_chiral_macro"][i] = float(np.dot(Zc_u, Zm_u))
-            history["dot_vec_chiral"][i] = float(np.dot(Zv_u, Zc_u))
-
-            history["cycle_stage"][i] = state.cycle_stage
-            history["identity_state"][i] = state.identity_state
-            history["t"][i] = state.t
-            history["uxy_coords"][i] = project_to_uxy(state.Omega)
-
-            # step
-            self.step(state, dt=dt)
-
-        if hasattr(self.p, "latent_foreclosure_enabled") and self.p.latent_foreclosure_enabled:
-            lf = compute_option_volume(
-                self,
-                state,
-                delta=self.p.lf_delta,
-                K=self.p.lf_K,
-                N=self.p.lf_N,
-                eps_corridor=self.p.lf_eps,
-                eps_norm=1.0,
-            )
-            history.setdefault("latent_foreclosure", []).append(lf)
-
-        return history
+        # History/offline machinery is owned by model_history (K1).  Imported
+        # lazily so that importing model_core keeps its pure kernel import
+        # surface (constants_selector, su3_basis, phase_triad_sync,
+        # latent_foreclosure, identity_rules are the only allowed siblings).
+        from .model_history import run_history
+        return run_history(self, state, n_steps=n_steps, dt=dt, seed=seed, version=version)
