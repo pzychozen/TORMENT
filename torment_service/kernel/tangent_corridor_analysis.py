@@ -1,6 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.cluster.vq import kmeans2
 
 from .cp_windows import cp_mask_from_phi_indices, default_cp_config
 
@@ -17,6 +15,8 @@ def detect_tangent_corridors(history, R=2.0):
     Analysis: tangent_corridor operates in the torus XY plane,
     so we project the jumps to XY before taking the dot product.
     """
+    import matplotlib.pyplot as plt
+
     phi_index = np.asarray(history["phi_index"])
     kappa = np.asarray(history["kappa"])
 
@@ -93,6 +93,8 @@ def cluster_delta_kz(history, frac_of_max=0.5, n_clusters=3):
         big_steps_mask : bool array over Δ steps (length L)
         mags           : array of |Δ(κ, Z)| for each step
     """
+    import matplotlib.pyplot as plt
+    from scipy.cluster.vq import kmeans2
 
     # ----- Extract core time series from history -----
     kappa = np.asarray(history["kappa"])

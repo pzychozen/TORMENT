@@ -1,6 +1,5 @@
 # physics_sampler.py
 import numpy as np
-import matplotlib.pyplot as plt
 
 from .definitions import compute_jeff_from_omega
 
@@ -111,6 +110,8 @@ def plot_phase_and_cp_distributions(obs):
     """
     Plot histograms of relative phases and J_eff.
     """
+    import matplotlib.pyplot as plt
+
     theta12 = obs["theta12"]
     theta23 = obs["theta23"]
     theta31 = obs["theta31"]

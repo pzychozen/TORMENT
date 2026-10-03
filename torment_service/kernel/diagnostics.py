@@ -108,7 +108,7 @@ def run_ic_scan(
         hist = model.run(state, n_steps=200, dt=0.05)
 
         # Physics observables (includes J_eff etc.)
-        from physics_sampler2 import sample_physics_observables
+        from .physics_sampler import sample_physics_observables
         obs = sample_physics_observables(hist)
 
         J = np.asarray(obs["J_eff"])
@@ -530,7 +530,7 @@ def run_noise_robustness_test(params,
 
     Returns a small dict of summary stats.
     """
-    from model_core import ModelState, TriOctaPhaseLockModel
+    from .model_core import ModelState, TriOctaPhaseLockModel
 
     rng = np.random.default_rng(seed)
 

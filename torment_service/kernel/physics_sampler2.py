@@ -1,6 +1,5 @@
 # physics_sampler2.py
 import numpy as np
-import matplotlib.pyplot as plt
 
 from .definitions import estimate_chirality_commit_time
 
@@ -142,6 +141,8 @@ def plot_flavor_time_series(history, obs):
     Plot P1,P2,P3 as a function of time, with CP-window hits indicated
     along the top as markers.
     """
+    import matplotlib.pyplot as plt
+
     t = history["t"]
     P = obs["P"]          # (T,3)
     mask_cp, _ = cp_conditioned_masks(history)
@@ -168,6 +169,8 @@ def plot_Jeff_vs_time(history, obs):
     """
     Plot J_eff(t) over time, with CP-window hits highlighted as markers.
     """
+    import matplotlib.pyplot as plt
+
     t = history["t"]
     J = obs["J_eff"]
     mask_cp, _ = cp_conditioned_masks(history)
