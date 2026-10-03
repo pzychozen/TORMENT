@@ -171,7 +171,7 @@ def resolve_request_context(
     """Resolve a RequestContext from the incoming request.
 
     When auth is enabled:
-      - Reads X-API-Key header (or api_key parameter)
+      - Reads the X-API-Key header (or an explicit api_key argument)
       - Looks up client_id and trust_tier from the key store
       - Rejects unknown keys with 401
 
@@ -191,18 +191,15 @@ def resolve_request_context(
             agent_id=agent_id,
         )
 
-    # Try to get key from parameter, then from header
+    # Explicit argument first, then the X-API-Key header (query strings are not a transport)
     key = api_key
     if not key:
         key = request.headers.get("x-api-key", "").strip()
-    if not key:
-        # Check query param as fallback
-        key = request.query_params.get("api_key", "").strip()
 
     if not key:
         raise HTTPException(
             status_code=401,
-            detail="Missing API key. Provide X-API-Key header or api_key parameter.",
+            detail="Missing API key. Provide X-API-Key header.",
         )
 
     store = get_key_store()

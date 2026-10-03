@@ -197,16 +197,18 @@ def test_runtime_startup_refusal_returns_generic_detail_and_logs_reason(auth_cli
     ) in caplog.record_tuples
 
 
-def test_valid_header_and_query_api_keys_reach_sensitive_handler(auth_client):
+def test_valid_header_api_key_reaches_sensitive_handler_but_query_api_key_is_rejected(auth_client):
+    # S-1: the REST API key is accepted via the X-API-Key header only; the former
+    # ``?api_key=`` query-string transport is retired (it leaked secrets into access logs).
     client, _appmod = auth_client
 
     header_response = client.get("/health", headers=_auth_headers())
     query_response = client.get(f"/health?api_key={API_KEY}")
 
     assert header_response.status_code == 200, header_response.text
-    assert query_response.status_code == 200, query_response.text
     assert header_response.json()["ok"] is True
-    assert query_response.json()["ok"] is True
+    assert query_response.status_code == 401, query_response.text
+    assert API_KEY not in query_response.text
 
 
 def test_low_trust_cognition_is_rejected_before_agent_creation(auth_client):
