@@ -62,20 +62,35 @@ class TestLaneHelpersPrivate(unittest.TestCase):
                 text=text, scope="private",
             )
 
+    def _read_model(self):
+        # Current supported helper shape (66b5e319): the lane helpers take the
+        # workspace_id and the qualified read model that fabric.query() builds
+        # through _legacy_query_read_model(); construct it the same way here.
+        ws = self.fabric.get_workspace("ws1")
+        return self.fabric._legacy_query_read_model(
+            ws, workspace_id="ws1", agent_id="atlas", preferred_private_domain=None,
+        )
+
     def test_private_lane_returns_hits(self):
         ak = self.fabric._agent_key("ws1", "atlas")
-        hits = self.fabric._query_private_lane(ak, "quantum", "atlas", top_k=3)
+        hits = self.fabric._query_private_lane(
+            ak, "ws1", "quantum", "atlas", top_k=3, read_model=self._read_model(),
+        )
         self.assertIsInstance(hits, list)
         self.assertGreater(len(hits), 0)
 
     def test_private_lane_zero_topk_returns_empty(self):
         ak = self.fabric._agent_key("ws1", "atlas")
-        hits = self.fabric._query_private_lane(ak, "quantum", "atlas", top_k=0)
+        hits = self.fabric._query_private_lane(
+            ak, "ws1", "quantum", "atlas", top_k=0, read_model=self._read_model(),
+        )
         self.assertEqual(hits, [])
 
     def test_private_lane_respects_topk(self):
         ak = self.fabric._agent_key("ws1", "atlas")
-        hits = self.fabric._query_private_lane(ak, "quantum", "atlas", top_k=1)
+        hits = self.fabric._query_private_lane(
+            ak, "ws1", "quantum", "atlas", top_k=1, read_model=self._read_model(),
+        )
         self.assertLessEqual(len(hits), 1)
 
 
@@ -94,11 +109,18 @@ class TestLaneHelpersShared(unittest.TestCase):
             scope="shared",
         )
 
+    def _read_model(self, ws):
+        # Same qualified read model fabric.query() builds (66b5e319 helper shape).
+        return self.fabric._legacy_query_read_model(
+            ws, workspace_id="ws1", agent_id="atlas", preferred_private_domain=None,
+        )
+
     def test_shared_lane_returns_hits_and_bridge_domains(self):
         ws = self.fabric.get_workspace("ws1")
         domains = list(ws.shared_graphs.keys())
         hits, bridge_domains = self.fabric._query_shared_lane(
-            ws, "collective", top_k=3, domains=domains,
+            ws, "ws1", "collective", top_k=3, domains=domains,
+            read_model=self._read_model(ws),
         )
         self.assertIsInstance(hits, list)
         self.assertIsInstance(bridge_domains, list)
@@ -107,7 +129,8 @@ class TestLaneHelpersShared(unittest.TestCase):
         ws = self.fabric.get_workspace("ws1")
         domains = list(ws.shared_graphs.keys())
         hits, bridge_domains = self.fabric._query_shared_lane(
-            ws, "collective", top_k=0, domains=domains,
+            ws, "ws1", "collective", top_k=0, domains=domains,
+            read_model=self._read_model(ws),
         )
         self.assertEqual(hits, [])
         self.assertEqual(bridge_domains, [])

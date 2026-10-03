@@ -518,14 +518,20 @@ class LegacyFabricPostWriteAdapter:
                     character_state = asdict(state)
             except Exception as exc:
                 owner._log.debug("checkpoint character state load failed: %s", exc)
-            if deps.kernel_context is None:
+            # Track-J fail-closed rule (restored from the pre-7G5A3D1 Fabric body):
+            # the periodic checkpoint persists the requested agent's LIVE runtime
+            # context looked up at save time.  deps.kernel_context was captured
+            # before kernel.process; if the agent's context has since disappeared,
+            # skip -- never save a stale context, recreate one, or use another agent's.
+            checkpoint_context = owner._kernel_contexts.get(deps.agent_key)
+            if checkpoint_context is None:
                 owner._log.debug("checkpoint skipped: KernelRuntimeContext missing for %s", deps.agent_key)
             else:
                 deps.save_checkpoint(
                     data_dir=owner.data_dir, workspace_id=context.workspace_id,
                     agent_id=context.agent_id, step=int(context.step),
-                    model_state=deps.model_state, corridor_monitor=deps.kernel_context.mon,
-                    kernel_runtime_context=deps.kernel_context, character_state_dict=character_state,
+                    model_state=deps.model_state, corridor_monitor=checkpoint_context.mon,
+                    kernel_runtime_context=checkpoint_context, character_state_dict=character_state,
                     motif_summary=motif_summary, shard_snapshot=shard_snapshot,
                     max_checkpoints=owner._checkpoint_max_keep,
                 )
