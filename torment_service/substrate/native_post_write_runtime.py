@@ -822,15 +822,21 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
                         character_state = asdict(state)
             except Exception as exc:
                 owner._log.debug("checkpoint character state load failed: %s", exc)
-            if binding.kernel_runtime_context is None:
+            # Track-J: use the requested agent's live context at save time; a
+            # context removed after the binding was captured is skipped, never
+            # recreated or substituted.
+            checkpoint_context = owner._kernel_contexts.get(
+                self._configuration.external.agent_key
+            )
+            if checkpoint_context is None:
                 owner._log.debug("checkpoint skipped: KernelRuntimeContext missing for %s", self._configuration.external.agent_key)
             else:
                 save_checkpoint(
                     data_dir=owner.data_dir, workspace_id=context.workspace_id,
                     agent_id=context.agent_id, step=int(context.step),
                     model_state=binding.model_state,
-                    corridor_monitor=binding.kernel_runtime_context.mon,
-                    kernel_runtime_context=binding.kernel_runtime_context,
+                    corridor_monitor=checkpoint_context.mon,
+                    kernel_runtime_context=checkpoint_context,
                     character_state_dict=character_state, motif_summary=motif_summary,
                     shard_snapshot=shard_snapshot, max_checkpoints=owner._checkpoint_max_keep,
                 )
@@ -1005,15 +1011,21 @@ class NativeFabricPostWriteAdapter(FabricPostWriteRuntimePort):
             except Exception as exc:
                 owner._log.debug("checkpoint character state load failed: %s", exc)
 
-            if binding.kernel_runtime_context is None:
+            # Track-J: use the requested agent's live context at save time; a
+            # context removed after the binding was captured is skipped, never
+            # recreated or substituted.
+            checkpoint_context = owner._kernel_contexts.get(
+                self._configuration.external.agent_key
+            )
+            if checkpoint_context is None:
                 owner._log.debug("checkpoint skipped: KernelRuntimeContext missing for %s", self._configuration.external.agent_key)
             else:
                 save_checkpoint(
                     data_dir=owner.data_dir, workspace_id=context.workspace_id,
                     agent_id=context.agent_id, step=int(context.step),
                     model_state=binding.model_state,
-                    corridor_monitor=binding.kernel_runtime_context.mon,
-                    kernel_runtime_context=binding.kernel_runtime_context,
+                    corridor_monitor=checkpoint_context.mon,
+                    kernel_runtime_context=checkpoint_context,
                     character_state_dict=character_state, motif_summary=motif_summary,
                     shard_snapshot=shard_snapshot, max_checkpoints=owner._checkpoint_max_keep,
                 )

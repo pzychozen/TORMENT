@@ -249,6 +249,7 @@ class _Owner:
         self._checkpoint_enable = True
         self._checkpoint_interval = 1
         self._checkpoint_max_keep = 2
+        self._kernel_contexts = {}  # production TormentFabric owner contract: live per-agent contexts
         self._character_enable = True
         self._character_drift_every = 1
         self._last_drift_was_high: dict[tuple[str, str], bool] = {}
@@ -403,6 +404,8 @@ def _harness(tmp_path: Path, *, affect: dict[str, object] | None = None):
         ),
         shared_integrated_default_required=True,
     )
+    # The owner holds the binding's exact context as the requested agent's live context.
+    owner._kernel_contexts[configuration.external.agent_key] = configuration.shared_checkpoint_snapshot_binding.kernel_runtime_context
     post_write = prepare_native_fabric_post_write_adapter(capability=capability, configuration=configuration)
     vectors = (_vector_runtime(capability, private), _vector_runtime(capability, research), _vector_runtime(capability, engineering))
     for runtime in vectors:

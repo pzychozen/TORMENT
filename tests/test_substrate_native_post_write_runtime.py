@@ -182,6 +182,7 @@ class _Owner:
         self._compress_min_step = 0
         self._checkpoint_enable = False
         self._checkpoint_interval = 1
+        self._kernel_contexts = {}  # production TormentFabric owner contract: live per-agent contexts
         self.character_store = SimpleNamespace(load_state=lambda *_args: None)
         self.ident_store = _IdentityStore()
         self.field = _CollectiveField()
@@ -327,7 +328,7 @@ def _i4e_private_configuration(tmp_path: Path, scope, configuration, owner, work
     model_state = kernel.init_state("ws/aria")
     runtime_context = kernel.new_runtime_context()
     private_root = data_root / "workspaces" / "ws" / "agents" / "aria" / "private"
-    return replace(
+    i4e = replace(
         configuration,
         profile=NativePostWriteQualificationProfile.core_staging_with_i4e_private_tail(),
         external=replace(
@@ -348,7 +349,10 @@ def _i4e_private_configuration(tmp_path: Path, scope, configuration, owner, work
         private_checkpoint_snapshot_binding=NativePrivateCheckpointSnapshotBinding(
             model_state, runtime_context,
         ),
-    ), data_root, private_root
+    )
+    # The owner holds the binding's exact context as the requested agent's live context.
+    i4e.external.owner._kernel_contexts[i4e.external.agent_key] = i4e.private_checkpoint_snapshot_binding.kernel_runtime_context
+    return i4e, data_root, private_root
 
 
 def test_adapter_requires_explicit_preparation_and_does_not_grant_activation(tmp_path: Path):

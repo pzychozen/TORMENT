@@ -127,6 +127,7 @@ class _Owner:
         self._checkpoint_enable = True
         self._checkpoint_interval = interval
         self._checkpoint_max_keep = keep
+        self._kernel_contexts = {}  # production TormentFabric owner contract: live per-agent contexts
 
 
 def _live_kernel():
@@ -156,8 +157,7 @@ def _configuration(
     character_store = character_store or _CharacterStore(
         CharacterState("ws", "aria", "seed-1", drift_score=.25, drift_history=[(3, .25)]),
     )
-    return (
-        NativePostWriteQualificationConfiguration(
+    configuration = NativePostWriteQualificationConfiguration(
             routing_scope=scope,
             profile=NativePostWriteQualificationProfile.core_staging_with_shared_checkpoint_snapshot(),
             external=NativePostWriteExternalDependencies(
@@ -176,10 +176,10 @@ def _configuration(
                 state if model_state is None else model_state,
                 runtime_context if kernel_runtime_context is None else kernel_runtime_context,
             ),
-        ),
-        owner,
-        character_store,
-    )
+        )
+    # The owner holds the binding's exact context as the requested agent's live context.
+    owner._kernel_contexts[configuration.external.agent_key] = configuration.shared_checkpoint_snapshot_binding.kernel_runtime_context
+    return configuration, owner, character_store
 
 
 def _request(key: str = "D4:SOURCE") -> NativeFabricRouteRequest:
