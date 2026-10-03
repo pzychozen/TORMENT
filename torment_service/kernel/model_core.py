@@ -1,9 +1,12 @@
 # model_core.py
 # K1 structural split: history/offline run machinery (history allocation,
 # record-before-step loop, uxy chart sampling, run metadata, optional
-# latent-foreclosure post-run hook) lives in model_history.py.  This module
+# latent-foreclosure post-run hook) lives in model_history.py.
+# K2 structural split: the staged Z readout mathematics (rho, theta, z,
+# Z_macro, Z_chiral, Z_vec) lives in staged_readouts.py; update_z here
+# resolves theta_lock_override and performs the in-place writes.  This module
 # keeps the live kernel: parameters, state, recurrence, phase sync, noise,
-# clock, staged Z, cycle stage, identity state and the master step().
+# clock, update_z (mutation), cycle stage, identity state and the master step().
 import numpy as np
 from dataclasses import dataclass, field
 
@@ -170,11 +173,16 @@ class TriOctaPhaseLockModel:
           - micro chiral geometry from Omega phases.
         """
 
-        kappa = state.kappa()
-        # normalize rho with soft saturation
-        rho = kappa / (1.0 + kappa)
+        # The mathematics (rho, theta, z, Z_macro, Z_chiral, Z_vec) is owned by
+        # staged_readouts (K2).  This method keeps the original interleaving
+        # of parameter reads, computation and in-place writes, so failure
+        # points and the state visible at them are unchanged.  Imported lazily
+        # so the module import surface stays within the theta-contract allowlist.
+        from .staged_readouts import blend_z, compute_chiral_z, compute_macro_z
 
-        theta = (2.0 * np.pi * state.phi_index) / self.p.d24_steps
+        kappa = state.kappa()
+        phi_index = state.phi_index
+        d24_steps = self.p.d24_steps
         lam = self.p.lambda_vp
         gamma = self.p.gamma
         theta_lock = (
@@ -183,35 +191,23 @@ class TriOctaPhaseLockModel:
             else theta_lock_override
         )
 
-        # --- scalar Z as before (macro vesica/TriOcta Z) ---
-        z = lam * rho * np.cos(3.0 * (theta - theta_lock)) * np.exp(-gamma * state.t)
-        state.z = float(z)
-
-        # (1) Macro geometry contribution (corridor angle in x-y plane)
-        phi = theta
-
-        Z_macro = np.array(
-            [float(z * np.cos(phi)),
-             float(z * np.sin(phi)),
-             float(z)],
-            dtype=float
+        # --- scalar Z as before (macro vesica/TriOcta Z) + (1) macro geometry ---
+        macro = compute_macro_z(
+            kappa, phi_index, state.t,
+            d24_steps=d24_steps, lambda_vp=lam, gamma=gamma, theta_lock=theta_lock,
         )
+        state.z = float(macro.z)
+        Z_macro = macro.Z_macro
         state.Z_macro[:] = Z_macro
 
         # (2) Micro chiral contribution from Omega phases
-        O1, O2, O3 = state.Omega
-        Z_chiral = np.array(
-            [float(np.imag(np.conj(O2) * O3)),
-             float(np.imag(np.conj(O3) * O1)),
-             float(np.imag(np.conj(O1) * O2))],
-            dtype=float
-        )
+        Z_chiral = compute_chiral_z(state.Omega)
         state.Z_chiral[:] = Z_chiral
 
         # (3) Blend them into a single orientation manifold vector
         alpha = self.p.z_alpha
         beta = self.p.z_beta
-        Z_vec = alpha * Z_macro + beta * Z_chiral
+        Z_vec = blend_z(Z_macro, Z_chiral, alpha, beta)
         state.Z_vec[:] = Z_vec
 
     def update_cycle_stage(self, state: ModelState) -> None:
