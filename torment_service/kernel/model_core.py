@@ -7,6 +7,8 @@
 # resolves theta_lock_override and performs the in-place writes.  This module
 # keeps the live kernel: parameters, state, recurrence, phase sync, noise,
 # clock, update_z (mutation), cycle stage, identity state and the master step().
+# K3 structural split: the optional stochastic forcing applied after phase sync
+# lives in stochastic_forcing.py; phase_lock_step resolves sigma and calls it.
 import numpy as np
 from dataclasses import dataclass, field
 
@@ -148,10 +150,13 @@ class TriOctaPhaseLockModel:
         )
 
         # --- optional tiny stochastic forcing (breaks perfect periodicity when enabled) ---
+        # Noise application is owned by stochastic_forcing (K3); sigma is still
+        # resolved here, at the original point, and the helper draws from the
+        # same global np.random stream in the same order.  Imported lazily so
+        # the module import surface stays within the theta-contract allowlist.
+        from .stochastic_forcing import apply_stochastic_forcing
         sigma = float(getattr(self.p, "omega_noise_sigma", 0.0) or 0.0)
-        if sigma > 0.0:
-            noise = (np.random.standard_normal(3) + 1j*np.random.standard_normal(3))
-            Omega_next = Omega_next + (sigma * noise.astype(np.complex128))
+        Omega_next = apply_stochastic_forcing(Omega_next, sigma)
         
 
         # --- finalize state ---
