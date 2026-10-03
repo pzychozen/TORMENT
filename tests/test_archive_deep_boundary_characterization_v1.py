@@ -14,6 +14,8 @@ from typing import Any, Dict, Iterator
 
 import numpy as np
 import pytest
+
+from conftest import LegacyRuntimeProxyForTest
 from starlette.requests import Request
 
 from torment_service.compression import (
@@ -504,7 +506,9 @@ def _isolated_app(data_dir: Path, archive_recall_flag: str | None) -> Iterator[A
     original_archive_latch = appmod._thinking_controller_module._ARCHIVE_RECALL_ENABLE
     test_fabric = TormentFabric(data_dir=str(data_dir))
     appmod.DATA_DIR = str(data_dir)
-    appmod.fabric = test_fabric
+    # I11 (R1): inject the directly constructed legacy fabric behind the narrow
+    # LEGACY proxy (runtime()/close()); not a startup/selector demonstration.
+    appmod.fabric = LegacyRuntimeProxyForTest(test_fabric)
     appmod._archive_stores = {}
     appmod._thinking_controller_module._ARCHIVE_RECALL_ENABLE = _flag_enabled(
         archive_recall_flag

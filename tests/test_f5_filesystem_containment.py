@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import _is_repo_default, assert_legacy_mode, existing_legacy_root, safe_run_data_root
 from torment_service.kernel.trajectory_v2 import (
     CHUNK_HEADER,
     FORMAT_VERSION,
@@ -36,8 +37,10 @@ def _make_directory_junction(link: Path, target: Path) -> None:
 
 @pytest.fixture()
 def authenticated_client(tmp_path):
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    safe_run_data_root()  # refuse before touching anything (run guard must be in force)
+    # I11: an EMPTY root is refused (fresh-root-requires-native-genesis); seed
+    # the disposable root as an existing legacy owner before the app binds to it.
+    data_dir = existing_legacy_root(tmp_path / "data")
     env_keys = (
         "TORMENT_DATA_DIR",
         "TORMENT_AUTH_ENABLE",
@@ -56,23 +59,31 @@ def authenticated_client(tmp_path):
     os.environ["TORMENT_HIVEMIND_ENABLE"] = "0"
     os.environ["TORMENT_SQLITE_INDEX_ENABLE"] = "0"
 
-    import torment_service.auth as authmod
-    import torment_service.app as appmod
-
-    authmod = importlib.reload(authmod)
-    appmod = importlib.reload(appmod)
-    client = TestClient(appmod.app)
+    authmod = appmod = None
     try:
-        yield client, appmod, data_dir
+        # env is bound above, BEFORE the import/reload that reads it
+        import torment_service.auth as authmod
+        import torment_service.app as appmod
+
+        authmod = importlib.reload(authmod)
+        appmod = importlib.reload(appmod)
+        with TestClient(appmod.app) as client:  # lifespan: startup-owned runtime construction
+            assert_legacy_mode(appmod)
+            yield client, appmod, data_dir
     finally:
-        client.close()
-        for key, value in original_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        importlib.reload(authmod)
-        importlib.reload(appmod)
+        try:
+            from torment_service.public_runtime import reset_public_runtime_for_test
+            reset_public_runtime_for_test(data_dir)  # only this root's cache entry
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if authmod is not None:
+                importlib.reload(authmod)
+            if appmod is not None and not _is_repo_default(os.environ.get("TORMENT_DATA_DIR")):
+                importlib.reload(appmod)  # rebind to the restored non-default root, never the repo default
 
 
 def _headers(key: str) -> dict[str, str]:

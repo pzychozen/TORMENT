@@ -14,6 +14,8 @@ import os
 import sys
 import tempfile
 import unittest
+
+from conftest import LegacyRuntimeProxyForTest
 from unittest.mock import patch
 
 
@@ -319,7 +321,7 @@ class TestReferenceLifecycleArchaeology(_FabricCase):
         import torment_service.app as appmod
 
         original_fabric = appmod.fabric
-        appmod.fabric = self.fabric
+        appmod.fabric = LegacyRuntimeProxyForTest(self.fabric)  # I11 (R1): handler-level legacy injection
         self.addCleanup(setattr, appmod, "fabric", original_fabric)
         result = appmod.retrieve_assembled(appmod.AssembleContextReq(
             workspace_id="ws_a", agent_id="atlas", query="archaeology",
@@ -585,7 +587,7 @@ class TestEnvironmentLifecycleArchaeology(_FabricCase):
         import torment_service.app as appmod
 
         original_fabric = appmod.fabric
-        appmod.fabric = self.fabric
+        appmod.fabric = LegacyRuntimeProxyForTest(self.fabric)  # I11 (R1): handler-level legacy injection
         self.addCleanup(setattr, appmod, "fabric", original_fabric)
         assembled = appmod.retrieve_assembled(appmod.AssembleContextReq(
             workspace_id="ws_a", agent_id="atlas", query="ENVIRONMENT_ARCHAEOLOGY_SENTINEL",

@@ -162,7 +162,13 @@ def _write_disposable_public_shape(root: Path, workspace_id: str, domain_id: str
 
     workspace = root / "workspaces" / workspace_id
     workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "workspace_meta.json").write_text("{}", encoding="utf-8")
+    # R5 (I11): a VALID disposable legacy owner names itself; the pre-selector
+    # classifier treats a workspace_meta.json without a matching workspace_id as
+    # invalid evidence (AMBIGUOUS_OR_INVALID), so prepare_root cannot see
+    # LEGACY_PUBLIC authority.  Identity-only payload per F7; nothing else added.
+    (workspace / "workspace_meta.json").write_text(
+        json.dumps({"workspace_id": workspace_id}, sort_keys=True), encoding="utf-8",
+    )
     (workspace / "domains.json").write_text(
         json.dumps({"domains": [domain_id]}, sort_keys=True), encoding="utf-8",
     )

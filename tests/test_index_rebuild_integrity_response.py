@@ -12,12 +12,22 @@ from pathlib import Path
 import numpy as np
 from fastapi.testclient import TestClient
 
+from conftest import _is_repo_default, assert_legacy_mode, existing_legacy_root, safe_run_data_root
 from torment_service.kernel.trajectory_v2 import TrajectoryV2Writer
 
 
 def test_index_rebuild_redacts_unsealed_v2_integrity_details():
     """Authenticated callers receive a stable, non-diagnostic integrity report."""
+    # R1: the original root held workspaces/<ws>/agents/<agent> with trajectory
+    # files but no workspace owner (workspace_meta.json) and no private/embeddings
+    # scope, so the I11 pre-selector classifier returned AMBIGUOUS_OR_INVALID and
+    # startup was refused.  Seed the guarded existing-legacy owner for THIS test's
+    # workspace before the agent directory is created; everything else is unchanged.
+    safe_run_data_root()
     temp_root = Path(tempfile.mkdtemp(prefix="torment_s1_1423_"))
+    workspace_id = "ws_index_rebuild_redaction"
+    agent_id = "ag_index_rebuild_redaction"
+    existing_legacy_root(temp_root / "data", workspace_id=workspace_id)
     env_overrides = {
         "TORMENT_DATA_DIR": str(temp_root / "data"),
         "TORMENT_AUTH_ENABLE": "1",
@@ -43,8 +53,7 @@ def test_index_rebuild_redacts_unsealed_v2_integrity_details():
         authmod = importlib.reload(authmod)
         appmod = importlib.reload(appmod)
 
-        workspace_id = "ws_index_rebuild_redaction"
-        agent_id = "ag_index_rebuild_redaction"
+        assert_legacy_mode(appmod)
         agent_dir = (
             temp_root
             / "data"
@@ -104,6 +113,9 @@ def test_index_rebuild_redacts_unsealed_v2_integrity_details():
             client.close()
         if index is not None:
             index.close()
+        if appmod is not None:
+            from torment_service.public_runtime import reset_public_runtime_for_test  # noqa: PLC0415
+            reset_public_runtime_for_test(temp_root / "data")  # only this test's root
 
         for key, value in original_env.items():
             if value is None:
@@ -117,6 +129,6 @@ def test_index_rebuild_redacts_unsealed_v2_integrity_details():
 
         if authmod is not None:
             importlib.reload(authmod)
-        if appmod is not None:
-            importlib.reload(appmod)
+        if appmod is not None and not _is_repo_default(os.environ.get("TORMENT_DATA_DIR")):
+            importlib.reload(appmod)  # rebind to the safe run root, never the repo default
         shutil.rmtree(temp_root)

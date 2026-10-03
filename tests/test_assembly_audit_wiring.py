@@ -40,6 +40,13 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from conftest import (
+    assert_legacy_mode,
+    bound_legacy_app,
+    existing_legacy_root,
+    safe_run_data_root,
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_smoke_api.py pattern)
@@ -47,37 +54,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 @pytest.fixture()
 def client(tmp_path):
-    """Create an isolated app instance pointing at a temp data dir.
-
-    Manual env save/restore + post-yield reload — not monkeypatch.
-    torment_service.app reads TORMENT_DATA_DIR at module-import time and
-    binds both DATA_DIR and the module-level fabric to it. Reloading the
-    module with TORMENT_DATA_DIR=tmp rebinds both to the tmp dir.
-    monkeypatch.setenv would restore the env var at fixture teardown, but
-    its restoration runs AFTER this fixture's post-yield code — so any
-    reload-in-finally would re-bind to the still-tmp env. Saving the env
-    manually and reloading inside finally AFTER the manual restore is the
-    only shape that reverts appmod.DATA_DIR + appmod.fabric to their
-    pre-fixture values. Without that revert, alphabetically-later tests
-    that depend on the repo DATA_DIR (e.g. test_app_security_hardening.py)
-    see a leaked tmp path.
-    """
+    """Isolated app instance on a disposable data dir seeded as an existing
+    legacy owner (I11: an EMPTY root is refused with
+    fresh-root-requires-native-genesis).  bound_legacy_app owns the env
+    bind -> import -> reload -> client sequence and the teardown that
+    closes only this root's runtime and rebinds the module to the safe
+    run root (never the repository default)."""
     data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    original_env = os.environ.get("TORMENT_DATA_DIR")
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-
-    import torment_service.app as appmod
-    appmod = importlib.reload(appmod)
-    try:
-        yield TestClient(appmod.app)
-    finally:
-        if original_env is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = original_env
-        importlib.reload(appmod)
+    data_dir.mkdir(parents=True, exist_ok=False)
+    with bound_legacy_app(existing_legacy_root(data_dir)) as bound:
+        assert_legacy_mode(bound.app)
+        yield bound.client
 
 
 def _unit_vec(dim=384, seed=0):
@@ -150,8 +137,11 @@ def _retrieve_payload(workspace: str, agent: str, *, include_audit: bool = False
 class TestWiring_RequestModel:
     def test_field_defaults_false(self):
         """AssembleContextReq.include_assembly_audit defaults to False."""
-        # Re-import to ensure model reflects the S5-added field.
+        # Re-import to ensure model reflects the S5-added field.  The reload
+        # rebinds DATA_DIR from the environment, so refuse unless the run
+        # guard (a non-default root) is in force; no runtime is started here.
         import torment_service.app as appmod
+        safe_run_data_root()
         importlib.reload(appmod)
         req = appmod.AssembleContextReq(
             workspace_id="ws", agent_id="ag", query="q",
@@ -160,6 +150,7 @@ class TestWiring_RequestModel:
 
     def test_field_accepts_true(self):
         import torment_service.app as appmod
+        safe_run_data_root()  # never rebind the module against the repo default
         importlib.reload(appmod)
         req = appmod.AssembleContextReq(
             workspace_id="ws", agent_id="ag", query="q",

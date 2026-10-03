@@ -8,6 +8,8 @@ from typing import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import _is_repo_default, assert_legacy_mode, existing_legacy_root, safe_run_data_root
+
 
 API_KEY = "sk-archive-rest-test"
 WORKSPACE_ID = "ws_archive_auth"
@@ -17,8 +19,11 @@ DOC_TEXT = "Archive auth regression document with searchable storage notes."
 
 
 def _client_with_env(tmp_path, *, auth_enabled: bool) -> Iterator[TestClient]:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
+    # R1: legacy-compatibility subject (archive REST auth over the retained legacy
+    # public runtime).  Seed a guarded existing-legacy root, bind the environment
+    # BEFORE import/reload, keep every step exception-safe, close only this root.
+    safe_run_data_root()
+    data_dir = existing_legacy_root(tmp_path / "data")
 
     env_keys = [
         "TORMENT_DATA_DIR",
@@ -28,30 +33,38 @@ def _client_with_env(tmp_path, *, auth_enabled: bool) -> Iterator[TestClient]:
         "TORMENT_EMBED_PROVIDER",
     ]
     original_env = {key: os.environ.get(key) for key in env_keys}
-
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-    os.environ["TORMENT_AUTH_ENABLE"] = "1" if auth_enabled else "0"
-    os.environ["TORMENT_API_KEYS"] = f"{API_KEY}:archive-test-client:1.0"
-    os.environ.pop("TORMENT_API_KEYS_FILE", None)
-    os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
-
-    import torment_service.auth as authmod
-    import torment_service.app as appmod
-
-    authmod = importlib.reload(authmod)
-    appmod = importlib.reload(appmod)
-    client = TestClient(appmod.app)
+    authmod = appmod = client = None
     try:
+        os.environ["TORMENT_DATA_DIR"] = str(data_dir)
+        os.environ["TORMENT_AUTH_ENABLE"] = "1" if auth_enabled else "0"
+        os.environ["TORMENT_API_KEYS"] = f"{API_KEY}:archive-test-client:1.0"
+        os.environ.pop("TORMENT_API_KEYS_FILE", None)
+        os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
+
+        import torment_service.auth as authmod
+        import torment_service.app as appmod
+
+        authmod = importlib.reload(authmod)
+        appmod = importlib.reload(appmod)
+        client = TestClient(appmod.app)
+        assert_legacy_mode(appmod)
         yield client
     finally:
-        client.close()
-        for key, value in original_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        importlib.reload(authmod)
-        importlib.reload(appmod)
+        try:
+            if client is not None:
+                client.close()
+            from torment_service.public_runtime import reset_public_runtime_for_test
+            reset_public_runtime_for_test(data_dir)
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if authmod is not None:
+                importlib.reload(authmod)
+            if appmod is not None and not _is_repo_default(os.environ.get("TORMENT_DATA_DIR")):
+                importlib.reload(appmod)  # rebind to the safe run root, never the repo default
 
 
 @pytest.fixture()

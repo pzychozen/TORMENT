@@ -17,6 +17,8 @@ Tier 3: Collective-disabled replay
 import os, json, subprocess, sys
 from pathlib import Path
 
+from conftest import existing_legacy_root
+
 
 def _run(cmd, env=None):
     p = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -26,13 +28,15 @@ def _run(cmd, env=None):
 
 def _record_and_replay(tmp_path, process_proposals_every: int):
     """Run record + replay and return both summaries."""
-    data_dir = tmp_path / "data"
+    # I11 (R1): seed guarded existing-legacy owners so sim.run_sim's public runtime
+    # starts on each disposable --data-dir (fresh roots are refused).
+    data_dir = existing_legacy_root(tmp_path / "data")
     out1 = tmp_path / "out1"
     out2 = tmp_path / "out2"
     rec = tmp_path / "replay.jsonl"
     env = os.environ.copy()
 
-    _run([sys.executable, "-m", "sim.run_sim",
+    _run([sys.executable, "-B", "-m", "sim.run_sim",
           "--workspace", "ws",
           "--agents", "6",
           "--steps", "40",
@@ -45,10 +49,10 @@ def _record_and_replay(tmp_path, process_proposals_every: int):
 
     s1 = json.loads((out1 / "summary.json").read_text(encoding="utf-8"))
 
-    data_dir2 = tmp_path / "data2"
+    data_dir2 = existing_legacy_root(tmp_path / "data2")
     env2 = os.environ.copy()
 
-    _run([sys.executable, "-m", "sim.run_sim",
+    _run([sys.executable, "-B", "-m", "sim.run_sim",
           "--workspace", "ws",
           "--agents", "6",
           "--steps", "40",

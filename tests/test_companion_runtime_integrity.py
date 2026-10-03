@@ -3,6 +3,17 @@ import sys
 
 import pytest
 
+from conftest import LegacyRuntimeProxyForTest, assert_legacy_mode, ensure_legacy_run_root
+
+# I11: these tests import torment_service.app on the process-default root; that
+# root must already hold an existing legacy owner for the runtime to start.
+ensure_legacy_run_root()
+
+
+def setup_module():
+    import torment_service.app as appmod
+    assert_legacy_mode(appmod)
+
 
 def _torment_module_names():
     return {
@@ -27,6 +38,14 @@ def _restore_torment_imports_after_test():
 
 def test_debug_metrics_exposes_loaded_companion_runtime_flags(monkeypatch):
     import torment_service.app as appmod
+
+    # I11 (R1): app.fabric is a lazy proxy that re-resolves DATA_DIR on every access
+    # (app.py:197-207).  This test monkeypatches DATA_DIR to a reporting-only literal
+    # path, which the proxy would then try to start as a fresh root.  Pin the already
+    # started legacy runtime's fabric behind the narrow test proxy so the DATA_DIR
+    # flag-reporting assertion below stays exactly as written.
+    assert_legacy_mode(appmod)
+    monkeypatch.setattr(appmod, "fabric", LegacyRuntimeProxyForTest(appmod.fabric.runtime().cognition_fabric))
 
     monkeypatch.setattr(appmod._spine_module, "_THINKING_ADVISORY_ENABLE", True)
     monkeypatch.setattr(appmod._thinking_controller_module, "_COGNITION_CORE_SHAPING_V1_ENABLE", True)

@@ -22,12 +22,23 @@ os.environ.setdefault("TORMENT_EMBED_PROVIDER", "hash")
 
 from fastapi.testclient import TestClient
 
+from conftest import assert_legacy_mode, ensure_legacy_run_root
+
+# I11: the application binds DATA_DIR at import time; an existing legacy owner
+# must be present on the (disposable) run root before that binding is used.
+ensure_legacy_run_root()
+
 from torment_service.app import app, fabric
 from torment_service.incident_log import IncidentLog, get_incident_log
 from torment_service import mcp_server as _mcp_server_prime
 incident_mod = sys.modules["torment_service.incident_log"]
 
 logger = logging.getLogger(__name__)
+
+
+def setUpModule():
+    import torment_service.app as appmod
+    assert_legacy_mode(appmod)
 
 
 # ---------------------------------------------------------------------------

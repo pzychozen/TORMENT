@@ -5,6 +5,8 @@ import gc
 import os
 import tempfile
 import unittest
+
+from conftest import LegacyRuntimeProxyForTest
 from unittest.mock import patch
 
 
@@ -36,7 +38,11 @@ class TestBlockBReferenceRetrieveIntegration(unittest.TestCase):
 
         self.appmod = appmod
         original_fabric = appmod.fabric
-        appmod.fabric = self.fabric
+        # I11 (R1): app.fabric is a public-runtime surface (runtime()/close()).  These
+        # are handler-level tests over a directly constructed legacy TormentFabric, so
+        # inject it behind the narrow LEGACY proxy; this demonstrates nothing about
+        # startup or selector validation.
+        appmod.fabric = LegacyRuntimeProxyForTest(self.fabric)
         self.addCleanup(setattr, appmod, "fabric", original_fabric)
 
     def _prepare_agent(self, workspace_id: str = "ws_a", agent_id: str = "atlas") -> None:

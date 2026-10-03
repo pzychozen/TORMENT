@@ -1,8 +1,11 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from conftest import existing_legacy_root
 
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -24,9 +27,11 @@ def test_golden_emergent_replay(replay_name, tmp_path, monkeypatch):
     Replays a previously recorded run and asserts key emergent metrics are within sane bounds.
     This protects against 'the system silently stopped learning' regressions.
     """
-    data_dir = tmp_path / "data"
+    # I11 (R1): sim.run_sim binds TORMENT_DATA_DIR to --data-dir and starts the public
+    # runtime; a fresh root is refused (fresh-root-requires-native-genesis), so seed the
+    # guarded existing-legacy owner.  The seed workspace is unrelated to the sim's "ws".
+    data_dir = existing_legacy_root(tmp_path / "data")
     out_dir = tmp_path / "out"
-    data_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     replay_path = GOLDEN_DIR / replay_name
@@ -35,7 +40,7 @@ def test_golden_emergent_replay(replay_name, tmp_path, monkeypatch):
     exp = EXPECTED[replay_name]
 
     cmd = [
-        "python", "-m", "sim.run_sim",
+        sys.executable, "-B", "-m", "sim.run_sim",  # same interpreter as the test process; no bytecode
         "--workspace", "ws",
         "--agents", str(exp["agents"]),
         "--seed", "0",

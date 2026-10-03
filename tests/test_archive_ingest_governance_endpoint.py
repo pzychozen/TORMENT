@@ -29,6 +29,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from conftest import assert_legacy_mode, bound_legacy_app, existing_legacy_root  # noqa: E402
+
 
 @pytest.fixture()
 def client(tmp_path):
@@ -39,22 +41,13 @@ def client(tmp_path):
     retrieval/exclusion behaves identically to that proven harness —
     torment_service.app reads TORMENT_DATA_DIR at module-import time.
     """
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    original_env = os.environ.get("TORMENT_DATA_DIR")
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-
-    import torment_service.app as appmod
-    appmod = importlib.reload(appmod)
-    try:
-        yield TestClient(appmod.app)
-    finally:
-        if original_env is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = original_env
-        importlib.reload(appmod)
+    # I11: the root must already hold an existing legacy owner; bound_legacy_app
+    # binds the env before import, cleans up on setup failure, and never rebinds
+    # the module to the repository default (tests/conftest.py).
+    data_dir = existing_legacy_root(tmp_path / "data")
+    with bound_legacy_app(data_dir) as bound:
+        assert_legacy_mode(bound.app)
+        yield bound.client
 
 
 def _unit_vec(dim=384, seed=0):

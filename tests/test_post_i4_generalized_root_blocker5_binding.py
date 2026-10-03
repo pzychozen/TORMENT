@@ -193,11 +193,17 @@ def test_pure_genesis_routing_retains_existing_root_plan_digest_contract() -> No
     assert root_runtime_scope_plan_digest(plans, replace(lane, model="different")) != runtime_plan_digest(fresh_plans)
 
 
+# R5 (I11): the valid disposable legacy owner must name itself (identity-only
+# payload); "{}" is invalid owner evidence and denies LEGACY_PUBLIC authority.
+# The same bytes are restored after the manifest-drift arm below.
+_WS_ONE_VALID_OWNER_META = b'{"workspace_id": "ws-one"}'
+
+
 def _root_fixture(tmp_path: Path):
     root = tmp_path / "synthetic-root"
     workspace = root / "workspaces" / "ws-one"
     workspace.mkdir(parents=True)
-    (workspace / "workspace_meta.json").write_bytes(b"{}")
+    (workspace / "workspace_meta.json").write_bytes(_WS_ONE_VALID_OWNER_META)
     core_path = root / "substrate" / "cores" / "root.db"
     core_path.parent.mkdir(parents=True)
     qualified = open_temporary_test_connection(core_path)
@@ -555,7 +561,7 @@ def test_synthetic_root_bridge_requires_post_p6_receipt_then_recovers_idempotent
     manifest_path.write_bytes(b"manifest-drift")
     with pytest.raises(OfflineCutoverRefused):
         controller.activate_root_core(request, normalization)
-    manifest_path.write_bytes(b"{}")
+    manifest_path.write_bytes(_WS_ONE_VALID_OWNER_META)  # restore the exact frozen bytes
     active = controller.activate_root_core(request, normalization)
     assert active.witness.deployment_state.value == "NATIVE_ACTIVE"
     assert controller.activate_root_core(request, normalization) == active

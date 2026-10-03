@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import assert_legacy_mode, bound_legacy_app, existing_legacy_root
 from torment_service.reflection_trace import ReflectionTrace, build_reflection_trace
 from torment_service.thinking_controller import ThinkingController
 from torment_service.thinking_models import ThinkingResult
@@ -402,20 +403,11 @@ class _SpyFabric:
 def appmod(tmp_path):
     """Isolated app module bound to a temp data dir (mirrors the Gate A /
     smoke-API fixture). Manual env save/restore + reload-in-finally."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    original_env = os.environ.get("TORMENT_DATA_DIR")
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-    import torment_service.app as appmod
-    appmod = importlib.reload(appmod)
-    try:
-        yield appmod
-    finally:
-        if original_env is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = original_env
-        importlib.reload(appmod)
+    # I11: existing legacy owner on the disposable root (tests/conftest.py).
+    data_dir = existing_legacy_root(tmp_path / "data")
+    with bound_legacy_app(data_dir) as bound:
+        assert_legacy_mode(bound.app)
+        yield bound.app
 
 
 class TestAgentQueryNonReentry:

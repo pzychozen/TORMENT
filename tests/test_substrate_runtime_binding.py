@@ -11,6 +11,7 @@ import sys
 import numpy as np
 import pytest
 
+from conftest import existing_legacy_root
 from torment_service import fabric as fabric_module
 from torment_service.fabric import TormentFabric
 from torment_service.memory_graph import MemoryGraph
@@ -293,7 +294,10 @@ def test_default_and_attached_fabric_remain_legacy_only_and_never_touch_native(t
 
 
 def test_app_startup_ignores_native_selector_names_and_creates_no_core(tmp_path: Path):
-    data_dir = tmp_path / "app-data"
+    # I11 (R1): the subject is legacy startup ignoring native selector NAMES; a fresh
+    # root is refused before that question is reached, so use a guarded
+    # existing-legacy root.  The child asserts legacy mode explicitly.
+    data_dir = existing_legacy_root(tmp_path / "app-data")
     environment = os.environ.copy()
     environment.update({
         "TORMENT_DATA_DIR": str(data_dir),
@@ -307,12 +311,14 @@ def test_app_startup_ignores_native_selector_names_and_creates_no_core(tmp_path:
 import os
 from pathlib import Path
 from torment_service import app
+from torment_service.public_runtime import PublicRuntimeMode
 root = Path(os.environ['TORMENT_DATA_DIR'])
+assert app.fabric.runtime().mode is PublicRuntimeMode.LEGACY
 assert app.fabric.native_memory_binding is None
 assert not list(root.rglob('*.db'))
 """
     completed = subprocess.run(
-        [sys.executable, "-c", code], cwd=str(Path(__file__).resolve().parents[1]),
+        [sys.executable, "-B", "-c", code], cwd=str(Path(__file__).resolve().parents[1]),
         env=environment, capture_output=True, text=True, timeout=30,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr

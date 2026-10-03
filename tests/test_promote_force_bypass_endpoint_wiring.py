@@ -42,6 +42,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import assert_legacy_mode, bound_legacy_app, existing_legacy_root
+
 
 # ---------------------------------------------------------------------------
 # Isolated app fixture (mirrors tests/test_smoke_api.py: manual env
@@ -52,22 +54,11 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(tmp_path):
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    original_env = os.environ.get("TORMENT_DATA_DIR")
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-
-    import torment_service.app as appmod
-    appmod = importlib.reload(appmod)
-    try:
-        yield TestClient(appmod.app)
-    finally:
-        if original_env is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = original_env
-        importlib.reload(appmod)
+    # I11: existing legacy owner on the disposable root; see tests/conftest.py.
+    data_dir = existing_legacy_root(tmp_path / "data")
+    with bound_legacy_app(data_dir) as bound:
+        assert_legacy_mode(bound.app)
+        yield bound.client
 
 
 _DOC_ID = "doc_bland"

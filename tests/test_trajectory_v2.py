@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from conftest import assert_legacy_mode, ensure_legacy_run_root
 from torment_service.kernel.trajectory_v2 import (
     CHUNK_HEADER,
     DYNAMIC_RECORD,
@@ -370,7 +371,13 @@ class TestTrajectoryV2CacheAndSurfaces:
             assert idx.index_trajectory(25, 8, (2, 0, 0), epoch=1, frame_seq=1)
             assert idx.index_trajectory(25, 7, (3, 0, 0), epoch=1, frame_seq=2)
             assert idx.index_trajectory(25, 8, (4, 0, 0), epoch=1, frame_seq=2)
+            # I11 (R1): app.fabric is a lazy proxy; monkeypatch's getattr probe starts the
+            # public runtime on the process-default root.  Seed the run-wide legacy owner
+            # (never the repository default) and assert the mode once; the handler
+            # assertions below are unchanged.
+            ensure_legacy_run_root()
             from torment_service import app as appmod
+            assert_legacy_mode(appmod)
             monkeypatch.setattr(appmod.fabric, "_get_sqlite_index", lambda *_args: idx)
             legacy = appmod.index_trajectory_range("ws", "agent", 25, 25, mode="legacy")
             entity_mode = appmod.index_trajectory_range("ws", "agent", 25, 25, mode="entity", eid=7, limit=10)

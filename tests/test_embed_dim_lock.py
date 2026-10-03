@@ -1,6 +1,15 @@
 from fastapi.testclient import TestClient
 
+from conftest import assert_legacy_mode, ensure_legacy_run_root
+
+ensure_legacy_run_root()  # I11: existing legacy owner on the run root before the import-time binding
+
 from torment_service.app import app
+
+
+def setup_module():
+    import torment_service.app as appmod
+    assert_legacy_mode(appmod)
 
 
 def test_workspace_embedding_dim_lock_rejects_mismatch() -> None:

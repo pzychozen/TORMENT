@@ -379,16 +379,23 @@ class TestCognitionRunGenericErrorStatus(unittest.TestCase):
         import os
         import tempfile
         from fastapi.testclient import TestClient
+        from conftest import _is_repo_default, assert_legacy_mode, existing_legacy_root, safe_run_data_root
 
-        d = tempfile.mkdtemp(prefix="torment_cog_err_")
+        safe_run_data_root()  # refuse before touching anything (run guard must be in force)
+        # I11: an EMPTY root is refused (fresh-root-requires-native-genesis);
+        # seed the disposable root as an existing legacy owner before binding.
+        d = str(existing_legacy_root(tempfile.mkdtemp(prefix="torment_cog_err_")))
         prev = {k: os.environ.get(k) for k in ("TORMENT_DATA_DIR", "TORMENT_AUTH_ENABLE", "TORMENT_EMBED_PROVIDER")}
         os.environ["TORMENT_DATA_DIR"] = d
         os.environ["TORMENT_AUTH_ENABLE"] = "0"
         os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
+        appmod = None
         try:
+            # env is bound above, BEFORE the reload that reads it
             import torment_service.app as appmod
             appmod = importlib.reload(appmod)
             client = TestClient(appmod.app)
+            assert_legacy_mode(appmod)  # the real public factory on the seeded root
             client.post("/workspace/create", json={"workspace_id": "wsE"})
             client.post("/agent/create", json={"workspace_id": "wsE", "agent_id": "agE"})
 
@@ -406,15 +413,19 @@ class TestCognitionRunGenericErrorStatus(unittest.TestCase):
             self.assertEqual(resp.json().get("detail"), "Cognition pipeline failed")
             self.assertNotIn("secret", resp.text)
         finally:
-            for k, v in prev.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
-            import shutil
-            shutil.rmtree(d, ignore_errors=True)
-            import torment_service.app as appmod
-            importlib.reload(appmod)
+            try:
+                from torment_service.public_runtime import reset_public_runtime_for_test
+                reset_public_runtime_for_test(d)  # only this root's cache entry; before rmtree
+            finally:
+                for k, v in prev.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+                import shutil
+                shutil.rmtree(d, ignore_errors=True)
+                if appmod is not None and not _is_repo_default(os.environ.get("TORMENT_DATA_DIR")):
+                    importlib.reload(appmod)  # rebind to the restored non-default root, never the repo default
 
 
 if __name__ == "__main__":

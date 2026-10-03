@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import assert_legacy_mode, bound_legacy_app, existing_legacy_root
+
 from torment_service.fabric import TormentFabric
 from torment_service.ingest_orchestration import LegacyFabricIngestStorageAdapter
 from torment_service.public_mutation_identity import (
@@ -160,39 +162,31 @@ def test_canonical_fingerprint_covers_semantic_request_not_trace_fields():
     assert first != changed
 
 
-def test_rest_header_is_optional_in_legacy_mode_and_invalid_key_fails_before_spine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    previous = os.environ.get("TORMENT_DATA_DIR")
-    monkeypatch.setenv("TORMENT_DATA_DIR", str(tmp_path))
-    import torment_service.app as appmod
-    appmod = importlib.reload(appmod)
-    try:
-        with TestClient(appmod.app) as client:
-            assert client.post("/workspace/create", json={"workspace_id": "ws"}).status_code == 200
-            assert client.post("/agent/create", json={"workspace_id": "ws", "agent_id": "aria"}).status_code == 200
-            body = {
-                "workspace_id": "ws", "agent_id": "aria", "text": "legacy key optional",
-                "step": 1, "supplied_embedding": _embedding(),
-            }
-            assert client.post("/agent/ingest", json=body).status_code == 200
-            assert client.post("/agent/ingest", json=body, headers={"Idempotency-Key": "rest-key-1"}).status_code == 200
-            response = client.post("/agent/ingest", json=body, headers={"Idempotency-Key": "\x7f"})
-            assert response.status_code == 400
-            # The rejection happens before the governed ingest dispatch.
-            graph = appmod.fabric.private_graphs[appmod.fabric._agent_key("ws", "aria")]
-            assert len(graph.entities) == 1
+def test_rest_header_is_optional_in_legacy_mode_and_invalid_key_fails_before_spine(tmp_path: Path):
+    # R1: the subject is explicitly legacy mode; use the guarded existing-legacy root
+    # and the exception-safe bound application (env before import, own-root close).
+    with bound_legacy_app(existing_legacy_root(tmp_path / "data")) as bound:
+        appmod, client = bound.app, bound.client
+        assert_legacy_mode(appmod)
+        assert client.post("/workspace/create", json={"workspace_id": "ws"}).status_code == 200
+        assert client.post("/agent/create", json={"workspace_id": "ws", "agent_id": "aria"}).status_code == 200
+        body = {
+            "workspace_id": "ws", "agent_id": "aria", "text": "legacy key optional",
+            "step": 1, "supplied_embedding": _embedding(),
+        }
+        assert client.post("/agent/ingest", json=body).status_code == 200
+        assert client.post("/agent/ingest", json=body, headers={"Idempotency-Key": "rest-key-1"}).status_code == 200
+        response = client.post("/agent/ingest", json=body, headers={"Idempotency-Key": "\x7f"})
+        assert response.status_code == 400
+        # The rejection happens before the governed ingest dispatch.
+        graph = appmod.fabric.private_graphs[appmod.fabric._agent_key("ws", "aria")]
+        assert len(graph.entities) == 1
 
-            spine_response = client.post("/spine/submit_task", json={
-                "workspace_id": "ws", "agent_id": "aria", "operation": "ingest",
-                "payload": body, "idempotency_key": "\x7f",
-            })
-            assert spine_response.status_code == 400
-    finally:
-        appmod.fabric.close()
-        if previous is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = previous
-        importlib.reload(appmod)
+        spine_response = client.post("/spine/submit_task", json={
+            "workspace_id": "ws", "agent_id": "aria", "operation": "ingest",
+            "payload": body, "idempotency_key": "\x7f",
+        })
+        assert spine_response.status_code == 400
 
 
 def test_mcp_invalid_key_is_rejected_without_reusing_task_identity(

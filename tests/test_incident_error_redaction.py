@@ -8,10 +8,16 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-import torment_service.incident_log as incident_module
-import torment_service.mcp_server as mcp_server
-import torment_service.spine as spine_module
-from torment_service.app import app, fabric
+from conftest import assert_legacy_mode, ensure_legacy_run_root
+
+# I11 (R1): this module binds the application at import time on the process-default
+# root; that root must already hold an existing legacy owner for startup to succeed.
+ensure_legacy_run_root()
+
+import torment_service.incident_log as incident_module  # noqa: E402
+import torment_service.mcp_server as mcp_server  # noqa: E402
+import torment_service.spine as spine_module  # noqa: E402
+from torment_service.app import app, fabric  # noqa: E402
 from torment_service.incident_log import get_incident_log, log_spine_decision
 from torment_service.request_context import RequestContext
 from torment_service.spine import SpineRequest, submit_task
@@ -52,6 +58,11 @@ _EXPECTED_INCIDENT_KEYS = {
     "operation_ok",
 }
 
+
+
+def setup_module():
+    import torment_service.app as appmod
+    assert_legacy_mode(appmod)
 
 @pytest.fixture
 def configured_incident_log(monkeypatch: pytest.MonkeyPatch, tmp_path):

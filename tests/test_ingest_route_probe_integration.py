@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import LegacyRuntimeProxyForTest
+
 
 def _close_fabric_resources(fabric):
     for graph in list(getattr(fabric, "private_graphs", {}).values()):
@@ -66,7 +68,9 @@ def test_positive_aligned_drift_route_probe_ingest_and_persistence():
         original_fabric = appmod.fabric
         test_fabric = TormentFabric(data_dir=str(data_dir))
         appmod.DATA_DIR = str(data_dir)
-        appmod.fabric = test_fabric
+        # I11 (R1): inject the directly constructed legacy fabric behind the narrow
+        # LEGACY proxy (runtime()/close()); not a startup/selector demonstration.
+        appmod.fabric = LegacyRuntimeProxyForTest(test_fabric)
         fresh = None
         try:
             with TestClient(appmod.app) as client:

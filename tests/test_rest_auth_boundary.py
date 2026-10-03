@@ -12,6 +12,8 @@ import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from conftest import _is_repo_default, assert_legacy_mode, existing_legacy_root, safe_run_data_root
+
 
 API_KEY = "sk-rest-boundary-test"
 LOW_TRUST_API_KEY = "sk-rest-boundary-low"
@@ -39,8 +41,10 @@ PATH_VALUES = {
 
 
 def _client_with_env(tmp_path, *, auth_enabled: bool) -> Iterator[tuple[TestClient, object]]:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
+    safe_run_data_root()  # refuse before touching anything (run guard must be in force)
+    # I11: an EMPTY root is refused (fresh-root-requires-native-genesis); seed
+    # the disposable root as an existing legacy owner before the app binds to it.
+    data_dir = existing_legacy_root(tmp_path / "data")
 
     env_keys = [
         "TORMENT_DATA_DIR",
@@ -65,23 +69,31 @@ def _client_with_env(tmp_path, *, auth_enabled: bool) -> Iterator[tuple[TestClie
     os.environ["TORMENT_ARCHIVIST_WRITEBACK"] = "0"
     os.environ["TORMENT_EMBED_PROVIDER"] = "hash"
 
-    import torment_service.auth as authmod
-    import torment_service.app as appmod
-
-    authmod = importlib.reload(authmod)
-    appmod = importlib.reload(appmod)
-    client = TestClient(appmod.app)
+    authmod = appmod = None
     try:
-        yield client, appmod
+        # env is bound above, BEFORE the import/reload that reads it
+        import torment_service.auth as authmod
+        import torment_service.app as appmod
+
+        authmod = importlib.reload(authmod)
+        appmod = importlib.reload(appmod)
+        with TestClient(appmod.app) as client:  # lifespan: startup-owned runtime construction
+            assert_legacy_mode(appmod)
+            yield client, appmod
     finally:
-        client.close()
-        for key, value in original_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        importlib.reload(authmod)
-        importlib.reload(appmod)
+        try:
+            from torment_service.public_runtime import reset_public_runtime_for_test
+            reset_public_runtime_for_test(data_dir)  # only this root's cache entry
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if authmod is not None:
+                importlib.reload(authmod)
+            if appmod is not None and not _is_repo_default(os.environ.get("TORMENT_DATA_DIR")):
+                importlib.reload(appmod)  # rebind to the restored non-default root, never the repo default
 
 
 @pytest.fixture()

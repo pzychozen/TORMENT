@@ -52,6 +52,8 @@ from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
+
+from conftest import assert_legacy_mode, bound_legacy_app, existing_legacy_root
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -73,22 +75,12 @@ def appmod(tmp_path):
     `appmod` (rather than a `TestClient`) so tests can `patch.object`
     on `appmod.fabric.query` before constructing the `TestClient`.
     """
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    original_env = os.environ.get("TORMENT_DATA_DIR")
-    os.environ["TORMENT_DATA_DIR"] = str(data_dir)
-
-    import torment_service.app as _appmod
-    _appmod = importlib.reload(_appmod)
-    try:
-        yield _appmod
-    finally:
-        if original_env is None:
-            os.environ.pop("TORMENT_DATA_DIR", None)
-        else:
-            os.environ["TORMENT_DATA_DIR"] = original_env
-        importlib.reload(_appmod)
+    # I11: existing legacy owner on the disposable root; bound_legacy_app owns the
+    # env binding, setup-failure cleanup and the safe rebind (tests/conftest.py).
+    data_dir = existing_legacy_root(tmp_path / "data")
+    with bound_legacy_app(data_dir) as bound:
+        assert_legacy_mode(bound.app)
+        yield bound.app
 
 
 # ---------------------------------------------------------------------------

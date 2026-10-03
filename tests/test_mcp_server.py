@@ -32,6 +32,9 @@ from torment_service.spine import (
 )
 from torment_service.request_context import TRUST_INGEST
 from torment_service.fabric import TormentFabric
+from torment_service.public_runtime import PublicRuntimeMode
+
+from conftest import existing_legacy_root
 
 mcp_mod = sys.modules["torment_service.mcp_server"]
 
@@ -253,7 +256,13 @@ class TestMCPNativeSelectionPreflight(unittest.TestCase):
 
     def test_lazy_mcp_fabric_ignores_native_selector_names(self):
         """No current MCP startup path can select or create a native core."""
-        with tempfile.TemporaryDirectory() as data_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # I11 (R1): the subject is MCP's retained legacy-only construction posture
+            # under native selector NAMES.  A genuinely fresh root is now refused before
+            # construction (fresh-root-requires-native-genesis; that refusal arm is a
+            # different contract), so the posture is exercised on a guarded
+            # existing-legacy root.  Assertions below are unchanged.
+            data_dir = str(existing_legacy_root(Path(temp_dir) / "data"))
             prior_fabric = mcp_mod._fabric
             created = None
             try:
@@ -267,6 +276,7 @@ class TestMCPNativeSelectionPreflight(unittest.TestCase):
                     "TORMENT_CHARACTER_ENABLE": "0",
                 }, clear=False):
                     created = mcp_mod._get_fabric()
+                    self.assertIs(created.mode, PublicRuntimeMode.LEGACY)
                     self.assertIsNone(created.native_memory_binding)
                     self.assertIsNone(created.native_memory_binding_readiness)
                     self.assertFalse(list(Path(data_dir).rglob("*.db")))
