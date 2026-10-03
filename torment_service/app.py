@@ -2943,7 +2943,23 @@ def cognition_run(req: CognitionRunReq, request: Request) -> Dict[str, Any]:
 
     def _private_lane(ws_id, ag_id, query_text, top_k):
         ak = fabric._agent_key(ws_id, ag_id)
-        return fabric._query_private_lane(ak, query_text, ag_id, top_k=top_k)
+        # Current helper shape (66b5e319): the lane reads through the same
+        # qualified legacy read model fabric.query() builds.
+        _ws = fabric.get_workspace(ws_id)
+        read_model = fabric._legacy_query_read_model(
+            _ws,
+            workspace_id=ws_id,
+            agent_id=ag_id,
+            preferred_private_domain=None,
+        )
+        return fabric._query_private_lane(
+            ak,
+            ws_id,
+            query_text,
+            ag_id,
+            top_k=top_k,
+            read_model=read_model,
+        )
 
     def _shared_lane(ws_id, ag_id, query_text, top_k, domain_id):
         _ws = fabric.get_workspace(ws_id)
@@ -2953,7 +2969,22 @@ def cognition_run(req: CognitionRunReq, request: Request) -> Dict[str, Any]:
         if domain_id:
             domains = [domain_id] + [d for d in domains if d != domain_id]
             domains = domains[:2]
-        return fabric._query_shared_lane(_ws, query_text, top_k=top_k, domains=domains)
+        # Current helper shape (66b5e319); returns (hits, bridge_peek_domains),
+        # which LaneQueryProvider already supports.
+        read_model = fabric._legacy_query_read_model(
+            _ws,
+            workspace_id=ws_id,
+            agent_id=ag_id,
+            preferred_private_domain=None,
+        )
+        return fabric._query_shared_lane(
+            _ws,
+            ws_id,
+            query_text,
+            top_k=top_k,
+            domains=domains,
+            read_model=read_model,
+        )
 
     def _deep_lane(ws_id, ag_id, query_text, top_k):
         ak = fabric._agent_key(ws_id, ag_id)
