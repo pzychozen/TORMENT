@@ -109,6 +109,12 @@ If you choose to expose TORMENT on a public or untrusted network, you are respon
 - TLS / transport protection
 - host-level isolation and monitoring
 
+### Restricted local operation and configuration visibility
+
+Authentication-disabled operation is supported only for a trusted, single-operator local profile using the shipped loopback launchers, without exposing, tunneling or forwarding the listener. Loopback alone does not protect against untrusted local software. Remote or lower-trust multi-client access must use configured authentication and appropriate trust assignments before exposure. This restriction is an operator responsibility, not a runtime guarantee against arbitrary launch commands or proxies; authentication alone does not certify a remote deployment as secure.
+
+For authenticated callers below `TRUST_OPERATOR`, `/debug/metrics` replaces the effective values of `TORMENT_DATA_DIR`, `TORMENT_SERVER_LAUNCHER_PATH` and `TORMENT_TEST_CONDITION` with the literal `<redacted>`. `/config` applies the same policy to `effective.TORMENT_DATA_DIR.value`. Ordinary allowed metrics/configuration fields remain available. Authenticated operators and the accepted auth-disabled local profile retain full diagnostic values. The pure non-HTTP builders remain unchanged. Native `/config` remains admitted; native `/debug/metrics` remains refused, with authentication refusal still taking precedence when credentials are absent or invalid.
+
 ## Disclosure
 
 Please allow reasonable time for validation and mitigation before public disclosure.

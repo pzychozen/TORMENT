@@ -2,6 +2,7 @@ import asyncio
 import sys
 
 import pytest
+from starlette.requests import Request
 
 from conftest import LegacyRuntimeProxyForTest, assert_legacy_mode, ensure_legacy_run_root
 
@@ -55,7 +56,8 @@ def test_debug_metrics_exposes_loaded_companion_runtime_flags(monkeypatch):
     monkeypatch.setattr(appmod, "TEST_CONDITION", "runtime_test")
     monkeypatch.setattr(appmod, "SERVER_LAUNCHER_PATH", r"C:\tmp\runtime_test_server.cmd")
 
-    data = asyncio.run(appmod.debug_metrics(workspace_id="missing"))
+    request = Request({"type": "http", "method": "GET", "path": "/debug/metrics", "headers": []})
+    data = asyncio.run(appmod.debug_metrics(request, workspace_id="missing"))
     flags = data["companion_runtime_flags"]
     for name in appmod.CANONICAL_COMPANION_RUNTIME_FLAGS:
         assert name in flags

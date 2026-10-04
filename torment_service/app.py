@@ -24,7 +24,7 @@ from .auth import (
     AUTH_ENABLED,
     get_key_store,
 )
-from .request_context import InsufficientTrustError
+from .request_context import InsufficientTrustError, TRUST_OPERATOR
 from .public_mutation_identity import PublicMutationKeyError, normalize_public_mutation_key
 from .public_runtime import (
     PublicRuntimeConfiguration,
@@ -699,18 +699,26 @@ def profiles() -> Dict[str, Any]:
 
 
 @app.get("/config")
-def config() -> Dict[str, Any]:
+def config(request: Request) -> Dict[str, Any]:
     """Return a UI-friendly view of effective configuration.
 
     Read-only. Helps users/UI understand what settings are active, and where
     each value came from (default / profile_default / env_override).
     """
-    return build_config_view(
+    ctx = get_request_context(request)
+    result = build_config_view(
         active_profile=ACTIVE_PROFILE,
         profile_applied=PROFILE_APPLIED,
         profile_known=PROFILE_KNOWN,
         data_dir=DATA_DIR,
     )
+    if ctx.trust_tier < TRUST_OPERATOR:
+        # Project only this HTTP value; retain the raw builder's dictionaries.
+        result = {**result, "effective": {
+            **result["effective"],
+            "TORMENT_DATA_DIR": {**result["effective"]["TORMENT_DATA_DIR"], "value": "<redacted>"},
+        }}
+    return result
 
 @app.get("/workspaces/meta")
 def workspaces_meta() -> Dict[str, Any]:
@@ -3399,7 +3407,7 @@ def thinking_alignment_recent(last_n: int = 50) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @app.get("/debug/metrics")
-async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] = None):
+async def debug_metrics(request: Request, workspace_id: str = "default", agent_id: Optional[str] = None):
     """Unified observability endpoint — aggregates memory, coherence, compression,
     motif, and hive mind stats into a single response.
 
@@ -3423,7 +3431,15 @@ async def debug_metrics(workspace_id: str = "default", agent_id: Optional[str] =
         "character_enable": fabric._character_enable,
         "checkpoint_enable": fabric._checkpoint_enable,
     }
-    result["companion_runtime_flags"] = build_companion_runtime_flags()
+    ctx = get_request_context(request, workspace_id=workspace_id, agent_id=agent_id)
+    flags = build_companion_runtime_flags()
+    if ctx.trust_tier < TRUST_OPERATOR:
+        # Copy the named entries before either the normal or missing-workspace
+        # HTTP return; internal/operator consumers retain the full raw values.
+        flags = dict(flags)
+        for name in ("TORMENT_DATA_DIR", "TORMENT_SERVER_LAUNCHER_PATH", "TORMENT_TEST_CONDITION"):
+            flags[name] = {**flags[name], "effective_value": "<redacted>"}
+    result["companion_runtime_flags"] = flags
 
     # --- Workspace existence check ---
     ws = fabric.workspaces.get(workspace_id)
