@@ -38,9 +38,43 @@ strict unpacking contract. Neither formula nor either input contract was merged.
 The `observables` and `offline` package markers do not eagerly aggregate owners.
 The normal live-runtime import path does not load these new packages.
 
-Offline relocation is still incomplete. `diagnostics.py`, `physics_sampler.py`,
-`physics_sampler2.py` and `tangent_corridor_analysis.py` remain in this directory.
-Their P1 plotting and clustering imports stay local to the functions that use
-them. Executable analysis scripts such as `analyze_seed_trajectories.py` and
-`c.py` also remain here; inspect them as scripts, not by importing them. Seed,
-world and trajectory/persistence modules have not been reorganized by P4A.
+Offline experiments and plotting retain their existing function groupings in
+four implementation owners. They are separate from live recurrence and the
+P4A saved-history observable/RSB owners above.
+
+| Compatibility import | Implementation owner |
+| --- | --- |
+| `diagnostics.py` | `offline/experiments.py`: experiment drivers and their summary helpers |
+| `physics_sampler.py` | `offline/samplers.py`: physics sampling and distribution plots |
+| `physics_sampler2.py` | `offline/cp_analysis.py`: CP-conditioned analysis, chirality windows and time-series plots |
+| `tangent_corridor_analysis.py` | `offline/corridors.py`: tangent detection, clustering, plots and CP event splits |
+
+These four compatibility modules re-export the actual owner functions and their
+existing helper/model/NumPy names. Assigning an attribute on a compatibility
+module does not change the globals used by a moved function; patch the actual
+implementation owner when needed. Matplotlib and SciPy imports remain inside
+the functions that use them. Importing an owner does not require those libraries;
+calling its plotting or clustering functions still does.
+
+The two CSV scripts now live outside the kernel. From the repository root,
+execute them explicitly:
+
+```bat
+python scripts/kernel_offline/analyze_seed_trajectories.py
+python scripts/kernel_offline/scan_health_summary.py
+```
+
+The first reads `outputs_patch39_unified/lambda_*/seed_trajectories_seed*.csv`
+and writes `outputs_patch39_unified/trajectory_class_summary.csv`. The second,
+formerly `kernel/c.py`, reads `outputs/wide_scan_triocta_ultra.csv` and prints
+its health summary. All input/output paths remain relative to the process
+working directory. To use another data directory as the working directory,
+invoke the corresponding script by its absolute path.
+
+Their former kernel file/module paths were removed. These scripts are explicit
+execution tools, not supported import APIs: importing one still executes its
+payload, and existing missing-input/error behavior is unchanged.
+
+Seed/world, trajectory/persistence, `rsb_model.py`, CP rules and the live core
+were not reorganized by this relocation. Wider package scope remains for review;
+this map does not imply any further restructuring.

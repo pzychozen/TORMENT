@@ -1,0 +1,528 @@
+{
+  "predecessor": "967c129057ad6a5f3ea677a7cc01e5c6edfa2068",
+  "environment": {
+    "system": "Windows",
+    "machine": "AMD64",
+    "python": "3.11.15 | packaged by Anaconda, Inc. | (main, Mar 11 2026, 17:12:15) [MSC v.1942 64 bit (AMD64)]",
+    "packages": {
+      "numpy": "2.4.4",
+      "matplotlib": "3.10.9",
+      "scipy": "1.17.1",
+      "pandas": "3.0.3"
+    },
+    "numeric_libraries": {
+      "blas": {
+        "name": "scipy-openblas",
+        "version": "0.3.31.188.0",
+        "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=24"
+      },
+      "lapack": {
+        "name": "scipy-openblas",
+        "version": "0.3.31.188.0",
+        "openblas configuration": "OpenBLAS 0.3.31.188.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=24"
+      }
+    },
+    "simd": {
+      "baseline": [
+        "X86_V2"
+      ],
+      "found": [
+        "X86_V3"
+      ]
+    }
+  },
+  "modules": {
+    "diagnostics": {
+      "names": [
+        "np",
+        "estimate_chirality_timescale",
+        "ModelParams",
+        "ModelState",
+        "TriOctaPhaseLockModel",
+        "sample_physics_observables",
+        "summarize_cp_conditioned_observables",
+        "plot_flavor_time_series",
+        "plot_Jeff_vs_time",
+        "detect_chirality_selection_window",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "detect_tangent_corridors",
+        "cluster_delta_kz",
+        "run_once",
+        "run_ic_scan",
+        "strong_delta_sector_histogram",
+        "analyze_Jeff_coupling",
+        "run_corridor_spectroscopy_scan",
+        "run_long_time_stability_test",
+        "run_noise_robustness_test"
+      ],
+      "wildcard": [
+        "np",
+        "estimate_chirality_timescale",
+        "ModelParams",
+        "ModelState",
+        "TriOctaPhaseLockModel",
+        "sample_physics_observables",
+        "summarize_cp_conditioned_observables",
+        "plot_flavor_time_series",
+        "plot_Jeff_vs_time",
+        "detect_chirality_selection_window",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "detect_tangent_corridors",
+        "cluster_delta_kz",
+        "run_once",
+        "run_ic_scan",
+        "strong_delta_sector_histogram",
+        "analyze_Jeff_coupling",
+        "run_corridor_spectroscopy_scan",
+        "run_long_time_stability_test",
+        "run_noise_robustness_test"
+      ],
+      "functions": {
+        "run_once": {
+          "source_sha256": "850ea4db2953ef5c3de6dbc596d9612108bf71a2737ca077a1d42ba61ef4f147",
+          "ast_sha256": "2a21ac74646559cdaa02ec604f82601589969da79ab98ae9e82848b640596ed5",
+          "signature": "(params: torment_service.kernel.model_core.ModelParams)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "run_ic_scan": {
+          "source_sha256": "d97b00cf2abc26c8fa9ebce947c1bebc16d58e6c1d24be913ae41741082db5d3",
+          "ast_sha256": "a4154d725e8a67bfa709d5900e089e4d17a5c7690986ef00159f9b8d7f2af604",
+          "signature": "(params: torment_service.kernel.model_core.ModelParams, n_inits: int = 32, seed: int = 123, verbose: bool = True)",
+          "defaults": [
+            "tuple",
+            [
+              32,
+              123,
+              true
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "strong_delta_sector_histogram": {
+          "source_sha256": "312d24e1e0c187ceb598df8da2b9367da358299d5d0734f5a39af46bf44e0d47",
+          "ast_sha256": "aee62c59c6e127c6801e4760cf3fb62b6153036a5c50eaa4cb451d1b6c349a59",
+          "signature": "(history, big_steps_mask, cp_cfg=None)",
+          "defaults": [
+            "tuple",
+            [
+              null
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "analyze_Jeff_coupling": {
+          "source_sha256": "dab3a23cc2632d50d47247631cadad7fb342e18b51c00e5cfe1c3b4d1e6032df",
+          "ast_sha256": "e5bf55123a27f917a432743a3c938fad4d5f3f349c0e5ad1f73f666ef56fe25b",
+          "signature": "(history, obs, big_steps_mask)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "run_corridor_spectroscopy_scan": {
+          "source_sha256": "90f94b2fa1a76f3364c54de5d5f49f567fb9524870876d00ce9c8bcf28c0f3db",
+          "ast_sha256": "ab4eba1f00ce1a88f5376f7b4eb1e291cdfa846cf608676b93c97012d4658d42",
+          "signature": "(params: torment_service.kernel.model_core.ModelParams, n_inits: int = 32, seed: int = 321, frac_of_max: float = 0.5)",
+          "defaults": [
+            "tuple",
+            [
+              32,
+              321,
+              [
+                "float",
+                "0x1.0000000000000p-1"
+              ]
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "run_long_time_stability_test": {
+          "source_sha256": "3f4a1ee480d29d77ecab8794fded109fbd5eb0182ffd8a9c46c75008bd8acdbb",
+          "ast_sha256": "6f6e52f5194538877eb3bac5d23f4c14c105bdfd892a17c0b11126a974a6cac9",
+          "signature": "(params: torment_service.kernel.model_core.ModelParams, n_steps: int = 2000, dt: float = 0.05, seed: int = 999, frac_of_max: float = 0.5)",
+          "defaults": [
+            "tuple",
+            [
+              2000,
+              [
+                "float",
+                "0x1.999999999999ap-5"
+              ],
+              999,
+              [
+                "float",
+                "0x1.0000000000000p-1"
+              ]
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "run_noise_robustness_test": {
+          "source_sha256": "5168c848a10c67ee392b0ea583f55ef905277d077edfd9a7fc6499f1bfbc1ff7",
+          "ast_sha256": "f9085a06ac6100f643f7c898d094089472cd0ed1274636c0b2f7bf3b4a785b0f",
+          "signature": "(params, n_steps: int = 200, dt: float = 0.05, noise_sigma_k: float = 0.01, noise_sigma_z: float = 0.01, noise_sigma_J: float = 0.01, frac_of_max: float = 0.5, seed: int = 1234)",
+          "defaults": [
+            "tuple",
+            [
+              200,
+              [
+                "float",
+                "0x1.999999999999ap-5"
+              ],
+              [
+                "float",
+                "0x1.47ae147ae147bp-7"
+              ],
+              [
+                "float",
+                "0x1.47ae147ae147bp-7"
+              ],
+              [
+                "float",
+                "0x1.47ae147ae147bp-7"
+              ],
+              [
+                "float",
+                "0x1.0000000000000p-1"
+              ],
+              1234
+            ]
+          ],
+          "kwdefaults": null
+        }
+      }
+    },
+    "physics_sampler": {
+      "names": [
+        "np",
+        "compute_jeff_from_omega",
+        "compute_flavor_probabilities",
+        "compute_relative_phases",
+        "compute_cp_like_invariant",
+        "sample_physics_observables",
+        "summarize_observables",
+        "plot_phase_and_cp_distributions"
+      ],
+      "wildcard": [
+        "np",
+        "compute_jeff_from_omega",
+        "compute_flavor_probabilities",
+        "compute_relative_phases",
+        "compute_cp_like_invariant",
+        "sample_physics_observables",
+        "summarize_observables",
+        "plot_phase_and_cp_distributions"
+      ],
+      "functions": {
+        "compute_flavor_probabilities": {
+          "source_sha256": "0839d0e7c38cd8006362ba8884d55d09d6cae122f3e433e98a70fdfd22bd4465",
+          "ast_sha256": "458f447d26fd87649c45d4c30b799cd263591abd9430c43b27569747a34f4068",
+          "signature": "(Omega_history: numpy.ndarray)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "compute_relative_phases": {
+          "source_sha256": "73416b4ec8d3b81291810753502f5ea67ce44eddb6ef15a142b190019d5e9d7d",
+          "ast_sha256": "e1be3353858e3d07c8ad132bbdb625cb8fe3b1fa4b2da33efe0c043fe8a7df8b",
+          "signature": "(Omega_history: numpy.ndarray)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "compute_cp_like_invariant": {
+          "source_sha256": "e33f0e8ffd16b1d93297127c8d07074fa5213b9b90afc82435f8374c783a77a2",
+          "ast_sha256": "7fd9ac775cd28dd6cd41b2f2eb28e6f9f303c9b8e45fce857e5e825461643694",
+          "signature": "(Omega_history: numpy.ndarray)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "sample_physics_observables": {
+          "source_sha256": "7fcada812f95268d08c6ef717a6d293dcf7926ed3fddf2e7cfb735b9c2ea32f7",
+          "ast_sha256": "651ba66aa691842bfb007ab7ca50649ca049d02e3bc1c69a12d081a0dd681c4a",
+          "signature": "(history)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "summarize_observables": {
+          "source_sha256": "c8098c22cce8d00ffdea01ac5d23f6acfe2ecd7013b238508b5d5864983b5228",
+          "ast_sha256": "17d57e33bb14e1a06d5e81160a008c127aa15b73ff4b6a4d25ae7ddaecf30b73",
+          "signature": "(obs)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "plot_phase_and_cp_distributions": {
+          "source_sha256": "8f2fa6ac4522e53e95fc3091078b938e0757c3a76bdfa9723dfa37a087e59801",
+          "ast_sha256": "f1fd35a87f0462474c34e855a66ffb388d2b672fac721a70ad75b2b110ab80d0",
+          "signature": "(obs)",
+          "defaults": null,
+          "kwdefaults": null
+        }
+      }
+    },
+    "physics_sampler2": {
+      "names": [
+        "np",
+        "estimate_chirality_commit_time",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "cp_conditioned_masks",
+        "summarize_cp_conditioned_observables",
+        "detect_chirality_selection_window",
+        "plot_flavor_time_series",
+        "plot_Jeff_vs_time"
+      ],
+      "wildcard": [
+        "np",
+        "estimate_chirality_commit_time",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "cp_conditioned_masks",
+        "summarize_cp_conditioned_observables",
+        "detect_chirality_selection_window",
+        "plot_flavor_time_series",
+        "plot_Jeff_vs_time"
+      ],
+      "functions": {
+        "cp_conditioned_masks": {
+          "source_sha256": "2663906e025d4bc260b991726a6f773b293513d461ee2394b6874e312bdc9d11",
+          "ast_sha256": "bc3318c8ed807d90b167c0b5824f5f2dca3c53fd56f7fee329fad1498fed9295",
+          "signature": "(history)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "summarize_cp_conditioned_observables": {
+          "source_sha256": "b7a1832cb32d1198ec3f534ab6f9e4f74624a94c6ab15b83f5cffc6be8c2feb5",
+          "ast_sha256": "e8e5234a1e724c04d514928009306dc346aeb27eb6f5e4dc12663a0735b6d2f7",
+          "signature": "(history, obs)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "detect_chirality_selection_window": {
+          "source_sha256": "8710a10a52c10c214dc829136855df4cbb3f2b0bfa7ac904a3aa0692906b4b04",
+          "ast_sha256": "8a190163f081e15b355a01d90dc85621b86d88cf70f1b75576887085b7e0652f",
+          "signature": "(history, obs, frac_start=0.1, frac_end=0.2)",
+          "defaults": [
+            "tuple",
+            [
+              [
+                "float",
+                "0x1.999999999999ap-4"
+              ],
+              [
+                "float",
+                "0x1.999999999999ap-3"
+              ]
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "plot_flavor_time_series": {
+          "source_sha256": "d2741657ce269cec8c44199758b23e1254c302a28c435f628c9314a2822a3fa0",
+          "ast_sha256": "544bd4bb5f90f6d9b058a211c0e30406ab099e5b1d1fa071b6a12fd25744a59e",
+          "signature": "(history, obs)",
+          "defaults": null,
+          "kwdefaults": null
+        },
+        "plot_Jeff_vs_time": {
+          "source_sha256": "18522c4a7cfc44f749cf787d6d3c1ababcbbc88694dc2782dc65f120ce271a02",
+          "ast_sha256": "bd53591f805a340ffa7305e4c03d39ca4f4e3046e6853e1d81d2d6d6aa7e6681",
+          "signature": "(history, obs)",
+          "defaults": null,
+          "kwdefaults": null
+        }
+      }
+    },
+    "tangent_corridor_analysis": {
+      "names": [
+        "np",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "detect_tangent_corridors",
+        "cluster_delta_kz",
+        "cp_split_big_delta_events"
+      ],
+      "wildcard": [
+        "np",
+        "cp_mask_from_phi_indices",
+        "default_cp_config",
+        "detect_tangent_corridors",
+        "cluster_delta_kz",
+        "cp_split_big_delta_events"
+      ],
+      "functions": {
+        "detect_tangent_corridors": {
+          "source_sha256": "10a92f2b31e6ef8ba06b4487cf833963747e5f5590579ee53143f26499dcaab9",
+          "ast_sha256": "23deffc5c375c2919f049e802c0d1b68631750205008b1ba65cf07e8fef74427",
+          "signature": "(history, R=2.0)",
+          "defaults": [
+            "tuple",
+            [
+              [
+                "float",
+                "0x1.0000000000000p+1"
+              ]
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "cluster_delta_kz": {
+          "source_sha256": "341b5aadccfd183cffea6e2105bfa9421c3f17abe10cca7bb3baa6eb9834f72f",
+          "ast_sha256": "adb558c92982de6bd16655dc7e1f2361adca46d46b21cb70dc5324bb118e9c3e",
+          "signature": "(history, frac_of_max=0.5, n_clusters=3)",
+          "defaults": [
+            "tuple",
+            [
+              [
+                "float",
+                "0x1.0000000000000p-1"
+              ],
+              3
+            ]
+          ],
+          "kwdefaults": null
+        },
+        "cp_split_big_delta_events": {
+          "source_sha256": "a0f72f671411ac959b17b321f6ee8be9769c5f7317ad4a39bfa5e01bf7fcbef4",
+          "ast_sha256": "ea1e9a0d60ddaaccd0e61f244c8c86ce42556a3e43f6673e45309322274cd2ed",
+          "signature": "(history, big_steps_mask, mags, cp_cfg=None)",
+          "defaults": [
+            "tuple",
+            [
+              null
+            ]
+          ],
+          "kwdefaults": null
+        }
+      }
+    }
+  },
+  "script_sha256": {
+    "trajectories": "03e2c7bdc7fea484a1abf0c91ad968594df5983b21de0eb797f30c2d5e8ad8e4",
+    "health": "43f3619347f34612aa41daf7bf7ebb0382b780248b598c490f03df7ded30a3ae"
+  },
+  "drivers": {
+    "run_once": {
+      "return_sha256": "efbd845a2e8f3a7ad3194e1a6f0e594a1b54e19d2dce4212c4fc7b2dca5efa4c",
+      "rng_sha256": "4979e2486780146ac108a24337721a74752f5c191bad5f5020165227641209c1",
+      "show_calls": 4,
+      "png_sha256": [
+        "1e4ef5e2a3cb4c06599ae2c41a9a1399aa3522f10e542f96266a0476c4300ee2",
+        "4a62eb8d5117c2b70ea029bbe8a17519bd025a5b36cb0f029b037a7ab5e9d001",
+        "e644944ff54cc673c89aae11b7c9f022560c37a50d42c2ef5fe0f55a21e782c1",
+        "852b4b4045cfb383ee87a7068ee03415b7bbcf658f160cf59e0f8ad3481cbb7f",
+        "79486876a55599a2e0102cf4afb51ddfdeea6fe6eba2f5d081998f82bd41d5c2"
+      ],
+      "warnings": [],
+      "stdout": "=== CP-conditioned flavor means (⟨P1⟩,⟨P2⟩,⟨P3⟩) ===\nCP: 0.254, 0.260, 0.486\nnon-CP: 0.252, 0.262, 0.486\n\n=== CP-conditioned phase stats (mean, std) ===\nCP:\n  theta12: mean=0.009, std=0.064\n  theta23: mean=-0.014, std=0.091\n  theta31: mean=0.005, std=0.028\nnon-CP:\n  theta12: mean=0.040, std=0.288\n  theta23: mean=-0.041, std=0.285\n  theta31: mean=0.001, std=0.029\n\n=== CP-conditioned J_eff stats (mean, std, min, max) ===\nCP: mean=5.7856e-01, std=2.2098e-01, min=2.5605e-05, max=6.7292e-01\nnon-CP: mean=5.7710e-01, std=2.2292e-01, min=7.9329e-06, max=6.7292e-01\n=== Chirality selection window (J_eff) ===\nInitial |J| ≈ 2.3723e-03, plateau |J| ≈ 6.7292e-01\nt_10% ≈ 1.150, t_90% ≈ 1.700, Δt ≈ 0.550\nCommit time t_commit ≈ 1.700 (sign +)\nTangent corridor steps detected: 35 / 199 (17.59%)\n\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=  14, mean|Δ|=2.0574e-01, std=7.1876e-02, min=1.1131e-01, max=3.3872e-01\nCluster 1: steps=  15, mean|Δ|=1.9834e-01, std=7.4748e-02, min=9.8281e-02, max=3.3743e-01\nCluster 2: steps= 170, mean|Δ|=2.1878e-02, std=3.5921e-02, min=1.4523e-04, max=1.9463e-01\n\nDominant cluster: 0, threshold within cluster = 0.50 × local max = 1.6936e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 9 / 199 (4.5%)\n\nChirality/transition selection window: t ≈ 0.675 → 2.275 (Δt ≈ 1.600)\n"
+    },
+    "ic": {
+      "return_sha256": "ce27b58f92075d08721be6681b00ba83f28f32ecb96585bb6d0e38f7e0c44573",
+      "rng_sha256": "4979e2486780146ac108a24337721a74752f5c191bad5f5020165227641209c1",
+      "show_calls": 1,
+      "png_sha256": [
+        "cccb202fcf5d7a5d650f67e7b532bb3e1bf4bd62e630df142871bb2798d1cd96",
+        "20e99663d57f6604662344dcafb80da887a0c3832f6a313a5dc35b19f22c36b3"
+      ],
+      "warnings": [],
+      "stdout": "\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=  13, mean|Δ|=3.1096e-01, std=1.0158e-01, min=1.5736e-01, max=4.7173e-01\nCluster 1: steps=  14, mean|Δ|=3.0240e-01, std=1.0204e-01, min=1.4854e-01, max=4.6670e-01\nCluster 2: steps= 172, mean|Δ|=2.3620e-02, std=3.9120e-02, min=1.4523e-04, max=1.9265e-01\n\nDominant cluster: 0, threshold within cluster = 0.50 × local max = 2.3586e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 9 / 199 (4.5%)\n\nChirality/transition selection window: t ≈ 0.075 → 1.675 (Δt ≈ 1.600)\n\n=== Initial-condition robustness scan ===\nTotal runs: 1\n  J_sign > 0 : 1\n  J_sign < 0 : 0\n  J_sign = 0 : 0\n  Δt_J mean ≈ 0.500, std ≈ 0.000\n  strong Δ(κ,Z) steps: mean ≈ 9.00, std ≈ 0.00\n  max |Δ(κ,Z)| across runs ≈ 4.7173e-01\n"
+    },
+    "spectroscopy": {
+      "return_sha256": "16e868f83055a0067211628ae811d728e80aa906ff39baf9cd33dc3dc5e502a7",
+      "rng_sha256": "4979e2486780146ac108a24337721a74752f5c191bad5f5020165227641209c1",
+      "show_calls": 1,
+      "png_sha256": [
+        "7042856219d02267400b937d49b4d88ba6d535df29800c39a04ae91d7f615ff9",
+        "140a52557781bc0e419731c773bfeda0f5f5f6badb20770062652dc3c0ddcc88"
+      ],
+      "warnings": [],
+      "stdout": "\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=  12, mean|Δ|=3.3352e-01, std=1.0488e-01, min=1.7661e-01, max=4.9066e-01\nCluster 1: steps=  13, mean|Δ|=3.1689e-01, std=1.0889e-01, min=1.6671e-01, max=4.9562e-01\nCluster 2: steps= 174, mean|Δ|=2.4771e-02, std=4.0914e-02, min=1.4523e-04, max=1.9290e-01\n\nDominant cluster: 0, threshold within cluster = 0.50 × local max = 2.4533e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 9 / 199 (4.5%)\n\nChirality/transition selection window: t ≈ 0.075 → 1.675 (Δt ≈ 1.600)\n\n=== Corridor spectroscopy scan (many ICs) ===\nParameters: eps=0.05, g=0.2, k_vals=[1.         1.22089647 6.35310346]\nNumber of IC runs: 1\nMean strong Δ(κ,Z) steps per run: 9.00 ± 0.00\n\nTotal strong Δ events across all runs: 9\n  of which CP-tagged   : 6\n           non-CP-tagged: 3\n\nAll strong Δ events:\n  total events = 9, support sectors (nonzero bins) = 3\n    sector  2: count=  3, frac=0.333\n    sector  6: count=  3, frac=0.333\n    sector 10: count=  3, frac=0.333\n\nCP-tagged strong Δ:\n  total events = 6, support sectors (nonzero bins) = 2\n    sector  2: count=  3, frac=0.500\n    sector 10: count=  3, frac=0.500\n\nnon-CP strong Δ:\n  total events = 3, support sectors (nonzero bins) = 1\n    sector  6: count=  3, frac=1.000\n"
+    },
+    "long_short": {
+      "return_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "rng_sha256": "78bfd0500f403376ec66804dc6dcee1736a23583d10876b05ea3e9b8062dd240",
+      "show_calls": 0,
+      "png_sha256": [],
+      "warnings": [],
+      "stdout": "[WARN] Not enough steps for long-time test.\n"
+    },
+    "long_regular": {
+      "error": [
+        "builtins.IndexError",
+        "tuple index out of range"
+      ],
+      "rng_sha256": "14571cac5bbf9aea202495efd58abc51f8201c827c2f7016c6542057feb1ab7f",
+      "show_calls": 1,
+      "png_sha256": [
+        "ce2011841ad6f9a20722005ad09b993a07e5954817fbdda29197c778e380f534",
+        "90fb4e1c79dfec6566800192ae962594f607e2e3dc1f0dc06559e3be5924416f"
+      ],
+      "warnings": [],
+      "stdout": "\n===== Long-time stability test =====\nTotal steps = 48, dt = 0.05\nMean J_eff early window  ≈ -9.7100e-02, sign = -1\nMean J_eff late window   ≈ -4.3186e-01, sign = -1\n\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=  12, mean|Δ|=3.2784e-01, std=9.9142e-02, min=1.7661e-01, max=4.8194e-01\nCluster 1: steps=  23, mean|Δ|=6.0183e-02, std=6.2983e-02, min=1.1655e-02, max=1.9528e-01\nCluster 2: steps=  12, mean|Δ|=3.2808e-01, std=9.5154e-02, min=1.8710e-01, max=4.7441e-01\n\nDominant cluster: 2, threshold within cluster = 0.50 × local max = 2.3721e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 9 / 47 (19.1%)\n\nChirality/transition selection window: t ≈ 0.025 → 1.575 (Δt ≈ 1.550)\n"
+    },
+    "noise": {
+      "return_sha256": "891312548c919e3db0df154407a04beff693d21ed50c99d7a934af7e2e9cec96",
+      "rng_sha256": "3560ff007ea16cd2ac587b439ad57e5565c89616d0c1294bb884bdbf557334b8",
+      "show_calls": 2,
+      "png_sha256": [
+        "dd9ed253635306deeccce26553da6ebdbafe527927685b54413c4ccbfa65169b",
+        "7560f9f7353e77ca956b76e73042f3d9517dce5adf5a5251e8aed68dcb27d8a1",
+        "09009167d6c0c109bb6d51c34bde6d8b5fc0fedac2ecf7ae5bb4e11977a08071",
+        "17c5bd6ed8ea050fd20c98c9a7aed63ed62cf79c65f4a5529b04fd4aea763d8b"
+      ],
+      "warnings": [],
+      "stdout": "\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=  23, mean|Δ|=1.8547e-01, std=1.6332e-01, min=1.8490e-02, max=5.0290e-01\nCluster 1: steps=   4, mean|Δ|=3.3551e-01, std=4.2764e-02, min=2.8019e-01, max=3.9482e-01\nCluster 2: steps=   4, mean|Δ|=4.6127e-01, std=3.2176e-02, min=4.1826e-01, max=4.9275e-01\n\nDominant cluster: 2, threshold within cluster = 0.50 × local max = 2.4638e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 4 / 31 (12.9%)\n\nChirality/transition selection window: t ≈ 0.075 → 0.675 (Δt ≈ 0.600)\n\n=== Δ(κ, Z) k-means cluster diagnostics ===\nCluster 0: steps=   8, mean|Δ|=4.0230e-01, std=7.9875e-02, min=2.6768e-01, max=5.0866e-01\nCluster 1: steps=  15, mean|Δ|=8.2815e-02, std=7.4306e-02, min=4.0551e-04, max=2.1402e-01\nCluster 2: steps=   8, mean|Δ|=3.7282e-01, std=9.5468e-02, min=1.8845e-01, max=4.7695e-01\n\nDominant cluster: 0, threshold within cluster = 0.50 × local max = 2.5433e-01\nStrong Δ(κ, Z) steps (dominant cluster + threshold): 8 / 31 (25.8%)\n\nChirality/transition selection window: t ≈ 0.075 → 1.475 (Δt ≈ 1.400)\n\n===== Noise robustness test (measurement noise) =====\nParameters: eps=0.05, g=0.2, k_vals=[1.         1.22089647 6.35310346]\nNoise levels: σ_k=0.01, σ_Z=0.01, σ_J=0.01\nBaseline strong steps : 4 / 31\nNoisy strong steps    : 8 / 31\nMask agreement        : 87.1% of steps\nΔ-magnitude correlation (clean vs noisy): 0.995\n"
+    }
+  },
+  "scripts": {
+    "trajectories/success": {
+      "exit_code": 0,
+      "stdout": "[OK] wrote outputs_patch39_unified\\trajectory_class_summary.csv\n   lambda_phase channel traj_class  count  total  fraction\n0           0.2     vis     locked      2      3  0.666667\n1           0.2     vis  wandering      1      3  0.333333\n2           0.5    dark     locked      1      2  0.500000\n3           0.5    dark  wandering      1      2  0.500000\n\n=== Fraction table ===\ntraj_class              locked  wandering\nlambda_phase channel                     \n0.2          vis      0.666667   0.333333\n0.5          dark     0.500000   0.500000\n",
+      "exception": null,
+      "generated_csv_hex": {
+        "outputs_patch39_unified/trajectory_class_summary.csv": "6c616d6264615f70686173652c6368616e6e656c2c7472616a5f636c6173732c636f756e742c746f74616c2c6672616374696f6e0d0a302e322c7669732c6c6f636b65642c322c332c302e363636363636363636363636363636360d0a302e322c7669732c77616e646572696e672c312c332c302e333333333333333333333333333333330d0a302e352c6461726b2c6c6f636b65642c312c322c302e350d0a302e352c6461726b2c77616e646572696e672c312c322c302e350d0a"
+      }
+    },
+    "trajectories/missing": {
+      "exit_code": 1,
+      "stdout": "",
+      "exception": "RuntimeError: No seed_trajectories_seed*.csv files found",
+      "generated_csv_hex": {}
+    },
+    "trajectories/headers_only": {
+      "exit_code": 1,
+      "stdout": "",
+      "exception": "ValueError: No objects to concatenate",
+      "generated_csv_hex": {}
+    },
+    "trajectories/missing_column": {
+      "exit_code": 1,
+      "stdout": "",
+      "exception": "KeyError: 'traj_class'",
+      "generated_csv_hex": {}
+    },
+    "health/success": {
+      "exit_code": 0,
+      "stdout": "vrec_mean finite fraction: 0.5\nstable fraction (flags): 0.5\n",
+      "exception": null,
+      "generated_csv_hex": {}
+    },
+    "health/no_vrec": {
+      "exit_code": 0,
+      "stdout": "vrec_mean finite fraction: NO vrec_mean\nstable fraction (flags): 0.5\n",
+      "exception": null,
+      "generated_csv_hex": {}
+    },
+    "health/missing": {
+      "exit_code": 1,
+      "stdout": "",
+      "exception": "FileNotFoundError: [Errno 2] No such file or directory: 'outputs/wide_scan_triocta_ultra.csv'",
+      "generated_csv_hex": {}
+    },
+    "health/missing_flags": {
+      "exit_code": 1,
+      "stdout": "vrec_mean finite fraction: 1.0\n",
+      "exception": "AttributeError: 'bool' object has no attribute 'mean'",
+      "generated_csv_hex": {}
+    }
+  }
+}

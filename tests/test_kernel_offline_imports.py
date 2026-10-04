@@ -215,7 +215,8 @@ def test_repaired_driver_import_resolution_with_substitutes(tmp_path, driver):
         import numpy as np
         from types import SimpleNamespace
         from unittest.mock import Mock, patch
-        from torment_service.kernel import diagnostics as d, physics_sampler as s, model_core as core
+        from torment_service.kernel import diagnostics as d, model_core as core
+        from torment_service.kernel.offline import experiments as e, samplers as s
         hist = {{'t': np.arange(4.), 'kappa': np.arange(4.), 'z': np.arange(4.)}}
         sampler = Mock(return_value={{'J_eff': np.array([.1, .2, .4, .8])}})
         model = Mock()
@@ -224,13 +225,13 @@ def test_repaired_driver_import_resolution_with_substitutes(tmp_path, driver):
         state = Mock(return_value=object())
         cluster = Mock(return_value=(np.array([True, False, True]), np.array([1., 2., 3.])))
         params = SimpleNamespace(eps=.1, g=.2, k_vals=(1, 2, 3))
-        # IC resolves its local sampler from physics_sampler. Noise resolves
-        # its local model classes from model_core, even if d's globals differ.
-        target = d if {driver!r} == 'run_ic_scan' else core
-        sampler_target = s if {driver!r} == 'run_ic_scan' else d
+        # Call through diagnostics, but patch the actual implementation owners.
+        # IC imports its sampler from samplers; noise imports model_core classes.
+        target = e if {driver!r} == 'run_ic_scan' else core
+        sampler_target = s if {driver!r} == 'run_ic_scan' else e
         with patch.object(target, 'ModelState', state), patch.object(target, 'TriOctaPhaseLockModel', factory), \
              patch.object(sampler_target, 'sample_physics_observables', sampler), \
-             patch.object(d, 'cluster_delta_kz', cluster):
+             patch.object(e, 'cluster_delta_kz', cluster):
             if {driver!r} == 'run_ic_scan':
                 result = d.run_ic_scan(params, n_inits=1, verbose=False)
                 assert len(result) == 1 and result[0]['num_strong_delta'] == 2
