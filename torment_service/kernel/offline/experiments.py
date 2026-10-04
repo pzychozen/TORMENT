@@ -462,15 +462,21 @@ def run_long_time_stability_test(params: ModelParams,
     # We slice κ, Z, phi_index, uxy_coords, etc. consistently.
     # Build two sub-histories:
     def slice_history(hist, start_idx, end_idx):
+        from collections.abc import Mapping
+
         h_sub = {}
         for key, val in hist.items():
+            # Metadata is not a time series, even if it has n entries.
+            if isinstance(val, Mapping):
+                h_sub[key] = val
+                continue
             arr = np.asarray(val)
-            # If it's per-step, slice [start_idx:end_idx]
-            if arr.shape[0] == n:
+            # Only per-step series share the history's time dimension.
+            if arr.ndim > 0 and arr.shape[0] == n:
                 h_sub[key] = arr[start_idx:end_idx]
             else:
-                # Otherwise keep as-is (e.g. constants), or trim if off by 1 is needed upstream
-                h_sub[key] = arr
+                # Preserve non-temporal values and their original types.
+                h_sub[key] = val
         return h_sub
 
     early_hist = slice_history(hist, 0, i_q1)

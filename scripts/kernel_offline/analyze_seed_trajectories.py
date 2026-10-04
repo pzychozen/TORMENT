@@ -14,8 +14,15 @@ if not files:
 frames = []
 for f in files:
     d = pd.read_csv(f)
+    required_columns = ("lambda_phase", "channel", "traj_class")
+    missing_columns = [name for name in required_columns if name not in d.columns]
+    if missing_columns:
+        raise ValueError("Missing required trajectory columns: " + ", ".join(missing_columns))
     if len(d) > 0:
         frames.append(d)
+
+if not frames:
+    raise RuntimeError("No trajectory data rows found")
 
 df = pd.concat(frames, ignore_index=True)
 

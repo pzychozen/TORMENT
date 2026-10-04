@@ -89,7 +89,8 @@ def compute_recursive_velocity_geom(
     dZ = np.linalg.norm(dZ_vec, axis=1)
 
     # --- mean phase step from Omega ---
-    Omega = np.asarray(hist.get("Omega", []))
+    Omega_value = hist.get("Omega")
+    Omega = None if Omega_value is None else np.asarray(Omega_value)
     if Omega is None or np.size(Omega) == 0 or Omega.shape[0] < 2:
         dphi = np.zeros_like(dZ)
     else:

@@ -63,6 +63,30 @@ SCRIPT_CASES = {
     "health": ("success", "no_vrec", "missing", "missing_flags"),
 }
 
+# Exact additions admitted by Stage A. Removing just these blocks must recover
+# the historical payload bytes; successful script outputs remain fixture-pinned.
+SCRIPT_VALIDATION = {
+    "trajectories": (
+        '    required_columns = ("lambda_phase", "channel", "traj_class")\n'
+        '    missing_columns = [name for name in required_columns if name not in d.columns]\n'
+        '    if missing_columns:\n'
+        '        raise ValueError("Missing required trajectory columns: " + ", ".join(missing_columns))\n',
+        'if not frames:\n    raise RuntimeError("No trajectory data rows found")\n\n',
+    ),
+    "health": (
+        'required_columns = ("has_nan", "omega_blowup", "kappa_runaway", "z_runaway")\n'
+        'missing_columns = [name for name in required_columns if name not in df.columns]\n'
+        'if missing_columns:\n'
+        '    raise ValueError("Missing required health columns: " + ", ".join(missing_columns))\n'
+        'if df.empty:\n    raise RuntimeError("No health data rows found")\n',
+    ),
+}
+SCRIPT_REPAIRED_ERRORS = {
+    ("trajectories", "headers_only"): "RuntimeError: No trajectory data rows found",
+    ("trajectories", "missing_column"): "ValueError: Missing required trajectory columns: traj_class",
+    ("health", "missing_flags"): "ValueError: Missing required health columns: has_nan, omega_blowup, kappa_runaway, z_runaway",
+}
+
 
 def _encode(value):
     if isinstance(value, np.ndarray):
@@ -158,6 +182,18 @@ def _capture_driver(case_id):
                     # These two generated identifiers are not computational outputs.
                     hist = {**hist, "_meta": {k: v for k, v in meta.items() if k not in ("run_id", "timestamp_utc")}}
                     returned = (hist, *tail)
+                if case_id == "long_regular":
+                    assert list(returned) == ["J_early_mean", "J_late_mean", "sign_early", "sign_late",
+                                              "early_all", "late_all", "early_cp", "late_cp", "early_ncp", "late_ncp"]
+                    for part in ("early", "late"):
+                        assert np.isfinite(returned["J_" + part + "_mean"])
+                        assert returned["sign_" + part] == int(np.sign(returned["J_" + part + "_mean"]))
+                        for suffix in ("all", "cp", "ncp"):
+                            counts = returned[part + "_" + suffix]
+                            assert counts.shape == (12,) and np.issubdtype(counts.dtype, np.integer)
+                            assert np.all(counts >= 0) and counts.sum() <= 11
+                        np.testing.assert_array_equal(returned[part + "_all"],
+                                                      returned[part + "_cp"] + returned[part + "_ncp"])
                 result["return_sha256"] = _digest(returned)
             except Exception as exc:
                 result["error"] = [type(exc).__module__ + "." + type(exc).__qualname__, str(exc)]
@@ -261,7 +297,15 @@ def test_actual_owner_identity_and_source_contract(old, name, recorded):
     function = getattr(owner, name)
     assert getattr(compatibility, name) is function
     assert function.__module__ == owner_name
-    assert _contract(function, restore_imports=True) == recorded["modules"][old]["functions"][name]
+    actual = _contract(function, restore_imports=True)
+    expected = dict(recorded["modules"][old]["functions"][name])
+    if (old, name) == ("diagnostics", "run_long_time_stability_test"):
+        # Metadata-safe slicing is exercised with real 48/default-2000 runs.
+        coverage = ast.parse((ROOT / "tests/test_kernel_analysis_repairs.py").read_bytes())
+        assert any(isinstance(node, ast.FunctionDef) and node.name == "test_real_long_driver" for node in coverage.body)
+        for field in ("source_sha256", "ast_sha256"):
+            del actual[field], expected[field]
+    assert actual == expected
 
 
 @pytest.mark.parametrize("old", list(OWNERS))
@@ -284,23 +328,45 @@ def test_complete_compatibility_surface(old, recorded):
 
 @pytest.mark.parametrize("case_id", list(DRIVERS))
 def test_real_experiment_driver_matches_predecessor(case_id, tmp_path, recorded, exact_environment):
-    assert _driver_process(case_id, tmp_path) == recorded["drivers"][case_id]
+    actual = _driver_process(case_id, tmp_path)
+    expected = recorded["drivers"][case_id]
+    if case_id == "long_regular":
+        # New return is checked in _capture_driver and test_real_long_driver.
+        assert "error" not in actual
+        assert set(actual) == {"return_sha256", "rng_sha256", "show_calls", "png_sha256", "warnings", "stdout"}
+        assert actual["show_calls"] == 3
+        assert len(actual["png_sha256"]) == 6
+        assert actual["png_sha256"][:2] == expected["png_sha256"]
+        assert actual["stdout"].startswith(expected["stdout"])
+        assert actual["warnings"] == expected["warnings"]
+        assert "-- Late-segment corridor histogram --" in actual["stdout"]
+    else:
+        assert actual == expected
 
 
 @pytest.mark.parametrize("kind", list(SCRIPT_PATHS))
-def test_script_payload_and_intentional_old_path_removal(kind, recorded):
+def test_script_validation_admission_and_intentional_old_path_removal(kind, recorded):
     old, new = SCRIPT_PATHS[kind]
     assert not (ROOT / old).exists()
-    assert hashlib.sha256((ROOT / new).read_bytes()).hexdigest() == recorded["script_sha256"][kind]
     raw = (ROOT / new).read_bytes()
     assert raw.count(b"\n") == raw.count(b"\r\n")
+    for block in SCRIPT_VALIDATION[kind]:
+        admitted = block.replace("\n", "\r\n").encode()
+        assert raw.count(admitted) == 1
+        raw = raw.replace(admitted, b"")
+    assert hashlib.sha256(raw).hexdigest() == recorded["script_sha256"][kind]
+    # New failures/non-overwrite behavior: test_csv_deliberate_validation.
     assert importlib.util.find_spec("torment_service.kernel." + Path(old).stem) is None
 
 
 @pytest.mark.parametrize("kind,case", [(kind, case) for kind, cases in SCRIPT_CASES.items() for case in cases])
 def test_script_execution_matches_predecessor(kind, case, tmp_path, recorded, exact_environment):
     result = _script_process(ROOT / SCRIPT_PATHS[kind][1], kind, case, tmp_path)
-    assert result == recorded["scripts"][kind + "/" + case]
+    expected = dict(recorded["scripts"][kind + "/" + case])
+    if (kind, case) in SCRIPT_REPAIRED_ERRORS:
+        expected["exception"] = SCRIPT_REPAIRED_ERRORS[kind, case]
+        expected["stdout"] = ""
+    assert result == expected
 
 
 def _blocked_child(tmp_path, code):
@@ -355,6 +421,12 @@ def test_owner_uses_explicit_allowed_dependencies(owner):
                (0, "scipy.cluster.vq")}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            assert (node.level, node.module) in allowed
+            if owner == "experiments" and (node.level, node.module) == (0, "collections.abc"):
+                assert [(item.name, item.asname) for item in node.names] == [("Mapping", None)]
+                driver = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_long_time_stability_test")
+                slicer = next(n for n in driver.body if isinstance(n, ast.FunctionDef) and n.name == "slice_history")
+                assert node in ast.walk(slicer)
+            else:
+                assert (node.level, node.module) in allowed
         elif isinstance(node, ast.Import):
             assert all(item.name in ("numpy", "matplotlib.pyplot") for item in node.names)

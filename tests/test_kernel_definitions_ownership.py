@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import copy
 import hashlib
 import importlib
 import inspect
@@ -50,6 +51,14 @@ GROUPS = {
     ),
 }
 OWNERS = {name: module for module, names in GROUPS.items() for name in names}
+
+# Stage A: only these source contracts change; identity/defaults remain frozen.
+REPAIR_COVERAGE = {
+    "compute_recursive_velocity_geom": ("test_optional_omega_components",),
+    "analyze_rsb_history": ("test_rsb_layouts", "test_seed_is_only_a_label"),
+    "summarize_rsb_seed": ("test_optional_summary_series", "test_empty_wrapper_composes"),
+    "format_rsb_seed_summary": ("test_incomplete_formatter",),
+}
 
 
 def _cases():
@@ -290,18 +299,49 @@ def exact_environment(recorded):
 @pytest.mark.parametrize("case_id", list(_cases()))
 def test_predecessor_results(case_id, recorded, exact_environment):
     definitions = importlib.import_module("torment_service.kernel.definitions")
-    assert _observe(definitions, _cases()[case_id]) == recorded["cases"][case_id]
+    expected = copy.deepcopy(recorded["cases"][case_id])
+    # The immutable fixture retains the five historical defects. Re-admit only
+    # their corrected fields, using hand results or unaffected canonical cases.
+    if case_id == "compute_recursive_velocity_geom/none_omega":
+        del expected["error"]
+        expected["return"] = _encode(np.array([np.sqrt(2.)]))
+    elif case_id == "analyze_rsb_history/ordinary_verbose_seed":
+        summary = dict(expected["return"]["dict"])["seed_summary"]["dict"]
+        next(pair for pair in summary if pair[0] == "seed")[1] = 19
+    elif case_id == "analyze_rsb_history/axes_existing_behavior":
+        canonical = dict(recorded["cases"]["analyze_rsb_history/quiet"]["return"]["dict"])
+        for pair in expected["return"]["dict"]:
+            if pair[0] in {"E_t_m", "dom_band_series", "spectral_entropy_series", "seed_summary", "meta_label"}:
+                pair[1] = canonical[pair[0]]
+    elif case_id == "summarize_rsb_seed/none_series_error":
+        del expected["error"]
+        expected["return"] = recorded["cases"]["summarize_rsb_seed/empty"]["return"]
+    elif case_id == "format_rsb_seed_summary/incomplete_error":
+        del expected["error"]
+        expected["return"] = (
+            "RSB seed summary\n  regime: ?\n  H(0)    = 1.000\n  H(T)    = 0.500\n"
+            "  ΔH      = 0.500\n  t_collapse_10pct: none (no 10% collapse)\n"
+            "  m₀(T)   = None\n  visited bands = []\n  # band switches = 0"
+        )
+    assert _observe(definitions, _cases()[case_id]) == expected
 
 
 @pytest.mark.parametrize("name", list(OWNERS))
-def test_owner_identity_signature_and_unchanged_ast(name, recorded):
+def test_owner_identity_signature_and_admitted_source_contract(name, recorded):
     definitions = importlib.import_module("torment_service.kernel.definitions")
     module_name = "torment_service.kernel." + OWNERS[name]
     owner = importlib.import_module(module_name)
     function = getattr(owner, name)
     assert getattr(definitions, name) is function
     assert function.__module__ == module_name
-    assert _function_contract(function) == recorded["functions"][name]
+    actual = _function_contract(function)
+    expected = dict(recorded["functions"][name])
+    if name in REPAIR_COVERAGE:
+        coverage = ast.parse((ROOT / "tests/test_kernel_analysis_repairs.py").read_bytes())
+        tests = {node.name for node in coverage.body if isinstance(node, ast.FunctionDef)}
+        assert set(REPAIR_COVERAGE[name]) <= tests
+        del actual["ast_sha256"], expected["ast_sha256"]
+    assert actual == expected
 
 
 @pytest.mark.parametrize("module", list(GROUPS))

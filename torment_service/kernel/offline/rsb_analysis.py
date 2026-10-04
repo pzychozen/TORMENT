@@ -97,7 +97,15 @@ def analyze_rsb_history(
         )
 
     # 4) Spectral diagnostics
-    E_t_m = compute_spectral_energy_series(psi_hist)          # shape (T, M)
+    # The observable call above validates the existing axis contract.
+    # Interpret the same layout for the fixed-layout spectral helper.
+    time_axis = next(iter(set(range(4)) - {chan_axis, phase_axis, hel_axis}))
+    psi_t = np.moveaxis(
+        np.asarray(psi_hist),
+        (time_axis, chan_axis, phase_axis, hel_axis),
+        (0, 1, 2, 3),
+    )
+    E_t_m = compute_spectral_energy_series(psi_t)             # shape (T, M)
     dom_band_series = compute_dominant_band_series(E_t_m)     # shape (T,)
     spectral_entropy_series = compute_spectral_entropy_series(E_t_m)
 
@@ -120,7 +128,7 @@ def analyze_rsb_history(
         stats,
         t=t_axis,
         frac=0.10,     # 10% collapse threshold (same as before)
-        seed=None,
+        seed=seed,
     )
     stats["seed_summary"] = seed_summary
 
@@ -211,8 +219,10 @@ def summarize_rsb_seed(
         }
     """
     # --- Pull main series out with safe defaults ---
-    H_series = np.asarray(rsb_stats.get("spectral_entropy_series", []), dtype=float)
-    m_series = np.asarray(rsb_stats.get("dom_band_series", []), dtype=float)
+    H_value = rsb_stats.get("spectral_entropy_series")
+    m_value = rsb_stats.get("dom_band_series")
+    H_series = np.asarray([] if H_value is None else H_value, dtype=float)
+    m_series = np.asarray([] if m_value is None else m_value, dtype=float)
 
     # Time axis
     if t is None:
@@ -295,6 +305,8 @@ def format_rsb_seed_summary(summary):
     dH = summary.get("delta_H", None)
 
     if H0 is not None and HT is not None:
+        if dH is None:
+            dH = H0 - HT
         lines.append(f"  H(0)    = {H0:.3f}")
         lines.append(f"  H(T)    = {HT:.3f}")
         lines.append(f"  ΔH      = {dH:.3f}")
