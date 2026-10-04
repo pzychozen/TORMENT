@@ -24,9 +24,9 @@ GHSA-9j44-4v2c-3hp2 was reported on July 8, 2026.
 - Mechanically verified affected tagged releases: `v2.1.1`, `v2.2.0`, `v2.3.0`, `v2.4.0`, `v2.4.2`, `v2.4.3`, `v2.4.4`, `v2.4.5`, and `v2.4.6-proof-slice-complete`.
 - Fix commit: `b76a1594cb968d99291f94aa8e1a8b54c9f00cd9` (`fix(security): require auth on archive REST endpoints`).
 - First fixed tag: `v2.4.7-security`.
-- Current fixed release: `v2.5.0`.
+- Current fixed release: `v2.5.1`.
 
-Users running any affected release should upgrade to `v2.5.0`. If you cannot upgrade immediately, move at least to `v2.4.7-security` and plan a full upgrade to the current supported line. `v2.4.7-security` is the first marker for the originally disclosed archive endpoint fix; `v2.5.0` is the first release intended to enforce the configured REST authentication boundary consistently across sensitive REST surfaces.
+Users running any affected release should upgrade to `v2.5.1`. If you cannot upgrade immediately, move at least to `v2.4.7-security` and plan a full upgrade to the current supported line. `v2.4.7-security` is the first marker for the originally disclosed archive endpoint fix; `v2.5.0` is the first release intended to enforce the configured REST authentication boundary consistently across sensitive REST surfaces.
 
 TORMENT is commonly deployed as a local or controlled HTTP service. That deployment context does not change the severity or validity of an authentication bypass when authentication is configured.
 

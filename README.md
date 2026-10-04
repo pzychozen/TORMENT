@@ -223,9 +223,9 @@ Deeper reference:
 
 ---
 
-## Current status — v2.5.0
+## Current status — v2.5.1
 
-v2.5.0 is the current supported release line. It preserves the archive REST authentication fix first marked by `v2.4.7-security`, hardens the configured REST auth boundary across sensitive surfaces, and represents the current repository line after development beyond the old v2.4.x security marker.
+v2.5.1 is the current supported release. It closes the agreed kernel-package cleanup, repairs the recorded analysis/input defects, and restricts named HTTP configuration values to operators when authentication is enabled. See the [v2.5.1 release notes](docs/RELEASE_NOTES_v2.5.1.md) for highlights, validation scope and deployment boundaries. It preserves the archive REST authentication fix first marked by `v2.4.7-security` and the configured REST authentication boundary introduced in v2.5.0.
 
 v2.4.4 closed the provenance-migration subsystem (step 6). Legacy memory rows can be walked through a two-gate policy — gate 1 epistemic recovery, gate 2 ancestry admission — and rewritten by a narrow append-only writer that preserves refusal state and recursion safety. The full closure sequence — export, dry-run, apply, and guard re-verification — has been validated end-to-end against a live workspace. `TORMENT_ARCHIVIST_WRITEBACK` remains off; enabling it is a separate later decision gate.
 
@@ -302,3 +302,14 @@ If TORMENT is useful to you, support is appreciated.
 - **BTC (Bitcoin network / Native SegWit)** — `bc1qvc0cx36jdd2tr85mk7fuwsnxecdrwkn85tulyj`
 - **ETH (Ethereum network)** — `0x4e3EeD872a1242918691Aba1123ed80Eb25F40F2`
 - **SOL (Solana network)** — `BypcHG3aY8NUhYBw7jhNfPFCKafVPcfjbmnafa6cCUuo`
+
+## Related research — Tri-Octagon Physics
+
+[Tri-Octagon Physics](https://github.com/pzychozen/trioctagon-physics) is our
+companion repository for geometrical and mathematical-physics toy models,
+research papers, and reproducible numerical experiments. It contains two
+distinct kernels for study and comparison: the newer scientific kernel
+(`kernel_physics`) and the independent Historical TORMENT reference kernel
+(`trioctagon_historical_kernel`). The comparison explores their shared origins
+and mathematical differences; neither research kernel replaces this
+repository's production memory system.

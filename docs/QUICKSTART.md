@@ -8,7 +8,7 @@ TORMENT is a **local memory service** you attach to any local LLM/character. It 
 
 ```bash
 python -m pip install -r requirements.txt
-python -m torment_service.app
+python -m torment_service
 ```
 
 Service defaults to: `http://127.0.0.1:8787`

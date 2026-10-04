@@ -73,8 +73,16 @@ invoke the corresponding script by its absolute path.
 
 Their former kernel file/module paths were removed. These scripts are explicit
 execution tools, not supported import APIs: importing one still executes its
-payload, and existing missing-input/error behavior is unchanged.
+payload. Missing files, empty datasets and missing required columns fail
+explicitly; invalid trajectory inputs do not create or overwrite the summary CSV.
+Successful outputs and the health script's optional `vrec_mean` behavior remain.
 
-Seed/world, trajectory/persistence, `rsb_model.py`, CP rules and the live core
-were not reorganized by this relocation. Wider package scope remains for review;
-this map does not imply any further restructuring.
+The accepted analysis repairs preserve non-temporal history metadata while
+slicing temporal series, use consistent supported RSB axis layouts, propagate
+seed labels, and handle optional Omega, absent summary series and incomplete
+entropy formatting deliberately. These are specific input-contract corrections,
+not support for arbitrary malformed analysis inputs.
+
+The agreed kernel-package cleanup is closed. Seed/world, trajectory/persistence,
+`rsb_model.py`, CP rules and the live core were not reorganized by this relocation;
+no further package restructuring is required by this cleanup.

@@ -161,7 +161,7 @@ async def _fabric_lifespan(_: FastAPI):
         await _close_fabric_on_shutdown()
 
 
-app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.0', lifespan=_fabric_lifespan)
+app = FastAPI(title="Torment Memory Fabric (TriOcta)", version='2.5.1', lifespan=_fabric_lifespan)
 
 
 @app.middleware("http")
